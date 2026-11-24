@@ -19,7 +19,4 @@ object CohereEmbeddingConfigKeys {
 
   /** Overrides the Cohere embedding base URL. Defaults to `"https://api.cohere.com"`. */
   val COHERE_EMBEDDING_BASE_URL = "COHERE_EMBEDDING_BASE_URL"
-
-  /** Selects the Cohere embedding model when using the legacy provider format. */
-  val COHERE_EMBEDDING_MODEL = "COHERE_EMBEDDING_MODEL"
 }

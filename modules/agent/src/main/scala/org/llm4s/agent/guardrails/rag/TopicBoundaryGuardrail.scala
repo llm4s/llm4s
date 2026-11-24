@@ -94,7 +94,7 @@ class TopicBoundaryGuardrail(
   override def validate(value: String): Result[String] = bounded(value, llmClient)
 
   /** As `validate(value)`, the judge called through `context.accounted(llmClient)`, so its call is counted. */
-  override def validate(value: String, context: UsageAccounting): Result[String] =
+  override def validateIn(value: String, context: UsageAccounting): Result[String] =
     bounded(value, context.accounted(llmClient))
 
   private def bounded(value: String, client: LLMClient): Result[String] =

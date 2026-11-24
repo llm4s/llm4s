@@ -107,17 +107,18 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       config.baseUrl.asUrl shouldBe "https://fixture.example/v1"
     }
 
-    "prefer the unified EMBEDDING_MODEL over the section's model" in {
-      val config = load(
+    "refuse a section that still sets its own model, naming EMBEDDING_MODEL (#2835)" in {
+      val error = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/from-unified"
           |    fixturecloud { apiKey = "fk", model = "from-section" }
           |  }
           |}""".stripMargin
-      ).value
+      ).left.value
 
-      config.model.asString shouldBe "from-unified"
+      error.message should include("llm4s.embeddings.fixturecloud.model ('from-section') is no longer read")
+      error.message should include("EMBEDDING_MODEL")
     }
 
     "be reachable by an alias it declares" in {

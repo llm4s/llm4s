@@ -117,7 +117,7 @@ class SpanTreeSpec
         case 2 => Right(calling(call("same", "probe", ujson.Obj("text" -> "b"))))
         case _ => Right(CompletionFixture.simple("done"))
     }
-    val agent = lead(client).withTracing(tracing).withTools(ToolSet.of(probe).value).build().value
+    val agent = lead(client).withTracing(tracing).withToolSet(ToolSet.of(probe).value).build().value
     agent.run(ThreadId("t1"), "go").value
     val spans = tracing.events.collect {
       case e: TraceEvent.CustomEvent if e.name == "agent.tool_executed" => e.span.value.context

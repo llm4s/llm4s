@@ -159,7 +159,6 @@ llm4s {
   embeddings {
     acme {
       baseUrl = ${?ACME_EMBEDDING_BASE_URL}
-      model   = ${?ACME_EMBEDDING_MODEL}
     }
   }
 }
@@ -747,7 +746,7 @@ final class AcmeClient(
 
 ### Content parts
 
-A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`: `Text`, `Image` and `Document`, each image
+A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`: `Text`, `Image` and `Document`, each image
 or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
 encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
 `UnsupportedContentPartError(providerName, part.kind, role.name)` for any other: never drop a part, and never turn
@@ -770,8 +769,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
     requiresApiKey = true,
     defaultBaseUrl = Some(BaseUrl("https://api.acme.example/v1")),
     defaultModel   = Some(ModelName("acme-embed-1")),
-    apiKeyEnv      = Seq("ACME_API_KEY"),
-    modelEnv       = Some("ACME_EMBEDDING_MODEL")
+    apiKeyEnv      = Seq("ACME_API_KEY")
   )
 
   // What ModelDimensionRegistry answers from; override dimensionsOf for model-name variants.

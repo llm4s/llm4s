@@ -11,16 +11,16 @@ import org.llm4s.llmconnect.EmbeddingClientOptions
  * The embedding counterpart of [[ProviderConfigContext]]: one value, so that something a later provider needs
  * is a new field here and not a new signature for every descriptor.
  *
- * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, when the unified form was used. It
- *                      takes precedence over the section's `model`.
+ * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`: the model, ahead of the provider's
+ *                      `defaultModel`.
  */
 @Stable
 final case class EmbeddingConfigContext private (modelOverride: Option[ModelName]):
 
-  /** Sets the model that takes precedence over the section's. */
+  /** Sets the model, which takes precedence over the provider's default. */
   def withModelOverride(modelOverride: ModelName): EmbeddingConfigContext = copy(modelOverride = Some(modelOverride))
 
-  /** Sets, or clears, the model that takes precedence over the section's. */
+  /** Sets, or clears, the model, which takes precedence over the provider's default. */
   def withModelOverride(modelOverride: Option[ModelName]): EmbeddingConfigContext = copy(modelOverride = modelOverride)
 
 object EmbeddingConfigContext:

@@ -224,7 +224,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * is `Dropped` (this dialect sends Anthropic models a budget only) and the budget comes from
    * `reasoning`. On any other model a `thinking` is `Dropped`.
    */
-  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): List[RequestAdjustment] = {
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
     val modelLower       = model.asString.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =

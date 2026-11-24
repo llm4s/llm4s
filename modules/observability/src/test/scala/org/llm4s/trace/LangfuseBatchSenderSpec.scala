@@ -7,19 +7,29 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.slf4j.LoggerFactory
 
+import java.time.Instant
 import java.util.Base64
 
 class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
 
   private def testConfig = LangfuseHttpApiCaller(
-    langfuseUrl = "https://cloud.langfuse.com/api/public/ingestion",
+    langfuseUrl = "https://cloud.langfuse.com",
     publicKey = Secret("pk-lf-test-key"),
     secretKey = Secret("sk-lf-test-secret")
   )
 
-  private def testEvents = Seq(
-    ujson.Obj("type" -> "trace-create", "body" -> ujson.Obj("id" -> "trace-1", "name" -> "test"))
-  )
+  private val t0 = Instant.parse("2026-11-24T12:00:00Z")
+
+  private def request(names: String*) =
+    LangfuseOtlp.request(
+      names.map(n =>
+        LangfuseOtlp.Observation(TraceContext.random(), None, n, LangfuseOtlp.ObservationType.Span, t0, t0)
+      ),
+      LangfuseOtlp.Deployment("test", "r", "v"),
+      "spec"
+    )
+
+  private def testScores = Seq(ujson.Obj("traceId" -> "a" * 32, "name" -> "faithfulness", "value" -> 0.9))
 
   private def withLangfuseBatchSenderLoggerSilenced[A](body: => A): A = {
     val logger   = LoggerFactory.getLogger(classOf[DefaultLangfuseBatchSender]).asInstanceOf[LBLogger]
@@ -29,158 +39,98 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     finally logger.setLevel(previous)
   }
 
-  "DefaultLangfuseBatchSender" should "send correct URL, headers, and body on success" in {
-    val mockClient = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
+  private def sender(mock: org.llm4s.http.Llm4sHttpClient, restore: () => Unit = () => ()) =
+    new DefaultLangfuseBatchSender(httpClient = mock, restoreInterrupt = restore)
 
-    sender.sendBatch(testEvents, testConfig)
+  "DefaultLangfuseBatchSender.sendTraces" should "post the export to the OTel endpoint with Langfuse's headers" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
 
-    mockClient.lastUrl shouldBe Some("https://cloud.langfuse.com/api/public/ingestion")
+    sender(mockClient).sendTraces(request("one", "two"), testConfig)
+
+    mockClient.lastUrl shouldBe Some("https://cloud.langfuse.com/api/public/otel/v1/traces")
     mockClient.lastTimeout shouldBe Some(scala.concurrent.duration.Duration(30, "seconds"))
-
-    // Verify Basic auth header
     val expectedCredentials = Base64.getEncoder.encodeToString("pk-lf-test-key:sk-lf-test-secret".getBytes)
-    mockClient.lastHeaders.flatMap(_.get("Authorization")) shouldBe Some(s"Basic $expectedCredentials")
-    mockClient.lastHeaders.flatMap(_.get("Content-Type")) shouldBe Some("application/json")
-    mockClient.lastHeaders.flatMap(_.get("User-Agent")) shouldBe Some("llm4s-scala/1.0.0")
+    val headers             = mockClient.lastHeaders.getOrElse(fail("no headers"))
+    headers.get("Authorization") shouldBe Some(s"Basic $expectedCredentials")
+    headers.get("Content-Type") shouldBe Some("application/json")
+    headers.get("x-langfuse-ingestion-version") shouldBe Some("4")
 
-    // Verify body contains batch payload
-    val body = mockClient.lastBody.getOrElse(fail("Expected body"))
-    val json = ujson.read(body)
-    json.obj("batch").arr should have size 1
-    json.obj("batch").arr.head.obj("type").str shouldBe "trace-create"
+    SentSpan.all(mockClient.lastBody.getOrElse(fail("Expected body"))).map(_.name) shouldBe Seq("one", "two")
   }
 
-  it should "handle 207 partial success without throwing" in {
-    val mockClient = new MockHttpClient(HttpResponse(207, """{"successes":1,"errors":0}"""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-
-    // Should not throw
-    noException should be thrownBy {
-      sender.sendBatch(testEvents, testConfig)
-    }
-    mockClient.postCallCount shouldBe 1
-  }
-
-  it should "handle non-2xx error response without throwing" in {
-    val mockClient = new MockHttpClient(HttpResponse(500, """{"error":"Internal Server Error"}"""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-
-    noException should be thrownBy {
-      withLangfuseBatchSenderLoggerSilenced {
-        sender.sendBatch(testEvents, testConfig)
-      }
-    }
-    mockClient.postCallCount shouldBe 1
-  }
-
-  it should "handle 401 unauthorized without throwing" in {
-    val mockClient = new MockHttpClient(HttpResponse(401, """{"error":"Unauthorized"}"""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-
-    noException should be thrownBy {
-      withLangfuseBatchSenderLoggerSilenced {
-        sender.sendBatch(testEvents, testConfig)
-      }
-    }
-    mockClient.postCallCount shouldBe 1
-  }
-
-  it should "skip export when public key is empty" in {
+  it should "post to the host of a URL that names the legacy ingestion endpoint" in {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-    val config     = testConfig.copy(publicKey = Secret(""))
+    sender(mockClient).sendTraces(
+      request("x"),
+      testConfig.copy(langfuseUrl = "https://langfuse.example.com/api/public/ingestion")
+    )
+    mockClient.lastUrl shouldBe Some("https://langfuse.example.com/api/public/otel/v1/traces")
+  }
 
-    withLangfuseBatchSenderLoggerSilenced {
-      sender.sendBatch(testEvents, config)
+  it should "handle a partial success, an error response and an unreadable body without throwing" in {
+    Seq(
+      HttpResponse(200, """{"partialSuccess":{"rejectedSpans":"1","errorMessage":"bad"}}"""),
+      HttpResponse(500, """{"error":"Internal Server Error"}"""),
+      HttpResponse(401, """{"error":"Unauthorized"}"""),
+      HttpResponse(200, "not json")
+    ).foreach { response =>
+      val mockClient = new MockHttpClient(response)
+      noException should be thrownBy withLangfuseBatchSenderLoggerSilenced(
+        sender(mockClient).sendTraces(request("x"), testConfig)
+      )
+      mockClient.postCallCount shouldBe 1
     }
+  }
 
+  it should "skip export when either key is empty" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
+    withLangfuseBatchSenderLoggerSilenced {
+      sender(mockClient).sendTraces(request("x"), testConfig.copy(publicKey = Secret("")))
+      sender(mockClient).sendScores(testScores, testConfig.copy(secretKey = Secret("")))
+    }
     mockClient.postCallCount shouldBe 0
   }
 
-  it should "skip export when secret key is empty" in {
-    val mockClient = new MockHttpClient(HttpResponse(200, ""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-    val config     = testConfig.copy(secretKey = Secret(""))
-
-    withLangfuseBatchSenderLoggerSilenced {
-      sender.sendBatch(testEvents, config)
-    }
-
-    mockClient.postCallCount shouldBe 0
-  }
-
-  it should "call restoreInterrupt on InterruptedException" in {
+  it should "call restoreInterrupt on an interrupted request" in {
     var interruptRestored = false
-    val mockRestore       = () => interruptRestored = true
     val failingClient = new FailingHttpClient(org.llm4s.error.ExecutionError("POST request interrupted", "http.POST"))
-    val sender        = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = mockRestore)
 
-    noException should be thrownBy {
-      withLangfuseBatchSenderLoggerSilenced {
-        sender.sendBatch(testEvents, testConfig)
-      }
-    }
+    noException should be thrownBy withLangfuseBatchSenderLoggerSilenced(
+      sender(failingClient, () => interruptRestored = true).sendTraces(request("x"), testConfig)
+    )
     interruptRestored shouldBe true
   }
 
-  it should "handle generic exceptions without throwing" in {
+  it should "handle a transport failure without throwing" in {
     val failingClient = new FailingHttpClient(new RuntimeException("connection reset"))
-    val sender        = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = () => ())
-
-    noException should be thrownBy {
-      withLangfuseBatchSenderLoggerSilenced {
-        sender.sendBatch(testEvents, testConfig)
-      }
-    }
-  }
-
-  it should "handle multiple events in batch payload" in {
-    val mockClient = new MockHttpClient(HttpResponse(200, """{"successes":3}"""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-
-    val events = Seq(
-      ujson.Obj("type" -> "trace-create", "body"      -> ujson.Obj("id" -> "t1")),
-      ujson.Obj("type" -> "span-create", "body"       -> ujson.Obj("id" -> "s1")),
-      ujson.Obj("type" -> "generation-create", "body" -> ujson.Obj("id" -> "g1"))
+    noException should be thrownBy withLangfuseBatchSenderLoggerSilenced(
+      sender(failingClient).sendTraces(request("x"), testConfig)
     )
-
-    sender.sendBatch(events, testConfig)
-
-    val body = mockClient.lastBody.getOrElse(fail("Expected body"))
-    val json = ujson.read(body)
-    json.obj("batch").arr should have size 3
   }
 
-  "DefaultLangfuseBatchSender.normalizeIngestionUrl" should "append the ingestion path to a bare base URL" in {
-    DefaultLangfuseBatchSender.normalizeIngestionUrl("https://cloud.langfuse.com") shouldBe
-      "https://cloud.langfuse.com/api/public/ingestion"
+  "DefaultLangfuseBatchSender.sendScores" should "post the scores as one JSON array to the scores endpoint" in {
+    val mockClient = new MockHttpClient(HttpResponse(202, """{"message":"Accepted"}"""))
+    val scores     = testScores :+ ujson.Obj("traceId" -> "a" * 32, "name" -> "ragas_score", "value" -> 0.8)
+
+    sender(mockClient).sendScores(scores, testConfig)
+
+    mockClient.lastUrl shouldBe Some("https://cloud.langfuse.com/api/public/scores")
+    mockClient.lastHeaders.flatMap(_.get("Content-Type")) shouldBe Some("application/json")
+    ujson.read(mockClient.lastBody.getOrElse(fail("Expected body"))) shouldBe ujson.Arr.from(scores)
   }
 
-  it should "strip a trailing slash before appending the ingestion path" in {
-    DefaultLangfuseBatchSender.normalizeIngestionUrl("https://cloud.langfuse.com/") shouldBe
-      "https://cloud.langfuse.com/api/public/ingestion"
+  it should "send nothing for no scores" in {
+    val mockClient = new MockHttpClient(HttpResponse(202, ""))
+    sender(mockClient).sendScores(Seq.empty, testConfig)
+    mockClient.postCallCount shouldBe 0
   }
 
-  it should "leave a URL that already ends with the ingestion path unchanged" in {
-    DefaultLangfuseBatchSender.normalizeIngestionUrl("https://cloud.langfuse.com/api/public/ingestion") shouldBe
-      "https://cloud.langfuse.com/api/public/ingestion"
-  }
-
-  it should "encode credentials correctly in Base64" in {
-    val mockClient = new MockHttpClient(HttpResponse(200, ""))
-    val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-    val config = LangfuseHttpApiCaller(
-      langfuseUrl = "https://langfuse.example.com/api",
-      publicKey = Secret("pk-test"),
-      secretKey = Secret("sk-test")
+  it should "handle a 207 that rejects scores without throwing" in {
+    val body       = """{"accepted":0,"rejected":1,"errors":[{"message":"value must be a number"}]}"""
+    val mockClient = new MockHttpClient(HttpResponse(207, body))
+    noException should be thrownBy withLangfuseBatchSenderLoggerSilenced(
+      sender(mockClient).sendScores(testScores, testConfig)
     )
-
-    sender.sendBatch(testEvents, config)
-
-    val authHeader = mockClient.lastHeaders.flatMap(_.get("Authorization")).getOrElse(fail("Missing Authorization"))
-    val encoded    = authHeader.stripPrefix("Basic ")
-    val decoded    = new String(Base64.getDecoder.decode(encoded))
-    decoded shouldBe "pk-test:sk-test"
+    mockClient.postCallCount shouldBe 1
   }
 }

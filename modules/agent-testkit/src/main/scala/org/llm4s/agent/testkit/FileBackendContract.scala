@@ -62,7 +62,8 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
       Reply.toolCalls(batch.map(c => ToolCall(ToolCallId(s"c${ids.next()}"), "fs", ujson.Obj("text" -> c)))*)
     ) :+
       Reply.text("done")
-    val agent  = Agent.builder("contract", ScriptedLLMClient.sequence(replies*)).withTools(tools(backend)).build().value
+    val agent =
+      Agent.builder("contract", ScriptedLLMClient.sequence(replies*)).withToolSet(tools(backend)).build().value
     val config = RunConfig().withTenantId(tenant.map(TenantId(_)))
     val result: AgentResult =
       agent.run(ThreadId(s"file-contract-${runs.incrementAndGet()}-${System.nanoTime()}"), "go", config).value

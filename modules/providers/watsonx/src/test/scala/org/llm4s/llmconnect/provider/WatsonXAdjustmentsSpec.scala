@@ -27,7 +27,7 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
   private val reply =
     """{"id":"g","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
 
-  private def adjustments(cfg: WatsonXConfig, options: CompletionOptions): List[RequestAdjustment] =
+  private def adjustments(cfg: WatsonXConfig, options: CompletionOptions): Seq[RequestAdjustment] =
     new WatsonXClient(cfg, httpClient = routed(_ => Right(iamToken()), _ => Right(HttpResponse(200, reply))))
       .complete(hi, options)
       .value

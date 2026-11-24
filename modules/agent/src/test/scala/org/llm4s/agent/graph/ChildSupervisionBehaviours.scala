@@ -74,7 +74,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   private def family(runtime: GraphRuntime, setup: Setup): (Agent, Agent) = {
     val childBuilder = setup.child(Agent.builder("worker", setup.childClient).withRuntime(runtime))
     val child = (if (setup.childTools.isEmpty) childBuilder
-                 else childBuilder.withTools(SpecTools.set(setup.childTools*)))
+                 else childBuilder.withToolSet(SpecTools.set(setup.childTools*)))
       .build()
       .ok
     val spec = setup.delegateTimeout.fold(SpecTools.spec("delegate"))(t => SpecTools.spec("delegate").withTimeout(t))
@@ -91,7 +91,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       Agent
         .builder("lead", setup.parentClient)
         .withRuntime(runtime)
-        .withTools(SpecTools.set(delegate))
+        .withToolSet(SpecTools.set(delegate))
         .withMiddleware(setup.parentMiddleware*)
         .build()
         .ok
@@ -811,7 +811,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child = Agent
       .builder("worker", childClient)
       .withRuntime(runtime)
-      .withTools(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
+      .withToolSet(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
       .build()
       .ok
     // asks first; its resume delegates, and times out
@@ -840,7 +840,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val parent = Agent
       .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(confirm))
+      .withToolSet(SpecTools.set(confirm))
       .withMiddleware(late)
       .build()
       .ok
@@ -901,7 +901,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child = Agent
       .builder("worker", ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(stubborn))
+      .withToolSet(SpecTools.set(stubborn))
       .build()
       .ok
     // The call's 300 ms timeout is wall time, and a slow runner may not admit the child and reach `stubborn` within it
@@ -935,7 +935,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val parent = Agent
       .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(delegate))
+      .withToolSet(SpecTools.set(delegate))
       .build()
       .ok
     val thread = ThreadId("timed-out-busy")

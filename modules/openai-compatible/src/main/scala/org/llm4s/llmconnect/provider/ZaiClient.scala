@@ -164,7 +164,7 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * endpoint; `false` is correct on both. A request that neither replays reasoning nor disables
    * thinking gets no `thinking` field.
    */
-  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): List[RequestAdjustment] = {
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
     val family = ZaiDialect.family(model.asString)
     val off    = options.thinking.contains(Thinking.Off)
     // what llm4s's own level is called on Z.ai's scale, where it has one; Minimal and XHigh have none

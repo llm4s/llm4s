@@ -437,7 +437,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     def agent(builder: AgentBuilder) =
       built(
         builder
-          .withTools(
+          .withToolSet(
             org.llm4s.agent.SpecTools.set(
               org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
                 org.llm4s.agent.graph.tool.ToolOutcome
@@ -676,7 +676,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
       Right(CompletionFixture.simple("It rose."))
     )
     val history = Seq(UserMessage(Vector(ContentPart.Text("earlier"), chart)), AssistantMessage("ok"))
-    built(Agent.builder("assistant", client).withMiddleware(m).withTools(org.llm4s.agent.SpecTools.set(tool)))
+    built(Agent.builder("assistant", client).withMiddleware(m).withToolSet(org.llm4s.agent.SpecTools.set(tool)))
       .run(ThreadId("media"), "How did sales go?", RunConfig(), history)
       .value
     contents(held(m, None)) shouldBe Vector("How did sales go?", "It rose.")

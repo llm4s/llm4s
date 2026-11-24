@@ -80,7 +80,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       CompletionFixture.simple("done")
     )
     val tools  = ToolSet.of(AgentTool.fromToolFunction(echoTool())).fold(e => fail(e.message), identity)
-    val result = built(Agent.builder("assistant", client).withTools(tools)).run("q").value
+    val result = built(Agent.builder("assistant", client).withToolSet(tools)).run("q").value
 
     result.messages.collect { case t: ToolMessage => t.content }.head should include("set")
   }

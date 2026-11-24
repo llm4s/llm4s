@@ -74,8 +74,8 @@ object Messages:
       if freed == 0 then incoming else incoming.copy(message = withParts(incoming.message, parts))
 
   private def partsOf(message: Message): Vector[ContentPart] = message match
-    case u: UserMessage => u.parts
-    case t: ToolMessage => t.parts
+    case u: UserMessage => u.parts.toVector
+    case t: ToolMessage => t.parts.toVector
     case _              => Vector.empty
 
   private def withParts(message: Message, parts: Vector[ContentPart]): Message = message match

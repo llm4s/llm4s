@@ -57,8 +57,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
     defaultBaseUrl = Some(BaseUrl("https://api.openai.com/v1")),
-    apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY),
-    modelEnv = Some(OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY)
   )
 
   override val modelDimensions: Map[ModelName, Int] = Map(

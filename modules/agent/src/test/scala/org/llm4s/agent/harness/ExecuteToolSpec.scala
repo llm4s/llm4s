@@ -45,7 +45,7 @@ class ExecuteToolSpec extends AnyFlatSpec with Matchers with EitherValues with O
   private def results(runner: Recording, batches: Seq[Completion], middleware: Option[PermissionMiddleware] = None) = {
     val client  = ScriptedLLMClient.of((batches :+ CompletionFixture.simple("done"))*)
     val tools   = ToolSet.of(ExecuteTool(SandboxBackend(runner))).value
-    val builder = Agent.builder("runner", client).withTools(tools)
+    val builder = Agent.builder("runner", client).withToolSet(tools)
     val agent   = built(middleware.fold(builder)(builder.withMiddleware(_)))
     agent.run("go").map(_.messages.collect { case t: ToolMessage => t.content }.toVector)
   }

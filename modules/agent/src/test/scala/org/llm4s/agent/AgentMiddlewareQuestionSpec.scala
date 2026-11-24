@@ -211,7 +211,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       CompletionFixture.simple("both")
     )
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(new Environment(ran)))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(new Environment(ran)))
     val parked = agent.run("deploy").value
     val asked  = askedOf(parked)
     asked.map(_._2.hook) shouldBe Vector(MiddlewareHook.WrapToolCall, MiddlewareHook.WrapToolCall)
@@ -234,7 +234,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val env     = new Environment(ran)
     val client  = ScriptedLLMClient.of(calling(call("c1", "deploy", "one")), CompletionFixture.simple("done"))
     val approve = new ApprovalMiddleware(_ => Some("check"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(env, approve))
+    val agent =
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(env, approve))
     val parked = agent.run("deploy").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val approval = asked.status match {
@@ -258,7 +259,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     }
     val env    = new Environment(new CopyOnWriteArrayList[String]())
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withMiddleware(env))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(confirm)).withMiddleware(env))
     val parked = agent.run("go").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val question = asked.status match {
@@ -288,7 +289,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         if calls.incrementAndGet() == 1 then next() else askAbout(Need("late"))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withMiddleware(late))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(confirm)).withMiddleware(late))
     val parked = agent.run("go").value
     val id = parked.status match {
       case AgentStatus.Suspended(s) if s.questions.sizeIs == 1 => s.questions.head._1
@@ -308,7 +309,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         ToolOutcome.Ask("anything")
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(rogue))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(rogue))
     cause(agent.run("go").error) match {
       case GraphError.ToolFailed(_, _, cause) => cause.message should include("asked a question it does not declare")
       case other                              => fail(s"expected ToolFailed, got $other")
@@ -322,7 +323,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         ToolOutcome.Ask(42)
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(wrong))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(wrong))
     cause(agent.run("go").error) match {
       case GraphError.ToolFailed(_, _, cause) => cause.message should include("asked a question of another type")
       case other                              => fail(s"expected ToolFailed, got $other")

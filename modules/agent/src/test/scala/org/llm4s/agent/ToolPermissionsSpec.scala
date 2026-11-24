@@ -32,7 +32,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(tools*))
+        .withToolSet(SpecTools.set(tools*))
         .withMiddleware(new PermissionMiddleware(rules))
     )
 
@@ -71,7 +71,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     val allowing = built(
       Agent
         .builder("assistant", ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("done")))
-        .withTools(SpecTools.set(plain))
+        .withToolSet(SpecTools.set(plain))
         .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.allow(Operation.Invoke, "lookup"))))
     )
     toolResults(allowing.run("go").value) shouldBe Vector("ok")
@@ -144,7 +144,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(writer(ran)))
+        .withToolSet(SpecTools.set(writer(ran)))
         .withMiddleware(new ApprovalMiddleware(_ => Some("review")), new PermissionMiddleware(rules))
     )
     val parked = agent.run("go").value
@@ -183,7 +183,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(saver))
+        .withToolSet(SpecTools.set(saver))
         .withMiddleware(new PermissionMiddleware(rules), recording)
     )
     (agent, wrote, seen)

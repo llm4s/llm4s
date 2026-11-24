@@ -33,7 +33,7 @@ class TypedStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     built(
       Agent
         .builder("assistant", ScriptedLLMClient.of(SpecTools.calling(SpecTools.call("c1", "pinger")), answer))
-        .withTools(SpecTools.set(SpecTools.tool("pinger")(tool)))
+        .withToolSet(SpecTools.set(SpecTools.tool("pinger")(tool)))
         .withRuntime(runtime)
     )
 

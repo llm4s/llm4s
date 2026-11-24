@@ -66,7 +66,7 @@ sealed trait RequestTransformer {
   private[llm4s] def adjustOptions(
     modelId: ModelName,
     options: CompletionOptions
-  ): Result[(CompletionOptions, List[RequestAdjustment])]
+  ): Result[(CompletionOptions, Seq[RequestAdjustment])]
 
   /**
    * Transform messages for model-specific requirements.
@@ -159,7 +159,7 @@ final private[model] class DefaultRequestTransformer(
   override private[llm4s] def adjustOptions(
     modelId: ModelName,
     options: CompletionOptions
-  ): Result[(CompletionOptions, List[RequestAdjustment])] = {
+  ): Result[(CompletionOptions, Seq[RequestAdjustment])] = {
     val found = violations(modelId, options, getCapabilities(modelId))
     Right((found.foldLeft(options)((adjusted, violation) => violation.drop(adjusted)), found.map(_.adjustment)))
   }
@@ -301,7 +301,7 @@ final case class TransformationResult private (
   options: CompletionOptions,
   messages: Seq[Message],
   requiresFakeStreaming: Boolean,
-  adjustments: List[RequestAdjustment]
+  adjustments: Seq[RequestAdjustment]
 ) {
 
   /** Sets the transformed completion options. */
@@ -315,7 +315,7 @@ final case class TransformationResult private (
     copy(requiresFakeStreaming = requiresFakeStreaming)
 
   /** Sets what the transformation dropped or changed. */
-  def withAdjustments(adjustments: List[RequestAdjustment]): TransformationResult = copy(adjustments = adjustments)
+  def withAdjustments(adjustments: Seq[RequestAdjustment]): TransformationResult = copy(adjustments = adjustments)
 }
 
 object TransformationResult {
@@ -328,7 +328,7 @@ object TransformationResult {
     options: CompletionOptions,
     messages: Seq[Message],
     requiresFakeStreaming: Boolean = false,
-    adjustments: List[RequestAdjustment] = List.empty
+    adjustments: Seq[RequestAdjustment] = Seq.empty
   ): TransformationResult =
     new TransformationResult(options, messages, requiresFakeStreaming, adjustments)
 
@@ -346,7 +346,7 @@ object TransformationResult {
     val transformedOptions =
       if (dropUnsupported) transformer.adjustOptions(modelId, options)
       else
-        transformer.transformOptions(modelId, options, dropUnsupported = false).map(_ -> List.empty[RequestAdjustment])
+        transformer.transformOptions(modelId, options, dropUnsupported = false).map(_ -> Seq.empty[RequestAdjustment])
     transformedOptions.map { (transformed, adjustments) =>
       TransformationResult(
         options = transformed,

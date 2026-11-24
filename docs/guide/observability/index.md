@@ -442,7 +442,16 @@ parsed match {
 
 ## Langfuse Monitoring Workflow
 
-Langfuse provides purpose-built LLM observability. When configured, LLM4S automatically traces:
+Langfuse provides purpose-built LLM observability. The `langfuse` backend sends each event as OpenTelemetry spans, over OTLP/HTTP with JSON,
+to Langfuse's [OpenTelemetry endpoint](https://langfuse.com/integrations/native/opentelemetry),
+`<LANGFUSE_URL>/api/public/otel/v1/traces`, with `Authorization: Basic` (the public key and secret key) and
+`x-langfuse-ingestion-version: 4`, which Langfuse v4 needs to show the data in real time. Each span is a Langfuse
+observation whose `langfuse.*` attributes carry its type, input, output, metadata, level, model and usage; a run's
+span also sets the trace's name, session, user, tags, metadata and visibility. Langfuse
+[removed its legacy batch ingestion API](https://langfuse.com/docs/compatibility), `/api/public/ingestion`, from
+Langfuse Cloud on 2026-11-16, and this backend no longer uses it, so it works with Langfuse Cloud and with a
+self-hosted Langfuse v3.22 or later. It needs no OpenTelemetry SDK, and it is not the
+[OpenTelemetry backend](#opentelemetry-integration), which exports over gRPC.
 
 > **Checked 2026-11-24: Langfuse Cloud no longer accepts what this backend sends.** `llm4s-observability` posts
 > trace, span, generation and event objects to Langfuse's legacy batch ingestion API, `POST /api/public/ingestion`.
@@ -457,14 +466,33 @@ Langfuse provides purpose-built LLM observability. When configured, LLM4S automa
 
 ### What Gets Captured
 
+When configured, LLM4S automatically traces:
+
 | Langfuse object | From | Data included |
 |------------|-------------|---------------|
-| **Trace** | An agent run (`TraceEvent.AgentRunEnded`) | Session = the thread, input = the turn's first user message, output = its last assistant message, the run's `userId`, and one span per message of the turn |
-| **Generation** | A completion outside an agent run (`TraceEvent.CompletionReceived`) | Model and the completion's content; not the prompt |
+| **Trace** | An agent run (`TraceEvent.AgentRunEnded`) | Set on the run's span: session = the thread, input = the turn's first user message, output = its last assistant message, the run's user, and one span per message of the turn |
+| **Generation** | A completion outside an agent run (`TraceEvent.CompletionReceived`) | Model, token usage when the completion reports it, and the completion's content; not the prompt |
 | **Generation** | An agent's model call (`agent.model_call_completed`) | Model and token usage; the event's data as metadata. No prompt or completion |
 | **Span** | An agent's tool call (`agent.tool_executed`) | The event's data as metadata. No tool input or output |
 | **Span** | A `TraceEvent.ToolExecuted` you trace yourself (`traceToolCall`); an agent run sends none | The tool's arguments and result |
+| **Span** | Cache hits and misses, image generations, RAG operations | The event's figures as input, output and metadata |
 | **Event** | Every other event, your own `CustomEvent`s included | The event's data |
+
+The span attributes are Langfuse's: `langfuse.observation.type` (`span`, `generation` or `event`),
+`langfuse.observation.input` and `.output` (JSON text), `langfuse.observation.metadata.<key>`,
+`langfuse.observation.level` and `.status_message`, `langfuse.observation.model.name`,
+`langfuse.observation.usage_details` (`input`, `output` as billed, thinking included, and `total`), and
+`langfuse.environment`, `langfuse.release` and `langfuse.version` from `LANGFUSE_ENV`, `_RELEASE` and `_VERSION`. A
+run's span adds `langfuse.trace.name`, `session.id`, `user.id`, `langfuse.trace.tags`, `langfuse.trace.public` and
+`langfuse.trace.metadata.<key>`.
+
+An event placed in a trace keeps that trace's ids, so the spans of an agent run and of its subagents form one tree.
+A run with no placement is the trace `TraceContext.rootFor(runId)`, whose ids derive from the run id; any other
+event with none is a trace of its own. Each `traceEvent` call is one POST. Nothing is retried: a failed export, or
+spans Langfuse reports as rejected, is logged with the response body redacted and returned as a `Left`.
+
+`RAGASLangfuseObserver` (`llm4s-rag`) sends an evaluation's trace the same way, and its scores to
+`/api/public/scores`, each naming the trace's 32-hex-digit id.
 
 ### What an agent run sends
 
@@ -490,7 +518,7 @@ it. **[Agent tracing and metrics](agents)** is the description of that trace: th
   guardrail, `Guardrail '<name>' blocked`, never its reason; any other error's is sent as it is).
 - Message content reaches tracing only in `AgentRunEnded.messages`. Langfuse records it, as the trace's input and
   output and one span per message; OpenTelemetry records only a message count.
-- In Langfuse a trace is private: `public` is `false` unless `llm4s.tracing.langfuse.public = true`.
+- In Langfuse a trace is private: `langfuse.trace.public` is `false` unless `llm4s.tracing.langfuse.public = true`.
 
 A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no `AgentRunEnded`.
 (The kernel's own `TracingSubscriber`, used for graphs that are not agents, names agent events `graph.custom`;
@@ -515,7 +543,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability" % llm4sVersion
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=<your-langfuse-public-key>
 LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
-LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted URL
+LANGFUSE_URL=https://cloud.langfuse.com  # the default; https://us.cloud.langfuse.com, or a self-hosted base URL
 ```
 
 Both keys are required. With either missing, `Tracing.fromSettings` returns a
@@ -523,7 +551,10 @@ Both keys are required. With either missing, `Tracing.fromSettings` returns a
 (LANGFUSE_PUBLIC_KEY)`. An application that would rather run untraced than stop says so where it
 builds the tracer: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
-**Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
+`LANGFUSE_URL` is the host: the backend appends `/api/public/otel/v1/traces`. A URL that still ends in the legacy
+`/api/public/ingestion` path is read as the host it is on.
+
+**Traces are private.** Every trace is sent with `langfuse.trace.public = false`, so only members of your Langfuse project can
 open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace
 holds the turn's messages; to share traces by link all the same, set it in `application.conf`:
 
@@ -533,7 +564,7 @@ llm4s.tracing.langfuse.public = true
 
 Only `true` turns it on. A trace's user is the run's `RunConfig.principal`
 (`agent.run(query, RunConfig().withPrincipal(Principal("user-42")))`), which Langfuse's per-user views and costs
-group by; a run without a principal sends no `userId`. Send an id you are content for Langfuse to hold - an opaque
+group by; a run without a principal sends no `user.id`. Send an id you are content for Langfuse to hold - an opaque
 one, not an email address.
 
 To read the Langfuse settings whatever `TRACING_MODE` selects (for example to combine Langfuse with

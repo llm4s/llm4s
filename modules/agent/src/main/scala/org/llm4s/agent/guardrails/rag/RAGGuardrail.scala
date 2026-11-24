@@ -210,7 +210,7 @@ object RAGGuardrail {
     new OutputGuardrail {
       def validate(value: String): Result[String] = guardrail.validate(value)
 
-      override def validate(value: String, context: UsageAccounting): Result[String] = context match {
+      override def validateIn(value: String, context: UsageAccounting): Result[String] = context match {
         case hook: ModelContext =>
           AgentRun.turnMessages(hook.state).flatMap { turn =>
             retrieved(turn).fold[Result[String]](Right(value))(guardrail.validateWithContext(value, _, hook))

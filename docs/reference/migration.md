@@ -60,6 +60,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
 [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
 [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
+[the Langfuse backend sends OpenTelemetry spans](#the-langfuse-backend-sends-opentelemetry-spans-2883),
 [`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
 [`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801),
 [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
@@ -97,7 +98,51 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
-and [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805).
+[`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
+[`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)
+and [message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809).
+
+## Message parts, citations and adjustments are `Seq`s (#2809)
+
+The model's public signatures use `Seq` for a collection, as `AssistantMessage.toolCalls` already did. Stored JSON
+is unchanged: a message with one text part is still written as `content`, any other as `parts`, whatever `Seq`
+holds them.
+
+| Before | After |
+|---|---|
+| `UserMessage.parts`, `ToolMessage.parts`: `Vector[ContentPart]`; `apply(parts: Vector[...])`, `withParts(Vector[...])` | `Seq[ContentPart]`; a `List` or any other `Seq` is accepted |
+| `Completion.citations: List[Citation]`, `withCitations(List[...])` | `Seq[Citation]` |
+| `Completion.adjustments`, `TransformationResult.adjustments`: `List[RequestAdjustment]`; `RequestTransformer.transform` returns `(CompletionOptions, List[RequestAdjustment])` | `Seq[RequestAdjustment]` |
+| `OpenAICompatibleDialect.addReasoning(...)`: `List[RequestAdjustment]` | `Seq[RequestAdjustment]`: change the return type of an override |
+| `AgentEvents.ModelCallCompleted.adjustments: List[RequestAdjustment]` | `Seq[RequestAdjustment]` |
+
+Code that reads one of these as a `List` or `Vector` (`val parts: Vector[ContentPart] = message.parts`, a
+`case Vector(...)` or `::` pattern) calls `.toVector` / `.toList`, or uses `Seq` and `case Seq(...)`.
+
+## `withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost (#2835)
+
+MiMa skips an `@Experimental` method together with every overload of its name, so an Experimental overload of a
+Stable method would leave the Stable one unchecked once the baseline is set. The two such overloads in `llm4s-agent`
+are renamed:
+
+| Before | After |
+|---|---|
+| `Agent.builder(id, client).withTools(toolSet)`, given a `ToolSet` | `.withToolSet(toolSet)`; `withTools(registry)` still takes a `ToolRegistry` |
+| `override def validate(value: A, context: UsageAccounting)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` |
+| `guardrail.validate(value, context)` | `guardrail.validateIn(value, context)` |
+
+`validate(value)` is unchanged. `RAGGuardrail.validateWithContext(output, ragContext)` is unchanged too: it validates
+against a `RAGContext`, which is why the stage form is not called `validateWithContext`. `TypedAgent.withTools`,
+`LoopAgent.withTools` and `ModelRequest.withTools` take only a `ToolSet` and keep their names.
+
+The Java facade's `inputGuardrails` and `outputGuardrails` now sit where a Scala agent's `withInputGuardrails` and
+`withOutputGuardrails` put them: innermost in the agent's middleware, after the facade's context window. Before, the
+facade installed its own `GuardrailMiddleware` first. Input guardrails run at admission wherever they sit, so a blocked
+query was already never stored; innermost, an output guardrail also checks the answer before any other middleware's
+`afterAgent` sees it, the order the Scala builder chose so that a middleware such as semantic memory never records a
+blocked answer. What a Java agent answers or blocks is unchanged, but its graph version changes (the guardrail
+middleware's id is `agent-guardrails` now), so a Java agent's thread suspended or in flight before the upgrade is not
+resumed by the upgraded agent: finish or abandon it first.
 
 ## `llm4s.providers.provider` is now `llm4s.defaultProvider` (#2806)
 
@@ -535,7 +580,7 @@ val t: Option[Double] = options.temperature
 - **Tracing.** The OpenTelemetry `gen_ai.request.temperature`, `top_p` and penalty attributes are present only
   for an option that was set.
 
-`SamplingOptionsOptional` (in `Llm4sMigrate_1_0`) wraps the named arguments in `Some`. A read of one of the four
+`SamplingOptionsOptional` (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps the named arguments in `Some`. A read of one of the four
 is left to you.
 
 ## `Completion` reads `content` and `toolCalls` from its message (#2807)
@@ -1050,7 +1095,7 @@ Nothing stored changes: a `ModelName` is written as the JSON string it wraps, so
 agent events, model-metadata JSON, trace events and the provider exchange log read and write byte for byte as before.
 The Java facade (`llm4s-java-api`) still presents model ids as `String`s.
 
-The scalafix rule `ModelIdNewtypes` (part of `Llm4sMigrate_1_0`) wraps the argument at the common call sites:
+The scalafix rule `ModelIdNewtypes` (part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps the argument at the common call sites:
 `Completion`'s `model`, `ModelMetadata`'s `modelId`, `EmbeddingModelConfig`'s name, `lookup`, `estimate`,
 `UsageSummary.add`, `StreamingAccumulator`, `withModel`, and a provider config's `fromValues` and `withBaseUrl`. A
 `byModel` map key, a function typed `String => ...` and a model compared with a `String` are left for the compiler to
@@ -1220,7 +1265,7 @@ is a new stage that runs first: it may rewrite the query, and only the rewrite i
 | a `beforeAgent` hook that redacts, to keep text out of the store | override `admit(query, context: AdmissionContext): Result[String]`; `beforeAgent` still rewrites what joins the conversation, after the first checkpoint |
 | input guardrails ran after other middleware's `beforeAgent`, on what those returned | they run before every `beforeAgent`, on the query as submitted: a rewrite a guardrail depends on belongs in `admit` |
 | `GuardrailMiddleware(input, output).beforeAgent(text, context)` called directly | `.admit(text, context)` with an `AdmissionContext` (`MiddlewareTestKit.admissionContext()`) |
-| `override def validate(value: A, context: ModelContext)` in a guardrail | `context: UsageAccounting`, which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
+| `override def validate(value: A, context: ModelContext)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` ([renamed](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)), which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
 | `GuardrailBlocked(guardrail, reason: String)` | `reason: Option[String]`; `block(reason)` builds it |
 | `submitter.submit(thread, agent.id, QueuedInput.query(text))`, the query in the queue as submitted | `agent.admit(thread, text).map(QueuedInput.admitted)` first, to keep refused or unrewritten text out of the queue |
 
@@ -1335,7 +1380,7 @@ were. Java and Kotlin see a `String` (an opaque type erases to it), and the Java
 A comparison with a `String` no longer compiles, `call.id == "c1"` and ScalaTest's `call.id shouldBe "c1"` alike:
 compare with `ToolCallId("c1")`, or read `call.id.asString`.
 
-The Scalafix rule `ToolCallIdTyped` (also in `Llm4sMigrate_1_0`) wraps an id or key set from a `String`, adds
+The Scalafix rule `ToolCallIdTyped` (also in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps an id or key set from a `String`, adds
 `.asString` to every other read, and moves the agent's imports ([Scalafix](scalafix)).
 
 ## `SchemaDefinition` gains a union and a raw JSON Schema case (#2814)
@@ -1419,8 +1464,8 @@ for {
 ## `Llm4sConfig.providerConfigs()` returns each section's `Result`; `providers()` and `ProvidersConfig` are internal (#2804)
 
 `Llm4sConfig` and `Llm4sSettings` (from `Llm4sConfig.from(config)`) are now one implementation: every `Llm4sConfig`
-method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`; `Llm4sConfig.from` itself
-stays `@Experimental`.
+method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`, and so is
+`Llm4sConfig.from`, the entry point at the application edge, although it takes a Typesafe `Config`.
 
 **`providerConfigs()`** returned `Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])]`. It
 returns `Result[Map[ProviderName, Result[ProviderConfig]]]`: each section's config, or the error loading it, under
@@ -1918,6 +1963,31 @@ created `public: false`, and nothing is hard-coded as the user.
 - `AgentRunEnded` gains the field `userId` (it has fourteen fields in all), so a positional pattern on it no longer
   compiles: match `case e: TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
 
+## The Langfuse backend sends OpenTelemetry spans (#2883)
+
+Langfuse removed its legacy batch ingestion API, `POST /api/public/ingestion`, from Langfuse Cloud on 2026-11-16, and a
+self-hosted Langfuse v4 in `events_only` mode rejects it. The `langfuse` tracing mode now sends OTLP/HTTP JSON to
+Langfuse's OpenTelemetry endpoint, `<url>/api/public/otel/v1/traces`, with `x-langfuse-ingestion-version: 4`; each
+trace, span, generation and event it sent is a span whose `langfuse.*` attributes carry the same fields. The mode,
+the `llm4s.tracing.langfuse.*` keys and the `LANGFUSE_*` variables are unchanged.
+
+- **`LANGFUSE_URL` is the host.** `LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`, was
+  `https://cloud.langfuse.com/api/public/ingestion`. A URL that still ends in `/api/public/ingestion` keeps working:
+  it is read as the host it is on. A self-hosted Langfuse must be v3.22 or later, which has the OTel endpoint.
+- **An unplaced run's trace id.** A run traced without a placement (a hand-built `AgentRunEnded`) was the trace whose
+  id is the run id; OTLP trace ids are 32 hex digits, so it is now the trace `TraceContext.rootFor(runId).traceId`.
+  The run id stays in the trace's `run_id` metadata. Any other event without a placement is a trace of its own, as
+  before. A run's trace now has a root span (`LLM4S Agent Run`) with its messages under it.
+- **`LangfuseBatchSender`** has `sendTraces(request: ujson.Obj, config)`, an OTLP `ExportTraceServiceRequest`, and
+  `sendScores(scores: Seq[ujson.Obj], config)`, posted to `/api/public/scores`; `sendBatch(events, config)` and
+  `DefaultLangfuseBatchSender.normalizeIngestionUrl` are removed. A `LangfuseTracing` subclass that overrode
+  `sendBatch(events: Seq[ujson.Obj])` overrides `sendBatch(request: ujson.Obj)`, the export.
+- **`RAGASLangfuseObserver.logEvaluation(result, traceId)`** scores the trace with that id. To add its
+  `Evaluation Details` span to the trace too, the id must be an OpenTelemetry trace id (32 hex digits), as every trace
+  llm4s sends now has; any other id gets the scores alone, with a warning.
+- Message spans no longer carry `tags` (Langfuse observations have none; the trace keeps `llm4s`, `agent`,
+  `conversation`), and a model call's `usage` no longer has `unit: TOKENS`.
+
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
 In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
@@ -2006,9 +2076,20 @@ In HOCON, replace `llm4s.embeddings.provider = "openai"` with
 `llm4s.embeddings.provider` and no model fails to load with
 `llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
 one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
-`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
-`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
-model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`, so the per-provider
+model settings only the provider-only form read are removed too ([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+
+| Before | After |
+|---|---|
+| `llm4s.embeddings.<id>.model = "m"` | `llm4s.embeddings.model = "<id>/m"` (`EMBEDDING_MODEL=<id>/m`). A block that still sets `model` fails to load: ``llm4s.embeddings.openai.model ('m') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to openai/<model>, e.g. openai/m, and remove llm4s.embeddings.openai.model`` |
+| `OPENAI_EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VOYAGE_EMBEDDING_MODEL`, `JINA_EMBEDDING_MODEL`, `COHERE_EMBEDDING_MODEL` | not bound or read: put the model in `EMBEDDING_MODEL` |
+| `OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL` and the `*_EMBEDDING_MODEL` constants of `OllamaConfigKeys`, `VoyageConfigKeys`, `JinaConfigKeys` and `CohereEmbeddingConfigKeys` | removed |
+| `EmbeddingConfigSpec(modelEnv = Some("ACME_EMBEDDING_MODEL"))`, `withModelEnv` | removed: drop the argument, and the `model = ${?ACME_EMBEDDING_MODEL}` line from the module's `reference.conf` |
+| `EmbeddingProviderSection(model = ...)`, `section.model`, `withModel` | removed: a descriptor's model is `context.modelOverride`, else `configSpec.defaultModel` |
+| `EmbeddingConfigSpec.resolveModel(id, section, modelOverride, spec)` | `resolveModel(id, modelOverride, spec)` |
+
+`EmbeddingConfigSpec.defaultModel` stays: `llm4s-rag` uses it for a provider chosen without a model
+(`RAGConfig().withEmbeddings("ollama")`).
 
 ## Vertex AI no longer reads `endpoint` and `organization`
 
@@ -2025,10 +2106,13 @@ vertex-main {
 }
 ```
 
-They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
-A section that sets `endpoint` and no `project` fails with
-`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
-one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+`endpoint` is now an unknown key: logged with a warning that names it and lists the keys Vertex AI accepts, and
+ignored. A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.
+One that sets `organization` and no `location` fails too, rather than run in `us-central1` unnoticed
+([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+``llm4s.providers.<name> sets `organization`, which Vertex AI no longer reads: the region is `location`. Replace `organization = "europe-west4"` with `location = "europe-west4"`.``
+Beside a `location`, a leftover `organization` is logged and ignored.
 
 For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
 `withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
@@ -2386,7 +2470,7 @@ val drop = keep.withTransform(_ => Seq.empty)
 ```
 
 A rule built positionally, `CompressionRule(name, f)`, is unchanged. The Scalafix rule `CompressionRuleTransform`
-(in `Llm4sMigrate_1_0`) makes these edits.
+(in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) makes these edits.
 
 ## A RAG with a `SearchIndex` ingests only with permissions (#2716)
 
@@ -2437,7 +2521,7 @@ open question 6).
   `ValidationError`. The partial text is `Truncated.partialAnswer`, and stays in the thread's messages, so the next
   turn (`continueConversation`, "go on") sees it; the turn is a completed one, like `StepLimitReached`.
 - **A `match` on `AgentStatus` without a catch-all** needs a `Truncated` case. Scala 3 warns that the match is not
-  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrate_1_0`) reports each one.
+  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) reports each one.
 - **Delegation**: a child that ends `Truncated` is refused `TaskRefusal.Truncated`, as a child at its step limit is,
   and `SubagentEvents.TaskEnded`'s status is `truncated`.
 - **Tracing**: `TraceEvent.AgentRunEnded.status` is `truncated`.
@@ -2603,13 +2687,13 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
+The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
 source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
-on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#migration-rules)). These need a hand edit:
+on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)). These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and

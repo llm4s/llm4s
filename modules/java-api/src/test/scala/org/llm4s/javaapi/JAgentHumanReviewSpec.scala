@@ -48,7 +48,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     ran.clear()
     val client =
       scripted(Right(calling(call("c1", "deploy", "one"), call("c2", "deploy", "two"))), Right(completion("done")))
-    val agent = jAgentOf(client)(_.withTools(tools).withInterruptBefore(AgentNode.Tool))
+    val agent = jAgentOf(client)(_.withToolSet(tools).withInterruptBefore(AgentNode.Tool))
     val first = agent.run("deploy").get()
     first.status.kind shouldBe AgentStatusKind.SUSPENDED
     val List(p1, p2) = pendingOf(first): @unchecked
@@ -107,7 +107,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     ran.clear()
     val client =
       scripted(Right(calling(call("c1", "deploy", "one"), call("c2", "deploy", "two"))), Right(completion("ok")))
-    val agent        = jAgentOf(client)(_.withTools(tools).withMiddleware(new Environment))
+    val agent        = jAgentOf(client)(_.withToolSet(tools).withMiddleware(new Environment))
     val first        = agent.run("deploy").get()
     val List(p1, p2) = pendingOf(first): @unchecked
     (p1.kind, p1.toolName(), p1.argumentsJson()) shouldBe

@@ -63,7 +63,7 @@ class AgentToolEffectPhaseSpec extends AnyFlatSpec with Matchers {
           "assistant",
           ScriptedLLMClient.of(calling(call("c1", "confirm", "go")), CompletionFixture.simple("done"))
         )
-        .withTools(SpecTools.set(tool))
+        .withToolSet(SpecTools.set(tool))
     )
 
   "An answered resume" should "be an effect of its own, never replaying execute's" in {

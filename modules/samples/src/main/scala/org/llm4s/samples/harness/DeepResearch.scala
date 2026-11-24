@@ -205,7 +205,7 @@ object DeepResearch {
       agent <- Agent
         .builder(AgentName, client)
         .withHarness(profile)
-        .withTools(tools)
+        .withToolSet(tools)
         // the builder's guardrails run innermost, so memory is outside them and never records a blocked answer
         .withMiddleware(memory)
         .withOutputGuardrails(SecretLeakGuardrail())

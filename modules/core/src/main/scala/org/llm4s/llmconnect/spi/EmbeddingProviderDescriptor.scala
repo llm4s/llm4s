@@ -103,12 +103,11 @@ trait EmbeddingProviderDescriptor:
    *                      nothing. Everything this method needs arrives typed, in here:
    *                      a descriptor never reads configuration itself.
    * @param context       `context.modelOverride`: the `<model>` half of
-   *                      `EMBEDDING_MODEL=<id>/<model>`, when the unified form was used. It takes
-   *                      precedence over the section.
+   *                      `EMBEDDING_MODEL=<id>/<model>`; the model is it, else `configSpec.defaultModel`.
    */
   def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext): Result[EmbeddingProviderConfig] =
     for
-      model   <- EmbeddingConfigSpec.resolveModel(id, section, context.modelOverride, configSpec)
+      model   <- EmbeddingConfigSpec.resolveModel(id, context.modelOverride, configSpec)
       baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
       apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
     yield EmbeddingProviderConfig(id, baseUrl, model, apiKey, timeouts = section.timeouts)

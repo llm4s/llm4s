@@ -245,7 +245,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       SpecTools.calling(SpecTools.call("c1", "slow")),
       CompletionFixture.simple("finished")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
     val thread = ThreadId("busy-forget")
 
     val run = agent.start(thread, "go").fold(e => fail(e.message), identity)

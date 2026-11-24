@@ -98,7 +98,7 @@ object PermissionRulesExample {
       tools <- ToolSet.of(writeFile(files))
       agent <- Agent
         .builder("permission-rules-example", client)
-        .withTools(tools)
+        .withToolSet(tools)
         .withMiddleware(new PermissionMiddleware(rules))
         .build()
       parked <- agent.run("Write the source, system and deployment files.")

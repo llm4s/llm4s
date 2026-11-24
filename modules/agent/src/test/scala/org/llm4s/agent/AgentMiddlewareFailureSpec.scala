@@ -73,7 +73,7 @@ class AgentMiddlewareFailureSpec extends AnyFlatSpec with TestTimeLimit with Mat
       CompletionFixture.simple("second answer")
     )
     val middleware = new Failing(hook, mode)
-    val agent      = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)).withMiddleware(middleware))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)).withMiddleware(middleware))
     (agent, middleware, client)
 
   private val thread = ThreadId("t1")
