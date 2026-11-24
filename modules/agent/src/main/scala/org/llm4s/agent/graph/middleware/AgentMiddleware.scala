@@ -17,6 +17,7 @@ import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
 import scala.annotation.unused
+import scala.reflect.ClassTag
 import scala.util.Try
 
 /**
@@ -35,6 +36,52 @@ object MiddlewareId:
    * `MiddlewareId` is a `String`, so summoning `ReadWriter[String]` would find this given.
    */
   given ReadWriter[MiddlewareId] = ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
+
+/**
+ * Names the middleware an ordering constraint is about ([[AgentMiddleware.runsBefore]], [[AgentMiddleware.runsAfter]]):
+ * the one with an id, `MiddlewareRef(id)`, or every middleware of a type, `MiddlewareRef.ofType[GuardrailMiddleware]`
+ * (#2795). Name another middleware by its type when you can: its id is its user's to choose.
+ *
+ * A reference is required unless it is made optional with [[ifPresent]]: a required one that matches nothing in the
+ * stack is refused, so a mistyped id cannot silently leave an order unarranged; an optional one applies when the
+ * other is there and is ignored when it is not, which is how a reusable middleware says "outside the guardrails, if
+ * there are any".
+ */
+@Experimental
+final case class MiddlewareRef private (
+  private[middleware] val target: Either[MiddlewareId, Class[?]],
+  optional: Boolean
+):
+
+  /** This reference, applied only when the stack has the middleware it names; no error when it has none. */
+  def ifPresent: MiddlewareRef = copy(optional = true)
+
+  /** Whether `middleware` is one this reference names. */
+  private[middleware] def matches(middleware: AgentMiddleware): Boolean =
+    target.fold(_ == middleware.id, _.isInstance(middleware))
+
+  /** Whether it names a type: a middleware is never ordered against itself by its own type. */
+  private[middleware] def byType: Boolean = target.isRight
+
+  /** What a required reference that matched nothing is reported as. */
+  private[middleware] def missing: String = target.fold(
+    id => s"unknown middleware '${id.value}'",
+    kind => s"a middleware of type ${kind.getSimpleName}, and the stack has none"
+  )
+
+  override def toString: String =
+    val named = target.fold(id => s"'${id.value}'", kind => s"type ${kind.getSimpleName}")
+    if optional then s"MiddlewareRef($named, if present)" else s"MiddlewareRef($named)"
+
+@Experimental
+object MiddlewareRef:
+
+  /** The middleware whose id is `id`. */
+  def apply(id: MiddlewareId): MiddlewareRef = new MiddlewareRef(Left(id), optional = false)
+
+  /** Every middleware of type `M` in the stack - a subclass too - whatever id each was given. */
+  def ofType[M <: AgentMiddleware](using tag: ClassTag[M]): MiddlewareRef =
+    new MiddlewareRef(Right(tag.runtimeClass), optional = false)
 
 /**
  * One model call as a model wrapper sees it: the system prompt, the conversation so far and the tools offered. A
@@ -189,7 +236,7 @@ object ToolCallRequest:
  * run, its model calls and its tool calls. Every hook passes through by default; override only
  * those the concern needs.
  *
- * Middleware run as a [[org.llm4s.agent.graph.middleware.MiddlewareStack MiddlewareStack]], ordered by registration and by [[runsBefore]] and
+ * Middleware run as a stack, ordered by registration and by [[runsBefore]] and
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
  * unwinding, and `afterAgent`, run in reverse. A hook that throws fails the run with
  * `GraphError.MiddlewareFailed`; a thrown cancellation cancels it.
@@ -211,18 +258,22 @@ trait AgentMiddleware:
   /** This middleware's identifier, unique in its stack; must match `[a-zA-Z0-9_-]{1,64}`. */
   def id: MiddlewareId
 
-  /** Middleware this one must run outside of (wrap); each must be registered in the same stack. */
-  def runsBefore: Set[MiddlewareId] = Set.empty
+  /**
+   * Middleware this one must run outside of (wrap): the stack is arranged so. Each is named by id or by type
+   * ([[MiddlewareRef]]) and must be in the same stack, unless the reference is optional (`ifPresent`).
+   */
+  def runsBefore: Set[MiddlewareRef] = Set.empty
 
-  /** Middleware this one must run inside of (be wrapped by); each must be registered in the same stack. */
-  def runsAfter: Set[MiddlewareId] = Set.empty
+  /** Middleware this one must run inside of (be wrapped by), named and arranged as [[runsBefore]]'s are. */
+  def runsAfter: Set[MiddlewareRef] = Set.empty
 
   /**
    * Where this middleware must run relative to `other`, when both are present; `None`, the default, when it does not
-   * matter. A requirement is checked, never arranged: [[org.llm4s.agent.graph.middleware.MiddlewareStack.of MiddlewareStack.of]] - so `AgentBuilder.build()` - refuses a
+   * matter. A requirement is checked, never arranged: `AgentBuilder.build()` refuses a
    * stack in which this middleware does not run outside `other`, and a [[org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary Placement.OutsideAtBoundary]] is checked
-   * across an agent family too. Register the two in the right order, or name `other` in [[runsBefore]]. Name `other`
-   * by its type: ids are configurable.
+   * across an agent family too, which [[runsBefore]] cannot arrange. Register the two in the right order, or name
+   * `other` in [[runsBefore]]. `other` is the middleware itself, so match it by its type, as a [[MiddlewareRef]]
+   * names one, or by `other.id`.
    */
   def placement(@unused other: AgentMiddleware): Option[Placement] = None
 

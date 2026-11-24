@@ -5,6 +5,7 @@ import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   BoundaryResult,
   MiddlewareId,
+  MiddlewareRef,
   ModelContext,
   Placement,
   PromptSection,
@@ -124,8 +125,8 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
   "MiddlewareTestKit.order" should "return the ids in the order the stack runs them" in {
     val inner = named("inner")
     val outer = new AgentMiddleware {
-      val id: MiddlewareId                       = MiddlewareId("outer")
-      override def runsBefore: Set[MiddlewareId] = Set(MiddlewareId("inner"))
+      val id: MiddlewareId                        = MiddlewareId("outer")
+      override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("inner")))
     }
     MiddlewareTestKit.order(inner, outer).value.map(_.value) shouldBe Vector("outer", "inner")
     MiddlewareTestKit.order().value shouldBe empty
@@ -133,8 +134,8 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "return the validation error that names the constraint that failed" in {
     val needsAbsent = new AgentMiddleware {
-      val id: MiddlewareId                      = MiddlewareId("needs-absent")
-      override def runsAfter: Set[MiddlewareId] = Set(MiddlewareId("absent"))
+      val id: MiddlewareId                       = MiddlewareId("needs-absent")
+      override def runsAfter: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("absent")))
     }
     MiddlewareTestKit.order(needsAbsent).left.value.message should include(
       "middleware 'needs-absent': runsAfter names unknown middleware 'absent'"

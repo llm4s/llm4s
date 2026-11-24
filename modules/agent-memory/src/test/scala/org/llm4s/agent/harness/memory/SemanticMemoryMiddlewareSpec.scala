@@ -193,17 +193,24 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     contents(held(m, None)) shouldBe empty
   }
 
-  "The memory middleware inside guardrail middleware" should "be refused when the agent is built (design 4.37)" in {
+  "The memory middleware registered inside guardrail middleware" should "be arranged outside it, whatever its id" in {
+    import org.llm4s.agent.graph.middleware.{ GuardrailReviewMiddleware, MiddlewareId, MiddlewareStack }
     val (stores, _) = perTenant()
     val m           = new SemanticMemoryMiddleware(stores, simple, answering())
-    val guard       = new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 3)))
-    val review      = new org.llm4s.agent.graph.middleware.GuardrailReviewMiddleware(Nil, Nil)
-    val error       = Agent.builder("assistant", answering()).withMiddleware(guard, review, m).build().left.value
-    error.message should include("'semantic-memory' must run outside 'guardrails'")
-    error.message should include("'semantic-memory' must run outside 'guardrail-review'")
-    // arranged outside by runsBefore, whatever the registration order
-    val placed = new SemanticMemoryMiddleware(stores, simple, answering(), runsBefore = Set(guard.id))
-    Agent.builder("assistant", answering()).withMiddleware(guard, placed).build().isRight shouldBe true
+    // ids of the user's own (#2795): the memory middleware names the guardrails by type, not by their default ids
+    val guard  = new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 3)), MiddlewareId("my-guardrails"))
+    val review = new GuardrailReviewMiddleware(Nil, Nil, MiddlewareId("my-review"))
+    MiddlewareStack.of(guard, review, m).value.ordered.map(_.id.value) shouldBe
+      Vector("semantic-memory", "my-guardrails", "my-review")
+    val agent = built(Agent.builder("assistant", answering("far too long")).withMiddleware(guard, review, m))
+    agent.run("question").value.status shouldBe a[AgentStatus.Blocked]
+    contents(held(m, None)) shouldBe empty
+  }
+
+  it should "need no guardrail middleware in the stack: the constraint is optional" in {
+    val (stores, _) = perTenant()
+    val m           = new SemanticMemoryMiddleware(stores, simple, answering())
+    Agent.builder("assistant", answering()).withMiddleware(m).build().isRight shouldBe true
   }
 
   it should "be refused on a handoff target when the root has the guardrail, whose afterAgent runs last" in {

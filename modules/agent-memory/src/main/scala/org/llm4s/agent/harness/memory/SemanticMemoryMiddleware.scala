@@ -7,6 +7,7 @@ import org.llm4s.agent.graph.middleware.{
   GuardrailMiddleware,
   GuardrailReviewMiddleware,
   MiddlewareId,
+  MiddlewareRef,
   ModelContext,
   Placement,
   PromptSection
@@ -61,10 +62,11 @@ import scala.util.{ Try, Using }
  *   - **Failures after the answer** are skipped and announced by [[MemoryEvents.Skipped]]: the answer is never
  *     retracted because memory could not be written. A crash is replayed by `recover` from C4's records.
  *
- * Register it outside guardrail middleware - before it, or with `runsBefore` naming it - so that a blocked answer is
- * never recorded: `afterAgent` runs in reverse stack order, and a guardrail's block stops the others. `build()` refuses
- * it inside a `GuardrailMiddleware` or `GuardrailReviewMiddleware` ([[placement]]), and on a handoff target when the
- * root agent has one, since the root's `afterAgent` runs after every agent's own. An effect that
+ * It runs outside guardrail middleware, so that a blocked answer is never recorded: `afterAgent` runs in reverse stack
+ * order, and a guardrail's block stops the others. In one agent's stack that is arranged, wherever the two were
+ * registered ([[runsBefore]]: every `GuardrailMiddleware` and `GuardrailReviewMiddleware`, if there is one). Across a
+ * handoff family it cannot be arranged, so `build()` refuses it on a handoff target when the root agent has one
+ * ([[placement]]), since the root's `afterAgent` runs after every agent's own. An effect that
  * applied stays applied: a Block restores thread state, not the store.
  *
  * The key is registered only by an agent family with a `SemanticMemoryMiddleware`: adding one to an existing agent
@@ -78,7 +80,6 @@ import scala.util.{ Try, Using }
  * @param consolidate when to consolidate old memories after a turn; `None` never
  * @param bounds the most each tenant's store keeps
  * @param clock where consolidation reads "now" from
- * @param runsBefore middleware this one must run outside of, such as `MiddlewareId("guardrails")`
  * @param id this middleware's id
  */
 @Experimental
@@ -91,7 +92,6 @@ final class SemanticMemoryMiddleware(
   val consolidate: Option[MemoryConsolidation] = None,
   val bounds: MemoryBounds = MemoryBounds(),
   clock: Clock = Clock.systemUTC(),
-  override val runsBefore: Set[MiddlewareId] = Set.empty,
   val id: MiddlewareId = SemanticMemoryMiddleware.DefaultId
 ) extends AgentMiddleware:
   import SemanticMemoryMiddleware.*
@@ -100,6 +100,10 @@ final class SemanticMemoryMiddleware(
   private val resolving = new ReentrantLock()
 
   override def writes: Set[StateKey[?, ?]] = Set(RecalledKey)
+
+  /** Outside the guardrail middleware of its stack, when there is any, whatever ids they were given (#2795). */
+  override def runsBefore: Set[MiddlewareRef] =
+    Set(MiddlewareRef.ofType[GuardrailMiddleware].ifPresent, MiddlewareRef.ofType[GuardrailReviewMiddleware].ifPresent)
 
   /** Outside guardrail middleware, at the boundary, so a blocked answer is never recorded; see the class's Scaladoc. */
   override def placement(other: AgentMiddleware): Option[Placement] = other match
