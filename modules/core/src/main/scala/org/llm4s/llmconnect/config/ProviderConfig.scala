@@ -160,7 +160,7 @@ object ProviderConfig {
       case IdentitySource.File(path) =>
         nonEmpty(provider, s"${prefix}identityTokenFile", path.toString)
       case IdentitySource.Literal(token) =>
-        nonEmpty(provider, s"${prefix}identityToken", token)
+        nonEmpty(provider, s"${prefix}identityToken", token.reveal)
 
   /**
    * Roots a `fromValues` refusal at the named section it was built from, so the section path

@@ -223,9 +223,16 @@ its own federation takes the identity token's file path instead (see `AnthropicP
 The configuration side is `@Stable` ([#1818](https://github.com/llm4s/llm4s/issues/1818)): `AuthConfig`,
 `IdentitySource`, `TokenExchangeConfig`, `AccessToken` and the `AccessTokenProvider` trait, which a Stable
 `NamedProviderConfig`, `ProviderDescriptor.requireAuthExtra` and `OpenAICompatibleClient.Credential` carry. The
-machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` - is still
+machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenProvider` - is still
 `@Experimental`, so keep it out of your own Stable signatures. An `AccessTokenProvider` should return a failure as a
 `Left`; `OpenAICompatibleClient` and `CachingAccessTokenProvider` turn one that throws into an `AuthenticationError`.
+
+The three suppliers of a credential are siblings with one method, `current()`: `ApiKeyProvider.current()` gives an
+`ApiKey`, and `AccessTokenProvider.current()` and `IdentityTokenProvider.current()` a `Secret`, so a token prints
+as `***` and is read with `.reveal` only where it is sent. `AccessTokenProvider.invalidate(rejected: Secret)` has a
+no-op default, so a provider that caches nothing is a lambda: `() => readToken().map(Secret.token)`. An
+`IdentitySource` is the configured form (`File(path)` or `Literal(token: Secret)`), and
+`IdentityTokenProvider.from(source)` the provider that reads it.
 
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 

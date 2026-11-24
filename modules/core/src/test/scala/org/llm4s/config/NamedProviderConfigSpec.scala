@@ -4,6 +4,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.ProviderTimeouts
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -20,7 +21,7 @@ class NamedProviderConfigSpec extends AnyFlatSpec with Matchers {
     apiKey = None
   )
 
-  private val configuredAuth     = AuthConfig(IdentitySource.Literal("identity-token"))
+  private val configuredAuth     = AuthConfig(IdentitySource.Literal(Secret("identity-token")))
   private val keyFile            = Paths.get("secrets", "provider-key")
   private val configuredTimeouts = ProviderTimeouts(request = Some(10.seconds), stream = Some(30.seconds))
 
@@ -89,7 +90,7 @@ class NamedProviderConfigSpec extends AnyFlatSpec with Matchers {
     original.withHeaders(Map("other-header" -> "v")) shouldBe configured(headers = Map("other-header" -> "v"))
     original.withExtras(Map("other-extra" -> "v")) shouldBe configured(extras = Map("other-extra" -> "v"))
     original.withTimeouts(ProviderTimeouts.default) shouldBe configured(timeouts = ProviderTimeouts.default)
-    val otherAuth = AuthConfig(IdentitySource.Literal("other-token"))
+    val otherAuth = AuthConfig(IdentitySource.Literal(Secret("other-token")))
     original.withAuth(otherAuth) shouldBe configured(auth = Some(otherAuth))
     original.withAuth(Some(otherAuth)) shouldBe configured(auth = Some(otherAuth))
     original.withAuth(None) shouldBe configured(auth = None)

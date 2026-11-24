@@ -112,11 +112,11 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     provider(
       cfg,
       () =>
-        tokenProvider.token().map { token =>
-          generations.rotate(token)
-          token
+        tokenProvider.current().map { token =>
+          generations.rotate(token.reveal)
+          token.reveal
         },
-      tokenProvider.invalidate,
+      rejected => tokenProvider.invalidate(Secret.unregistered(rejected)),
       None
     )
   }

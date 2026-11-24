@@ -283,7 +283,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         model = "m",
         baseUrl = "https://ws.example/serving-endpoints",
         tokenExchange = Some(
-          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://ws.example/oidc/v1/token")
+          TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://ws.example/oidc/v1/token")
         )
       )
       val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
@@ -321,7 +321,7 @@ class OpenAICompatibleWorkloadIdentitySpec
             baseUrl = "https://ws.example/serving-endpoints",
             tokenExchange = Some(
               TokenExchangeConfig(
-                IdentitySource.Literal(subject),
+                IdentitySource.Literal(Secret(subject)),
                 "https://ws.example/oidc/v1/token",
                 clientId = Some(clientId)
               )
@@ -380,8 +380,8 @@ class OpenAICompatibleWorkloadIdentitySpec
         val token                                  = "opaqueDynamicToken0001"
         // A plain provider, not CachingAccessTokenProvider: the client itself must register what it sends.
         val own = new AccessTokenProvider:
-          def token(): Result[String]                     = Right("opaqueDynamicToken0001")
-          override def invalidate(rejected: String): Unit = ()
+          def current(): Result[Secret]                   = Right(Secret.unregistered("opaqueDynamicToken0001"))
+          override def invalidate(rejected: Secret): Unit = ()
         for streaming <- Seq(false, true) do
           val http =
             MockHttpClient(Seq(HttpResponse(403, s"""{"error":{"message":"request with $token lacks permission"}}""")))
@@ -477,7 +477,7 @@ class OpenAICompatibleWorkloadIdentitySpec
           baseUrl = "https://ws.example/serving-endpoints",
           tokenExchange = Some(
             TokenExchangeConfig(
-              IdentitySource.Literal(subject),
+              IdentitySource.Literal(Secret(subject)),
               "https://ws.example/oidc/v1/token",
               clientId = Some(clientId)
             )
@@ -503,7 +503,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
       import scala.concurrent.duration.DurationInt
       val exchange = OpenAICompatibleClient.Credential.Exchange(
-        TokenExchangeConfig(IdentitySource.Literal("opaque-svid-literal-5"), "https://ws.example/oidc/v1/token")
+        TokenExchangeConfig(IdentitySource.Literal(Secret("opaque-svid-literal-5")), "https://ws.example/oidc/v1/token")
       )
       for (timeouts, expected) <- Seq(
           org.llm4s.llmconnect.config.ProviderTimeouts(request = Some(7.seconds)) -> 7.seconds,
@@ -528,7 +528,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         model = "m",
         baseUrl = "https://ws.example/serving-endpoints",
         tokenExchange = Some(
-          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://u:pw@ws.example/t?sig=s3cr3t")
+          TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://u:pw@ws.example/t?sig=s3cr3t")
             .withClientId("sp-secret")
         )
       )
@@ -613,8 +613,8 @@ class OpenAICompatibleWorkloadIdentitySpec
         given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
         val fetched                                = new AtomicInteger(0)
         val dynamic = new AccessTokenProvider:
-          def token(): Result[String]                     = { fetched.incrementAndGet(); Right("t") }
-          override def invalidate(rejected: String): Unit = ()
+          def current(): Result[Secret] = { fetched.incrementAndGet(); Right(Secret.unregistered("t")) }
+          override def invalidate(rejected: Secret): Unit = ()
         val exchange = OpenAICompatibleClient.settings(insecureConfig(fake).withBaseUrl("https://ws.example/v1"))
         val credentials = Seq(
           exchange.credential,
@@ -656,7 +656,7 @@ class OpenAICompatibleWorkloadIdentitySpec
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
     val exchange =
-      TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://ws.example/oidc/v1/token")
+      TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://ws.example/oidc/v1/token")
 
     def fromValues(
       headers: Map[String, String] = Map.empty,
@@ -704,7 +704,7 @@ class OpenAICompatibleWorkloadIdentitySpec
 
     "be refused by fromValues, the client and the with* setters for a blank token, tokenUrl or optional field" in {
       val blanks = Seq(
-        "tokenExchange.identityToken"     -> exchange.withIdentityToken(IdentitySource.Literal(" ")),
+        "tokenExchange.identityToken"     -> exchange.withIdentityToken(IdentitySource.Literal(Secret(" "))),
         "tokenExchange.identityTokenFile" -> exchange.withIdentityToken(IdentitySource.File(Path.of(""))),
         "tokenExchange.tokenUrl"          -> exchange.withTokenUrl(""),
         "tokenExchange.clientId"          -> exchange.withClientId(" "),
@@ -763,8 +763,8 @@ class OpenAICompatibleWorkloadIdentitySpec
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
     val dynamic = new AccessTokenProvider:
-      def token(): Result[String]                     = Right("t")
-      override def invalidate(rejected: String): Unit = ()
+      def current(): Result[Secret]                   = Right(Secret.unregistered("t"))
+      override def invalidate(rejected: Secret): Unit = ()
 
     def settings(credential: OpenAICompatibleClient.Credential) =
       OpenAICompatibleClient.Settings("p", "P", "m", "https://h/v1", credential, 8192, 2048)
@@ -773,7 +773,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       val credentials = Seq(
         OpenAICompatibleClient.Credential.Dynamic(dynamic),
         OpenAICompatibleClient.Credential.Exchange(
-          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://h/token")
+          TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://h/token")
         )
       )
       for
@@ -790,8 +790,9 @@ class OpenAICompatibleWorkloadIdentitySpec
         // run to completion and rotate past it; its error body, echoing its own token, arrives last.
         val issued = new AtomicInteger(0)
         val perCall = new AccessTokenProvider:
-          def token(): Result[String]                     = Right(s"opaquePerCallToken000${issued.incrementAndGet()}")
-          override def invalidate(rejected: String): Unit = ()
+          def current(): Result[Secret] =
+            Right(Secret.unregistered(s"opaquePerCallToken000${issued.incrementAndGet()}"))
+          override def invalidate(rejected: Secret): Unit = ()
         for streaming <- Seq(false, true) do
           issued.set(0)
           var overlap: () => Unit = () => ()
@@ -823,8 +824,8 @@ class OpenAICompatibleWorkloadIdentitySpec
 
     "fail a request whose Dynamic provider throws with an AuthenticationError, sending nothing (#1818)" in {
       val throwing = new AccessTokenProvider:
-        def token(): Result[String] = throw new IllegalStateException("token store down: secret-detail")
-        override def invalidate(rejected: String): Unit = ()
+        def current(): Result[Secret] = throw new IllegalStateException("token store down: secret-detail")
+        override def invalidate(rejected: Secret): Unit = ()
       val http = MockHttpClient(Seq.empty)
       val c = new OpenAICompatibleClient(
         settings(OpenAICompatibleClient.Credential.Dynamic(throwing)),
@@ -848,8 +849,8 @@ class OpenAICompatibleWorkloadIdentitySpec
     "still retry once on a 401 when the Dynamic provider's invalidate throws (#1818)" in {
       val issued = new AtomicInteger(0)
       val flaky = new AccessTokenProvider:
-        def token(): Result[String]                     = Right(s"t${issued.incrementAndGet()}")
-        override def invalidate(rejected: String): Unit = throw new IllegalStateException("cannot drop")
+        def current(): Result[Secret]                   = Right(Secret.unregistered(s"t${issued.incrementAndGet()}"))
+        override def invalidate(rejected: Secret): Unit = throw new IllegalStateException("cannot drop")
       val http = MockHttpClient(
         Seq(
           HttpResponse(401, """{"error":{"message":"expired"}}"""),

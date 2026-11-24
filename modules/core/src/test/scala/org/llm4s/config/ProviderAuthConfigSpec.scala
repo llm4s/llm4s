@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.security.Secret
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -71,7 +72,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       val config = load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }, timeouts { request = 3m }""")
       ).value
-      config.auth.value.identityToken shouldBe IdentitySource.Literal("eyJ.x.y")
+      config.auth.value.identityToken shouldBe IdentitySource.Literal(Secret("eyJ.x.y"))
       config.timeouts.request shouldBe Some(scala.concurrent.duration.DurationInt(3).minutes)
       config.extras shouldBe empty
       config.withTimeouts(config.timeouts).auth shouldBe config.auth
@@ -82,7 +83,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }""")
       ).value.auth.value.identityToken shouldBe
-        IdentitySource.Literal("eyJ.x.y")
+        IdentitySource.Literal(Secret("eyJ.x.y"))
     }
 
     "resolves a relative identityTokenFile to an absolute path" in {
@@ -243,7 +244,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "ProviderDescriptor.requireAuthExtra" should {
-    val auth = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> "https://t"))
+    val auth = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> "https://t"))
     "read a key that is present" in {
       ProviderDescriptor.requireAuthExtra("p", auth, "tokenUrl") shouldBe Right("https://t")
     }
@@ -253,7 +254,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       error.message should (include("auth.clientId").and(include("llm4s.providers.p.auth.clientId")))
     }
     "report a key built blank in code as missing, naming it" in {
-      val blank = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> "  "))
+      val blank = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> "  "))
       ProviderDescriptor.requireAuthExtra("p", blank, "tokenUrl").left.value.message should include(
         "llm4s.providers.p.auth.tokenUrl"
       )
@@ -262,7 +263,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
 
   "AuthConfig" should {
     "trim its extras and drop blank ones, through apply and withExtras" in {
-      val auth = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> " https://t ", "clientId" -> ""))
+      val auth = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> " https://t ", "clientId" -> ""))
       auth.extras shouldBe Map("tokenUrl" -> "https://t")
       auth.withExtras(Map("scope" -> " ", "audience" -> "a")).extras shouldBe Map("audience" -> "a")
       auth.extra("clientId") shouldBe None

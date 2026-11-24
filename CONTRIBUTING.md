@@ -387,7 +387,7 @@ All in `modules/openai-compatible`, keeping the `org.llm4s.*` packages:
   `ProviderDescriptor` with its `id`, a `configSpec`
   (`ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(<NAME>_API_KEY))` for the
   usual case - `apiKeyEnv` names the vendor's variable in the missing-key error),
-  `buildConfig` from the named section and `buildClient` through
+  `buildConfig` from the named section and `build` through
   `ProviderDescriptor.expectConfig`. Give it a `modelLister` if the provider has a `/models`
   endpoint (`OpenAICompatibleModelListers.scala`).
 - **Registration**: add the descriptor to `providers` in `Llm4sOpenAICompatibleModule`. The

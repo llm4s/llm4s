@@ -5,7 +5,7 @@ import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
-import org.llm4s.security.{ KnownSecrets, TokenGenerations }
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -199,17 +199,17 @@ object TokenExchange:
     clock: Clock = Clock.systemUTC(),
     timeout: FiniteDuration = DefaultTimeout
   ): () => Result[AccessToken] =
-    val subject = IdentityTokenSource.from(config.identityToken)
+    val subject = IdentityTokenProvider.from(config.identityToken)
     config.clientId.foreach(KnownSecrets.registerIdentifier)
     () =>
       for
         _   <- TokenExchangeConfig.validate(config)
-        jwt <- subject.fetch()
-        _ = subjects.rotate(jwt)
+        jwt <- subject.current()
+        _ = subjects.rotate(jwt.reveal)
         response <- httpClient.post(
           config.tokenUrl,
           Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json"),
-          form(config, jwt),
+          form(config, jwt.reveal),
           timeout
         )
         token <- parse(response, clock)
@@ -266,7 +266,12 @@ object TokenExchange:
                 value.numOpt.orElse(value.strOpt.flatMap(_.trim.toDoubleOption)) match
                   // A non-finite or negative lifetime is the endpoint's bug, not a token to cache; a huge one is clamped.
                   case Some(expiry) if !expiry.isNaN && !expiry.isInfinite && expiry >= 0 =>
-                    Right(AccessToken(access, now.plusSeconds(math.min(expiry.toLong, MaxLifetime.toSeconds))))
+                    Right(
+                      AccessToken(
+                        Secret.unregistered(access),
+                        now.plusSeconds(math.min(expiry.toLong, MaxLifetime.toSeconds))
+                      )
+                    )
                   case _ =>
                     Left(
                       AuthenticationError(
@@ -280,7 +285,7 @@ object TokenExchange:
                     val latest = now.plusSeconds(MaxLifetime.toSeconds)
                     if exp.isAfter(latest) then latest else exp
                   case None => now.plusSeconds(DefaultLifetime.toSeconds)
-                Right(AccessToken(access, expiresAt))
+                Right(AccessToken(Secret.unregistered(access), expiresAt))
           }
       case status @ (400 | 401 | 403) =>
         Left(AuthenticationError(Provider, s"token endpoint rejected the identity token (HTTP $status): $errorBody"))
