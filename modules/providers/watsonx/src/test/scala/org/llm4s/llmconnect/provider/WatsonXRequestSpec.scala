@@ -20,7 +20,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private val options = CompletionOptions().withTemperature(0.5).withMaxTokens(64)
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two numbers",
     Schema

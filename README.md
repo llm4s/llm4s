@@ -378,7 +378,7 @@ val weatherSchema = Schema
   .withProperty(Schema.property("location", Schema.string("The city to look up")))
 
 val result = for {
-  weather <- ToolBuilder[Map[String, Any], String]("get_weather", "Current weather for a city", weatherSchema)
+  weather <- ToolBuilder[String]("get_weather", "Current weather for a city", weatherSchema)
                .withHandler(args => args.getString("location").map(city => s"Sunny in $city"))
                .buildSafe()
   tools   <- ToolRegistry.of(Seq(weather))

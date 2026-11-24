@@ -84,7 +84,7 @@ class SpringAiOpenAiChatModelSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "send llm4s's tools as the model's tools" in {
-    val weather = ToolBuilder[Map[String, Any], String](
+    val weather = ToolBuilder[String](
       "weather",
       "The weather in a city",
       Schema.`object`[Map[String, Any]]("Weather request").withProperty(Schema.property("city", Schema.string("City")))

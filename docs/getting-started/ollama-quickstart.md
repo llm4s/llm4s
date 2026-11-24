@@ -463,7 +463,7 @@ object OllamaTools extends App {
       Schema.property("location", Schema.string("City or location name"))
     )
 
-  val getWeather = ToolBuilder[Map[String, Any], WeatherResult](
+  val getWeather = ToolBuilder[WeatherResult](
     "get_weather",
     "Get the current weather in a location",
     weatherSchema

@@ -130,7 +130,7 @@ import org.llm4s.repl.*
 import org.llm4s.testkit.Reply
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 
-val weather = ToolBuilder[Map[String, Any], ujson.Value](
+val weather = ToolBuilder[ujson.Value](
   "get_weather",
   "The weather in a city",
   Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))

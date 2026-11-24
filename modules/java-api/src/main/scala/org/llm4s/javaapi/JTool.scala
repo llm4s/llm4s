@@ -24,7 +24,7 @@ import org.llm4s.toolapi.ToolFunction
  * lambda reads them from its `args`, and an annotated method from a parameter of type [[JToolArgs]], which the model
  * does not see. They are empty outside an agent run.
  */
-final class JTool private[javaapi] (token: FacadeToken, private[javaapi] val function: ToolFunction[?, ?]) {
+final class JTool private[javaapi] (token: FacadeToken, private[javaapi] val function: ToolFunction[?]) {
 
   FacadeToken.check(token, "JTool")
 

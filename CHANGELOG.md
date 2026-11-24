@@ -136,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
   properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
 - A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
-  `Either[ToolParameterError, A]`; `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
+  `Either[ToolParameterError, A]`; `ToolFunction` and `ToolBuilder` have one type parameter, the result's
+  (`ToolBuilder[String](...)`); `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
   `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
 - `EmbeddingCache` has no type parameter, returns `Result`s and has an optional `stats`; `InMemoryEmbeddingCache.create` (a `java.time.Clock`, checked arguments) replaces its constructors; `CacheStats` computes `totalRequests` and `hitRatePercent`; `CacheEntry` is internal; `CachedEmbeddingClient`'s `cacheStats` is an `Option` and `clearCache` a `Result` ([#2803](https://github.com/llm4s/llm4s/issues/2803)); [migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803).
 - `ModelRegistryConfig` holds one `ModelRegistrySource` (`Resource | File | Url`); `lookup` is exact and `search` finds ids by substring; `ModelMetadata` loses `inputCostPerToken`/`outputCostPerToken` (use `pricing`), its `deprecationDate` is a `LocalDate` and its `apply` has defaults; `statistics()` is removed and `listProviders()` returns a `List`; `ModelCapabilities.fromJson`/`ModelPricing.fromJson` are internal; `RequestTransformer` is sealed, `transformOptions` has no `dropUnsupported` default, and `disallowedParams` and `withOverrides` are gone ([#2823](https://github.com/llm4s/llm4s/issues/2823)); [migration](docs/reference/migration.md#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823).
@@ -490,7 +491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nullable instead of dropping `required = false`
   ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
 - **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
-  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`
+  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`; `ToolFunction[R]`
+  and `ToolBuilder[R]` drop the arguments type parameter nothing read (Scalafix rule `ToolFunctionOneTypeParameter`)
   ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
   path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).

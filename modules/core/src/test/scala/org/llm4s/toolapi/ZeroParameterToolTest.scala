@@ -29,13 +29,13 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
    */
   def createZeroParameterTool(
     name: String = "list_inventory"
-  ): Result[ToolFunction[Map[String, Any], InventoryResult]] = {
+  ): Result[ToolFunction[InventoryResult]] = {
     // Schema with no properties = zero parameters
     val schema = Schema
       .`object`[Map[String, Any]]("Tool with no parameters")
     // Note: No .withProperty() calls - this tool takes no parameters
 
-    ToolBuilder[Map[String, Any], InventoryResult](
+    ToolBuilder[InventoryResult](
       name,
       "Returns the current inventory items",
       schema
@@ -95,13 +95,13 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
   "Multiple zero-parameter tools" should "work correctly" in {
     // Define a few different zero-parameter tools via for-comprehension
     val result = for {
-      statusTool <- ToolBuilder[Map[String, Any], StatusResult](
+      statusTool <- ToolBuilder[StatusResult](
         "get_status",
         "Returns the player's current status",
         Schema.`object`[Map[String, Any]]("No parameters required")
       ).withHandler(_ => Right(StatusResult(health = 100, mana = 50))).buildSafe()
 
-      timeTool <- ToolBuilder[Map[String, Any], TimeResult](
+      timeTool <- ToolBuilder[TimeResult](
         "get_game_time",
         "Returns the current in-game time",
         Schema.`object`[Map[String, Any]]("No parameters")
@@ -115,7 +115,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
   }
 
   "Zero-parameter tool handler" should "not attempt to extract any parameters" in {
-    ToolBuilder[Map[String, Any], SimpleResult](
+    ToolBuilder[SimpleResult](
       "simple_tool",
       "A simple tool with no parameters",
       Schema.`object`[Map[String, Any]]("No parameters needed")
@@ -137,7 +137,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
   }
 
   "Tool with required parameters" should "still reject null arguments" in {
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       "tool_with_params",
       "A tool that requires parameters",
       Schema

@@ -72,8 +72,8 @@ object ReadFileTool {
   /**
    * Create a read file tool with the given configuration, returning a Result for safe error handling.
    */
-  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], ReadFileResult]] =
-    ToolBuilder[Map[String, Any], ReadFileResult](
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[ReadFileResult]] =
+    ToolBuilder[ReadFileResult](
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
         s"Blocked paths: ${config.describedBlockedPaths}. " +
@@ -91,7 +91,7 @@ object ReadFileTool {
   /**
    * Default read file tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], ReadFileResult]] = createSafe()
+  val toolSafe: Result[ToolFunction[ReadFileResult]] = createSafe()
 
   private def readFile(
     pathStr: String,

@@ -53,7 +53,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
     "refuse tools, tool calls and tool results before loading the model" in {
       val loader = new CountingLoader(Right(new ScriptedEngine()))
       val local  = client(loader)
-      val tool = ToolBuilder[Map[String, Any], String]("echo", "Echoes", Schema.`object`[Map[String, Any]]("args"))
+      val tool = ToolBuilder[String]("echo", "Echoes", Schema.`object`[Map[String, Any]]("args"))
         .withHandler(_ => Right("ok"))
         .buildSafe()
         .fold(e => fail(e.toString), identity)

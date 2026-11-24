@@ -85,7 +85,7 @@ class WatsonXChatOverHttpSpec
       )
     )
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two integers",
     Schema

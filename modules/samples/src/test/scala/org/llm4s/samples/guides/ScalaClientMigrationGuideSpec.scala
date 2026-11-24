@@ -112,7 +112,7 @@ class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with Eithe
   case class WeatherInput(location: String) derives SchemaOf, ReadWriter
   case class Weather(location: String, report: String) derives ReadWriter
 
-  lazy val weatherTool: Result[ToolFunction[WeatherInput, Weather]] =
+  lazy val weatherTool: Result[ToolFunction[Weather]] =
     Tool.of[WeatherInput, Weather]("get_weather", "Get the current weather for a location") { input =>
       Right(Weather(input.location, "22°C, sunny"))
     }

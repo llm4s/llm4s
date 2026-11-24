@@ -28,7 +28,7 @@ trait SnippetEnv {
   protected def chunks: Seq[String]                  = ???
   protected def model: EmbeddingModelConfig          = ???
   protected def question: String                     = ???
-  protected def myTools: Seq[ToolFunction[_, _]]     = ???
+  protected def myTools: Seq[ToolFunction[_]]        = ???
   protected def tools: ToolRegistry                  = ???
 
   // guide/reliability.md: the client being wrapped

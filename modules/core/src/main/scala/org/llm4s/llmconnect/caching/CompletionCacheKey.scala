@@ -19,7 +19,7 @@ final private[caching] case class CompletionCacheKey(
   maxTokens: Option[Int],
   presencePenalty: Option[Double],
   frequencyPenalty: Option[Double],
-  tools: Seq[ToolFunction[?, ?]],
+  tools: Seq[ToolFunction[?]],
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
   responseFormat: Option[ResponseFormat]

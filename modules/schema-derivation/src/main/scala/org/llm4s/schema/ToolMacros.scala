@@ -14,10 +14,10 @@ import scala.quoted.*
  */
 private[schema] object ToolMacros {
 
-  def fromMethodImpl[F: Type](method: Expr[F])(using Quotes): Expr[Result[ToolFunction[?, ?]]] =
+  def fromMethodImpl[F: Type](method: Expr[F])(using Quotes): Expr[Result[ToolFunction[?]]] =
     new Deriver().fromMethod(method)
 
-  def deriveImpl[S: Type](service: Expr[S])(using Quotes): Expr[Result[Seq[ToolFunction[?, ?]]]] =
+  def deriveImpl[S: Type](service: Expr[S])(using Quotes): Expr[Result[Seq[ToolFunction[?]]]] =
     new Deriver().derive(service)
 
   /** Tool names every provider accepts. */
@@ -94,7 +94,7 @@ private[schema] object ToolMacros {
 
     // ---- Tool.fromMethod
 
-    def fromMethod[F: Type](method: Expr[F]): Expr[Result[ToolFunction[?, ?]]] = {
+    def fromMethod[F: Type](method: Expr[F]): Expr[Result[ToolFunction[?]]] = {
       val usage =
         s"Tool.fromMethod takes a method, eta-expanded (Tool.fromMethod(service.method)), not ${method.show}"
 
@@ -142,12 +142,12 @@ private[schema] object ToolMacros {
             arguments => Select.unique(function, "apply").appliedToArgs(arguments)
           ).asTerm
         }
-        .asExprOf[Result[ToolFunction[?, ?]]]
+        .asExprOf[Result[ToolFunction[?]]]
     }
 
     // ---- Tools.derive
 
-    def derive[S: Type](service: Expr[S]): Expr[Result[Seq[ToolFunction[?, ?]]]] = {
+    def derive[S: Type](service: Expr[S]): Expr[Result[Seq[ToolFunction[?]]]] = {
       val owner = TypeRepr.of[S]
       val cls   = owner.typeSymbol
       if (!cls.isClassDef)
@@ -203,7 +203,7 @@ private[schema] object ToolMacros {
           }
           '{ MethodTools.all(${ Expr.ofList(tools) }) }.asTerm
         }
-        .asExprOf[Result[Seq[ToolFunction[?, ?]]]]
+        .asExprOf[Result[Seq[ToolFunction[?]]]]
     }
 
     // ---- what both share
@@ -261,7 +261,7 @@ private[schema] object ToolMacros {
       types: List[TypeRepr],
       result: TypeRepr,
       call: List[Term] => Term
-    ): Expr[Result[ToolFunction[?, ?]]] = {
+    ): Expr[Result[ToolFunction[?]]] = {
       val (summary, paramDocs) =
         overridden(method).flatMap(_.docstring).headOption.map(scaladoc).getOrElse((None, Map.empty[String, String]))
       val name        = toolNameOf(method, at)

@@ -153,7 +153,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def say(text: String): Conversation = Conversation(Seq(UserMessage(text)))
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two integers",
     Schema

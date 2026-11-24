@@ -68,7 +68,7 @@ package object filesystem {
    * All file system tools with default configuration (read-only, excludes write),
    * returning a Result for safe error handling.
    */
-  val readOnlyToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_, _]]] = for {
+  val readOnlyToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_]]] = for {
     readFile <- ReadFileTool.toolSafe
     listDir  <- ListDirectoryTool.toolSafe
     fileInfo <- FileInfoTool.toolSafe

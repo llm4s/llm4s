@@ -228,7 +228,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   private lazy val searchTool = {
     import org.llm4s.toolapi.{ Schema, ToolBuilder }
     val schema = Schema.`object`[Map[String, Any]]("In").withProperty(Schema.property("q", Schema.string("q")))
-    ToolBuilder[Map[String, Any], String]("lookup", "Lookup tool", schema)
+    ToolBuilder[String]("lookup", "Lookup tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
       .fold(e => fail(e.message), identity)
@@ -656,7 +656,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("q", Schema.string("query")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("search", "Search tool", schema)
+    val toolResult = ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
@@ -678,7 +678,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("x", Schema.integer("x")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("my_tool", "My tool description", schema)
+    val toolResult = ToolBuilder[String]("my_tool", "My tool description", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 

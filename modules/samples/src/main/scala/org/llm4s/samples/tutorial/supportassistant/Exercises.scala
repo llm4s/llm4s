@@ -59,7 +59,7 @@ object Part3Exercise {
    * order that has `shipped` arrives in 2 working days, one still `processing` in 4, and an order number it does not
    * know is the error `There is no order <orderId>`.
    */
-  def deliveryTool: Result[ToolFunction[DeliveryQuery, DeliveryEstimate]] =
+  def deliveryTool: Result[ToolFunction[DeliveryEstimate]] =
     ??? // TODO: build the tool with Tool.of, reading `Part3Tools.orders`
 }
 

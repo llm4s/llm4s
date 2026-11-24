@@ -27,7 +27,7 @@ private[llm4s] object OpenAIToolHelper {
    * @return The same builder, for chaining
    */
   def addToolsToParams(
-    tools: Seq[ToolFunction[_, _]],
+    tools: Seq[ToolFunction[_]],
     params: ChatCompletionCreateParams.Builder
   ): ChatCompletionCreateParams.Builder =
     params.tools(chatCompletionTools(tools))
@@ -38,7 +38,7 @@ private[llm4s] object OpenAIToolHelper {
    * @param tools The tools to convert
    * @return The tool definitions
    */
-  def chatCompletionTools(tools: Seq[ToolFunction[_, _]]): java.util.List[ChatCompletionTool] = {
+  def chatCompletionTools(tools: Seq[ToolFunction[_]]): java.util.List[ChatCompletionTool] = {
     val toolsJson = ToolFunction.toolDefinitions(tools, strict = true)
     val mapper    = ObjectMappers.jsonMapper()
     toolsJson.arr.map(tool => mapper.readValue(ujson.write(tool), classOf[ChatCompletionTool])).toSeq.asJava

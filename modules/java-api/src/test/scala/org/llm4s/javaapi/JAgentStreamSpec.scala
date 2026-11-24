@@ -53,7 +53,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
   }
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))

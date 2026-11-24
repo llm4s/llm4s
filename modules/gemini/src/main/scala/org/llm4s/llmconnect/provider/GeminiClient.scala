@@ -476,7 +476,7 @@ class GeminiClient(
    * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
    * to maintain compatibility with the Gemini API.
    */
-  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_]): ujson.Value = {
     // Generate base JSON schema without strict mode
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
 

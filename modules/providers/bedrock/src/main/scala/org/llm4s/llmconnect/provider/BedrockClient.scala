@@ -635,7 +635,7 @@ class BedrockClient(
     }
   }
 
-  private def convertTool(toolFunction: ToolFunction[?, ?]): Tool = {
+  private def convertTool(toolFunction: ToolFunction[?]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[?]]
     val schemaDoc    = ujsonToDocument(ujson.read(objectSchema.toJsonSchema(false).render()))
     val toolSpec = ToolSpecification

@@ -33,7 +33,7 @@ package object core {
   /**
    * All core utility tools combined into a sequence, returning a Result for safe error handling.
    */
-  val allToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_, _]]] = for {
+  val allToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_]]] = for {
     dateTime   <- DateTimeTool.toolSafe
     calculator <- CalculatorTool.toolSafe
     uuid       <- UUIDTool.toolSafe

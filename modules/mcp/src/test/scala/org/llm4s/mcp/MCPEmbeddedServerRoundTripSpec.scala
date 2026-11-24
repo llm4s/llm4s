@@ -24,8 +24,8 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
 
   private def tool(name: String, description: String, schema: ObjectSchema[Map[String, Any]])(
     handler: SafeParameterExtractor => Either[ToolHandlerError, String]
-  ): ToolFunction[_, _] =
-    ToolBuilder[Map[String, Any], String](name, description, schema)
+  ): ToolFunction[_] =
+    ToolBuilder[String](name, description, schema)
       .withHandler(handler)
       .buildSafe()
       .fold(e => fail(s"could not build tool $name: ${e.formatted}"), identity)
@@ -74,7 +74,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
     } finally client.close()
   }
 
-  private def toolNamed(client: MCPClientImpl, name: String): ToolFunction[_, _] =
+  private def toolNamed(client: MCPClientImpl, name: String): ToolFunction[_] =
     client.getTools().getOrElse(Seq.empty).find(_.name == name).getOrElse(fail(s"tool '$name' not advertised"))
 
   "MCPClientImpl against an embedded server" should "advertise exactly the registered tools with their descriptions" in

@@ -192,9 +192,9 @@ class MCPErrorPathsSpec extends AnyFlatSpec with Matchers {
 
   "an MCPClient that does not record hints" should "report none" in {
     val bare = new MCPClient {
-      def getTools(): Result[Seq[ToolFunction[_, _]]] = Right(Seq.empty)
-      def initialize(): Result[Unit]                  = Right(())
-      def close(): Unit                               = ()
+      def getTools(): Result[Seq[ToolFunction[_]]] = Right(Seq.empty)
+      def initialize(): Result[Unit]               = Right(())
+      def close(): Unit                            = ()
     }
     bare.getToolHints() shouldBe empty
   }
