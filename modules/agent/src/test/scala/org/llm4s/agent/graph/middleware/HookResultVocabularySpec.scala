@@ -50,7 +50,8 @@ class HookResultVocabularySpec extends AnyFlatSpec with Matchers with EitherValu
   }
 
   it should "keep its update when its completion changes" in {
-    val changed = ModelResponse(CompletionFixture.simple("a"), note("kept")).withCompletion(CompletionFixture.simple("b"))
+    val changed =
+      ModelResponse(CompletionFixture.simple("a"), note("kept")).withCompletion(CompletionFixture.simple("b"))
     applied(changed.update)._1 shouldBe Vector("kept")
   }
 

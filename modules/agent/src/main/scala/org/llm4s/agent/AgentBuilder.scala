@@ -431,6 +431,19 @@ final class AgentBuilder private (
    * sets; assembled once per builder, so its middleware are one set of instances however often it is built.
    */
   private lazy val effective: Result[AgentBuilder.Effective] =
+    // an id the agent uses itself is refused by name, whether or not it installs its own middleware under it (#2795)
+    // (the agent's own middleware classes are private to llm4s, so only the library can have passed one in)
+    val users = middleware.filterNot(m => m.isInstanceOf[DelegationMiddleware] || m.isInstanceOf[AncestorPermissions])
+    val reserved = users.map(_.id).distinct.flatMap { used =>
+      MiddlewareId.reserved.get(used).map { purpose =>
+        s"agent '$id': middleware id '${used.value}' is reserved for $purpose: give your middleware another id"
+      }
+    }
+    if reserved.nonEmpty then Left(ValidationError("middleware stack", reserved.toList))
+    else installed
+
+  /** [[effective]], once the middleware given to this builder are known to use no reserved id. */
+  private def installed: Result[AgentBuilder.Effective] =
     // a subagent's: every ancestor's permission rules outermost (design 4.45), then the parent middleware it was granted,
     // outside its harness's and its own; and its granted tools after its own
     // the guard also reads the agent's own permission rules, so a call they deny is denied before an ancestor asks
@@ -596,7 +609,7 @@ final class AgentBuilder private (
 object AgentBuilder:
 
   /** The id of the `GuardrailMiddleware` that `withInputGuardrails` and `withOutputGuardrails` install. */
-  private[agent] val GuardrailsId: MiddlewareId = MiddlewareId("agent-guardrails")
+  private[agent] val GuardrailsId: MiddlewareId = MiddlewareId.AgentGuardrails
 
   private[agent] def apply(id: String, client: LLMClient): AgentBuilder =
     new AgentBuilder(

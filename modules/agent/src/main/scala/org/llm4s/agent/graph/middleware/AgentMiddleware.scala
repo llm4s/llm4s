@@ -31,6 +31,30 @@ object MiddlewareId:
   def apply(value: String): MiddlewareId         = value
   extension (id: MiddlewareId) def value: String = id
 
+  /** The id of the middleware that runs `AgentBuilder.withInputGuardrails` and `withOutputGuardrails`. */
+  val AgentGuardrails: MiddlewareId = "agent-guardrails"
+
+  /** The id of the middleware that offers an agent's subagents (`AgentBuilder.withSubagents`, a harness's). */
+  val Delegation: MiddlewareId = "delegation"
+
+  /** The id of the middleware that applies a subagent's ancestors' permission rules. */
+  val AncestorPermissions: MiddlewareId = "ancestor-permissions"
+
+  /** The id the response format's prompt section is listed under (`AgentBuilder.withOutput`). */
+  val ResponseFormat: MiddlewareId = "response-format"
+
+  /**
+   * The ids the agent uses itself, each with what it is reserved for (#2795): a middleware given to
+   * `AgentBuilder.withMiddleware` with one of them is refused by `build()`, whether or not the agent installs its own
+   * under that id. A constraint may name one (`MiddlewareRef(MiddlewareId.Delegation)`).
+   */
+  val reserved: Map[MiddlewareId, String] = Map(
+    AgentGuardrails     -> "the guardrails given to AgentBuilder.withInputGuardrails and withOutputGuardrails",
+    Delegation          -> "the middleware that offers an agent's subagents",
+    AncestorPermissions -> "the middleware that applies a subagent's ancestors' permission rules",
+    ResponseFormat      -> "the response format's prompt section (AgentBuilder.withOutput)"
+  )
+
   /**
    * Encodes as a plain JSON string. Built from upickle's string codecs: inside this scope a
    * `MiddlewareId` is a `String`, so summoning `ReadWriter[String]` would find this given.

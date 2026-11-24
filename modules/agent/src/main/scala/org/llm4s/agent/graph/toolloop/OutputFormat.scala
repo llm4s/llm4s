@@ -81,7 +81,7 @@ object OutputFormat:
 
   /** The id of the format's prompt section, and the owner its size is reported under. */
   private[toolloop] val SectionId: String   = "response-format"
-  private[toolloop] val Owner: MiddlewareId = MiddlewareId("response-format")
+  private[toolloop] val Owner: MiddlewareId = MiddlewareId.ResponseFormat
 
   private val Instruction =
     "When you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:"

@@ -67,6 +67,6 @@ final private[agent] class AncestorPermissions(
           )
 
 private[agent] object AncestorPermissions:
-  val Id: MiddlewareId = MiddlewareId("ancestor-permissions")
+  val Id: MiddlewareId = MiddlewareId.AncestorPermissions
 
   private def describe(resource: ToolResource): String = s"${resource.operation.label} ${resource.target}"

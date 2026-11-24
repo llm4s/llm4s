@@ -33,10 +33,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     before: Set[String] = Set.empty,
     contributes: Vector[AgentTool[?]] = Vector.empty
   ) extends AgentMiddleware:
-    val id: MiddlewareId                       = MiddlewareId(name)
+    val id: MiddlewareId                        = MiddlewareId(name)
     override def runsAfter: Set[MiddlewareRef]  = after.map(n => MiddlewareRef(MiddlewareId(n)))
     override def runsBefore: Set[MiddlewareRef] = before.map(n => MiddlewareRef(MiddlewareId(n)))
-    override def tools: Vector[AgentTool[?]]   = contributes
+    override def tools: Vector[AgentTool[?]]    = contributes
     override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
       log.add(s"$name:beforeAgent")
       Right(BoundaryResult(s"$input>$name"))
@@ -195,7 +195,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a required constraint naming a type the stack has none of" in {
-    problems(MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef.ofType[Guard])), named("plain"))) shouldBe
+    problems(
+      MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef.ofType[Guard])), named("plain"))
+    ) shouldBe
       List("middleware 'memory': runsBefore names a middleware of type Guard, and the stack has none")
     problems(MiddlewareStack.of(constrained("audit", after = Set(MiddlewareRef.ofType[Guard])))) shouldBe
       List("middleware 'audit': runsAfter names a middleware of type Guard, and the stack has none")
@@ -228,7 +230,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     ids(stack(named("plain"), optional)) shouldBe Vector("plain", "memory")
 
-    problems(MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef(MiddlewareId("guardrails")))))) shouldBe
+    problems(
+      MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef(MiddlewareId("guardrails")))))
+    ) shouldBe
       List("middleware 'memory': runsBefore names unknown middleware 'guardrails'")
   }
 

@@ -196,7 +196,12 @@ private[agent] object MiddlewareStack:
 
     val duplicates = nodes
       .filter(id => all.count(_.id == id) > 1)
-      .map(id => s"duplicate middleware id '${id.value}'")
+      .map { id =>
+        // an id the agent uses itself: the clash is with a middleware the user never registered
+        val why =
+          MiddlewareId.reserved.get(id).fold("")(p => s": the id is reserved for $p, which the agent installs itself")
+        s"duplicate middleware id '${id.value}'$why"
+      }
 
     // the middleware a reference of `m` names: by id, the one with it; by type, every other one of the type
     def named(m: AgentMiddleware, ref: MiddlewareRef): Vector[MiddlewareId] =

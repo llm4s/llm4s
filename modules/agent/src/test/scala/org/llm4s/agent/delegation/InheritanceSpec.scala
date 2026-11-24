@@ -797,7 +797,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val client = RoutingClient(PartialFunction.empty)
     val a      = new AgentMiddleware { val id: MiddlewareId = MiddlewareId("a") }
     val b = new AgentMiddleware {
-      val id: MiddlewareId                       = MiddlewareId("b")
+      val id: MiddlewareId                        = MiddlewareId("b")
       override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("a")))
     }
     val agent = lead(client).withSubagents(researcher.withMiddleware(a, b)).build().value
@@ -1026,9 +1026,9 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
 
   "Agent.delegation" should "list a child's tools in the order its model is offered them" in {
     def contributing(name: String, before: Set[String]) = new AgentMiddleware {
-      val id: MiddlewareId                       = MiddlewareId(name)
+      val id: MiddlewareId                        = MiddlewareId(name)
       override def runsBefore: Set[MiddlewareRef] = before.map(n => MiddlewareRef(MiddlewareId(n)))
-      override val tools: Vector[AgentTool[?]]   = Vector(echo(s"tool_$name"))
+      override val tools: Vector[AgentTool[?]]    = Vector(echo(s"tool_$name"))
     }
     val client = RoutingClient(delegatingOnce.orElse(answering))
     val agent = lead(client)
@@ -1048,7 +1048,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
   it should "resolve a delegating child's middleware with its delegation middleware included" in {
     val client = RoutingClient(PartialFunction.empty)
     val early = new AgentMiddleware {
-      val id: MiddlewareId                       = MiddlewareId("early")
+      val id: MiddlewareId                        = MiddlewareId("early")
       override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("delegation")))
     }
     val agent = lead(client)
@@ -1183,7 +1183,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
   "build()" should "refuse a child middleware ordered outside the ancestors' permissions" in {
     val client = RoutingClient(PartialFunction.empty)
     val early = new AgentMiddleware {
-      val id: MiddlewareId                       = MiddlewareId("early")
+      val id: MiddlewareId                        = MiddlewareId("early")
       override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("ancestor-permissions")))
     }
     lead(client)

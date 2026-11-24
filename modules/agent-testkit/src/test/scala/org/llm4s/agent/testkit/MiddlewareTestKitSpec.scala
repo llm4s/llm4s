@@ -83,7 +83,9 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
     val context = MiddlewareTestKit.modelContext(config = RunConfig().withBudgets(RunBudgets().withMaxTokens(1L)))
     val counted = context.accounted(client)
 
-    counted.complete(Conversation(Seq(UserMessage("the first call is admitted under the budget")))).isRight shouldBe true
+    counted
+      .complete(Conversation(Seq(UserMessage("the first call is admitted under the budget"))))
+      .isRight shouldBe true
     counted.complete(Conversation(Seq(UserMessage("the second is not: the first used it up")))).isLeft shouldBe true
     client.callCount shouldBe 1
   }
