@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ServiceError
@@ -291,7 +292,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .get()
       .config match {
       case azure: AzureConfig =>
-        azure.endpoint shouldBe "https://r.openai.azure.com"
+        azure.endpoint shouldBe BaseUrl("https://r.openai.azure.com")
         azure.apiVersion shouldBe "2024-02-01"
       case other => fail(s"Expected AzureConfig, got $other")
     }
@@ -696,7 +697,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     val config = org.llm4s.llmconnect.config.OpenAICompatibleConfig
       .fromValues(
         ModelName("m"),
-        "https://gateway.example.test/v1",
+        BaseUrl("https://gateway.example.test/v1"),
         headers = Map("Authorization" -> "Bearer h1", "X-Tenant" -> "t9")
       )
       .fold(e => fail(e.message), identity)

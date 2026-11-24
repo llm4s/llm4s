@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials, ProviderConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -32,7 +33,7 @@ class BedrockInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValue
     "build a Bedrock client from a model, region and static credentials" in {
       val config = BedrockConfig
         .fromValues(
-          "anthropic.claude-3-5-sonnet-20240620-v1:0",
+          ModelName("anthropic.claude-3-5-sonnet-20240620-v1:0"),
           "us-east-1",
           credentials = Some(BedrockCredentials(Secret("AKIATEST"), Secret("secret-test")))
         )

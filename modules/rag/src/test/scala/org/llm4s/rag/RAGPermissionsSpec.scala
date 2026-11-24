@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -45,7 +46,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          model = "mock",
+          model = ModelName("mock"),
           message = AssistantMessage("Mock answer."),
           usage = Some(TokenUsage(10, 5, 15))
         )
@@ -813,7 +814,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
           Completion(
             id = "rerank",
             created = Instant.EPOCH,
-            model = "mock",
+            model = ModelName("mock"),
             message = AssistantMessage("[0.1, 0.9]"),
             usage = None
           )

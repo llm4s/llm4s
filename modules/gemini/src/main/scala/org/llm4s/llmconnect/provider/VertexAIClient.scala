@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.syntax.toLLMError
@@ -80,7 +81,7 @@ class VertexAIClient(
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
   protected def providerName: String      = "vertexai"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
@@ -93,7 +94,7 @@ class VertexAIClient(
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   // the model's registry capabilities, looked up once: the registry is a static snapshot
-  private lazy val capabilities = registryService.lookup(config.model.asString).toOption.map(_.capabilities)
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
 
   private def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
@@ -107,7 +108,7 @@ class VertexAIClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -165,7 +166,7 @@ class VertexAIClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -204,7 +205,7 @@ class VertexAIClient(
               recordExchange(startedAt, requestText, Some(err), errorResult)
               errorResult
             case Right(response) =>
-              val accumulator = StreamingAccumulator(config.model.asString)
+              val accumulator = StreamingAccumulator(config.model)
               val messageId   = UUID.randomUUID().toString
               val rawStream   = StringBuilder()
               val signatures =
@@ -284,7 +285,7 @@ class VertexAIClient(
                 .filterOrElse(_ => finish.isDefined, GeminiStreamEnd.unfinished(url))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
-                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     val completion = c
@@ -508,12 +509,12 @@ class VertexAIClient(
           toolCalls = toolCalls,
           thinking = thinking
         )
-        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
 
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            model = config.model.asString,
+            model = config.model,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -573,7 +574,7 @@ class VertexAIClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = responseBody
       ),
       result

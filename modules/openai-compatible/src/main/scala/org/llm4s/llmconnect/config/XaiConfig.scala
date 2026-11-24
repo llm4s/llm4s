@@ -34,7 +34,7 @@ import org.llm4s.types.Result
 final case class XaiConfig private (
   apiKey: Secret,
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
@@ -42,7 +42,7 @@ final case class XaiConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                               = ProviderId("xai")
-  override def endpointUrl: Option[BaseUrl]                         = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                         = Some(baseUrl)
   override def withModel(model: ModelName): XaiConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
@@ -52,7 +52,7 @@ final case class XaiConfig private (
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): XaiConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): XaiConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): XaiConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -64,7 +64,7 @@ object XaiConfig {
   private val standardReserve = 8192
 
   /** xAI's API base. Requests go to `<baseUrl>/chat/completions`. */
-  val DEFAULT_BASE_URL: String = "https://api.x.ai/v1"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.x.ai/v1")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 131072
@@ -79,7 +79,7 @@ object XaiConfig {
   def apply(
     apiKey: Secret,
     model: ModelName,
-    baseUrl: String = DEFAULT_BASE_URL,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -110,8 +110,8 @@ object XaiConfig {
    * `grok-4.5` to `grok-4.7`, 1M for `grok-4.3` and `grok-4.20`, 256k for the other Grok 4
    * models and 131072 otherwise.
    */
-  private[config] def xaiFallback(modelName: String): ContextLimits =
-    modelName.toLowerCase match {
+  private[config] def xaiFallback(modelName: ModelName): ContextLimits =
+    modelName.asString.toLowerCase match {
       case HalfMillionWindow()               => ContextLimits(500000, standardReserve)
       case MillionWindow()                   => ContextLimits(1000000, standardReserve)
       case name if name.startsWith("grok-4") => ContextLimits(256000, standardReserve)
@@ -128,16 +128,16 @@ object XaiConfig {
    *                  when loaded via [[org.llm4s.config.Llm4sConfig]].
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[XaiConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("xAI", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("xai"),
+        lookupProviders = Seq(ProviderId("xai")),
         modelName = modelName,
         defaultContextWindow = 131072,
         defaultReserve = standardReserve,
@@ -145,7 +145,7 @@ object XaiConfig {
       )
       XaiConfig(
         apiKey = apiKey,
-        model = ModelName(modelName),
+        model = modelName,
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc

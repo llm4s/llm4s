@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.TokenUsage
@@ -25,7 +26,7 @@ object TracingExample {
 
         val completionEvent = TraceEvent.CompletionReceived(
           id = "test-123",
-          model = "gpt-5.6-terra",
+          model = ModelName("gpt-5.6-terra"),
           toolCalls = 2,
           content = "I'll check the weather for you."
         )
@@ -101,7 +102,7 @@ object TracingExample {
         case e: TraceEvent.TokenUsageRecorded =>
           TraceEvent.TokenUsageRecorded(
             usage = e.usage,
-            model = s"[COST] ${e.model}",
+            model = ModelName(s"[COST] ${e.model}"),
             operation = e.operation
           )
         case other => other
@@ -110,7 +111,7 @@ object TracingExample {
 
     val tokenEvent = TraceEvent.TokenUsageRecorded(
       usage = TokenUsage(10, 20, 30),
-      model = "gpt-5.6-terra",
+      model = ModelName("gpt-5.6-terra"),
       operation = "completion"
     )
     complexTracer.traceEvent(tokenEvent)

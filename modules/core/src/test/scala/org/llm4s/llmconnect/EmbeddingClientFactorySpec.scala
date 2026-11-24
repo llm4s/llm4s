@@ -94,7 +94,7 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
         .getOrElse(fail("expected the registered fixture provider to resolve"))
 
       val response = client
-        .embed(EmbeddingRequest(input = Seq("hello"), model = EmbeddingModelConfig("m", dimensions = 2)))
+        .embed(EmbeddingRequest(input = Seq("hello"), model = EmbeddingModelConfig(ModelName("m"), dimensions = 2)))
         .getOrElse(fail("expected the fixture provider to embed"))
 
       // The config reached the provider the descriptor built, not a stale one.

@@ -173,7 +173,11 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
       models <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = models
       config = RAGConfig()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(
+          BagOfWordsEmbeddings.id.asString,
+          BagOfWordsEmbeddings.Model.asString,
+          BagOfWordsEmbeddings.Dimensions
+        )
         .withTopK(1)
         .withLLM(client)
       rag <- RAG.build(config, _ => Right(BagOfWordsEmbeddings.config))

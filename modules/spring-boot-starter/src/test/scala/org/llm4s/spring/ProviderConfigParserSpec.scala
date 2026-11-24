@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -52,7 +53,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     val config = result.get().asInstanceOf[OpenAIConfig]
     config.model.asString shouldBe "gpt-4o"
     config.apiKey.reveal shouldBe "sk-test"
-    config.baseUrl shouldBe "https://api.openai.com/v1"
+    config.baseUrl shouldBe BaseUrl("https://api.openai.com/v1")
     config.organization shouldBe None
   }
 
@@ -66,7 +67,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     val result = ProviderConfigParser.parse(
       props(provider = "openai", model = "m", apiKey = "k", baseUrl = "https://custom.api/v1")
     )
-    result.get().asInstanceOf[OpenAIConfig].baseUrl shouldBe "https://custom.api/v1"
+    result.get().asInstanceOf[OpenAIConfig].baseUrl shouldBe BaseUrl("https://custom.api/v1")
   }
 
   it should "include organization when provided" in {
@@ -91,7 +92,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     val config = result.get().asInstanceOf[AnthropicConfig]
     config.model.asString shouldBe "claude-sonnet-4-5-latest"
     config.apiKey.reveal shouldBe "sk-ant-test"
-    config.baseUrl shouldBe "https://api.anthropic.com"
+    config.baseUrl shouldBe BaseUrl("https://api.anthropic.com")
   }
 
   it should "fail when apiKey is empty" in {
@@ -103,7 +104,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     val result = ProviderConfigParser.parse(
       props(provider = "anthropic", model = "m", apiKey = "k", baseUrl = "https://proxy.example.com")
     )
-    result.get().asInstanceOf[AnthropicConfig].baseUrl shouldBe "https://proxy.example.com"
+    result.get().asInstanceOf[AnthropicConfig].baseUrl shouldBe BaseUrl("https://proxy.example.com")
   }
 
   "Ollama parsing" should "succeed without an apiKey" in {
@@ -113,14 +114,14 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     result.isSuccess shouldBe true
     val config = result.get().asInstanceOf[OllamaConfig]
     config.model.asString shouldBe "llama3"
-    config.baseUrl shouldBe "http://localhost:11434"
+    config.baseUrl shouldBe BaseUrl("http://localhost:11434")
   }
 
   it should "use a custom baseUrl when provided" in {
     val result = ProviderConfigParser.parse(
       props(provider = "ollama", model = "llama3", baseUrl = "http://my-server:11434")
     )
-    result.get().asInstanceOf[OllamaConfig].baseUrl shouldBe "http://my-server:11434"
+    result.get().asInstanceOf[OllamaConfig].baseUrl shouldBe BaseUrl("http://my-server:11434")
   }
 
   it should "forward contextWindow and reserveCompletion" in {

@@ -3,7 +3,7 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.{ Config, ConfigFactory }
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.types.ProviderModelTypes.ProviderName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -143,7 +143,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
       val cfg = s.embeddings().value
       cfg.providerId.asString shouldBe "fixtureembedding"
       cfg.model.asString shouldBe "fixture-embed-small"
-      s.textEmbeddingModel().value.name shouldBe "fixture-embed-small"
+      s.textEmbeddingModel().value.name shouldBe ModelName("fixture-embed-small")
     }
 
     "report a section that is not there as Llm4sConfig does" in {

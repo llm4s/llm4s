@@ -971,6 +971,93 @@ unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
 - **`TraceId`** is `org.llm4s.trace.model.TraceId`, in `llm4s-observability`, which was its only user. The scalafix
   rule `ResultSyntaxMoved` rewrites the import.
 
+## Model ids are `ModelName`, provider ids `ProviderId`, and provider configs' base URLs `BaseUrl` (#2822)
+
+Every public signature that takes or returns a model id takes or returns an
+`org.llm4s.types.ProviderModelTypes.ModelName`, where it was a `String`; a provider config's base URL is a `BaseUrl`.
+Wrap a literal with `ModelName("gpt-4o")` / `BaseUrl("https://...")`, and read one back with `.asString` / `.asUrl`.
+A `ModelName` no longer compares equal to a `String` at compile time: `completion.model == "gpt-4o"` does not
+compile; write `completion.model == ModelName("gpt-4o")` or `completion.model.asString == "gpt-4o"`.
+
+- **Completions and usage:** `Completion.model` and `withModel`; `UsageSummary.byModel` is a
+  `Map[ModelName, ModelUsage]` and `add` takes a `ModelName`; `CostTracker.byModel` likewise; the agent's
+  `ModelCallCompleted.model`, `ModelContext.recordUsage` and `AdmissionContext.recordUsage`.
+- **The model registry:** `ModelMetadata.modelId` (and `withModelId`, `fromJson`), `ModelRegistryService.lookup`,
+  `RequestTransformer` (every `modelId`, `adjusted`'s function, `withOverrides`' map), `TransformationResult.transform`,
+  `CostEstimator.estimate`, `ContextWindowResolver.resolve` (`fallbackResolver: ModelName => ContextLimits`) and
+  `strictContextWindow`.
+- **Embeddings:** `EmbeddingModelConfig.name`, `EmbeddingConfigContext.modelOverride`, `EmbeddingConfigSpec.defaultModel`
+  (and its `defaultBaseUrl`, a `BaseUrl`), `EmbeddingProviderDescriptor.modelDimensions` (`Map[ModelName, Int]`) and
+  `dimensionsOf`, `ModelDimensionRegistry.getDimension`, `CacheKeyGenerator.embeddingKey` and the key function of
+  `CachedEmbeddingClient` (`(String, ModelName, InputPurpose) => String`).
+- **Tracing and exchange logs:** the `model` (and `responseModel`) of `TraceEvent.CompletionReceived`, `ErrorOccurred`,
+  `TokenUsageRecorded`, `EmbeddingUsageRecorded`, `CostRecorded` and `ImageGenerationCompleted`, and the `Tracing`
+  helpers that build them; `ProviderExchange.model` and `ProviderExchangeCall.model`.
+- **Provider SPI:** `BaseLifecycleLLMClient.modelName`, `StreamingAccumulator(model)`,
+  `OpenAICompatibleClient.Settings` (`model: ModelName`, `baseUrl: BaseUrl`), `OpenAICompatibleDialect.validationUrl`
+  and `addReasoning`, `ProviderConfigSpec.defaultBaseUrl` and `apiKeyAndDefaultBaseUrl`,
+  `ProviderDescriptor.resolveBaseUrl` (a `Result[BaseUrl]`), `NamedProviderConfig.baseUrlOrDefault`.
+- **Provider configs:** every `fromValues` takes a `ModelName` and a `BaseUrl`; each config's `baseUrl` (Azure's
+  `endpoint`), `withBaseUrl` and `DEFAULT_BASE_URL` are `BaseUrl`, as are `OpenAIProvider`, `OpenRouterProvider` and
+  `RequestyProvider`'s `DEFAULT_BASE_URL`; `MistralConfig.apiBaseUrl` and `CohereConfig.compatibilityBaseUrl` return one.
+- **Capabilities:** `ModelRef.model` and `requireCapabilities(provider, model)`.
+
+```scala
+// Before
+val config = OpenAIConfig.fromValues("gpt-4o", apiKey, "https://api.openai.com/v1")
+val done   = Completion(id = "1", created = Instant.EPOCH, model = "gpt-4o", message = AssistantMessage("hi"))
+summary.byModel.get("gpt-4o")
+
+// After
+val config = OpenAIConfig.fromValues(ModelName("gpt-4o"), apiKey, BaseUrl("https://api.openai.com/v1"))
+val done   = Completion(id = "1", created = Instant.EPOCH, model = ModelName("gpt-4o"), message = AssistantMessage("hi"))
+summary.byModel.get(ModelName("gpt-4o"))
+```
+
+Nothing stored changes: a `ModelName` is written as the JSON string it wraps, so stored usage summaries, durable
+agent events, model-metadata JSON, trace events and the provider exchange log read and write byte for byte as before.
+The Java facade (`llm4s-java-api`) still presents model ids as `String`s.
+
+The scalafix rule `ModelIdNewtypes` (part of `Llm4sMigrate_1_0`) wraps the argument at the common call sites:
+`Completion`'s `model`, `ModelMetadata`'s `modelId`, `EmbeddingModelConfig`'s name, `lookup`, `estimate`,
+`UsageSummary.add`, `StreamingAccumulator`, `withModel`, and a provider config's `fromValues` and `withBaseUrl`. A
+`byModel` map key, a function typed `String => ...` and a model compared with a `String` are left for the compiler to
+report.
+
+### Provider ids are `ProviderId`
+
+Where a value is a provider's id (the registry's vendor, such as `openai` or `bedrock_converse`), it is a
+`ProviderId`, canonicalised to trimmed lowercase as `ProviderId("OpenAI") == ProviderId("openai")`:
+
+- `ModelMetadata.provider` and `withProvider`;
+- `ModelRegistryService.listProviders()` (a `List[ProviderId]`), `listByProvider(provider)` and
+  `lookup(provider, modelName)`;
+- `ContextWindowResolver.resolve`'s `lookupProviders` (a `Seq[ProviderId]`) and `strictContextWindow(provider, ...)`;
+- `ModelDimensionRegistry.getDimension(provider, model)`;
+- `ModelRef.provider` and `requireCapabilities(provider, model)` (`llm4s-capabilities`).
+
+```scala
+// Before
+registry.lookup("openai", "gpt-4o")
+ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small")
+
+// After
+registry.lookup(ProviderId("openai"), ModelName("gpt-4o"))
+ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
+```
+
+A `ProviderId` is written as its string. A stored provider that was not lowercase reads back lowercased; LiteLLM's
+model data, the model-metadata JSON llm4s writes and the agent's events only ever hold lowercase ids. `ModelIdNewtypes`
+wraps `lookup`, `listByProvider`, `getDimension`, `withProvider` and `ModelMetadata`'s `provider`.
+
+Left as `String` on purpose, being labels rather than ids: `MetricsCollector`'s `model` and `provider` (and
+`MetricsRecording.withMetrics` and `ReliableClient`'s `providerName`, which pass them through); the `provider` of the
+error types (`ServiceError`, `RateLimitError`, `AuthenticationError`, ...) and of `HttpErrorMapper`, `SdkErrorMapper`
+and `PartEncoding`, which name the client or the configured section for a message; `OpenAICompatibleClient.Settings`'
+`providerName`; and `ThinkingBlock.Opaque.provider`, part of a stored message. The model of the image, speech and RAG
+configs (`RAGConfig.embeddingModel`, the image generation configs) also stays a `String`: no provider config or the
+registry reads it.
+
 ## One retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed (#2798)
 
 `ReliableClient` with a `RetryPolicy` is the library's one retry and circuit breaker.

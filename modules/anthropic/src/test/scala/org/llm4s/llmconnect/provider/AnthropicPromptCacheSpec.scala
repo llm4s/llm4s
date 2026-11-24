@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -68,7 +69,7 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
         model = ModelName("claude-sonnet-4-6"),
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 200000,
         reserveCompletion = 4096
       )
@@ -126,11 +127,11 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     val tokens          = completion.usage.get
     tokens.promptTokens shouldBe 3510
     tokens.totalTokens shouldBe 3530
-    val pricing = summon[ModelRegistryService].lookup("claude-sonnet-4-6").toOption.get.pricing
+    val pricing = summon[ModelRegistryService].lookup(ModelName("claude-sonnet-4-6")).toOption.get.pricing
     val expected = 10 * pricing.inputCostPerToken.get + 3000 * pricing.cacheReadInputTokenCost.get +
       500 * pricing.cacheCreationInputTokenCost.get + 20 * pricing.outputCostPerToken.get
     completion.estimatedCost.get.toDouble shouldBe expected +- 1e-12
-    CostEstimator.estimate("claude-sonnet-4-6", tokens).get.toDouble shouldBe expected +- 1e-12
+    CostEstimator.estimate(ModelName("claude-sonnet-4-6"), tokens).get.toDouble shouldBe expected +- 1e-12
   }
 
   it should "report it dropped when nothing was read from or written to the cache" in {

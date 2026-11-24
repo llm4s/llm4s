@@ -105,12 +105,13 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def openAiClient(model: String, apiKey: String, baseUrl: String): Result[LLMClient] =
   for {
     registry <- ModelRegistryService.default()
     given ModelRegistryService = registry
-    config <- OpenAIConfig.fromValues(model, Secret(apiKey), baseUrl)
+    config <- OpenAIConfig.fromValues(ModelName(model), Secret(apiKey), BaseUrl(baseUrl))
     client <- LLMConnect.getClient(config)
   } yield client
 ```
@@ -187,13 +188,14 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 final case class LlmSettings(model: String, apiKey: ciris.Secret[String], baseUrl: String)
 
 val settings: ConfigValue[Effect, LlmSettings] = (
   env("OPENAI_MODEL").default("gpt-5.6-luna"),
   env("OPENAI_API_KEY").secret,
-  env("OPENAI_BASE_URL").default(OpenAIConfig.DEFAULT_BASE_URL)
+  env("OPENAI_BASE_URL").default(OpenAIConfig.DEFAULT_BASE_URL.asUrl)
 ).parMapN(LlmSettings.apply)
 
 def llmClient(s: LlmSettings): IO[LLMClient] =
@@ -201,7 +203,7 @@ def llmClient(s: LlmSettings): IO[LLMClient] =
     (for {
       registry <- ModelRegistryService.default()
       given ModelRegistryService = registry
-      config <- OpenAIConfig.fromValues(s.model, Secret(s.apiKey.value), s.baseUrl)
+      config <- OpenAIConfig.fromValues(ModelName(s.model), Secret(s.apiKey.value), BaseUrl(s.baseUrl))
       client <- LLMConnect.getClient(config)
     } yield client).leftMap(error => new IllegalStateException(error.message))
   )
@@ -222,6 +224,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 import zio.{ Config, ConfigProvider, ZIO }
 import zio.config.*
 
@@ -231,7 +234,7 @@ final case class LlmSettings(model: String, apiKey: Config.Secret, baseUrl: Stri
 val descriptor: Config[LlmSettings] =
   (Config.string("model").withDefault("gpt-5.6-luna") ++
     Config.secret("api_key") ++
-    Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL))
+    Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL.asUrl))
     .nested("openai")
     .map { case (model, apiKey, baseUrl) => LlmSettings(model, apiKey, baseUrl) }
 
@@ -240,7 +243,7 @@ def llmClient(s: LlmSettings): ZIO[Any, Throwable, LLMClient] =
     .fromEither(for {
       registry <- ModelRegistryService.default()
       given ModelRegistryService = registry
-      config <- OpenAIConfig.fromValues(s.model, Secret(s.apiKey.stringValue), s.baseUrl)
+      config <- OpenAIConfig.fromValues(ModelName(s.model), Secret(s.apiKey.stringValue), BaseUrl(s.baseUrl))
       client <- LLMConnect.getClient(config)
     } yield client)
     .mapError(error => new IllegalStateException(error.message))

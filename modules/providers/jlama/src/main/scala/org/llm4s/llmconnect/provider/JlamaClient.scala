@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -40,7 +41,7 @@ final class JlamaClient private[provider] (
 
   protected def clientDescription: String = s"Jlama client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   private val lock                        = new ReentrantLock()
   private var engine: Option[JlamaEngine] = None // guarded by lock
@@ -135,7 +136,7 @@ final class JlamaClient private[provider] (
           Completion(
             id = UUID.randomUUID().toString,
             created = Instant.now(),
-            model = config.model.asString,
+            model = config.model,
             message = AssistantMessage(generation.text),
             usage = Some(
               TokenUsage(

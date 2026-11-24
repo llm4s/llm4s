@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
 import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, ToolCallId, UsageSummary, UserMessage }
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
@@ -164,7 +165,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "convert TokenUsageRecorded event to span with token attributes" in {
     import org.llm4s.llmconnect.model.TokenUsage
     val usage = TokenUsage(10, 20, 30)
-    val event = TraceEvent.TokenUsageRecorded(usage, "gpt-4", "completion")
+    val event = TraceEvent.TokenUsageRecorded(usage, ModelName("gpt-4"), "completion")
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -180,7 +181,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "convert EmbeddingUsageRecorded to Embedding span" in {
     import org.llm4s.llmconnect.model.EmbeddingUsage
     val usage = EmbeddingUsage(100, 100)
-    val event = TraceEvent.EmbeddingUsageRecorded(usage, "text-embedding-3-small", "indexing", 5)
+    val event = TraceEvent.EmbeddingUsageRecorded(usage, ModelName("text-embedding-3-small"), "indexing", 5)
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -195,8 +196,8 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "record a token usage's thinking and its output as billed beside the raw completion count" in {
     import org.llm4s.llmconnect.model.TokenUsage
     val usage = TokenUsage(81, 18, 145, thinkingTokens = Some(46))
-    collector.traceEvent(TraceEvent.TokenUsageRecorded(usage, "o3", "completion")) shouldBe Right(())
-    collector.traceTokenUsage(usage, "o3", "direct") shouldBe Right(())
+    collector.traceEvent(TraceEvent.TokenUsageRecorded(usage, ModelName("o3"), "completion")) shouldBe Right(())
+    collector.traceTokenUsage(usage, ModelName("o3"), "direct") shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
     spans should have size 2
@@ -261,7 +262,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "name the agent run span after its event type and carry the run summary" in {
-    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+    val usage = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
     val event = TraceEvent.AgentRunEnded(
       "thread-1",
       "run-1",
@@ -286,7 +287,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "convert CustomEvent and CostRecorded to Internal spans" in {
     val customEvent = TraceEvent.CustomEvent("my-event", ujson.Obj("key" -> "value"))
-    val costEvent   = TraceEvent.CostRecorded(0.05, "gpt-4", "completion", 1000, "total")
+    val costEvent   = TraceEvent.CostRecorded(0.05, ModelName("gpt-4"), "completion", 1000, "total")
     collector.traceEvent(customEvent) shouldBe Right(())
     collector.traceEvent(costEvent) shouldBe Right(())
 
@@ -359,13 +360,13 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "keep a completion's served tier as its span's service_tier (#2750)" in {
     import org.llm4s.llmconnect.model.{ Completion, ServiceTier }
     import org.llm4s.trace.model.SpanValue
-    val completion = Completion("c-1", java.time.Instant.EPOCH, "m", AssistantMessage("hi"))
+    val completion = Completion("c-1", java.time.Instant.EPOCH, ModelName("m"), AssistantMessage("hi"))
     collector.traceEvent(
-      TraceEvent.CompletionReceived("c-1", "m", 0, "hi", servedTier = Some(ServiceTier.Flex))
+      TraceEvent.CompletionReceived("c-1", ModelName("m"), 0, "hi", servedTier = Some(ServiceTier.Flex))
     ) shouldBe Right(())
-    collector.traceEvent(TraceEvent.CompletionReceived("c-2", "m", 0, "hi")) shouldBe Right(())
-    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m") shouldBe Right(())
-    collector.traceCompletion(completion, "m") shouldBe Right(())
+    collector.traceEvent(TraceEvent.CompletionReceived("c-2", ModelName("m"), 0, "hi")) shouldBe Right(())
+    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), ModelName("m")) shouldBe Right(())
+    collector.traceCompletion(completion, ModelName("m")) shouldBe Right(())
     store.getSpans(collector.traceId).map(_.attributes.get("service_tier")) should contain theSameElementsAs Seq(
       Some(SpanValue.StringValue("flex")),
       None,

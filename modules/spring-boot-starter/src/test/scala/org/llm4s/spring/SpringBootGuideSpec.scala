@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -30,7 +31,7 @@ object SpringBootGuideSpec {
     val sent: ConcurrentLinkedQueue[Conversation] = new ConcurrentLinkedQueue[Conversation]()
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.add(c)
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.agent.graph.{
   Checkpointer,
@@ -32,7 +33,7 @@ private[javaapi] object StreamFixtures {
   val ParkSeconds: Long = 120L
 
   def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(text)))
 
   def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
 

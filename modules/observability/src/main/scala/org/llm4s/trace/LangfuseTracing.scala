@@ -314,7 +314,7 @@ class LangfuseTracing(
             "id"        -> uuid,
             "timestamp" -> now,
             "name"      -> "LLM Completion",
-            "model"     -> e.model,
+            "model"     -> e.model.asString,
             "input" -> ujson.Arr(
               ujson.Obj("role" -> "system", "content" -> "LLM4S completion request")
             ),
@@ -396,7 +396,7 @@ class LangfuseTracing(
             "timestamp" -> now,
             "name"      -> s"Token Usage - ${e.operation}",
             "input" -> ujson.Obj(
-              "model"     -> e.model,
+              "model"     -> e.model.asString,
               "operation" -> e.operation
             ),
             "output" -> ujson.Obj(
@@ -407,7 +407,7 @@ class LangfuseTracing(
               "total_tokens"      -> e.usage.totalTokens
             ),
             "metadata" -> ujson.Obj(
-              "model"      -> e.model,
+              "model"      -> e.model.asString,
               "operation"  -> e.operation,
               "token_type" -> "usage"
             )
@@ -456,7 +456,7 @@ class LangfuseTracing(
             "timestamp" -> now,
             "name"      -> s"Embedding Usage - ${e.operation}",
             "input" -> ujson.Obj(
-              "model"       -> e.model,
+              "model"       -> e.model.asString,
               "operation"   -> e.operation,
               "input_count" -> e.inputCount
             ),
@@ -465,7 +465,7 @@ class LangfuseTracing(
               "total_tokens"  -> e.usage.totalTokens
             ),
             "metadata" -> ujson.Obj(
-              "model"       -> e.model,
+              "model"       -> e.model.asString,
               "operation"   -> e.operation,
               "input_count" -> e.inputCount,
               "token_type"  -> "embedding_usage"
@@ -484,7 +484,7 @@ class LangfuseTracing(
             "name"      -> s"Cost - ${e.operation}",
             "level"     -> "DEFAULT",
             "input" -> ujson.Obj(
-              "model"       -> e.model,
+              "model"       -> e.model.asString,
               "operation"   -> e.operation,
               "token_count" -> e.tokenCount,
               "cost_type"   -> e.costType
@@ -493,7 +493,7 @@ class LangfuseTracing(
               "cost_usd" -> e.costUsd
             ),
             "metadata" -> ujson.Obj(
-              "model"       -> e.model,
+              "model"       -> e.model.asString,
               "operation"   -> e.operation,
               "token_count" -> e.tokenCount,
               "cost_type"   -> e.costType,
@@ -550,7 +550,7 @@ class LangfuseTracing(
 
       case e: TraceEvent.ImageGenerationCompleted =>
         val outputObj = ujson.Obj(
-          "model"       -> e.model,
+          "model"       -> e.model.asString,
           "operation"   -> e.operation,
           "image_count" -> e.imageCount,
           "size"        -> e.size,
@@ -572,7 +572,7 @@ class LangfuseTracing(
             "name"      -> "Image Generation",
             "level"     -> (if (e.success) "DEFAULT" else "ERROR"),
             "input" -> ujson.Obj(
-              "model"     -> e.model,
+              "model"     -> e.model.asString,
               "operation" -> e.operation,
               "size"      -> e.size,
               "quality"   -> e.quality

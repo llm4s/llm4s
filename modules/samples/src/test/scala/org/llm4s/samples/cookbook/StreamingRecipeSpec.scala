@@ -1,5 +1,6 @@
 package org.llm4s.samples.cookbook
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -47,7 +48,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
           Completion(
             id = "s",
             created = Instant.EPOCH,
-            model = "m",
+            model = ModelName("m"),
             message = AssistantMessage("Hello world")
           )
         )

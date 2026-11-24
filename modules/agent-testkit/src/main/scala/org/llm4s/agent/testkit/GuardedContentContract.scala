@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AdmittedQuery, Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.encryption.{ EncryptingCheckpointer, EncryptionKey, KeyId, StaticKeySource }
 import org.llm4s.agent.graph.*
@@ -379,7 +380,7 @@ object GuardedContentContract:
     Completion(
       id = "guarded-content-contract",
       created = Instant.EPOCH,
-      model = "contract-model",
+      model = ModelName("contract-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
       finishReason = if message.toolCalls.nonEmpty then FinishReason.ToolCalls else FinishReason.Stop

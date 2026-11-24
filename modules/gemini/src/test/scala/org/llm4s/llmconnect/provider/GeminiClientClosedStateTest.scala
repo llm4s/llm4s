@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,7 +24,7 @@ class GeminiClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: GeminiConfig = GeminiConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = ModelName("gemini-2.0-flash"),
-    baseUrl = "https://example.invalid/v1beta",
+    baseUrl = BaseUrl("https://example.invalid/v1beta"),
     contextWindow = 1048576,
     reserveCompletion = 8192
   )

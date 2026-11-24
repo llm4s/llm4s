@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,7 +24,7 @@ class ZaiClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: ZaiConfig = ZaiConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = ModelName("zai-coder-v1"),
-    baseUrl = "https://example.invalid/v1",
+    baseUrl = BaseUrl("https://example.invalid/v1"),
     contextWindow = 128000,
     reserveCompletion = 8192
   )

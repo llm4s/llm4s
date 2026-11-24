@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -19,7 +20,7 @@ final class ScoringJudgeClient(reply: String) extends LLMClient {
       Completion(
         id = "test-id",
         created = Instant.EPOCH,
-        model = "test-model",
+        model = ModelName("test-model"),
         message = AssistantMessage(reply),
         usage = Some(TokenUsage(promptTokens = 10, completionTokens = 1, totalTokens = 11))
       )

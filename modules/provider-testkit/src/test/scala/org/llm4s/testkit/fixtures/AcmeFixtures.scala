@@ -37,16 +37,17 @@ import java.time.Instant
  * fail.
  */
 object AcmeProvider extends ProviderDescriptor:
-  val id: ProviderId                 = ProviderId("acme")
-  override val aliases: Set[String]  = Set("acme-ai")
-  val DefaultBaseUrl: String         = "https://acme.invalid/v1"
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl, Seq("ACME_API_KEY"))
+  val id: ProviderId                = ProviderId("acme")
+  override val aliases: Set[String] = Set("acme-ai")
+  val DefaultBaseUrl: String        = "https://acme.invalid/v1"
+  val configSpec: ProviderConfigSpec =
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl(DefaultBaseUrl), Seq("ACME_API_KEY"))
 
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     for
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-    yield AcmeConfig(apiKey.reveal, section.model, baseUrl)
+    yield AcmeConfig(apiKey.reveal, section.model, baseUrl.asUrl)
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(AcmeClient(_))
@@ -69,7 +70,7 @@ final case class AcmeConfig(apiKey: String, model: ModelName, baseUrl: String) e
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    Right(Completion("acme-1", Instant.EPOCH, config.model.asString, AssistantMessage("hi")))
+    Right(Completion("acme-1", Instant.EPOCH, config.model, AssistantMessage("hi")))
 
   def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
@@ -85,7 +86,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
   override val aliases: Set[String] = Set("acme-embed")
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some(AcmeProvider.DefaultBaseUrl),
+    defaultBaseUrl = Some(BaseUrl(AcmeProvider.DefaultBaseUrl)),
     apiKeyEnv = Seq("ACME_API_KEY")
   )
 
@@ -111,7 +112,7 @@ final class UnlistedModule extends Llm4sProviderModule:
 
 object UnlistedProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("unlisted")
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://unlisted.invalid")
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://unlisted.invalid"))
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     AcmeProvider.buildConfig(section, context)
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -126,7 +127,7 @@ final class EmptyModule extends Llm4sProviderModule
  */
 class TwinProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("twin")
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://twin.invalid")
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://twin.invalid"))
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     AcmeProvider.buildConfig(section, context)
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -147,16 +148,16 @@ final class TwinModuleB extends Llm4sProviderModule:
  */
 object GreedyProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("greedy")
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://greedy.invalid")
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://greedy.invalid"))
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     AcmeProvider.buildConfig(section, context)
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
-    Right(AcmeClient(AcmeConfig("k", ModelName(config.model.asString), "https://greedy.invalid")))
+    Right(AcmeClient(AcmeConfig("k", config.model, "https://greedy.invalid")))
 
 object UnboundProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("unbound")
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://unbound.invalid", Seq("UNBOUND_API_KEY"))
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://unbound.invalid"), Seq("UNBOUND_API_KEY"))
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     AcmeProvider.buildConfig(section, context)
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -166,7 +167,7 @@ object UnboundEmbeddings extends EmbeddingProviderDescriptor:
   val id: ProviderId = ProviderId("unbound")
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://unbound.invalid"),
+    defaultBaseUrl = Some(BaseUrl("https://unbound.invalid")),
     apiKeyEnv = Seq("UNBOUND_API_KEY")
   )
   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =

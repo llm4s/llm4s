@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- A model id is a `ModelName` wherever it crosses a public API (`Completion.model`, `UsageSummary.byModel`, `ModelMetadata.modelId`, `ModelRegistryService.lookup`, `RequestTransformer`, `EmbeddingModelConfig.name`, trace events, every `fromValues`), and a provider config's base URL is a `BaseUrl`; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#model-ids-are-modelname-provider-ids-providerid-and-provider-configs-base-urls-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- A provider id is a `ProviderId` in `ModelMetadata.provider`, `ModelRegistryService.lookup(provider, model)`, `listByProvider` and `listProviders`, `ContextWindowResolver`, `ModelDimensionRegistry.getDimension` and `ModelRef`
+  ([migration](docs/reference/migration.md#provider-ids-are-providerid)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
 - `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set, and no client sends an unset one
   ([migration](docs/reference/migration.md#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
 - `Completion` reads `content` and `toolCalls` from its `message`: `apply` takes neither, and `withContent`, `withToolCalls` and `asText` are removed
@@ -331,7 +335,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#2750](https://github.com/llm4s/llm4s/issues/2750)).
 - **Changed** Every member of `ProviderConfig` is abstract: `model: ModelName`, `withModel(ModelName)`, `endpointUrl: Option[BaseUrl]`, and `withApiKeyProvider` returns `Result[ProviderConfig]`, a `ConfigurationError` from a config that cannot take one (Ollama, Vertex AI, Bedrock, Jlama) instead of the config unchanged; each provider config's `apply` takes a `ModelName` ([migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805).
 - **Fixed** A section's `timeouts`, or its own `http` block, that its provider's config does not take (`jlama`) fails the load of that section instead of being dropped [#2805](https://github.com/llm4s/llm4s/issues/2805).
-- **Changed** `ContextWindowResolver` is final; `resolve` returns `ContextLimits(contextWindow, reserveCompletion)`, takes `fallbackResolver: String => ContextLimits` and has no `logPrefix` [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Changed** `ContextWindowResolver` is final; `resolve` returns `ContextLimits(contextWindow, reserveCompletion)`, takes `fallbackResolver: ModelName => ContextLimits` and has no `logPrefix` [#2805](https://github.com/llm4s/llm4s/issues/2805).
 
 ### Java & Kotlin APIs
 
@@ -347,6 +351,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
+- **Changed** Model ids are `ModelName` and provider configs' base URLs `BaseUrl` across the public API, from `Completion` and `UsageSummary` to the registry, embeddings, trace events, the provider SPI and every `fromValues`; the scalafix rule `ModelIdNewtypes` wraps the common call sites ([migration](docs/reference/migration.md#model-ids-are-modelname-and-provider-configs-base-urls-are-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- **Changed** Provider ids are `ProviderId` in `ModelMetadata`, the model registry, `ContextWindowResolver` and `ModelDimensionRegistry`; a `ProviderId` reads and writes as its string ([migration](docs/reference/migration.md#provider-ids-are-providerid)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
 - **Changed** `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set; every client sends a sampling parameter only when the caller set it, and a set one that a model cannot take is reported as a `RequestAdjustment` whatever its value (an explicit value equal to the old default used to go unreported). [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** `Completion.content` and `Completion.toolCalls` are read from `Completion.message` instead of being stored beside it, so they cannot disagree with it. **Removed** `Completion.withContent`, `withToolCalls` and `asText`. **Fixed** a completion assembled from a stream reports its tool calls on `toolCalls`, which each client used to copy over by hand. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Added** `FinishReason.Unknown`, what a `Completion` carries when the client read no reason; `Completion.apply` defaults to it instead of `Stop`, and it replaces `FinishReason.Other("")`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
@@ -612,7 +618,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
-- **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
+- **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect); the watsonx, Perplexity and Bedrock setup sections, typed tools and the media and store-contract pages are filled in, and `LLMClient`, `AgentStatus`, `ModelRegistryService` and `MCPClient` say how to obtain and use them [#2834](https://github.com/llm4s/llm4s/issues/2834).
 - **Fixed** 23 more guide pages have their Scala blocks compiled (agents, streaming, durable checkpointers, memory, ZIO, cats-effect, RAG, speech, tracing and others), which corrected code that did not compile against the API; guide specs fail when their copy of a page drifts ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 
 ### Build & tooling

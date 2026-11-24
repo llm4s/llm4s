@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -21,7 +22,7 @@ class TestDatasetGenerationSpec extends AnyFlatSpec with Matchers with EitherVal
         Completion(
           id = "test-completion",
           created = Instant.EPOCH,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(text = Some(response))
         )
       }

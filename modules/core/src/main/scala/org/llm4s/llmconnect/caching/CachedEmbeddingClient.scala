@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
@@ -37,7 +38,7 @@ import org.slf4j.LoggerFactory
 class CachedEmbeddingClient(
   baseClient: EmbeddingProvider,
   cache: EmbeddingCache,
-  keyGenerator: (String, String, InputPurpose) => String = CacheKeyGenerator.embeddingKey
+  keyGenerator: (String, ModelName, InputPurpose) => String = CacheKeyGenerator.embeddingKey
 ) extends EmbeddingProvider {
 
   private val logger = LoggerFactory.getLogger(getClass)

@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -33,7 +34,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "noop",
           created = Instant.EPOCH,
-          model = "noop",
+          model = ModelName("noop"),
           message = AssistantMessage(text = Some("")),
           usage = None
         )

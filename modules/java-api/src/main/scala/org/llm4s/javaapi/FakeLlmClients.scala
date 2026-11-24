@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{
   AuthenticationError,
   CancelledError,
@@ -50,7 +51,7 @@ private[javaapi] object FakeLlmClients {
       val index  = lock.synchronized { recorded = recorded :+ prompt; recorded.size - 1 }
       script.lift(index) match {
         case Some(Right(text)) =>
-          Right(Completion(s"fake-${index + 1}", Instant.EPOCH, "fake", AssistantMessage(text)))
+          Right(Completion(s"fake-${index + 1}", Instant.EPOCH, ModelName("fake"), AssistantMessage(text)))
         case Some(Left(error)) => Left(error)
         case None =>
           Left(

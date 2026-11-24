@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.OpenAICompatibleModelLister
 import org.llm4s.config.NamedProviderConfig
@@ -282,7 +283,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       )
       val config = OpenAICompatibleConfig(
         model = ModelName("m"),
-        baseUrl = "https://ws.example/serving-endpoints",
+        baseUrl = BaseUrl("https://ws.example/serving-endpoints"),
         tokenExchange = Some(
           TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://ws.example/oidc/v1/token")
         )
@@ -319,7 +320,7 @@ class OpenAICompatibleWorkloadIdentitySpec
           )
           val config = OpenAICompatibleConfig(
             model = ModelName("m"),
-            baseUrl = "https://ws.example/serving-endpoints",
+            baseUrl = BaseUrl("https://ws.example/serving-endpoints"),
             tokenExchange = Some(
               TokenExchangeConfig(
                 IdentitySource.Literal(Secret(subject)),
@@ -354,7 +355,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         val svid = svidFile(subjects.head)
         val config = OpenAICompatibleConfig(
           model = ModelName("m"),
-          baseUrl = "https://ws.example/serving-endpoints",
+          baseUrl = BaseUrl("https://ws.example/serving-endpoints"),
           tokenExchange = Some(TokenExchangeConfig(IdentitySource.File(svid), "https://ws.example/oidc/v1/token"))
         )
         val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
@@ -388,7 +389,15 @@ class OpenAICompatibleWorkloadIdentitySpec
             MockHttpClient(Seq(HttpResponse(403, s"""{"error":{"message":"request with $token lacks permission"}}""")))
           val c = new OpenAICompatibleClient(
             OpenAICompatibleClient
-              .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Dynamic(own), 8192, 2048),
+              .Settings(
+                "p",
+                "P",
+                ModelName("m"),
+                BaseUrl("https://h/v1"),
+                OpenAICompatibleClient.Credential.Dynamic(own),
+                8192,
+                2048
+              ),
             OpenAICompatibleDialect.Standard
           ) {
             override protected[provider] val httpClient: Llm4sHttpClient = http
@@ -411,7 +420,15 @@ class OpenAICompatibleWorkloadIdentitySpec
           MockHttpClient(Seq(HttpResponse(403, s"""{"error":{"message":"request with $token lacks permission"}}""")))
         val c = new OpenAICompatibleClient(
           OpenAICompatibleClient
-            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Anonymous, 8192, 2048),
+            .Settings(
+              "p",
+              "P",
+              ModelName("m"),
+              BaseUrl("https://h/v1"),
+              OpenAICompatibleClient.Credential.Anonymous,
+              8192,
+              2048
+            ),
           OpenAICompatibleDialect.standard(Seq("Authorization" -> s"Bearer $token"))
         ) {
           override protected[provider] val httpClient: Llm4sHttpClient = http
@@ -435,7 +452,15 @@ class OpenAICompatibleWorkloadIdentitySpec
         val http = MockHttpClient(Seq(HttpResponse(status, deep)))
         val c = new OpenAICompatibleClient(
           OpenAICompatibleClient
-            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Static(Secret(key)), 8192, 2048),
+            .Settings(
+              "p",
+              "P",
+              ModelName("m"),
+              BaseUrl("https://h/v1"),
+              OpenAICompatibleClient.Credential.Static(Secret(key)),
+              8192,
+              2048
+            ),
           OpenAICompatibleDialect.Standard
         ) {
           override protected[provider] val httpClient: Llm4sHttpClient = http
@@ -475,7 +500,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         val http = MockHttpClient(responses)
         val config = OpenAICompatibleConfig(
           model = ModelName("m"),
-          baseUrl = "https://ws.example/serving-endpoints",
+          baseUrl = BaseUrl("https://ws.example/serving-endpoints"),
           tokenExchange = Some(
             TokenExchangeConfig(
               IdentitySource.Literal(Secret(subject)),
@@ -513,7 +538,8 @@ class OpenAICompatibleWorkloadIdentitySpec
       do
         val http = MockHttpClient(Seq(HttpResponse(400, """{"error":"invalid_grant"}""")))
         val c = new OpenAICompatibleClient(
-          OpenAICompatibleClient.Settings("p", "P", "m", "https://h/v1", exchange, 8192, 2048, timeouts),
+          OpenAICompatibleClient
+            .Settings("p", "P", ModelName("m"), BaseUrl("https://h/v1"), exchange, 8192, 2048, timeouts),
           OpenAICompatibleDialect.Standard
         ) {
           override protected[provider] val httpClient: Llm4sHttpClient = http
@@ -527,7 +553,7 @@ class OpenAICompatibleWorkloadIdentitySpec
     "show the exchange's token URL without userinfo or query in the settings and config" in {
       val config = OpenAICompatibleConfig(
         model = ModelName("m"),
-        baseUrl = "https://ws.example/serving-endpoints",
+        baseUrl = BaseUrl("https://ws.example/serving-endpoints"),
         tokenExchange = Some(
           TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://u:pw@ws.example/t?sig=s3cr3t")
             .withClientId("sp-secret")
@@ -560,7 +586,7 @@ class OpenAICompatibleWorkloadIdentitySpec
     def insecureConfig(fake: FakeTokenExchangeServer): OpenAICompatibleConfig =
       OpenAICompatibleConfig(
         model = ModelName("m"),
-        baseUrl = insecureBaseUrl(fake),
+        baseUrl = BaseUrl(insecureBaseUrl(fake)),
         tokenExchange = Some(
           TokenExchangeConfig(
             IdentitySource.File(freshSvid),
@@ -616,7 +642,8 @@ class OpenAICompatibleWorkloadIdentitySpec
         val dynamic = new AccessTokenProvider:
           def current(): Result[Secret] = { fetched.incrementAndGet(); Right(Secret.unregistered("t")) }
           override def invalidate(rejected: Secret): Unit = ()
-        val exchange = OpenAICompatibleClient.settings(insecureConfig(fake).withBaseUrl("https://ws.example/v1"))
+        val exchange =
+          OpenAICompatibleClient.settings(insecureConfig(fake).withBaseUrl(BaseUrl("https://ws.example/v1")))
         val credentials = Seq(
           exchange.credential,
           OpenAICompatibleClient.Credential.Dynamic(dynamic)
@@ -624,7 +651,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         for credential <- credentials do
           val error = intercept[IllegalArgumentException](
             new OpenAICompatibleClient(
-              exchange.withBaseUrl(insecureBaseUrl(fake)).withCredential(credential),
+              exchange.withBaseUrl(BaseUrl(insecureBaseUrl(fake))).withCredential(credential),
               OpenAICompatibleDialect.standard(Nil)
             )
           )
@@ -646,7 +673,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         // A static key is the caller's own, as before: a plain-http base URL is still accepted with one.
         new OpenAICompatibleClient(
           exchange
-            .withBaseUrl(insecureBaseUrl(fake))
+            .withBaseUrl(BaseUrl(insecureBaseUrl(fake)))
             .withCredential(OpenAICompatibleClient.Credential.Static(Secret("k"))),
           OpenAICompatibleDialect.standard(Nil)
         ).close()
@@ -667,7 +694,7 @@ class OpenAICompatibleWorkloadIdentitySpec
     ) =
       OpenAICompatibleConfig.fromValues(
         model = ModelName("m"),
-        baseUrl = baseUrl,
+        baseUrl = BaseUrl(baseUrl),
         apiKey = apiKey.map(Secret(_)),
         headers = headers,
         tokenExchange = Some(tokenExchange)
@@ -731,10 +758,10 @@ class OpenAICompatibleWorkloadIdentitySpec
         valid.withHeaders(Map("authorization" -> "Bearer stale")),
         valid.withApiKey(Secret("k")),
         valid.withTokenExchange(exchange.withTokenUrl("http://ws.example/t")),
-        valid.withBaseUrl("http://ws.example/v1"),
+        valid.withBaseUrl(BaseUrl("http://ws.example/v1")),
         OpenAICompatibleConfig(
           model = ModelName("m"),
-          baseUrl = "https://ws.example/v1",
+          baseUrl = BaseUrl("https://ws.example/v1"),
           headers = Map("Authorization" -> "Bearer stale"),
           tokenExchange = Some(exchange)
         )
@@ -768,7 +795,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       override def invalidate(rejected: Secret): Unit = ()
 
     def settings(credential: OpenAICompatibleClient.Credential) =
-      OpenAICompatibleClient.Settings("p", "P", "m", "https://h/v1", credential, 8192, 2048)
+      OpenAICompatibleClient.Settings("p", "P", ModelName("m"), BaseUrl("https://h/v1"), credential, 8192, 2048)
 
     "refuse a dialect that sets Authorization, in any case" in {
       val credentials = Seq(

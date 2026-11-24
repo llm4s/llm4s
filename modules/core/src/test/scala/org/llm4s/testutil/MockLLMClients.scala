@@ -1,5 +1,6 @@
 package org.llm4s.testutil
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -19,7 +20,7 @@ object MockLLMClients {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )
@@ -48,7 +49,7 @@ object MockLLMClients {
         Completion(
           id = s"test-id-$responseIndex",
           created = Instant.now(),
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )

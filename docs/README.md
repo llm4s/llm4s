@@ -53,9 +53,15 @@ The design documents of the agent framework and its features are in [design/](de
 - **[Migration Guide](reference/migration.md)** - Upgrade between versions
 - **[Scalafix Rules](reference/scalafix.md)** - Code quality
 - **[Glossary](reference/glossary.md)** - Definitions of the terms LLM4S uses
-- **[Test Coverage](reference/test-coverage.md)** - Testing guidelines
-- **[Release Process](reference/release.md)** - How releases work
 - **[Roadmap](reference/roadmap.md)** - Single source of truth for project status
+
+### [Contribute](https://llm4s.org/contribute/)
+
+The contributor pages are published under `/contribute/`; their sources stay in `reference/`.
+
+- **[Contributing Guide](reference/contributing.md)** - How to submit your first PR
+- **[Test Coverage](reference/test-coverage.md)** - Coverage tooling and thresholds
+- **[Release Process](reference/release.md)** - How releases work
 
 ### 🌐 [Community](https://llm4s.org/community/)
 

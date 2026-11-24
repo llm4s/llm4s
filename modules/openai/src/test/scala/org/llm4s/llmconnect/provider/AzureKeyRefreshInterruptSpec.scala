@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.error.{ CancelledError, ConfigurationError }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
@@ -35,7 +36,9 @@ class AzureKeyRefreshInterruptSpec extends AnyWordSpec with Matchers with TestTi
           Left(ConfigurationError("vault down"))
 
       val config =
-        AzureConfig("https://r.openai.azure.com", Secret(""), ModelName("gpt-4o")).withApiKeyProvider(Some(blocking))
+        AzureConfig(BaseUrl("https://r.openai.azure.com"), Secret(""), ModelName("gpt-4o")).withApiKeyProvider(
+          Some(blocking)
+        )
       val client = OpenAIClient(config).fold(e => fail(e.message), identity)
 
       val holder = new Thread(() => client.complete(hello, CompletionOptions()): Unit)

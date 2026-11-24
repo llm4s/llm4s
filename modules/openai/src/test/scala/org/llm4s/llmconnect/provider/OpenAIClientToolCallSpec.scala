@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import com.openai.models.chat.completions.ChatCompletionCreateParams
@@ -24,10 +26,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
 
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 
@@ -67,10 +69,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 
@@ -97,10 +99,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 
@@ -133,10 +135,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 

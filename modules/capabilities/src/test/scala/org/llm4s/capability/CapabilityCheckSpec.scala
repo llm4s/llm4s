@@ -1,5 +1,7 @@
 package org.llm4s.capability
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelRegistryService }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
@@ -52,8 +54,8 @@ class CapabilityCheckSpec extends AnyFlatSpec with Matchers with EitherValues {
       .requireCapabilities[
         Vision & Tools & ParallelTools & StructuredOutput & Reasoning & PromptCaching & SystemMessages
       ](
-        "acme",
-        "omni"
+        ProviderId("acme"),
+        ModelName("omni")
       )
       .value
     capable.client shouldBe theSameInstanceAs(client)
@@ -62,17 +64,20 @@ class CapabilityCheckSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "succeed for one capability" in {
-    client.requireCapabilities[Vision]("acme", "only-Vision").value.capabilities shouldBe List(Capability.Vision)
+    client.requireCapabilities[Vision](ProviderId("acme"), ModelName("only-Vision")).value.capabilities shouldBe List(
+      Capability.Vision
+    )
   }
 
   it should "refuse a model that lacks one, naming it" in {
-    val error = client.requireCapabilities[Vision]("acme", "plain").left.value
+    val error = client.requireCapabilities[Vision](ProviderId("acme"), ModelName("plain")).left.value
     error shouldBe a[ValidationError]
     error.message shouldBe "Invalid capabilities: acme/plain does not support Vision"
   }
 
   it should "list every capability the model lacks, and only those" in {
-    val error = client.requireCapabilities[Tools & Vision & Reasoning]("acme", "only-Vision").left.value
+    val error =
+      client.requireCapabilities[Tools & Vision & Reasoning](ProviderId("acme"), ModelName("only-Vision")).left.value
     error should matchPattern { case ValidationError(_, "capabilities", _) => }
     error.context("violations").split("; ").toList shouldBe List(
       "acme/only-Vision does not support Tools",
@@ -86,17 +91,17 @@ class CapabilityCheckSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "pass the registry's error on for a model it does not know" in {
-    client.requireCapabilities[Vision]("acme", "missing").left.value.message should include(
+    client.requireCapabilities[Vision](ProviderId("acme"), ModelName("missing")).left.value.message should include(
       "Model not found: acme/missing"
     )
   }
 
   it should "use the registry in scope, so a different registry gives a different answer" in {
     val vision = Fixtures.everything.withCapabilities(ModelCapabilities(supportsVision = Some(true)))
-    client.requireCapabilities[Tools]("acme", "omni").isRight shouldBe true
+    client.requireCapabilities[Tools](ProviderId("acme"), ModelName("omni")).isRight shouldBe true
     locally {
       given ModelRegistryService = ModelRegistryService.fromModels(List(vision))
-      client.requireCapabilities[Tools]("acme", "omni").isLeft shouldBe true
+      client.requireCapabilities[Tools](ProviderId("acme"), ModelName("omni")).isLeft shouldBe true
     }
   }
 
@@ -110,7 +115,7 @@ class CapabilityCheckSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "A checked Capable" should "say what it was checked against" in {
     client
-      .requireCapabilities[Vision]("acme", "omni")
+      .requireCapabilities[Vision](ProviderId("acme"), ModelName("omni"))
       .value
       .toString shouldBe "Capable(Vision, checked against acme/omni)"
   }

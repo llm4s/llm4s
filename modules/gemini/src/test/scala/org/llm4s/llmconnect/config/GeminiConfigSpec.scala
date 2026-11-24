@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
@@ -26,7 +27,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val baseUrl = "https://api.example.com"
 
   private val gemini =
-    GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), "https://x.invalid/v1beta", 1048576, 8192)
+    GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), BaseUrl("https://x.invalid/v1beta"), 1048576, 8192)
   private val vertexai = VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), None, 1048576, 8192)
 
   // ---- GeminiConfig.fromValues: base URL normalisation (from ProviderConfigSpec) ----
@@ -34,29 +35,32 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test("GeminiConfig.fromValues appends v1beta when baseUrl is the API host root") {
     val config = GeminiConfig
       .fromValues(
-        modelName = "gemini-1.5-flash",
+        modelName = ModelName("gemini-1.5-flash"),
         apiKey = Secret("test-key"),
-        baseUrl = "https://generativelanguage.googleapis.com"
+        baseUrl = BaseUrl("https://generativelanguage.googleapis.com")
       )
       .value
 
-    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+    config.baseUrl shouldBe BaseUrl("https://generativelanguage.googleapis.com/v1beta")
   }
 
   test("GeminiConfig.fromValues preserves explicit versioned baseUrl") {
     val config = GeminiConfig
       .fromValues(
-        modelName = "gemini-1.5-flash",
+        modelName = ModelName("gemini-1.5-flash"),
         apiKey = Secret("test-key"),
-        baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+        baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta")
       )
       .value
 
-    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+    config.baseUrl shouldBe BaseUrl("https://generativelanguage.googleapis.com/v1beta")
   }
 
   test("GeminiConfig.DEFAULT_BASE_URL is already versioned, so fromValues keeps it as is") {
-    GeminiConfig.fromValues("gemini-2.0-flash", Secret(apiKey), GeminiConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
+    GeminiConfig
+      .fromValues(ModelName("gemini-2.0-flash"), Secret(apiKey), GeminiConfig.DEFAULT_BASE_URL)
+      .value
+      .baseUrl shouldBe
       GeminiConfig.DEFAULT_BASE_URL
   }
 
@@ -64,43 +68,43 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // Model names use a "patch-cov-" prefix so the registry misses and the fallback runs.
 
   test("GeminiConfig fallback returns 1048576 for gemini-2-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-2", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-gemini-2"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-1.5-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.5-pro", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-gemini-1.5-pro"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 32768 for gemini-1.0-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.0", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-gemini-1.0"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 32768
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-pro-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-pro", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-gemini-pro"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-flash-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-flash", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-gemini-flash"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for unknown model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-unknown", Secret(apiKey), baseUrl).value
+    val cfg = GeminiConfig.fromValues(ModelName("patch-cov-unknown"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("VertexAIConfig fallback returns the Gemini defaults for an unknown model") {
-    val cfg = VertexAIConfig.fromValues("patch-cov-unknown", projectId = "my-project").value
+    val cfg = VertexAIConfig.fromValues(ModelName("patch-cov-unknown"), projectId = "my-project").value
     cfg.location shouldBe VertexAIConfig.DEFAULT_LOCATION
     cfg.credentialFilePath shouldBe None
     cfg.contextWindow shouldBe 1048576
@@ -113,9 +117,9 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val secret = "SECRET_TEST_VALUE_12345"
     val gemini = GeminiConfig
       .fromValues(
-        modelName = "gemini-1.5-pro",
+        modelName = ModelName("gemini-1.5-pro"),
         apiKey = Secret(secret),
-        baseUrl = "https://example.invalid"
+        baseUrl = BaseUrl("https://example.invalid")
       )
       .value
     (gemini.toString should not).include(secret)
@@ -160,10 +164,11 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("fromValues returns a Left naming the provider and field for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "Gemini apiKey"       -> GeminiConfig.fromValues("gemini-2.0-flash", Secret(" "), "https://example.invalid"),
-      "Gemini baseUrl"      -> GeminiConfig.fromValues("gemini-2.0-flash", Secret("key"), " "),
-      "Vertex AI projectId" -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = " "),
-      "Vertex AI location"  -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = "p", location = " ")
+      "Gemini apiKey" -> GeminiConfig
+        .fromValues(ModelName("gemini-2.0-flash"), Secret(" "), BaseUrl("https://example.invalid")),
+      "Gemini baseUrl"      -> GeminiConfig.fromValues(ModelName("gemini-2.0-flash"), Secret("key"), BaseUrl(" ")),
+      "Vertex AI projectId" -> VertexAIConfig.fromValues(ModelName("gemini-2.0-flash"), projectId = " "),
+      "Vertex AI location"  -> VertexAIConfig.fromValues(ModelName("gemini-2.0-flash"), projectId = "p", location = " ")
     )
 
     blanks.foreach { case (field, result) =>
@@ -174,7 +179,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("VertexAIConfig.fromValues builds a config for a non-blank project and location") {
-    val config = VertexAIConfig.fromValues("gemini-2.0-flash", projectId = "my-project").value
+    val config = VertexAIConfig.fromValues(ModelName("gemini-2.0-flash"), projectId = "my-project").value
 
     config.projectId shouldBe "my-project"
     config.location shouldBe VertexAIConfig.DEFAULT_LOCATION
@@ -199,7 +204,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val adjusted = gemini
       .withApiKey(Secret("k2"))
       .withModel(ModelName("gemini-2.5-pro"))
-      .withBaseUrl("https://proxy.example.com/v1beta")
+      .withBaseUrl(BaseUrl("https://proxy.example.com/v1beta"))
       .withContextWindow(64000)
       .withReserveCompletion(2048)
       .withTimeouts(timeouts)
@@ -208,7 +213,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     adjusted shouldBe GeminiConfig(
       Secret("k2"),
       ModelName("gemini-2.5-pro"),
-      "https://proxy.example.com/v1beta",
+      BaseUrl("https://proxy.example.com/v1beta"),
       64000,
       2048,
       timeouts = timeouts,

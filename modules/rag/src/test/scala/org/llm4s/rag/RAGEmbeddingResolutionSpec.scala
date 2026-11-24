@@ -34,10 +34,10 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
     val built: mutable.Buffer[EmbeddingProviderConfig] = mutable.Buffer.empty
     val requests: mutable.Buffer[EmbeddingRequest]     = mutable.Buffer.empty
 
-    val id: ProviderId                             = ProviderId("fake")
-    override val aliases: Set[String]              = Set("phony")
-    override val configSpec                        = EmbeddingConfigSpec(defaultModel = Some("fake-default"))
-    override val modelDimensions: Map[String, Int] = Map("fake-default" -> 4, "fake-big" -> 6)
+    val id: ProviderId                = ProviderId("fake")
+    override val aliases: Set[String] = Set("phony")
+    override val configSpec           = EmbeddingConfigSpec(defaultModel = Some(ModelName("fake-default")))
+    override val modelDimensions: Map[ModelName, Int] = Map(ModelName("fake-default") -> 4, ModelName("fake-big") -> 6)
 
     def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       built += config
@@ -70,7 +70,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
 
     ingestOnce(rag)
     fake.built.map(_.model) shouldBe Seq("fake-big")
-    fake.requests.head.model.name shouldBe "fake-big"
+    fake.requests.head.model.name shouldBe ModelName("fake-big")
     fake.requests.head.model.dimensions shouldBe 6
   }
 

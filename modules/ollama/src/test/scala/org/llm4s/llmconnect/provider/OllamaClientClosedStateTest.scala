@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,7 +22,7 @@ class OllamaClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: OllamaConfig = OllamaConfig(
     model = ModelName("llama3"),
-    baseUrl = "http://example.invalid:11434",
+    baseUrl = BaseUrl("http://example.invalid:11434"),
     contextWindow = 8192,
     reserveCompletion = 4096
   )

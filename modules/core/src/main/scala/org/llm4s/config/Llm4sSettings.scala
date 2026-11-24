@@ -349,8 +349,8 @@ final class Llm4sSettings private[llm4s] (source: ConfigSource) {
   def textEmbeddingModel()(using ProviderRegistry): Result[EmbeddingModelConfig] =
     embeddings().flatMap { cfg =>
       ModelDimensionRegistry
-        .getDimension(cfg.providerId.asString, cfg.model.asString)
-        .map(EmbeddingModelConfig(cfg.model.asString, _))
+        .getDimension(cfg.providerId, cfg.model)
+        .map(EmbeddingModelConfig(cfg.model, _))
     }
 }
 

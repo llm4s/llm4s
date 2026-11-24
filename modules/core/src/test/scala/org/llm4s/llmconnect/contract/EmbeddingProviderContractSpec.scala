@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.contract
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.testutil.MockEmbeddingProviders
 import org.scalatest.matchers.should.Matchers
@@ -11,7 +12,7 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class EmbeddingProviderContractSpec extends AnyWordSpec with Matchers with EmbeddingProviderContractBehaviors {
 
-  private val testModel = EmbeddingModelConfig(name = "mock-embed", dimensions = 128)
+  private val testModel = EmbeddingModelConfig(name = ModelName("mock-embed"), dimensions = 128)
 
   "SimpleMock EmbeddingProvider" should {
     embeddingProviderContract(

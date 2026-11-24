@@ -47,7 +47,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     NamedProviderConfig(
       provider = descriptor.id,
       model = ModelName("test-model"),
-      baseUrl = descriptor.configSpec.defaultBaseUrl.map(BaseUrl(_)),
+      baseUrl = descriptor.configSpec.defaultBaseUrl,
       apiKey = Some(ApiKey("test-key")),
       extras = Map(
         "organization"              -> "test-org",
@@ -153,10 +153,10 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     )
     val config = OpenAIConfig
       .fromValues(
-        modelName = "test-model",
+        modelName = ModelName("test-model"),
         apiKey = Secret("test-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .toOption
       .get
@@ -170,7 +170,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     def openAIClientAt(baseUrl: String): LLMClient =
       OpenAIConfig
-        .fromValues("gpt-4o", Secret("sk-test"), baseUrl, None)
+        .fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl), None)
         .flatMap(OpenAIClient(_)) match
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
@@ -232,13 +232,14 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       )(openAIClientAt)
       assertContentParts("openai", respond)(supported*)(openAIClientAt)
       assertContentParts("requesty", respond)(supported*) { baseUrl =>
-        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).toOption.get
+        val config =
+          OpenAIConfig.fromValues(ModelName("openai/gpt-4o-mini"), Secret("rq-key"), BaseUrl(baseUrl)).toOption.get
         RequestyProvider.build(config, ProviderBuildContext.of()).toOption.get
       }
       assertContentParts("azure", respond)(supported*) { baseUrl =>
         val config =
           AzureConfig
-            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
+            .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
             .toOption
             .get
         AzureProvider.build(config, ProviderBuildContext.of()).toOption.get
@@ -253,7 +254,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
           ujson.Obj("error" -> ujson.Obj("message" -> message, "type" -> "invalid_request_error")).render()
         )
       def requestyClientAt(baseUrl: String): LLMClient = {
-        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).toOption.get
+        val config =
+          OpenAIConfig.fromValues(ModelName("openai/gpt-4o-mini"), Secret("rq-key"), BaseUrl(baseUrl)).toOption.get
         RequestyProvider.build(config, ProviderBuildContext.of()).toOption.get
       }
       val found  = """{"id":"gpt-4o","object":"model","created":1,"owned_by":"openai"}"""
@@ -291,7 +293,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         )
       def azureClientAt(suffix: String)(baseUrl: String): LLMClient = {
         val config = AzureConfig
-          .fromValues("my-deploy", Secret("azure-key"), s"$baseUrl$suffix", AzureConfig.DEFAULT_API_VERSION)
+          .fromValues(
+            ModelName("my-deploy"),
+            Secret("azure-key"),
+            BaseUrl(s"$baseUrl$suffix"),
+            AzureConfig.DEFAULT_API_VERSION
+          )
           .toOption
           .get
         AzureProvider.build(config, ProviderBuildContext.of()).toOption.get
@@ -325,7 +332,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       assertModelCallContract(OpenAIContractFixtures.replies) { baseUrl =>
         val config =
           AzureConfig
-            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
+            .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
             .toOption
             .get
         AzureProvider.build(config, ProviderBuildContext.of()).toOption.get
@@ -338,7 +345,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.sendJsonResponse(_, 400, body)) { baseUrl =>
         val config =
           AzureConfig
-            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
+            .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
             .toOption
             .get
         val client = AzureProvider.build(config, ProviderBuildContext.of()).toOption.get

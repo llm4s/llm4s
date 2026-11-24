@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ModelCallCompleted, ToolExecutionOutcome }
@@ -50,11 +51,11 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text), usage = usage)
       .withFinishReason(FinishReason.Stop)
 
   private def calling(call: ToolCall): Completion =
-    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
+    Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)
 
   private val toolCall                       = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion = calling(toolCall)
@@ -167,7 +168,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val mixed = Completion(
       "turn-1",
       Instant.EPOCH,
-      "test-model",
+      ModelName("test-model"),
       AssistantMessage(None, Seq(handoff, toolCall)),
       usage
     )
@@ -335,7 +336,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val runtime = GraphRuntime(store)
     val call    = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
-      Right(Completion("c1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)),
+      Right(Completion("c1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)),
       Right(answer(s"the answer is $marker"))
     )
     val agent = Agent
@@ -417,7 +418,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val judging = new AgentMiddleware:
       val id = MiddlewareId("judge")
       override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
-        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
     val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.adjustments) } shouldBe
@@ -519,7 +520,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val judging = new AgentMiddleware:
       val id = MiddlewareId("judge")
       override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
-        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
     val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.finishReason) } shouldBe

@@ -73,7 +73,7 @@ private[doctor] object DoctorPorts {
       conversation <- Conversation.userOnly("Reply with the single word: ok")
       client       <- LLMConnect.getClient(config)(using service, registry)
       completion   <- Using.resource(client)(_.complete(conversation, CompletionOptions().withMaxTokens(8)))
-    } yield completion.model
+    } yield completion.model.asString
 }
 
 /**
@@ -404,7 +404,7 @@ object Doctor {
     options: DoctorOptions,
     ports: DoctorPorts
   ): DoctorCheck = {
-    val base = section.baseUrl.map(_.asUrl).orElse(descriptor.configSpec.defaultBaseUrl)
+    val base = section.baseUrl.orElse(descriptor.configSpec.defaultBaseUrl).map(_.asUrl)
     base match {
       case Some(raw) if isLoopback(raw) =>
         val url = DoctorUrls.display(raw)

@@ -1,5 +1,6 @@
 package org.llm4s.knowledgegraph.extraction
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
@@ -13,7 +14,7 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
 
   private def makeCompletion(content: String): Completion = Completion(
     id = "test-id",
-    model = "test-model",
+    model = ModelName("test-model"),
     created = Instant.ofEpochSecond(1234567890L),
     message = org.llm4s.llmconnect.model.AssistantMessage(Some(content), Nil),
     usage = None

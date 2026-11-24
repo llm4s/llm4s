@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 
 import org.llm4s.testutil.TestTimeLimit
@@ -59,7 +61,7 @@ class AgentOpenAIStreamingToolsSpec extends AnyFlatSpec with TestTimeLimit with 
   private val answerTurn = LocalProviderTestServer.openAISseBody(Seq("17 * 23", " = ", "391."), model)
 
   private def client(baseUrl: String): OpenAIClient =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), baseUrl).flatMap(OpenAIClient(_)) match
+    OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl(baseUrl)).flatMap(OpenAIClient(_)) match
       case Right(c)    => c
       case Left(error) => fail(s"could not build an OpenAIClient: ${error.message}")
 

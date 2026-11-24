@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
@@ -23,7 +24,12 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       options: CompletionOptions
     ): Result[Completion] =
       Right(
-        Completion(id = "test-id", created = Instant.EPOCH, model = "test-model", message = AssistantMessage(answer))
+        Completion(
+          id = "test-id",
+          created = Instant.EPOCH,
+          model = ModelName("test-model"),
+          message = AssistantMessage(answer)
+        )
       )
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -35,7 +36,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
 
   private val config = OllamaConfig(
     model = ModelName(testModel),
-    baseUrl = baseUrl,
+    baseUrl = BaseUrl(baseUrl),
     contextWindow = 8192,
     reserveCompletion = 4096
   )

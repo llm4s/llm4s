@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.llmconnect.provider.GeminiThinking.{ Family, Plan }
 import org.llm4s.model.{ ModelCapabilities, ModelRegistryService }
@@ -11,7 +12,8 @@ class GeminiThinkingSpec extends AnyFlatSpec with Matchers {
 
   private given registry: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def caps(model: String): Option[ModelCapabilities] = registry.lookup(model).toOption.map(_.capabilities)
+  private def caps(model: String): Option[ModelCapabilities] =
+    registry.lookup(ModelName(model)).toOption.map(_.capabilities)
 
   private def plan(model: String, options: CompletionOptions): Plan = GeminiThinking.plan(model, options, caps(model))
 

@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -23,7 +24,7 @@ class MemoryEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService =
     Llm4sConfig.modelRegistryService().fold(e => fail(s"no model registry: ${e.message}"), identity)
 
-  private val modelConfig = EmbeddingModelConfig("purpose-test-model", 3)
+  private val modelConfig = EmbeddingModelConfig(ModelName("purpose-test-model"), 3)
 
   /** Records every request it is asked, and answers with the same vector for every text. */
   final private class RecordingProvider extends EmbeddingProvider {

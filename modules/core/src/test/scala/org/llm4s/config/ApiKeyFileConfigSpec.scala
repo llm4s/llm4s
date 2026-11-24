@@ -35,8 +35,9 @@ class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues w
 
   /** A provider whose key is read when its config is built, not per request. */
   private object NoRotation extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("norotation")
-    val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl)
+    val id: ProviderId = ProviderId("norotation")
+    val configSpec: ProviderConfigSpec =
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl))
     def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       ProviderDescriptor.requireApiKey(context.providerName, section).map(key => StaticKeyConfig(key.reveal, id))
     def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -44,8 +45,9 @@ class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues w
 
   /** A provider that takes no API key, as Ollama and Bedrock do. */
   private object Keyless extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("keylessprovider")
-    val configSpec: ProviderConfigSpec = ProviderConfigSpec(defaultBaseUrl = Some(FixtureChatProvider.DefaultBaseUrl))
+    val id: ProviderId = ProviderId("keylessprovider")
+    val configSpec: ProviderConfigSpec =
+      ProviderConfigSpec(defaultBaseUrl = Some(BaseUrl(FixtureChatProvider.DefaultBaseUrl)))
     def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] = Right(
       StaticKeyConfig("", id)
     )

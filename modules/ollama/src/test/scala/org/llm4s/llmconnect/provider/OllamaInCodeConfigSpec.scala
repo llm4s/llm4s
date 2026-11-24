@@ -32,7 +32,7 @@ class OllamaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
 
   "llm4s-ollama, configured in code" should {
     "build an Ollama chat client from a model and base URL" in {
-      assertBuilds(OllamaConfig.fromValues("llama3", "http://localhost:11434").value, "ollama")
+      assertBuilds(OllamaConfig.fromValues(ModelName("llama3"), BaseUrl("http://localhost:11434")).value, "ollama")
     }
 
     "build an Ollama embedding client from a base URL and model" in {

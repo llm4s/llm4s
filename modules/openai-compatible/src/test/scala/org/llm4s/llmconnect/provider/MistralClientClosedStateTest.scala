@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
@@ -23,7 +24,7 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: MistralConfig = MistralConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = ModelName("mistral-small-latest"),
-    baseUrl = "https://example.invalid",
+    baseUrl = BaseUrl("https://example.invalid"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )

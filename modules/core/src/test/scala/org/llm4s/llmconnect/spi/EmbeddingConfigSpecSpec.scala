@@ -20,8 +20,8 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
   /** A spec with no field at its default, so a setter that resets another field shows up. */
   private val full = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://default.acme.example"),
-    defaultModel = Some("default-model"),
+    defaultBaseUrl = Some(BaseUrl("https://default.acme.example")),
+    defaultModel = Some(ModelName("default-model")),
     defaultApiKey = Some("default-acme-key"),
     apiKeyEnv = Seq("ACME_API_KEY"),
     modelEnv = Some("ACME_MODEL")
@@ -33,11 +33,11 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
   "resolveModel" should {
 
-    val withDefault = EmbeddingConfigSpec(defaultModel = Some("default-model"))
+    val withDefault = EmbeddingConfigSpec(defaultModel = Some(ModelName("default-model")))
     val section     = EmbeddingProviderSection(model = Some(ModelName("section-model")))
 
     "prefer the override to the section and the default" in {
-      EmbeddingConfigSpec.resolveModel(id, section, Some("override-model"), withDefault) shouldBe
+      EmbeddingConfigSpec.resolveModel(id, section, Some(ModelName("override-model")), withDefault) shouldBe
         Right(ModelName("override-model"))
     }
 
@@ -50,8 +50,12 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "skip a blank or whitespace-only override" in {
-      EmbeddingConfigSpec.resolveModel(id, section, Some(""), withDefault) shouldBe Right(ModelName("section-model"))
-      EmbeddingConfigSpec.resolveModel(id, section, Some("   "), withDefault) shouldBe Right(ModelName("section-model"))
+      EmbeddingConfigSpec.resolveModel(id, section, Some(ModelName("")), withDefault) shouldBe Right(
+        ModelName("section-model")
+      )
+      EmbeddingConfigSpec.resolveModel(id, section, Some(ModelName("   ")), withDefault) shouldBe Right(
+        ModelName("section-model")
+      )
     }
 
     "skip a blank or whitespace-only section model" in {
@@ -62,7 +66,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "trim the override and the section model" in {
-      EmbeddingConfigSpec.resolveModel(id, noSection, Some("  override-model "), withDefault) shouldBe
+      EmbeddingConfigSpec.resolveModel(id, noSection, Some(ModelName("  override-model ")), withDefault) shouldBe
         Right(ModelName("override-model"))
       val padded = EmbeddingProviderSection(model = Some(ModelName(" section-model ")))
       EmbeddingConfigSpec.resolveModel(id, padded, None, withDefault) shouldBe Right(ModelName("section-model"))
@@ -89,7 +93,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
   "resolveBaseUrl" should {
 
-    val withDefault = EmbeddingConfigSpec(defaultBaseUrl = Some("https://default.acme.example"))
+    val withDefault = EmbeddingConfigSpec(defaultBaseUrl = Some(BaseUrl("https://default.acme.example")))
 
     "prefer the section to the default" in {
       val section = EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://section.acme.example")))
@@ -197,29 +201,31 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "set and clear defaultBaseUrl" in {
-      full.withDefaultBaseUrl("https://other.example") shouldBe EmbeddingConfigSpec(
+      full.withDefaultBaseUrl(BaseUrl("https://other.example")) shouldBe EmbeddingConfigSpec(
         requiresApiKey = true,
-        defaultBaseUrl = Some("https://other.example"),
+        defaultBaseUrl = Some(BaseUrl("https://other.example")),
         defaultModel = full.defaultModel,
         defaultApiKey = full.defaultApiKey,
         apiKeyEnv = full.apiKeyEnv,
         modelEnv = full.modelEnv
       )
-      full.withDefaultBaseUrl(Some("https://other.example")) shouldBe full.withDefaultBaseUrl("https://other.example")
+      full.withDefaultBaseUrl(Some(BaseUrl("https://other.example"))) shouldBe full.withDefaultBaseUrl(
+        BaseUrl("https://other.example")
+      )
       full.withDefaultBaseUrl(None).defaultBaseUrl shouldBe None
       full.withDefaultBaseUrl(None).withDefaultBaseUrl(full.defaultBaseUrl) shouldBe full
     }
 
     "set and clear defaultModel" in {
-      full.withDefaultModel("other-model") shouldBe EmbeddingConfigSpec(
+      full.withDefaultModel(ModelName("other-model")) shouldBe EmbeddingConfigSpec(
         requiresApiKey = true,
         defaultBaseUrl = full.defaultBaseUrl,
-        defaultModel = Some("other-model"),
+        defaultModel = Some(ModelName("other-model")),
         defaultApiKey = full.defaultApiKey,
         apiKeyEnv = full.apiKeyEnv,
         modelEnv = full.modelEnv
       )
-      full.withDefaultModel(Some("other-model")) shouldBe full.withDefaultModel("other-model")
+      full.withDefaultModel(Some(ModelName("other-model"))) shouldBe full.withDefaultModel(ModelName("other-model"))
       full.withDefaultModel(None).defaultModel shouldBe None
       full.withDefaultModel(None).withDefaultModel(full.defaultModel) shouldBe full
     }

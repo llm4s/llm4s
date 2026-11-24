@@ -93,7 +93,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
         Completion(
           id = s"mock-completion-${System.currentTimeMillis()}",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(text = Some(content)),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )

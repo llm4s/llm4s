@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.llmconnect.model.{
@@ -314,7 +315,7 @@ object SmokeChecks {
 
   /** The completion a consumer of `onChunk` would rebuild from `chunks`. */
   private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
-    val accumulator = StreamingAccumulator("")
+    val accumulator = StreamingAccumulator(ModelName(""))
     chunks.foreach(accumulator.addChunk)
     accumulator.toCompletion.left
       .map(e => s"the streamed chunks did not reassemble: ${e.message}")

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
@@ -35,9 +36,9 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private def config(key: String): GeminiConfig =
     GeminiConfig
       .fromValues(
-        modelName = "gemini-1.5-flash",
+        modelName = ModelName("gemini-1.5-flash"),
         apiKey = Secret(key),
-        baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+        baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta")
       )
       .value
 

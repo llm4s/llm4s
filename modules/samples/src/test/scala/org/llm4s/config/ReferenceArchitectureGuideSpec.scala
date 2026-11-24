@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.configpolicy.{ CatalogEnvironment, ConfigPolicy, ConfigPolicyEngine }
 import org.llm4s.llmconnect.LLMConnect
@@ -96,7 +97,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
     "load through Llm4sConfig as the default provider, with the tenant headers, the window and the timeouts" in {
       val cfg = gatewayConfig(keyFile("sk-gateway-0001"))
 
-      cfg.baseUrl shouldBe Gateway
+      cfg.baseUrl.asUrl shouldBe Gateway
       cfg.model.asString shouldBe "gpt-4o-mini"
       cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
       cfg.contextWindow shouldBe 128000
@@ -166,7 +167,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
     "load beside the gateway, with its own key file and the same tenant headers" in {
       load(withLocal(hocon(2), DrKey, keyFile("sk-gateway-dr-0001")), Some("gateway-dr")) match
         case cfg: OpenAICompatibleConfig =>
-          cfg.baseUrl shouldBe "https://llm-gateway.eu-west-1.example.internal/v1"
+          cfg.baseUrl shouldBe BaseUrl("https://llm-gateway.eu-west-1.example.internal/v1")
           cfg.model.asString shouldBe "gpt-4o-mini"
           cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
           cfg.contextWindow shouldBe 128000
@@ -179,7 +180,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
     "load Azure OpenAI with Entra ID and no key, and Bedrock on its regional endpoint" in {
       load(hocon(1), Some("azure-private")) match
         case azure: AzureConfig =>
-          azure.endpoint shouldBe "https://contoso-llm.openai.azure.com"
+          azure.endpoint shouldBe BaseUrl("https://contoso-llm.openai.azure.com")
           azure.model.asString shouldBe "gpt-4o"
           azure.tokenProvider should not be empty
         case other => fail(s"expected an Azure section, got $other")

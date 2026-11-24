@@ -123,7 +123,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("anthropic-proxy")) match
-        case Right(anthropic: AnthropicConfig) => anthropic.baseUrl shouldBe "https://anthropic-proxy.example"
+        case Right(anthropic: AnthropicConfig) => anthropic.baseUrl shouldBe BaseUrl("https://anthropic-proxy.example")
         case other                             => fail(s"Expected AnthropicConfig, got $other")
     }
   }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
@@ -91,7 +92,7 @@ class GeminiApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
         sendJsonResponse(exchange, 200, reply)
       } { baseUrl =>
         val config = GeminiConfig(Secret(""), ModelName("gemini-2.5-flash"))
-          .withBaseUrl(baseUrl)
+          .withBaseUrl(BaseUrl(baseUrl))
           .withApiKeyProvider(Some(throwing))
         config.toString should include("apiKeyProvider=")
         config.withApiKeyProvider(None).apiKeyProvider shouldBe None

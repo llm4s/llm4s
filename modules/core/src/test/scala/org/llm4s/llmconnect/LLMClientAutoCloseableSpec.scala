@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -17,7 +18,7 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
   private val stubCompletion = Completion(
     id = "test-1",
     created = Instant.EPOCH,
-    model = "test",
+    model = ModelName("test"),
     message = AssistantMessage("ok")
   )
 

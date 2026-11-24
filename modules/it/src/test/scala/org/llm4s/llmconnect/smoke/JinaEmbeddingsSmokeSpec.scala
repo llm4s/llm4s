@@ -39,7 +39,7 @@ class JinaEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
     )
 
   private def request(texts: String*): EmbeddingRequest =
-    EmbeddingRequest(texts, EmbeddingModelConfig(Model, ExpectedDimensions))
+    EmbeddingRequest(texts, EmbeddingModelConfig(ModelName(Model), ExpectedDimensions))
 
   "Jina AI embeddings" should "embed 3 sentences with jina-embeddings-v3" in {
     Tier.require(jinaApiKey.isDefined, "JINA_API_KEY not set")
