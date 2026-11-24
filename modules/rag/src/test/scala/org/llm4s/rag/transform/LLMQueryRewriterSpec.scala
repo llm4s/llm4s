@@ -33,17 +33,14 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = s"mock-${System.currentTimeMillis()}",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
-          message = AssistantMessage(contentOpt = Some(response)),
+          message = AssistantMessage(text = Some(response)),
           usage = Some(TokenUsage(promptTokens = 50, completionTokens = 20, totalTokens = 70))
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -58,9 +55,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(ServiceError(500, "mock-provider", "LLM service unavailable"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -137,7 +132,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
 
     rewriter.transform("test")
     mock.callCount shouldBe 1
-    mock.lastOptions.get.temperature shouldBe 0.0
+    mock.lastOptions.get.temperature shouldBe Some(0.0)
   }
 
   // ==========================================================================

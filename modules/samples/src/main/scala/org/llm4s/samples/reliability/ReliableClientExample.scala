@@ -51,7 +51,6 @@ object ReliableClientExample {
   private val dummyCompletion = Completion(
     id = "dummy-id",
     created = Instant.now(),
-    content = "Hello! I am a reliable assistant.",
     model = "mock-model",
     message = AssistantMessage(content = "Hello! I am a reliable assistant.", toolCalls = List.empty)
   )
@@ -249,9 +248,7 @@ object ReliableClientExample {
       behavior()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

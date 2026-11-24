@@ -252,7 +252,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         toolCall.arguments shouldBe ujson.Obj("location" -> "Paris")
         (toolCall.id should fullyMatch).regex(callId)
         completion.message.toolCalls shouldBe completion.toolCalls
-        completion.message.contentOpt shouldBe None
+        completion.message.text shouldBe None
         completion.content shouldBe ""
         completion.hasToolCalls shouldBe true
       }
@@ -331,7 +331,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val completion = ask(client).toOption.get
 
         completion.content shouldBe "Let me check."
-        completion.message.contentOpt shouldBe Some("Let me check.")
+        completion.message.text shouldBe Some("Let me check.")
         completion.toolCalls should have size 1
       }
     }
@@ -396,7 +396,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     "read no tool calls from a missing, null or empty `tool_calls`" in {
       def callsOf(message: ujson.Obj): List[ToolCall] = {
         var calls = List.empty[ToolCall]
-        withOllama(rawReply(message))((client, _) => calls = ask(client).toOption.get.toolCalls)
+        withOllama(rawReply(message))((client, _) => calls = ask(client).toOption.get.toolCalls.toList)
         calls
       }
 
@@ -460,9 +460,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
       client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
-        CompletionOptions().withTools(tools),
-        _ => ()
-      )
+        CompletionOptions().withTools(tools)
+      )(_ => ())
 
     def validation(result: Result[Completion]): ValidationError =
       result.left.toOption.getOrElse(fail("expected a failure")) match {
@@ -565,9 +564,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       val chunks = ListBuffer.empty[StreamedChunk]
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
-        CompletionOptions().withTools(Seq(weatherTool)),
-        chunks += _
-      )
+        CompletionOptions().withTools(Seq(weatherTool))
+      )(chunks += _)
       (result, chunks.toList)
     }
 
@@ -782,7 +780,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
     "keep any other value as Other, and none as Other(\"\")" in {
       OllamaClient.finishReason(last(Some("load")), calledTools = false) shouldBe FinishReason.Other("load")
-      OllamaClient.finishReason(last(None), calledTools = false) shouldBe FinishReason.Other("")
+      OllamaClient.finishReason(last(None), calledTools = false) shouldBe FinishReason.Unknown
     }
 
     "come from a non-streaming reply's done_reason, on the Completion" in {
@@ -800,14 +798,14 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.Length)
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.Stop)
-        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Unknown)
       }
     }
 
     "end a streamed reply cut at the limit with Length, on the chunk and the Completion" in {
       withOllama(ndjson(line("Hel"), last(Some("length")))) { (client, _) =>
         val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-        val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), chunks += _)
+        val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(chunks += _)
         chunks.last.finishReason shouldBe Some(FinishReason.Length)
         result.map(_.finishReason) shouldBe Right(FinishReason.Length)
       }

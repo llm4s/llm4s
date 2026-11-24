@@ -237,7 +237,7 @@ Get real-time token-by-token responses.
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 
 val conversation = Conversation(Seq(UserMessage("Tell me a story")))
-client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
+client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
 ```
 
 [Learn more →](/guide/agents/streaming)
@@ -401,10 +401,7 @@ def streamChat(message: String): Unit = {
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    _ <- client.streamComplete(
-      Conversation(Seq(UserMessage(message))),
-      onChunk = chunk => chunk.content.foreach(print)
-    )
+    _ <- client.streamComplete(Conversation(Seq(UserMessage(message))))(chunk => chunk.content.foreach(print))
   } yield println()
 
   result.left.foreach(error => println(s"Error: $error"))

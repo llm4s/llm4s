@@ -129,7 +129,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
 
         result.isRight shouldBe true
         exchanges should have size 1
-        exchanges.head.provider shouldBe "zai"
+        exchanges.head.provider.asString shouldBe "zai"
         exchanges.head.model shouldBe Some("GLM-4.7")
         exchanges.head.requestBody should include("hello")
         exchanges.head.responseBody.value should include("Logged response")
@@ -145,7 +145,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       val client = new ZaiClient(localConfig(baseUrl))
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+      val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
       result.isRight shouldBe true
       val completion = result.toOption.get
@@ -164,13 +164,13 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new ZaiClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
-      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
       result.isRight shouldBe true
       exchanges should have size 1
-      exchanges.head.provider shouldBe "zai"
+      exchanges.head.provider.asString shouldBe "zai"
       exchanges.head.requestBody should include("\"stream\":true")
       exchanges.head.responseBody.value should include("data:")
       exchanges.head.responseBody.value should include("Hello")
@@ -182,7 +182,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
     withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 429, """{"error":"Rate limited"}""")) {
       baseUrl =>
         val client = new ZaiClient(localConfig(baseUrl))
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+        val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
         result.isLeft shouldBe true
         result.swap.toOption.get shouldBe a[RateLimitError]

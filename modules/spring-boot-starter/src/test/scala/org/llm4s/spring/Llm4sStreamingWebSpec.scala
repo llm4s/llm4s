@@ -31,12 +31,12 @@ object Llm4sStreamingWebSpec {
   /** A model that streams [[Pieces]], or fails when the query is `fail`. */
   val streaming: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      streamComplete(c, o, _ => ())
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      streamComplete(c, o)(_ => ())
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       if (c.messages.lastOption.exists(_.content == "fail")) Left(ServiceError(503, "scripted", "the model is down"))
       else {
         Pieces.foreach(p => f(StreamedChunk(id = "c", content = Some(p))))
-        Right(Completion("id", Instant.EPOCH, Pieces.mkString, "m", AssistantMessage(Pieces.mkString)))
+        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(Pieces.mkString)))
       }
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

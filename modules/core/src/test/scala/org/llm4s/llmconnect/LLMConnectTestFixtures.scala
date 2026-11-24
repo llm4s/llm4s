@@ -36,7 +36,7 @@ object LLMConnectTestFixtures {
   )
 
   val assistantWithToolCalls: AssistantMessage = AssistantMessage(
-    contentOpt = Some("I'll check the weather for you."),
+    text = Some("I'll check the weather for you."),
     toolCalls = Seq(sampleToolCall)
   )
 

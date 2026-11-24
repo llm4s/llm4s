@@ -119,13 +119,11 @@ final class ReliableClient private (
         .getOrElse(executeWithReliability(rateLimited(() => underlying.complete(conversation, options))))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     if (!config.enabled) {
-      underlying.streamComplete(conversation, options, onChunk)
+      underlying.streamComplete(conversation, options)(onChunk)
     } else
       configError.map(error => Left(error): Result[Completion]).getOrElse {
         // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
@@ -145,7 +143,7 @@ final class ReliableClient private (
           }
         }
         executeWithReliability(
-          rateLimited(() => underlying.streamComplete(conversation, options, tracking)),
+          rateLimited(() => underlying.streamComplete(conversation, options)(tracking)),
           canRetry = () => !delivered.get(),
           callerFailed = () => callerFailed.get()
         )

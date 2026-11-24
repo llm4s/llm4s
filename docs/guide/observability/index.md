@@ -622,7 +622,7 @@ Pass the collector to the client when you build it:
 
 ```scala
 import org.llm4s.config.{Llm4sConfig, MetricsConfigLoader}
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 
 val application = for {
@@ -631,7 +631,7 @@ val application = for {
   given ModelRegistryService = registryService
   configured <- MetricsConfigLoader.default()
   (metrics, endpoint) = configured
-  client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+  client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)).left.map { error =>
     endpoint.foreach(_.stop()) // release the server if client creation fails
     error
   }
@@ -750,7 +750,7 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 import org.llm4s.metrics.MetricsCollector
 
 val both = MetricsCollector.compose(metrics, myCollector)
-// LLMConnect.getClient(providerConfig, both)
+// LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = both))
 ```
 
 ### Agent runtime metrics

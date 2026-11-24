@@ -50,9 +50,7 @@ final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveC
       .attempt(chatModel.call(SpringAiMapping.prompt(conversation, options, chatModel.getOptions)))
       .flatMap(SpringAiMapping.completion)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val acc = new SpringAiLlmClient.Accumulator
@@ -122,13 +120,11 @@ object SpringAiLlmClient {
       Completion(
         id = id.getOrElse(UUID.randomUUID().toString),
         created = Instant.now(),
-        content = content,
         model = model.getOrElse(""),
-        message = AssistantMessage(contentOpt = Option(content).filter(_.nonEmpty), toolCalls = calls),
-        toolCalls = calls.toList,
+        message = AssistantMessage(text = Option(content).filter(_.nonEmpty), toolCalls = calls),
         usage = usage,
         // Spring AI's reason as the model reported it: it has no common vocabulary to map
-        finishReason = FinishReason.Other(finish.getOrElse(""))
+        finishReason = finish.filter(_.nonEmpty).fold(FinishReason.Unknown)(FinishReason.Other(_))
       )
     }
   }

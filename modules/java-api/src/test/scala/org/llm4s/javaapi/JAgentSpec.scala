@@ -23,18 +23,9 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       options: CompletionOptions
     ): Result[Completion] =
       Right(
-        Completion(
-          id = "test-id",
-          created = Instant.EPOCH,
-          content = answer,
-          model = "test-model",
-          message = AssistantMessage(answer),
-          toolCalls = List.empty
-        )
+        Completion(id = "test-id", created = Instant.EPOCH, model = "test-model", message = AssistantMessage(answer))
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -44,9 +35,7 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def failingClient(error: LLMError): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(error)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(error)
     override def getContextWindow(): Int     = 4096

@@ -123,7 +123,7 @@ private[provider] object GeminiThoughtSignatures {
    */
   def parts(provider: String, message: AssistantMessage): Seq[ujson.Value] = {
     val signed = Replay.from(provider, message.thinking)
-    val text   = message.contentOpt.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
+    val text   = message.text.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
     val calls = message.toolCalls.map { tc =>
       def rebuilt = ujson.Obj("functionCall" -> ujson.Obj("name" -> tc.name, "args" -> tc.arguments))
       val part = signed.calls.get(tc.id) match {

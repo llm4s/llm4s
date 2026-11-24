@@ -69,13 +69,11 @@ object RagFakes {
         val answer = prompt.linesIterator
           .collectFirst { case l if l.startsWith("[1] ") => l.stripPrefix("[1] ") }
           .getOrElse(NoContext)
-        Completion("id", Instant.EPOCH, answer, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
+        Completion("id", Instant.EPOCH, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
       }
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

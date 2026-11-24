@@ -68,7 +68,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   // ---- "From code": a JSONL file for this run
 
   def jsonlLogging(dir: Path): Result[ProviderExchangeLogging] =
-    ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.enabled)
+    ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.Enabled(_))
 
   // ---- "Writing your own sink"
 
@@ -91,7 +91,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
 
   private def clientWith(baseUrl: String, sink: ProviderExchangeSink): LLMClient =
     LLMConnect
-      .getClient(config(baseUrl), LlmClientOptions(exchangeLogging = ProviderExchangeLogging.enabled(sink)))
+      .getClient(config(baseUrl), LlmClientOptions(exchangeLogging = ProviderExchangeLogging.Enabled(sink)))
       .getOrElse(fail("could not build the client"))
 
   private def freeLoopbackUrl(): String = {
@@ -118,7 +118,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
         recorded should have size 1
         val exchange = recorded.head
         noException should be thrownBy UUID.fromString(exchange.exchangeId)
-        exchange.provider shouldBe "deepseek"
+        exchange.provider.asString shouldBe "deepseek"
         exchange.model shouldBe Some("deepseek-chat")
         exchange.requestId shouldBe None
         exchange.correlationId shouldBe None
@@ -166,7 +166,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
       baseUrl =>
         val (sink, recorded) = collecting()
         clientWith(baseUrl, sink)
-          .streamComplete(conversation("stream it"), CompletionOptions(), _ => ())
+          .streamComplete(conversation("stream it"), CompletionOptions())(_ => ())
           .isRight shouldBe true
 
         recorded should have size 1
@@ -290,7 +290,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   it should "write a line of the shape the guide shows" in {
     // the line in the guide, copied from a real run (the ids and times differ from run to run)
     val example =
-      """{"exchange_id":"bd1e7d34-3c95-44e5-a9be-428bf3ca85f1","provider":"deepseek","model":"deepseek-chat","request_id":"","correlation_id":"","started_at":"2026-10-07T10:27:19.668236Z","completed_at":"2026-10-07T10:27:19.676649Z","duration_ms":"8","outcome":"Error","request_body":"{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"will fail\"}],\"temperature\":0.7,\"top_p\":1}","response_body":"{\"error\":\"Unauthorized\"}","error_message":"Authentication failed for deepseek: Unauthorized. Check that the key is this provider's, and that its project or organisation has access to the model. See https://llm4s.org/getting-started/troubleshooting#authentication-failed"}"""
+      """{"exchange_id":"bd1e7d34-3c95-44e5-a9be-428bf3ca85f1","provider":"deepseek","model":"deepseek-chat","request_id":"","correlation_id":"","started_at":"2026-10-07T10:27:19.668236Z","completed_at":"2026-10-07T10:27:19.676649Z","duration_ms":"8","outcome":"Error","request_body":"{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"will fail\"}]}","response_body":"{\"error\":\"Unauthorized\"}","error_message":"Authentication failed for deepseek: Unauthorized. Check that the key is this provider's, and that its project or organisation has access to the model. See https://llm4s.org/getting-started/troubleshooting#authentication-failed"}"""
 
     val dir  = Files.createTempDirectory("exchange-guide-shape")
     val sink = ProviderExchangeSink.createRunScopedJsonl(dir).getOrElse(fail("could not create the sink"))

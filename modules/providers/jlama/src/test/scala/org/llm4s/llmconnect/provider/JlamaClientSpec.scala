@@ -165,7 +165,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
     "deliver each token as a chunk, then a chunk with the finish reason, all with the completion's id" in {
       val chunks = mutable.Buffer.empty[StreamedChunk]
       val completion = client(new ScriptedEngine(tokens = Seq("A", "B", "C")))
-        .streamComplete(hello, CompletionOptions(), chunks += _)
+        .streamComplete(hello, CompletionOptions())(chunks += _)
         .fold(e => fail(e.message), identity)
       chunks.flatMap(_.content) shouldBe Seq("A", "B", "C")
       chunks.last.finishReason shouldBe Some(FinishReason.Stop)
@@ -176,7 +176,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
     "report a reply cut off by the token limit as length" in {
       val chunks = mutable.Buffer.empty[StreamedChunk]
       val result =
-        client(new ScriptedEngine(finish = JlamaFinish.Length)).streamComplete(hello, CompletionOptions(), chunks += _)
+        client(new ScriptedEngine(finish = JlamaFinish.Length)).streamComplete(hello, CompletionOptions())(chunks += _)
       chunks.last.finishReason shouldBe Some(FinishReason.Length)
       result.map(_.finishReason) shouldBe Right(FinishReason.Length)
     }

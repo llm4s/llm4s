@@ -277,7 +277,7 @@ final class RAGPipeline private (
       )
     )
 
-    val options = CompletionOptions(temperature = 0.0, maxTokens = Some(500))
+    val options = CompletionOptions(temperature = Some(0.0), maxTokens = Some(500))
 
     llmClient.complete(conversation, options).map(c => (c.content, c.usage))
   }

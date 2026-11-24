@@ -413,7 +413,7 @@ further code: `PrometheusMetrics` as `llm4s_retries_total`, `llm4s_circuit_break
 `llm4s_reliability_errors_total`, `MicrometerMetrics` under the same names. `increment` defaults to a no-op;
 `observeRequest`, `addTokens` and `recordCost` must be implemented. To also get per-call
 latency and token metrics from the provider client, pass the same collector to
-`LLMConnect.getClient(providerConfig, metrics)`. Both layers then report a failed call: the
+`LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))`. Both layers then report a failed call: the
 provider client once per attempt (`observeRequest`) and `ReliableClient` once for the final failure
 (`ReliabilityMetrics.Errors`). Both backends keep the two apart (`llm4s_errors_total` and
 `llm4s_reliability_errors_total`), so neither counts a failure twice; a collector of your own should do the same.
@@ -874,7 +874,7 @@ All reliability features are **thread-safe**:
 
 ```scala
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliableClient, ReliabilityConfig, RetryPolicy }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage, CompletionOptions }
 import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
@@ -909,7 +909,7 @@ object ProductionExample {
       providerConfig <- Llm4sConfig.defaultProvider()
       registry       <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
-      baseClient     <- LLMConnect.getClient(providerConfig, metrics)
+      baseClient     <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))
     } yield ReliableClient(baseClient, providerConfig.providerId.asString, reliabilityConfig).withMetrics(metrics)
 
     clientResult match {

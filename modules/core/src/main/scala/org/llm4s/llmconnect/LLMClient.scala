@@ -46,9 +46,7 @@ trait LLMClient extends AutoCloseable {
    * @param onChunk callback invoked for each chunk; called synchronously, avoid blocking operations
    * @return Right(Completion) with the complete accumulated response, or Left(LLMError) on failure
    */
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion]
 

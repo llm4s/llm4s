@@ -26,9 +26,7 @@ final private[agent] class DeterministicFakeLLMClient(
   ): Result[Completion] =
     Right(response)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -66,9 +64,7 @@ final private[agent] class TwoTurnDeterministicFakeLLMClient(
     if (hasToolResult || hasAssistantMessage) Right(second) else Right(first)
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -97,9 +93,7 @@ final private[agent] class FailingLLMClient(error: LLMError) extends LLMClient {
   ): Result[Completion] =
     Left(error)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     Left(error)
@@ -132,9 +126,7 @@ final private[agent] class NTurnFakeLLMClient(responses: Completion*) extends LL
     else Right(responses(index % responses.size))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -162,11 +154,10 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
       model = "test-model",
       message = message,
-      toolCalls = Nil,
-      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
+      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)),
+      finishReason = FinishReason.Stop
     )
   }
 
@@ -183,10 +174,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
       created = Instant.now(),
-      content = "",
       model = "test-model",
       message = message,
-      toolCalls = List(tc),
       usage = Some(TokenUsage(promptTokens = 15, completionTokens = 5, totalTokens = 20))
     )
   }
@@ -196,10 +185,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-msg-${System.nanoTime()}",
       created = Instant.now(),
-      content = message.content,
       model = "test-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -217,11 +204,10 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-usage-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
       model = "test-model",
       message = message,
-      toolCalls = Nil,
-      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion))
+      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion)),
+      finishReason = FinishReason.Stop
     )
   }
 }
@@ -255,9 +241,7 @@ final private[agent] class ScriptedLLMClient(responses: Result[Completion]*) ext
       .getOrElse(Left(org.llm4s.error.ValidationError("scripted", s"no response scripted for call $index")))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 

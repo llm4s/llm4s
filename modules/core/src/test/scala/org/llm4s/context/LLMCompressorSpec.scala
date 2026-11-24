@@ -26,18 +26,14 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          content = compressed,
           model = "mock-model",
           message = AssistantMessage(compressed),
-          toolCalls = Nil,
           usage = Some(TokenUsage(10, 5, 15))
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk(id = "chunk-1", content = Some("Compressed.")))
@@ -45,10 +41,8 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          content = "Compressed.",
           model = "mock-model",
           message = AssistantMessage("Compressed."),
-          toolCalls = Nil,
           usage = Some(TokenUsage(10, 5, 15))
         )
       )

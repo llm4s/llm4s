@@ -51,7 +51,7 @@ Create a `MicrometerMetrics` over your registry and give it to the client:
 ```scala
 import io.micrometer.core.instrument.MeterRegistry
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.metrics.MicrometerMetrics
 import org.llm4s.model.ModelRegistryService
 
@@ -61,7 +61,7 @@ def clientWithMetrics(meterRegistry: MeterRegistry) =
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
     metrics                    = new MicrometerMetrics(meterRegistry)
-    client <- LLMConnect.getClient(providerConfig, metrics)
+    client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))
   } yield client
 ```
 
@@ -134,7 +134,7 @@ exhausted. Pass the same collector to both layers:
 ```scala
 val metrics = new MicrometerMetrics(meterRegistry)
 val client = LLMConnect
-  .getClient(providerConfig, metrics)
+  .getClient(providerConfig, LlmClientOptions(metrics = metrics))
   .map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))
 ```
 

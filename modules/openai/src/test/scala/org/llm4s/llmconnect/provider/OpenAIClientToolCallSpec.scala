@@ -154,7 +154,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       model,
       transport(complete = _ => completions),
       config,
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
     val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
@@ -163,7 +163,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     recorded should have size 1
 
     val exchange = recorded.head
-    exchange.provider shouldBe "openai"
+    exchange.provider.asString shouldBe "openai"
     exchange.model shouldBe Some("gpt-4")
     exchange.requestBody should include("messages")
     exchange.requestBody should include("hello")

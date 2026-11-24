@@ -19,7 +19,7 @@ import scala.concurrent.duration.*
 class TracingComposerConveniencesSpec extends AnyFlatSpec with Matchers {
 
   private val completion =
-    Completion("c-1", Instant.EPOCH, "the answer", "test-model", AssistantMessage("the answer"), usage = None)
+    Completion("c-1", Instant.EPOCH, "test-model", AssistantMessage("the answer"), usage = None)
   private val usage = TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30)
 
   "Tracing.traceError" should "record an LLMError as it is: its message and type, with no exception (#2800)" in {

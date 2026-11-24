@@ -76,7 +76,7 @@ def askTheDocs(rag: RAG, question: String): Result[RAGAnswerResult] = for {
 
 `queryWithAnswer` returns the answer and the passages it was given (`contexts`), so you can show sources. The answer
 is generated at temperature 0.0, so it keeps to the passages; set other options for every answer with
-`RAGConfig.withCompletionOptions(CompletionOptions(temperature = 0.7, maxTokens = Some(512)))`, or for one call with
+`RAGConfig.withCompletionOptions(CompletionOptions(temperature = Some(0.7), maxTokens = Some(512)))`, or for one call with
 `rag.queryWithAnswer(question, options = ...)`.
 
 To stream the answer to a chat UI, `rag.queryWithAnswerStreaming(question)(onContexts, onChunk)` takes two

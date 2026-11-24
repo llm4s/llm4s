@@ -24,16 +24,13 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = reply,
           model = "test-model",
           message = AssistantMessage(reply),
           usage = None
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

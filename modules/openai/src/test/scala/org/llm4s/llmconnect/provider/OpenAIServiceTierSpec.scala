@@ -123,7 +123,7 @@ final class OpenAIServiceTierSpec extends AnyFlatSpec with Matchers with EitherV
     ).map(OpenAISdkFixtures.chunk)
     val completion = OpenAIClient
       .forTest("gpt-4o", transport(streaming = _ => OpenAISdkFixtures.stream(chunks*)), openAI)
-      .streamComplete(hello, CompletionOptions(), _ => ())
+      .streamComplete(hello, CompletionOptions())(_ => ())
       .value
     (completion.content, completion.servedTier) shouldBe ("ok", Some(ServiceTier.Flex))
   }

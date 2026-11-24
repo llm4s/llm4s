@@ -75,7 +75,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -84,9 +83,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     }
 
     // Implement other required methods
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -112,7 +109,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-malformed",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -120,9 +116,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -147,7 +141,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-empty",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -155,9 +148,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -177,9 +168,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(org.llm4s.error.ServiceError(503, "test-provider", "Mock LLM failure for testing"))
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -579,7 +568,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val cancelling = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(org.llm4s.error.CancelledError("model"))
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 128000
       def getReserveCompletion(): Int = 4096

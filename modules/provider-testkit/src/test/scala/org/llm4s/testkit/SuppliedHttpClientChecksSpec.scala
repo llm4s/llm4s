@@ -77,15 +77,13 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
     closesSupplied: Boolean,
     closedFlag: AtomicBoolean
   ) extends LLMClient:
-    private val answer = Completion("c-1", Instant.EPOCH, "hi", "acme-large", AssistantMessage("hi"))
+    private val answer = Completion("c-1", Instant.EPOCH, "acme-large", AssistantMessage("hi"))
     private def send(path: String): Unit =
       http.foreach(_.post(s"https://acme.invalid/$path", Map.empty, "{}", 1.second)): Unit
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       if completeSends then send("complete")
       Right(answer)
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       if streamSends then send("stream")

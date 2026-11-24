@@ -41,7 +41,7 @@ class AgentIOStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))

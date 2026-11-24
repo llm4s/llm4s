@@ -110,7 +110,7 @@ final class GeminiConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
       val client  = new GeminiClient(gemini(baseUrl, ProviderTimeouts(stream = Some(300.millis))))
       val started = System.nanoTime()
-      val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

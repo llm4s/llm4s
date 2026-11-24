@@ -29,16 +29,13 @@ class RAGGuardrailsPresetsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

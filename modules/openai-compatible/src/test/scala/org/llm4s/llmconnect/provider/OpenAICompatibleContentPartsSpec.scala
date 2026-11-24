@@ -58,7 +58,7 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     val conversation = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
         ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1")
       )
     )
@@ -75,7 +75,7 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     val inTool = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
         ToolMessage(Vector(imageUrl), "c1")
       )
     )

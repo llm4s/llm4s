@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -151,9 +152,7 @@ class PerplexityClient(
         .map(_.withAdjustments(unsent(options)))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     createRequestBody(conversation, options, stream = true)
@@ -258,12 +257,14 @@ class PerplexityClient(
     Completion(
       id = if (reply.id.nonEmpty) reply.id else java.util.UUID.randomUUID().toString,
       created = reply.created.getOrElse(Instant.now()),
-      content = reply.text,
       model = reply.model.getOrElse(config.model),
       message = message,
-      toolCalls = reply.toolCalls,
       usage = reply.usage,
-      estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
+      // a reported cost that is not a number has no decimal value: the estimate stands in for it
+      estimatedCost = reply.cost
+        .filter(_.isFinite)
+        .map(BigDecimal.decimal)
+        .orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
       citations = reply.citations,
       finishReason = finishReasonOf(reply)
     )
@@ -271,10 +272,10 @@ class PerplexityClient(
 
   /**
    * The reply's [[FinishReason]] (RFC 0009): `incomplete` (a limit) is `Length`, even with a call in it; `completed`
-   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Other("")`, since none was read.
+   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Unknown`, since none was read.
    */
   private def finishReasonOf(reply: Reply): FinishReason =
-    if (!reply.statusRead) FinishReason.Other("")
+    if (!reply.statusRead) FinishReason.Unknown
     else if (reply.incomplete) FinishReason.Length
     else if (reply.toolCalls.nonEmpty) FinishReason.ToolCalls
     else FinishReason.Stop
@@ -296,8 +297,9 @@ class PerplexityClient(
       val body     = ujson.Obj("model" -> config.model, "input" -> encodeInput(messages))
       val system   = messages.collect { case SystemMessage(content) => content }.filter(_.nonEmpty)
       if (system.nonEmpty) body("instructions") = system.mkString("\n\n")
-      body("temperature") = options.temperature
-      if (options.topP != 1.0) body("top_p") = options.topP
+      // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+      options.temperature.foreach(t => body("temperature") = t)
+      options.topP.foreach(p => body("top_p") = p)
       options.maxTokens
         .orElse(Option.when(isAnthropic(config.model))(anthropicDefaultMaxTokens(config.reserveCompletion)))
         .foreach(max => body("max_output_tokens") = max)
@@ -349,13 +351,15 @@ class PerplexityClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   override def getContextWindow(): Int     = config.contextWindow
@@ -476,12 +480,12 @@ object PerplexityClient {
     }
     val penalties =
       Option
-        .when(options.presencePenalty != 0.0)(
+        .when(options.presencePenalty.isDefined)(
           RequestAdjustment.Dropped(RequestOption.PresencePenalty, "the Perplexity Agent API takes no penalties")
         )
         .toList ++
         Option
-          .when(options.frequencyPenalty != 0.0)(
+          .when(options.frequencyPenalty.isDefined)(
             RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "the Perplexity Agent API takes no penalties")
           )
           .toList

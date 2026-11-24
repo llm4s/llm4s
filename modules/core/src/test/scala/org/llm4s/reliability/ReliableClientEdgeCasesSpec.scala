@@ -22,9 +22,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       behavior()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       callCount.incrementAndGet()
@@ -45,9 +43,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       responses(idx % responses.size)()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -90,7 +86,6 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private val testCompletion = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    content = "response",
     model = "test-model",
     message = AssistantMessage(content = "response")
   )
@@ -107,7 +102,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       ReliabilityConfig.default
     )
 
-    val result = reliable.streamComplete(testConversation, onChunk = _ => ())
+    val result = reliable.streamComplete(testConversation)(_ => ())
     result shouldBe Right(testCompletion)
     mockClient.callCount.get() shouldBe 1
   }
@@ -127,7 +122,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     val reliable = ReliableClient(mockClient, "test", config)
-    val result   = reliable.streamComplete(testConversation, onChunk = _ => ())
+    val result   = reliable.streamComplete(testConversation)(_ => ())
     result shouldBe Right(testCompletion)
     mockClient.callCount.get() shouldBe 2
   }
@@ -136,7 +131,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockClient(() => Right(testCompletion))
     val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.disabled)
 
-    val result = reliable.streamComplete(testConversation, onChunk = _ => ())
+    val result = reliable.streamComplete(testConversation)(_ => ())
     result shouldBe Right(testCompletion)
   }
 

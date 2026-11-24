@@ -60,7 +60,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "report Other(\"\") when the reply has no finish_reason" in {
-    complete("gpt-4o", "").value.finishReason shouldBe FinishReason.Other("")
+    complete("gpt-4o", "").value.finishReason shouldBe FinishReason.Unknown
   }
 
   "OpenAIClient.streamComplete" should "carry the typed reason on the chunk and the Completion" in {
@@ -75,7 +75,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = OpenAIClient
       .forTest("gpt-4o", transport(streaming = _ => stream(events*)), configFor("gpt-4o"))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     chunks.flatMap(_.finishReason).toList shouldBe List(FinishReason.Length)
     result.value.finishReason shouldBe FinishReason.Length
   }
@@ -95,7 +95,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = OpenAIClient
       .forTest("gpt-4o", transport(streaming = _ => stream(events*)), configFor("gpt-4o"))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     chunks.flatMap(_.content).mkString shouldBe "Hel"
     chunks.flatMap(_.finishReason) shouldBe empty
     result.left.value match {
@@ -110,7 +110,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = OpenAIClient
       .forTest("o1", transport(complete = _ => reply(""","finish_reason":"content_filter"""")), configFor("o1"))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     result.left.value shouldBe a[ContentFilteredError]
     chunks shouldBe empty
   }
@@ -119,7 +119,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = OpenAIClient
       .forTest("o1", transport(complete = _ => reply(""","finish_reason":"length"""")), configFor("o1"))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     chunks.flatMap(_.finishReason).toList shouldBe List(FinishReason.Length)
     result.value.finishReason shouldBe FinishReason.Length
   }
@@ -135,7 +135,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
       org.llm4s.testkit.LocalProviderTestServer.sendSseResponse(_, body)
     ) { baseUrl =>
       val client = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl, None).flatMap(OpenAIClient(_)).value
-      result = Some(client.streamComplete(hi, CompletionOptions(), chunks += _))
+      result = Some(client.streamComplete(hi, CompletionOptions())(chunks += _))
       client.close()
     }
     (result.get, chunks.toList)

@@ -32,9 +32,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       behavior()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -79,7 +77,6 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   val testCompletion = Completion(
     id = "test-id",
     created = Instant.now(),
-    content = "response",
     model = "test-model",
     message = AssistantMessage(content = "response", toolCalls = List.empty)
   )

@@ -156,16 +156,16 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
 
   it should "preserve other options when adding reasoning" in {
     val original = CompletionOptions(
-      temperature = 0.5,
+      temperature = Some(0.5),
       maxTokens = Some(2048),
-      presencePenalty = 0.2
+      presencePenalty = Some(0.2)
     )
 
     val withReasoning = original.withReasoning(ReasoningEffort.High)
 
-    withReasoning.temperature shouldBe 0.5
+    withReasoning.temperature shouldBe Some(0.5)
     withReasoning.maxTokens shouldBe Some(2048)
-    withReasoning.presencePenalty shouldBe 0.2
+    withReasoning.presencePenalty shouldBe Some(0.2)
     withReasoning.reasoning shouldBe Some(ReasoningEffort.High)
   }
 
@@ -177,7 +177,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val withoutThinking = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "response",
       model = "test",
       message = AssistantMessage(Some("response"), Seq.empty)
     )
@@ -195,7 +194,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty).withThinking("Let me calculate this...")
     )
@@ -210,7 +208,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty)
     )

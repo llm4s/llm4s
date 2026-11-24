@@ -14,10 +14,8 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val stubClient: LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage("ok")))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage("ok")))
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -116,8 +114,8 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
     val own = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-        Right(Completion("id", Instant.EPOCH, "mine", "m", AssistantMessage("mine")))
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("mine")))
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 512

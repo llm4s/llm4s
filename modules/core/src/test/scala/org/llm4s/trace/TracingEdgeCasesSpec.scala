@@ -327,7 +327,6 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "comp-1",
       created = Instant.EPOCH,
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty)
     )

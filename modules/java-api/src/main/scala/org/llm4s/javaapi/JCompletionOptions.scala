@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ServiceTier, Thinking }
 
-import java.util.{ Objects, Optional, OptionalInt }
+import java.util.{ Objects, Optional, OptionalDouble, OptionalInt }
 
 /**
  * The options of one completion request, built for Java and Kotlin callers and passed to
@@ -28,20 +28,20 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
 
   FacadeToken.check(token, "JCompletionOptions")
 
-  /** The sampling temperature: higher is more random. Reasoning models may ignore it. */
-  def temperature: Double = underlying.temperature
+  /** The sampling temperature: higher is more random; empty for the provider's default. Reasoning models may ignore it. */
+  def temperature: OptionalDouble = JCompletionOptions.optionalDouble(underlying.temperature)
 
-  /** Nucleus sampling: only tokens within this cumulative probability are considered. */
-  def topP: Double = underlying.topP
+  /** Nucleus sampling: only tokens within this cumulative probability are considered; empty for the provider's default. */
+  def topP: OptionalDouble = JCompletionOptions.optionalDouble(underlying.topP)
 
   /** The most tokens the completion may contain, or empty for the provider's default. */
   def maxTokens: OptionalInt = JCompletionOptions.optionalInt(underlying.maxTokens)
 
-  /** The penalty for a token that has appeared at all, encouraging new topics. */
-  def presencePenalty: Double = underlying.presencePenalty
+  /** The penalty for a token that has appeared at all, encouraging new topics; empty for the provider's default. */
+  def presencePenalty: OptionalDouble = JCompletionOptions.optionalDouble(underlying.presencePenalty)
 
-  /** The penalty for a token in proportion to how often it has appeared, discouraging repetition. */
-  def frequencyPenalty: Double = underlying.frequencyPenalty
+  /** The penalty for a token in proportion to how often it has appeared, discouraging repetition; empty for the provider's default. */
+  def frequencyPenalty: OptionalDouble = JCompletionOptions.optionalDouble(underlying.frequencyPenalty)
 
   /** The reasoning level asked for, or empty for none. */
   def reasoning: Optional[JReasoningEffort] =
@@ -66,13 +66,16 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
   override def hashCode: Int = underlying.hashCode
 
   override def toString: String =
-    s"JCompletionOptions(temperature=$temperature, topP=$topP, maxTokens=${text(maxTokens)}, " +
-      s"presencePenalty=$presencePenalty, frequencyPenalty=$frequencyPenalty, " +
+    s"JCompletionOptions(temperature=${text(temperature)}, topP=${text(topP)}, maxTokens=${text(maxTokens)}, " +
+      s"presencePenalty=${text(presencePenalty)}, frequencyPenalty=${text(frequencyPenalty)}, " +
       s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, thinking=${thinking.map[String](_.toString).orElse("unset")}, " +
       s"serviceTier=${serviceTier.map[String](_.name).orElse("unset")})"
 
   private def text(value: OptionalInt): String =
     if (value.isPresent) value.getAsInt.toString else "unset"
+
+  private def text(value: OptionalDouble): String =
+    if (value.isPresent) value.getAsDouble.toString else "unset"
 }
 
 object JCompletionOptions {
@@ -173,6 +176,9 @@ object JCompletionOptions {
   }
 
   private def optionalInt(value: Option[Int]): OptionalInt = value.fold(OptionalInt.empty())(OptionalInt.of)
+
+  private def optionalDouble(value: Option[Double]): OptionalDouble =
+    value.fold(OptionalDouble.empty())(OptionalDouble.of)
 
   private def toCore(effort: JReasoningEffort): ReasoningEffort = effort match {
     case JReasoningEffort.MINIMAL => ReasoningEffort.Minimal

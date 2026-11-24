@@ -230,7 +230,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
 
     withReplies(sse, finalReply) { (baseUrl, seen) =>
       val c        = client(baseUrl)
-      val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
+      val streamed = c.streamComplete(Conversation(history), CompletionOptions())(_ => ()).value
       val joinedText = ujson.Obj(
         "type"      -> "reasoning.text",
         "text"      -> "Paris weather.",
@@ -258,7 +258,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     // reported, and the items are replayed while the configured model is unchanged
     withReplies(sse.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")) { (baseUrl, _) =>
       val c        = client(baseUrl, model = "openrouter/auto")
-      val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
+      val streamed = c.streamComplete(Conversation(history), CompletionOptions())(_ => ()).value
       streamed.model shouldBe "openai/o3"
       val turn =
         assistantTurn(c.createRequestBody(Conversation(history :+ streamed.message :+ answer), CompletionOptions()))

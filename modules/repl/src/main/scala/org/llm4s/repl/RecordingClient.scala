@@ -16,12 +16,10 @@ final private[repl] class RecordingClient(underlying: LLMClient, session: Sessio
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     timed(underlying.complete(conversation, options))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    timed(underlying.streamComplete(conversation, options, onChunk))
+    timed(underlying.streamComplete(conversation, options)(onChunk))
 
   override def getContextWindow(): Int = underlying.getContextWindow()
 

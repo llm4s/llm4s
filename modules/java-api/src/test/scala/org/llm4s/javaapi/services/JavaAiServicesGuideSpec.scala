@@ -34,9 +34,9 @@ class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matche
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val n       = sent.synchronized { sent += conversation; sent.size - 1 }
       val message = script(n)
-      Right(Completion(s"s$n", Instant.EPOCH, message.content, "scripted", message))
+      Right(Completion(s"s$n", Instant.EPOCH, "scripted", message))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 128000
     override def getReserveCompletion(): Int = 4096
@@ -104,7 +104,7 @@ class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matche
     "run a tool in the agent turn" in {
       val client = new Scripted(n =>
         if (n == 0)
-          AssistantMessage(toolCalls = Seq(ToolCall("c1", "orderStatus", ujson.Obj("orderId" -> "42"))))
+          AssistantMessage(None, toolCalls = Seq(ToolCall("c1", "orderStatus", ujson.Obj("orderId" -> "42"))))
         else AssistantMessage("It shipped yesterday.")
       )
       AiServiceSnippets.tools(Llm4s.wrapClient(client)) shouldBe "It shipped yesterday."

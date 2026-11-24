@@ -87,7 +87,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     // The first delta carries `content: ""` (the role chunk), so `isDefined` alone would pass for a
     // stream with no text at all; require real text, and that it is what the call returned.
@@ -110,7 +110,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val completion = client
       .complete(
         Conversation(Seq(UserMessage("Use the get_secret_code tool with the topic 'vault'."))),
-        CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+        CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
       )
       .value
     client.close()
@@ -128,7 +128,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val history = Conversation(
       Seq(
         UserMessage("Use the get_secret_code tool with the topic 'vault', then tell me the code."),
-        AssistantMessage(toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
+        AssistantMessage(None, toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
         ToolMessage("ZX-4417", foreignId)
       )
     )
@@ -136,7 +136,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val client = MistralClient(config(apiKey.get)).value
     val result = client.complete(
       history,
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
     )
     client.close()
 
@@ -150,7 +150,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     // Mistral rejects an assistant message with neither content nor tool calls; the dialect leaves it out.
     val history = Conversation(
-      Seq(UserMessage("Hello"), AssistantMessage(contentOpt = None), UserMessage("Say hi in one word"))
+      Seq(UserMessage("Hello"), AssistantMessage(text = None), UserMessage("Say hi in one word"))
     )
 
     val client = MistralClient(config(apiKey.get)).value
@@ -168,7 +168,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get, ReasoningModel)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)))(c => chunks += c)
     client.close()
 
     withClue(s"Streaming from $ReasoningModel failed: ${result.swap.toOption}") {

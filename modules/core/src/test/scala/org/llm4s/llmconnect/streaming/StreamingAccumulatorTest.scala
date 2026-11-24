@@ -56,6 +56,20 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     toolCalls(1).name shouldBe "function2"
   }
 
+  test("the completion's toolCalls and content are its message's (#2807)") {
+    // the completion used to hold a second, empty `toolCalls` beside the message's, which each client copied over
+    val accumulator = StreamingAccumulator("test-model")
+    val call        = ToolCall("tool-1", "function1", ujson.Obj("arg" -> "value1"))
+    accumulator.addChunk(StreamedChunk("msg-1", Some("text"), None, None))
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(call), Some(FinishReason.ToolCalls)))
+
+    val completion = accumulator.toCompletion.fold(e => fail(e.message), identity)
+    completion.toolCalls.map(_.id) shouldBe Seq("tool-1")
+    completion.toolCalls shouldBe completion.message.toolCalls
+    completion.content shouldBe "text"
+    completion.hasToolCalls shouldBe true
+  }
+
   test("should track finish reason") {
     val accumulator = StreamingAccumulator("test-model")
 
@@ -95,7 +109,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     val comp = completion.toOption.get
     comp.id shouldBe "msg-456"
-    comp.message.contentOpt shouldBe Some("Hello world!")
+    comp.message.text shouldBe Some("Hello world!")
     comp.usage.get.totalTokens shouldBe 15
   }
 

@@ -24,8 +24,8 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     val n = new AtomicInteger(0)
     def reply(conversation: Conversation): Result[Completion] =
       if (n.getAndIncrement() == 0) {
-        val message = AssistantMessage(contentOpt = None, toolCalls = Seq(call))
-        Right(Completion("id", Instant.EPOCH, "", "m", message, toolCalls = List(call)))
+        val message = AssistantMessage(text = None, toolCalls = Seq(call))
+        Right(Completion("id", Instant.EPOCH, "m", message))
       } else {
         val result = conversation.messages.collect { case t: ToolMessage => t.content }.lastOption.getOrElse("none")
         Right(completion(s"tool said: $result"))
@@ -33,7 +33,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     val last = new java.util.concurrent.atomic.AtomicReference[Conversation]()
     new org.llm4s.llmconnect.LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { last.set(c); reply(c) }
-      def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096
       def getReserveCompletion(): Int = 256

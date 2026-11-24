@@ -96,14 +96,12 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     private def reply: Completion = {
       calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
-      Completion(id = "script", created = Instant.EPOCH, content = message.content, model = "script", message = message)
+      Completion(id = "script", created = Instant.EPOCH, model = "script", message = message)
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(reply)
 
@@ -219,9 +217,9 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "Growth-prone types" should "be changed with with* setters, not copy" in {
-    val options = CompletionOptions(temperature = 0.2).withMaxTokens(500)
+    val options = CompletionOptions(temperature = Some(0.2)).withMaxTokens(500)
 
-    options.temperature shouldBe 0.2
+    options.temperature shouldBe Some(0.2)
     options.maxTokens shouldBe Some(500)
   }
 }

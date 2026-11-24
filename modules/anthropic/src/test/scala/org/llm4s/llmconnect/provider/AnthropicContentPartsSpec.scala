@@ -154,7 +154,7 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
         case other => fail(s"expected UnsupportedContentPartError for $kind, got $other")
       }
       client
-        .streamComplete(conversation, CompletionOptions(), _ => ())
+        .streamComplete(conversation, CompletionOptions())(_ => ())
         .left
         .value shouldBe a[UnsupportedContentPartError]
     }

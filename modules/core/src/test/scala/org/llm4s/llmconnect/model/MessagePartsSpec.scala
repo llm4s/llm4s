@@ -57,7 +57,7 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContentPart.Text(null) shouldBe ContentPart.Text("")
     UserMessage(Vector(ContentPart.Text(null), image)).validate.isRight shouldBe true
     ToolMessage(Vector(ContentPart.Text(null)), "c").validate.isLeft shouldBe true
-    Conversation.create(UserMessage(Vector(ContentPart.Text(null), image))).isRight shouldBe true
+    Conversation.create(Seq(UserMessage(Vector(ContentPart.Text(null), image)))).isRight shouldBe true
     read[Message](write[Message](UserMessage(Vector(ContentPart.Text(null), image)))) shouldBe
       UserMessage(Vector(ContentPart.Text(""), image))
   }
@@ -65,7 +65,7 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
   "A null part" should "make a message invalid, and still print" in {
     UserMessage(Vector(null, image)).validate.isLeft shouldBe true
     ToolMessage(Vector(ContentPart.Text("ok"), null), "c").validate.isLeft shouldBe true
-    Conversation.create(UserMessage(Vector(null, image))).isLeft shouldBe true
+    Conversation.create(Seq(UserMessage(Vector(null, image)))).isLeft shouldBe true
     UserMessage(Vector(null)).toString shouldBe "user: [null part]"
   }
 

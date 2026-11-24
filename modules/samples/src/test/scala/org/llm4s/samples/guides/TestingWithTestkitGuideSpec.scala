@@ -146,7 +146,7 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
     val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSize(5)
 
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation, options, chunks += _)
+    client.streamComplete(conversation, options)(chunks += _)
 
     chunks.flatMap(_.content).mkString shouldBe "Hello, world"
     chunks.last.finishReason shouldBe Some(FinishReason.Stop)

@@ -17,7 +17,6 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
     created = Instant.now(),
-    content = content,
     model = "test-model",
     message = AssistantMessage(content)
   )
@@ -37,9 +36,7 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
       Right(mockCompletion(response))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

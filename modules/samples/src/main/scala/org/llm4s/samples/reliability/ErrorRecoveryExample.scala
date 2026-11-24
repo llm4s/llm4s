@@ -56,16 +56,13 @@ object ErrorRecoveryExample {
         Completion(
           id = "demo",
           created = Instant.now(),
-          content = text,
           model = "demo-model",
           message = AssistantMessage(text)
         )
       }
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

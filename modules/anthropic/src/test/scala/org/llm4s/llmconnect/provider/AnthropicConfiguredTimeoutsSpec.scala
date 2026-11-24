@@ -87,7 +87,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.streamThenHold(_, first)) { baseUrl =>
       val client  = new AnthropicClient(config(baseUrl, ProviderTimeouts(stream = Some(500.millis))))
       val started = System.nanoTime()
-      val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true
@@ -119,7 +119,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
       val client = new AnthropicClient(
         config(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
       )
-      val result = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result = client.streamComplete(hello, CompletionOptions())(_ => ())
       result.value.content shouldBe "Hello"
     }
   }

@@ -211,7 +211,7 @@ calls:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
 import org.llm4s.metrics.CostTracker
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
@@ -232,7 +232,7 @@ def reliableClient(section: String): Result[LLMClient] =
     config   <- Llm4sConfig.provider(section)
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    client <- LLMConnect.getClient(config, costs)
+    client <- LLMConnect.getClient(config, LlmClientOptions(metrics = costs))
   yield ReliableClient(client, section, reliability).withMetrics(costs)
 ```
 

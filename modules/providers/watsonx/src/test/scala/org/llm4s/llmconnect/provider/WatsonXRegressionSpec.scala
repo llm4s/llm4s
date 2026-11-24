@@ -72,8 +72,8 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
         )
     )
     val c = new WatsonXClient(config, httpClient = http)
-    c.streamComplete(hi, CompletionOptions(), _ => ()).isLeft shouldBe true
-    c.streamComplete(hi, CompletionOptions(), _ => ()).map(_.content) shouldBe Right("ok")
+    c.streamComplete(hi, CompletionOptions())(_ => ()).isLeft shouldBe true
+    c.streamComplete(hi, CompletionOptions())(_ => ()).map(_.content) shouldBe Right("ok")
   }
 
   test("an IAM answer that is valid JSON but not an object is an error, not an exception") {
@@ -132,7 +132,7 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
             )
           )
         )
-      ).streamComplete(hi, CompletionOptions(), _ => ()).left.toOption match
+      ).streamComplete(hi, CompletionOptions())(_ => ()).left.toOption match
         case Some(error) =>
           List(error.message, error.formatted).foreach { text =>
             (text should not).include(ApiKey)

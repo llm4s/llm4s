@@ -28,7 +28,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
   }
 
   private val completion =
-    Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
+    Completion("id", Instant.EPOCH, "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
 
   /** Fails its first `failures` calls with a retryable timeout, then answers. */
   private def client(failures: Int): LLMClient = new LLMClient {
@@ -37,9 +37,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       calls += 1
       if (calls <= failures) Left(TimeoutError("timeout", 1.second, "test")) else Right(completion)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

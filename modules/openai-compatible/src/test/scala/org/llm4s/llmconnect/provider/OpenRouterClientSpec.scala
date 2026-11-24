@@ -160,7 +160,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
     val result = client.complete(conversation, CompletionOptions())
@@ -169,7 +169,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     recorded should have size 1
 
     val exchange = recorded.head
-    exchange.provider shouldBe "openrouter"
+    exchange.provider.asString shouldBe "openrouter"
     exchange.model shouldBe Some("anthropic/claude-3.5-sonnet")
     exchange.requestBody should include("\"messages\"")
     exchange.requestBody should include("hello")
@@ -222,7 +222,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 401, """{"error":"Invalid API key"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
@@ -232,7 +232,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[RateLimitError]
@@ -242,7 +242,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 500, """{"error":"Internal server error"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[ServiceError]
@@ -252,7 +252,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 503, """{"error":"Service unavailable"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     val err = result.swap.toOption.get
@@ -265,7 +265,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   } { baseUrl =>
     val client     = new OpenRouterClient(localConfig(baseUrl))
     var chunkCount = 0
-    val result     = client.streamComplete(conversation, CompletionOptions(), _ => chunkCount += 1)
+    val result     = client.streamComplete(conversation, CompletionOptions())(_ => chunkCount += 1)
 
     result.isLeft shouldBe true
     chunkCount shouldBe 0
@@ -281,14 +281,14 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openrouter"
+    recorded.head.provider.asString shouldBe "openrouter"
     recorded.head.requestBody should include("\"stream\":true")
     recorded.head.responseBody.value should include("data:")
     recorded.head.responseBody.value should include("Hello")
@@ -311,7 +311,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     result.isRight shouldBe true
     val completion = result.toOption.get

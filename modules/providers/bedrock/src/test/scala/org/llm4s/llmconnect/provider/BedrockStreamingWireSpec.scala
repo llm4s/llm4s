@@ -29,7 +29,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
   private def run(url: String) = {
     val client = new BedrockClient(config(url))
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conv, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conv, CompletionOptions())(c => chunks += c)
     client.close()
     (result, chunks.toList)
   }
@@ -208,7 +208,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
         val client  = new BedrockClient(config(url))
         val outcome = new java.util.concurrent.atomic.AtomicReference[(org.llm4s.types.Result[Completion], Boolean)]()
         val worker = Thread.ofVirtual().start { () =>
-          val r = client.streamComplete(conv, CompletionOptions(), _ => firstChunk.countDown())
+          val r = client.streamComplete(conv, CompletionOptions())(_ => firstChunk.countDown())
           outcome.set((r, Thread.currentThread().isInterrupted))
         }
         firstChunk.await(10, TimeUnit.SECONDS) shouldBe true
@@ -234,7 +234,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
       } { url =>
         val client = new BedrockClient(config(url))
         Thread.currentThread().interrupt()
-        val r    = client.streamComplete(conv, CompletionOptions(), _ => ())
+        val r    = client.streamComplete(conv, CompletionOptions())(_ => ())
         val flag = Thread.interrupted() // clear the flag so it cannot leak into other tests
         client.close()
         r.left.toOption.value shouldBe a[CancelledError]

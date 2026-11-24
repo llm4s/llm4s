@@ -61,10 +61,8 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   private val completionWithToolCalls = Completion(
     id = "completion-1",
     created = Instant.EPOCH,
-    content = "",
     model = "test-model",
     message = AssistantMessage(None, Seq(toolCall)).withThinking("add them"),
-    toolCalls = List(toolCall),
     usage = Some(usage.withThinkingTokens(Some(4)).withCachedTokens(Some(2))),
     estimatedCost = Some(0.0001)
   )

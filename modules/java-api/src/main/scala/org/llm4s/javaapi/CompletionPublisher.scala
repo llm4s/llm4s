@@ -48,9 +48,8 @@ final private[javaapi] class CompletionPublisher(
         .safely(
           client.streamComplete(
             conversation,
-            options,
-            chunk => chunk.content.filter(_.nonEmpty).foreach(offer(publisher, cancelled, _))
-          )
+            options
+          )(chunk => chunk.content.filter(_.nonEmpty).foreach(offer(publisher, cancelled, _)))
         )
         .flatten
     )

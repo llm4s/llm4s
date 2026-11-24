@@ -71,7 +71,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
     val client = OpenAIClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -124,7 +124,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     // Streams carry usage only because the client sets stream_options.include_usage; OpenAI
     // then sends it on a final chunk with no choices.
     val client = OpenAIClient(config(apiKey.get)).toOption.get
-    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(16)), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(16)))(_ => ())
     client.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {

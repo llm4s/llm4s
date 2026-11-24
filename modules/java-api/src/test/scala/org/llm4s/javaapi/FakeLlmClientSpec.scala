@@ -65,7 +65,7 @@ class FakeLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "stream its reply as one chunk, and report a context window" in {
     val fake   = FakeLlmClient.replying("streamed")
     val chunks = List.newBuilder[StreamedChunk]
-    fake.client().underlying.streamComplete(Conversation(Seq(UserMessage("s"))), onChunk = c => chunks += c) match {
+    fake.client().underlying.streamComplete(Conversation(Seq(UserMessage("s"))))(c => chunks += c) match {
       case Right(c) => c.content shouldBe "streamed"
       case Left(e)  => fail(e.message)
     }

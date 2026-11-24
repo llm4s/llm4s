@@ -33,7 +33,7 @@ import java.time.Instant
 private[pekko] object Fixtures {
 
   val completion: Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage(Some("ok")))
+    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some("ok")))
 
   val conversation: Conversation = Conversation(Seq(UserMessage("ping")))
 
@@ -99,7 +99,7 @@ private[pekko] object Fixtures {
   ) extends LLMClient {
     val streamCalls: AtomicInteger                                          = new AtomicInteger(0)
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
       streamCalls.incrementAndGet()
       onStream(onChunk)
     }
@@ -244,8 +244,8 @@ private[pekko] object Fixtures {
           val n = calls.getAndIncrement()
           if (n < turns) {
             val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
-            Right(Completion(s"c$n", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
-          } else if (n == turns) Right(Completion(s"c$n", Instant.EPOCH, "done", "m", AssistantMessage(Some("done"))))
+            Right(Completion(s"c$n", Instant.EPOCH, "m", AssistantMessage(None, Seq(call))))
+          } else if (n == turns) Right(Completion(s"c$n", Instant.EPOCH, "m", AssistantMessage(Some("done"))))
           else boom
         }
       )

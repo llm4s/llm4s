@@ -39,7 +39,7 @@ class OpenAICompatibleWorkloadIdentitySpec
   /** A stream sent with the exchanged token succeeds and delivers at least one chunk. */
   private def assertStreamsWithToken(client: LLMClient): Unit =
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation, CompletionOptions(), chunks += _).isRight shouldBe true
+    client.streamComplete(conversation, CompletionOptions())(chunks += _).isRight shouldBe true
     chunks should not be empty
 
   /** `body` run on a thread with a deliberately small (256 KB) stack; a throw, overflow included, fails the test. */
@@ -217,7 +217,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       val c = client(fake, freshSvid)
       fake.rejectNextApiCalls(1)
       val chunks = new AtomicInteger(0)
-      c.streamComplete(conversation, CompletionOptions(), _ => chunks.incrementAndGet(): Unit).isRight shouldBe true
+      c.streamComplete(conversation, CompletionOptions())(_ => chunks.incrementAndGet(): Unit).isRight shouldBe true
       chunks.get should be > 0
       fake.issuedTokens shouldBe Seq("t1", "t2")
     }
@@ -332,7 +332,7 @@ class OpenAICompatibleWorkloadIdentitySpec
               override protected[provider] val httpClient: Llm4sHttpClient = http
             }
           val result =
-            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            if streaming then c.streamComplete(conversation, CompletionOptions())(_ => ())
             else c.complete(conversation, CompletionOptions())
           val error = result.left.value
           error shouldBe an[AuthenticationError]
@@ -393,7 +393,7 @@ class OpenAICompatibleWorkloadIdentitySpec
             override protected[provider] val httpClient: Llm4sHttpClient = http
           }
           val result =
-            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            if streaming then c.streamComplete(conversation, CompletionOptions())(_ => ())
             else c.complete(conversation, CompletionOptions())
           http.posts.head._2("Authorization") shouldBe s"Bearer $token"
           val message = result.left.value.message
@@ -440,7 +440,7 @@ class OpenAICompatibleWorkloadIdentitySpec
           override protected[provider] val httpClient: Llm4sHttpClient = http
         }
         val result = onSmallStack {
-          if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+          if streaming then c.streamComplete(conversation, CompletionOptions())(_ => ())
           else c.complete(conversation, CompletionOptions())
         }
         withClue(s"HTTP $status, streaming=$streaming: ") {
@@ -487,7 +487,7 @@ class OpenAICompatibleWorkloadIdentitySpec
           override protected[provider] val httpClient: Llm4sHttpClient = http
         }
         val outcome = org.llm4s.testutil.SmallStack.run(
-          if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+          if streaming then c.streamComplete(conversation, CompletionOptions())(_ => ())
           else c.complete(conversation, CompletionOptions()),
           stackBytes = 256L * 1024
         )
@@ -813,7 +813,7 @@ class OpenAICompatibleWorkloadIdentitySpec
             override protected[provider] val httpClient: Llm4sHttpClient = http
           }
           def call() =
-            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            if streaming then c.streamComplete(conversation, CompletionOptions())(_ => ())
             else c.complete(conversation, CompletionOptions())
           overlap = () => { call(); call(); () }
           val first = call().left.value.message
@@ -835,7 +835,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       }
       for result <- Seq(
           c.complete(conversation, CompletionOptions()),
-          c.streamComplete(conversation, CompletionOptions(), _ => ())
+          c.streamComplete(conversation, CompletionOptions())(_ => ())
         )
       do
         val error = result.left.value

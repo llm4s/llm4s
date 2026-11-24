@@ -59,11 +59,9 @@ final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) exte
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    Right(Completion("acme-1", Instant.EPOCH, "hi", config.model, AssistantMessage("hi")))
+    Right(Completion("acme-1", Instant.EPOCH, config.model, AssistantMessage("hi")))
 
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     onChunk(StreamedChunk("acme-1", Some("hi")))

@@ -52,7 +52,7 @@ class KnowledgeGraphGenerator(llmClient: LLMClient, graphStore: GraphStore) {
     )
 
     llmClient
-      .complete(conversation, CompletionOptions(temperature = 0.0))
+      .complete(conversation, CompletionOptions(temperature = Some(0.0)))
       .flatMap(completion => parseGraph(completion.content))
       .flatMap(graph => writeGraphToStore(graph).map(_ => graph))
   }

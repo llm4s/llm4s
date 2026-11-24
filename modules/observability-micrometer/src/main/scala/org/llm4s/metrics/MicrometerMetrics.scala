@@ -18,7 +18,7 @@ import scala.util.{ Failure, Success, Try }
  * `PrometheusMeterRegistry` of your own) and the LLM metrics should appear next to the rest:
  * {{{
  * val metrics = new MicrometerMetrics(registry)
- * val client  = LLMConnect.getClient(config, metrics)
+ * val client  = LLMConnect.getClient(config, LlmClientOptions(metrics = metrics))
  * }}}
  *
  * The meter names follow the series that `llm4s-observability-prometheus` exposes, so a dashboard built on

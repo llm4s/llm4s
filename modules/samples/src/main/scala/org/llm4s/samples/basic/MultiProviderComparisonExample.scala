@@ -92,7 +92,7 @@ object MultiProviderComparisonExample {
       Using.resource(client) { c =>
         val start = nanoTime()
         c.complete(Conversation(Seq(UserMessage(prompt)))).map { completion =>
-          Reply(completion.asText.trim, completion.usage.map(_.totalTokens), (nanoTime() - start).nanos)
+          Reply(completion.content.trim, completion.usage.map(_.totalTokens), (nanoTime() - start).nanos)
         }
       }
     }

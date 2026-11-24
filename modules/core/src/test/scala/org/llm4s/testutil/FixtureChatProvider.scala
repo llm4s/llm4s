@@ -100,15 +100,12 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
       Completion(
         id = "fixturechat-completion",
         created = Instant.EPOCH,
-        content = FixtureChatClient.Reply,
         model = config.model,
         message = AssistantMessage(FixtureChatClient.Reply)
       )
     )
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)

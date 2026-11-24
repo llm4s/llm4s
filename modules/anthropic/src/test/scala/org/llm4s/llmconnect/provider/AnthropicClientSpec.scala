@@ -108,7 +108,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
       assert(result.isRight)
       exchanges should have size 1
-      exchanges.head.provider shouldBe "anthropic"
+      exchanges.head.provider.asString shouldBe "anthropic"
       exchanges.head.model shouldBe Some("claude-3-5-sonnet-latest")
       exchanges.head.requestBody should include("hello")
       exchanges.head.responseBody.value should include("Logged response")
@@ -159,7 +159,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
         val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
         val errors = Seq(
           client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions()),
-          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
         ).map(_.left.toOption.value)
         errors.foreach { e =>
           withClue(s"$status ${e.getClass.getSimpleName}: ") {
@@ -184,7 +184,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     exchanges should have size 1
@@ -233,9 +233,8 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.content.foreach(chunks += _)
-      )
+        CompletionOptions()
+      )(chunk => chunk.content.foreach(chunks += _))
 
       assert(result.isRight)
       chunks.mkString shouldBe "Hello"
@@ -244,10 +243,10 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("anthropic client request body does not send top_p by default") {
+  test("anthropic client request body sends no sampling parameter the caller left unset") {
     withServer { exchange =>
       val requestBody = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
-      requestBody should include("temperature")
+      (requestBody should not).include("\"temperature\"")
       (requestBody should not).include("\"top_p\"")
 
       val body =

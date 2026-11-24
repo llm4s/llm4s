@@ -10,10 +10,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   behavior.of("CostEstimator")
 
-  private def assertBigDecimalClose(actual: Double, expected: BigDecimal, tolerance: BigDecimal): Unit = {
-    val actualBd = BigDecimal.decimal(actual)
-    (actualBd - expected).abs should be <= tolerance
-  }
+  private def assertBigDecimalClose(actual: BigDecimal, expected: BigDecimal, tolerance: BigDecimal): Unit =
+    (actual - expected).abs should be <= tolerance
 
   val sampleUsage = TokenUsage(
     promptTokens = 100,
@@ -58,7 +56,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     cost shouldBe defined
     // 100 * 0.00001 + 50 * 0.00002 = 0.001 + 0.001 = 0.002
-    cost.get shouldBe 0.002 +- 0.0001
+    cost.get.toDouble shouldBe 0.002 +- 0.0001
   }
 
   it should "estimate cost from metadata with thinking tokens" in {
@@ -66,7 +64,15 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     cost shouldBe defined
     // 100 * 0.00001 + (50 + 50) * 0.00002 = 0.001 + 0.002 = 0.003
-    cost.get shouldBe 0.003 +- 0.0001
+    cost.get.toDouble shouldBe 0.003 +- 0.0001
+  }
+
+  // #2807: a cost is a BigDecimal, so a micro-cost is exact and a sum of them does not drift as a Double's does
+  it should "estimate exactly, where the same sum in Double is not exact" in {
+    val usage = TokenUsage(promptTokens = 3, completionTokens = 0, totalTokens = 3)
+
+    CostEstimator.estimateDirect(0.1, 0.0, usage) shouldBe BigDecimal("0.3")
+    (3 * 0.1) should not be 0.3 // the Double the estimator used to return
   }
 
   it should "return None when metadata is missing" in {
@@ -83,7 +89,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val cost = CostEstimator.estimateDirect(0.00001, 0.00002, sampleUsage)
 
     // 100 * 0.00001 + 50 * 0.00002 = 0.002
-    cost shouldBe 0.002 +- 0.0001
+    cost.toDouble shouldBe 0.002 +- 0.0001
   }
 
   it should "preserve legacy behavior when cache breakdown is absent" in {
@@ -307,7 +313,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     // reasoningOutput = 200 * 0.000004 = 0.0008
     // total = 0.0024
 
-    cost.get shouldBe 0.0024 +- 1e-9
+    cost.get.toDouble shouldBe 0.0024 +- 1e-9
   }
 
   it should "preserve precision of micro-cost values" in {
@@ -330,7 +336,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     cost shouldBe defined
     // 10 * 0.000001 + 5 * 0.000002 = 0.00001 + 0.00001 = 0.00002
-    cost.get shouldBe 0.00002 +- 0.000001
+    cost.get.toDouble shouldBe 0.00002 +- 0.000001
   }
 
   it should "handle zero tokens" in {
@@ -347,7 +353,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     cost shouldBe defined
     // 100000 * 0.00001 + 50000 * 0.00002 = 1.0 + 1.0 = 2.0
-    cost.get shouldBe 2.0 +- 0.01
+    cost.get.toDouble shouldBe 2.0 +- 0.01
   }
 
   behavior.of("Completion with estimatedCost")
@@ -356,7 +362,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage),
@@ -371,7 +376,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage)
@@ -384,7 +388,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content")
     )

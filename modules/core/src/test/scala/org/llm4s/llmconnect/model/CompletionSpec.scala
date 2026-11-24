@@ -12,7 +12,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1677652288L),
-      content = "hi",
       model = "gpt-4",
       message = AssistantMessage("hi")
     )
@@ -25,7 +24,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val base = Completion(
       id = "test-id",
       created = Instant.EPOCH,
-      content = "hi",
       model = "gpt-4",
       message = AssistantMessage("hi")
     )
@@ -36,23 +34,10 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     updated shouldBe Completion(
       id = "test-id",
       created = at,
-      content = "hi",
       model = "gpt-4",
       message = AssistantMessage("hi")
     )
     base.created shouldBe Instant.EPOCH
-  }
-
-  test("Completion.asText returns content") {
-    val completion = Completion(
-      id = "test-id",
-      created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello, world!",
-      model = "gpt-4",
-      message = AssistantMessage("Hello, world!")
-    )
-
-    completion.asText shouldBe "Hello, world!"
   }
 
   test("Completion.hasToolCalls returns true when tool calls present") {
@@ -60,10 +45,8 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "",
       model = "gpt-4",
-      message = AssistantMessage(None, Seq(toolCall)),
-      toolCalls = List(toolCall)
+      message = AssistantMessage(None, Seq(toolCall))
     )
 
     completion.hasToolCalls shouldBe true
@@ -73,7 +56,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello")
     )
@@ -85,7 +67,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking("Let me calculate 2 + 2...")
     )
@@ -97,7 +78,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking(Seq(ThinkingBlock.Redacted("opaque")))
     )
@@ -110,7 +90,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello").withThinking("")
     )
@@ -122,7 +101,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking("Let me think...")
     )
@@ -136,7 +114,6 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello")
     )

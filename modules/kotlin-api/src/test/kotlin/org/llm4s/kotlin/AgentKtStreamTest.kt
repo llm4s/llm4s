@@ -94,11 +94,10 @@ class AgentKtStreamTest {
     private fun completion(text: String): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", Instant.EPOCH, text, "m", AssistantMessage.apply(text),
-                scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
+                "id", Instant.EPOCH, "m", AssistantMessage.apply(text),
                 Option.empty(), Option.empty(),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
-                Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+                Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
             ),
         )
 
@@ -142,11 +141,10 @@ class AgentKtStreamTest {
                 } else {
                     Right(
                         Completion.apply(
-                            "id", Instant.EPOCH, "recovered", "m", AssistantMessage.apply("recovered"),
-                            scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
+                            "id", Instant.EPOCH, "m", AssistantMessage.apply("recovered"),
                             Option.empty(), Option.empty(),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
-                            Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+                            Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
                         ),
                     )
                 }

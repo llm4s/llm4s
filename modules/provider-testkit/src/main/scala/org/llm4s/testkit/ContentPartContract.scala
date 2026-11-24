@@ -130,7 +130,7 @@ object ContentPartContract:
       if role == MessageRole.Tool then
         Seq(
           UserMessage("Fetch it."),
-          AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("call_parts", "fetch", ujson.Obj()))),
+          AssistantMessage(text = None, toolCalls = Seq(ToolCall("call_parts", "fetch", ujson.Obj()))),
           ToolMessage(parts, "call_parts")
         )
       else Seq(UserMessage(parts))

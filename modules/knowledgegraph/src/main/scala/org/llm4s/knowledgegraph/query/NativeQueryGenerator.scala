@@ -79,7 +79,7 @@ class NativeQueryGenerator(llmClient: LLMClient) {
     )
 
     llmClient
-      .complete(conversation, CompletionOptions(temperature = 0.0))
+      .complete(conversation, CompletionOptions(temperature = Some(0.0)))
       .flatMap(completion => parseResponse(completion.content, language))
   }
 

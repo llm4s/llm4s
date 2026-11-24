@@ -11,8 +11,7 @@ import java.time.Instant
 class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
 
   private def reply(reason: FinishReason, calls: ToolCall*): Completion =
-    Completion("r", Instant.EPOCH, "", "m", AssistantMessage(None, calls.toList))
-      .withToolCalls(calls.toList)
+    Completion("r", Instant.EPOCH, "m", AssistantMessage(None, calls.toList))
       .withFinishReason(reason)
 
   private val call = ToolCall("c1", "lookup", ujson.Obj("q" -> "x"))
@@ -50,7 +49,7 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
   "blankArguments" should "accept no arguments only after ToolCalls or Stop (rule 2)" in {
     ToolCallRules.blankArguments("f", FinishReason.ToolCalls) shouldBe Right(())
     ToolCallRules.blankArguments("f", FinishReason.Stop) shouldBe Right(())
-    malformed(ToolCallRules.blankArguments("f", FinishReason.Other(""))) shouldBe true
+    malformed(ToolCallRules.blankArguments("f", FinishReason.Unknown)) shouldBe true
     malformed(ToolCallRules.blankArguments("f", FinishReason.Length)) shouldBe true
   }
 }

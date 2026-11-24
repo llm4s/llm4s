@@ -280,7 +280,7 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "render", ujson.Obj())))
+    val call = AssistantMessage(text = None, toolCalls = Seq(ToolCall("c1", "render", ujson.Obj())))
     val messages = Seq(
       UserMessage("Draw it"),
       call,
@@ -309,7 +309,7 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c9", "render", ujson.Obj())))
+    val call = AssistantMessage(text = None, toolCalls = Seq(ToolCall("c9", "render", ujson.Obj())))
     val messages = Seq(
       UserMessage("Question 1"),
       AssistantMessage("Answer 1"),
