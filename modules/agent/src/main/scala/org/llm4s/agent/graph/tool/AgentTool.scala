@@ -338,6 +338,15 @@ enum ToolOutcome:
   /** An infrastructure failure: the run fails with `GraphError.ToolFailed`. */
   case Fatal(error: LLMError)
 
+  /**
+   * This outcome with `update` applied after a `Success`'s own: how a tool wrapper adds a write to the outcome
+   * `next` returned, as `addUpdate` does on a boundary hook's and a model wrapper's result. Every other outcome is
+   * returned as it is, since only a successful call commits an update.
+   */
+  def addUpdate(update: StateUpdate): ToolOutcome = this match
+    case Success(result) => Success(result.addUpdate(update))
+    case other           => other
+
 @Experimental
 object ToolOutcome:
 
@@ -353,8 +362,12 @@ object ToolOutcome:
  */
 @Experimental
 final case class ToolSuccess private (content: ToolContent, update: StateUpdate):
+
+  /** This result with `value` as its content, keeping its update. */
   def withContent(value: ToolContent): ToolSuccess = copy(content = value)
-  def withUpdate(value: StateUpdate): ToolSuccess  = copy(update = value)
+
+  /** This result with `value` applied after its update; nothing replaces an update, so a wrapper keeps the tool's. */
+  def addUpdate(value: StateUpdate): ToolSuccess = copy(update = update.combine(value))
 
 @Experimental
 object ToolSuccess:

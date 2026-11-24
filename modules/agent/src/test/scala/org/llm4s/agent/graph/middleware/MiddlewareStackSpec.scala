@@ -509,8 +509,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     upickle.default.read[MiddlewareId]("\"approval\"") shouldBe MiddlewareId("approval")
   }
 
-  "BoundaryResult" should "replace its update with withUpdate and keep its text" in {
-    val result = BoundaryResult("text").withText("changed").withUpdate(StateUpdate.empty)
+  "BoundaryResult" should "change its text and keep its update" in {
+    val result = BoundaryResult("text").withText("changed")
     result.text shouldBe "changed"
     result.update shouldBe StateUpdate.empty
   }

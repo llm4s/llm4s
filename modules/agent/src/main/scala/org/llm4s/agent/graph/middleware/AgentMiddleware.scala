@@ -55,8 +55,11 @@ object ModelRequest:
  * `writes`, committed with the model step's task. A wrapper adds its writes with [[addUpdate]], which keeps those of
  * the wrappers inside it - the combined update applies innermost first - and changes the completion with
  * [[withCompletion]], which keeps the update. A wrapper that answers without calling `next` builds its own with
- * `ModelResponse(completion)`. Only the response a wrapper returns counts: the updates of a response it discarded,
- * calling `next` again, are never committed.
+ * `ModelResponse(completion)` or `ModelResponse(completion, update)`. Only the response a wrapper returns counts: the
+ * updates of a response it discarded, calling `next` again, are never committed.
+ *
+ * Every hook returns its update the same way (#2795): built with the result, read with `update`, added to with
+ * `addUpdate` - here, on [[BoundaryResult]] and on a tool wrapper's `ToolOutcome`. Nothing replaces an update.
  */
 @Experimental
 final class ModelResponse private (
@@ -82,20 +85,21 @@ final class ModelResponse private (
 
 @Experimental
 object ModelResponse:
-  /** `completion` with no update. */
-  def apply(completion: Completion): ModelResponse = new ModelResponse(completion, Vector.empty)
+  /** `completion` with `update`, which belongs to the wrapper that returns the response; none by default. */
+  def apply(completion: Completion, update: StateUpdate = StateUpdate.empty): ModelResponse =
+    new ModelResponse(completion, Vector.empty).addUpdate(update)
 
 /**
  * What `beforeAgent` and `afterAgent` return: the `text` - the run's input, or its final answer - possibly changed,
  * and an `update` to keys the middleware declares in its `writes`. `beforeAgent`'s commits with the turn's input,
- * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer.
+ * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer. Built with its update,
+ * `BoundaryResult(text, update)`, and added to with [[addUpdate]], as every hook's result is.
  */
 @Experimental
 final case class BoundaryResult private (text: String, update: StateUpdate):
-  def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
-  /** This result with `u` in place of its update; [[addUpdate]] combines instead. */
-  def withUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, u)
+  /** This result with `t` as its text, keeping its update. */
+  def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
   /** This result with `u` applied after its update. */
   def addUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, update.combine(u))
@@ -124,16 +128,18 @@ object PromptSection:
    * The tokens `chars` characters of section text are estimated at - one per four, rounded up - the estimate the
    * agent bounds its sections by (`maxPromptSectionTokens`), and a middleware bounds its own section by.
    */
-  private[agent] def estimatedTokens(chars: Long): Long = (chars + 3) / 4
+  def estimatedTokens(chars: Long): Long = (chars + 3) / 4
 
-  /** The most characters a section of `tokens` estimated tokens holds. */
-  private[agent] def charsFor(tokens: Int): Long = tokens.toLong * 4
+  /** The most characters a section of `tokens` estimated tokens holds: cut a section's text to this to bound it. */
+  def charsFor(tokens: Int): Long = tokens.toLong * 4
 
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
- * read-only: a wrapper cannot change a call's arguments. `resources` are what the call touches, from
- * its decoded arguments and its tool's `AgentToolSpec.withResources`; never empty, since a call that
- * declares none touches its tool's `defaultResource`.
+ * read-only: a wrapper cannot change a call's tool, arguments or resources, so it has no setters and `wrapToolCall`'s
+ * `next` takes no request (#2795) - the arguments a tool runs with are the ones that were validated, and the
+ * resources a permission was decided on are the ones the call touches. A test builds one with
+ * `ToolCallRequest(spec, call)`. `resources` are what the call touches, from its decoded arguments and its tool's
+ * `AgentToolSpec.withResources`; never empty, since a call that declares none touches its tool's `defaultResource`.
  */
 @Experimental
 final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]):
@@ -143,11 +149,6 @@ final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall
 
   /** The called tool's name, typed. */
   def toolName: ToolName = ToolName(call.name)
-
-  def withSpec(s: AgentToolSpec[?]): ToolCallRequest = copy(spec = s)
-  def withCall(c: ToolCall): ToolCallRequest         = copy(call = c)
-  def withResources(r: Vector[ToolResource]): ToolCallRequest =
-    copy(resources = ToolCallRequest.orDefault(spec, r))
 
 @Experimental
 object ToolCallRequest:

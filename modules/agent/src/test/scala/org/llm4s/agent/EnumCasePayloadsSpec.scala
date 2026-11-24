@@ -161,14 +161,14 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     changed.version shouldBe 1
   }
 
-  "ToolSuccess" should "set each field through its own setter" in {
+  "ToolSuccess" should "set its content and add to its update" in {
     val key    = StateKey.replace[Int]("enum-case-payloads-count", 0)
     val update = StateUpdate.update(key, 7)
     val base   = ToolSuccess(ToolContent.Json(ujson.Num(1)))
     base.update shouldBe StateUpdate.empty
     base.withContent(ToolContent.Json(ujson.Num(2))).content shouldBe ToolContent.Json(ujson.Num(2))
-    base.withUpdate(update).update shouldBe update
-    base.withUpdate(update).content shouldBe base.content
+    base.addUpdate(update).update.isEmpty shouldBe false
+    base.addUpdate(update).content shouldBe base.content
     base.withContent(ToolContent.Json(ujson.Num(2))).update shouldBe StateUpdate.empty
   }
 
@@ -178,6 +178,6 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     ToolOutcome.success(ToolContent.Json(ujson.Num(1))) shouldBe
       ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1)), StateUpdate.empty))
     ToolOutcome.success(ToolContent.Json(ujson.Num(1)), update) shouldBe
-      ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1))).withUpdate(update))
+      ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1)), update))
   }
 }
