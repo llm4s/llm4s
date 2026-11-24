@@ -477,6 +477,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 - **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
   logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
+- **Fixed** `ContextManager` no longer digests the leading system messages, so the system prompt survives history
+  compression; the digests it made are dropped when the newest turn fits only without them [#2918](https://github.com/llm4s/llm4s/issues/2918).
 
 ### Agent runtime
 
