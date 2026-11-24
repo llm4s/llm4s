@@ -31,6 +31,13 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 The 0.7.0 baseline makes every break visible and reviewed; the compatibility promise starts at 1.0.
 
+One kind of change is not a break in any of those rows: a Stable sealed type or enum that the compatibility policy
+lists under [Sealed types that may gain a case](compatibility-policy#sealed-types-that-may-gain-a-case) (`ContentPart`,
+`TraceEvent`, `AgentStatus`, `ThinkingBlock`, `RequestAdjustment`, `ToolCallError`, `LLMError`'s hierarchy and the
+others named there) may gain a case in a minor release. MiMa accepts a new case, so nothing in the build stops one;
+the list is what bounds it. A match on one of those types needs a default case. Removing or renaming a case is a
+break, and MiMa reports it.
+
 ---
 
 ## Tiers in the Code

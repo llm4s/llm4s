@@ -52,8 +52,8 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -173,7 +173,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     name = "get_forecast",
     description = "Returns the forecast for a city",
     schema = forecastSchema
-  ).withHandler(extractor => extractor.getString("city").map(city => Forecast(city, "sunny"))).buildSafe()
+  ).withHandler(extractor => extractor.getString("city").map(city => Forecast(city, "sunny"))).build()
   // end snippet
 
   "The tool snippet" should "run through an agent: the model asks for the tool and the answer uses its result" in {

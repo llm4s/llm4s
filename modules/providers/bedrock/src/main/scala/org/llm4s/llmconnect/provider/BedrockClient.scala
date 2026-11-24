@@ -177,7 +177,8 @@ class BedrockClient(
   @volatile private var asyncClientStarted = false
 
   protected def clientDescription: String = s"Bedrock client for model ${config.model}"
-  protected def providerName: String      = "bedrock"
+  protected def provider: ProviderId      = ProviderId("bedrock")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
@@ -261,8 +262,8 @@ class BedrockClient(
     }
   }
 
-  override def getContextWindow(): Int     = providerConfig.contextWindow
-  override def getReserveCompletion(): Int = providerConfig.reserveCompletion
+  override def contextWindow: Int     = providerConfig.contextWindow
+  override def reserveCompletion: Int = providerConfig.reserveCompletion
 
   override protected def releaseResources(): Unit = {
     sdkClient.close()
@@ -792,7 +793,7 @@ class BedrockClient(
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),

@@ -69,7 +69,7 @@ object ToolCallingRecipe extends RecipeApp {
         to   <- params.getString("to").map(_.toUpperCase)
         rate <- rates.get((from, to)).toRight(s"no rate from $from to $to")
       } yield ExchangeRate(from, to, rate)
-    }.buildSafe()
+    }.build()
 
   def run(client: LLMClient, question: String): Result[AgentResult] =
     for {

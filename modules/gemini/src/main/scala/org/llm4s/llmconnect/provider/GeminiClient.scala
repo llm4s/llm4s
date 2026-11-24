@@ -99,7 +99,8 @@ class GeminiClient(
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(GeminiClient.DefaultStreamTimeout)
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
-  protected def providerName: String      = "gemini"
+  protected def provider: ProviderId      = ProviderId("gemini")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
@@ -323,9 +324,9 @@ class GeminiClient(
       }
   }
 
-  override def getContextWindow(): Int = config.contextWindow
+  override def contextWindow: Int = config.contextWindow
 
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def reserveCompletion: Int = config.reserveCompletion
 
   /**
    * Asks for the configured model with `GET <baseUrl>/models/<model>` (the API's `models.get`), sending the key as
@@ -394,7 +395,7 @@ class GeminiClient(
         // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
         // goes back verbatim with it
         // text, then function calls, each part carrying the thought signature Gemini gave it (if it is still valid)
-        val parts = GeminiThoughtSignatures.parts(providerName, am)
+        val parts = GeminiThoughtSignatures.parts(provider, am)
         parts.foreach { p =>
           p.objOpt
             .flatMap(_.get("functionCall"))
@@ -548,7 +549,7 @@ class GeminiClient(
 
         // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
         // thought summary if one was requested, and the thought signatures, split by part
-        val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
+        val parsed      = GeminiThoughtSignatures.parse(provider, parts, 0, () => UUID.randomUUID().toString)
         val textContent = parsed.text
         val toolCalls   = parsed.calls
 
@@ -601,7 +602,7 @@ class GeminiClient(
 
         // Extract text delta, function calls and thought signatures
         val parsed =
-          GeminiThoughtSignatures.parse(providerName, parts, textOffset, () => UUID.randomUUID().toString)
+          GeminiThoughtSignatures.parse(provider, parts, textOffset, () => UUID.randomUUID().toString)
 
         // the finish reason, ToolCalls for a STOP after a function call in this chunk or an earlier one
         val finishReason = Try(candidate("finishReason").str).toOption
@@ -640,7 +641,7 @@ class GeminiClient(
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),

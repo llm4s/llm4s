@@ -61,6 +61,6 @@ object WeatherTool {
     "get_weather",
     "Retrieves current weather for the given location.",
     weatherParamsSchema
-  ).withHandler(weatherHandler).buildSafe()
+  ).withHandler(weatherHandler).build()
 
 }

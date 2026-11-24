@@ -619,7 +619,7 @@ sbt "samples/runMain org.llm4s.samples.toolapi.WeatherToolExample"
 val toolSafe: Result[ToolFunction[WeatherResult]] =
   ToolBuilder[WeatherResult]("get_weather", "Get current weather for a location", schema)
     .withHandler(weatherHandler)
-    .buildSafe()
+    .build()
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/WeatherToolExample.scala)

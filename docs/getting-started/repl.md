@@ -136,7 +136,7 @@ val weather = ToolBuilder[ujson.Value](
   "The weather in a city",
   Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))
 ).withHandler(args => args.getString("city").map(city => ujson.Obj("city" -> city, "temperature" -> 21)))
-  .buildSafe()
+  .build()
 
 given Session = Session.offline(
   Reply.toolCall("get_weather", """{"city":"Paris"}"""),

@@ -29,7 +29,7 @@ class WatsonXDocumentedShapesSpec extends AnyFunSuite with Matchers with LoneEle
       .`object`[Map[String, Any]]("params")
       .withProperty(Schema.property("a", Schema.integer("first")))
       .withProperty(Schema.property("b", Schema.integer("second")))
-  ).withHandler(_ => Right("6")).buildSafe().fold(e => fail(e.toString), identity)
+  ).withHandler(_ => Right("6")).build().fold(e => fail(e.toString), identity)
 
   // the documented call, verbatim, inside the usual reply envelope
   private val documentedCall =

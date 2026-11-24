@@ -49,8 +49,8 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(ValidationError("test", "streamComplete must not be used by completeStructured"))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 512
 
     def recorded: Seq[(Conversation, CompletionOptions)] = calls.asScala.toSeq
   }

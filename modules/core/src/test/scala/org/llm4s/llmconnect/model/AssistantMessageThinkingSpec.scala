@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.model
 
 import org.llm4s.llmconnect.model.ToolCallId
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -32,7 +32,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
     toolCalls = Seq(call),
     thinking = Seq(
       ThinkingBlock.Text("The user wants the weather."),
-      ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.encrypted","data":"x","index":0}""")
+      ThinkingBlock.Opaque(ProviderId("openrouter"), """{"type":"reasoning.encrypted","data":"x","index":0}""")
     )
   )
 
@@ -162,8 +162,11 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "refuse an opaque block with no provider or no data" in {
-    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Opaque("", "{}"))).validate.isLeft shouldBe true
-    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Opaque("openrouter", ""))).validate.isLeft shouldBe true
+    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Opaque(ProviderId(""), "{}"))).validate.isLeft shouldBe true
+    AssistantMessage("Hi")
+      .withThinking(Seq(ThinkingBlock.Opaque(ProviderId("openrouter"), "")))
+      .validate
+      .isLeft shouldBe true
   }
 
   "an opaque thinking block" should "round-trip through the codecs, provider and data intact" in {

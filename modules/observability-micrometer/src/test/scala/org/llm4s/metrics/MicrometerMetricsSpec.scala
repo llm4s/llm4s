@@ -24,6 +24,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.llmconnect.provider.MetricsRecording
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -419,7 +420,7 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
       operation: => Result[A],
       usage: A => Option[TokenUsage] = (_: A) => None,
       cost: A => Option[Double] = (_: A) => None
-    ): Result[A] = withMetrics("probe", "probe-model", operation, usage, cost)
+    ): Result[A] = withMetrics(ProviderId("probe"), ModelName("probe-model"), operation, usage, cost)
   }
 
   "Through MetricsRecording" should "record a successful call with its tokens and cost" in {
@@ -472,13 +473,19 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     val calls = new java.util.concurrent.atomic.AtomicInteger(0)
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls.incrementAndGet()
-      withMetrics("probe", "probe-model", Left(error), (_: Completion) => None, (_: Completion) => None)
+      withMetrics(
+        ProviderId("probe"),
+        ModelName("probe-model"),
+        Left(error),
+        (_: Completion) => None,
+        (_: Completion) => None
+      )
     }
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   "With ReliableClient and the provider client on one collector" should "count each failed attempt once in llm4s.errors and the final failure once in llm4s.reliability.errors" in {

@@ -162,7 +162,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       .`object`[Map[String, Any]]("params")
       .withProperty(Schema.property("a", Schema.integer("first")))
       .withProperty(Schema.property("b", Schema.integer("second")))
-  ).withHandler(_ => Right("46")).buildSafe().fold(e => fail(e.toString), identity)
+  ).withHandler(_ => Right("46")).build().fold(e => fail(e.toString), identity)
 
   private val askText  = "What is 12 + 34? Use the add tool."
   private val askToAdd = say(askText)

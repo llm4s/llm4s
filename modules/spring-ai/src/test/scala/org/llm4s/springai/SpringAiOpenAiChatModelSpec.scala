@@ -88,7 +88,7 @@ class SpringAiOpenAiChatModelSpec extends AnyFlatSpec with Matchers with EitherV
       "weather",
       "The weather in a city",
       Schema.`object`[Map[String, Any]]("Weather request").withProperty(Schema.property("city", Schema.string("City")))
-    ).withHandler(_ => Right("sunny")).buildSafe().value
+    ).withHandler(_ => Right("sunny")).build().value
     new SpringAiLlmClient(model())
       .complete(conversation, CompletionOptions().withTools(Seq(weather)))
       .value

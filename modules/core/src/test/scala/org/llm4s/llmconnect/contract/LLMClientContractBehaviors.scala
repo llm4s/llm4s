@@ -113,36 +113,36 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
 
     "return a positive context window" in {
       val client = createClient()
-      client.getContextWindow() should be > 0
+      client.contextWindow should be > 0
     }
 
     "return a non-negative reserve completion" in {
       val client = createClient()
-      client.getReserveCompletion() should be >= 0
+      client.reserveCompletion should be >= 0
     }
 
     "have reserve completion less than context window" in {
       val client = createClient()
-      client.getReserveCompletion() should be < client.getContextWindow()
+      client.reserveCompletion should be < client.contextWindow
     }
 
     "return a positive context budget with Standard headroom" in {
       val client = createClient()
-      client.getContextBudget(HeadroomPercent.Standard) should be > 0
+      client.contextBudget(HeadroomPercent.Standard) should be > 0
     }
 
     "return context budget equal to contextWindow - reserve when headroom is None" in {
       val client   = createClient()
-      val expected = client.getContextWindow() - client.getReserveCompletion()
-      client.getContextBudget(HeadroomPercent.Zero) shouldBe expected
+      val expected = client.contextWindow - client.reserveCompletion
+      client.contextBudget(HeadroomPercent.Zero) shouldBe expected
     }
 
     "have monotonically decreasing budgets: None > Light > Standard > Conservative" in {
       val client       = createClient()
-      val none         = client.getContextBudget(HeadroomPercent.Zero)
-      val light        = client.getContextBudget(HeadroomPercent.Light)
-      val standard     = client.getContextBudget(HeadroomPercent.Standard)
-      val conservative = client.getContextBudget(HeadroomPercent.Conservative)
+      val none         = client.contextBudget(HeadroomPercent.Zero)
+      val light        = client.contextBudget(HeadroomPercent.Light)
+      val standard     = client.contextBudget(HeadroomPercent.Standard)
+      val conservative = client.contextBudget(HeadroomPercent.Conservative)
       none should be > light
       light should be > standard
       standard should be > conservative

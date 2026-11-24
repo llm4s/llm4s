@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -14,11 +16,11 @@ class ThinkingBlockWireFormatSpec extends AnyFlatSpec with Matchers {
   private val opaqueData = """{"type":"reasoning.encrypted","data":"x","index":0}"""
 
   private val blocks = Seq[(ThinkingBlock, String)](
-    ThinkingBlock.Text("Plan the call.")                  -> """{"type":"text","text":"Plan the call."}""",
+    ThinkingBlock.Text("Plan the call.") -> """{"type":"text","text":"Plan the call."}""",
     ThinkingBlock.Text("Plan the call.", Some("sig-abc")) ->
       """{"type":"text","text":"Plan the call.","signature":"sig-abc"}""",
-    ThinkingBlock.Redacted("ZW5j")             -> """{"type":"redacted","data":"ZW5j"}""",
-    ThinkingBlock.Opaque("openrouter", opaqueData) ->
+    ThinkingBlock.Redacted("ZW5j") -> """{"type":"redacted","data":"ZW5j"}""",
+    ThinkingBlock.Opaque(ProviderId("openrouter"), opaqueData) ->
       """{"type":"opaque","provider":"openrouter","data":"{\"type\":\"reasoning.encrypted\",\"data\":\"x\",\"index\":0}"}"""
   )
 

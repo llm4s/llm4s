@@ -78,7 +78,7 @@ object AuthenticatedMCPServerSample {
         .`object`[Map[String, Any]]("Echo parameters")
         .withProperty(Schema.property("message", Schema.string("The text to echo")))
     ).withHandler((params: SafeParameterExtractor) => params.getString("message").map(msg => s"Echo: $msg"))
-      .buildSafe()
+      .build()
       .fold(
         err => throw new RuntimeException(s"Failed to build echo tool: ${err.formatted}"),
         identity
@@ -91,7 +91,7 @@ object AuthenticatedMCPServerSample {
         .`object`[Map[String, Any]]("Reverse parameters")
         .withProperty(Schema.property("text", Schema.string("The text to reverse")))
     ).withHandler((params: SafeParameterExtractor) => params.getString("text").map(_.reverse))
-      .buildSafe()
+      .build()
       .fold(
         err => throw new RuntimeException(s"Failed to build reverse tool: ${err.formatted}"),
         identity

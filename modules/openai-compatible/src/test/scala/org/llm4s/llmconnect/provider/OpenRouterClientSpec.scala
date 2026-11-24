@@ -96,13 +96,13 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   it should "return correct context window" in {
     val client = new OpenRouterClient(testConfig)
 
-    client.getContextWindow() shouldBe 200000
+    client.contextWindow shouldBe 200000
   }
 
   it should "return correct reserve completion" in {
     val client = new OpenRouterClient(testConfig)
 
-    client.getReserveCompletion() shouldBe 4096
+    client.reserveCompletion shouldBe 4096
   }
 
   it should "serialize tool message with correct fields" in {

@@ -40,28 +40,28 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   // ============ Context Window Tests ============
 
-  "ZaiClient.getContextWindow" should "return the configured context window" in {
+  "ZaiClient.contextWindow" should "return the configured context window" in {
     val client = new ZaiClient(testConfig)
-    client.getContextWindow() shouldBe 128000
+    client.contextWindow shouldBe 128000
   }
 
   it should "return different values for different model configs" in {
     val config4_5 = testConfig.withContextWindow(32000)
     val client    = new ZaiClient(config4_5)
-    client.getContextWindow() shouldBe 32000
+    client.contextWindow shouldBe 32000
   }
 
   // ============ Reserve Completion Tests ============
 
-  "ZaiClient.getReserveCompletion" should "return the configured reserve completion" in {
+  "ZaiClient.reserveCompletion" should "return the configured reserve completion" in {
     val client = new ZaiClient(testConfig)
-    client.getReserveCompletion() shouldBe 4096
+    client.reserveCompletion shouldBe 4096
   }
 
   it should "return custom reserve completion when configured" in {
     val customConfig = testConfig.withReserveCompletion(8192)
     val client       = new ZaiClient(customConfig)
-    client.getReserveCompletion() shouldBe 8192
+    client.reserveCompletion shouldBe 8192
   }
 
   // ============ Request Body Creation Tests ============

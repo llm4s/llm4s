@@ -29,8 +29,8 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(completion(text))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Right(completion(text))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   private val failingClient: LLMClient = new LLMClient {
@@ -38,8 +38,8 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Left(SimpleError("agent-fail"))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("agent-fail"))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   "AgentIO.run" should "return an AgentResult with Completed status when the agent finishes" in {
@@ -102,8 +102,8 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         if (calls.getAndIncrement() == 0) Right(completion("4")) else Left(SimpleError("agent-fail"))
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
     val agentIO = AgentIO[IO](Fixtures.agentOf(client)())
     val s1      = agentIO.run("First").unsafeRunSync()

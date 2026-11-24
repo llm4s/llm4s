@@ -160,7 +160,7 @@ object DuckDuckGoSearchTool {
         _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
         result      <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"

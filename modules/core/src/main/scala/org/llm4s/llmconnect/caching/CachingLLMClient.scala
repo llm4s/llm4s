@@ -218,9 +218,9 @@ class CachingLLMClient(
     // Streaming bypasses cache
     baseClient.streamComplete(conversation, options)(onChunk)
 
-  override def getContextWindow(): Int = baseClient.getContextWindow()
+  override def contextWindow: Int = baseClient.contextWindow
 
-  override def getReserveCompletion(): Int = baseClient.getReserveCompletion()
+  override def reserveCompletion: Int = baseClient.reserveCompletion
 
   override def validate(): Result[Unit] = baseClient.validate()
 

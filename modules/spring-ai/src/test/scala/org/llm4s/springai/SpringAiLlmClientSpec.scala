@@ -77,7 +77,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     "weather",
     "Current weather in a city",
     Schema.`object`[Map[String, Any]]("Weather query").withProperty(Schema.property("city", Schema.string("City name")))
-  ).withHandler(params => params.getString("city").map(city => s"sunny in $city")).buildSafe().value
+  ).withHandler(params => params.getString("city").map(city => s"sunny in $city")).build().value
 
   "complete" should "answer with the Spring AI model's reply, its id, model and usage" in {
     val usage  = new DefaultUsage(10, 2, 12, null, 3L, 1L)
@@ -350,12 +350,12 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       .content shouldBe "streamed"
     chunks.result().mkString shouldBe "streamed"
 
-    (client.getContextWindow(), client.getReserveCompletion()) shouldBe (32000, 1000)
+    (client.contextWindow, client.reserveCompletion) shouldBe (32000, 1000)
   }
 
   "the client" should "assume a 128k context window by default, wrap as a JLlmClient, and refuse a null model" in {
     val client = new SpringAiLlmClient(new FakeChatModel(_ => reply("from Spring AI")))
-    (client.getContextWindow(), client.getReserveCompletion()) shouldBe (128000, 4096)
+    (client.contextWindow, client.reserveCompletion) shouldBe (128000, 4096)
     Llm4s.wrapClient(client).complete("hi").get() shouldBe "from Spring AI"
     intercept[NullPointerException](new SpringAiLlmClient(null))
   }

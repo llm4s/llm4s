@@ -45,7 +45,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ToolOutcome.success(ToolContent.Json(ujson.Str(next.toString)), StateUpdate.update(counter, next))
     }
 
-  private def toolResults(result: AgentResult): Vector[String] =
+  private def toolResults(result: AgentResult): Seq[String] =
     result.messages.collect { case t: ToolMessage => t.content }.toVector
 
   "Two calls holding one lock" should "run in turn, the second seeing the first's write" in {

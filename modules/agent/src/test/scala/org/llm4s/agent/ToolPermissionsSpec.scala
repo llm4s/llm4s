@@ -36,7 +36,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
         .withMiddleware(new PermissionMiddleware(rules))
     )
 
-  private def toolResults(result: AgentResult): Vector[String] =
+  private def toolResults(result: AgentResult): Seq[String] =
     result.messages.collect { case t: ToolMessage => t.content }.toVector
 
   private def approvalsOf(result: AgentResult): Vector[InterruptId] = result.status match {

@@ -105,7 +105,7 @@ object TypedTools {
         a <- p.getInt("a")
         b <- p.getInt("b")
       } yield (a + b).toString
-    ).buildSafe()
+    ).build()
   )
 
   val typedAdd =
@@ -208,7 +208,7 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val handBuiltPing = built(
       ToolBuilder[String]("ping", "Pong", Schema.`object`[Map[String, Any]]("No parameters"))
         .withHandler(_ => Right("pong"))
-        .buildSafe()
+        .build()
     )
     val ping = built(Tool.of[NoArgs, String]("ping", "Pong")(_ => Right("pong")))
     ping.execute(ujson.Null) shouldBe Right(ujson.Str("pong"))

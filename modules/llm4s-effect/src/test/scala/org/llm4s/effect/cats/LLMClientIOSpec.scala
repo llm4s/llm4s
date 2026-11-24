@@ -39,8 +39,8 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         chunks.foreach(onChunk)
         Right(completion)
       }
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
 
   private val failingClient: LLMClient = new LLMClient {
@@ -48,8 +48,8 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Left(SimpleError("boom"))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("boom"))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   "LLMClientIO.complete" should "return the completion from the underlying client" in {
@@ -100,8 +100,8 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           Right(testCompletion)
         } else Left(SimpleError("first chunk was not delivered incrementally"))
       }
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
     val emitted = LLMClientIO[IO](client)
       .streamComplete(testConversation)
@@ -120,8 +120,8 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         onChunk(StreamedChunk(id = "c2", content = Some("b")))
         Left(SimpleError("mid-stream"))
       }
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
     val out = LLMClientIO[IO](client).streamComplete(testConversation).attempt.compile.toList.unsafeRunSync()
     out.map(_.map(_.id).left.map(_.getClass)) shouldBe List(
@@ -145,8 +145,8 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         interrupted.countDown()
         Left(SimpleError("interrupted"))
       }
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
     val taken = LLMClientIO[IO](client).streamComplete(testConversation).take(1).compile.toList.unsafeRunSync()
     taken.map(_.id) shouldBe List("c1")

@@ -44,7 +44,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
         Thread.sleep(delayMs)
       }
       extractor.getString("input").map(input => TestResult(s"$name: $input", startTime))
-    }.buildSafe()
+    }.build()
   }
 
   /**
@@ -105,7 +105,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
             outcome.fold(e => Left(e.getMessage), identity).map(_ => TestResult(s"$name: $input", 0L))
           }
         }
-        .buildSafe()
+        .build()
     }
   }
 
@@ -312,7 +312,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
           Right(TestResult(s"success: $input", System.currentTimeMillis()))
         }
       }
-    }.buildSafe()
+    }.build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         failingTool => {

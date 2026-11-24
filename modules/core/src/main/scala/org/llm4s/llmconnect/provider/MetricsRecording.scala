@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 
 import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
@@ -36,8 +37,8 @@ trait MetricsRecording {
    * via `ErrorKind.fromLLMError`, and records tokens only for a [[org.llm4s.error.ContentFilteredError]] carrying
    * the usage the provider billed for the filtered call.
    *
-   * @param provider     Provider label forwarded to the collector (e.g. `"openai"`).
-   * @param model        Model identifier forwarded to the collector.
+   * @param provider     The provider called; its string is the label the collector receives (e.g. `"openai"`).
+   * @param model        The model called; its string is the model the collector receives.
    * @param operation    The LLM call to time and observe.
    * @param extractUsage Extracts prompt/completion token counts from a successful
    *                     result; return `None` to skip token recording.
@@ -46,6 +47,14 @@ trait MetricsRecording {
    * @return The result of `operation`, unchanged.
    */
   protected def withMetrics[A](
+    provider: ProviderId,
+    model: ModelName,
+    operation: => Result[A],
+    extractUsage: A => Option[TokenUsage],
+    extractCost: A => Option[Double]
+  ): Result[A] = withLabels(provider.asString, model.asString, operation, extractUsage, extractCost)
+
+  private def withLabels[A](
     provider: String,
     model: String,
     operation: => Result[A],

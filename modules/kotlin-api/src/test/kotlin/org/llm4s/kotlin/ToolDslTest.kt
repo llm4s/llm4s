@@ -74,8 +74,8 @@ class ToolDslTest {
             options: CompletionOptions,
             onChunk: Function1<StreamedChunk, BoxedUnit>,
         ): Either<LLMError, Completion> = reply()
-        override fun getContextWindow(): Int = 4096
-        override fun getReserveCompletion(): Int = 256
+        override fun contextWindow: Int = 4096
+        override fun reserveCompletion: Int = 256
     }
 
     /** A client whose model calls [calls] once, then answers `done`. */

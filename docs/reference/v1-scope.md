@@ -156,6 +156,7 @@ type's tier is its `@Stable` or `@Experimental` annotation (`org.llm4s.annotatio
 [Scaladoc](/scaladoc/), and MiMa skips `@Experimental` types ([API Stability](api-stability#tiers-in-the-code)).
 
 - **Source and binary compatible within 1.x.** From 1.0, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all 1.x releases. Between the 0.7.0 baseline and 1.0 MiMa already runs, but a minor release may still break a frozen API, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note.
+- **A sealed type may gain a case.** The Stable sealed types and enums that the policy lists under [Sealed types that may gain a case](compatibility-policy#sealed-types-that-may-gain-a-case), `ContentPart`, `TraceEvent`, `AgentStatus` and `LLMError`'s hierarchy among them, may gain a case in a minor release, so a match on one needs a default case. Removing or renaming a case is a break.
 - **Deprecate before removing, from 1.0.** A Frozen API is then only removed after a deprecation cycle, never dropped outright in a minor release. Before 1.0 a wrong API is fixed outright, with no `@deprecated` shim. See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 

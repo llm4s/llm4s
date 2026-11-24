@@ -226,7 +226,7 @@ object StreamingBridgeContract {
       ).withHandler { params =>
         seen.set(Some(Thread.currentThread()))
         params.getString("city").map(_ => 21.0)
-      }.buildSafe()
+      }.build()
       agent <- Agent.builder("contract", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
     } yield agent
     built.fold(e => throw new IllegalStateException(s"could not build the contract's agent: $e"), identity)
@@ -276,8 +276,8 @@ object StreamingBridgeContract {
       chunks.foreach(onChunk)
       Left(error)
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   /**
@@ -308,8 +308,8 @@ object StreamingBridgeContract {
       ended.countDown()
       if (stopped.get()) Left(CancelledError("counting stream")) else result
     }
-    def getContextWindow(): Int     = delegate.getContextWindow()
-    def getReserveCompletion(): Int = delegate.getReserveCompletion()
+    def contextWindow: Int     = delegate.contextWindow
+    def reserveCompletion: Int = delegate.reserveCompletion
   }
 
   /**
@@ -336,8 +336,8 @@ object StreamingBridgeContract {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       parked(delegate.streamComplete(conversation, options)(onChunk))
-    def getContextWindow(): Int     = delegate.getContextWindow()
-    def getReserveCompletion(): Int = delegate.getReserveCompletion()
+    def contextWindow: Int     = delegate.contextWindow
+    def reserveCompletion: Int = delegate.reserveCompletion
   }
 }
 

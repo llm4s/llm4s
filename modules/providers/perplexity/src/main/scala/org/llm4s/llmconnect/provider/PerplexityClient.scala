@@ -93,7 +93,8 @@ class PerplexityClient(
   private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   protected def clientDescription: String = s"Perplexity Agent API client for model ${config.model}"
-  protected def providerName: String      = ProviderName
+  protected def provider: ProviderId      = ProviderId(ProviderName)
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   private val replayOrigin = ReplayOrigin(ProviderName, config.model.asString)
@@ -327,7 +328,7 @@ class PerplexityClient(
       case um: UserMessage  => Seq(messageItem("user", textContent(um.parts)))
       case am: AssistantMessage =>
         val signatures =
-          am.thinking.collect { case ThinkingBlock.Opaque(ProviderName, data) => data }.flatMap(decode).toMap
+          am.thinking.collect { case ThinkingBlock.Opaque(p, data) if p == provider => data }.flatMap(decode).toMap
         val text = Option.when(am.content.nonEmpty)(messageItem("assistant", ujson.Str(am.content)))
         val calls = am.toolCalls.map { call =>
           callNames(call.id.asString) = call.name
@@ -358,7 +359,7 @@ class PerplexityClient(
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),
@@ -367,8 +368,8 @@ class PerplexityClient(
       result
     )
 
-  override def getContextWindow(): Int     = config.contextWindow
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def contextWindow: Int     = config.contextWindow
+  override def reserveCompletion: Int = config.reserveCompletion
 
   /**
    * Gets the Agent API's model listing, `GET <baseUrl>/v1/models`
@@ -603,7 +604,7 @@ object PerplexityClient {
         text = text,
         toolCalls = calls.map(_._1),
         signatures = calls.collect { case (call, Some(sig)) =>
-          ThinkingBlock.Opaque(ProviderName, encode(call.id.asString, sig))
+          ThinkingBlock.Opaque(ProviderId(ProviderName), encode(call.id.asString, sig))
         },
         citations = citations,
         usage = usage.flatMap(parseUsage),

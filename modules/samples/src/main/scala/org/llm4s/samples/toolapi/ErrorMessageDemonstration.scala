@@ -32,7 +32,7 @@ object ErrorMessageDemonstration extends App {
         qty  <- extractor.getDouble("quantity")
         loc  <- extractor.getString("location")
       } yield Result(s"Added $qty units of $item to $loc")
-    }.buildSafe()
+    }.build()
   } yield {
     logger.info("=" * 60)
     logger.info("Tool Parameter Validation - Error Message Examples")

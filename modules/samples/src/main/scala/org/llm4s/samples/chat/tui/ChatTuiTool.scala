@@ -106,7 +106,7 @@ object ChatTuiTool:
           result  <- readBounded(target, rawPath)
         } yield result
       }
-      .buildSafe()
+      .build()
 
   private def readBounded(target: Path, rawPath: String): Either[String, ReadFileResult] =
     if !Files.exists(target) then Left(s"file not found: $rawPath")

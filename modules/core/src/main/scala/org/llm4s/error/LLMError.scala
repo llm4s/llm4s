@@ -65,11 +65,11 @@ object LLMError {
   }
 
   /** The errors that are [[isRecoverable]]. */
-  def recoverableErrors(errors: List[LLMError]): List[LLMError] =
+  def recoverableErrors(errors: Seq[LLMError]): Seq[LLMError] =
     errors.filter(isRecoverable)
 
   /** The errors that are not [[isRecoverable]]: every [[NonRecoverableError]], and every error with no marker. */
-  def nonRecoverableErrors(errors: List[LLMError]): List[LLMError] =
+  def nonRecoverableErrors(errors: Seq[LLMError]): Seq[LLMError] =
     errors.filterNot(isRecoverable)
 
   /**

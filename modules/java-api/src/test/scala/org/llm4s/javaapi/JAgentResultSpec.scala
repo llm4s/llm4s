@@ -393,7 +393,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       "Echoes the input",
       Schema.`object`[Map[String, Any]]("Echo").withProperty(Schema.property("input", Schema.string("Input")))
     ).withHandler(ext => ext.getString("input").map(s => JAgentResultSpec.Echo(s"echoed: $s")))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.message), t => ToolRegistry.of(Seq(t)).toOption.get)
 }
 

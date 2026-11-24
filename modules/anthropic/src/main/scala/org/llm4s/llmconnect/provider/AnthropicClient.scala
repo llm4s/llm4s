@@ -211,7 +211,8 @@ class AnthropicClient(
     config.timeouts.stream.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
 
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
-  protected def providerName: String      = "anthropic"
+  protected def provider: ProviderId      = ProviderId("anthropic")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
@@ -595,9 +596,9 @@ curl https://api.anthropic.com/v1/messages \
       }
   }
 
-  override def getContextWindow(): Int = providerConfig.contextWindow
+  override def contextWindow: Int = providerConfig.contextWindow
 
-  override def getReserveCompletion(): Int = providerConfig.reserveCompletion
+  override def reserveCompletion: Int = providerConfig.reserveCompletion
 
   /**
    * Asks for the configured model with the Models API (`GET /v1/models/<model>`), through the SDK client and with
@@ -991,7 +992,7 @@ curl https://api.anthropic.com/v1/messages \
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),

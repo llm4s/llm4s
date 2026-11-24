@@ -33,7 +33,7 @@ class ExampleAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val reply  = model.streamComplete(Conversation(Seq(UserMessage("hi"))), options)(c => chunks.updateAndGet(_ :+ c))
     reply.map(_.content) shouldBe Right("Echo: hi")
     model.complete(Conversation(Seq.empty), options).map(_.content) shouldBe Right("Echo: ")
-    model.getContextWindow() should be > model.getReserveCompletion()
+    model.contextWindow should be > model.reserveCompletion
   }
 
   "the pause tool" should "wait its delay, and end early with an error when interrupted" in {

@@ -142,7 +142,7 @@ class OpenAIClient private[provider] (
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector,
   exchangeLogging: ProviderExchangeLogging,
-  provider: ProviderId = OpenAIProvider.id
+  protected val provider: ProviderId = OpenAIProvider.id
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
@@ -154,7 +154,7 @@ class OpenAIClient private[provider] (
   OpenAIClient.registerCredentials(config)
 
   protected def clientDescription: String = s"$displayName client for model $model"
-  protected def providerName: String      = provider.asString
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
@@ -525,9 +525,9 @@ class OpenAIClient private[provider] (
     }
   }
 
-  override def getContextWindow(): Int = config.contextWindow
+  override def contextWindow: Int = config.contextWindow
 
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def reserveCompletion: Int = config.reserveCompletion
 
   /**
    * One request through the SDK client, with the credential a completion is sent with:
@@ -957,7 +957,7 @@ class OpenAIClient private[provider] (
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody.getOrElse(""),
         model = Some(modelName),

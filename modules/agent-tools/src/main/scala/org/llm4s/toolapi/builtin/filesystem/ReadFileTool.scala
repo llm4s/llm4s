@@ -86,7 +86,7 @@ object ReadFileTool {
         encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
         result <- readFile(pathStr, maxLines, encoding, config)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Default read file tool instance, returning a Result for safe error handling.

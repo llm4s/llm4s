@@ -32,7 +32,7 @@ import upickle.default.ReadWriter
  *       result <- calculate(operation, a, bOpt)
  *     } yield result
  *   }
- *   .buildSafe()
+ *   .build()
  * }}}
  *
  * The typed way writes them once, in [[TypedCalculator.CalculatorArgs]], and the function receives them decoded.

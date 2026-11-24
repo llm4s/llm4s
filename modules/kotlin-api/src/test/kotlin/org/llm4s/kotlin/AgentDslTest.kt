@@ -82,8 +82,8 @@ class AgentDslTest {
             return reply(conversation, options, streamed = true)
         }
 
-        override fun getContextWindow(): Int = 4096
-        override fun getReserveCompletion(): Int = 512
+        override fun contextWindow: Int = 4096
+        override fun reserveCompletion: Int = 512
     }
 
     private fun client(model: LLMClient) = LLMClientKt(org.llm4s.javaapi.Llm4s.wrapClient(model))

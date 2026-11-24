@@ -95,7 +95,8 @@ class OllamaClient(
   private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
-  protected def providerName: String      = "ollama"
+  protected def provider: ProviderId      = ProviderId("ollama")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
@@ -230,7 +231,7 @@ class OllamaClient(
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),
@@ -478,9 +479,9 @@ class OllamaClient(
     }
   }
 
-  override def getContextWindow(): Int = config.contextWindow
+  override def contextWindow: Int = config.contextWindow
 
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def reserveCompletion: Int = config.reserveCompletion
 
   /**
    * Asks the server for the configured model with `POST /api/show`, which loads nothing and generates nothing.

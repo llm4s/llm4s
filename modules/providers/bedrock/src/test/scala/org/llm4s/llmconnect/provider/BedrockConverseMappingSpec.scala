@@ -81,7 +81,7 @@ class BedrockConverseMappingSpec extends AnyWordSpec with Matchers {
           .`object`[Map[String, Any]]("Weather params")
           .withProperty(Schema.property("location", Schema.string("City name")))
           .withProperty(Schema.property("days", Schema.integer("How many days"), required = false))
-      ).withHandler(_ => Right("sunny")).buildSafe().toOption.value
+      ).withHandler(_ => Right("sunny")).build().toOption.value
 
       val conv    = Conversation(Seq(UserMessage("hi")))
       val withIt  = requestBody(conv, CompletionOptions(tools = Seq(tool)))
@@ -110,7 +110,7 @@ class BedrockConverseMappingSpec extends AnyWordSpec with Matchers {
       )
       val tool = ToolBuilder[String]("get_weather", "Weather", Schema.raw(raw))
         .withHandler(_ => Right("sunny"))
-        .buildSafe()
+        .build()
         .toOption
         .value
 

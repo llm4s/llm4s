@@ -36,8 +36,8 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { last.set(c); reply(c) }
       def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
   }
 

@@ -232,7 +232,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val schema = Schema.`object`[Map[String, Any]]("In").withProperty(Schema.property("q", Schema.string("q")))
     ToolBuilder[String]("lookup", "Lookup tool", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.message), identity)
   }
 
@@ -663,7 +663,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val toolResult = ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
 
     val client = mkClient(stub[StubbedHttpCalls])
     toolResult match {
@@ -685,7 +685,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val toolResult = ToolBuilder[String]("my_tool", "My tool description", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
 
     val client = mkClient(stub[StubbedHttpCalls])
     toolResult match {

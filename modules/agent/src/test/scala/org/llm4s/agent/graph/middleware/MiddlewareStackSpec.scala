@@ -105,7 +105,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def newLog = new CopyOnWriteArrayList[String]()
 
-  private def problems(result: Result[MiddlewareStack]): List[String] = result.left.value match
+  private def problems(result: Result[MiddlewareStack]): Seq[String] = result.left.value match
     case v: ValidationError => v.violations
     case other              => fail(s"not a ValidationError: $other")
 

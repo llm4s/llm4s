@@ -32,7 +32,7 @@ object ScriptedAgentZSpec extends ZIOSpecDefault {
       Schema
         .`object`[Map[String, Any]]("Parameters")
         .withProperty(Schema.property("city", Schema.string("City name")))
-    ).withHandler(params => params.getString("city").map(city => Temperature(city, 21.0))).buildSafe()
+    ).withHandler(params => params.getString("city").map(city => Temperature(city, 21.0))).build()
 
   def packingAgent(client: LLMClient): Result[Agent] =
     for {

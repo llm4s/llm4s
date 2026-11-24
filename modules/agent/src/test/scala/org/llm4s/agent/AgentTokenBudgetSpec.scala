@@ -195,8 +195,8 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     val fanOut = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("fan-out")

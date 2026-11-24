@@ -92,8 +92,8 @@ class OptionsAndClientDslTest {
                 onChunk: Function1<StreamedChunk, BoxedUnit>,
             ): Either<LLMError, Completion> = complete(conversation, options)
 
-            override fun getContextWindow(): Int = 4096
-            override fun getReserveCompletion(): Int = 256
+            override fun contextWindow: Int = 4096
+            override fun reserveCompletion: Int = 256
         }
         val client = Llm4s.wrapClient(JLlm4s.wrapClient(model))
 

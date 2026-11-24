@@ -80,7 +80,7 @@ object TokenWindowExample {
     conversation: Conversation
   ): TokenAnalysis = {
     val tokenCount = tokenCounter.countConversation(conversation)
-    val breakdown  = tokenCounter.getTokenBreakdown(conversation)
+    val breakdown  = tokenCounter.tokenBreakdown(conversation)
 
     TokenAnalysis(
       totalTokens = tokenCount,
@@ -327,13 +327,13 @@ object TokenWindowExample {
   ): BudgetDemoResults = {
     logger.info("=== Demonstrating Automatic Budget Derivation ===")
 
-    val contextWindow     = client.getContextWindow()
-    val reserveCompletion = client.getReserveCompletion()
+    val contextWindow     = client.contextWindow
+    val reserveCompletion = client.reserveCompletion
 
     val budgets = Map(
-      "Standard (8% headroom)"      -> client.getContextBudget(HeadroomPercent.Standard),
-      "Light (5% headroom)"         -> client.getContextBudget(HeadroomPercent.Light),
-      "Conservative (15% headroom)" -> client.getContextBudget(HeadroomPercent.Conservative)
+      "Standard (8% headroom)"      -> client.contextBudget(HeadroomPercent.Standard),
+      "Light (5% headroom)"         -> client.contextBudget(HeadroomPercent.Light),
+      "Conservative (15% headroom)" -> client.contextBudget(HeadroomPercent.Conservative)
     )
 
     logger.info(s"Model: $modelName")

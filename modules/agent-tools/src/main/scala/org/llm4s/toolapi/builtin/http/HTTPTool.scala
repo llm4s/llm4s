@@ -126,7 +126,7 @@ object HTTPTool {
         contentType = extractor.getString("content_type").toOption
         result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))

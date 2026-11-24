@@ -69,7 +69,8 @@ For a Frozen module:
   [Stability](../guide/writing-a-provider#stability) in the provider guide: a provider compiled against
   1.0 keeps working across 1.x.
 - **The error model.** The `LLMError` types and their fields. The *text* of an error message is not part
-  of the promise, and neither is a log line.
+  of the promise, and neither is a log line. New error types are added
+  ([Sealed types that may gain a case](#sealed-types-that-may-gain-a-case)).
 - **Configuration.** The documented `application.conf` keys and the environment variables bound to them.
   Before 1.0 a key is renamed outright, with a migration note. From 1.0 a renamed key keeps its old name as an
   alias for the rest of the major version, with a warning that names the key to rename it to.
@@ -105,11 +106,47 @@ These are the rules the codebase follows so a minor release does not break anyon
 - **Express a duration** as a `FiniteDuration` and a point in time as an `Instant`, never a raw number
   with its unit in the name; a wire format keeps its units and converts at the boundary.
 - **Keep a helper only llm4s modules use `private[llm4s]`.** Public is a promise.
+- **Add a case to a sealed type or enum** only where
+  [Sealed types that may gain a case](#sealed-types-that-may-gain-a-case) lists the type. A case with fields is a
+  `final case class X private` with a companion `apply`, so the case itself can grow.
 
 A change that cannot avoid breaking binary compatibility follows
 [Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change). Between the baseline and 1.0
 it is a minor-release change: a narrow `ProblemFilters.exclude` entry that says why, a CHANGELOG *Breaking changes*
 line and a migration note, with no `@deprecated` shim. From 1.0 it is a major-release change, after a deprecation.
+
+---
+
+## Sealed types that may gain a case
+
+A new kind of content, event, status or error is added as a new case of a sealed type or enum. That is binary
+compatible, and it is **not** treated as a break: the Stable types below may gain a case in a minor release, 1.x
+included. A match on one of them therefore needs a default case (`case _ =>` or `case other =>`): without it the
+compiler reports the match as not exhaustive after an upgrade, which fails a build that makes warnings fatal, and a
+value of the new case throws a `MatchError`. Removing or renaming a case is a break and follows
+[Deprecating and removing](#deprecating-and-removing), like any other member.
+
+| Area | Types that may gain a case |
+|---|---|
+| Messages and requests | `ContentPart`, `ThinkingBlock`, `Thinking`, `ReasoningEffort`, `ResponseFormat`, `Modality`, `InputPurpose`, `RequestAdjustment`, `RequestOption` |
+| Errors | `LLMError`'s hierarchy (the trait is open: a new error type can appear in any minor release, and the `RecoverableError` / `NonRecoverableError` markers say how to treat one you do not know), `ToolCallError`, `ToolParameterError`, `RateLimitOrigin` |
+| Tools | `SchemaDefinition`, `ToolParameterType` |
+| Tracing and metrics | `TraceEvent`, `ErrorKind`, `ProviderExchangeOutcome` |
+| Models and configuration | `ModelMode`, `ModelRegistrySource`, `ApiKeySource`, `IdentitySource`, `ProviderCollisionKind` |
+| HTTP | `HttpBody`, `MultipartPart`, `HttpMethod`: an `Llm4sHttpClient` of your own answers one it does not know with a `Left`, never a `MatchError` |
+| Agents | `AgentStatus`, `RunStatus` |
+
+`StreamEvent` and the `AgentEvents` extractors are Experimental, so the promise does not cover them at all, but the
+same advice holds: an agent gains event kinds as it gains features, and a listener ignores the ones it does not
+know.
+
+Some types are already open, with a case that carries a value llm4s does not know: `FinishReason.Other(raw)` and
+`FinishReason.Unknown`, `ServiceTier.Other(raw)`, `TracingMode.Named(name)`. A new *named* case can still be added
+beside it, so a match on these needs its default case too; the value a provider sends keeps meaning what it meant.
+
+A Stable sealed type or enum that is not listed here is closed for 1.x: `Message` and `MessageRole` (a conversation
+has four roles), `Outcome`, `ProviderExchangeLogging`, `CircuitState` and `RetryPolicy`. Adding a case to one of
+those is a breaking change.
 
 ---
 

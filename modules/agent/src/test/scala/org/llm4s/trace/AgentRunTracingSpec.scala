@@ -78,8 +78,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private def answer(text: String): Completion =
@@ -100,7 +100,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+  ).withHandler(_.getString("message").map(EchoResult(_))).build().fold(e => fail(e.formatted), identity)
 
   private def traced(client: LLMClient, tracing: Tracing): Agent =
     Agent
@@ -145,8 +145,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      override def getContextWindow(): Int        = 4096
-      override def getReserveCompletion(): Int    = 1024
+      override def contextWindow: Int             = 4096
+      override def reserveCompletion: Int         = 1024
       override def providerId: Option[ProviderId] = Some(ProviderId("anthropic"))
     }
     ok(traced(client, tracing).run("hi"))
@@ -450,8 +450,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     }
     ok(traced(slow, tracing).run(ThreadId("t-chat-span"), "go"))
     val calls = tracing.custom.filter(_.name == "agent.model_call_completed")
@@ -627,8 +627,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     }
     val run = traced(blocking, tracing).start(ThreadId("t8"), "go").fold(e => fail(e.message), identity)
     entered.await(5, TimeUnit.SECONDS) shouldBe true

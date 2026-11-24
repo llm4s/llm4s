@@ -28,7 +28,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
       .`object`[Map[String, Any]]("params")
       .withProperty(Schema.property("a", Schema.integer("first")))
       .withProperty(Schema.property("b", Schema.integer("second")))
-  ).withHandler(_ => Right("3")).buildSafe().fold(e => fail(e.toString), identity)
+  ).withHandler(_ => Right("3")).build().fold(e => fail(e.toString), identity)
 
   test("golden: system + user") {
     body(Conversation(Seq(SystemMessage("be brief"), UserMessage("Hi"))), options) shouldBe
