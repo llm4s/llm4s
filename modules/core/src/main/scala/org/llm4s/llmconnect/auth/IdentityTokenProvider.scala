@@ -32,7 +32,7 @@ enum IdentitySource:
  * Supplies the subject token a token exchange presents: the workload's identity, read afresh for each exchange.
  *
  * Named and shaped as its siblings [[ApiKeyProvider]] and [[AccessTokenProvider]] are: one method, `current()`.
- * It was `IdentityTokenSource`, one word from the [[IdentitySource]] it is made from.
+ * [[IdentityTokenProvider.from]] makes one from a configured [[IdentitySource]].
  */
 @Experimental
 trait IdentityTokenProvider:

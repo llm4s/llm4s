@@ -82,7 +82,7 @@ trait ProviderDescriptor:
    * express (a malformed value, say).
    *
    * The embedding half has the same method, with the same shape:
-   * [[EmbeddingProviderDescriptor.buildConfig]].
+   * `EmbeddingProviderDescriptor.buildConfig`.
    *
    * @param section the validated `llm4s.providers.<name>` section
    * @param context the section's name (`context.providerName`, for error messages) and the resolver of context
@@ -104,7 +104,7 @@ trait ProviderDescriptor:
    * does not close that client, and declares so with `features.customHttpClient = true` (it defaults to
    * `false`, which a provider built on a vendor SDK keeps).
    *
-   * The embedding half has the same method, with the same shape: [[EmbeddingProviderDescriptor.build]].
+   * The embedding half has the same method, with the same shape: `EmbeddingProviderDescriptor.build`.
    *
    * @param config  a config, normally one [[buildConfig]] returned
    * @param context the caller's client options (`context.metrics`, `context.exchangeLogging`,

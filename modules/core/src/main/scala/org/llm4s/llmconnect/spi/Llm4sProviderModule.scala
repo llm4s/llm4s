@@ -34,8 +34,8 @@ trait Llm4sProviderModule:
   /**
    * The chat providers this module supplies.
    *
-   * Unprefixed, as the chat half is across the SPI: [[ProviderDescriptor]] beside
-   * [[EmbeddingProviderDescriptor]], `ProviderRegistry.find` beside `findEmbedding`.
+   * Unprefixed, as the chat half is across the SPI: `ProviderDescriptor` beside
+   * `EmbeddingProviderDescriptor`, `ProviderRegistry.find` beside `findEmbedding`.
    */
   def providers: Seq[ProviderDescriptor] = Nil
 
