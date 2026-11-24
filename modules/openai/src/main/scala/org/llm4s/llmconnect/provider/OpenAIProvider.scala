@@ -97,4 +97,4 @@ object OpenAIProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OpenAIConfig](id, config)
-      .flatMap(OpenAIClient(_, context.metrics, context.exchangeLogging))
+      .flatMap(OpenAIClient(_, context.options))

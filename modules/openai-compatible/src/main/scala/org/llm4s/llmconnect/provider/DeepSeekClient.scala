@@ -2,15 +2,13 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
-
-import scala.util.Try
 
 /**
  * DeepSeek LLM client implementation using the OpenAI-compatible API.
@@ -26,9 +24,12 @@ import scala.util.Try
  * @param config DeepSeek configuration containing API key, model, base URL, and context settings
  * @param metrics MetricsCollector for recording request metrics
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class DeepSeekClient(
+final class DeepSeekClient private[provider] (
   config: DeepSeekConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -54,25 +55,20 @@ class DeepSeekClient(
 
 object DeepSeekClient {
 
-  def apply(
-    config: DeepSeekConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[DeepSeekClient] =
-    OpenAICompatibleClient
-      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging, httpClient)).toResult)
-
-  def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
-    OpenAICompatibleClient
-      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new DeepSeekClient(config, metrics)).toResult)
-
-  def apply(config: DeepSeekConfig)(using ModelRegistryService): Result[DeepSeekClient] =
-    OpenAICompatibleClient
-      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult)
+  /**
+   * A [[DeepSeekClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * `Left(ConfigurationError)`, and nothing is thrown.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
+   */
+  def apply(config: DeepSeekConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[DeepSeekClient] =
+    OpenAICompatibleClient.keyed("DeepSeek", config.apiKey, config.apiKeyProvider)(options)(
+      new DeepSeekClient(config, _, _, _)
+    )
 }
 
 /**

@@ -99,4 +99,4 @@ object BedrockProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[BedrockConfig](id, config)
-      .flatMap(BedrockClient(_, context.metrics, context.exchangeLogging))
+      .flatMap(BedrockClient(_, context.options))

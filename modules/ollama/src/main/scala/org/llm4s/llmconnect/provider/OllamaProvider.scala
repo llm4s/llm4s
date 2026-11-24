@@ -4,7 +4,6 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OllamaConfigKeys, OllamaModelLister, ProviderModelLister }
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -56,11 +55,4 @@ object OllamaProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OllamaConfig](id, config)
-      .flatMap(
-        OllamaClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(OllamaClient(_, context.options))

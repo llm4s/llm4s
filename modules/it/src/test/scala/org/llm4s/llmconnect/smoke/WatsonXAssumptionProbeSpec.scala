@@ -148,10 +148,10 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       .value
 
   private def withClient[A](key: String = apiKey.getOrElse(""))(f: WatsonXClient => A): A =
-    Using.resource(new WatsonXClient(config(key)))(f)
+    Using.resource(WatsonXClient(config(key)).fold(e => fail(e.message), identity))(f)
 
   private def withReasoningClient[A](f: WatsonXClient => A): A =
-    Using.resource(new WatsonXClient(config(apiKey.getOrElse(""), reasoningModel)))(f)
+    Using.resource(WatsonXClient(config(apiKey.getOrElse(""), reasoningModel)).fold(e => fail(e.message), identity))(f)
 
   private def say(text: String): Conversation = Conversation(Seq(UserMessage(text)))
 

@@ -33,12 +33,15 @@ import org.slf4j.LoggerFactory
  * @param keyGenerator Function that maps (text, model name, purpose) to a cache key; defaults to
  *                     [[CacheKeyGenerator.embeddingKey]]. The purpose is an argument so that a query and a
  *                     document with the same text never share an entry.
+ *
+ * Build one with the companion's `apply`. The constructor is private, so that a setting can be added without
+ * breaking a caller, and the class is final: wrap it to change what it does.
  */
 @Stable
-class CachedEmbeddingClient(
+final class CachedEmbeddingClient private (
   baseClient: EmbeddingProvider,
   cache: EmbeddingCache,
-  keyGenerator: (String, ModelName, InputPurpose) => String = CacheKeyGenerator.embeddingKey
+  keyGenerator: (String, ModelName, InputPurpose) => String
 ) extends EmbeddingProvider {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -120,4 +123,18 @@ class CachedEmbeddingClient(
     cache.put(key, vector).left.foreach { error =>
       logger.warn(s"Embedding cache store failed, the vector is not cached: ${error.message}")
     }
+}
+
+object CachedEmbeddingClient {
+
+  /**
+   * `baseClient` with its vectors kept in `cache`, each under the key `keyGenerator` gives its text, model and
+   * purpose; by default [[CacheKeyGenerator.embeddingKey]].
+   */
+  def apply(
+    baseClient: EmbeddingProvider,
+    cache: EmbeddingCache,
+    keyGenerator: (String, ModelName, InputPurpose) => String = CacheKeyGenerator.embeddingKey
+  ): CachedEmbeddingClient =
+    new CachedEmbeddingClient(baseClient, cache, keyGenerator)
 }

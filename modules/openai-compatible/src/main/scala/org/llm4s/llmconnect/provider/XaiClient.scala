@@ -3,15 +3,13 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ EffortMapping, ModelRegistryService }
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
-
-import scala.util.Try
 
 /**
  * xAI (Grok) client, over xAI's OpenAI-compatible Chat Completions API
@@ -29,9 +27,12 @@ import scala.util.Try
  * @param config          xAI configuration: API key, model, base URL and context settings.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Experimental
-class XaiClient(
+final class XaiClient private[provider] (
   config: XaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -58,21 +59,20 @@ class XaiClient(
 @Experimental
 object XaiClient {
 
-  def apply(config: XaiConfig)(using ModelRegistryService): Result[XaiClient] =
-    apply(config, MetricsCollector.noop, ProviderExchangeLogging.Disabled)
-
-  def apply(config: XaiConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[XaiClient] =
-    apply(config, metrics, ProviderExchangeLogging.Disabled)
-
-  def apply(
-    config: XaiConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[XaiClient] =
-    OpenAICompatibleClient
-      .requireKey("xAI", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new XaiClient(config, metrics, exchangeLogging, httpClient)).toResult)
+  /**
+   * A [[XaiClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * `Left(ConfigurationError)`, and nothing is thrown.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
+   */
+  def apply(config: XaiConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[XaiClient] =
+    OpenAICompatibleClient.keyed("xAI", config.apiKey, config.apiKeyProvider)(options)(
+      new XaiClient(config, _, _, _)
+    )
 }
 
 /**

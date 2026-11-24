@@ -4,17 +4,16 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model.ResponseFormat
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import scala.util.Try
 
 /**
  * Cohere client, over Cohere's OpenAI-compatibility API
@@ -36,9 +35,12 @@ import scala.util.Try
  * @param config          Cohere configuration: API key, model, base URL and context settings.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Experimental
-class CohereClient(
+final class CohereClient private[provider] (
   config: CohereConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -65,25 +67,20 @@ class CohereClient(
 @Experimental
 object CohereClient {
 
-  def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
-    OpenAICompatibleClient
-      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new CohereClient(config)).toResult)
-
-  def apply(config: CohereConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[CohereClient] =
-    OpenAICompatibleClient
-      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new CohereClient(config, metrics)).toResult)
-
-  def apply(
-    config: CohereConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[CohereClient] =
-    OpenAICompatibleClient
-      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging, httpClient)).toResult)
+  /**
+   * A [[CohereClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * `Left(ConfigurationError)`, and nothing is thrown.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
+   */
+  def apply(config: CohereConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[CohereClient] =
+    OpenAICompatibleClient.keyed("Cohere", config.apiKey, config.apiKeyProvider)(options)(
+      new CohereClient(config, _, _, _)
+    )
 }
 
 /**

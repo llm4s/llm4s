@@ -97,7 +97,7 @@ object PerplexityProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[PerplexityConfig](id, config)
-      .flatMap(PerplexityClient(_, context.metrics, context.exchangeLogging))
+      .flatMap(PerplexityClient(_, context.options))
 
   /**
    * The model registry's context window for an Agent API model id, `vendor/model`: the strict entry of that vendor

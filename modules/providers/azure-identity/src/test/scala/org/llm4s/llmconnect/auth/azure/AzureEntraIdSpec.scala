@@ -68,7 +68,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         val clock      = new TestClock(Instant.parse("2026-10-25T10:00:00Z"))
         val credential = new TestCredential(clock)
         val tokens     = AzureEntraId.tokenProvider(credential, AzureEntraId.CognitiveServicesScope, clock)
-        val client     = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
+        val client     = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
 
         client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
         clock.advance(java.time.Duration.ofMinutes(30))

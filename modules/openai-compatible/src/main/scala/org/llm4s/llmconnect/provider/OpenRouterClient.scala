@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
@@ -71,13 +72,16 @@ import scala.util.Try
  *
  * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
  *                carries the API key and model name. A config with `workloadIdentity` or a
- *                blank `apiKey` is refused with an `IllegalArgumentException`.
+ *                blank `apiKey` is refused: the companion's `apply` returns a `ConfigurationError`.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class OpenRouterClient(
+final class OpenRouterClient private[provider] (
   config: OpenAIConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -130,37 +134,26 @@ object OpenRouterClient {
       .flatMap(OpenAIConfig.validate)
 
   /**
-   * Constructs an [[OpenRouterClient]], wrapping any construction-time
-   * exception in a `Left`.
+   * An [[OpenRouterClient]] for `config`, or why one cannot be built: a config with `workloadIdentity` or a blank
+   * `apiKey` is a `Left(ConfigurationError)`, and nothing is thrown.
    *
-   * @param config  `OpenAIConfig` with the OpenRouter API key, model, and
-   *                a `baseUrl` that contains `"openrouter.ai"`.
-   * @param metrics Receives per-call latency and token-usage events.
-   *                Defaults to `MetricsCollector.noop`.
-   * @return `Right(client)` on success; `Left(ConfigurationError)` for a config with
-   *         `workloadIdentity` or a blank `apiKey`; `Left(LLMError)` if construction fails.
+   * @param config  `OpenAIConfig` with the OpenRouter API key, model, and a `baseUrl` that contains `"openrouter.ai"`.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
    */
-  def apply(
-    config: OpenAIConfig,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[OpenRouterClient] =
-    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics)).toResult)
-
-  def apply(
-    config: OpenAIConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[OpenRouterClient] =
-    apply(config, metrics, exchangeLogging, Llm4sHttpClient.FromConfig)
-
-  /** As the three-argument `apply`, sending requests through `httpClient`, which the caller keeps owning. */
-  def apply(
-    config: OpenAIConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient
-  )(using ModelRegistryService): Result[OpenRouterClient] =
-    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics, exchangeLogging, httpClient)).toResult)
+  def apply(config: OpenAIConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenRouterClient] =
+    validate(config).flatMap(valid =>
+      Try(
+        new OpenRouterClient(
+          valid,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      ).toResult
+    )
 }
 
 /**

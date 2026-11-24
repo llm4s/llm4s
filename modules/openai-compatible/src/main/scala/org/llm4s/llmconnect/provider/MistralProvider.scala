@@ -4,7 +4,6 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ MistralModelLister, ProviderModelLister }
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -53,11 +52,4 @@ object MistralProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[MistralConfig](id, config)
-      .flatMap(
-        MistralClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(MistralClient(_, context.options))

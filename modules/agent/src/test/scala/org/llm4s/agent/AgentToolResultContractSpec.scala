@@ -118,7 +118,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .render()
     }
     def client(baseUrl: String): LLMClient =
-      new AnthropicClient(
+      AnthropicClient(
         AnthropicConfig(
           apiKey = Secret("test-key"),
           model = ModelName(model),
@@ -126,7 +126,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           contextWindow = 200000,
           reserveCompletion = 4096
         )
-      )
+      ).fold(e => fail(e.message), identity)
   }
 
   /**
