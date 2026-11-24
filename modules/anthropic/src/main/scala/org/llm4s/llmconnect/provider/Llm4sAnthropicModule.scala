@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * Registers `llm4s-anthropic`'s provider: the Anthropic Claude API (id `anthropic`).
  *
  * Anthropic supplies a chat client only, so this module overrides
- * `chatProviders` and leaves `embeddingProviders` empty.
+ * `providers` and leaves `embeddingProviders` empty.
  *
  * Declared in this module's
  * `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule`, so adding
@@ -26,4 +26,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  */
 @Stable
 final class Llm4sAnthropicModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(AnthropicProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(AnthropicProvider)

@@ -92,14 +92,14 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 
 /** The well-formed module, named in the test `META-INF/services`. */
 final class Llm4sAcmeModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(AcmeProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(AcmeProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(AcmeEmbeddings)
 
 // ---- broken variants ----
 
 /** Supplies a provider but is in no services file, so discovery cannot find it. */
 final class UnlistedModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(UnlistedProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(UnlistedProvider)
 
 object UnlistedProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("unlisted")
@@ -128,10 +128,10 @@ object TwinProviderA extends TwinProvider
 object TwinProviderB extends TwinProvider
 
 final class TwinModuleA extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(TwinProviderA)
+  override def providers: Seq[ProviderDescriptor] = Seq(TwinProviderA)
 
 final class TwinModuleB extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(TwinProviderB)
+  override def providers: Seq[ProviderDescriptor] = Seq(TwinProviderB)
 
 /**
  * Listed, but each descriptor gets something wrong: `greedy` builds a client from any config,
@@ -165,5 +165,5 @@ object UnboundEmbeddings extends EmbeddingProviderDescriptor:
     AcmeEmbeddings.build(config, context)
 
 final class FlawedModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(GreedyProvider, UnboundProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(GreedyProvider, UnboundProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(UnboundEmbeddings)

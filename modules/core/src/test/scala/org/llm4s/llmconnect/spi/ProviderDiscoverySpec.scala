@@ -106,7 +106,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
     "find an embedding-only provider module" in {
       // Voyage's shape: embeddings and no chat client. The module never overrides
-      // `chatProviders`, so this is also the test that the default is usable.
+      // `providers`, so this is also the test that the default is usable.
       val registry = ProviderRegistry.discover(loaderFor("embeddings"))
 
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)

@@ -48,7 +48,7 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
 
     "contribute the chat provider under the id jlama and no embeddings" in {
       val module = new Llm4sJlamaModule
-      module.chatProviders shouldBe Seq(JlamaProvider)
+      module.providers shouldBe Seq(JlamaProvider)
       module.embeddingProviders shouldBe empty
       JlamaProvider.id.asString shouldBe "jlama"
     }

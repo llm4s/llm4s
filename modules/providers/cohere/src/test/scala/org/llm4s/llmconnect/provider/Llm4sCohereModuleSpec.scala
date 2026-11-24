@@ -23,7 +23,7 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "contribute no chat provider: Cohere chat is a dialect in llm4s-openai-compatible" in {
-      new Llm4sCohereModule().chatProviders shouldBe empty
+      new Llm4sCohereModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("cohere")) shouldBe None
     }
   }

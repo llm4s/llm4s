@@ -390,7 +390,7 @@ All in `modules/openai-compatible`, keeping the `org.llm4s.*` packages:
   `buildConfig` from the named section and `buildClient` through
   `ProviderDescriptor.expectConfig`. Give it a `modelLister` if the provider has a `/models`
   endpoint (`OpenAICompatibleModelListers.scala`).
-- **Registration**: add the descriptor to `chatProviders` in `Llm4sOpenAICompatibleModule`. The
+- **Registration**: add the descriptor to `providers` in `Llm4sOpenAICompatibleModule`. The
   module is already declared in `META-INF/services`, so nothing else is needed - and nothing in
   `llm4s-core` changes.
 - **Shared key**: `llm4s.credentials.<id>.apiKey = ${?<NAME>_API_KEY}` in the module's

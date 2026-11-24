@@ -50,7 +50,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "contribute both halves under the id ollama" in {
       val module = new Llm4sOllamaModule
-      module.chatProviders shouldBe Seq(OllamaProvider)
+      module.providers shouldBe Seq(OllamaProvider)
       module.embeddingProviders shouldBe Seq(OllamaEmbeddingProvider)
     }
   }

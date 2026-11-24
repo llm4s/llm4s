@@ -117,9 +117,9 @@ trait ProviderModuleChecks extends Assertions:
             s"$kind id '${id.asString}' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}"
           )
       }
-    suppliers("chat", module.chatProviders.map(_.id), _.providerIds)
+    suppliers("chat", module.providers.map(_.id), _.providerIds)
     suppliers("embedding", module.embeddingProviders.map(_.id), _.embeddingProviderIds)
-    val names = (module.chatProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
+    val names = (module.providers.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
       module.embeddingProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString)).toSet
     report.collisions.find(c => names.contains(c.id.asString)).foreach { c =>
       failAt(s"${c.subject} collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}")
@@ -139,7 +139,7 @@ trait ProviderModuleChecks extends Assertions:
    * registration half of a module spec in one line. A module that lists no provider at all fails.
    */
   def assertModule(module: Llm4sProviderModule)(using pos: Position): Assertion =
-    if module.chatProviders.isEmpty && module.embeddingProviders.isEmpty then
+    if module.providers.isEmpty && module.embeddingProviders.isEmpty then
       failAt(s"${module.getClass.getName} lists no chat or embedding provider")
     assertDiscovered(module)
     assertSoleSupplier(module)
@@ -149,7 +149,7 @@ trait ProviderModuleChecks extends Assertions:
     Position
   ): Assertion =
     val className = module.getClass.getName
-    module.chatProviders.foreach { descriptor =>
+    module.providers.foreach { descriptor =>
       val id = descriptor.id.asString
       registry.resolve(descriptor.id) match
         case Right(found) if found == descriptor => ()

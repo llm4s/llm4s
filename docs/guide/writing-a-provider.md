@@ -95,9 +95,14 @@ whatever it supplies. Both members default to `Nil`.
 
 ```scala
 trait Llm4sProviderModule:
-  def chatProviders: Seq[ProviderDescriptor] = Nil
+  def providers: Seq[ProviderDescriptor] = Nil
   def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Nil
 ```
+
+One naming rule holds across the SPI: **an unprefixed name is the chat half, and `embedding*` the embedding
+half**. So `ProviderDescriptor` and `EmbeddingProviderDescriptor`, `providers` and `embeddingProviders` here, and
+on `ProviderRegistry` `descriptors` / `embeddingDescriptors`, `find` / `findEmbedding`, `resolve` /
+`resolveEmbedding`, `ids` / `embeddingIds`, `of` / `ofEmbeddings` and `withProvider` / `withEmbeddingProvider`.
 
 Implement it as a **`class` with a public no-arg constructor, not an `object`** -
 `java.util.ServiceLoader` instantiates the class it is given, and an `object` has no such
@@ -109,7 +114,7 @@ package com.acme.llm4s
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 final class Llm4sAcmeModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(AcmeProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(AcmeProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(AcmeEmbeddings)
 ```
 

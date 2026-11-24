@@ -26,7 +26,7 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "contribute no chat provider, so voyage is not a chat id" in {
-      new Llm4sVoyageModule().chatProviders shouldBe empty
+      new Llm4sVoyageModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("voyage")) shouldBe None
     }
   }

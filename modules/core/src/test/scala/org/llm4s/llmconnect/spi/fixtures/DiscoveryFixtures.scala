@@ -42,11 +42,11 @@ object FixtureProvider extends ProviderDescriptor:
  * requires — the shape every provider module must use.
  */
 final class FixtureProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(FixtureProvider)
 
 /** A module whose own code fails, to prove discovery survives a hostile module. */
 final class ThrowingProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] =
+  override def providers: Seq[ProviderDescriptor] =
     throw new IllegalStateException("this module is broken")
 
 /**
@@ -59,8 +59,8 @@ final class ThrowingProviderModule extends Llm4sProviderModule:
  * with it.
  */
 final class LinkageErrorProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] =
-    throw new AbstractMethodError("org.llm4s.llmconnect.spi.Llm4sProviderModule.chatProviders()")
+  override def providers: Seq[ProviderDescriptor] =
+    throw new AbstractMethodError("org.llm4s.llmconnect.spi.Llm4sProviderModule.providers()")
 
 /**
  * An embedding provider that exists only to be discovered.
@@ -85,13 +85,13 @@ object FixtureEmbeddings extends EmbeddingProviderDescriptor:
           )
     )
 
-/** A module supplying only embeddings - it never overrides `chatProviders`. */
+/** A module supplying only embeddings - it never overrides `providers`. */
 final class FixtureEmbeddingModule extends Llm4sProviderModule:
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
 
 /** A module supplying both halves, as `llm4s-ollama` does. */
 final class FixtureBothHalvesModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(FixtureProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
 
 /** A provider that collides with [[FixtureProvider]]'s id, to exercise collision reporting. */
@@ -107,7 +107,7 @@ object CollidingProvider extends ProviderDescriptor:
 
 /** A second module claiming `fixturecloud`, the same id [[FixtureProviderModule]] supplies. */
 final class CollidingProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(CollidingProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(CollidingProvider)
 
 /** An embedding provider that collides with [[FixtureEmbeddings]]'s id, to exercise collision reporting. */
 object CollidingEmbeddings extends EmbeddingProviderDescriptor:
@@ -128,7 +128,7 @@ final class CollidingEmbeddingModule extends Llm4sProviderModule:
  * half must still be registered and the report must say which half failed.
  */
 final class HalfBrokenProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] =
     throw new IllegalStateException("the embedding half of this module is broken")
 
@@ -159,5 +159,5 @@ object SkewedEmbeddings extends EmbeddingProviderDescriptor:
 
 /** A module whose skewed descriptors sit beside a working one: only the skewed ones are dropped. */
 final class SkewedProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(SkewedProvider, FixtureProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(SkewedProvider, FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(SkewedEmbeddings, FixtureEmbeddings)

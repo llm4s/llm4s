@@ -66,7 +66,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
     "contribute exactly the expected providers, and no embedding providers" in {
       val module = new Llm4sOpenAICompatibleModule
-      module.chatProviders should contain theSameElementsAs expectations.map(_._1)
+      module.providers should contain theSameElementsAs expectations.map(_._1)
       module.embeddingProviders shouldBe empty
     }
   }

@@ -64,7 +64,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "contribute the three chat providers and the OpenAI embedding provider" in {
       val module = new Llm4sOpenAIModule
-      module.chatProviders should contain theSameElementsAs expectations.map(_._1)
+      module.providers should contain theSameElementsAs expectations.map(_._1)
       module.embeddingProviders shouldBe Seq(OpenAIEmbeddingProvider)
     }
 

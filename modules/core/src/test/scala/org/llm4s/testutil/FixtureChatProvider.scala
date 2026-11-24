@@ -121,7 +121,7 @@ object FixtureChatClient:
 
 /** The services entry point for [[FixtureChatProvider]]; a `class`, as `ServiceLoader` requires. */
 final class FixtureChatProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
 
 /**
  * [[FixtureChatProvider]]'s model lister: `GET <baseUrl>/models` through the HTTP client it is

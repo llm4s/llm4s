@@ -24,7 +24,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     }
 
     "contribute no chat provider, so jina is not a chat id" in {
-      new Llm4sJinaModule().chatProviders shouldBe empty
+      new Llm4sJinaModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("jina")) shouldBe None
     }
   }

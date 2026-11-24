@@ -76,7 +76,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
   "ProviderRegistry.withModule" should {
     "add every provider the module supplies" in {
       val module = new Llm4sProviderModule:
-        override def chatProviders: Seq[ProviderDescriptor] = Seq(new StubProvider("one"), new StubProvider("two"))
+        override def providers: Seq[ProviderDescriptor] = Seq(new StubProvider("one"), new StubProvider("two"))
 
       ProviderRegistry.of().withModule(module).ids shouldBe Seq("one", "two")
     }
