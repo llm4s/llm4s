@@ -181,7 +181,7 @@ object SmokeChecks {
     val conversation = Conversation(
       Seq(
         UserMessage("Pick a four-digit favourite number for me and tell me what it is."),
-        AssistantMessage(contentOpt = Some(s"Your favourite number is $FavouriteNumber.")),
+        AssistantMessage(text = Some(s"Your favourite number is $FavouriteNumber.")),
         UserMessage("What is my favourite number? Reply with the number only.")
       )
     )
@@ -257,7 +257,7 @@ object SmokeChecks {
         called <- calledTool(tool, first)
         withResult = Conversation(
           ask.messages ++ Seq(
-            AssistantMessage(contentOpt = first.message.contentOpt, toolCalls = first.toolCalls),
+            AssistantMessage(text = first.message.text, toolCalls = first.toolCalls),
             ToolMessage(content = called._2, toolCallId = called._1.id)
           )
         )

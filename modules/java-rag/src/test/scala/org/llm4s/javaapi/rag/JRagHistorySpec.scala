@@ -142,7 +142,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val call = ToolCall("t1", "lookup", ujson.Obj("q" -> "cat"))
     val history = java.util.List.of(
       JMessage.user("Find the cat."),
-      FacadeInternals.message(AssistantMessage(contentOpt = None, toolCalls = Seq(call))),
+      FacadeInternals.message(AssistantMessage(text = None, toolCalls = Seq(call))),
       FacadeInternals.message(ToolMessage("""{"found":true}""", "t1")),
       JMessage.assistant("Found it.")
     )
@@ -151,7 +151,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     try {
       rag.ask(Followup, history).isSuccess shouldBe true
       val sent = model.conversations.head.messages.slice(1, 5)
-      sent(1) shouldBe AssistantMessage(contentOpt = None, toolCalls = Seq(call))
+      sent(1) shouldBe AssistantMessage(text = None, toolCalls = Seq(call))
       sent(2) shouldBe ToolMessage("""{"found":true}""", "t1")
     } finally rag.close()
   }

@@ -62,7 +62,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       ToolCall("keep", "two", ujson.Obj())
     )
     result.message.toolCalls shouldBe result.toolCalls
-    result.message.contentOpt shouldBe None
+    result.message.text shouldBe None
     result.content shouldBe ""
   }
 
@@ -70,7 +70,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val reply  = Reply.toolCall("t").withContent("let me check")
     val result = ask(ScriptedLLMClient.sequence(reply), "q").value
     result.content shouldBe "let me check"
-    result.message.contentOpt shouldBe Some("let me check")
+    result.message.text shouldBe Some("let me check")
     result.toolCalls.map(_.name) shouldBe List("t")
   }
 

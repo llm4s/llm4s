@@ -144,7 +144,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val helper   = new ZaiClientTestHelper(testConfig)
     val toolCall = ToolCall("call-123", "calculate", ujson.Obj("expression" -> "2+2"))
     val conversation =
-      Conversation(Seq(AssistantMessage(contentOpt = None, toolCalls = List(toolCall))))
+      Conversation(Seq(AssistantMessage(text = None, toolCalls = List(toolCall))))
     val options = CompletionOptions()
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
@@ -644,7 +644,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
       created = Instant.ofEpochSecond(json("created").num.toLong),
       model = json("model").str,
       message = AssistantMessage(
-        contentOpt = Some(contentStr),
+        text = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
       usage = usage

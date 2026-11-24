@@ -678,7 +678,7 @@ curl https://api.anthropic.com/v1/messages \
         // only the paired calls; dropping one unseals the thinking, which then stays out
         val am             = pairing.replayable(index, original)
         val calls          = am.toolCalls
-        val text           = am.contentOpt.filter(_.nonEmpty)
+        val text           = am.text.filter(_.nonEmpty)
         val sealedThinking = AnthropicClient.thinkingBlockParams(am.thinking)
         if (calls.isEmpty && text.isEmpty) {
           // nothing to send: every tool call went unanswered, and thinking cannot stand alone
@@ -846,7 +846,7 @@ curl https://api.anthropic.com/v1/messages \
         else None
       }
 
-      val message = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
+      val message = AssistantMessage(text = textContent, toolCalls = toolCalls, thinking = thinking)
 
       // Extract token usage, including thinking tokens if available
       val usage = response.usage()

@@ -40,7 +40,7 @@ object Llm4sAgentAutoConfigurationSpec {
             )
           case _ =>
             val call    = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
-            val message = AssistantMessage(contentOpt = None, toolCalls = Seq(call))
+            val message = AssistantMessage(text = None, toolCalls = Seq(call))
             Right(Completion("id", Instant.EPOCH, "m", message))
         }
       }

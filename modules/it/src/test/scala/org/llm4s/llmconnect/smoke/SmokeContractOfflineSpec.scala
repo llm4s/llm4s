@@ -264,7 +264,7 @@ class SmokeContractOfflineSpec
       id = "stub",
       created = Instant.EPOCH,
       model = "stub",
-      message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),
+      message = AssistantMessage(text = Some(content), toolCalls = toolCalls),
       usage = usage
     )
 

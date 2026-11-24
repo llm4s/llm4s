@@ -56,7 +56,7 @@ can also be applied by hand.
 
 | Rule | Rewrites |
 |---|---|
-| `CopyToWithSetters` | `.copy(maxTokens = Some(500), temperature = 0.2)` on a growth-prone type to `.withMaxTokens(500).withTemperature(0.2)`; `message.copy(contentOpt = Some(t))` to `message.withContent(t)` |
+| `CopyToWithSetters` | `.copy(maxTokens = Some(500), temperature = 0.2)` on a growth-prone type to `.withMaxTokens(500).withTemperature(0.2)`; `message.copy(text = Some(t))` to `message.withContent(t)` |
 | `MillisToFiniteDuration` | `CrawlerConfig(delayMs = 500, timeoutMs = 30000)` to `CrawlerConfig(delay = 500.millis, timeout = 30.seconds)` (also `UrlLoader`, `HttpConfig`, `ShellConfig` and the search tool configs), `RateLimitError("openai", 1000L)` to `RateLimitError("openai", 1.second)`, and a read of `config.timeoutMs` to `config.timeout.toMillis` |
 | `IsRecoverableToTotal` | `error.isRecoverable` to `LLMError.isRecoverable(error)` |
 | `MovedConfigLoaders` | `Llm4sConfig.loadBraveSearchTool()` (and the DuckDuckGo and Exa loaders) to `ToolsConfigLoader`, `Llm4sConfig.metrics()` to `MetricsConfigLoader.default()`, `Llm4sConfig.pgSearchIndex()` to `PgSearchIndexConfigLoader.default()` |

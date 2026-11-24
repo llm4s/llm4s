@@ -152,6 +152,6 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
       )
     )
     completion.toolCalls shouldBe Seq(ToolCall("c1", "f", ujson.Obj("a" -> 1)))
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
   }
 }

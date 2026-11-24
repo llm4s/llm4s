@@ -485,7 +485,7 @@ class OpenAICompatibleClient(
   private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
     ThinkingReplay.replayable(replayOrigin, conversation.messages, options).filterNot {
       case am: AssistantMessage =>
-        !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
+        !dialect.sendEmptyAssistantTurns && am.text.forall(_.isEmpty) && am.toolCalls.isEmpty &&
         !encodesThinking(am)
       case _ => false
     }
@@ -519,7 +519,7 @@ class OpenAICompatibleClient(
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case am: AssistantMessage =>
-        val content   = am.contentOpt
+        val content   = am.text
         val toolCalls = am.toolCalls
         val message   = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
@@ -625,7 +625,7 @@ class OpenAICompatibleClient(
         .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
         .getOrElse(Instant.EPOCH),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
+      message = AssistantMessage(text = content, toolCalls = toolCalls.toList, thinking = thinking),
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),

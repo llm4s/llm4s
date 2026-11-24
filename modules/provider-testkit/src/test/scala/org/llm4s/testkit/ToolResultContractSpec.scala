@@ -77,7 +77,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
 
   "violations" should "find a call with no result, in either format" in {
     val messages =
-      Seq(user, AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"), call("b"))), ToolMessage("x", "a"))
+      Seq(user, AssistantMessage(text = None, toolCalls = Seq(call("a"), call("b"))), ToolMessage("x", "a"))
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe
       Vector("message 1: tool call 'b' has no result straight after it")
     ToolResultContract.violations(AnthropicMessages, anthropic(messages)) shouldBe
@@ -87,7 +87,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
   it should "find a second result for one call, and a result that answers no call" in {
     val messages = Seq(
       user,
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"))),
+      AssistantMessage(text = None, toolCalls = Seq(call("a"))),
       ToolMessage("x", "a"),
       ToolMessage("y", "a"),
       ToolMessage("z", "q")
@@ -104,7 +104,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     val messages =
       Seq(
         user,
-        AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"))),
+        AssistantMessage(text = None, toolCalls = Seq(call("a"))),
         UserMessage("wait"),
         ToolMessage("x", "a")
       )
@@ -121,11 +121,11 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
   it should "pair positionally, so a reused id does not hide a call with no result" in {
     val messages = Seq(
       user,
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0"))),
+      AssistantMessage(text = None, toolCalls = Seq(call("call_0"))),
       ToolMessage("first", "call_0"),
       AssistantMessage("done"),
       UserMessage("again"),
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0")))
+      AssistantMessage(text = None, toolCalls = Seq(call("call_0")))
     )
     // the id-based check is satisfied by the first turn's result
     Message.validateConversation(messages.toList) shouldBe Right(())
@@ -139,7 +139,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     val messages =
       Seq(
         user,
-        AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"), call("a"), call(""))),
+        AssistantMessage(text = None, toolCalls = Seq(call("a"), call("a"), call(""))),
         ToolMessage("x", "a")
       )
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe Vector(
@@ -150,7 +150,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
 
   it should "count a whitespace-only call id as blank, as the agent does" in {
     val messages =
-      Seq(user, AssistantMessage(contentOpt = None, toolCalls = Seq(call(" "))), ToolMessage("x", " "))
+      Seq(user, AssistantMessage(text = None, toolCalls = Seq(call(" "))), ToolMessage("x", " "))
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe
       Vector("message 1: a tool call has a blank id")
   }

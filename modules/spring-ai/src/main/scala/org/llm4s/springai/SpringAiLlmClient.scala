@@ -123,7 +123,7 @@ object SpringAiLlmClient {
         id = id.getOrElse(UUID.randomUUID().toString),
         created = Instant.now(),
         model = model.getOrElse(""),
-        message = AssistantMessage(contentOpt = Option(content).filter(_.nonEmpty), toolCalls = calls),
+        message = AssistantMessage(text = Option(content).filter(_.nonEmpty), toolCalls = calls),
         usage = usage,
         // Spring AI's reason as the model reported it: it has no common vocabulary to map
         finishReason = finish.filter(_.nonEmpty).fold(FinishReason.Unknown)(FinishReason.Other(_))

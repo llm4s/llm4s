@@ -128,7 +128,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val history = Conversation(
       Seq(
         UserMessage("Use the get_secret_code tool with the topic 'vault', then tell me the code."),
-        AssistantMessage(toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
+        AssistantMessage(None, toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
         ToolMessage("ZX-4417", foreignId)
       )
     )
@@ -150,7 +150,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     // Mistral rejects an assistant message with neither content nor tool calls; the dialect leaves it out.
     val history = Conversation(
-      Seq(UserMessage("Hello"), AssistantMessage(contentOpt = None), UserMessage("Say hi in one word"))
+      Seq(UserMessage("Hello"), AssistantMessage(text = None), UserMessage("Say hi in one word"))
     )
 
     val client = MistralClient(config(apiKey.get)).value

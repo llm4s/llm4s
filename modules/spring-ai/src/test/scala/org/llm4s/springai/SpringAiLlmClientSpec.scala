@@ -161,7 +161,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     done.toolCalls shouldBe List(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")))
     done.message.toolCalls shouldBe done.toolCalls
-    done.message.contentOpt shouldBe None
+    done.message.text shouldBe None
     val callback = model.prompts.head.getOptions.asInstanceOf[ToolCallingChatOptions].getToolCallbacks.asScala.head
     callback.getToolDefinition.name shouldBe "weather"
     callback.getToolDefinition.description shouldBe "Current weather in a city"
@@ -176,7 +176,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       Seq(
         UserMessage("Weather?"),
         AssistantMessage(
-          contentOpt = None,
+          text = None,
           toolCalls =
             Seq(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("c2", "weather", ujson.Obj()))
         ),

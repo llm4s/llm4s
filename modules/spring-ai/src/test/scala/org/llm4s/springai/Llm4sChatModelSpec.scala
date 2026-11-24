@@ -252,7 +252,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
       Seq(
         UserMessage("Weather?"),
         AssistantMessage(
-          contentOpt = None,
+          text = None,
           toolCalls =
             Seq(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("call-2", "time", ujson.Obj()))
         ),

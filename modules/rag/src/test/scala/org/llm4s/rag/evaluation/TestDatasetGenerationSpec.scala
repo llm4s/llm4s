@@ -22,7 +22,7 @@ class TestDatasetGenerationSpec extends AnyFlatSpec with Matchers with EitherVal
           id = "test-completion",
           created = Instant.EPOCH,
           model = "test-model",
-          message = AssistantMessage(contentOpt = Some(response))
+          message = AssistantMessage(text = Some(response))
         )
       }
     }

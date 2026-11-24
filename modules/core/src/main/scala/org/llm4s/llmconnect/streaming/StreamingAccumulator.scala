@@ -166,7 +166,7 @@ final class StreamingAccumulator private (model: String) {
     // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
     // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
-      contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
+      text = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
       toolCalls = finalToolCalls
     ).withThinking(thinkingBuilder.toString)
 

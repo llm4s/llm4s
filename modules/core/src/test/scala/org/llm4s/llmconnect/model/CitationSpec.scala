@@ -8,7 +8,7 @@ import java.time.Instant
 /** [[Citation]] and [[Completion.citations]]: what a completion says about the sources behind its answer. */
 class CitationSpec extends AnyFlatSpec with Matchers {
 
-  private val message = AssistantMessage(contentOpt = Some("answer"))
+  private val message = AssistantMessage(text = Some("answer"))
   private val source =
     Citation(url = "https://example.com/a", title = Some("A"), startIndex = Some(0), endIndex = Some(6))
 

@@ -51,7 +51,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
           id = "mock",
           created = Instant.EPOCH,
           model = "mock-model",
-          message = AssistantMessage(contentOpt = Some("A mock answer.")),
+          message = AssistantMessage(text = Some("A mock answer.")),
           usage = Some(TokenUsage(50, 25, 75))
         )
       )

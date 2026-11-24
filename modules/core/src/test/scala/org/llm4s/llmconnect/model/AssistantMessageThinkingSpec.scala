@@ -10,7 +10,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   private val call = ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris"))
 
   private val signed = AssistantMessage(
-    contentOpt = Some("Checking."),
+    text = Some("Checking."),
     toolCalls = Seq(call),
     thinking = Seq(
       ThinkingBlock.Text("The user wants the weather.", Some("sig-abc")),
@@ -26,7 +26,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   )
 
   private val withOpaque = AssistantMessage(
-    contentOpt = Some("Checking."),
+    text = Some("Checking."),
     toolCalls = Seq(call),
     thinking = Seq(
       ThinkingBlock.Text("The user wants the weather."),
@@ -45,17 +45,43 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
 
   it should "read JSON written before the field existed as no thinking" in {
     read[AssistantMessage]("""{"contentOpt":"Hello","toolCalls":[]}""") shouldBe AssistantMessage("Hello")
-    read[Message]("""{"type":"assistant","data":{"contentOpt":null,"toolCalls":[]}}""") shouldBe AssistantMessage()
+    read[Message]("""{"type":"assistant","data":{"contentOpt":null,"toolCalls":[]}}""") shouldBe AssistantMessage(None)
   }
 
   it should "not write a thinking key for a message without thinking" in {
-    ujson.read(write(AssistantMessage("Hello"))).obj.keySet shouldBe Set("contentOpt", "toolCalls")
+    ujson.read(write(AssistantMessage("Hello"))).obj.keySet shouldBe Set("content", "toolCalls")
+  }
+
+  // #2809: an assistant message is stored flat, its text under `content`, as the other roles are
+  "An assistant message's JSON" should "be flat, with its text under content" in {
+    val call = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
+
+    write[Message](AssistantMessage("Hello")) shouldBe """{"type":"assistant","content":"Hello","toolCalls":[]}"""
+    write[Message](AssistantMessage(None, Seq(call))) shouldBe
+      """{"type":"assistant","toolCalls":[{"id":"c1","name":"weather","arguments":{"city":"Paris"}}]}"""
+    write(AssistantMessage("Hello")) shouldBe """{"content":"Hello","toolCalls":[]}"""
+    read[Message](write[Message](AssistantMessage(None, Seq(call)))) shouldBe AssistantMessage(None, Seq(call))
+  }
+
+  it should "still read the nested shape and the contentOpt key it was stored with before" in {
+    val call = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
+    val stored =
+      """{"type":"assistant","data":{"contentOpt":"Checking.","toolCalls":[{"id":"c1","name":"weather",""" +
+        """"arguments":{"city":"Paris"}}],"thinking":[{"type":"text","text":"hmm"}],"thinkingBinding":"abc"}}"""
+
+    val message = read[Message](stored).asInstanceOf[AssistantMessage]
+    message.text shouldBe Some("Checking.")
+    message.toolCalls shouldBe Seq(call)
+    message.thinkingText shouldBe Some("hmm")
+    message.thinkingBinding shouldBe Some("abc")
+    // a stored conversation of the old shape
+    read[Conversation]("""{"messages":[{"type":"user","content":"hi"},""" + stored + "]}").messages(1) shouldBe message
   }
 
   it should "expose the text of its text blocks and not of redacted ones" in {
     signed.thinkingText shouldBe Some("The user wants the weather.Call the tool.")
     signed.hasThinking shouldBe true
-    AssistantMessage(thinking = Seq(ThinkingBlock.Redacted("x"))).thinkingText shouldBe None
+    AssistantMessage(None, thinking = Seq(ThinkingBlock.Redacted("x"))).thinkingText shouldBe None
     AssistantMessage("Hi").hasThinking shouldBe false
   }
 
@@ -66,7 +92,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
 
   it should "be sealed when it holds a signed or redacted block" in {
     signed.hasSealedThinking shouldBe true
-    AssistantMessage(thinking = Seq(ThinkingBlock.Redacted("x"))).hasSealedThinking shouldBe true
+    AssistantMessage(None, thinking = Seq(ThinkingBlock.Redacted("x"))).hasSealedThinking shouldBe true
     AssistantMessage("Hi").withThinking("plain").hasSealedThinking shouldBe false
     AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Text("t", Some("")))).hasSealedThinking shouldBe false
   }
@@ -125,7 +151,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "refuse thinking alone" in {
-    AssistantMessage().withThinking("only thinking").validate.isLeft shouldBe true
+    AssistantMessage(None).withThinking("only thinking").validate.isLeft shouldBe true
   }
 
   it should "refuse an empty unsigned block or empty redacted data" in {

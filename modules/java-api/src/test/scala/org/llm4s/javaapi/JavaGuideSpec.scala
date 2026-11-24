@@ -414,7 +414,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
                 "id",
                 Instant.EPOCH,
                 "m",
-                AssistantMessage(contentOpt = None, toolCalls = calls)
+                AssistantMessage(text = None, toolCalls = calls)
               )
             )
           else super.complete(c, o)

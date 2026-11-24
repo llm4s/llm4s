@@ -598,7 +598,7 @@ class BedrockClient(
               ReasoningContentBlock.builder().redactedContent(BedrockClient.decodeRedacted(data)).build()
             )
         }
-        val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
+        val textBlocks = msg.text.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
         val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
             ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
@@ -687,7 +687,7 @@ class BedrockClient(
     toolCalls.flatMap { toolCalls =>
       val message =
         AssistantMessage(
-          contentOpt = Option(textContent).filter(_.nonEmpty),
+          text = Option(textContent).filter(_.nonEmpty),
           toolCalls = toolCalls,
           thinking = thinking
         )

@@ -66,7 +66,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       calls += 1
       val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(

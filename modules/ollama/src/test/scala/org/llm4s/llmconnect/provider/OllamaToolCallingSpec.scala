@@ -252,7 +252,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         toolCall.arguments shouldBe ujson.Obj("location" -> "Paris")
         (toolCall.id should fullyMatch).regex(callId)
         completion.message.toolCalls shouldBe completion.toolCalls
-        completion.message.contentOpt shouldBe None
+        completion.message.text shouldBe None
         completion.content shouldBe ""
         completion.hasToolCalls shouldBe true
       }
@@ -331,7 +331,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val completion = ask(client).toOption.get
 
         completion.content shouldBe "Let me check."
-        completion.message.contentOpt shouldBe Some("Let me check.")
+        completion.message.text shouldBe Some("Let me check.")
         completion.toolCalls should have size 1
       }
     }

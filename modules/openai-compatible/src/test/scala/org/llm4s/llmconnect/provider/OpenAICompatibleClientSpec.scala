@@ -175,7 +175,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     completion.created shouldBe Instant.EPOCH
     completion.model shouldBe "local-model"
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.usage shouldBe Some(TokenUsage(3, 4, 7))
   }
 

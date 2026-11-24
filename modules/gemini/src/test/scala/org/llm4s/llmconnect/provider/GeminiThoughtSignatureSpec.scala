@@ -587,7 +587,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   "GeminiThoughtSignatures.parts" should "send one unsigned part when the signed text no longer fits the content" in {
     val message = AssistantMessage(
-      contentOpt = Some("Something else entirely"),
+      text = Some("Something else entirely"),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "Hello", "sig" -> "S").render()))
     )
 
@@ -596,7 +596,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   it should "send one unsigned part when signed texts overlap" in {
     val message = AssistantMessage(
-      contentOpt = Some("abcdef"),
+      text = Some("abcdef"),
       thinking = Seq(
         ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "abcd", "sig" -> "S1").render()),
         ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 2, "text" -> "cdef", "sig" -> "S2").render())
@@ -608,7 +608,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   it should "keep a signed part in the middle of the text, with plain parts either side" in {
     val message = AssistantMessage(
-      contentOpt = Some("one two three"),
+      text = Some("one two three"),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 4, "text" -> "two ", "sig" -> "S").render()))
     )
 
@@ -622,6 +622,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   it should "send a function call's signature but not the thought summary text kept beside it" in {
     val call = ToolCall(id = "call-1", name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
+      text = None,
       toolCalls = Seq(call),
       thinking = Seq(
         ThinkingBlock.Text("The model's own reasoning summary."),
@@ -637,6 +638,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   it should "not attach a signature to a call it does not belong to" in {
     val call = ToolCall(id = "real-id", name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
+      text = None,
       toolCalls = Seq(call),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("call" -> "other-id", "sig" -> "S").render()))
     )

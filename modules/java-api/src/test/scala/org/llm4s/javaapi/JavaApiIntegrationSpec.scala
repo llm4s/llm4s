@@ -32,10 +32,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
         callCount += 1
         if (callCount == 1) {
           val tc  = ToolCall("call-1", toolName, toolArgs)
-          val msg = AssistantMessage(contentOpt = None, toolCalls = Seq(tc))
+          val msg = AssistantMessage(text = None, toolCalls = Seq(tc))
           Right(Completion("id", Instant.EPOCH, "test-model", msg))
         } else {
-          val msg = AssistantMessage(contentOpt = Some(finalResponse))
+          val msg = AssistantMessage(text = Some(finalResponse))
           Right(Completion("id", Instant.EPOCH, "test-model", msg))
         }
       }

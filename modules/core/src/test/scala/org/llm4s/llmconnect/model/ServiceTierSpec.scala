@@ -25,7 +25,7 @@ class ServiceTierSpec extends AnyFlatSpec with Matchers {
       id = "c",
       created = java.time.Instant.EPOCH,
       model = "m",
-      message = AssistantMessage(contentOpt = None)
+      message = AssistantMessage(text = None)
     )
     completion.servedTier shouldBe None
     completion.withServedTier(ServiceTier.Priority).servedTier shouldBe Some(ServiceTier.Priority)

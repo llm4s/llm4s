@@ -49,7 +49,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
         result
       )
     )

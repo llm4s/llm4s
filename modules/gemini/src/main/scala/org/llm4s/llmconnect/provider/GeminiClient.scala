@@ -404,7 +404,7 @@ class GeminiClient(
             .filter(_.nonEmpty)
             .foreach(callIdsSentWithId += _)
         }
-        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
+        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.text.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
       case tm: ToolMessage =>
@@ -558,7 +558,7 @@ class GeminiClient(
         val thinking =
           Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
         val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          text = if (textContent.nonEmpty) Some(textContent) else None,
           toolCalls = toolCalls,
           thinking = thinking
         )

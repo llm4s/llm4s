@@ -20,7 +20,7 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     id = "test-id",
     created = Instant.EPOCH,
     model = "test-model",
-    message = AssistantMessage(contentOpt = Some(text))
+    message = AssistantMessage(text = Some(text))
   )
 
   private def successClient(text: String): LLMClient = new LLMClient {

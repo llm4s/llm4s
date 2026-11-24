@@ -109,7 +109,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     val comp = completion.toOption.get
     comp.id shouldBe "msg-456"
-    comp.message.contentOpt shouldBe Some("Hello world!")
+    comp.message.text shouldBe Some("Hello world!")
     comp.usage.get.totalTokens shouldBe 15
   }
 

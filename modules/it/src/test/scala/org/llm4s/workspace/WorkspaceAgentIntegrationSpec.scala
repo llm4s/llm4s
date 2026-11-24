@@ -73,7 +73,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       val toolCalls =
         script.lift(turn - 1).map { case (name, args) => ToolCall(s"call-$turn", name, args) }.toList
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(

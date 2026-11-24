@@ -150,7 +150,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       case Left(e)  => fail(s"expected an empty answer, got $e")
     }
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.toolCalls shouldBe empty
     completion.usage shouldBe Some(noPartsUsage)
   }

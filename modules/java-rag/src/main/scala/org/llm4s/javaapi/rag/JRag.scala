@@ -296,7 +296,7 @@ object JRag {
                   .map(args => calls :+ ToolCall(call.id, call.name, args))
               )
             }
-            .map(calls => AssistantMessage(contentOpt = Option(message.content).filter(_.nonEmpty), toolCalls = calls))
+            .map(calls => AssistantMessage(text = Option(message.content).filter(_.nonEmpty), toolCalls = calls))
         case JMessageRole.TOOL => Right(ToolMessage(message.content, message.toolCallId.orElse("")))
         case JMessageRole.SYSTEM =>
           Left(

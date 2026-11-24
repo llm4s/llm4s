@@ -74,7 +74,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     val long = Seq(
       UserMessage("first"),
       AssistantMessage("one"),
-      AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("t1", "lookup", ujson.Obj()))),
+      AssistantMessage(text = None, toolCalls = Seq(ToolCall("t1", "lookup", ujson.Obj()))),
       ToolMessage("{}", "t1"),
       UserMessage("second"),
       AssistantMessage("two")

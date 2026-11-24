@@ -51,6 +51,12 @@ sealed trait Message {
  */
 object Message {
 
+  // An assistant message is written flat, as the other roles are: `content` (left out when the model
+  // produced only tool calls), `toolCalls`, and `thinking` and `thinkingBinding` when present. Until
+  // #2809 it was nested under `data` with its text under `contentOpt`; that shape is still read, so a
+  // stored checkpoint or conversation loads. ThinkingReplay's fingerprint has its own encoding, so the
+  // bindings made before the change stay valid.
+  //
   // A user or tool message whose parts are one Text is written as `content`, the shape it had before
   // parts (#1913), and any other as `parts`; both are read. So JSON written before parts reads, and
   // a text-only conversation serialises as it did - which keeps every ThinkingReplay binding, a
@@ -73,7 +79,10 @@ object Message {
     {
       case um: UserMessage      => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
       case sm: SystemMessage    => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
-      case am: AssistantMessage => ujson.Obj("type" -> ujson.Str("assistant"), "data" -> ujson.read(write(am)))
+      case am: AssistantMessage =>
+        val obj = ujson.Obj("type" -> ujson.Str("assistant"))
+        AssistantMessage.fields(am).value.foreach { case (key, value) => obj(key) = value }
+        obj
       case tm: ToolMessage =>
         partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId)))
     },
@@ -82,7 +91,8 @@ object Message {
       obj("type").str match {
         case "user"      => UserMessage(readParts(obj))
         case "system"    => SystemMessage(obj("content").str)
-        case "assistant" => read[AssistantMessage](obj("data"))
+        // nested under "data" until #2809, flat since: both are read
+        case "assistant" => read[AssistantMessage](obj.getOrElse("data", json))
         case "tool"      => ToolMessage(readParts(obj), obj("toolCallId").str)
       }
     }
@@ -147,7 +157,7 @@ object Message {
    * @return `Right(())` when all checks pass; `Left(ValidationError)` with all
    *         violations listed in `error.violations` when any check fails.
    */
-  def validateConversation(messages: List[Message]): Result[Unit] = {
+  def validateConversation(messages: Seq[Message]): Result[Unit] = {
     if (messages.isEmpty) {
       return Right(())
     }
@@ -180,7 +190,7 @@ object Message {
   /**
    * Validates conversation flow rules
    */
-  private def validateConversationFlow(messages: List[Message]): List[String] = {
+  private def validateConversationFlow(messages: Seq[Message]): List[String] = {
     val errors = scala.collection.mutable.ListBuffer[String]()
 
     messages.zipWithIndex.foreach { case (message, index) =>
@@ -228,7 +238,7 @@ object Message {
   /**
    * Validates tool call consistency
    */
-  private def validateToolCallConsistency(messages: List[Message]): List[String] = {
+  private def validateToolCallConsistency(messages: Seq[Message]): List[String] = {
     val errors = scala.collection.mutable.ListBuffer[String]()
 
     // Collect all tool calls and their responses
@@ -279,13 +289,13 @@ object Message {
       Right(UserMessage(content = content))
     }
 
-  def assistant(content: String, toolCalls: List[ToolCall] = List.empty): Result[AssistantMessage] =
+  def assistant(content: String, toolCalls: Seq[ToolCall] = Seq.empty): Result[AssistantMessage] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
       Left(
         ValidationError("content", "Assistant message must have either content or tool calls")
       )
     } else {
-      Right(AssistantMessage(content = content, toolCalls = toolCalls))
+      Right(AssistantMessage(content, toolCalls))
     }
 
   def tool(content: String, toolCallId: String): Result[ToolMessage] =
@@ -400,13 +410,12 @@ object SystemMessage {
  * A response from the LLM, optionally containing text, tool-call requests, or both, and the
  * reasoning the model produced before them.
  *
- * `content` always returns a non-null `String`; it returns `""` when the LLM
- * response contains only tool calls and no accompanying text (`contentOpt` is
- * `None`). Code that displays assistant output should check for an empty string
- * rather than null-guarding.
+ * `text` is the text of the response, `None` when the model produced only tool calls. `content`
+ * is the same text as a non-null `String`, `""` for `None`, as every [[Message]] has one. Code that
+ * displays assistant output should check for an empty string rather than null-guarding.
  *
  * A well-formed `AssistantMessage` must satisfy at least one of:
- *  - `contentOpt.exists(_.trim.nonEmpty)` — the LLM produced text.
+ *  - `text.exists(_.trim.nonEmpty)` — the LLM produced text.
  *  - `toolCalls.nonEmpty` — the LLM requested one or more tool invocations.
  *
  * Thinking alone does not make a message well-formed.
@@ -440,7 +449,7 @@ object SystemMessage {
  * one. To keep signed thinking, leave the message and everything before it as they are; to replace
  * it deliberately, use `withThinking`.
  *
- * @param contentOpt Text portion of the response; `None` when the model produced
+ * @param text      Text portion of the response; `None` when the model produced
  *                   only tool calls.
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
  *                   that must be matched by a subsequent [[ToolMessage]].
@@ -455,21 +464,22 @@ object SystemMessage {
  */
 @Stable
 final case class AssistantMessage private (
-  contentOpt: Option[String],
+  text: Option[String],
   toolCalls: Seq[ToolCall],
   thinking: Seq[ThinkingBlock],
   thinkingBinding: Option[String]
 ) extends Message {
   val role: MessageRole = MessageRole.Assistant
 
-  def content: String = contentOpt.getOrElse("")
+  /** [[text]], or `""` when the model produced only tool calls. */
+  def content: String = text.getOrElse("")
 
   /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
   def withContent(content: String): AssistantMessage = withContent(Some(content))
 
   /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
   def withContent(content: Option[String]): AssistantMessage =
-    if (content == contentOpt) this else unsealed.copy(contentOpt = content)
+    if (content == text) this else unsealed.copy(text = content)
 
   /** Sets the tool calls; changed tool calls unseal the thinking (see "Sealed thinking" above). */
   def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage =
@@ -542,38 +552,43 @@ final case class AssistantMessage private (
 
 object AssistantMessage {
 
-  /** Creates an [[AssistantMessage]]. Named arguments are the supported way to construct one. */
+  /**
+   * Creates an [[AssistantMessage]]. `text` has no default: a message with neither text nor tool calls fails
+   * [[Message.validate]], so "no text" is said, `AssistantMessage(None, toolCalls)`, never left out.
+   */
   def apply(
-    contentOpt: Option[String] = None,
+    text: Option[String],
     toolCalls: Seq[ToolCall] = Seq.empty,
     thinking: Seq[ThinkingBlock] = Seq.empty
   ): AssistantMessage =
-    new AssistantMessage(contentOpt, toolCalls, thinking, None)
+    new AssistantMessage(text, toolCalls, thinking, None)
 
   def apply(content: String): AssistantMessage =
     new AssistantMessage(Some(content), Seq.empty, Seq.empty, None)
   def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
     new AssistantMessage(Some(content), toolCalls, Seq.empty, None)
 
-  // Manual ReadWriter: `thinking` and `thinkingBinding` are written only when present and read as
-  // empty when absent, so JSON written before they existed still reads
+  /**
+   * The message's JSON fields, without a `type`: `content` when there is text, `toolCalls`, and `thinking` and
+   * `thinkingBinding` when present.
+   */
+  private[model] def fields(msg: AssistantMessage): ujson.Obj = {
+    val obj = ujson.Obj()
+    msg.text.foreach(text => obj("content") = text)
+    obj("toolCalls") = ujson.read(write(msg.toolCalls))
+    if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
+    msg.thinkingBinding.foreach(b => obj("thinkingBinding") = b)
+    obj
+  }
+
+  // Manual ReadWriter: `content`, `thinking` and `thinkingBinding` are written only when present and read as
+  // empty when absent. The text is read from `content`, or from `contentOpt`, its key until #2809, so JSON
+  // written before still reads.
   implicit val rw: RW[AssistantMessage] = readwriter[ujson.Value].bimap[AssistantMessage](
-    msg => {
-      val obj = ujson.Obj(
-        "contentOpt" -> (msg.contentOpt match {
-          case None          => ujson.Null
-          case Some(content) => ujson.Str(content)
-        }),
-        "toolCalls" -> ujson.read(write(msg.toolCalls))
-      )
-      if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
-      msg.thinkingBinding.foreach(b => obj("thinkingBinding") = b)
-      obj
-    },
+    fields,
     json => {
       val obj = json.obj
-      val contentOpt = obj.get("contentOpt") match {
-        case Some(ujson.Null)         => None
+      val text = obj.get("content").orElse(obj.get("contentOpt")) match {
         case Some(ujson.Str(content)) => Some(content)
         case _                        => None
       }
@@ -586,7 +601,7 @@ object AssistantMessage {
         case Some(thinkingJson)      => read[Seq[ThinkingBlock]](thinkingJson)
       }
       val binding = obj.get("thinkingBinding").flatMap(_.strOpt)
-      new AssistantMessage(contentOpt, toolCalls, thinking, binding)
+      new AssistantMessage(text, toolCalls, thinking, binding)
     }
   )
 }
@@ -630,20 +645,19 @@ final class ToolMessage(
    * Resolves the tool name for this response by scanning `contextMessages` for
    * the [[ToolCall]] whose `id` matches [[toolCallId]].
    *
-   * Returns `"unknown-tool"` when no matching tool call is found, which can
-   * happen if `contextMessages` does not include the assistant message that
-   * issued the request (e.g. after context pruning).
+   * `None` when no matching tool call is found, which can happen if
+   * `contextMessages` does not include the assistant message that issued the
+   * request (e.g. after context pruning).
    *
    * @param contextMessages The conversation history to search; all
    *                        [[AssistantMessage]] entries are scanned.
    */
-  def findToolCallName(contextMessages: Seq[Message]): String =
+  def findToolCallName(contextMessages: Seq[Message]): Option[String] =
     contextMessages
       .collect { case am: AssistantMessage => am.toolCalls }
       .flatten
       .find(_.id == toolCallId)
       .map(_.name)
-      .getOrElse("unknown-tool")
 
   override def validate: Result[Message] = {
     val validations = List(

@@ -186,7 +186,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation.messages.filter(_.role == MessageRole.Tool).lastOption.map(_.content) match {
         case None =>
           AssistantMessage(
-            contentOpt = None,
+            text = None,
             toolCalls = Seq(ToolCall("call-1", "get_forecast", ujson.Obj("city" -> "Oslo")))
           )
         case Some(output) => AssistantMessage(s"The tool returned $output")

@@ -33,7 +33,7 @@ final class DemoModel(toolDelay: FiniteDuration) extends LLMClient:
     val answered = conversation.messages.lastOption.exists(_.isInstanceOf[ToolMessage])
     if toolDelay > Duration.Zero && !answered then
       val call = ToolCall(s"pause-${conversation.messages.size}", ExampleAgent.PauseTool, ujson.Obj())
-      Right(completion(AssistantMessage(contentOpt = None, toolCalls = Seq(call))))
+      Right(completion(AssistantMessage(text = None, toolCalls = Seq(call))))
     else
       val text = s"Echo: ${lastUser.getOrElse("")}"
       Right(completion(AssistantMessage(text)))

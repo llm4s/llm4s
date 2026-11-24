@@ -17,7 +17,7 @@ object AgentZSpec extends ZIOSpecDefault {
     id = "test-id",
     created = Instant.EPOCH,
     model = "test-model",
-    message = AssistantMessage(contentOpt = Some(text))
+    message = AssistantMessage(text = Some(text))
   )
 
   private def successClient(text: String): LLMClient = new LLMClient {

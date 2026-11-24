@@ -109,7 +109,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "send a tool result for an unknown call without a name, and drop an empty assistant turn" in {
       val conversation =
-        Conversation(Seq(UserMessage("q"), AssistantMessage(contentOpt = None), ToolMessage("r", "call_x")))
+        Conversation(Seq(UserMessage("q"), AssistantMessage(text = None), ToolMessage("r", "call_x")))
       val (http, _) = completeWith(response(s"[${textMessage("ok")}]"), conversation)
       http.lastBody("input").arr.map(_("type").str) shouldBe Seq("message", "function_call_output")
       http.lastBody("input")(1).obj.keySet should not contain "name"

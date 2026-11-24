@@ -846,7 +846,7 @@ class OpenAIClient private[provider] (
   ): Completion = {
     val content = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
-      AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
+      AssistantMessage(text = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
     val usage = known(response._usage()).map(toTokenUsage)
 

@@ -573,7 +573,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     // copies every assistant and tool message, truncating tool results: none is the same reference
     val copying = PruningStrategy.Custom(_.map {
       case t: ToolMessage      => ToolMessage(t.content.take(6), t.toolCallId)
-      case a: AssistantMessage => AssistantMessage(a.contentOpt, a.toolCalls)
+      case a: AssistantMessage => AssistantMessage(a.text, a.toolCalls)
       case other               => other
     })
     val pruned =

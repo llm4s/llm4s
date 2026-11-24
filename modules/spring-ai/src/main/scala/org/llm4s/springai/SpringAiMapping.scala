@@ -90,7 +90,7 @@ private[springai] object SpringAiMapping {
     case MessageType.ASSISTANT =>
       val assistant = message.asInstanceOf[SpringAssistantMessage]
       toolCalls(assistant).map(calls =>
-        Seq(AssistantMessage(contentOpt = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
+        Seq(AssistantMessage(text = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
       )
     case MessageType.TOOL =>
       Right(
@@ -363,7 +363,7 @@ private[springai] object SpringAiMapping {
               id = meta.flatMap(m => Option(m.getId)).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString),
               created = Instant.now(),
               model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
-              message = AssistantMessage(contentOpt = Option(text).filter(_.nonEmpty), toolCalls = calls),
+              message = AssistantMessage(text = Option(text).filter(_.nonEmpty), toolCalls = calls),
               usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
               // Spring AI's reason as the model reported it: it has no common vocabulary to map
               finishReason = Option(generation.getMetadata)

@@ -34,7 +34,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
           id = "noop",
           created = Instant.EPOCH,
           model = "noop",
-          message = AssistantMessage(contentOpt = Some("")),
+          message = AssistantMessage(text = Some("")),
           usage = None
         )
       )

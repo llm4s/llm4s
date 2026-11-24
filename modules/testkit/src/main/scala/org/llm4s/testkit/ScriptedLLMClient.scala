@@ -165,7 +165,7 @@ final class ScriptedLLMClient private (
       created = Instant.EPOCH,
       model = reply.model,
       message = AssistantMessage(
-        contentOpt = Some(reply.content).filter(_.nonEmpty),
+        text = Some(reply.content).filter(_.nonEmpty),
         toolCalls = calls
       ),
       usage = reply.usage,

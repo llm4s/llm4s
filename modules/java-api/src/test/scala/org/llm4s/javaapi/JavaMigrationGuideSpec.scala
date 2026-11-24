@@ -66,7 +66,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
             "1",
             Instant.EPOCH,
             "m",
-            AssistantMessage(contentOpt = None, toolCalls = List(call))
+            AssistantMessage(text = None, toolCalls = List(call))
           )
         )
       else {

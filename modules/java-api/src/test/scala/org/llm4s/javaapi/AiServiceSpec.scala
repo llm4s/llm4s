@@ -42,7 +42,7 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
   private def replying(replies: String*): Recording = new Recording(n => AssistantMessage(replies(n)))
 
   private def toolCall(id: String): AssistantMessage =
-    AssistantMessage(toolCalls = Seq(ToolCall(s"call-$id", "orderStatus", ujson.Obj("id" -> id))))
+    AssistantMessage(None, toolCalls = Seq(ToolCall(s"call-$id", "orderStatus", ujson.Obj("id" -> id))))
 
   private def support(client: JLlmClient): Support = Llm4s.aiService(classOf[Support]).client(client).build()
 

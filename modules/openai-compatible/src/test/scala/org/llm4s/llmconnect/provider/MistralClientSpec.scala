@@ -183,7 +183,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       err => fail(s"Expected Right, got Left($err)"),
       completion => {
         completion.content shouldBe ""
-        completion.message.contentOpt shouldBe Some("")
+        completion.message.text shouldBe Some("")
         completion.toolCalls shouldBe empty
       }
     )
