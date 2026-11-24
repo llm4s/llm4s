@@ -21,7 +21,7 @@ import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaTy
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, PromptCacheReport, TransformationResult, UnmappedOptions }
-import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
+import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -634,8 +634,8 @@ class BedrockClient(
   }
 
   private def convertTool(toolFunction: ToolFunction[?]): Tool = {
-    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[?]]
-    val schemaDoc    = ujsonToDocument(ujson.read(objectSchema.toJsonSchema(false).render()))
+    // whatever the schema is: a `Schema.raw` one goes as written (#2903)
+    val schemaDoc = ujsonToDocument(toolFunction.schema.toJsonSchema(false))
     val toolSpec = ToolSpecification
       .builder()
       .name(toolFunction.name)

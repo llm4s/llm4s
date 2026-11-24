@@ -10,7 +10,8 @@ has_children: true
 # Example Gallery
 {: .no_toc }
 
-Explore **70 working examples** covering all LLM4S features.
+Explore working examples of LLM4S features, each with its run command. This page lists a selection; every runnable
+sample is in [`modules/samples`](https://github.com/llm4s/llm4s/tree/main/modules/samples/src/main).
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -1028,7 +1029,7 @@ client.complete(conversation)
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/context/`
 
-All 8 context management examples demonstrate advanced token window management, compression, and optimization strategies.
+The context management examples demonstrate advanced token window management, compression, and optimization strategies.
 
 ### ContextPipelineExample {#context-pipeline}
 

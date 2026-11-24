@@ -355,6 +355,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** Every member of `ProviderConfig` is abstract: `model: ModelName`, `withModel(ModelName)`, `endpointUrl: Option[BaseUrl]`, and `withApiKeyProvider` returns `Result[ProviderConfig]`, a `ConfigurationError` from a config that cannot take one (Ollama, Vertex AI, Bedrock, Jlama) instead of the config unchanged; each provider config's `apply` takes a `ModelName` ([migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805).
 - **Fixed** A section's `timeouts`, or its own `http` block, that its provider's config does not take (`jlama`) fails the load of that section instead of being dropped [#2805](https://github.com/llm4s/llm4s/issues/2805).
 - **Changed** `ContextWindowResolver` is final; `resolve` returns `ContextLimits(contextWindow, reserveCompletion)`, takes `fallbackResolver: ModelName => ContextLimits` and has no `logPrefix` [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Fixed** Anthropic sends a tool's whole schema as its `input_schema`, so the top-level `required` list reaches Claude, and a `Schema.raw` tool on Anthropic or Bedrock is sent as written instead of throwing a `ClassCastException` (a non-object schema on Anthropic is a `ValidationError`) [#2903](https://github.com/llm4s/llm4s/issues/2903).
 
 ### Java & Kotlin APIs
 
