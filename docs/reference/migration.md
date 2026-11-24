@@ -86,7 +86,132 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the provider SPI's descriptors, embedding sections and credential suppliers](#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811),
 [the Experimental context pipeline and token counters built over a tokenizer](#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818),
 [`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
-and [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
+[opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
+[`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
+[tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
+[image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
+and [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824).
+
+## `ReliableClient` has a private constructor (#2797)
+
+`ReliableClient`'s constructor is private, so that a setting can be added to it without breaking a caller. Build one
+with the companion's `apply` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `withMetrics`.
+The `clock` and `sleep` parameters were test seams and are no longer public.
+
+| Before | After |
+|---|---|
+| `new ReliableClient(client, "openai", config)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "openai", ReliabilityConfig.default)` | `ReliableClient(client, "openai")`, or as before without `new` |
+| `new ReliableClient(client, "openai", config, Some(metrics))` | `ReliableClient(client, "openai", config).withMetrics(metrics)` |
+| `new ReliableClient(client, "openai", config, None)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "p", config, sleep = _ => ())`, in a test that must not wait | give the config a short delay: `config.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))` |
+| `new ReliableClient(client, "p", config, clock = fake)`, in a test of the deadline or of circuit recovery | no public replacement: use a short `deadline` or `recoveryTimeout` and wait for real |
+
+`withMetrics` returns a new client with a circuit breaker and rate limit of its own, so call it where the client is
+built, not on a client that has already served requests. `providerName` is still a `String`: it is the `provider`
+label of the client's metrics, whatever name you choose, not a provider id.
+
+## A tracing backend declares its aliases, and `Tracing.create` is removed (#2799)
+
+**`Tracing.create` is removed.** It returned `NoOpTracing`, with the reason only in the log, when the configured
+backend was missing or could not start. `Tracing.fromSettings` returns that reason, and is the only factory:
+
+| Before | After |
+|---|---|
+| `Tracing.create(settings)` | `Tracing.fromSettings(settings)`, a `Result[Tracing]`; in a `for`, `tracer <- Tracing.fromSettings(settings)` |
+| `Llm4sConfig.tracing().map(Tracing.create)` | `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` |
+| the old fallback, kept on purpose | `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`, logging the error first if you want it logged |
+
+**The `otel` alias belongs to its backend.** Core's mode parser named a backend (`"otel"` meant
+`Named("opentelemetry")`). A `TracingBackend` now declares its own `aliases`, and `llm4s-observability-otel` declares
+`otel`. Nothing changes for an application that sets `TRACING_MODE=otel` and loads its settings with
+`Llm4sConfig.tracing()`: with `llm4s-observability-otel` on the classpath the settings still carry
+`TracingMode.Named("opentelemetry")` and the `llm4s.tracing.opentelemetry` block, because `Llm4sConfig.tracing()`
+replaces an alias by its backend's mode before it reads the block. What changes:
+
+- `TracingMode.fromString("otel")` returns `Named("otel")`. Code that compared it with `Named("opentelemetry")` should
+  compare the mode of the loaded `TracingSettings`, or use `"opentelemetry"`.
+- Without `llm4s-observability-otel` on the classpath, `Llm4sConfig.tracing()` with `TRACING_MODE=otel` gives
+  `Named("otel")` with empty extras, and `Tracing.fromSettings` fails naming the artifact to add, as before.
+- **A shaded jar that registers the backend explicitly must use the full name.** With no services files,
+  `Llm4sConfig.tracing()` cannot see the backend, so it cannot replace the alias, and
+  `Tracing.fromSettings(settings, TracingBackends.of(new OpenTelemetryTracingBackend))` would start the backend on its
+  defaults. Set `TRACING_MODE=opentelemetry` there.
+
+A backend of your own with more than one name overrides `aliases`:
+
+```scala
+final class DatadogTracingBackend extends TracingBackend:
+  val mode: TracingMode             = TracingMode.Named("datadog")
+  override val aliases: Set[String] = Set("dd")
+  def create(settings: TracingSettings): Result[Tracing] = ???
+```
+
+**`TracingBackends.find` returns `Result[Option[TracingBackend]]`.** `Right(None)` is "no backend answers to this
+name"; a `Left` is a `ConfigurationError` naming two that do. Explicit registration still replaces by mode
+(`withBackend`, a later argument of `TracingBackends.of`). Two *discovered* backends for one mode used to resolve to
+the later one on the classpath; they are now that error, from `find`, `Tracing.fromSettings` and
+`Llm4sConfig.tracing()`, as are two backends that share an alias or one whose alias is another's mode. Remove one
+from the classpath, or pass the one you want in a `TracingBackends.of(...)`.
+
+## Image metrics are `ImageMetrics` in `llm4s-image` (#2801)
+
+`MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed: image generation lives in
+`llm4s-image`, and its metrics are now declared there, as `ImageMetrics`, and recorded through the collector's
+generic `increment` and `observe`, the way `ReliabilityMetrics` are.
+
+**Nothing changes on a dashboard.** Every image series keeps its name, type, labels and buckets in both
+`llm4s-observability-prometheus` and `llm4s-observability-micrometer` (`llm4s_image_generations_total`,
+`llm4s_images_generated_total`, `llm4s_image_generation_duration_seconds`, `llm4s_image_generation_cost_usd_total`,
+`llm4s_image_generation_errors_total`), and a failed image generation still counts in `llm4s_errors_total`. Three
+things differ that are not a series' identity: the Micrometer duration meter's description gains " in seconds", the
+Prometheus duration `_sum` is exact to the nanosecond where it was to the millisecond, and the Micrometer collector no
+longer maps an unknown `operation` to `other` (the instrumented client only sends `generate` and `edit`).
+
+**A collector of your own** that overrode the two methods no longer compiles. Image generation reaches it through
+the generic methods; match on the metric:
+
+```scala
+import org.llm4s.imagegeneration.ImageMetrics
+
+override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit = metric match
+  case ImageMetrics.Generations     => () // labelValues: provider, model, operation, status
+  case ImageMetrics.ImagesGenerated => () // provider, model; amount is the number of images
+  case ImageMetrics.CostUsd         => () // provider, model; amount is the cost in USD
+  case ImageMetrics.Errors          => () // provider, model, operation, error_type
+  case _                            => ()
+
+override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+  if metric == ImageMetrics.Duration then () // provider, model, operation
+```
+
+A collector that implements the three generic methods for every `Metric`, as the two shipped backends do, needs no
+image code at all.
+
+| Before | After |
+|---|---|
+| `MicrometerMetrics.Names.ImageGenerations` | `ImageMetrics.Generations.name` |
+| `MicrometerMetrics.Names.ImagesGenerated` | `ImageMetrics.ImagesGenerated.name` |
+| `MicrometerMetrics.Names.ImageGenerationDuration` | `ImageMetrics.Duration.name` |
+| `MicrometerMetrics.Names.ImageGenerationCostUsd` | `ImageMetrics.CostUsd.name` |
+| `MicrometerMetrics.Names.ImageGenerationErrors` | `ImageMetrics.Errors.name` |
+
+`MetricsCollector.Errors` is new: the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so that a module
+of your own can add its failed operations to it with
+`metrics.increment(MetricsCollector.Errors, Seq(provider, errorType))`. A backend of your own that keeps that count in
+a meter of its own should record this metric into it.
+
+## `Secret` or `Secret.token`: which one stays registered (#2824)
+
+Nothing changed here; the contract is now written down, on `Secret` and in
+[Security best practices](../guide/patterns/security-best-practices#api-keys). Creating a `Secret` registers its value
+process-wide for exact-match scrubbing. `Secret(value)` is a configured credential and is never evicted;
+`Secret.token(value)` may be evicted once the registry holds more than 4096 values; a value under 8 characters is not
+registered; nothing can be forgotten on request.
+
+If your application creates a `Secret(...)` per tenant, per user or per request, change those to `Secret.token(...)`:
+each distinct `Secret(...)` is held, and matched against every scrubbed text, for the life of the process. llm4s logs
+one warning, naming this cause, when the registry passes 4096 values.
 
 ## Provider SPI: error mapping, published helpers, report types (#2811)
 
@@ -344,7 +469,7 @@ unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
 
 | Before | After |
 |---|---|
-| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `new ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
+| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
 | `LLMClientRetry.streamCompleteWithRetry(...)` | the same client's `streamComplete`; a stream that has delivered a chunk is still not retried |
 | `ErrorRecovery.recoverWithBackoff(() => client.complete(c), 3, 1.second)` | the `ReliableClient` above |
 | `new ErrorRecovery.CircuitBreaker[A](failureThreshold, recoveryTimeout)` | `ReliabilityConfig(circuitBreaker = CircuitBreakerConfig(failureThreshold, recoveryTimeout))` |
@@ -4102,18 +4227,21 @@ val reliable = ReliableProviders.wrap(client, "openai", config)
 val other    = client.withReliability("openai")
 
 // after
-val reliable = new ReliableClient(client, "openai", config)
-val other    = new ReliableClient(client, "openai", ReliabilityConfig.default)
+val reliable = ReliableClient(client, "openai", config)
+val other    = ReliableClient(client, "openai", ReliabilityConfig.default)
 ```
+
+(The constructor has since become private: this is the companion's `apply`, see
+[`ReliableClient` has a private constructor](#reliableclient-has-a-private-constructor-2797).)
 
 `ReliableClient`'s companion factories (`ReliableClient(client)`, `ReliableClient(client, config)`,
 `ReliableClient(client, config, metrics)`, `ReliableClient.withProviderName`) go too: three of them
-guessed the provider name from the client's class name. Use the constructor. For a client built
+guessed the provider name from the client's class name. Use `ReliableClient(client, name, config)`. For a client built
 from config, the name is `providerConfig.providerId.asString`.
 
 Behaviour fix: **`ReliableClient` now applies `ReliabilityConfig.rateLimit` itself**, before every
 attempt, retries included. Before, only `ReliableProviders.wrap` honoured it, so a
-`new ReliableClient(...)` with rate limiting enabled was not rate limited.
+`ReliableClient` built directly with rate limiting enabled was not rate limited.
 
 ### OpenAI's model rules leave `RequestTransformer`
 
@@ -4729,7 +4857,11 @@ belongs in `traceEvent`'s `AgentStateUpdated` case.
 
 ### `Tracing.create` finds backends on the classpath
 
-`Tracing.create(settings)` keeps its signature. It builds `NoOp` and `Console` itself and hands
+`Tracing.create` has since been removed: `Tracing.fromSettings` is the only factory, see
+[A tracing backend declares its aliases, and `Tracing.create` is removed](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
+What follows describes it as it was in this slice.
+
+`Tracing.create(settings)` kept its signature. It built `NoOp` and `Console` itself and handed
 every other mode to an `org.llm4s.trace.spi.TracingBackend` registered in
 `META-INF/services/org.llm4s.trace.spi.TracingBackend`:
 

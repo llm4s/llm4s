@@ -135,14 +135,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MetricsCollector.recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` are removed: `ReliableClient` records
   `ReliabilityMetrics.Retries`, `CircuitBreakerTransitions` and `Errors` through `increment`, so a collector that overrode them overrides `increment`;
   [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
+- `MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed, with `MicrometerMetrics.Names`' five image constants: the image metrics are `ImageMetrics` in `llm4s-image`, recorded through `increment`/`observe`; the exported series are unchanged;
+  [migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801).
 - `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
   (delete your overrides), `traceToolCall` takes the call's `duration` and `success`, `shutdown()` is `close()` (`Tracing` is `AutoCloseable`), the `TracingComposer`
   trait is gone (the object stays) and the tracing mode `print` is no longer read; [migration](docs/reference/migration.md#tracing-has-one-abstract-method-2799).
+- `Tracing.create` is removed (`Tracing.fromSettings` is the only factory; write the `NoOpTracing` fallback yourself), `TracingMode.fromString("otel")` is `Named("otel")` (the alias is `llm4s-observability-otel`'s), `TracingBackends.find` returns `Result[Option[TracingBackend]]`, and two discovered backends for one mode are an error, not "the later wins";
+  [migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
 - Langfuse traces are private: `LangfuseTracing` sent every trace `public: true` and as user `llm4s-user`; it now sends
   `public: false` unless `llm4s.tracing.langfuse.public = true`, and the run's own user or none;
   [migration](docs/reference/migration.md#langfuse-traces-are-private-and-name-the-runs-user-2828).
 - `ReliableClient` refuses a call on an open circuit with `CircuitOpenError`, not `ServiceError(503, "circuit-breaker")`; `RateLimitConfig.default` is disabled like `RateLimitConfig()`; `ReliabilityConfig.withoutDeadline` and the instance `disabled` are removed
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
@@ -361,6 +367,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `ReliableClient`'s fast-fail on an open circuit was a retryable 503, so an outer retry repeated it, and several callers arriving after the recovery time all probed the service; it is a `CircuitOpenError` carrying `retryAfter` that no retry rule repeats, and exactly one caller probes
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** `ReliableClient`'s constructor is private: build one with `ReliableClient(underlying, providerName, config)` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `.withMetrics(collector)`
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** A `TracingBackend` declares its own `aliases`, and `llm4s-observability-otel` declares `otel`, which core's mode parser no longer names; `TRACING_MODE=otel` works as before. Two backends answering to one name are a `ConfigurationError` naming both
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Removed** `Tracing.create`, which logged a missing or failing backend and returned `NoOpTracing`: `Tracing.fromSettings` returns the error
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Changed** `Secret`'s Scaladoc and the security guide state the registry contract (`Secret(value)` is never evicted, `Secret.token(value)` may be past 4096 values, so a per-tenant or per-request key is a `Secret.token`), and the over-cap warning names that cause
+  ([migration](docs/reference/migration.md#secret-or-secrettoken-which-one-stays-registered-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Fixed** `RegexSafetyManager.safeCompile` refused every quantified alternation, so `RegexValidator("(foo|bar)+")` failed every value and a `FileBackend`'s or the workspace's regex search for `(jpg|png)*` was refused or run as a literal; only overlapping alternatives such as `(a|ab)*` are refused now
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
@@ -524,6 +538,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `PrometheusMetrics` dropped `ReliableClient`'s retries, circuit-breaker transitions and errors: they are now generic metrics
   (`org.llm4s.reliability.ReliabilityMetrics`) that every backend exports, as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total`
   and `llm4s_reliability_errors_total` [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Changed** The image generation metrics are `ImageMetrics` in `llm4s-image`, generic metrics every backend exports; `MetricsCollector` has no image method. Every exported series keeps its name, type, labels and buckets, pinned by `ImageMetricsSeriesSpec`
+  ([migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801)) [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Added** `MetricsCollector.Errors`, the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so a module above core adds its failed operations to it [#2801](https://github.com/llm4s/llm4s/issues/2801).
 - **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
   `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
   (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
