@@ -5,7 +5,6 @@ import org.llm4s.agent.delegation.BoundAgent
 import org.llm4s.agent.graph.toolloop.AgentInput
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.Message
 import org.llm4s.types.Result
 
 import scala.util.Try
@@ -19,7 +18,7 @@ import scala.util.Try
 @Experimental
 final class QueuedAgent private (
   private[service] val agent: Agent,
-  private[service] val query: ujson.Value => Result[(String, Seq[Message])]
+  private[service] val input: ujson.Value => Result[AgentInput]
 ):
 
   /** The agent id the queue's entries name. */
@@ -38,9 +37,8 @@ object QueuedAgent:
           .map(thrown =>
             ValidationError("input", s"the queued input is not an agent input (${thrown.getClass.getSimpleName})")
           )
-          .map(in => in.query -> in.history)
     )
 
   /** A bound `TypedAgent[I, O]`: a queued start is an `I`, in its JSON form. */
   def typed[I, O](agent: BoundAgent[I, O]): QueuedAgent =
-    new QueuedAgent(agent.agent, input => agent.queuedQuery(input).map(_ -> Nil))
+    new QueuedAgent(agent.agent, input => agent.queuedQuery(input).map(AgentInput(_)))

@@ -45,11 +45,11 @@ Write one when the concern applies to every turn or every call, whatever the mod
 
 ## A first middleware
 
-`id` is the only member without a default. This one removes e-mail addresses from the user's text before
-it joins the conversation, so the model and the thread's messages never hold them:
+`id` is the only member without a default. This one removes e-mail addresses from the user's text as the turn
+is admitted, so the model, the thread's messages and the checkpoint store never hold them:
 
 ```scala
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext }
+import org.llm4s.agent.graph.middleware.{ AdmissionContext, AgentMiddleware, MiddlewareId }
 import org.llm4s.types.Result
 
 final class RedactEmails extends AgentMiddleware:
@@ -57,12 +57,13 @@ final class RedactEmails extends AgentMiddleware:
 
   private val Email = """[\w.+-]+@[\w-]+(\.[\w-]+)+""".r
 
-  override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
-    Right(BoundaryResult(Email.replaceAllIn(input, "[email]")))
+  override def admit(query: String, context: AdmissionContext): Result[String] =
+    Right(Email.replaceAllIn(query, "[email]"))
 ```
 
-On a durable thread the query as submitted is still in the turn's first checkpoint, which is written before any
-hook runs: when sensitive input must never reach storage, redact it before you call the agent.
+`admit` runs before anything of the turn is stored, so the query as submitted is in no checkpoint, event or trace.
+The same rewrite in `beforeAgent` would reach the model and the thread's messages, but too late for the store: the
+turn's first checkpoint, which holds the query, is written before `beforeAgent` runs. See [Admission](#admission).
 
 Attach it with `Agent.builder(...).withMiddleware(new RedactEmails)`. `withMiddleware` appends, in order, to
 the agent's stack; the order matters (see [Ordering](#ordering)).
@@ -71,13 +72,14 @@ the agent's stack; the order matters (see [Ordering](#ordering)).
 
 | Hook | When it runs | What it returns |
 |---|---|---|
-| `beforeAgent(input, context)` | once per turn, on the user's query, before it joins the conversation | `Result[BoundaryResult]`: the query, possibly changed |
+| `admit(query, context)` | once per turn, on the user's query, before anything of the turn is stored | `Result[String]`: the query, possibly rewritten |
+| `beforeAgent(input, context)` | once per turn, on the admitted query, before it joins the conversation | `Result[BoundaryResult]`: the query, possibly changed |
 | `promptSections(context)` | before every model call, to build its system prompt | `Result[Vector[PromptSection]]` |
 | `wrapModelCall(request, context)(next)` | around every model call | `Result[ModelResponse]`: the completion |
 | `wrapToolCall(request, context)(next)` | around every tool call, after its arguments were validated and decoded | `ToolOutcome`: what a tool returns |
 | `afterAgent(answer, context)` | once per turn, on the final answer | `Result[BoundaryResult]`: the answer, possibly changed |
 
-Two things are the same for every hook:
+Two things are the same for every hook but `admit`, which returns only the query:
 
 - **A state update** travels in the hook's result: build the result with it, or add it with `addUpdate`. See
   [State](#state).
@@ -91,10 +93,63 @@ A middleware also declares, with defaults that are empty:
   any other; a name contributed twice, by one middleware or by two, is refused at `build()`.
 - `runsBefore`, `runsAfter` and `placement(other)` - constraints on its position; see [Ordering](#ordering).
 
+### Admission
+
+`admit` decides whether a turn's query is taken at all, and as what. It runs in stack order, each middleware on the
+query the previous one returned, before every `beforeAgent` and before the runtime stores anything of the turn. It
+is the one place that can keep text out of storage:
+
+| `admit` returns | The turn | What is stored |
+|---|---|---|
+| `Right(query)` | runs with that query | only the query returned: in the first checkpoint, the thread's messages, a queue entry |
+| `block(reason)` | ends `AgentStatus.Blocked(id, Some(reason))` | no query. The blocked run is on record by name: its `agent.guardrail_blocked` event and its closing checkpoint |
+| any other `Left`, a throw, a blank query | does not start: `agent.run` returns the `Left` | nothing, and the thread is unchanged |
+
+It can decide and rewrite, and nothing else. Its `AdmissionContext` gives the turn's `threadId`, `tenantId` and
+`principal`, the `agent` whose stack the stage is in, and `accounted(client)` for a model call of its own (an LLM
+judge's is counted in the thread's usage, and announced, with the turn's first step). There is no thread state, no
+update to return, no event to emit and no tool to call, and a middleware that asks a question from `admit` is refused:
+a stage that needs any of those belongs in `beforeAgent`.
+
+It also runs before the thread is claimed. A turn the runtime then refuses - a busy thread, a pending interrupt,
+another tenant's thread - has had its stages run all the same, and a model call a stage made for it is counted
+nowhere, since there is no turn to count it in.
+
+Input guardrails run here: `withInputGuardrails` and a `GuardrailMiddleware`'s input side are `admit` stages. So a
+guardrail sees the query as submitted, after the `admit` stages of the middleware outside it, and never what a
+`beforeAgent` hook makes of it afterwards.
+
+When the turn is stored before the agent sees it, `admit` cannot run first.
+
+**A queued run.** `QueuedInput.query(query)` puts the query in the run queue as you submit it. Admit it first, with
+the agent, and queue the result:
+
+```scala
+import org.llm4s.agent.{ AdmittedQuery, Agent }
+import org.llm4s.agent.graph.ThreadId
+import org.llm4s.agent.service.{ QueuedInput, RunSubmitter, Ticket }
+import org.llm4s.types.Result
+
+def submit(agent: Agent, submitter: RunSubmitter, threadId: ThreadId, query: String): Result[Option[Ticket]] =
+  agent.admit(threadId, query).flatMap {
+    // refused: the reason is here and nowhere else. Queue it instead to record the blocked turn on the thread
+    case AdmittedQuery.Refused(_, _, _) => Right(None)
+    case accepted => submitter.submit(threadId, agent.id, QueuedInput.admitted(accepted)).map(Some(_))
+  }
+```
+
+The entry then holds the query only as admitted, and the worker that takes it does not run the stages again. A query
+queued as it is, is admitted by the worker: it is kept out of the checkpoint store, and stays in the queue entry until
+the entry is reclaimed.
+
+**A delegated task.** A subagent's query is its parent's tool call, already in the parent's thread. The child's
+`admit` stages run as the first thing of its input step, with the same verdicts.
+
 ### The turn's boundaries
 
-`beforeAgent` runs in stack order, each middleware on the text the previous one returned, before the query is
-stored. `BoundaryResult(text)` gives the text to store. `afterAgent` runs in reverse stack order on the final
+`beforeAgent` runs in stack order, each middleware on the text the previous one returned, after the turn's first
+checkpoint - which holds the admitted query - is stored and before the query joins the conversation.
+`BoundaryResult(text)` gives the text to add to the thread's messages. `afterAgent` runs in reverse stack order on the final
 answer; the text it returns replaces the stored answer.
 
 A boundary hook can end the turn: return `block(reason)` and the turn ends `AgentStatus.Blocked` with the
@@ -102,8 +157,9 @@ middleware's id and your reason, as a guardrail's block does. A blank query from
 answer from `afterAgent`, blocks the turn too (see [Errors](#errors)).
 
 In an agent family with [handoffs](handoffs), the root agent's boundary hooks guard the whole family: its
-`beforeAgent` runs on every turn's query before the active agent's own, and its `afterAgent` on every final
-answer after the answering agent's own. A handoff target's boundary hooks apply only while it is active.
+`admit` and `beforeAgent` run on every turn's query before the active agent's own, and its `afterAgent` on every
+final answer after the answering agent's own. A handoff target's `admit` and boundary hooks apply only while it is
+active.
 
 ### Around a model call
 
@@ -205,7 +261,8 @@ returning `ask(question)` from `beforeAgent`, `afterAgent` or `wrapModelCall`, o
 
 ## The context a hook sees
 
-`beforeAgent`, `promptSections`, `wrapModelCall` and `afterAgent` get a `ModelContext`:
+`admit` gets an `AdmissionContext`, described under [Admission](#admission). `beforeAgent`, `promptSections`,
+`wrapModelCall` and `afterAgent` get a `ModelContext`:
 
 - `context.state` is the committed `ThreadState`; read a key with `context.state.get(key)`. A hook never sees
   an update made in the same step, its own included: an update is visible from the next one.
@@ -389,13 +446,15 @@ failure does depends only on where the hook runs:
 
 | Where | Hooks | A failure |
 |---|---|---|
+| at admission | `admit` | **refuses the turn**: no run starts and nothing is stored; `block(reason)` instead ends the turn `Blocked`, with no query stored |
 | at the turn's boundary | `beforeAgent`, `afterAgent` | **blocks the turn**: nothing of it is kept - an input block stores nothing, an output block removes the turn and restores every key it wrote - its usage is kept, the thread stays usable, and there is nothing to recover |
 | inside a step | `promptSections`, `wrapModelCall`, `wrapToolCall` | **fails the run**: the thread keeps its last checkpoint, a new turn is refused until `recover` runs the step again (for a tool, only that call) |
 
 What the caller sees:
 
-- `block(reason)` from a boundary hook is an outcome: `agent.run` returns `Right`, with
-  `AgentStatus.Blocked(id, reason)`. A guardrail's block is the same, with the guardrail's name.
+- `block(reason)` from `admit` or a boundary hook is an outcome: `agent.run` returns `Right`, with
+  `AgentStatus.Blocked(id, Some(reason))`. A guardrail's block is the same, with the guardrail's name. The reason is
+  on that result and is never stored: a status read back from the thread later has `None`.
 - Any other boundary failure is the `Left` of `agent.run`: the hook's error, or `MiddlewareFailed` for a throw.
 - A step's failure is the `Left` of `agent.run` too: the error, inside `GraphError.NodeFailed`, and inside
   `GraphError.ToolFailed` for a wrapper's `Fatal`.
@@ -421,7 +480,9 @@ final class OfficeHours(open: () => Boolean) extends AgentMiddleware:
 
 ## Running again: replay and determinism
 
-A hook can run more than once for one step of a turn, and must give the same result each time:
+`admit` runs once for a turn: `recover` and `resume` continue from the turn's first checkpoint, which holds the
+query as admitted, and never admit it again. Every other hook can run more than once for one step of a turn, and
+must give the same result each time:
 
 - `recover` re-runs a task that failed, was cancelled or was cut short by a crash; the tasks that finished
   before are not run again.
@@ -523,7 +584,7 @@ Notes on what it relies on:
 
 | Middleware | Hooks it uses | Guide |
 |---|---|---|
-| `GuardrailMiddleware` | `beforeAgent`, `afterAgent`: runs input and output guardrails, blocks on failure | [Guardrails](guardrails) |
+| `GuardrailMiddleware` | `admit`, `afterAgent`: runs input and output guardrails, blocks on failure | [Guardrails](guardrails) |
 | `GuardrailReviewMiddleware` | as `GuardrailMiddleware`, but asks a reviewer instead of blocking | [Human Review](human-review#reviewing-what-guardrails-refuse) |
 | `ApprovalMiddleware` | `wrapToolCall`: asks for approval when its function gives a reason | [Human Review](human-review#five-ways-a-turn-waits) |
 | `PermissionMiddleware` | `wrapToolCall`: allows, denies or asks by rules over each call's resources | [Tool Permissions](index#tool-permissions-timeouts-and-locks) |
@@ -574,6 +635,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Tes
 - `MiddlewareTestKit.modelContext(state, config, threadId)` is the `ModelContext` of `beforeAgent`,
   `promptSections`, `wrapModelCall` and `afterAgent`; `config` is the run's `RunConfig`, so its tenant,
   principal, run id and budgets are yours to set.
+- `MiddlewareTestKit.admissionContext(config, threadId)` is the `AdmissionContext` of `admit`:
+  `new RedactEmails().admit("write to ada@example.com", MiddlewareTestKit.admissionContext())`.
 - `MiddlewareTestKit.toolContext(call, state, config, threadId, approved)` is the `ToolContext` of
   `wrapToolCall`, with the idempotency key the loop would derive for `call`. Build the request with
   `ToolCallRequest(spec, call)`.

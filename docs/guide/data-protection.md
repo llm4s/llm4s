@@ -213,8 +213,15 @@ Their limits:
   only with a leading `+`. Names, postal addresses, IBANs in most layouts and free-text health data are not detected.
 - They see the query and the final answer. Tool arguments and tool results, retrieved RAG passages and memories put into
   the prompt are not checked, and neither is what a tool sends to its own API.
-- A masked query is what the thread stores, so the masking also keeps it out of the checkpointer; an unmasked one is
-  stored as written.
+- Input guardrails run before a turn is stored. A masked query is the only form of it the checkpointer holds, in
+  every checkpoint of the turn and across `recover` and `resume`; a query a guardrail blocks is in no checkpoint,
+  durable event or trace, and the blocked turn records the guardrail's name and nothing else. The reason a guardrail
+  gives - which may quote the text - is returned to the caller and never stored.
+- That covers the checkpoint store. A query handed to a run queue is stored there as submitted unless you admit it
+  first (`agent.admit`, then `QueuedInput.admitted`), and a `beforeAgent` middleware hook runs after the turn's first
+  checkpoint: redact in `admit`. See [Admission](agents/middleware#admission).
+- An answer is different: an output guardrail runs on an answer the model has produced, so a blocked answer was in
+  the turn's earlier checkpoints, which the block removes from the thread.
 
 For stronger guarantees, redact or pseudonymise before text reaches llm4s, and choose a provider and region your
 agreements cover.

@@ -24,6 +24,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.graph.middleware.{
+  AdmissionContext,
   AgentMiddleware,
   BoundaryResult,
   GuardrailMiddleware,
@@ -391,9 +392,16 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     def validate(value: String): Result[String] = Left(ValidationError.invalid("input", s"refused '$value'"))
   }
 
-  /** Replaces `secret` in the turn's query, as a PII-masking middleware does. */
+  /** Replaces `secret` in the turn's query as it is admitted, as a PII-masking middleware does. */
   final private class Redacting(secret: String) extends AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("redacting")
+    override def admit(query: String, context: AdmissionContext): Result[String] =
+      Right(query.replace(secret, "[REDACTED]"))
+  }
+
+  /** Replaces `secret` in `beforeAgent`: after the turn's first checkpoint is stored. */
+  final private class RedactingLate(secret: String) extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("redacting-late")
     override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
       Right(BoundaryResult(text.replace(secret, "[REDACTED]")))
   }
@@ -449,7 +457,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     history.foreach(c => (c.toString should not).include(marker))
   }
 
-  "A query a beforeAgent hook redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {
+  "A query an admit stage redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {
     val marker  = "SECRET-42"
     val store   = new InMemoryCheckpointer()
     val tracing = Recording()
@@ -473,7 +481,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
 
-  it should "still be in the run's first checkpoint as submitted: the hook runs after it is stored (#2793)" in {
+  it should "be in no checkpoint as submitted: admission runs before the turn is stored (#2854)" in {
     val marker = "SECRET-42"
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("t-first")
@@ -485,7 +493,25 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
     ok(agent.run(thread, s"my card is $marker"))
 
-    // the documented limit: a redacting hook does not keep the submitted query out of checkpoint history
+    val history = stored(store.history(thread, None, 100))
+    history.filter(_.toString.contains(marker)) shouldBe empty
+    history.map(_.status) should contain(CheckpointStatus.Running)
+    history.exists(_.toString.contains("[REDACTED]")) shouldBe true
+  }
+
+  "A query a beforeAgent hook redacts" should "still be in the run's first checkpoint: redact in admit (#2854)" in {
+    val marker = "SECRET-42"
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("t-late")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done"))))
+      .withMiddleware(new RedactingLate(marker))
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(thread, s"my card is $marker")).messages.map(_.content).mkString should include("[REDACTED]")
+
+    // beforeAgent keeps its semantics: it runs inside the checkpointed input step, on a query already stored
     val holding = stored(store.history(thread, None, 100)).filter(_.toString.contains(marker))
     holding.map(_.status) shouldBe Vector(CheckpointStatus.Running)
   }

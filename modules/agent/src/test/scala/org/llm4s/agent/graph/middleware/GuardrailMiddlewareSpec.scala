@@ -77,24 +77,24 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     val l             = build(model, new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil))
     val (kept, cause) = runInMemory(l.graph, AgentInput("much too long")).failed
     blocked(cause).guardrail shouldBe "LengthCheck"
-    blocked(cause).reason should include("Input too long")
+    blocked(cause).reason.getOrElse("") should include("Input too long")
     cause.message shouldBe "Guardrail 'LengthCheck' blocked"
     keptMessages(kept) shouldBe empty
     model.seen.size shouldBe 0
   }
 
-  it should "report the first failing guardrail's name and every reason from beforeAgent" in {
+  it should "report the first failing guardrail's name and every reason from admit" in {
     val mw  = new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)
-    val ctx = testModelContext()
-    mw.beforeAgent("too long input", ctx).left.value match {
-      case GuardrailBlocked(name, reason) =>
+    val ctx = testAdmissionContext()
+    mw.admit("too long input", ctx).left.value match {
+      case GuardrailBlocked(name, Some(reason)) =>
         name shouldBe "LengthCheck"
         reason should include("Input too long")
       case other => fail(s"unexpected: $other")
     }
     val two = new GuardrailMiddleware(Seq(new Reject("A"), new Reject("B")), Nil)
-    two.beforeAgent("hi", ctx).left.value match {
-      case GuardrailBlocked(name, reason) =>
+    two.admit("hi", ctx).left.value match {
+      case GuardrailBlocked(name, Some(reason)) =>
         name shouldBe "A"
         reason should include("A rejected")
         reason should include("B rejected")
@@ -122,18 +122,20 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     val (kept, cause) = runInMemory(l.graph, AgentInput("hi")).failed
     keptMessages(kept) shouldBe empty
     blocked(cause).guardrail shouldBe "A"
-    blocked(cause).reason should include("A rejected")
-    blocked(cause).reason should include("B rejected")
+    blocked(cause).reason.getOrElse("") should include("A rejected")
+    blocked(cause).reason.getOrElse("") should include("B rejected")
   }
 
   it should "block an answer an output guardrail rejects" in {
     val l             = build(ScriptedModel("this is badword"), new GuardrailMiddleware(none, Seq(ProfanityFilter())))
     val (kept, cause) = runInMemory(l.graph, AgentInput("hi")).failed
-    blocked(cause).reason should include("inappropriate")
+    blocked(cause).reason.getOrElse("") should include("inappropriate")
     // the blocked turn is not kept: neither the input nor the blocked answer
     keptMessages(kept) shouldBe empty
     val l2 = build(ScriptedModel("fine"), new GuardrailMiddleware(none, Seq(new Reject("Z"))))
-    blocked(runInMemory(l2.graph, AgentInput("hi"), thread = "z").failed._2).reason should include("Z rejected")
+    blocked(runInMemory(l2.graph, AgentInput("hi"), thread = "z").failed._2).reason.getOrElse("") should include(
+      "Z rejected"
+    )
   }
 
   it should "change the run's output when an output guardrail fixes it" in {

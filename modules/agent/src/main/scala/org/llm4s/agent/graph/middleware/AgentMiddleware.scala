@@ -265,6 +265,10 @@ object ToolCallRequest:
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
  * unwinding, and `afterAgent`, run in reverse.
  *
+ * Before any of them, [[admit]] decides whether the turn's query is taken at all, and as what (#2854): it runs
+ * before anything of the turn is stored, so it is the one place that can keep a query, or part of one, out of the
+ * checkpoint store, the event log, a run queue and traces. Input guardrails run there.
+ *
  * Failure follows one model for every hook (#2795). A hook fails by value: a `Left` from a hook that returns
  * `Result`, a `ToolOutcome.Fatal` from `wrapToolCall`, which returns what a tool returns. A hook that throws has
  * failed with that value holding `GraphError.MiddlewareFailed`, which names the middleware; a thrown cancellation
@@ -324,24 +328,54 @@ trait AgentMiddleware:
   def tools: Vector[AgentTool[?]] = Vector.empty
 
   /**
-   * Ends the turn as blocked by this middleware: return it from `beforeAgent` or `afterAgent`. The turn ends
+   * Ends the turn as blocked by this middleware: return it from `admit`, `beforeAgent` or `afterAgent`. The turn ends
    * `AgentStatus.Blocked(id, reason)` - an outcome of `agent.run`, not its `Left` - exactly as a guardrail's block
    * does with the guardrail's name: an input block stores nothing of the turn, an output block removes it, the
    * thread stays usable, and a durable `GuardrailBlocked` event names this middleware and never the reason. Any other
    * `Left` from a boundary hook blocks the turn too, but reaches the caller as the `Left` of `agent.run`.
    *
-   * It blocks only at a boundary: returned from `promptSections` or `wrapModelCall` it is a failure of the run like
+   * It blocks only there: returned from `promptSections` or `wrapModelCall` it is a failure of the run like
    * any other `Left`.
    */
-  final protected def block(reason: String): Result[Nothing] = Left(GuardrailBlocked(id.value, reason))
+  final protected def block(reason: String): Result[Nothing] = Left(GuardrailBlocked(id.value, Some(reason)))
 
   /** The codecs of the question this middleware asks and the answer it takes; only [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]] declares one. */
   private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
 
   /**
-   * Sees the run's input before anything else runs: returns it, possibly changed, with an update to this
-   * middleware's `writes` that the turn's first model call sees. A `Left` blocks the turn; [[block]] blocks it as an
-   * outcome, `AgentStatus.Blocked`.
+   * Admits the turn's query before anything of the turn is stored (#2854): returns it, possibly rewritten, or refuses
+   * it. Each middleware's stage runs in stack order on the query the one before returned, and all of them before any
+   * `beforeAgent`.
+   *
+   *   - `Right(query)` admits the turn with that text: it is what the turn's first checkpoint, its run queue entry
+   *     and every later hook hold, and the query as submitted is stored nowhere. Redact here, not in `beforeAgent`.
+   *   - [[block]] refuses it: the turn ends `AgentStatus.Blocked(id, reason)`, and nothing of the query is stored -
+   *     the blocked run records which middleware refused, and its `GuardrailBlocked` event, and no text.
+   *   - any other `Left` refuses to start the turn: `agent.run` returns it as its `Left`, the thread unchanged and no
+   *     run started. A blank query returned is refused the same way.
+   *
+   * It decides and rewrites, and nothing else: it has no thread state to read, returns no update, cannot ask a
+   * question (a middleware that asks from here is refused) and has no tool to call; its `context` offers only the
+   * turn's identity and a way to count a model call. Run before the turn is stored, it runs once for the turn,
+   * however often the turn's input step runs afterwards - a `recover` or a `resume` runs `beforeAgent` again, never
+   * this - and its verdict is final: a later change of mind is `beforeAgent`'s.
+   *
+   * It runs before the thread is claimed, so a turn the runtime then refuses (`ThreadBusy`, `PendingInterrupts`, ...)
+   * has had its stages run, and a model call one of them made is counted in no thread's usage.
+   *
+   * It runs before the query is stored whenever the turn starts through `Agent.run`, `start` or `stream`, and when a
+   * queue's submitter calls `Agent.admit` first. A turn that is stored before the agent sees it - a query put on a
+   * run queue as it is, a delegated child's task - runs the stage as the first thing of its input step instead: the
+   * verdict is the same, but that query was already stored by whoever stored it, and the stage runs again if that
+   * step does (a `recover` of a step that failed).
+   */
+  def admit(query: String, @unused context: AdmissionContext): Result[String] = Right(query)
+
+  /**
+   * Sees the run's input, as admitted, before anything else of the turn runs: returns it, possibly changed, with an
+   * update to this middleware's `writes` that the turn's first model call sees. A `Left` blocks the turn; [[block]]
+   * blocks it as an outcome, `AgentStatus.Blocked`. The query it is given is already in the turn's first checkpoint:
+   * to keep text out of the store, rewrite or refuse it in [[admit]].
    */
   def beforeAgent(input: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(input))
 

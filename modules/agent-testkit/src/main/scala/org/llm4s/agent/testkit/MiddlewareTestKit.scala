@@ -11,7 +11,13 @@ import org.llm4s.agent.graph.{
   ThreadState,
   ToolCallId
 }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, ModelContext }
+import org.llm4s.agent.graph.middleware.{
+  AdmissionContext,
+  AgentMiddleware,
+  MiddlewareId,
+  MiddlewareStack,
+  ModelContext
+}
 import org.llm4s.agent.graph.tool.ToolContext
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages }
 import org.llm4s.llmconnect.model.{ ToolCall, UsageSummary }
@@ -26,6 +32,8 @@ import org.llm4s.types.Result
  * val state   = MiddlewareTestKit.state(Set(Articles), StateUpdate.update(Articles, "returns policy"))
  * val context = state.map(MiddlewareTestKit.modelContext(_))
  * context.flatMap(new KnowledgeBase(search).promptSections(_))
+ *
+ * new RedactEmails().admit("write to ada@example.com", MiddlewareTestKit.admissionContext())
  * }}}
  *
  * The contexts are outside any runtime: events a hook emits go nowhere, no timeout is enforced, and effect records
@@ -91,6 +99,29 @@ object MiddlewareTestKit:
 
   /** The model usage the hooks given `context` have recorded so far, through `accounted` clients and `recordUsage`. */
   def usage(context: ModelContext): UsageSummary = context.run.usage.summary
+
+  /**
+   * The context `admit` is given (#2854), for a turn on `threadId` with `config`'s tenant and principal, before
+   * anything of the turn is stored. It has no thread state and no run: a stage reads who the turn is for and counts
+   * its own model calls, which [[usage]] reads back.
+   *
+   * @param agent the id of the agent whose stage it is, for the usage events an accounted call announces
+   */
+  def admissionContext(
+    config: RunConfig = RunConfig(),
+    threadId: ThreadId = DefaultThread,
+    agent: String = "agent"
+  ): AdmissionContext =
+    AdmissionContext.before(
+      threadId,
+      AgentId.unsafe(agent),
+      config.tenantId,
+      config.principal,
+      new AdmissionContext.Collected
+    )
+
+  /** The model usage the stages given `context` have counted so far, through `accounted` clients and `recordUsage`. */
+  def usage(context: AdmissionContext): UsageSummary = context.counted
 
   /**
    * The ids of `middleware` in the order a stack runs them, outermost first - `runsBefore` and `runsAfter` applied,

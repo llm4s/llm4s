@@ -480,12 +480,12 @@ stable carried in the payload, such as the tool call's `IdempotencyKey`, never b
   `RunOutcome.Blocked(guardrail)`, the name only: a status rebuilt from it has no reason. A failed
   run's holds its error's message and an invalid typed answer's its schema errors, which
   `EncryptingCheckpointer` seals.
-- **A `beforeAgent` hook does not keep the submitted query out of the store.** The run's first
-  checkpoint holds the query as it was submitted, and the hook runs after that checkpoint is
-  committed: what the hook returns is what joins the conversation, but the original stays in
-  checkpoint history until it is pruned (an input guardrail's Block removes it, with the turn). To
-  keep text out of the store, redact it before `agent.run`; to protect what is stored, wrap the store
-  in `EncryptingCheckpointer` (see [durable checkpointers](durable-checkpointers)).
+- **A `beforeAgent` hook does not keep the submitted query out of the store; `admit` does.** A turn's
+  first checkpoint holds its query, and `beforeAgent` runs after that checkpoint is committed: what the
+  hook returns is what joins the conversation, but the query it was given stays in checkpoint history
+  until it is pruned. To keep text out of the store, rewrite or refuse it in `admit`, which runs before
+  the turn is stored and is where input guardrails run; see [Admission](middleware#admission). To protect
+  what is stored, wrap the store in `EncryptingCheckpointer` (see [durable checkpointers](durable-checkpointers)).
 - **Live events are not replayed**, and a late `subscribe` misses earlier ones. A subscription
   receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
   `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or

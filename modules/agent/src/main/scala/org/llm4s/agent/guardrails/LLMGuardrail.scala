@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.agent.graph.middleware.ModelContext
+import org.llm4s.agent.graph.middleware.UsageAccounting
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -150,7 +150,7 @@ trait LLMGuardrail extends OutputGuardrail {
   override def validate(value: String): Result[String] = judged(value, llmClient)
 
   /** As `validate(value)`, the judge called through `context.accounted(llmClient)`, so its call is counted. */
-  override def validate(value: String, context: ModelContext): Result[String] =
+  override def validate(value: String, context: UsageAccounting): Result[String] =
     judged(value, context.accounted(llmClient))
 
   private def judged(value: String, client: LLMClient): Result[String] = {

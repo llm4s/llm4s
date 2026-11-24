@@ -446,7 +446,8 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val blocking = new org.llm4s.agent.graph.middleware.AgentMiddleware {
       val id = org.llm4s.agent.graph.middleware.MiddlewareId("block-once")
       override def afterAgent(answer: String, context: org.llm4s.agent.graph.middleware.ModelContext) =
-        if (blockOnce.getAndSet(false)) Left(org.llm4s.agent.graph.middleware.GuardrailBlocked("block-once", "no"))
+        if (blockOnce.getAndSet(false))
+          Left(org.llm4s.agent.graph.middleware.GuardrailBlocked("block-once", Some("no")))
         else Right(org.llm4s.agent.graph.middleware.BoundaryResult(answer))
     }
     val spec = SpecTools

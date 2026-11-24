@@ -47,7 +47,10 @@ enum AgentStatus:
    *
    * `reason` is `Some` on the result of the run that was blocked and `None` everywhere else (#2853): a reason may
    * quote the text the guardrail refused, so it is never stored, and a status rebuilt from the thread - a delegated
-   * child's, read again by its parent - names the guardrail only. Keep the reason yourself if you need it later.
+   * child's, read again by its parent - names the guardrail only. So does a turn whose query was refused at admission
+   * in one call and blocked in another (#2854): a queued entry its submitter admitted (`Agent.admit` returned the
+   * reason there), or a turn held at a breakpoint before its first step and resumed. Keep the reason yourself if you
+   * need it later.
    */
   case Blocked(guardrail: String, reason: Option[String])
 

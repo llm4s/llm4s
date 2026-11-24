@@ -151,7 +151,7 @@ class AgentMiddlewareFailureSpec extends AnyFlatSpec with TestTimeLimit with Mat
     s"block(reason) from $hook" should "be a failure there: only a boundary hook blocks a turn" in {
       val (agent, middleware, _) = fixture(hook, Mode.Blocks)
 
-      cause(agent.run(thread, "q1").error) shouldBe GuardrailBlocked("failing", "not on a weekend")
+      cause(agent.run(thread, "q1").error) shouldBe GuardrailBlocked("failing", Some("not on a weekend"))
       middleware.on.set(false)
       agent.recover(thread).value.status shouldBe AgentStatus.Completed("first answer")
     }

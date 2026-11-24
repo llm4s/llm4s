@@ -40,7 +40,8 @@ class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       input match
         case "ask"   => NodeResult.Suspend(StateUpdate.update(log, "asked"), "ok?", review)
         case "block" => NodeResult.Block(StateUpdate.update(log, "blocked"), ValidationError("act", "no"))
-        case "guard" => NodeResult.Block(StateUpdate.update(log, "guarded"), GuardrailBlocked("LengthCheck", "long"))
+        case "guard" =>
+          NodeResult.Block(StateUpdate.update(log, "guarded"), GuardrailBlocked("LengthCheck", Some("long")))
         case "fail" if failing.get => NodeResult.Fail(ValidationError("act", "down"))
         case other                 => continue(Command.empty.update(log, other))
     }
@@ -304,7 +305,7 @@ class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val b = GraphBuilder("spawning", "v1")
     val spawn = b.node[String]("spawn", writes = Set(log)) { (_, _, _) =>
       Vector(1, 2, 3).foreach(n => startChild(runtime, parent, n))
-      NodeResult.Block(StateUpdate.update(log, "blocked"), GuardrailBlocked("LengthCheck", "long"))
+      NodeResult.Block(StateUpdate.update(log, "blocked"), GuardrailBlocked("LengthCheck", Some("long")))
     }
     val spawning = b.compile(spawn)(_.get(log)).value
 
@@ -754,7 +755,7 @@ class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   }
 
   "RunOutcome.blocked" should "keep a guardrail's name and reason, and every error of an invalid output" in {
-    RunOutcome.blocked(GuardrailBlocked("g", "r")) shouldBe RunOutcome.Blocked("g")
+    RunOutcome.blocked(GuardrailBlocked("g", Some("r"))) shouldBe RunOutcome.Blocked("g")
     RunOutcome.blocked(GraphError.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))) shouldBe
       RunOutcome.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))
     RunOutcome.blocked(ValidationError("x", "y")) shouldBe RunOutcome.Failed(

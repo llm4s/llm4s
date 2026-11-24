@@ -14,14 +14,12 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
-  FinishReason,
   Message,
-  RequestAdjustment,
   ResponseFormat,
-  ServiceTier,
   StreamedChunk,
   ThinkingBlock,
   TokenUsage,
+  UsageSummary,
   UserMessage
 }
 import org.llm4s.toolapi.ToolFunction
@@ -30,6 +28,20 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.slf4j.LoggerFactory
 
 import scala.util.Try
+
+/**
+ * What counts the model calls a hook, an admission stage or a guardrail makes itself, so that they are in the thread's
+ * usage: a hook's [[ModelContext]], and an admission stage's [[AdmissionContext]] (#2854). A guardrail that calls a
+ * model is given one (`Guardrail.validate(value, context)`) and calls through [[accounted]], whichever stage runs it.
+ */
+@Experimental
+trait UsageAccounting:
+
+  /** `client`, with the usage of every completion through it counted in the thread's usage. */
+  def accounted(client: LLMClient): LLMClient
+
+  /** Records usage that arrived without a client call, as one request to `model`. */
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit
 
 /**
  * What a middleware's `beforeAgent`, `wrapModelCall`, `promptSections` and `afterAgent` hooks see: the task's
@@ -48,7 +60,8 @@ import scala.util.Try
  * estimate (the request's messages in, the completion out), never zero, so the budget still advances.
  */
 @Experimental
-final class ModelContext private[agent] (val run: RunContext, val state: ThreadState, agent: AgentId):
+final class ModelContext private[agent] (val run: RunContext, val state: ThreadState, agent: AgentId)
+    extends UsageAccounting:
 
   /**
    * `client`, with the usage of every `complete` and `streamComplete` through it - and of `completeStructured`,
@@ -59,19 +72,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
   def accounted(client: LLMClient): LLMClient = new ModelContext.Accounted(client, this)
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit =
-    record(
-      model,
-      Some(usage),
-      estimatedCost,
-      attempt = 0,
-      toolCalls = 0,
-      usage,
-      provider = None,
-      adjustments = Nil,
-      finishReason = None,
-      servedTier = None
-    )
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double]): Unit =
+    record(ModelContext.recordedUsage(agent, model, usage, estimatedCost))
 
   /**
    * Records a completed model call of `request`, sent with `definitions` (its tool and response-format schemas, as
@@ -87,18 +89,15 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     definitions: => Seq[String],
     provider: Option[ProviderId]
   ): Unit =
-    record(
-      completion.model,
-      completion.usage,
-      completion.estimatedCost,
-      attempt,
-      Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
-      completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions)),
-      provider,
-      ModelContext.nonNull(completion.adjustments).toList,
-      Option(completion.finishReason),
-      completion.servedTier
-    )
+    record(ModelContext.recorded(agent, completion, attempt, request, definitions, provider))
+
+  /**
+   * Counts the model calls an admission stage made before this task's run existed (#2854): their `usage` joins the
+   * task's, and each of `calls` is announced as it would have been had a hook of this task made it.
+   */
+  private[agent] def countAdmitted(usage: UsageSummary, calls: Vector[events.ModelCallCompleted]): Unit =
+    run.usage.addAll(usage)
+    calls.foreach(AgentEvents.ModelCallCompleted.emit(run, _))
 
   /**
    * `call` - a model call that records its usage before it returns - admitted under `RunBudgets.maxTokens` (#2084):
@@ -119,41 +118,74 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
           }
         )
 
-  private def record(
-    model: String,
-    usage: Option[TokenUsage],
-    cost: Option[Double],
-    attempt: Int,
-    toolCalls: Int,
-    charged: TokenUsage,
-    provider: Option[ProviderId],
-    adjustments: List[RequestAdjustment],
-    finishReason: Option[FinishReason],
-    servedTier: Option[ServiceTier]
-  ): Unit =
-    run.usage.add(model, charged, cost)
+  private def record(call: ModelContext.Recorded): Unit =
+    run.usage.add(call.model, call.charged, call.cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
-    if attempt > 0 then run.usage.step()
-    AgentEvents.ModelCallCompleted.emit(
-      run,
-      events.ModelCallCompleted(
-        agent.value,
-        model,
-        attempt,
-        toolCalls,
-        usage.map(events.CallUsage.fromTokenUsage),
-        cost,
-        provider,
-        adjustments,
-        finishReason,
-        servedTier
-      )
-    )
+    if call.event.attempts > 0 then run.usage.step()
+    AgentEvents.ModelCallCompleted.emit(run, call.event)
 
 @Experimental
 object ModelContext:
 
   private val logger = LoggerFactory.getLogger(getClass)
+
+  /** A model call as it is counted: the usage charged for it, and the durable event that announces it. */
+  final private[agent] case class Recorded(
+    model: String,
+    charged: TokenUsage,
+    cost: Option[Double],
+    event: events.ModelCallCompleted
+  )
+
+  /**
+   * A completed call of `agent`'s, as it is counted: attempt `attempt` of the agent's model step, or 0 for a hook's or
+   * an admission stage's own call. A completion without usage is charged an estimate (#2084).
+   */
+  private[agent] def recorded(
+    agent: AgentId,
+    completion: Completion,
+    attempt: Int,
+    request: Seq[Message],
+    definitions: => Seq[String],
+    provider: Option[ProviderId]
+  ): Recorded =
+    Recorded(
+      completion.model,
+      completion.usage.getOrElse(estimated(completion, request, definitions)),
+      completion.estimatedCost,
+      events.ModelCallCompleted(
+        agent.value,
+        completion.model,
+        attempt,
+        Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
+        completion.usage.map(events.CallUsage.fromTokenUsage),
+        completion.estimatedCost,
+        provider,
+        nonNull(completion.adjustments).toList,
+        Option(completion.finishReason),
+        completion.servedTier
+      )
+    )
+
+  /** Usage that arrived without a client call, counted as one request of `agent`'s to `model`. */
+  private[agent] def recordedUsage(agent: AgentId, model: String, usage: TokenUsage, cost: Option[Double]): Recorded =
+    Recorded(
+      model,
+      usage,
+      cost,
+      events.ModelCallCompleted(
+        agent.value,
+        model,
+        0,
+        0,
+        Some(events.CallUsage.fromTokenUsage(usage)),
+        cost,
+        None,
+        Nil,
+        None,
+        None
+      )
+    )
 
   /** The tokenizer of usage estimates: `cl100k_base`, else four characters a token when it is unavailable. */
   private lazy val counter: Option[ConversationTokenCounter] = ConversationTokenCounter.openAI().toOption

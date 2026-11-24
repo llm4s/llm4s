@@ -189,6 +189,12 @@ the text and phase it was given for, whatever the refusal's wording: once given,
 run on that text again, so an LLM judge whose reason varies from call to call is asked about once and is
 not called again.
 
+Because it can suspend the turn, its input guardrails run in `beforeAgent`, not at
+[admission](middleware#admission): the query is in the turn's first checkpoint before they see it, and a
+question holds the refused text and the guardrail's reason for the reviewer, stored with the suspended turn
+(sealed under `EncryptingCheckpointer`). Use `GuardrailMiddleware` or `withInputGuardrails` for what must
+never be stored.
+
 ## From Java and Kotlin
 
 `JAgentStatus.pending()` lists every interrupt as a `PendingInterrupt`, approvals first, then tool

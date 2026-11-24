@@ -73,7 +73,7 @@ class AgentBuilderGuardrailsSpec extends AnyFlatSpec with TestTimeLimit with Mat
     result.answer shouldBe Some("x+a+b")
   }
 
-  "The builder's guardrails" should "run innermost: after other middleware's beforeAgent, before their afterAgent" in {
+  "The builder's guardrails" should "admit the query before any beforeAgent, and check the answer before any afterAgent" in {
     val seen = ArrayBuffer.empty[String]
     val recorder = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("recorder")
@@ -93,7 +93,8 @@ class AgentBuilderGuardrailsSpec extends AnyFlatSpec with TestTimeLimit with Mat
         .withMiddleware(recorder)
     ).run("q").value
 
-    seen.toVector shouldBe Vector("before:q", "after:x+out")
+    // input guardrails run at admission (#2854), so every beforeAgent sees the query they passed on
+    seen.toVector shouldBe Vector("before:q+in", "after:x+out")
     lastQuery(client) shouldBe "q+in"
   }
 

@@ -2,6 +2,7 @@ package org.llm4s.agent.testkit
 
 import org.llm4s.agent.graph.{ RunBudgets, RunConfig, RunId, StateKey, StateUpdate, TenantId, ThreadId }
 import org.llm4s.agent.graph.middleware.{
+  AdmissionContext,
   AgentMiddleware,
   BoundaryResult,
   MiddlewareId,
@@ -90,6 +91,25 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
     client.callCount shouldBe 1
   }
 
+  "MiddlewareTestKit.admissionContext" should "let an admit stage be called directly, for the turn the test chose" in {
+    val redact  = new RedactEmails
+    val context = MiddlewareTestKit.admissionContext(RunConfig(tenantId = Some(TenantId("acme"))), ThreadId("t-9"))
+    context.threadId shouldBe ThreadId("t-9")
+    context.tenantId shouldBe Some(TenantId("acme"))
+
+    redact.admit("write to ada@example.com", context).value shouldBe "write to [email]"
+  }
+
+  it should "count an accounted client's calls, before any run exists" in {
+    val client  = ScriptedLLMClient.always(Reply.text("fine"))
+    val context = MiddlewareTestKit.admissionContext()
+    MiddlewareTestKit.usage(context).requestCount shouldBe 0
+
+    context.accounted(client).complete(Conversation(Seq(UserMessage("judge this")))).isRight shouldBe true
+
+    MiddlewareTestKit.usage(context).requestCount shouldBe 1
+  }
+
   "MiddlewareTestKit.toolContext" should "let a tool wrapper be called directly" in {
     val policy = new ReviewDeploys
     val call   = ToolCall("call-1", "deploy", ujson.Obj("text" -> "prod"))
@@ -169,6 +189,15 @@ object MiddlewareTestKitSpec {
     )
 
   def named(name: String): AgentMiddleware = new AgentMiddleware { val id: MiddlewareId = MiddlewareId(name) }
+
+  /** The guide's first middleware: e-mail addresses removed from the query as it is admitted. */
+  final class RedactEmails extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("redact-emails")
+    private val Email    = """[\w.+-]+@[\w-]+(\.[\w-]+)+""".r
+
+    override def admit(query: String, context: AdmissionContext): Result[String] =
+      Right(Email.replaceAllIn(query, "[email]"))
+  }
 
   /** The guide's state example: articles looked up once a turn, shown to every model call. */
   final class KnowledgeBase(search: String => String) extends AgentMiddleware {

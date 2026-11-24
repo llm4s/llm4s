@@ -28,7 +28,8 @@ final class AgentRun private[agent] (
   root: AgentId,
   runtime: GraphRuntime,
   tracing: Option[AgentTracing],
-  listening: Option[RunScope]
+  listening: Option[RunScope],
+  refused: Option[GuardrailBlocked]
 ):
   // the listener scopes `await` drains: the `stream*` listener's, and every `subscribe`'s
   private val scopes = new ConcurrentLinkedQueue[RunScope]()
@@ -160,7 +161,7 @@ final class AgentRun private[agent] (
       isBlock <- result match
         case RunResult.Failed(_, _: GuardrailBlocked) => runtime.endedBlocked(threadId, runId)
         case _                                        => Right(false)
-      status <- AgentRun.status(result, isBlock, loop)
+      status <- AgentRun.status(result, isBlock, loop, refused)
       agentResult <- result match
         case RunResult.Completed(state, output, _) => summary(state, Some(output.activeAgent), status)
         case suspended: RunResult.Suspended        => summary(suspended.state, None, status)
@@ -229,7 +230,9 @@ private[agent] object AgentRun:
    * `await` drains it when `drain` is set. The bridges (fs2, ZIO) pass `drain = false`: they end on
    * the scope's `onEnd`, and their release awaits the run without waiting on their own listener.
    * `parent` is a delegated child run's parent thread and run, which its tracing names (design 4.47); `continues` the
-   * trace context the run's span takes as its parent (design 4.58).
+   * trace context the run's span takes as its parent (design 4.58). `refused` is the block of an admission stage that
+   * refused the turn's query before the turn was stored (#2854): the run's own block names the same guardrail and has
+   * no reason, so the result takes its reason from here.
    */
   def apply(
     handle: RunHandle[TurnOutput],
@@ -240,7 +243,8 @@ private[agent] object AgentRun:
     scope: Option[RunScope],
     drain: Boolean,
     parent: Option[(ThreadId, RunId)] = None,
-    continues: Option[TraceContext] = None
+    continues: Option[TraceContext] = None,
+    refused: Option[GuardrailBlocked] = None
   ): AgentRun =
     scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
@@ -249,7 +253,8 @@ private[agent] object AgentRun:
       root,
       runtime,
       tracing.map(AgentTracing(handle, root, loop, _, parent, continues)),
-      scope.filter(_ => drain)
+      scope.filter(_ => drain),
+      refused
     )
 
   /**
@@ -257,9 +262,16 @@ private[agent] object AgentRun:
    * returns. The one derivation of a turn's status - `await` and [[AgentTracing]] both use it.
    * `isBlock` is whether a failed result is the run's guardrail Block: `await` reads it from the
    * thread's closing checkpoint, tracing from the run's own `agent.guardrail_blocked` event. A
-   * completed turn without an assistant message is a `ValidationError`.
+   * completed turn without an assistant message is a `ValidationError`. A block with no reason of its own - the
+   * run's input step raised it for a query an admission stage had refused (#2854) - takes `refused`'s, when that is
+   * the same guardrail's.
    */
-  def status(result: RunResult[TurnOutput], isBlock: Boolean, loop: ToolLoop): Result[AgentStatus] =
+  def status(
+    result: RunResult[TurnOutput],
+    isBlock: Boolean,
+    loop: ToolLoop,
+    refused: Option[GuardrailBlocked] = None
+  ): Result[AgentStatus] =
     result match
       case RunResult.Completed(state, output, _) =>
         output.outcome match
@@ -276,7 +288,8 @@ private[agent] object AgentRun:
           delegated   <- delegatedOf(loop, suspended)
         yield AgentStatus.Suspended(Suspension(approvals, questions, middleware, breakpoints, delegated))
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
-        Right(AgentStatus.Blocked(blocked.guardrail, Some(blocked.reason)))
+        val live = refused.filter(_.guardrail == blocked.guardrail).flatMap(_.reason)
+        Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason.orElse(live)))
       case RunResult.Failed(_, error) => Left(error)
 
   /**

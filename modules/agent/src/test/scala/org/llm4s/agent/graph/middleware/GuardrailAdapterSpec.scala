@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.GraphTestSupport.testModelContext
+import org.llm4s.agent.graph.GraphTestSupport.{ testAdmissionContext, testModelContext }
 import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -20,7 +20,7 @@ class GuardrailAdapterSpec extends AnyFlatSpec with Matchers {
   final private class Recording(val name: String, fails: Boolean, calls: CopyOnWriteArrayList[String])
       extends Guardrail[String] {
     def validate(value: String): Result[String] = { calls.add(s"$name:plain"); outcome(value) }
-    override def validate(value: String, context: ModelContext): Result[String] = {
+    override def validate(value: String, context: UsageAccounting): Result[String] = {
       calls.add(s"$name:context"); outcome(value)
     }
     override def description: Option[String] = Some(s"$name checks")
@@ -33,7 +33,7 @@ class GuardrailAdapterSpec extends AnyFlatSpec with Matchers {
     val composite = CompositeGuardrail.sequential(
       Seq(new Recording("A", fails = true, calls), new Recording("B", fails = false, calls))
     )
-    val result = new GuardrailMiddleware(Seq(InputGuardrail.from(composite)), Nil).beforeAgent("hi", testModelContext())
+    val result = new GuardrailMiddleware(Seq(InputGuardrail.from(composite)), Nil).admit("hi", testAdmissionContext())
     result.left.toOption.collect { case b: GuardrailBlocked => b.guardrail } shouldBe Some(composite.name)
     calls.asScala.toList shouldBe List("A:context")
   }
@@ -41,7 +41,7 @@ class GuardrailAdapterSpec extends AnyFlatSpec with Matchers {
   it should "pass the hook's context on, so a judge's model calls are counted" in {
     val calls = new CopyOnWriteArrayList[String]()
     val input = InputGuardrail.from(new Recording("J", fails = false, calls))
-    new GuardrailMiddleware(Seq(input), Nil).beforeAgent("hi", testModelContext()).isRight shouldBe true
+    new GuardrailMiddleware(Seq(input), Nil).admit("hi", testAdmissionContext()).isRight shouldBe true
     calls.asScala.toList shouldBe List("J:context")
   }
 
@@ -69,7 +69,8 @@ class GuardrailAdapterSpec extends AnyFlatSpec with Matchers {
     )
     val result =
       new GuardrailMiddleware(Nil, Seq(OutputGuardrail.from(composite))).afterAgent("answer", testModelContext())
-    val reason = result.left.toOption.collect { case b: GuardrailBlocked => b.reason }.getOrElse(fail("not blocked"))
+    val reason =
+      result.left.toOption.collect { case b: GuardrailBlocked => b.reason }.flatten.getOrElse(fail("not blocked"))
     reason should include("A rejected")
     reason should include("B rejected")
     calls.asScala.toList shouldBe List("A:context", "B:context")

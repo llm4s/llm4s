@@ -112,11 +112,14 @@ class InMemoryDelegationContractSpec extends AnyFlatSpec with DelegationContract
 
 ### What a guardrail refused
 
-`GuardedContentContract` runs guarded agents on your store and checks that the reason a guardrail gave is in nothing
-the store was handed and nothing it gives back: each `Commit` is recorded on its way in, so a row written and then
-retracted is seen too, and checkpoint history, the event log and the thread's children are read back afterwards. It
-also checks that `EncryptingCheckpointer` over your store hands it no error text of a failed run's outcome. It takes
-a fresh store and its queue per case:
+`GuardedContentContract` runs guarded agents on your store and checks that a query an input guardrail refused, and
+the reason any guardrail gave, are in nothing the store was handed and nothing it gives back: each `Commit` is
+recorded on its way in, so a row written and then retracted is seen too, and checkpoint history, the event log and
+the thread's children are read back afterwards. It checks the same when the turn is held at a breakpoint and resumed,
+and when its run stops after its first checkpoint and is recovered; that a query a guardrail rewrote is stored only
+as rewritten, across a failed model call and a suspension; that a query admitted before it is queued is in its queue
+entry only as admitted; and that `EncryptingCheckpointer` over your store hands it no error text of a failed run's
+outcome. It takes a fresh store and its queue per case:
 
 ```scala
 import org.llm4s.agent.graph.InMemoryCheckpointer

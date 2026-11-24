@@ -241,7 +241,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def wrapModelCall(request: ModelRequest, context: ModelContext)(
       next: ModelRequest => Result[ModelResponse]
     ): Result[ModelResponse] =
-      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", "not now")) else next(request)
+      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", Some("not now"))) else next(request)
   }
 
   "A GuardrailBlocked from a model wrapper" should "fail the run as Left, leaving the thread for recover" in {
@@ -251,7 +251,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val thread  = org.llm4s.agent.graph.ThreadId("wrapper-guardrail")
 
     val error = agent.run(thread, "q").error
-    cause(error) shouldBe GuardrailBlocked("ModelGuard", "not now")
+    cause(error) shouldBe GuardrailBlocked("ModelGuard", Some("not now"))
     // not a Block: the thread is Running, so a new turn is refused and recover continues it
     agent.run(thread, "another").error shouldBe a[GraphError.IncompleteRun]
     val recovered = agent.recover(thread).value

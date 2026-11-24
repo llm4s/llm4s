@@ -78,7 +78,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   private def secretGuard: AgentMiddleware = middleware(
     "guard",
     writing = Set.empty,
-    after = (t, _) => if t.contains("secret") then Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(t))
+    after =
+      (t, _) => if t.contains("secret") then Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(t))
   )
 
   private def systemOf(request: Vector[Message]): Option[String] =
@@ -184,8 +185,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       after = (t, _) => Right(BoundaryResult(t, undeclared)),
       model = (r, _, next) => next(r).map(_.addUpdate(undeclared))
     )
-    val blockingIn  = middleware("blocking", before = (_, _) => Left(GuardrailBlocked("in", "no")))
-    val blockingOut = middleware("blocking", after = (_, _) => Left(GuardrailBlocked("out", "no")))
+    val blockingIn  = middleware("blocking", before = (_, _) => Left(GuardrailBlocked("in", Some("no"))))
+    val blockingOut = middleware("blocking", after = (_, _) => Left(GuardrailBlocked("out", Some("no"))))
     // outermost: discards the inner response, then fails the call
     val discarding =
       middleware("discarding", model = (r, _, next) => next(r).flatMap(_ => Left(ValidationError("x", "y"))))
@@ -474,7 +475,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       "m",
       writing = Set(scratch),
       before = (t, _) => Right(BoundaryResult(t, StateUpdate.update(scratch, Some(t)))),
-      after = (_, _) => Left(GuardrailBlocked("all", "no"))
+      after = (_, _) => Left(GuardrailBlocked("all", Some("no")))
     )
     val (state, _) = runInMemory(loopOf(ScriptedModel(answer("hi")), Seq(m)).graph, AgentInput("go")).failed
     state.isSet(scratch) shouldBe false
@@ -552,7 +553,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
         next: ModelRequest => Result[ModelResponse]
       ): Result[ModelResponse] = next(request).map(_.addUpdate(StateUpdate.update(notes, "model")))
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        answered(context).fold(ask("block?"))(_ => Left(GuardrailBlocked("review", "rejected")))
+        answered(context).fold(ask("block?"))(_ => Left(GuardrailBlocked("review", Some("rejected"))))
     }
     val loop  = loopOf(ScriptedModel(answer("hi")), Seq(reviewing))
     val store = new InMemoryCheckpointer
@@ -674,7 +675,10 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
         new org.llm4s.agent.guardrails.OutputGuardrail {
           val name: String                            = "composite"
           def validate(value: String): Result[String] = composite.validate(value)
-          override def validate(value: String, context: ModelContext): Result[String] =
+          override def validate(
+            value: String,
+            context: org.llm4s.agent.graph.middleware.UsageAccounting
+          ): Result[String] =
             composite.validate(value, context)
         }
       )

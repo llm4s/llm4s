@@ -75,8 +75,9 @@ class AgentSpec internal constructor(private var builder: JAgentBuilder) {
     }
 
     /**
-     * Guardrails run in order on each turn's query before the model sees it; one that fails ends the turn `BLOCKED`
-     * (`status().kind()`), naming itself in `status().guardrail()`, and the turn stores nothing. Built with
+     * Guardrails run in order on each turn's query before the model sees it and before the turn is stored; one that
+     * fails ends the turn `BLOCKED` (`status().kind()`), naming itself in `status().guardrail()`, and nothing of the
+     * query is stored. Its reason is in `status().reason()` on that result only: it is never stored. Built with
      * `JGuardrails`: `length`, `profanity` and `regex`; `json()` checks answers only, so it is not accepted here.
      */
     fun inputGuardrails(guardrails: List<JGuardrail>) {

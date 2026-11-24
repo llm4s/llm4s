@@ -892,7 +892,9 @@ for
 yield worker
 ```
 
-Wrap **both**: the queue is a separate SPI, and a queued query is the user's input. Every runtime, worker and
+Wrap **both**: the queue is a separate SPI, and a queued query is the user's input (encryption protects what is
+stored; to keep text out of the stores altogether, refuse or rewrite it in the turn's
+[admission](middleware#admission), where input guardrails run). Every runtime, worker and
 submitter of the service must use the wrappers with the same keys. Put `MeteredCheckpointer` outside, as above: it then
 times commits with their encryption and still counts child tasks, whose events it reads before they are sealed.
 

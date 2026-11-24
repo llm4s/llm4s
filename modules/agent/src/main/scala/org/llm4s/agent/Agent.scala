@@ -3,7 +3,8 @@ package org.llm4s.agent
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.toolloop.{ AgentInput, SettledTurn, ToolLoop, TurnOutput }
+import org.llm4s.agent.graph.middleware.GuardrailBlocked
+import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys, SettledTurn, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
@@ -22,6 +23,10 @@ import org.slf4j.LoggerFactory
  *   second <- agent.continueConversation(first, "And in London?")
  * yield second.answer
  * }}}
+ *
+ * Before a turn is stored its query is admitted (#2854): the family's `admit` stages - input guardrails among them -
+ * may rewrite it, and only the rewrite is stored, or refuse it, and then the turn ends `Blocked` with nothing of the
+ * query in the checkpoint store, the event log or a trace.
  *
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
  * `Completed`, `Truncated` (the answer was cut off at the model's output limit), `StepLimitReached` or
@@ -477,25 +482,96 @@ final class Agent private[agent] (
     history: Seq[Message],
     listening: Option[Listening]
   ): Result[AgentRun] =
-    val input    = AgentInput(query, history.toVector)
-    val watching = listening.map(observed(config, _))
-    val observer = watching.map(_._1)
-    val started =
-      // refused before any thread is claimed: stored, a blank query would fail every model call after it
-      if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
-      else if history.isEmpty then runtime.start(threadId, loop.graph, input, configured(config), observer = observer)
-      else
-        importable(history).flatMap(_ =>
+    // refused before any thread is claimed: stored, a blank query would fail every model call after it
+    if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
+    else startInput(threadId, AgentInput(query, history.toVector), config, listening)
+
+  /**
+   * Starts a turn with `input`, admitting its query first (#2854): nothing of the turn is stored before every `admit`
+   * stage has run, a rewritten query is the only one stored, and a refused one starts a turn that holds no query and
+   * blocks at once, its reason on the returned run's result only. An input that records its admission - one a
+   * queue's submitter admitted - is started as it is.
+   */
+  private def startInput(
+    threadId: ThreadId,
+    input: AgentInput,
+    config: RunConfig,
+    listening: Option[Listening]
+  ): Result[AgentRun] =
+    val history = input.history
+    for
+      _        <- if history.isEmpty then Right(()) else importable(history)
+      admitted <- admitting(threadId, input, config)
+      watching = listening.map(observed(config, _))
+      observer = watching.map(_._1)
+      handle <-
+        if history.isEmpty then
+          runtime.start(threadId, loop.graph, admitted.input, configured(config), observer = observer)
+        else
           runtime.startNew(
             threadId,
             loop.graph,
-            input,
+            admitted.input,
             configured(config),
             ValidationError("history", "history is imported only into a new thread"),
             observer
           )
-        )
-    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
+    yield agentRun(handle, watching.map(_._2), listening.exists(_.drain), refused = admitted.refused)
+
+  /** [[start]] with an input a queue held (W2): admitted now unless its submitter admitted it. */
+  private[agent] def startQueued(threadId: ThreadId, input: AgentInput, config: RunConfig): Result[AgentRun] =
+    if input.query.trim.isEmpty && input.refusedBy.isEmpty then Left(ValidationError("query", "the query is blank"))
+    else startInput(threadId, input, config, None)
+
+  /**
+   * `input` after the admission stage: the root's `admit` stack, and the stack of the agent the thread is with. That
+   * agent is read from the thread before the turn claims it, which only a family with a handoff target needs; a
+   * thread that cannot be read is admitted by the root alone, and the start that follows reports why.
+   */
+  private def admitting(threadId: ThreadId, input: AgentInput, config: RunConfig): Result[ToolLoop.Admitted] =
+    val settled = configured(config)
+    val active =
+      if !loop.hasTargets then None
+      else
+        runtime
+          .childAtRest(threadId, loop.graph, settled)
+          .toOption
+          .flatten
+          .flatMap((_, execution) => execution.state.get(LoopKeys.activeAgent).toOption.flatten)
+    loop.admit(input, active, threadId, settled)
+
+  /**
+   * Runs the admission stage on `query` and starts nothing (#2854): for a caller that hands the turn to something
+   * that stores it before this agent runs it - a run queue above all. A query put on a queue as it is submitted is
+   * stored there before any guardrail has seen it; admit it first and submit what comes back
+   * ([[org.llm4s.agent.service.QueuedInput.admitted QueuedInput.admitted]]), and the queue holds the query only as
+   * the stages left it, or, for a refused one, no query at all.
+   *
+   *   - `AdmittedQuery.Accepted(input)`: the query passed, `input` holding it as rewritten.
+   *   - `AdmittedQuery.Refused(input, guardrail, reason)`: a stage refused it. `reason` is here and nowhere else;
+   *     `input` holds no query. Submitting it runs a turn that ends `AgentStatus.Blocked(guardrail, None)`, which
+   *     records the refusal on the thread; not submitting it leaves no record at all.
+   *   - `Left`: a stage failed, or `query` or the stages' result is blank.
+   *
+   * The worker that takes the entry does not run the stages again. `threadId` and `config` are what the stages see as
+   * the turn's thread, tenant and principal, and decide which agent's stages run after a handoff.
+   */
+  @Experimental
+  def admit(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig = RunConfig(),
+    history: Seq[Message] = Nil
+  ): Result[AdmittedQuery] =
+    if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
+    else
+      val checked = if history.isEmpty then Right(()) else importable(history)
+      checked.flatMap(_ => admitting(threadId, AgentInput(query, history.toVector), config)).map { admitted =>
+        admitted.refused match
+          case Some(blocked) =>
+            AdmittedQuery.Refused(admitted.input, blocked.guardrail, blocked.reason.getOrElse(blocked.message))
+          case None => AdmittedQuery.Accepted(admitted.input)
+      }
 
   /**
    * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
@@ -511,16 +587,19 @@ final class Agent private[agent] (
   ): Result[AgentRun] =
     if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
     else
-      runtime
-        .startNew(
-          threadId,
-          loop.graph,
-          AgentInput(query),
-          configured(config),
-          GraphError.ThreadExists(threadId.value),
-          amend = _ => Right(record)
-        )
-        .map(agentRun(_, None, drain = false))
+      // admitted before it is stored, as any turn's query is (#2854); a new thread is with the root
+      loop.admit(AgentInput(query), None, threadId, configured(config)).flatMap { admitted =>
+        runtime
+          .startNew(
+            threadId,
+            loop.graph,
+            admitted.input,
+            configured(config),
+            GraphError.ThreadExists(threadId.value),
+            amend = _ => Right(record)
+          )
+          .map(agentRun(_, None, drain = false, refused = admitted.refused))
+      }
 
   /**
    * Whether this agent's graph can take `checkpoint` on as a run would (Stage 5 W2, design 4.56): a worker leaves an
@@ -574,9 +653,29 @@ final class Agent private[agent] (
     handle: RunHandle[TurnOutput],
     scope: Option[RunScope],
     drain: Boolean,
-    parent: Option[(ThreadId, RunId)] = None
+    parent: Option[(ThreadId, RunId)] = None,
+    refused: Option[GuardrailBlocked] = None
   ): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, handle.traceContext)
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, handle.traceContext, refused)
+
+/**
+ * A turn's query after the admission stage, from [[Agent.admit]] (#2854): what to hand to whatever stores the turn
+ * before the agent runs it. Either way [[input]] holds nothing of the query as it was submitted.
+ */
+@Experimental
+enum AdmittedQuery:
+
+  /** The turn's input after admission: give it to `QueuedInput.admitted`. */
+  def input: AgentInput
+
+  /** The query passed: `input` holds it as the stages left it. */
+  case Accepted(input: AgentInput)
+
+  /**
+   * A stage refused the query: `guardrail` is its name - a blocking middleware's id - and `reason` what it gave,
+   * which is nowhere else. `input` holds no query: a turn started with it ends `AgentStatus.Blocked(guardrail, None)`.
+   */
+  case Refused(input: AgentInput, guardrail: String, reason: String)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])
