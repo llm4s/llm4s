@@ -1,8 +1,4 @@
----
-layout: page
-title: Workspace Agent Protocol
-parent: API Reference
----
+> Historical design record; superseded by the [workspace sandbox reference](https://llm4s.org/reference/workspace-sandbox).
 
 # Workspace Agent Protocol (WAP) Specification
 
@@ -275,7 +271,7 @@ searchFiles({
 
 **Description**: Runs one program with its arguments in the workspace. The runner does not use a shell: it splits
 `command` into words and starts the program directly, so pipes, redirection, `;`, `&&` and `$(...)` are refused, as
-is anything else the sandbox's [command policy](reference/workspace-sandbox#command-policy) forbids. A refusal is
+is anything else the sandbox's [command policy](https://llm4s.org/reference/workspace-sandbox#command-policy) forbids. A refusal is
 a `WorkspaceAgentErrorResponse` carrying the policy's code (for example `FORBIDDEN_CHARACTERS`).
 
 **Parameters**:

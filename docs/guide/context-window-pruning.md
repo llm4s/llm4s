@@ -9,7 +9,12 @@ parent: User Guide
 
 # Context Window Pruning Strategies
 
-Complete guide to LLM4S context window management and pruning strategies.
+Complete guide to LLM4S context window management and pruning strategies. `ContextWindowConfig`,
+`PruningStrategy` and `ContextWindowMiddleware` are in the agent runtime, `llm4s-agent`:
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-agent" % "{{ site.data.project.latest_release }}"
+```
 
 ## Overview
 
@@ -246,40 +251,32 @@ val scoreImportance: Seq[Message] => Seq[Message] = { messages =>
 
 ---
 
-### 5. AdaptiveWindowing (Intelligent auto-tuning)
+### 5. AdaptiveWindowing (a token budget from the model's size and prices)
 
-**How it works:** Automatically calculates the optimal context window based on:
-- Model's context size
-- Model tier (small, medium, large, extra-large)
-- Token pricing (input vs output cost)
-- Cost sensitivity preference
+**How it works:** `AdaptiveWindowing` turns a model's context window, and optionally its prices, into a token
+budget, then prunes oldest first to fit it. You pass the numbers; the
+[model registry](../reference/model-metadata) has them for the models it knows. The budget is:
+
+1. a share of `contextWindowSize` by size tier: 60% up to 32K tokens, 70% up to 100K, 75% up to 200K, 80% above;
+2. when both prices are given, reduced by up to 20%: by `inputCost / (inputCost + outputCost) * costSensitivity * 0.2`,
+   so expensive input and a high `costSensitivity` shrink it most;
+3. never below 1,000 tokens.
+
+`costSensitivity` (0.0 to 1.0, default 0.5) has an effect only when both prices are given.
 
 **Best for:**
-- ✅ Multi-model deployments (switch models without config changes)
-- ✅ Cost-conscious production systems
-- ✅ Quality-sensitive applications
-- ✅ Hybrid cost/quality optimization
-- ✅ When you want "set it and forget it"
-
-**Cost:**
-- 🟢 Excellent - Optimizes based on actual pricing
-- ✅ Adapts to model changes
-
-**Quality:**
-- 🟢 Good - Uses 70-80% of context window
-- ✅ Leaves room for model reasoning
+- Deployments that switch models: derive the budget from the model's own metadata instead of a hand-set `maxTokens`
+- Cost-conscious systems where input tokens dominate the bill
 
 **Example:**
 ```scala
-import org.llm4s.model.ModelMetadata
-import org.llm4s.agent.PruningStrategy
+import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
 
-// From ModelMetadata (automatically available)
 val strategy = PruningStrategy.AdaptiveWindowing(
   contextWindowSize = 128_000,           // gpt-4o context
   inputCostPerToken = Some(0.000005),    // $5 per 1M input tokens
   outputCostPerToken = Some(0.000015),   // $15 per 1M output tokens
-  costSensitivity = 0.5  // Balanced (0=quality, 1=cost)
+  costSensitivity = 0.5                  // the default
 )
 
 val config = ContextWindowConfig(
@@ -287,59 +284,55 @@ val config = ContextWindowConfig(
   minRecentTurns = 3     // Kept even past the window
 )
 
-println(strategy.calculateOptimalWindow)  // Output: 89,600 tokens (70% * 128K)
-println(strategy.explanation)  // "AdaptiveWindowing: using 89,600 tokens (70% of 128K large model)"
+println(strategy.calculateOptimalWindow)  // 93600: 128000 * 0.75 (tier) * 0.975 (cost)
+println(strategy.explanation)             // AdaptiveWindowing: using 93600 tokens (73% of 128K large model)
 ```
 
-**Model tier adjustments:**
-
-| Model Size | Context | Multiplier | Adjusted Window | Use Case |
-|-----------|---------|-----------|-----------------|----------|
-| Small | 8K | 60% | 4.8K | Budget-conscious |
-| Medium | 100K | 70% | 70K | Balanced |
-| Large | 200K | 75% | 150K | Quality-focused |
-| Extra Large | 1M+ | 80% | 800K+ | Complex reasoning |
-
-**Cost sensitivity examples:**
+The same numbers from the model registry, for whichever model a section configures:
 
 ```scala
-// 🟡 Balanced (default)
-// Sensitivity = 0.5
-// Minimizes cost moderately while preserving quality
+import org.llm4s.agent.PruningStrategy
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 
-val balanced = PruningStrategy.AdaptiveWindowing(
+def adaptiveFor(registry: ModelRegistryService, model: String): Result[PruningStrategy] =
+  registry.lookup(model).map { metadata =>
+    PruningStrategy.AdaptiveWindowing(
+      contextWindowSize = metadata.contextWindow.getOrElse(8192),
+      inputCostPerToken = metadata.pricing.inputCostPerToken,
+      outputCostPerToken = metadata.pricing.outputCostPerToken
+    )
+  }
+```
+
+**Size tiers** (without prices):
+
+| `contextWindowSize` | Share | Budget for a window of that size |
+|---|---|---|
+| up to 32,000 | 60% | 8,000 → 4,800; 32,000 → 19,200 |
+| 32,001 to 100,000 | 70% | 100,000 → 70,000 |
+| 100,001 to 200,000 | 75% | 128,000 → 96,000; 200,000 → 150,000 |
+| above 200,000 | 80% | 1,000,000 → 800,000 |
+
+**Cost sensitivity examples** (128K window, input $5 and output $15 per 1M tokens, so input is a quarter of the
+combined price):
+
+```scala
+import org.llm4s.agent.PruningStrategy
+
+def adaptive(sensitivity: Double) = PruningStrategy.AdaptiveWindowing(
   contextWindowSize = 128_000,
   inputCostPerToken = Some(0.000005),
   outputCostPerToken = Some(0.000015),
-  costSensitivity = 0.5
+  costSensitivity = sensitivity
 )
 
-// 🟢 Quality-focused
-// Sensitivity = 0.1
-// Use most of the available context, cost matters less
-val qualityFocused = PruningStrategy.AdaptiveWindowing(
-  contextWindowSize = 128_000,
-  costSensitivity = 0.1  // Low cost sensitivity
-)
-
-// 💰 Cost-optimized
-// Sensitivity = 0.9
-// Aggressively minimize token usage
-val costOptimized = PruningStrategy.AdaptiveWindowing(
-  contextWindowSize = 128_000,
-  costSensitivity = 0.9  // High cost sensitivity
-)
+adaptive(0.1).calculateOptimalWindow  // 95520: quality first, the window nearly untouched
+adaptive(0.5).calculateOptimalWindow  // 93600: balanced (the default)
+adaptive(0.9).calculateOptimalWindow  // 91680: cost first
 ```
 
-**Trade-offs:**
-| Aspect | Rating | Notes |
-|--------|--------|-------|
-| Token efficiency | ⭐⭐⭐⭐ | Auto-optimized |
-| Context continuity | ⭐⭐⭐⭐ | Preserves minimum turns |
-| Implementation | ⭐⭐⭐⭐⭐ | Recommended for production |
-| Use case fit | Universal | Works everywhere |
-
----
+Without prices, `costSensitivity` changes nothing: all three would be 96000.
 
 ## Strategy Comparison Matrix
 
@@ -349,7 +342,7 @@ val costOptimized = PruningStrategy.AdaptiveWindowing(
 | **MiddleOut** | Preserves bookends | Loses intermediate steps | ⭐⭐⭐ | ⭐⭐⭐⭐ | Complex reasoning |
 | **RecentTurnsOnly** | Consistent turn count | Loses older turns | ⭐⭐⭐⭐ | ⭐⭐ | Turn-based systems |
 | **Custom** | Maximum flexibility | Requires implementation | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Special needs |
-| **AdaptiveWindowing** | Auto-optimized, scales | Needs model metadata | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Production systems |
+| **AdaptiveWindowing** | Budget follows the model's size and prices | You supply the numbers | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Several models |
 
 ---
 
@@ -404,24 +397,14 @@ val config = ContextWindowConfig(
 
 ### Pattern 5: Adaptive Mode (Multi-model)
 
-```scala
-val strategy = if (isExpensiveModel) {
-  PruningStrategy.AdaptiveWindowing(
-    contextWindowSize = modelSize,
-    inputCostPerToken = Some(0.000010),
-    costSensitivity = 0.8  // Aggressive cost optimization
-  )
-} else {
-  PruningStrategy.AdaptiveWindowing(
-    contextWindowSize = modelSize,
-    inputCostPerToken = Some(0.000001),
-    costSensitivity = 0.3  // More quality-focused
-  )
-}
+Derive the budget from the configured model's metadata (`adaptiveFor` from
+[AdaptiveWindowing](#5-adaptivewindowing-a-token-budget-from-the-models-size-and-prices)), so a change of model
+changes the budget with it:
 
-val config = ContextWindowConfig(
-  pruningStrategy = strategy
-)
+```scala
+val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
+  ContextWindowConfig(pruningStrategy = strategy)
+}
 ```
 
 ---
@@ -431,14 +414,20 @@ val config = ContextWindowConfig(
 ### Calculate conversation cost
 
 ```scala
-val tokenCounter = ConversationTokenCounter.forModel("gpt-4o").get
-val conversationTokens = tokenCounter.countConversation(conversation)
+import org.llm4s.context.ConversationTokenCounter
+import org.llm4s.llmconnect.model.Conversation
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 
-// Cost calculation
-val inputCostPerToken = 0.000005  // $5 per 1M tokens
-val totalCost = conversationTokens * inputCostPerToken
-
-println(s"Conversation: $conversationTokens tokens = \$$totalCost")
+// the input cost of sending `conversation` once, at the registry's price for the model
+def inputCost(registry: ModelRegistryService, model: String, conversation: Conversation): Result[Option[Double]] =
+  for {
+    counter  <- ConversationTokenCounter.forModel(model)
+    metadata <- registry.lookup(model)
+  } yield {
+    val tokens = counter.countConversation(conversation)
+    metadata.pricing.inputCostPerToken.map(_ * tokens)
+  }
 ```
 
 ### Compare strategies
@@ -446,7 +435,6 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
 ```scala
 // Without pruning: 10,000 tokens = $0.05
 // With OldestFirst (keeping 50 messages): ~3,000 tokens = $0.015 (70% savings)
-// With AdaptiveWindowing: ~4,096 tokens = $0.020 (60% savings)
 
 // For 100 conversations per day:
 // Without: $5.00/day
@@ -469,9 +457,9 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
    preserveSystemMessage = true  // Default, always set this
    ```
 
-3. **Use AdaptiveWindowing for production** - Handles model changes automatically
+3. **Take window sizes from the model registry** - so a model change changes the budget
    ```scala
-   PruningStrategy.AdaptiveWindowing(contextWindowSize, costPerToken)
+   adaptiveFor(registry, model)   // see AdaptiveWindowing above
    ```
 
 4. **Monitor pruning events** - Log when and what gets removed
@@ -501,10 +489,10 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
      ConversationTokenCounter.forModel("gpt-4o").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
    ```
 
-4. **Hard-code window sizes** - Use AdaptiveWindowing instead
+4. **Hard-code window sizes** - Derive them from the model's metadata instead
    ```scala
-   // Bad: Fixed 4K window works only for specific models
-   // Good: AdaptiveWindowing scales with model changes
+   // Bad: a fixed 4K window suits only some models
+   // Good: AdaptiveWindowing from registry.lookup(model)
    ```
 
 ---
@@ -650,9 +638,10 @@ val config = ContextWindowConfig(
 | Need | Strategy | Reason |
 |------|----------|--------|
 | I just want a working solution | **OldestFirst** | Simplest, most reliable |
-| I'm building a production system | **AdaptiveWindowing** | Auto-scales with models |
+| I switch between models | **AdaptiveWindowing** | The budget follows each model's size and prices |
 | I have complex reasoning | **MiddleOut** | Preserves bookends |
 | I need precise control | **Custom** | Maximum flexibility |
 | I have turn-based logic | **RecentTurnsOnly** | Natural for turns |
 
-Choose **AdaptiveWindowing** for production systems that work across multiple models. Choose **OldestFirst** for everything else.
+Choose **AdaptiveWindowing**, built from the model registry, when the model changes between deployments. Choose
+**OldestFirst** with a `maxTokens` for everything else.

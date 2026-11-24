@@ -23,7 +23,7 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Architecture rules
 
-**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `core/safety`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
+**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
 - No vendor SDK (`com.anthropic`, `com.azure`, `com.openai`), observability, JDBC, parsing or speech dependency in core. `commonSettings` carries no JDBC driver: declare one per module. The build has no third-party resolvers; think hard before adding one.
 - Nothing in core imports `org.llm4s.agent` or `org.llm4s.assistant`. Core's trace specs build `TraceEvent.AgentRunEnded` directly.
 - A utility with one consuming module lives in that module, not core. A helper only llm4s modules use is `private[llm4s]`.
@@ -309,7 +309,7 @@ def loadProviderConfig(): Result[ProviderConfig] = Llm4sConfig.defaultProvider()
 def parseConfig(): Config = throw new RuntimeException()
 
 // Convert Try to Result
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 Try("123".toInt).toResult
 ```
 
@@ -335,7 +335,7 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 **Banned patterns** (enforced via `.scalafix.conf`):
 - `ConfigFactory.load()`, `sys.env()`, `System.getenv()` - use `Llm4sConfig` in app/test code
-- `try/catch/finally` outside safety packages - use `Result`
+- `try/catch/finally` outside a `// scalafix:off` region - use `Result`
 - Infix operators - use `list.map(f)` not `list map f`
 
 ## Agent Framework
@@ -385,10 +385,11 @@ runtime. Search tool config comes from `ToolsConfigLoader.load*SearchTool()`.
 ```scala
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-BuiltinTools.core          // DateTime, Calculator, UUID, JSON
-BuiltinTools.safe()        // + web search, HTTP
-BuiltinTools.withFiles()   // + read-only file access
-BuiltinTools.development() // All tools (use with caution)
+// each returns Result[Seq[ToolFunction[_, _]]]
+BuiltinTools.coreSafe          // DateTime, Calculator, UUID, JSON
+BuiltinTools.withHttpSafe()    // + read-only HTTP (web search is configured separately)
+BuiltinTools.withFilesSafe()   // + read-only file access
+BuiltinTools.developmentSafe() // All tools (use with caution)
 ```
 
 ### Guardrails

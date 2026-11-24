@@ -103,7 +103,7 @@ What the gateway receives, on every chat request:
 - `model` as written. The gateway maps it to a provider, a region and a deployment, so switching any of those is a
   change to the gateway, not to the app.
 
-`registryProvider` tells LLM4S which [model registry](https://github.com/llm4s/llm4s/blob/main/docs/MODEL_METADATA.md) entry gives the context window, since a
+`registryProvider` tells LLM4S which [model registry](../reference/model-metadata) entry gives the context window, since a
 gateway's host says nothing about the model behind it
 ([details](providers#where-the-context-window-comes-from)). Without it, the window is 8192 tokens.
 
@@ -170,7 +170,7 @@ two: the gateway's provider keys, and the app's gateway key.
   does for any such file; the group is the pod's own.
 - **Vault Agent Injector and the Secrets Store CSI driver** work the same way: each writes a file that `apiKeyFile`
   names. Their manifests, and an `ApiKeyProvider` for a secret store your code calls, are in
-  [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+  [Secrets and key rotation](production-deployment#secrets-and-key-rotation).
 - **Embeddings, the reranker and every chat provider** take `apiKeyFile` too
   ([Rotating keys](../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider)), so RAG needs no
   environment-variable key either.
@@ -200,7 +200,7 @@ Three layers, from the outside in:
 1. **The gateway** can retry and fall back between deployments and regions of the same model, in its own config.
 2. **`ReliableClient`** in the app retries what is transient (429, 408, 5xx and timeouts, honouring `Retry-After`),
    opens a circuit breaker when the gateway keeps failing, bounds each call with a deadline and can rate-limit
-   locally ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)).
+   locally ([Reliable LLM Calling](reliability)).
 3. **A second section**, for a second gateway or provider, asked only when the first still fails.
 
 The section's `timeouts` bound how long one HTTP attempt may wait for the response to begin
@@ -317,7 +317,7 @@ Provider-neutral cost controls (prompt caching, effort, service tier) are tracke
 `llm4s-config-policy` checks a configuration before it ships. Its `prod` preset deliberately refuses the generic
 `openai-compatible` provider, because such a section can point anywhere, so a gateway deployment states its own
 policy: only the gateway's provider, model and URL, and a key written down for each section (`ownApiKey`, which
-`apiKeyFile` satisfies; [details](../PRODUCTION_DEPLOYMENT#check-for-inherited-keys-with-the-config-policy)).
+`apiKeyFile` satisfies; [details](production-deployment#check-for-inherited-keys-with-the-config-policy)).
 
 ```scala
 import org.llm4s.config.Llm4sConfig

@@ -1,8 +1,4 @@
----
-layout: page
-title: Tool Calling API Design
-parent: API Reference
----
+> Historical design record; superseded by the [custom tools guide](https://llm4s.org/guide/custom-tools).
 
 # Scala Tool Calling API Design
 

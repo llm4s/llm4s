@@ -229,9 +229,8 @@ ProviderConfigKey.required("project", "the project that owns your Acme deploymen
 ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west"))
 ```
 
-`ProviderConfigKey` also takes `env` (a variable to suggest in the missing-key message) and
-`deprecatedAliases` (old names, accepted with a warning), as named arguments or afterwards with
-`withEnv` / `withDeprecatedAliases`. Undeclared keys in a section are
+`ProviderConfigKey` also takes `env` (a variable to suggest in the missing-key message), as a named
+argument or afterwards with `withEnv`. Undeclared keys in a section are
 reported as unknown and not passed on. Values are strings; parse numbers or booleans in
 `buildConfig` and return a `ConfigurationError` for a malformed one.
 
@@ -738,7 +737,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 (local Ollama). Override `buildConfig(section, modelOverride)` only when the config cannot be
 expressed with the spec.
 
-## Testing: `Llm4s<Name>ModuleSpec`
+## Testing: `Llm4s<Name>ModuleSpec` {#testing}
 
 Every provider module in this repository proves its registration in one spec, and yours should
 too - it replaces the exhaustivity check the compiler gave when providers were a closed `enum`.

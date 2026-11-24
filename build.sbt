@@ -172,7 +172,7 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 // MiMa compares a module with the artifact of the same name in a previous release. The releases so far set no
 // baseline: 0.4.1 is a single `llm4s-core` of the pre-modularisation code (#1126 moved every package this check
 // would cover), and 0.5.0 and 0.5.1, the first releases with the split coordinates, were published without one.
-// #1281 sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen modules
+// #1281 sets it at 0.7.0, once the designs are final, for the frozen modules (`llm4s-agent` included)
 // only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
 // `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
@@ -2063,6 +2063,9 @@ lazy val samples = (project in file("modules//samples"))
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
     vectorstoreRedis         % Test,
+    // Test scope: docs/guide/secrets.md's Vault and AWS Secrets Manager snippets are compiled.
+    secretsVault % Test,
+    secretsAws   % Test,
     // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
     doctor % Test,
     // Test scope: docs/guide/reference-architecture.md's gateway policy is compiled and checked against the

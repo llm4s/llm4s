@@ -47,24 +47,22 @@ has a `thinking` property.
 
 ### Which one wins
 
-**An explicit `thinking` wins.** Without one, `reasoning` decides as it always has: a provider that thinks within a
-budget gets the level's default budget, so a request that sets only `reasoning` sends what it sent before `thinking`
-existed. A pair that contradicts itself on a provider with one control for both, such as `thinking = Off` with
+**An explicit `thinking` wins.** Without one, `reasoning` decides: a provider that thinks within a budget gets the
+level's default budget. A pair that contradicts itself on a provider with one control for both, such as `thinking = Off` with
 `reasoning = High` on OpenAI, is resolved by this rule and the level is reported as `Adjusted`.
 
 **The exception.** Some current models reject a manual thinking budget with a 400 (Claude Opus 4.7, Opus 4.8 and
 Fable 5 among those in the bundled model metadata). For a model whose capabilities say so
 (`ModelCapabilities.supportsBudgetThinking = Some(false)`), a `reasoning`-only request is sent as adaptive thinking at
-that effort instead, reported as `Adjusted(Reasoning, "budget_tokens", "output_config.effort", ...)`. Every request
-this changes is one that failed before.
+that effort instead, reported as `Adjusted(Reasoning, "budget_tokens", "output_config.effort", ...)`.
 
 ### What each provider sends
 
 | | `reasoning` | `thinking` |
 |---|---|---|
-| Anthropic | `output_config.effort` where the model takes it and you set `thinking` or a new level; otherwise a `budget_tokens` budget, as before. A level Anthropic lacks (`minimal`) is sent as the nearest. | `Off` → `disabled` (a model that cannot turn thinking off gets its default, reported); `Adaptive` → `adaptive` (a model from before adaptive thinking gets a budget, reported); `Budget(n)` → `budget_tokens`, fitted to `[1024, max_tokens)`, or `adaptive` on a model that rejects a budget, each reported when changed |
+| Anthropic | `output_config.effort` where the model takes it and you set `thinking` or a new level; otherwise a `budget_tokens` budget. A level Anthropic lacks (`minimal`) is sent as the nearest. | `Off` → `disabled` (a model that cannot turn thinking off gets its default, reported); `Adaptive` → `adaptive` (a model from before adaptive thinking gets a budget, reported); `Budget(n)` → `budget_tokens`, fitted to `[1024, max_tokens)`, or `adaptive` on a model that rejects a budget, each reported when changed |
 | OpenAI, Azure | `reasoning_effort`; a level the model lacks is sent as the nearest it accepts | `Off` → the lowest effort the model accepts (`none` where it can turn thinking off); `Adaptive` not needed; `Budget` dropped |
-| OpenRouter | as before: a budget for Claude models, `reasoning_effort` for OpenAI o-series | Claude models: `Budget(n)` → `thinking.budget_tokens`, `Off` → no thinking block; otherwise dropped |
+| OpenRouter | a budget for Claude models, `reasoning_effort` for OpenAI o-series | Claude models: `Budget(n)` → `thinking.budget_tokens`, `Off` → no thinking block; otherwise dropped |
 | Z.ai, xAI | by model family; see [Providers](providers) | `Off` → `thinking.type: disabled` or the lowest effort, as the model allows (reported where the model still thinks) |
 | Perplexity, watsonx | the Agent API's or chat API's levels, the nearest where one is missing | `Off` → the lowest effort; the others are not sent |
 | Gemini, Vertex AI | Gemini 3 and later: `thinkingLevel`, the nearest the model has. Gemini 2.5 takes no level: dropped | Gemini 2.5: `thinkingBudget` (`Off` → 0, or 2.5 Pro's minimum, which cannot turn off; `Adaptive` → -1; `Budget(n)` fitted to the model's range). Gemini 3 and later: `Off` → the lowest level; `Adaptive` not needed; `Budget` dropped (deprecated there). Other models: dropped |

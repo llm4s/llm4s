@@ -78,7 +78,7 @@ changed by llm4s.
 
 **What about models metadata, sample prompts and documentation images?** The repository's LICENSE covers the
 repository. The project has not published a separate statement on the licence of the model metadata
-([MODEL_METADATA](https://github.com/llm4s/llm4s/blob/main/docs/MODEL_METADATA.md)), sample prompts or images, and this page does not make one.
+([MODEL_METADATA](model-metadata)), sample prompts or images, and this page does not make one.
 
 ## AI-assisted contributions
 

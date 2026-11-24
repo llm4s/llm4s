@@ -7,9 +7,8 @@ import org.llm4s.annotation.Stable
  * `NamedProviderConfig` do not cover.
  *
  * Declaring the key is what makes it part of the section. The section validator
- * checks required keys, fills in defaults and resolves deprecated aliases before
- * the descriptor sees the section, and the descriptor reads the result from
- * `NamedProviderConfig.extras`. A key in a section that no descriptor declares
+ * checks required keys and fills in defaults before the descriptor sees the section,
+ * and the descriptor reads the result from `NamedProviderConfig.extras`. A key in a section that no descriptor declares
  * is reported as unknown and not passed on.
  *
  * Values are strings, as they are in HOCON; a descriptor that needs a number or a
@@ -26,14 +25,6 @@ import org.llm4s.annotation.Stable
  *                          Named sections read no variable by themselves, so the missing-key
  *                          message shows the binding that reads it - `key = ${?VAR}` - rather
  *                          than telling the user to set a variable nothing would read.
- * @param deprecatedAliases older names for this key. A section that sets an alias instead of
- *                          `name` still works, with a deprecation warning per alias used; one
- *                          that sets `name` and an alias, or two aliases, to different values is
- *                          an error. An alias may be any key the section could otherwise carry
- *                          as an extra - which is how a provider renames one (Vertex AI's
- *                          `endpoint` became `project`) - or one of the built-in fields in
- *                          [[ProviderConfigSpec.BuiltinAliasKeys]]. `provider`, `model` and
- *                          `headers` cannot be aliases, and a spec naming one fails validation.
  */
 @Stable
 final case class ProviderConfigKey private (
@@ -41,8 +32,7 @@ final case class ProviderConfigKey private (
   description: String,
   required: Boolean,
   default: Option[String],
-  env: Option[String],
-  deprecatedAliases: Seq[String]
+  env: Option[String]
 ) {
   def withName(name: String): ProviderConfigKey               = copy(name = name)
   def withDescription(description: String): ProviderConfigKey = copy(description = description)
@@ -51,8 +41,6 @@ final case class ProviderConfigKey private (
   def withDefault(default: Option[String]): ProviderConfigKey = copy(default = default)
   def withEnv(env: String): ProviderConfigKey                 = copy(env = Some(env))
   def withEnv(env: Option[String]): ProviderConfigKey         = copy(env = env)
-  def withDeprecatedAliases(deprecatedAliases: Seq[String]): ProviderConfigKey =
-    copy(deprecatedAliases = deprecatedAliases)
 }
 
 object ProviderConfigKey:
@@ -63,10 +51,9 @@ object ProviderConfigKey:
     description: String,
     required: Boolean = false,
     default: Option[String] = None,
-    env: Option[String] = None,
-    deprecatedAliases: Seq[String] = Seq.empty
+    env: Option[String] = None
   ): ProviderConfigKey =
-    new ProviderConfigKey(name, description, required, default, env, deprecatedAliases)
+    new ProviderConfigKey(name, description, required, default, env)
 
   /** A key the section must set. */
   def required(name: String, description: String): ProviderConfigKey =
@@ -220,13 +207,6 @@ object ProviderConfigSpec:
    */
   val BuiltinKeys: Set[String] =
     Set("provider", "model", "baseUrl", "apiKey", "apiKeyFile", "headers", "timeouts", "auth", "http")
-
-  /**
-   * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):
-   * those with a string form. `provider` and `model` select and drive every provider, and
-   * `headers` is a map, so none of them can stand in for a provider-specific key.
-   */
-  val BuiltinAliasKeys: Set[String] = Set("baseUrl", "apiKey")
 
   /**
    * The common shape: an API key, and a base URL that defaults to the

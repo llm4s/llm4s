@@ -297,4 +297,3 @@ its own timeout as well, so the work behind the handler stops too.
 - [Built-in Tools](builtin-tools): the tools that ship with `llm4s-agent-tools`
 - [Agents](agents/): running tools in an agent loop, with guardrails and handoffs
 - [Error Handling](error-handling): `Result[A]` and `LLMError`
-- [Tool Calling API design](../tool-calling-api-design): the design behind `ToolFunction`, errors and execution

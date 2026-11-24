@@ -42,7 +42,7 @@ The artifacts end in `_3`, the Scala binary version, which Maven and Gradle need
 
 | You had | Add | Gives you |
 |---|---|---|
-| `langchain4j`, `langchain4j-open-ai`, ... or `spring-ai-starter-model-*` | `org.llm4s:llm4s-java-api_3` | The client, tools, agents, structured output, embeddings, streaming and `FakeLlmClient`; brings the OpenAI, Anthropic, Ollama, Gemini and OpenAI-compatible providers ([Java](java#add-the-dependency)) |
+| `langchain4j`, `langchain4j-open-ai`, ... or `spring-ai-starter-model-*` | `org.llm4s:llm4s-java-api_3` | The client, tools, agents, structured output, embeddings, streaming and `FakeLlmClient`; add the provider module you call, such as `llm4s-openai_3` ([Java](java#add-the-dependency)) |
 | `langchain4j-easy-rag`, an `EmbeddingStore`, a Spring AI `VectorStore` | `org.llm4s:llm4s-java-rag_3` | `JRag`: ingest, search and ask, with an in-memory or SQLite store ([Java RAG](java-rag)) |
 | Reactor `Flux` from a model | `org.llm4s:llm4s-reactor_3` | `Streams.toFlux` ([Java Reactor](java-reactor)) |
 | A LangChain4j or Spring AI Spring Boot starter | `org.llm4s:llm4s-spring-boot-starter_3` | `LLM4STemplate`, configured from `llm4s.*` properties ([Spring Boot](spring-boot)) |

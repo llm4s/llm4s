@@ -107,7 +107,7 @@ A failure is thrown as `LLMException`. The Kotlin DSL for tools, completion opti
 ## Spring Boot, Quarkus and the rest
 
 - [Spring Boot](../guide/spring-boot): `llm4s-spring-boot-starter` auto-configures a client from `application.properties` and injects an `LLM4STemplate`.
-- [Quarkus](../guide/quarkus): a CDI producer for `JLlmClient` and a runnable sample.
+- [Quarkus](../guide/quarkus): a CDI producer for `JLlmClient` and a runnable sample; the extension is built from source and is outside the 1.0 scope.
 - [RAG from Java](../guide/java-rag) (`llm4s-java-rag`) and [Reactor](../guide/java-reactor) (`Flux` of a streamed reply).
 - [Moving a Java app from LangChain4j or Spring AI](../guide/java-migration).
 - Build files: [Maven](../getting-started/maven) and [Gradle](../getting-started/gradle).

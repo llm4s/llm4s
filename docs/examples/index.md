@@ -45,25 +45,25 @@ and is run in CI:
 
 ## Quick Navigation
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| [Playground](#playground) | 1 | Offline demo — no API key needed |
-| [Jupyter Notebooks](#jupyter-notebooks) | 2 | Almond notebooks, offline: completion, streaming, structured output, a tool, RAG |
-| [Java Offline Example](#java-offline-example) | 1 | Test application code with a scripted model |
-| [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
-| [Agent Examples](#agent-examples) | 10 | Multi-turn agents, persistence, built-in tools, the harness exit examples |
-| [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
-| [Guardrails Examples](#guardrails-examples) | 7 | Input/output validation, LLM-as-Judge |
-| [Handoff Examples](#handoff-examples) | 3 | Agent-to-agent delegation |
-| [Memory Examples](#memory-examples) | 6 | Short/long-term memory, vector search, RAG |
-| [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
-| [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
-| [Context Management](#context-management) | 8 | Token windows, compression |
-| [Embeddings](#embeddings) | 7 | Vector search, RAG, document extraction |
-| [RAG in a Box](#rag-in-a-box) | - | Production RAG server (external project) |
-| [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
-| [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
-| [Other Examples](#other-examples) | 8 | Speech, actions, utilities |
+| Category | Description |
+|----------|-------------|
+| [Playground](#playground) | Offline demo — no API key needed |
+| [Jupyter Notebooks](#jupyter-notebooks) | Almond notebooks, offline: completion, streaming, structured output, a tool, RAG |
+| [Java Offline Example](#java-offline-example) | Test application code with a scripted model |
+| [Basic Examples](#basic-examples) | Getting started, streaming, tracing |
+| [Agent Examples](#agent-examples) | Multi-turn agents, persistence, built-in tools, the harness exit examples |
+| [Tool Examples](#tool-examples) | Tool calling, built-in tools, parallel execution |
+| [Guardrails Examples](#guardrails-examples) | Input/output validation, LLM-as-Judge |
+| [Handoff Examples](#handoff-examples) | Agent-to-agent delegation |
+| [Memory Examples](#memory-examples) | Short/long-term memory, vector search, RAG |
+| [Streaming Examples](#streaming-examples) | Real-time responses, agent event streams |
+| [Reasoning Examples](#reasoning-examples) | Extended thinking modes |
+| [Context Management](#context-management) | Token windows, compression |
+| [Embeddings](#embeddings) | Vector search, RAG, document extraction |
+| [RAG in a Box](#rag-in-a-box) | Production RAG server (external project) |
+| [MCP Examples](#mcp-examples) | Model Context Protocol |
+| [Model Examples](#model-examples) | Model metadata and capabilities |
+| [Other Examples](#other-examples) | Speech, actions, utilities |
 
 ---
 
@@ -189,7 +189,7 @@ sbt "samples/runMain org.llm4s.samples.basic.StreamingExample"
 
 **File:** [`AdvancedStreamingExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/AdvancedStreamingExample.scala)
 
-More complex streaming patterns with error handling and state management.
+Streaming with progress indicators, throughput metrics and a histogram of chunk delays.
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.basic.AdvancedStreamingExample"
@@ -197,7 +197,7 @@ sbt "samples/runMain org.llm4s.samples.basic.AdvancedStreamingExample"
 
 **What it demonstrates:**
 - Advanced error handling during streaming
-- State management across chunks
+- Metrics accumulated across chunks
 - Progress tracking
 - Stream termination handling
 
@@ -227,7 +227,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingWithTrace"
 
 **File:** [`EnhancedTracingExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/EnhancedTracingExample.scala)
 
-Advanced tracing with detailed token usage and agent state tracking.
+Advanced tracing with detailed token usage and agent result snapshots.
 
 ```bash
 export TRACING_MODE=console
@@ -236,7 +236,7 @@ sbt "samples/runMain org.llm4s.samples.basic.EnhancedTracingExample"
 
 **What it demonstrates:**
 - Detailed trace information
-- Agent state tracking
+- Tracing an agent result
 - Token usage analysis
 - Multi-level tracing
 
@@ -329,7 +329,7 @@ sbt "samples/runMain org.llm4s.samples.basic.AgentLLMCallingExample"
 **What it demonstrates:**
 - Agent-based LLM calls
 - Context management
-- Agent state tracking
+- Tracing an agent result
 
 ---
 ### ProviderFallbackExample
@@ -417,7 +417,7 @@ sbt "samples/runMain org.llm4s.samples.agent.MultiStepAgentExample"
 
 **File:** [`MultiTurnConversationExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/MultiTurnConversationExample.scala)
 
-Functional, immutable multi-turn conversation API (Phase 1.1).
+Functional, immutable multi-turn conversation API.
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.agent.MultiTurnConversationExample"
@@ -608,18 +608,17 @@ sbt "samples/runMain org.llm4s.samples.toolapi.WeatherToolExample"
 ```
 
 **What it demonstrates:**
-- Basic tool creation with ToolFunction
+- Basic tool creation with `ToolBuilder`
 - Parameter schema definition
 - Tool execution
 - Return value handling
 
 **Key code:**
 ```scala
-val weatherTool = ToolFunction(
-  name = "get_weather",
-  description = "Get current weather for a location",
-  function = getWeather _
-)
+val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] =
+  ToolBuilder[Map[String, Any], WeatherResult]("get_weather", "Get current weather for a location", schema)
+    .withHandler(weatherHandler)
+    .buildSafe()
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/WeatherToolExample.scala)
@@ -778,7 +777,7 @@ sbt "samples/runMain org.llm4s.samples.guardrails.CompositeGuardrailExample"
 
 **What it demonstrates:**
 - Sequential composition (all must pass in order)
-- All composition (all must pass, run in parallel)
+- All composition (all must pass; every failure is reported)
 - Any composition (at least one must pass)
 - Error accumulation and reporting
 
@@ -1013,12 +1012,12 @@ sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 **Key code:**
 ```scala
 // Ingest documents
-val chunks = ChunkingUtils.chunkText(text, chunkSize = 800, overlap = 150)
-store.store(Memory.fromKnowledge(chunk, source = fileName))
+val chunks = ChunkingUtils.chunkText(document.text, config.chunkSize, config.chunkOverlap)
+s.store(Memory.fromKnowledge(content = chunk, source = fileName, chunkIndex = Some(idx)))
 
-// Query with semantic search
-val results = store.search(query, topK = 4)
-val answer = client.complete(buildRAGPrompt(query, results))
+// Query with semantic search, then answer from what it found
+store.search(query, config.topK, MemoryFilter.ByType(MemoryType.Knowledge))
+client.complete(conversation)
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/DocumentQAExample.scala)

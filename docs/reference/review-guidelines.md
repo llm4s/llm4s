@@ -233,8 +233,11 @@ Sealed traits force exhaustiveness. `Result[A]` for runtime errors.
 **P5. Simple over clever**
 Prefer straightforward ADT over advanced type-level programming unless justified.
 
-**P6. API stability over rapid iteration**
-Breaking changes require deprecation cycle. Semver strictly enforced.
+**P6. API stability, on the policy's schedule**
+Before 1.0 a wrong API is fixed outright: a breaking change needs a CHANGELOG *Breaking changes* line and a migration
+note (and, from the 0.7.0 baseline, a MiMa filter), never a `@deprecated` shim. From 1.0 a breaking change to a Frozen
+module needs a deprecation cycle and a major release. See the
+[Compatibility and Deprecation Policy](compatibility-policy).
 
 **P7. Soft functional style - pragmatism over purity**
 Immutable data and pure functions by default, without being religious about pure FP. If the simple solution works, use
@@ -1015,20 +1018,19 @@ Iterator.continually(rs).takeWhile(_.next()).map(extractRow).toSeq
 
 **Check**:
 
-- [ ] Breaking change? Add to changelog, bump version (major for breaking)
-- [ ] Deprecation cycle? Mark `@deprecated`, keep old method for 1 minor version
+- [ ] Breaking change? A line under the CHANGELOG's `### Breaking changes` and a note in the [Migration Guide](migration); from the 0.7.0 baseline, a narrow MiMa filter in a frozen module
+- [ ] Before 1.0: no `@deprecated` member and no compatibility shim; the old API is removed. From 1.0: deprecate, and keep the old API until the next major release
 - [ ] ScalaDoc on all `trait`, `case class`, public `def` with params
 - [ ] Binary compatibility check via MiMa (if applicable)
 
 **Template for API change comment**:
 
 ```markdown
-[HIGH] Breaking API change requires deprecation cycle
+[HIGH] Breaking API change has no migration note
 
-**Problem**: Renaming `Agent.execute` to `Agent.run` breaks existing code
-**Fix**: Keep `execute` as deprecated wrapper for 1 version:
-@deprecated("Use run() instead", "0.x.0")
-def execute(q: String): Result[AgentResult] = run(q)
+**Problem**: Renaming `Agent.execute` to `Agent.run` breaks existing code, and the PR says nothing about it
+**Fix**: Add a line under the CHANGELOG's `### Breaking changes` and a note in docs/reference/migration.md
+(before 1.0, no `@deprecated` wrapper: remove `execute`; from 1.0, deprecate it and keep it until the next major)
 **Reference**: Section 6.1
 ```
 

@@ -25,6 +25,13 @@ Low-level vector storage abstraction for RAG and semantic search.
 
 The {% include api.html t="org.llm4s.vectorstore.VectorStore" %} trait provides a backend-agnostic interface for storing and searching vector embeddings. This is the foundation layer for building RAG (Retrieval-Augmented Generation) applications.
 
+The stores, hybrid search, reranking, chunking and the RAG pipeline are in `llm4s-rag`; Elasticsearch, OpenSearch and
+Redis are separate modules (below):
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-rag" % "{{ site.data.project.latest_release }}"
+```
+
 **Key Features:**
 - Backend-agnostic API supporting multiple vector databases
 - Type-safe error handling with `Result[A]`
@@ -43,10 +50,6 @@ The {% include api.html t="org.llm4s.vectorstore.VectorStore" %} trait provides 
 **Keyword Backends (for hybrid search):**
 - **SQLite FTS5** - File-based or in-memory BM25 search (default)
 - **PostgreSQL** - Native full-text search with tsvector/tsquery (production-ready)
-
-**Planned Backends:**
-- Milvus
-- Pinecone
 
 ---
 
@@ -1170,8 +1173,7 @@ for {
 It reads `llm4s.rerank`. The Cohere key is `llm4s.rerank.cohere.apiKey` when set, and otherwise
 Cohere's shared `llm4s.credentials.cohere.apiKey`, bound to `COHERE_API_KEY` - the key a Cohere
 chat section uses too, so one variable serves both. Set `llm4s.rerank.cohere.apiKey` only to bill
-reranking to another account. (Before `RerankerConfigLoader`, nothing read `llm4s.rerank`,
-although `reference.conf` bound it.)
+reranking to another account.
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
@@ -1561,6 +1563,7 @@ trait VectorStore {
   def getBatch(ids: Seq[String]): Result[Seq[VectorRecord]]
   def delete(id: String): Result[Unit]
   def deleteBatch(ids: Seq[String]): Result[Unit]
+  def deleteByPrefix(prefix: String): Result[Long]
   def deleteByFilter(filter: MetadataFilter): Result[Long]
   def count(filter: Option[MetadataFilter] = None): Result[Long]
   def list(limit: Int = 100, offset: Int = 0,

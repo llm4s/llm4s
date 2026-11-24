@@ -83,7 +83,7 @@ LLM4S is under active pre-1.0 development. The latest published release is [v0.6
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
-Since 0.5.0, llm4s ships as separate modules. RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. Langfuse tracing, the trace collector and store, and `CostTracker` are in `llm4s-observability`, and Prometheus metrics in `llm4s-observability-prometheus`, leaving `llm4s-core` with only the tracing and metrics contracts, console and no-op tracing, and no observability dependency. The agent runtime is in `llm4s-agent` and the built-in tools in `llm4s-agent-tools`, so `llm4s-core` is now a ~19k-line spine, and its API has been cleaned up ahead of the compatibility baseline, which is set at a pre-1.0 release once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Upgrading from 0.4.x? Start with [Upgrading from 0.4.1 to 0.5.0](https://llm4s.org/migrations/0-4-1-to-0-5-0). See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+Since 0.5.0, llm4s ships as separate modules. RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. Langfuse tracing, the trace collector and store, and `CostTracker` are in `llm4s-observability`, and Prometheus metrics in `llm4s-observability-prometheus`, leaving `llm4s-core` with only the tracing and metrics contracts, console and no-op tracing, and no observability dependency. The agent runtime is in `llm4s-agent` and the built-in tools in `llm4s-agent-tools`, so `llm4s-core` is now a small spine, and its API has been cleaned up ahead of the compatibility baseline, which is set at a pre-1.0 release once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Upgrading from 0.4.x? Start with [Upgrading from 0.4.1 to 0.5.0](https://llm4s.org/migrations/0-4-1-to-0-5-0). See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
 
 The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
 
@@ -102,7 +102,7 @@ Spring AI, Koog and Embabel, with a source and a date for every claim, and
 
 ## Features
 
-- **Multi-Provider Support**: Connect to multiple LLM providers, including OpenAI, Anthropic, Azure OpenAI, Google Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Requesty, Z.ai, and Ollama.
+- **Multi-Provider Support**: Eighteen chat providers behind one API: OpenAI, Azure OpenAI, Requesty, Anthropic, Google Gemini, Vertex AI, Amazon Bedrock, IBM watsonx.ai, Mistral, Cohere, DeepSeek, xAI, Z.ai, OpenRouter, Perplexity, Ollama, Jlama (a model run inside your JVM) and any OpenAI-compatible endpoint.
 - **Execution Environments**: Run LLM-driven operations in secure, containerized or non-containerized setups.
 - **Error Handling**: Robust mechanisms to catch, log, and recover from failures gracefully.
 - **MCP Support**: Model Context Protocol primitives for richer tool and context integration.
@@ -307,7 +307,6 @@ sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"
 Every other sample:
 
 ```bash
-# Using Scala 3
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
@@ -320,12 +319,9 @@ sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspace
 
 ### Scala Version
 
-LLM4S now targets Scala 3.7.1 only. The build keeps compatibility-oriented aliases for Scala 3 verification:
-
-- `src/main/scala` - Common code for all versions
-- `src/main/scala-3` - Scala 3 specific code (add when needed)
-
-We've kept convenient build aliases:
+LLM4S targets Scala 3.7.1 only; sources live in each module's `src/main/scala`. There are no Scala 2.13 artifacts:
+calling LLM4S from Scala 2.13 through the TASTy reader is best effort, probed in CI but not a supported configuration
+(see [the TASTy-reader page](docs/getting-started/scala-2-13.md)). The build has these aliases:
 
 ```bash
 # Compile the repo
@@ -368,42 +364,31 @@ The roadmap covers:
 
 ## Tool Calling
 
-Tool calling is a critical integration - designed to work seamlessly with **multi-provider support** and **agent frameworks**.
-We use ScalaMeta to auto-generate tool definitions, support dynamic mapping, and run in **secure execution environments**.
-
-Tools can run:
-
-- In **containerized sandboxes** for isolation and safety.
-- In **multi-modal pipelines** where LLMs interact with text, images, and voice.
-- With **observability hooks** for trace analysis.
-
-### Tool Signature Generation
-
-Using ScalaMeta to automatically generate tool definitions from Scala methods:
+A tool is a function the model can call, with a JSON schema for its arguments. Build one with `ToolBuilder` and a
+`Schema` (or derive the schema from a case class with `derives SchemaOf`, from `llm4s-schema-derivation`), collect
+tools in a `ToolRegistry`, and give the registry to an agent, which runs the calls the model makes and sends back
+the results:
 
 ```scala
-/** My tool does some funky things with a & b...
- * @param a The first thing
- * @param b The second thing
- */
-def myTool(a: Int, b: String): ToolResponse = {
-  // Implementation
-}
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+
+val weatherSchema = Schema
+  .`object`[Map[String, Any]]("Weather query parameters")
+  .withProperty(Schema.property("location", Schema.string("The city to look up")))
+
+val result = for {
+  weather <- ToolBuilder[Map[String, Any], String]("get_weather", "Current weather for a city", weatherSchema)
+               .withHandler(args => args.getString("location").map(city => s"Sunny in $city"))
+               .buildSafe()
+  agent   <- Agent.builder("weather-agent", client).withTools(new ToolRegistry(Seq(weather))).build()
+  answer  <- agent.run("What's the weather in Paris?")
+} yield answer
 ```
 
-ScalaMeta extracts method parameters, types, and documentation to generate OpenAI-compatible tool definitions.
-
-### Tool Call Mapping
-
-Mapping LLM tool call requests to actual method invocations through:
-
-- Code generation
-- Reflection-based approaches
-- ScalaMeta-based parameter mapping
-
-### Secure Execution
-
-Tools run in a protected Docker container environment to prevent accidental system damage or data leakage.
+Ready-made tools (date and time, calculator, HTTP, web search, files, shell) are in `llm4s-agent-tools`, and MCP
+servers' tools come in through `llm4s-mcp`. Tools run in your JVM; for code a model writes, the optional workspace
+modules run it in a Docker container instead. See [Custom tools](https://llm4s.org/guide/custom-tools).
 
 ## Comprehensive Tracing & Observability
 
@@ -474,7 +459,6 @@ sbt new llm4s/llm4s.g8 \
 --llm4s_version=0.6.0 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
---directory=<your.project.name> \
 --force
 ```
 
@@ -483,8 +467,8 @@ to create new project.
 Since 0.5.0 `llm4s-core` ships no provider, so the generated `build.sbt` adds `llm4s-ollama` and `llm4s-openai` at the
 same version as `llm4s-core`, with a local Ollama section as the default; add any other provider module you use.
 
-For more information about the template, including compatibility matrix and documentation, visit the [template repository](https://github.com/llm4s/llm4s.g8).
-Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using starter kit.
+For more information about the template, including its options, compatibility matrix and documentation, visit the
+[template repository](https://github.com/llm4s/llm4s.g8).
 
 ---
 
@@ -547,14 +531,16 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Non-text stubs: `ENABLE_EXPERIMENTAL_STUBS`, `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL` → `EmbeddingSampleConfig.experimentalStubs()`, `.localModels()`
 
 - Embeddings: provider configuration
-  - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model` (or legacy `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider`)
-  - Supported providers: `openai` (`llm4s-openai`), `voyage` (`llm4s-voyage`), `ollama` (`llm4s-ollama`); each from its module once published
+  - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model`
+  - Supported providers: `openai` (`llm4s-openai`), `voyage` (`llm4s-voyage`), `jina` (`llm4s-jina`), `cohere` (`llm4s-cohere`), `ollama` (`llm4s-ollama`); each registered by its module
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:
     - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and `OPENAI_API_KEY` - the same key
       OpenAI chat sections use
     - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL`, `VOYAGE_API_KEY`
+    - **Jina**: `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL`, `JINA_API_KEY`
+    - **Cohere**: `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL`, `COHERE_API_KEY`
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
@@ -606,17 +592,14 @@ Our unified CI workflow runs on every push and pull request to main/master branc
 - **Quick Checks**: formatting, scalafix, compilation and the build's policy checks, in one sbt server. It runs
   alongside the test jobs rather than before them, and gates the merge through `All Tests Pass`
 - **Code Coverage**: per-module coverage floors, enforced in four parallel legs (`Code Coverage (<leg>)`)
-- **Cross-Platform Testing**: Tests run on Ubuntu and Windows with Scala 3.7.1
-- **Template Validation**: Verifies the g8 template works correctly
+- **Cross-Platform Testing**: The full suite runs on Ubuntu with Scala 3.7.1; on pull requests and nightly, a
+  Windows job runs the platform-sensitive tests (`sbt testPlatform`: paths, files, processes, SQLite)
 - **Caching**: Optimized caching strategy with Coursier for faster builds
 
-#### Claude Code Review (`claude-code-review.yml`)
+#### Claude (`claude.yml`, `claude-external-pr-comment.yml`)
 
-Automated AI-powered code review for pull requests:
-
-- **Automatic Reviews**: Trusted PRs get automatic Claude reviews
-- **Security**: External PRs require manual trigger by maintainers
-- **Manual Trigger**: Maintainers can request reviews with `@claude` comment
+AI assistance on issues and pull requests, started by an `@claude` comment or review; a pull request from a fork
+gets a comment from a separate workflow explaining how a maintainer can run it.
 
 #### Release Pipeline (`release.yml`)
 
@@ -970,7 +953,7 @@ Want to connect with maintainers? The LLM4S project is maintained by:
 
 - [CHANGELOG.md](CHANGELOG.md) — full release history from v0.1.0 to present, following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
 - [Migration guides](docs/migrations/) — step-by-step upgrade instructions between versions
-  - [0.x → 1.0 consolidated guide](docs/migrations/0x-to-1x.md) — all breaking changes across the 0.x series
+  - [0.x → 1.0 consolidated guide](docs/migrations/0x-to-1x.md) — the upgrade path to 1.0 from any 0.x release
   - [v0.2.9 → v0.3.0](docs/migrations/v0.2.9-to-v0.3.0.md) — migrate throwing APIs to type-safe `Result[T]`
 
 ## License

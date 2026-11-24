@@ -18,9 +18,8 @@ import org.slf4j.LoggerFactory
  * provider had to edit.
  *
  * It also resolves the provider-specific keys (`ProviderConfigSpec.extras`, #1215):
- * required ones must be present, defaults are filled in, deprecated aliases are
- * mapped to the current name with a warning, and keys the provider does not
- * declare are reported with a warning and dropped. Unknown keys were silently
+ * required ones must be present, defaults are filled in, and keys the provider
+ * does not declare are reported with a warning and dropped. Unknown keys were silently
  * ignored before extras existed, so a warning rather than an error keeps existing
  * configs loading while still surfacing a typo.
  */
@@ -47,8 +46,8 @@ private[llm4s] object NamedProviderSectionValidator:
     }
 
   /**
-   * [[validate]], returning the warnings instead of logging them: a deprecated alias in use,
-   * or a key the provider does not declare.
+   * [[validate]], returning the warnings instead of logging them: a key the provider does not
+   * declare.
    */
   def validateWithWarnings(
     providerName: ProviderName,
@@ -103,17 +102,9 @@ private[llm4s] object NamedProviderSectionValidator:
 
   private val MissingApiKeyPrefix = "  - apiKey: "
 
-  /**
-   * A descriptor bug rather than a user one: an extra key may not shadow a built-in field, and a
-   * deprecated alias may name a built-in field only if it has a string form to carry over.
-   */
+  /** A descriptor bug rather than a user one: an extra key may not shadow a built-in field. */
   private def specError(id: String, spec: ProviderConfigSpec): Option[ConfigurationError] =
-    val clashing = spec.extras.map(_.name).filter(ProviderConfigSpec.BuiltinKeys.contains)
-    val badAliases = spec.extras
-      .flatMap(_.deprecatedAliases)
-      .filter(alias =>
-        ProviderConfigSpec.BuiltinKeys.contains(alias) && !ProviderConfigSpec.BuiltinAliasKeys.contains(alias)
-      )
+    val clashing          = spec.extras.map(_.name).filter(ProviderConfigSpec.BuiltinKeys.contains)
     val reservedAuth      = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
     val undeclaredKeyless = spec.keylessWhen.map(_._1).filterNot(key => spec.extra(key).isDefined)
     val problems =
@@ -125,9 +116,6 @@ private[llm4s] object NamedProviderSectionValidator:
       ) ++ Option.when(clashing.nonEmpty)(
         s"declares provider-specific key(s) ${clashing.mkString(", ")}, which are built-in named-provider fields; " +
           "rename them in its ProviderConfigSpec.extras"
-      ) ++ Option.when(badAliases.nonEmpty)(
-        s"declares built-in field(s) ${badAliases.distinct.mkString(", ")} as deprecated aliases, which cannot " +
-          s"be; only ${ProviderConfigSpec.BuiltinAliasKeys.toSeq.sorted.mkString(", ")} can"
       )
     Option.when(problems.nonEmpty)(ConfigurationError(s"Provider '$id' ${problems.mkString("; and ")}"))
 
@@ -160,15 +148,11 @@ private[llm4s] object NamedProviderSectionValidator:
   private def envHint(key: String, env: Option[String]): String =
     env.fold("")(variable => s"; to read it from $variable, add $key = $${?$variable} to the section")
 
-  /** The provider-specific keys after defaults and aliases, and what is wrong with them. */
+  /** The provider-specific keys after defaults, and what is wrong with them. */
   final private case class ResolvedExtras(values: Map[String, String], problems: Seq[String], warnings: Seq[String])
 
-  /** One declared key's outcome: its value, if any, plus problems and warnings. */
-  final private case class KeyOutcome(
-    value: Option[String],
-    problems: Seq[String] = Nil,
-    warnings: Seq[String] = Nil
-  )
+  /** One declared key's outcome: its value, if any, plus problems. */
+  final private case class KeyOutcome(value: Option[String], problems: Seq[String] = Nil)
 
   /** The `auth` block's provider keys after defaults, and what is wrong with them. */
   private def resolveAuth(
@@ -204,63 +188,23 @@ private[llm4s] object NamedProviderSectionValidator:
   ): ResolvedExtras =
     val section = s"llm4s.providers.$name"
 
-    // A deprecated alias may be a built-in field or a former key read from `extras` - as Vertex
-    // AI's `endpoint` and `organization` are, now that neither is built in. Every built-in in
-    // `BuiltinAliasKeys` is read here; `specError` rejects the others.
-    def aliasValue(alias: String): Option[String] =
-      alias match
-        case "baseUrl" => normalized.baseUrl.map(_.asUrl)
-        case "apiKey"  => normalized.apiKey.map(_.asKey)
-        case other     => normalized.extras.get(other)
-
     def resolve(key: ProviderConfigKey): KeyOutcome =
-      val aliasHits = key.deprecatedAliases.flatMap(alias => aliasValue(alias).map(alias -> _))
-
-      def deprecated(alias: String): String =
-        s"$section.$alias is deprecated for provider = $id; rename it to $section.${key.name}. " +
-          "The old name will stop working in a future release."
-
-      normalized.extras.get(key.name) match
-        case Some(value) =>
-          aliasHits.find(_._2 != value) match
-            case Some((alias, _)) =>
-              KeyOutcome(
-                None,
-                problems = Seq(
-                  s"  - ${key.name}: also set, to a different value, as its deprecated alias `$alias`; remove $section.$alias"
-                )
-              )
-            case None => KeyOutcome(Some(value), warnings = aliasHits.map((alias, _) => deprecated(alias)))
-        case None =>
-          aliasHits.map(_._2).distinct match
-            case Seq(value) => KeyOutcome(Some(value), warnings = aliasHits.map((alias, _) => deprecated(alias)))
-            case _ if aliasHits.nonEmpty =>
-              // Several old spellings with different values: which was meant cannot be known.
-              val set = aliasHits.map((alias, value) => s"`$alias` = \"$value\"").mkString(", ")
-              KeyOutcome(
-                None,
-                problems = Seq(
-                  s"  - ${key.name}: set through several deprecated aliases with different values ($set); " +
-                    s"replace them with $section.${key.name}"
-                )
-              )
-            case _ =>
-              key.default match
-                case some @ Some(_) => KeyOutcome(some)
-                case None if key.required =>
-                  KeyOutcome(
-                    None,
-                    problems = Seq(
-                      s"  - ${key.name}: ${key.description} (set it in application.conf under llm4s.providers.$name.${key.name}" +
-                        s"${envHint(key.name, key.env)})"
-                    )
-                  )
-                case None => KeyOutcome(None)
+      normalized.extras.get(key.name).orElse(key.default) match
+        case some @ Some(_) => KeyOutcome(some)
+        case None if key.required =>
+          KeyOutcome(
+            None,
+            problems = Seq(
+              s"  - ${key.name}: ${key.description} (set it in application.conf under $section.${key.name}" +
+                s"${envHint(key.name, key.env)})"
+            )
+          )
+        case None => KeyOutcome(None)
 
     val outcomes = spec.extras.map(key => key -> resolve(key))
     val values   = outcomes.flatMap((key, outcome) => outcome.value.map(key.name -> _)).toMap
 
-    val claimed = spec.extras.flatMap(key => key.name +: key.deprecatedAliases).toSet
+    val claimed = spec.extras.map(_.name).toSet
     val unknown = normalized.extras.keys.filterNot(claimed.contains).toSeq.sorted
     val unknownWarning = Option.when(unknown.nonEmpty) {
       // `auth` is a built-in only for a provider that can use it.
@@ -275,7 +219,7 @@ private[llm4s] object NamedProviderSectionValidator:
     ResolvedExtras(
       values,
       outcomes.flatMap(_._2.problems),
-      outcomes.flatMap(_._2.warnings) ++ unknownWarning
+      unknownWarning.toSeq
     )
 
 /** Normalises a raw named provider section and validates it against its registered provider. */

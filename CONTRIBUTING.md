@@ -51,7 +51,7 @@ git checkout -b my-first-contribution
 # make the change
 sbt scalafmtAll   # format
 sbt core/test     # verify
-git commit -m "[TEST] Add tests for XYZ"
+git commit -s -m "[TEST] Add tests for XYZ"
 git push origin my-first-contribution
 # Open PR against main
 ```
@@ -137,8 +137,8 @@ and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to 
    ```bash
    sbt scalafixAll        # Run scalafix checks (enforced in CI/compile)
    sbt scalafmtAll        # Format code
-   sbt +compile           # Compile all versions
-   sbt +test              # Run all tests
+   sbt compile            # Compile (Scala 3 only)
+   sbt test               # Run all tests
    sbt buildAll           # Full pipeline check
    ```
 
@@ -194,10 +194,9 @@ def buildConfig(providerName: String, section: NamedProviderConfig)(using Contex
 ```
 
 Validation does the rest before `buildConfig` runs: a missing required key fails with its name,
-the section and your `description`; `default`s are filled in; `deprecatedAliases` let you rename a
-key without breaking configs, with a warning (an alias may be any former key, or `baseUrl` or
-`apiKey`, the built-in fields in `ProviderConfigSpec.BuiltinAliasKeys`); undeclared keys are
-dropped with a warning. Values are strings - parse and reject a malformed one in `buildConfig`.
+the section and your `description`; `default`s are filled in; undeclared keys are dropped with a
+warning. Before 1.0 a key is renamed outright, with a migration note
+([compatibility policy](docs/reference/compatibility-policy.md)). Values are strings - parse and reject a malformed one in `buildConfig`.
 Set `env` (or `baseUrlEnv`) to the key's conventional environment variable, if it has one: a
 section's extra keys and `baseUrl` read no variable by themselves, so the missing-key error shows
 the `key = ${?VAR}` binding that would read it, never a bare "set VAR". The API key is different:
@@ -208,7 +207,7 @@ its `reference.conf`, and `apiKeyEnv` names that variable in the error.
 
 See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 
-- Place tests in `modules/core/src/test/scala/org/llm4s/`
+- Place tests in the module's own `src/test/scala/org/llm4s/`, mirroring the source package
 - Name tests with `Spec` suffix
 - Use ScalaTest's FlatSpec style
 - Test both happy path and error cases
@@ -442,11 +441,9 @@ Keep `openaiCompatible`'s coverage at or above its floor in `build.sbt`
 See [AGENTS.md](AGENTS.md#build-test-and-development-commands) for complete list:
 
 ```bash
-sbt compile           # Compile active Scala version
-sbt +compile          # Compile all versions
+sbt compile           # Compile (the build is Scala 3 only)
 sbt test              # Run tests
-sbt +test             # Run tests all versions
-sbt buildAll          # Full pipeline (compile + test all versions)
+sbt buildAll          # Full pipeline (clean, compile, test)
 sbt scalafixAll       # Run Scalafix rules
 sbt scalafmtAll       # Format code
 ```
