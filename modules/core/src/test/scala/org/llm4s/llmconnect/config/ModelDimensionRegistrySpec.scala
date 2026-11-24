@@ -39,26 +39,23 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
       ModelDimensionRegistry.getDimension("FixtureEmbedding", "fixture-embed-small").value shouldBe 256
     }
 
-    "answer the local non-text encoders without a registered provider" in {
+    "not answer for the local non-text encoders: `local` is a provider id like any other (#2805)" in {
       given ProviderRegistry = ProviderRegistry.ofEmbeddings()
 
-      ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").value shouldBe 512
-      ModelDimensionRegistry.localDimension("wav2vec2-base").value shouldBe 768
-      ModelDimensionRegistry.localDimension("no-such-encoder").left.value.formatted should include(
-        "Unknown model 'no-such-encoder' for provider 'local'"
-      )
+      // Their table moved to llm4s-rag with its only consumer (`LocalEmbeddingModels.dimension`).
+      ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").isLeft shouldBe true
     }
 
-    "prefer a registered provider called local over the built-in encoder table" in {
+    "answer for a registered provider called local as for any other" in {
       // An application may register a real embedding provider under the id `local`;
       // `EmbeddingClient.from("local", ...)` resolves it, so its dimensions must too.
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegisteredLocalEmbeddings)
 
       // A model only the registered provider knows.
       ModelDimensionRegistry.getDimension("local", "my-local-embedder").value shouldBe 384
-      // A name that collides with the built-in table: the provider's answer wins.
+      // A name the local encoders also use: only the provider answers.
       ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").value shouldBe 1024
-      // And the table is not consulted as a fallback for the provider's own gaps.
+      // And nothing stands in for the provider's own gaps.
       ModelDimensionRegistry.getDimension("local", "wav2vec2-base").left.value.formatted should include(
         "Unknown model 'wav2vec2-base' for provider 'local'"
       )

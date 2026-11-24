@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.security.KnownSecrets
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
@@ -10,12 +10,12 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
 
   "RawProvidersConfigLoader" should {
 
-    "read the selected provider name and named providers from the new providers.provider config shape" in {
+    "read the selected provider name and named providers from llm4s.defaultProvider and the providers block" in {
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "openai-main"
           |  providers {
-          |    provider = "openai-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
@@ -75,8 +75,8 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "openai-main"
           |  providers {
-          |    provider = "openai-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
@@ -115,8 +115,8 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "openai"
           |  providers {
-          |    provider = "openai"
           |    openai {
           |      provider = "openai"
           |      model = "gpt-4o-mini"

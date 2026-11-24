@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -33,7 +33,7 @@ import org.llm4s.types.Result
 @Experimental
 final case class XaiConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -41,13 +41,15 @@ final case class XaiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("xai")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): XaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): XaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): XaiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("xai")
+  override def endpointUrl: Option[BaseUrl]                         = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): XaiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[XaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
@@ -76,7 +78,7 @@ object XaiConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
@@ -97,7 +99,7 @@ object XaiConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): XaiConfig =
+  def apply(apiKey: Secret, model: ModelName): XaiConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val HalfMillionWindow = """grok-4\.[5-9](?:-.*)?""".r
@@ -108,12 +110,12 @@ object XaiConfig {
    * `grok-4.5` to `grok-4.7`, 1M for `grok-4.3` and `grok-4.20`, 256k for the other Grok 4
    * models and 131072 otherwise.
    */
-  private[config] def xaiFallback(modelName: String): (Int, Int) =
+  private[config] def xaiFallback(modelName: String): ContextLimits =
     modelName.toLowerCase match {
-      case HalfMillionWindow()               => (500000, standardReserve)
-      case MillionWindow()                   => (1000000, standardReserve)
-      case name if name.startsWith("grok-4") => (256000, standardReserve)
-      case _                                 => (131072, standardReserve)
+      case HalfMillionWindow()               => ContextLimits(500000, standardReserve)
+      case MillionWindow()                   => ContextLimits(1000000, standardReserve)
+      case name if name.startsWith("grok-4") => ContextLimits(256000, standardReserve)
+      case _                                 => ContextLimits(131072, standardReserve)
     }
 
   /**
@@ -134,7 +136,7 @@ object XaiConfig {
       _ <- ProviderConfig.nonEmpty("xAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("xai"),
         modelName = modelName,
         defaultContextWindow = 131072,
@@ -143,7 +145,7 @@ object XaiConfig {
       )
       XaiConfig(
         apiKey = apiKey,
-        model = modelName,
+        model = ModelName(modelName),
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc

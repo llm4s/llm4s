@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.OpenAICompatibleModelLister
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchangeConfig }
@@ -280,7 +281,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         )
       )
       val config = OpenAICompatibleConfig(
-        model = "m",
+        model = ModelName("m"),
         baseUrl = "https://ws.example/serving-endpoints",
         tokenExchange = Some(
           TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://ws.example/oidc/v1/token")
@@ -317,7 +318,7 @@ class OpenAICompatibleWorkloadIdentitySpec
             Seq(HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}"""), rejected)
           )
           val config = OpenAICompatibleConfig(
-            model = "m",
+            model = ModelName("m"),
             baseUrl = "https://ws.example/serving-endpoints",
             tokenExchange = Some(
               TokenExchangeConfig(
@@ -352,7 +353,7 @@ class OpenAICompatibleWorkloadIdentitySpec
           MockHttpClient(access.flatMap(a => Seq(HttpResponse(200, s"""{"access_token":"$a","expires_in":0}"""), ok)))
         val svid = svidFile(subjects.head)
         val config = OpenAICompatibleConfig(
-          model = "m",
+          model = ModelName("m"),
           baseUrl = "https://ws.example/serving-endpoints",
           tokenExchange = Some(TokenExchangeConfig(IdentitySource.File(svid), "https://ws.example/oidc/v1/token"))
         )
@@ -473,7 +474,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       do
         val http = MockHttpClient(responses)
         val config = OpenAICompatibleConfig(
-          model = "m",
+          model = ModelName("m"),
           baseUrl = "https://ws.example/serving-endpoints",
           tokenExchange = Some(
             TokenExchangeConfig(
@@ -525,7 +526,7 @@ class OpenAICompatibleWorkloadIdentitySpec
 
     "show the exchange's token URL without userinfo or query in the settings and config" in {
       val config = OpenAICompatibleConfig(
-        model = "m",
+        model = ModelName("m"),
         baseUrl = "https://ws.example/serving-endpoints",
         tokenExchange = Some(
           TokenExchangeConfig(IdentitySource.Literal(Secret("eyJ.svid.sig")), "https://u:pw@ws.example/t?sig=s3cr3t")
@@ -558,7 +559,7 @@ class OpenAICompatibleWorkloadIdentitySpec
 
     def insecureConfig(fake: FakeTokenExchangeServer): OpenAICompatibleConfig =
       OpenAICompatibleConfig(
-        model = "m",
+        model = ModelName("m"),
         baseUrl = insecureBaseUrl(fake),
         tokenExchange = Some(
           TokenExchangeConfig(
@@ -665,7 +666,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       baseUrl: String = "https://ws.example/serving-endpoints"
     ) =
       OpenAICompatibleConfig.fromValues(
-        model = "m",
+        model = ModelName("m"),
         baseUrl = baseUrl,
         apiKey = apiKey.map(Secret(_)),
         headers = headers,
@@ -732,7 +733,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         valid.withTokenExchange(exchange.withTokenUrl("http://ws.example/t")),
         valid.withBaseUrl("http://ws.example/v1"),
         OpenAICompatibleConfig(
-          model = "m",
+          model = ModelName("m"),
           baseUrl = "https://ws.example/v1",
           headers = Map("Authorization" -> "Bearer stale"),
           tokenExchange = Some(exchange)

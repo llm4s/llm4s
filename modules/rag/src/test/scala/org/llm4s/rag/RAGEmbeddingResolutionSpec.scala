@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -12,7 +13,6 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -49,7 +49,15 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
       )
 
   private def resolver(model: String = ""): String => Result[EmbeddingProviderConfig] =
-    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = Secret("k")))
+    _ =>
+      Right(
+        EmbeddingProviderConfig(
+          providerId = ProviderId("fixture"),
+          baseUrl = BaseUrl("http://fake"),
+          model = ModelName(model),
+          apiKey = Some(Secret("k"))
+        )
+      )
 
   private def ingestOnce(rag: RAG): Unit =
     rag.ingestText("Some text worth embedding.", "doc-1").isRight shouldBe true

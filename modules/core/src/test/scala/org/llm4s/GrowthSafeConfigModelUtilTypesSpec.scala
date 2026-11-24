@@ -1,15 +1,14 @@
 package org.llm4s
 
-import org.llm4s.config.Llm4sConfig.TextEmbeddingModelSettings
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName, ProvidersConfig }
+import org.llm4s.config.{ NamedProviderConfig, ProvidersConfig }
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId, ProviderName }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Message, UserMessage }
 import org.llm4s.model.TransformationResult
-import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * `TextEmbeddingModelSettings`, `ProvidersConfig` and `TransformationResult` are growth-safe (#2384):
+ * `ProvidersConfig` and `TransformationResult` are growth-safe (#2384):
  * a private constructor and `copy`, a companion `apply` with the previous parameters and defaults, and a `with*`
  * setter per field. Each setter changes its field and nothing else; `new X(...)` and `.copy(...)` no longer compile.
  */
@@ -22,25 +21,6 @@ class GrowthSafeConfigModelUtilTypesSpec extends AnyFlatSpec with Matchers {
 
   private val options                = CompletionOptions()
   private val messages: Seq[Message] = Seq(UserMessage("hi"))
-
-  "TextEmbeddingModelSettings" should "build through apply and set each field" in {
-    val settings = TextEmbeddingModelSettings("openai", "text-embedding-3-small", 1536)
-    settings.provider shouldBe "openai"
-    settings.modelName shouldBe "text-embedding-3-small"
-    settings.dimensions shouldBe 1536
-
-    settings.withProvider("voyage") shouldBe TextEmbeddingModelSettings("voyage", "text-embedding-3-small", 1536)
-    settings.withModelName("large") shouldBe TextEmbeddingModelSettings("openai", "large", 1536)
-    settings.withDimensions(3072) shouldBe TextEmbeddingModelSettings("openai", "text-embedding-3-small", 3072)
-
-    val TextEmbeddingModelSettings(p, m, d) = settings
-    (p, m, d) shouldBe (("openai", "text-embedding-3-small", 1536))
-  }
-
-  it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new TextEmbeddingModelSettings("openai", "m", 1)""")
-    assertDoesNotCompile("""TextEmbeddingModelSettings("openai", "m", 1).copy(dimensions = 2)""")
-  }
 
   "ProvidersConfig" should "build through apply and set each field" in {
     val cfg = ProvidersConfig(Some(main), Map(main -> section))

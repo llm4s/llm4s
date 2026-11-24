@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ NetworkError, RateLimitError, TimeoutError, UnknownError }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderTimeouts }
@@ -30,7 +31,7 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
     new AnthropicClient(
       AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = "claude-3-5-haiku-latest",
+        model = ModelName("claude-3-5-haiku-latest"),
         baseUrl = baseUrl,
         contextWindow = 200000,
         reserveCompletion = 4096

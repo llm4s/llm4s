@@ -3,9 +3,8 @@ package org.llm4s.config
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.ProviderConfigSpec
 import org.llm4s.security.KnownSecrets
-import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderName }
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
 import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
 import com.typesafe.config.ConfigObject
 import pureconfig.{ ConfigObjectCursor, ConfigReader => PureConfigReader, ConfigSource }
@@ -131,38 +130,65 @@ private[config] object RawProvidersConfigLoader:
       yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http, apiKeyFile = apiKeyFile)
     }
 
-  /** The block as read, each section's read failure kept to that section. */
+  /**
+   * The block as read, each section's read failure kept to that section.
+   *
+   * @param movedDefault the value of a string `llm4s.providers.provider`, where the default section's name lived
+   *                     before it moved to `llm4s.defaultProvider`: reported by the no-default error, never used
+   */
   final private case class RawSections(
-    defaultProvider: Option[ProviderName],
-    sections: Map[ProviderName, Either[ConfigReaderFailures, RawNamedProviderSection]]
+    sections: Map[ProviderName, Either[ConfigReaderFailures, RawNamedProviderSection]],
+    movedDefault: Option[String]
   )
 
   /**
    * Reads each named section on its own, so a section that cannot be read - a key of the wrong
    * type, a value that is not an object - fails only that section (#1132). Only the block's own
-   * shape (`llm4s.providers` not an object, `llm4s.providers.provider` not a string) fails the
-   * whole read.
+   * shape (`llm4s.providers` not an object) fails the whole read. Every key of the block is a section:
+   * the default section's name is `llm4s.defaultProvider`, outside the block (#2806).
    */
   private given rawSectionsReader: PureConfigReader[RawSections] =
     PureConfigReader.fromCursor { cursor =>
-      cursor.asObjectCursor.flatMap { objCursor =>
-        val selectedKey = objCursor.atKeyOrUndefined("provider")
-        val defaultProvider =
-          if selectedKey.isUndefined then Right(None)
-          else selectedKey.asString.map(value => Option(value.trim).filter(_.nonEmpty).map(ProviderName.apply))
-
+      cursor.asObjectCursor.map { objCursor =>
         val sections =
           objCursor.objValue
             .keySet()
             .asScala
             .toList
-            .filterNot(_ == "provider")
             .map(key => ProviderName(key) -> objCursor.atKey(key).flatMap(namedProviderSectionReader.from))
             .toMap
-
-        defaultProvider.map(RawSections(_, sections))
+        val moved = objCursor.atKeyOrUndefined(MovedDefaultKey)
+        RawSections(sections, if moved.isUndefined then None else moved.asString.toOption.map(_.trim))
       }
     }
+
+  /** Where the default section's name lived, inside the block of sections. */
+  private val MovedDefaultKey = "provider"
+
+  /** The path of the default section's name. */
+  val DefaultProviderPath = "llm4s.defaultProvider"
+
+  /**
+   * `llm4s.defaultProvider`: the default section's name, trimmed; absent, `null` or blank is none. Anything but
+   * a string is an error naming the path.
+   */
+  private def readDefaultProvider(source: ConfigSource): Result[Option[ProviderName]] =
+    source.at(DefaultProviderPath).value() match
+      case Left(_) => Right(None)
+      case Right(value) =>
+        value.unwrapped() match
+          case null         => Right(None)
+          case text: String => Right(Option(text.trim).filter(_.nonEmpty).map(ProviderName.apply))
+          case _ =>
+            Left(
+              ConfigurationError(
+                TroubleshootingLinks.configuration(
+                  s"$DefaultProviderPath must be a string naming a section of llm4s.providers, but is ${value.render()}",
+                  TroubleshootingLinks.Entry.ApplicationConf
+                ),
+                List(DefaultProviderPath)
+              )
+            )
 
   /**
    * Reads the `llm4s.providers` config block and returns an unvalidated `RawProvidersConfig`.
@@ -174,17 +200,19 @@ private[config] object RawProvidersConfigLoader:
    *  @return `Right(RawProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
   def load(source: ConfigSource): Result[RawProvidersConfig] =
-    read(source).flatMap { raw =>
-      raw.sections.values.collect { case Left(failures) => failures }.reduceOption(_ ++ _) match
+    for
+      raw            <- read(source)
+      defaultSection <- readDefaultProvider(source)
+      config <- raw.sections.values.collect { case Left(failures) => failures }.reduceOption(_ ++ _) match
         case Some(failures) => Left(loadError(failures))
         case None =>
           Right(
             RawProvidersConfig(
-              defaultProvider = raw.defaultProvider,
+              defaultProvider = defaultSection,
               namedProviders = raw.sections.collect { case (name, Right(section)) => name -> section }
             )
           )
-    }
+    yield config
 
   /**
    * Reads the `llm4s.providers` config block, keeping each section's read failure to that section,
@@ -194,23 +222,26 @@ private[config] object RawProvidersConfigLoader:
    *  @return `Right` with each section read or failed on its own, or `Left` when the block itself is unreadable
    */
   def loadSections(source: ConfigSource): Result[ProviderSections] =
-    read(source).flatMap(raw => HttpNetworkReader.globalBlock(source).map(raw -> _)).map { (raw, http) =>
-      ProviderSections(
-        defaultProvider = raw.defaultProvider,
-        sections = raw.sections.map { case (name, section) =>
-          name -> section.left.map { failures =>
-            ConfigurationError(
-              TroubleshootingLinks.configuration(
-                s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}",
-                TroubleshootingLinks.Entry.ApplicationConf
-              )
+    for
+      raw            <- read(source)
+      defaultSection <- readDefaultProvider(source)
+      http           <- HttpNetworkReader.globalBlock(source)
+    yield ProviderSections(
+      defaultProvider = defaultSection,
+      sections = raw.sections.map { case (name, section) =>
+        name -> section.left.map { failures =>
+          ConfigurationError(
+            TroubleshootingLinks.configuration(
+              s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}",
+              TroubleshootingLinks.Entry.ApplicationConf
             )
-          }
-        },
-        credentials = SharedCredentials.read(source),
-        http = http
-      )
-    }
+          )
+        }
+      },
+      credentials = SharedCredentials.read(source),
+      http = http,
+      movedDefault = raw.movedDefault
+    )
 
   private def read(source: ConfigSource): Result[RawSections] =
     source.at("llm4s.providers").load[RawSections].left.map(loadError)

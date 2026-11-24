@@ -60,8 +60,8 @@ Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your o
 ### How It Works
 
 Each provider you use is a **named section** under `llm4s.providers` in your own
-`application.conf`. `llm4s.providers.provider` names the default section, which
-`Llm4sConfig.defaultProvider()` loads; `Llm4sConfig.provider("<name>")` loads any section by name.
+`application.conf`. `llm4s.defaultProvider` names the default section, which
+`Llm4sConfig.defaultProvider()` loads; `Llm4sConfig.provider(ProviderName("<name>"))` loads any section by name.
 A section's API key comes from its own `apiKey` when it sets one, and otherwise from its
 vendor's shared key, `llm4s.credentials.<provider>.apiKey`, which each provider module binds to
 the vendor's conventional variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). So with the
@@ -72,9 +72,8 @@ second account.
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {                     # key from OPENAI_API_KEY
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -90,9 +89,10 @@ llm4s {
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val default = Llm4sConfig.defaultProvider()   // openai-main
-val claude  = Llm4sConfig.provider("claude")  // any section, by name
+val claude  = Llm4sConfig.provider(ProviderName("claude"))  // any section, by name
 ```
 
 Only the section being loaded is validated, so a section with no key available - or whose
@@ -139,9 +139,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider     = "openai"
       model        = "gpt-4o"
@@ -242,9 +241,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "anthropic-main"
   providers {
-    provider = "anthropic-main"
-
     anthropic-main {
       provider = "anthropic"
       model    = "claude-opus-4-6"
@@ -320,9 +318,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "gemini-main"
   providers {
-    provider = "gemini-main"
-
     gemini-main {
       provider = "gemini"            # "google" is accepted as an alias
       model    = "gemini-3.8-flash"
@@ -398,9 +395,8 @@ above registers both.
 
 ```hocon
 llm4s {
+  defaultProvider = "vertex-main"
   providers {
-    provider = "vertex-main"
-
     vertex-main {
       provider = "vertexai"          # "vertex" is accepted as an alias
       model    = "gemini-3.8-flash"
@@ -687,9 +683,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "azure-main"
   providers {
-    provider = "azure-main"
-
     azure-main {
       provider   = "azure"
       model      = "gpt-4o"                  # your deployment name
@@ -771,9 +766,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "deepseek-main"
   providers {
-    provider = "deepseek-main"
-
     deepseek-main {
       provider = "deepseek"
       model = "deepseek-chat"
@@ -942,10 +936,10 @@ and you bind environment variables to it with HOCON substitutions, under names y
 
 ```hocon
 llm4s {
+  defaultProvider = "groq-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
   providers {
     # the default named provider; LLM4S_PROVIDER overrides it when set
-    provider = "groq-main"
-    provider = ${?LLM4S_PROVIDER}
 
     groq-main {
       provider = "openai-compatible"
@@ -967,8 +961,8 @@ For an endpoint chosen entirely from the environment, the conventional names are
 `OPENAI_COMPATIBLE_API_KEY` (optional), which `OpenAICompatibleConfigKeys` names:
 
 ```hocon
+llm4s.defaultProvider = "compatible-env"
 llm4s.providers {
-  provider = "compatible-env"
   compatible-env {
     provider = "openai-compatible"
     baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}
@@ -995,8 +989,9 @@ Then load it by name, or as the default:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
-val groq: Result[ProviderConfig]  = Llm4sConfig.provider("groq-main")
+val groq: Result[ProviderConfig]  = Llm4sConfig.provider(ProviderName("groq-main"))
 val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 ```
 
@@ -1267,7 +1262,7 @@ lmstudio {
 ```
 
 - Use the identifier LM Studio shows for the loaded model, or list them with
-  `Llm4sConfig.listModels("lmstudio")`.
+  `Llm4sConfig.listModels(ProviderName("lmstudio"))`.
 
 #### llama.cpp (`llama-server`)
 
@@ -1430,8 +1425,9 @@ the section's key and headers:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
-Llm4sConfig.listModels("groq-main")   // GET <baseUrl>/models
+Llm4sConfig.listModels(ProviderName("groq-main"))   // GET <baseUrl>/models
 ```
 
 **No API key for a local server.** Leave `apiKey` out - do not set a placeholder. OpenAI's SDKs
@@ -1520,9 +1516,8 @@ export MISTRAL_API_KEY=your-key
 
 ```hocon
 llm4s {
+  defaultProvider = "mistral-main"
   providers {
-    provider = "mistral-main"
-
     mistral-main {
       provider = "mistral"
       model = "mistral-large-latest"
@@ -1573,9 +1568,8 @@ export COHERE_API_KEY=your-key
 
 ```hocon
 llm4s {
+  defaultProvider = "cohere-main"
   providers {
-    provider = "cohere-main"
-
     cohere-main {
       provider = "cohere"
       model = "command-a-03-2025"
@@ -1629,9 +1623,8 @@ export XAI_API_KEY=xai-...
 
 ```hocon
 llm4s {
+  defaultProvider = "xai-main"
   providers {
-    provider = "xai-main"
-
     xai-main {
       provider = "xai"
       model = "grok-4.7"
@@ -1713,9 +1706,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
-
     ollama-local {
       provider = "ollama"
       model    = "mistral"
@@ -2029,8 +2021,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-azure-identity" % llm4sVersion
 and set `authentication = "entra-id"` in the section, with no `apiKey`:
 
 ```hocon
+llm4s.defaultProvider = "azure-prod"
 llm4s.providers {
-  provider = "azure-prod"
   azure-prod {
     provider       = "azure"
     endpoint       = "https://my-resource.openai.azure.com"
@@ -2064,10 +2056,11 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.auth.azure.AzureEntraId
 import org.llm4s.llmconnect.config.AzureConfig
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 def azureClient(using ModelRegistryService) =
   val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
-  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", "gpt-4o", tokens))
+  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", ModelName("gpt-4o"), tokens))
 ```
 
 Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the
@@ -2172,9 +2165,8 @@ override the URL:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o"
@@ -2235,13 +2227,14 @@ Configure one named section per provider, then load the default or any section b
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // conversation: the Conversation to send
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  primaryConfig  <- Llm4sConfig.defaultProvider()      // llm4s.providers.provider
-  fallbackConfig <- Llm4sConfig.provider("claude")     // llm4s.providers.claude
+  primaryConfig  <- Llm4sConfig.defaultProvider()      // llm4s.defaultProvider
+  fallbackConfig <- Llm4sConfig.provider(ProviderName("claude"))     // llm4s.providers.claude
   primary  <- LLMConnect.getClient(primaryConfig)
   fallback <- LLMConnect.getClient(fallbackConfig)
 } yield primary.complete(conversation).orElse(fallback.complete(conversation))

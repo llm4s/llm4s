@@ -108,14 +108,14 @@ sbt "samples/runMain org.llm4s.samples.cookbook.JudgeRecipe"          # scripted
 sbt "samples/runMain org.llm4s.samples.cookbook.JudgeRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 
 ## Use a real provider
 
 Run with `--live`, which uses one provider as both model and judge. In an evaluation, make the judge a separate,
-strong model, from a second named section (`Llm4sConfig.provider("judge")`), and run `evaluate` over a set of
+strong model, from a second named section (`Llm4sConfig.provider(ProviderName("judge"))`), and run `evaluate` over a set of
 questions with reference answers. For RAG pipelines, the RAGAS metrics in `llm4s-rag` (faithfulness, answer
 relevancy, context precision) are judges of this kind; see [RAG evaluation](../../guide/rag-evaluation).
 

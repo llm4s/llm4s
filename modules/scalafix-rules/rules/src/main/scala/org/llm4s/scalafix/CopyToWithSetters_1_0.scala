@@ -19,6 +19,7 @@ class CopyToWithSetters_1_0 extends CopyToSetters("CopyToWithSetters_1_0") {
   override protected def types: Set[String]                      = CopyToWithSetters_1_0.types.keySet
   override protected def release: String                         = "0.5.1"
   override protected def secrets: Map[(String, String), Boolean] = CopyToWithSetters_1_0.secrets
+  override protected def newtypes: Map[(String, String), String] = CopyToWithSetters_1_0.newtypes
   override protected def reportNew: Boolean                      = true
   override protected def privateCopyGuide(owner: String): String = CopyToWithSetters_1_0.types(owner)
   override protected def setter(owner: String, field: String): String =
@@ -157,6 +158,18 @@ object CopyToWithSetters_1_0 {
       )
     byNote.flatMap { case (anchor, names) => names.map(n => s"org/llm4s/$n" -> Migration.guide10(anchor)) }.toMap
   }
+
+  /**
+   * Fields that were a `String` in 0.5.1 and are a newtype of `org.llm4s.types.ProviderModelTypes` now: a provider
+   * config's `model`, and the model and base URL of an `EmbeddingProviderConfig` (#2805).
+   */
+  val newtypes: Map[(String, String), String] =
+    Seq("CohereConfig", "DeepSeekConfig", "MistralConfig", "ZaiConfig", "AzureConfig", "GeminiConfig", "VertexAIConfig")
+      .map(config => ("org/llm4s/llmconnect/config/" + config, "model") -> "ModelName")
+      .toMap ++ Map(
+      ("org/llm4s/llmconnect/config/EmbeddingProviderConfig", "model")   -> "ModelName",
+      ("org/llm4s/llmconnect/config/EmbeddingProviderConfig", "baseUrl") -> "BaseUrl"
+    )
 
   /** The `apiKey` fields that were a `String` (`true`: an `Option[String]`) in 0.5.1 and are a `Secret` now. */
   val secrets: Map[(String, String), Boolean] = Map(

@@ -50,7 +50,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     )
     result.isSuccess shouldBe true
     val config = result.get().asInstanceOf[OpenAIConfig]
-    config.model shouldBe "gpt-4o"
+    config.model.asString shouldBe "gpt-4o"
     config.apiKey.reveal shouldBe "sk-test"
     config.baseUrl shouldBe "https://api.openai.com/v1"
     config.organization shouldBe None
@@ -89,7 +89,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     )
     result.isSuccess shouldBe true
     val config = result.get().asInstanceOf[AnthropicConfig]
-    config.model shouldBe "claude-sonnet-4-5-latest"
+    config.model.asString shouldBe "claude-sonnet-4-5-latest"
     config.apiKey.reveal shouldBe "sk-ant-test"
     config.baseUrl shouldBe "https://api.anthropic.com"
   }
@@ -112,7 +112,7 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     )
     result.isSuccess shouldBe true
     val config = result.get().asInstanceOf[OllamaConfig]
-    config.model shouldBe "llama3"
+    config.model.asString shouldBe "llama3"
     config.baseUrl shouldBe "http://localhost:11434"
   }
 

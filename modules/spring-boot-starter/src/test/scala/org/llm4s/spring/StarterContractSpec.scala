@@ -229,7 +229,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
     // Read from the Spring Environment by SpringProviderSource rather than bound to Llm4sProperties (#1467).
     val environmentRead = Set(
       SpringProviderSource.ProvidersPrefix,
-      s"${SpringProviderSource.ProvidersPrefix}.provider",
+      SpringProviderSource.DefaultProviderKey,
       SpringProviderSource.CredentialsPrefix,
       // the embedding client's and the tracer's, read the same way (#2279)
       SpringProviderSource.EmbeddingsPrefix,

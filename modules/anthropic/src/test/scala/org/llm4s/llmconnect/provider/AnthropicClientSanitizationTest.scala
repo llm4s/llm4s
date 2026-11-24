@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -32,7 +33,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
   private val client = new AnthropicClient(
     AnthropicConfig(
       apiKey = Secret("test-api-key"),
-      model = "claude-3-haiku-20240307",
+      model = ModelName("claude-3-haiku-20240307"),
       baseUrl = "https://api.anthropic.com",
       contextWindow = 32768,
       reserveCompletion = 8192

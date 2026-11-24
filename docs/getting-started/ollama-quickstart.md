@@ -163,9 +163,8 @@ Create `src/main/resources/application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"          # the default: the name of a section below
   providers {
-    provider = "ollama-local"          # the default: the name of a section below
-
     ollama-local {
       provider = "ollama"
       model    = "mistral"
@@ -700,7 +699,7 @@ docker-compose exec ollama ollama pull llama3.1
 > 💡 Pro Tip
 >
 > Use Ollama for development and testing, then switch to a cloud provider for production by
-> pointing `llm4s.providers.provider` at another section - add the provider's module
+> pointing `llm4s.defaultProvider` at another section - add the provider's module
 > (e.g. `llm4s-openai`) and a section such as:
 >
 > ```hocon
@@ -710,7 +709,7 @@ docker-compose exec ollama ollama pull llama3.1
 > }
 > ```
 >
-> then set `provider = "openai-main"` (or `-Dllm4s.providers.provider=openai-main`). Only the
+> then set `provider = "openai-main"` (or `-Dllm4s.defaultProvider=openai-main`). Only the
 > selected section is validated, so `OPENAI_API_KEY` is needed only where `openai-main` is used.
 > See [Switching providers](configuration#switching-providers).
 >

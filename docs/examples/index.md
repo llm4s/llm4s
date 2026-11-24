@@ -1429,7 +1429,7 @@ llm4s.providers {
 ```
 
 and select it with `LLM4S_PROVIDER`, which the samples' `application.conf` binds to
-`llm4s.providers.provider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
+`llm4s.defaultProvider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
 to OpenAI's shared key.
 
 ```bash

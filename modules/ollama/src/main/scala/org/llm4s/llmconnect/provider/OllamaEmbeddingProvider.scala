@@ -123,7 +123,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
         val respEither: Result[org.llm4s.http.HttpResponse] =
           cfg.currentApiKey().flatMap { key =>
             httpClient
-              .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+              .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
               .left
               .map {
                 // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

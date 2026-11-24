@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.model.ModelRegistryTestSupport
@@ -46,6 +47,9 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
 
   test("withModel replaces only the model") {
     val config = build().getOrElse(fail("expected a config"))
-    config.withModel("meta-llama/llama-3-8b-instruct").model shouldBe "meta-llama/llama-3-8b-instruct"
-    config.withModel("x").projectId shouldBe config.projectId
+    config
+      .withModel(ModelName("meta-llama/llama-3-8b-instruct"))
+      .model
+      .asString shouldBe "meta-llama/llama-3-8b-instruct"
+    config.withModel(ModelName("x")).projectId shouldBe config.projectId
   }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
@@ -47,7 +48,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   private def config(baseUrl: String): MistralConfig =
     MistralConfig(
       apiKey = Secret("test-key"),
-      model = "mistral-small-latest",
+      model = ModelName("mistral-small-latest"),
       baseUrl = baseUrl,
       contextWindow = 128000,
       reserveCompletion = 4096
@@ -553,7 +554,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   "MistralClient" should "return correct context window from config" in {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
-      model = "mistral-small-latest",
+      model = ModelName("mistral-small-latest"),
       baseUrl = "https://example.invalid",
       contextWindow = 128000,
       reserveCompletion = 4096
@@ -565,7 +566,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   it should "return correct reserve completion from config" in {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
-      model = "mistral-small-latest",
+      model = ModelName("mistral-small-latest"),
       baseUrl = "https://example.invalid",
       contextWindow = 128000,
       reserveCompletion = 4096

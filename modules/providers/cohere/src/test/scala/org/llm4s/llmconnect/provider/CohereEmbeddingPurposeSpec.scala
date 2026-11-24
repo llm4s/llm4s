@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -16,7 +17,12 @@ import ujson.read
 class CohereEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
   private val cfg =
-    EmbeddingProviderConfig(baseUrl = "http://cohere-test", model = "embed-english-v3.0", apiKey = Secret("k"))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("cohere"),
+      baseUrl = BaseUrl("http://cohere-test"),
+      model = ModelName("embed-english-v3.0"),
+      apiKey = Some(Secret("k"))
+    )
   private val ok = HttpResponse(200, """{"embeddings":{"float":[[0.1,0.2]]}}""", Map.empty)
 
   private def request(purpose: InputPurpose) =

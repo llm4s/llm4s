@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -31,7 +31,7 @@ import org.llm4s.types.Result
 @Stable
 final case class ZaiConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -39,13 +39,15 @@ final case class ZaiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("zai")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): ZaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): ZaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): ZaiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("zai")
+  override def endpointUrl: Option[BaseUrl]                         = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): ZaiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): ZaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[ZaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): ZaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): ZaiConfig                  = copy(baseUrl = baseUrl)
@@ -72,7 +74,7 @@ object ZaiConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
@@ -93,14 +95,14 @@ object ZaiConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): ZaiConfig =
+  def apply(apiKey: Secret, model: ModelName): ZaiConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private def zaiFallback(modelName: String): (Int, Int) =
+  private def zaiFallback(modelName: String): ContextLimits =
     modelName match {
-      case name if name.contains("GLM-4.7") => (200000, standardReserve)
-      case name if name.contains("GLM-4.5") => (128000, standardReserve)
-      case _                                => (128000, standardReserve)
+      case name if name.contains("GLM-4.7") => ContextLimits(200000, standardReserve)
+      case name if name.contains("GLM-4.5") => ContextLimits(128000, standardReserve)
+      case _                                => ContextLimits(128000, standardReserve)
     }
 
   /**
@@ -122,7 +124,7 @@ object ZaiConfig {
       _ <- ProviderConfig.nonEmpty("Zai", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("zai"),
         modelName = modelName,
         defaultContextWindow = 128000,
@@ -131,7 +133,7 @@ object ZaiConfig {
       )
       ZaiConfig(
         apiKey = apiKey,
-        model = modelName,
+        model = ModelName(modelName),
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc

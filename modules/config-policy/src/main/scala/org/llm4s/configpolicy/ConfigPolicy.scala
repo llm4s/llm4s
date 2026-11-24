@@ -1,10 +1,9 @@
 package org.llm4s.configpolicy
 
 import org.llm4s.config.ApiKeySource
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import scala.util.{ Failure, Success, Try }
 import scala.util.matching.Regex
@@ -156,7 +155,7 @@ object ConfigPolicyEngine {
   def providerModel(config: ProviderConfig): String =
     s"${providerName(config)}/${config.model}"
 
-  def baseUrlOrEndpoint(config: ProviderConfig): Option[String] = config.endpointUrl
+  def baseUrlOrEndpoint(config: ProviderConfig): Option[String] = config.endpointUrl.map(_.asUrl)
 
   /**
    * @param registry resolves provider aliases and says which providers exist; the classpath's by default

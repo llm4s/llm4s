@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
@@ -27,11 +27,13 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "fixturechat-main").fold(err => fail(err.toString), identity)
+        Llm4sConfig
+          .provider(ConfigSource.string(hocon), ProviderName("fixturechat-main"))
+          .fold(err => fail(err.toString), identity)
 
       cfg match
         case fixture: FixtureChatConfig =>
-          fixture.model shouldBe "fixture-model"
+          fixture.model.asString shouldBe "fixture-model"
           fixture.apiKey shouldBe "fixture-key"
           fixture.baseUrl shouldBe FixtureChatProvider.DefaultBaseUrl
         case other =>
@@ -54,7 +56,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         |""".stripMargin
 
     "refuse a provider no registry on this classpath supplies" in {
-      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), "fixture-main") match
+      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), ProviderName("fixture-main")) match
         case Left(error) =>
           error.message should include("Provider 'fixturecloud'")
           error.message should include("Registered providers:")
@@ -65,7 +67,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       given ProviderRegistry = ProviderRegistry.default.withProvider(FixtureProvider)
 
       // Reaching the fixture's own error means validation and loading both routed through it.
-      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), "fixture-main") match
+      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), ProviderName("fixture-main")) match
         case Left(error) => error.message shouldBe "fixture provider builds no config"
         case Right(cfg)  => fail(s"Expected the fixture provider's own error, got $cfg")
     }
@@ -89,13 +91,13 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      val result = Llm4sConfig.provider(ConfigSource.string(hocon), "fixturechat-primary")
+      val result = Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("fixturechat-primary"))
 
       result match
         case Right(fixture: FixtureChatConfig) => fixture.apiKey shouldBe "named-fixture-key"
         case other => fail(s"Expected the valid provider despite its invalid sibling, got $other")
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "broken-fixturechat") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("broken-fixturechat")) match
         case Left(err) =>
           err.message should include(
             "Provider 'broken-fixturechat' (provider = fixturechat) is missing required fields"
@@ -111,8 +113,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -137,8 +139,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -157,8 +159,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -172,7 +174,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       cfg match
         case fixture: FixtureChatConfig =>
-          fixture.model shouldBe "fixture-model"
+          fixture.model.asString shouldBe "fixture-model"
           fixture.apiKey shouldBe "named-fixture-key"
           fixture.baseUrl shouldBe FixtureChatProvider.DefaultBaseUrl
         case other =>
@@ -183,8 +185,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -203,7 +205,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      val result = Llm4sConfig.listModels("fixturechat-primary", ConfigSource.string(hocon), httpClient)
+      val result = Llm4sConfig.listModels(ProviderName("fixturechat-primary"), ConfigSource.string(hocon), httpClient)
 
       result match
         case Right(models) =>
@@ -218,8 +220,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -231,7 +233,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val result =
         Llm4sConfig.listModels(
-          "opneai-main",
+          ProviderName("opneai-main"),
           ConfigSource.string(hocon),
           new MockHttpClient(HttpResponse(200, "{}", Map.empty))
         )
@@ -260,7 +262,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val result = Llm4sConfig.defaultProviderName(ConfigSource.string(hocon))
       result.isLeft shouldBe true
       result.left.getOrElse(fail("expected Left")).message should include(
-        "No default provider configured under llm4s.providers.provider"
+        "No default provider configured under llm4s.defaultProvider"
       )
     }
 
@@ -281,7 +283,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val result = Llm4sConfig.defaultProvider(ConfigSource.string(hocon))
       result.isLeft shouldBe true
       result.left.getOrElse(fail("expected Left")).message should include(
-        "No default provider configured under llm4s.providers.provider"
+        "No default provider configured under llm4s.defaultProvider"
       )
     }
   }

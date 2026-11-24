@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
@@ -33,7 +34,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   private val baseUrl   = "http://localhost:11434"
 
   private val config = OllamaConfig(
-    model = testModel,
+    model = ModelName(testModel),
     baseUrl = baseUrl,
     contextWindow = 8192,
     reserveCompletion = 4096
@@ -87,7 +88,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "report a model the server does not have as the 404 a completion gets, with the pull hint" in {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config.withModel("llm4s-no-such-model:latest"))
+    val client = new OllamaClient(config.withModel(ModelName("llm4s-no-such-model:latest")))
     val result = client.validate()
     client.close()
     result match {

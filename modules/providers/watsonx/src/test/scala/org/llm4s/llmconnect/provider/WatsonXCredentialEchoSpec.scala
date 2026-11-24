@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
@@ -22,7 +23,7 @@ final class WatsonXCredentialEchoSpec extends AnyFunSuite with Matchers:
           apiKey = Secret(echoKey),
           projectId = "project-1",
           spaceId = None,
-          model = "ibm/granite-13b-instruct-v2",
+          model = ModelName("ibm/granite-13b-instruct-v2"),
           baseUrl = baseUrl,
           apiVersion = "2026-09-25",
           iamUrl = s"$baseUrl/identity/token",

@@ -52,13 +52,17 @@ private[llm4s] object FacadeInternals {
    * none. Its dimensions are the ones the provider module declares for the model, and empty for a model it does not
    * list: the embed call itself needs none, and a reply's vectors say how long they are (#1781).
    */
-  def embeddingClient(loaded: Result[(String, EmbeddingProviderConfig)]): Result[JEmbeddingClient] =
+  def embeddingClient(loaded: Result[EmbeddingProviderConfig]): Result[JEmbeddingClient] =
     for {
-      selected <- loaded
-      (provider, config) = selected
+      config   <- loaded
       registry <- Llm4sConfig.modelRegistryService()
-      client   <- EmbeddingClient.from(provider, config)(using registry)
-    } yield new JEmbeddingClient(FacadeToken.INSTANCE, client, config.model, declaredDimensions(provider, config.model))
+      client   <- EmbeddingClient.from(config)(using registry)
+    } yield new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      client,
+      config.model.asString,
+      declaredDimensions(config.providerId.asString, config.model.asString)
+    )
 
   /**
    * The dimensions `provider`'s module declares for `model`. The provider is the one the config loaded, so the only

@@ -211,10 +211,10 @@ class AnthropicClient(
 
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -227,7 +227,7 @@ class AnthropicClient(
     // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
-        config.model,
+        config.model.asString,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
@@ -241,7 +241,7 @@ class AnthropicClient(
         // Create message parameters builder
         val paramsBuilder = MessageCreateParams
           .builder()
-          .model(config.model)
+          .model(config.model.asString)
 
         // Add max tokens if specified
         // max tokens is required by the api
@@ -249,7 +249,7 @@ class AnthropicClient(
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -257,7 +257,7 @@ class AnthropicClient(
         val adjustments =
           transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
             tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
           .control(transformed.options, PromptCache.Scope.Conversation)
@@ -325,7 +325,7 @@ curl https://api.anthropic.com/v1/messages \
     // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
-        config.model,
+        config.model.asString,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
@@ -339,14 +339,14 @@ curl https://api.anthropic.com/v1/messages \
         // Build parameters
         val paramsBuilder = MessageCreateParams
           .builder()
-          .model(config.model)
+          .model(config.model.asString)
 
         // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -354,7 +354,7 @@ curl https://api.anthropic.com/v1/messages \
         val adjustments =
           transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
             tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
           .control(transformed.options, PromptCache.Scope.Conversation)
@@ -370,7 +370,7 @@ curl https://api.anthropic.com/v1/messages \
         val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
-        val accumulator = StreamingAccumulator(config.model)
+        val accumulator = StreamingAccumulator(config.model.asString)
         // the sources the streamed text blocks cite, each once, in order
         val citations                        = mutable.LinkedHashSet.empty[Citation]
         var currentMessageId: Option[String] = None
@@ -567,7 +567,7 @@ curl https://api.anthropic.com/v1/messages \
                 .toLeft(c)
             )
             .map { c =>
-              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
               // the accumulator knows only the thinking text; the blocks carry their signatures
               val message =
                 if (thinkingBlocks.isEmpty) c.message
@@ -599,14 +599,14 @@ curl https://api.anthropic.com/v1/messages \
    * gets.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    Try(client.models().retrieve(config.model, AnthropicClient.ValidationOptions)).toEither.left
+    Try(client.models().retrieve(config.model.asString, AnthropicClient.ValidationOptions)).toEither.left
       .map(AnthropicClient.mapError(_))
       .map(_ => ())
   }
 
   /** This client's model's registry capabilities, looked up once: the registry is a static snapshot. */
   private lazy val capabilities: Option[ModelCapabilities] =
-    registryService.lookup(config.model).toOption.map(_.capabilities)
+    registryService.lookup(config.model.asString).toOption.map(_.capabilities)
 
   /** Puts `plan`'s `thinking` and `output_config.effort` on the request. */
   private def applyThinking(builder: MessageCreateParams.Builder, plan: AnthropicThinking.Plan): Unit = {
@@ -750,7 +750,7 @@ curl https://api.anthropic.com/v1/messages \
   /** The after-the-call report of a prompt cache that cached nothing, logged once like the rest. */
   private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] = {
     val report = AnthropicPromptCache.answered(options, usage)
-    adjustmentLog.record(config.model, report)
+    adjustmentLog.record(config.model.asString, report)
     report
   }
 
@@ -866,7 +866,7 @@ curl https://api.anthropic.com/v1/messages \
       )
 
       // Estimate cost using CostEstimator
-      val cost = CostEstimator.estimate(config.model, tokenUsage)
+      val cost = CostEstimator.estimate(config.model.asString, tokenUsage)
 
       // Create completion
       Completion(
@@ -953,11 +953,11 @@ curl https://api.anthropic.com/v1/messages \
   private def modelSupportsTemperature: Boolean = {
     val disallowedByRegistry =
       registryService
-        .lookup(config.model)
+        .lookup(config.model.asString)
         .toOption
         .flatMap(_.capabilities.disallowedParams)
         .exists(_.contains("temperature"))
-    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model)
+    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model.asString)
   }
 
   override protected def releaseResources(): Unit =
@@ -981,7 +981,7 @@ curl https://api.anthropic.com/v1/messages \
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model),
+        model = Some(config.model.asString),
         responseBody = responseBody
       ),
       result

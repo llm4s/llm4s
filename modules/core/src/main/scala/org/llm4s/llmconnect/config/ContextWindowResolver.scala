@@ -4,9 +4,33 @@ import org.llm4s.annotation.Stable
 import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
 
+/**
+ * A model's token limits, as a provider config carries them.
+ *
+ * @param contextWindow     the tokens a prompt and its completion may take together
+ * @param reserveCompletion the tokens held back from the prompt for the completion
+ *
+ * Build one with [[ContextLimits.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a further limit never breaks callers.
+ */
+@Stable
+final case class ContextLimits private (contextWindow: Int, reserveCompletion: Int):
+
+  /** Sets the tokens a prompt and its completion may take together. */
+  def withContextWindow(contextWindow: Int): ContextLimits = copy(contextWindow = contextWindow)
+
+  /** Sets the tokens held back from the prompt for the completion. */
+  def withReserveCompletion(reserveCompletion: Int): ContextLimits = copy(reserveCompletion = reserveCompletion)
+
+object ContextLimits:
+
+  /** Creates the limits from the context window and the completion reserve. */
+  def apply(contextWindow: Int, reserveCompletion: Int): ContextLimits =
+    new ContextLimits(contextWindow, reserveCompletion)
+
 /** Resolves context window and output-reserve token counts for a given model using the model registry. */
 @Stable
-class ContextWindowResolver(service: ModelRegistryService):
+final class ContextWindowResolver(service: ModelRegistryService):
   import ContextWindowResolver.logger
 
   /**
@@ -14,20 +38,18 @@ class ContextWindowResolver(service: ModelRegistryService):
    *
    * @param lookupProviders     ordered list of provider names to try when querying the registry
    * @param modelName           name of the model whose limits should be resolved
-   * @param defaultContextWindow fallback maximum context-window size in tokens
-   * @param defaultReserve      fallback maximum output-token reserve
-   * @param fallbackResolver    function returning (contextWindow, reserve) when the registry has no entry
-   * @param logPrefix           optional string prepended to log messages for disambiguation
-   * @return pair of (contextWindow, reserveTokens) for the resolved model
+   * @param defaultContextWindow the context window used when the registry knows the model but not its input limit
+   * @param defaultReserve      the reserve used when the registry knows the model but not its output limit
+   * @param fallbackResolver    the limits of a model the registry has no entry for, by model name
+   * @return the limits of the resolved model
    */
   def resolve(
     lookupProviders: Seq[String],
     modelName: String,
     defaultContextWindow: Int,
     defaultReserve: Int,
-    fallbackResolver: String => (Int, Int),
-    logPrefix: String = ""
-  ): (Int, Int) =
+    fallbackResolver: String => ContextLimits
+  ): ContextLimits =
     val registryResult =
       lookupProviders.view
         .flatMap(p => service.lookup(p, modelName).toOption)
@@ -36,12 +58,15 @@ class ContextWindowResolver(service: ModelRegistryService):
 
     registryResult match
       case Some(metadata) =>
-        val contextWindow = metadata.maxInputTokens.getOrElse(defaultContextWindow)
-        val reserve       = metadata.maxOutputTokens.getOrElse(defaultReserve)
-        logger.debug(
-          s"Using model registry metadata for ${logPrefix}$modelName: context=$contextWindow, reserve=$reserve"
+        val limits = ContextLimits(
+          metadata.maxInputTokens.getOrElse(defaultContextWindow),
+          metadata.maxOutputTokens.getOrElse(defaultReserve)
         )
-        (contextWindow, reserve)
+        logger.debug(
+          s"Using model registry metadata for ${lookupProviders.headOption.fold("")(_ + "/")}$modelName: " +
+            s"context=${limits.contextWindow}, reserve=${limits.reserveCompletion}"
+        )
+        limits
       case None =>
         logger.debug(s"Model $modelName not found in registry, using fallback values")
         fallbackResolver(modelName)

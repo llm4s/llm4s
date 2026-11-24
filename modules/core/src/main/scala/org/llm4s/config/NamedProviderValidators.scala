@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, AuthConfig }
 import org.llm4s.security.Secret
@@ -295,7 +295,12 @@ private[llm4s] object NamedProviderConfigValidator:
             // Read once now, so a missing or empty file fails the load; the client reads it again when it changes.
             case Some(file) => keyFromFile(sectionPath, file).map(Some(_))
             case None =>
-              credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+              credentials.resolve(
+                normalized.apiKey.map(_.asKey),
+                s"$sectionPath.apiKey",
+                normalized.provider,
+                apiKeyEnv = descriptor.configSpec.apiKeyEnv
+              )
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,

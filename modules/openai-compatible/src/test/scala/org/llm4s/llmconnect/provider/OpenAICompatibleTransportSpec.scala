@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.model.ModelRegistryService
@@ -13,7 +14,8 @@ class OpenAICompatibleTransportSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private val settings = OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None))
+  private val settings =
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1/v1", None))
 
   "OpenAICompatibleClient" should "close its HTTP client when it is closed" in {
     val closed = new AtomicBoolean(false)

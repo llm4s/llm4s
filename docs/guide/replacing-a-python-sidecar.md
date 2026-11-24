@@ -68,9 +68,8 @@ default is the one `provider` names:
 
 ```hocon
 llm4s {
+  defaultProvider = "python-vllm"
   providers {
-    provider = "python-vllm"
-
     # vllm serve Qwen/Qwen2.5-7B-Instruct --max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes
     python-vllm {
       provider      = "openai-compatible"
@@ -107,10 +106,11 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val pythonModel: Result[LLMClient] =
   for {
-    config   <- Llm4sConfig.provider("python-vllm")
+    config   <- Llm4sConfig.provider(ProviderName("python-vllm"))
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(config)

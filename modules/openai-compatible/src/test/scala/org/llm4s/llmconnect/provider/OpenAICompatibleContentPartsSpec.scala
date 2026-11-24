@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -31,7 +32,7 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
   }
 
   private val client =
-    OpenAICompatibleClient(OpenAICompatibleConfig(model = "m", baseUrl = deadBaseUrl, apiKey = None)).value
+    OpenAICompatibleClient(OpenAICompatibleConfig(model = ModelName("m"), baseUrl = deadBaseUrl, apiKey = None)).value
 
   private def messagesOf(conversation: Conversation): ujson.Value =
     client.createRequestBody(conversation, CompletionOptions())("messages")

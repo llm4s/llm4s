@@ -120,10 +120,10 @@ object EmbeddingClient {
     new EmbeddingClient(provider, tracer = None, operation = "embedding", providerId = None)
 
   /**
-   * Typed factory: build client from resolved provider name and typed provider config.
+   * Typed factory: builds the client of the provider `cfg.providerId` names from its typed config.
    * Avoids reading any additional configuration at runtime.
    *
-   * `provider` is resolved through the [[org.llm4s.llmconnect.spi.ProviderRegistry]],
+   * The provider is resolved through the [[org.llm4s.llmconnect.spi.ProviderRegistry]],
    * so an embedding provider that ships in its own module is reachable here
    * with nothing in `llm4s-core` edited — see
    * [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor]]. Applications that
@@ -131,19 +131,18 @@ object EmbeddingClient {
    *
    * {{{
    * given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(JinaEmbeddings)
-   * EmbeddingClient.from("jina", cfg)
+   * EmbeddingClient.from(cfg)   // cfg.providerId is ProviderId("jina")
    * }}}
    *
-   * @param provider the provider name as configured, e.g. the `openai` in
-   *                 `EMBEDDING_MODEL=openai/text-embedding-3-small`. Aliases are folded
-   *                 onto the canonical id.
+   * @param cfg     the provider's config; its `providerId` names the provider, e.g. the `openai` in
+   *                 `EMBEDDING_MODEL=openai/text-embedding-3-small`. An alias is folded onto the
+   *                 canonical id.
    * @param options  construction options: `EmbeddingClientOptions().withHttpClient(client)` sends the
    *                 provider's requests through the caller's own HTTP client, which the caller closes.
    * @return the client; a `ConfigurationError` from the registry when no embedding provider has that name
    *         (it lists the registered ones), or the provider's own error when it cannot be built from `cfg`
    */
   def from(
-    provider: String,
     cfg: EmbeddingProviderConfig,
     options: EmbeddingClientOptions = EmbeddingClientOptions.default
   )(using
@@ -151,7 +150,7 @@ object EmbeddingClient {
     ProviderRegistry
   ): Result[EmbeddingClient] = {
     val registry = summon[ProviderRegistry]
-    val id       = registry.canonicalEmbeddingId(provider)
+    val id       = registry.canonicalEmbeddingId(cfg.providerId.asString)
     registry
       .resolveEmbedding(id, Some("llm4s.embeddings.model"))
       .flatMap(_.build(cfg, EmbeddingBuildContext(options)))

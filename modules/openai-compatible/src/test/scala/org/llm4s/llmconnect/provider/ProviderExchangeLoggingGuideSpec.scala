@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.testutil.GuideMirror
-
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{
@@ -48,7 +48,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   private def config(baseUrl: String): DeepSeekConfig =
     DeepSeekConfig(
       apiKey = Secret(apiKey),
-      model = "deepseek-chat",
+      model = ModelName("deepseek-chat"),
       baseUrl = baseUrl,
       contextWindow = 128000,
       reserveCompletion = 8192

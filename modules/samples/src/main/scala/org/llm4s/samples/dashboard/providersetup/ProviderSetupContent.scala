@@ -18,10 +18,10 @@ private[providersetup] object ProviderSetupContent:
         "A named section under llm4s.providers.<name>; the samples ship one, ollama-local, as the default"
       ),
       optionalVars = List(
-        "LLM4S_PROVIDER=<name> - which section is the default (bound to llm4s.providers.provider in the samples' application.conf)",
+        "LLM4S_PROVIDER=<name> - which section is the default (bound to llm4s.defaultProvider in the samples' application.conf)",
         "OLLAMA_MODEL, OLLAMA_BASE_URL - the ollama-local section's model and baseUrl (bound in the samples' application.conf)",
         "A vendor key variable such as OPENAI_API_KEY - used by any section of that provider that sets no apiKey of its own",
-        "-Dllm4s.providers.provider=<name> - choose the default for one run"
+        "-Dllm4s.defaultProvider=<name> - choose the default for one run"
       ),
       recommendedModels = List("ollama/llama3:latest", "openai/gpt-4o-mini"),
       setupSteps = List(
@@ -39,9 +39,9 @@ private[providersetup] object ProviderSetupContent:
         "Use it to inspect the active default provider without browsing the full provider list.",
         "The exact required settings depend on that configured provider kind."
       ),
-      requiredVars = List("llm4s.providers.provider naming a section that loads"),
+      requiredVars = List("llm4s.defaultProvider naming a section that loads"),
       optionalVars = List(
-        "LLM4S_PROVIDER=<name> or -Dllm4s.providers.provider=<name> to change the default",
+        "LLM4S_PROVIDER=<name> or -Dllm4s.defaultProvider=<name> to change the default",
         "Any session-only overrides you want for this app run"
       ),
       recommendedModels = List("Uses the models discovered from the configured default provider"),
@@ -97,7 +97,7 @@ private[providersetup] object ProviderSetupContent:
       highlights = List(
         "Provider sections live in application.conf; this sample includes a git-ignored application.local.conf.",
         "Keep secrets in env vars and bind them in the section with ${?VAR}.",
-        "Java properties (-Dllm4s.providers.provider=...) are handy for scripted or IDE-driven launches."
+        "Java properties (-Dllm4s.defaultProvider=...) are handy for scripted or IDE-driven launches."
       ),
       requiredVars = List("Same logical keys regardless of config source"),
       optionalVars = List("Use local private files only if you intentionally want persistence"),

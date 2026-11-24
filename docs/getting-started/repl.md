@@ -58,7 +58,7 @@ Every helper takes a `Session` from a context parameter, so you set it once:
 import org.llm4s.repl.*
 import org.llm4s.testkit.Reply
 
-// The section `llm4s.providers.provider` names in application.conf
+// The section `llm4s.defaultProvider` names in application.conf
 val fromConfig = Session.fromConfig()
 // A named section, llm4s.providers.openai-main
 val named = Session.named("openai-main")

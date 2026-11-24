@@ -270,7 +270,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "lose the error with getOrElse, which is why the guide recommends fold" in {
-      val failed: Result[Int] = Left(ConfigurationError("no provider", List("llm4s.providers.provider")))
+      val failed: Result[Int] = Left(ConfigurationError("no provider", List("llm4s.defaultProvider")))
       failed.getOrElse(0) shouldBe 0
       intercept[RuntimeException](failed.getOrElse(throw new RuntimeException("LLM call failed"))).getMessage shouldBe
         "LLM call failed"

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -27,7 +28,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
   private def localConfig(baseUrl: String): DeepSeekConfig =
     DeepSeekConfig(
       apiKey = Secret("test-key"),
-      model = "deepseek-chat",
+      model = ModelName("deepseek-chat"),
       baseUrl = baseUrl,
       contextWindow = 128000,
       reserveCompletion = 8192

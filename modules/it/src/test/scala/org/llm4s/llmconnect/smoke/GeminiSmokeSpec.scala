@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -94,7 +95,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def invalidKeyClient: Option[Result[LLMClient]] =
     Some(GeminiClient(config("invalid-key-for-testing")))
   override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
-    Some(GeminiClient(config(key).withModel("llm4s-no-such-model")))
+    Some(GeminiClient(config(key).withModel(ModelName("llm4s-no-such-model"))))
 
   registerValidationContract()
 }

@@ -102,14 +102,13 @@ def startup(): Result[LLMClient] = for {
 
 ### 3. Name the provider in `application.conf`, not in code
 
-A chat provider is a named section under `llm4s.providers`, and `llm4s.providers.provider` names the default. Load the
+A chat provider is a named section under `llm4s.providers`, and `llm4s.defaultProvider` names the default. Load the
 default with `Llm4sConfig.defaultProvider()`.
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"

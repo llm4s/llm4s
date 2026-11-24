@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,7 +22,7 @@ class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: DeepSeekConfig = DeepSeekConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
-    model = "deepseek-chat",
+    model = ModelName("deepseek-chat"),
     baseUrl = "https://example.invalid/v1",
     contextWindow = 65536,
     reserveCompletion = 4096
@@ -75,7 +76,7 @@ class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("deepseek-reasoner")
+    val config = createTestConfig.withModel(ModelName("deepseek-reasoner"))
     val client = new DeepSeekClient(config)
 
     client.close()

@@ -28,7 +28,7 @@ class ChatTuiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     cfg shouldBe an[OpenAICompatibleConfig]
     cfg.providerId shouldBe ProviderId("openai-compatible")
-    cfg.model shouldBe "llama3.2"
+    cfg.model.asString shouldBe "llama3.2"
     val generic = cfg.asInstanceOf[OpenAICompatibleConfig]
     generic.baseUrl shouldBe "http://localhost:8000/v1"
     generic.apiKey shouldBe Some(Secret("sk-local"))
@@ -39,7 +39,7 @@ class ChatTuiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
       "openai-compatible/openai/gpt-oss-120b",
       "OPENAI_COMPATIBLE_BASE_URL" -> "https://api.groq.com/openai/v1"
     ).value
-    cfg.model shouldBe "openai/gpt-oss-120b"
+    cfg.model.asString shouldBe "openai/gpt-oss-120b"
   }
 
   it should "need no API key, for a local server" in {

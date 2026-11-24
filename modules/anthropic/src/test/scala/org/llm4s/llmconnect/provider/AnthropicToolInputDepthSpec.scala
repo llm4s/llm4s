@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
@@ -44,7 +45,7 @@ class AnthropicToolInputDepthSpec extends AnyFlatSpec with Matchers {
     val client = new AnthropicClient(
       AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = Model,
+        model = ModelName(Model),
         baseUrl = s"http://localhost:${server.getAddress.getPort}",
         contextWindow = 200000,
         reserveCompletion = 4096

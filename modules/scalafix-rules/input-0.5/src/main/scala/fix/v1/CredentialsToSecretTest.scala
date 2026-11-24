@@ -1,5 +1,5 @@
 /*
-rule = CredentialsToSecret
+rules = [CredentialsToSecret, ProviderConfigNewtypes]
 */
 package fix.v1
 

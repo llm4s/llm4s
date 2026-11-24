@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -35,7 +35,7 @@ import org.llm4s.types.Result
 @Experimental
 final case class MistralConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -43,13 +43,15 @@ final case class MistralConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("mistral")
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): MistralConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): MistralConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): MistralConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("mistral")
+  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): MistralConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[MistralConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
@@ -75,7 +77,7 @@ object MistralConfig:
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
@@ -96,11 +98,11 @@ object MistralConfig:
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): MistralConfig =
+  def apply(apiKey: Secret, model: ModelName): MistralConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private val mistralFallback: String => (Int, Int) =
-    _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
+  private val mistralFallback: String => ContextLimits =
+    _ => ContextLimits(DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The versioned API base the chat client posts `/chat/completions` under: the configured
@@ -133,7 +135,7 @@ object MistralConfig:
       _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("mistral"),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
@@ -142,7 +144,7 @@ object MistralConfig:
       )
       MistralConfig(
         apiKey = apiKey,
-        model = modelName,
+        model = ModelName(modelName),
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc

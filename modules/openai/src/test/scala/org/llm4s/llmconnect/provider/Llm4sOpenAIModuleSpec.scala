@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.config.OpenAIConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
@@ -191,7 +191,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
                 section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
                 ProviderConfigContext.of("rotation")
               )
-              .flatMap(config => descriptor.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+              .flatMap(_.withApiKeyProvider(keys))
+              .flatMap(descriptor.build(_, ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }
@@ -207,7 +208,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
             azure.withExtras(azure.extras.updated(AzureProvider.EndpointKey, baseUrl)),
             ProviderConfigContext.of("rotation")
           )
-          .flatMap(config => AzureProvider.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+          .flatMap(_.withApiKeyProvider(keys))
+          .flatMap(AzureProvider.build(_, ProviderBuildContext.of()))
           .fold(error => fail(error.message), identity)
       }
     }
@@ -393,7 +395,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "give OpenAI embeddings the same OPENAI_API_KEY" in {
       OpenAIEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.OPENAI_API_KEY)
-      assertEmbeddingCredentialBindings(OpenAIEmbeddingProvider, "text-embedding-3-small")
+      assertEmbeddingCredentialBindings(OpenAIEmbeddingProvider, ModelName("text-embedding-3-small"))
     }
   }
 
@@ -402,7 +404,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("openai"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("text-embedding-3-small"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
       }
     }
@@ -410,7 +417,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         OpenAIEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("openai"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -423,8 +435,13 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         )
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(keys))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("openai"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("text-embedding-3-small"),
+            apiKey = Some(Secret("test-key"))
+          )
+        assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }

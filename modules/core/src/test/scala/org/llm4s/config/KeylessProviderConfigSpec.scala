@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.spi.{
@@ -14,7 +14,6 @@ import org.llm4s.llmconnect.spi.{
 }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers

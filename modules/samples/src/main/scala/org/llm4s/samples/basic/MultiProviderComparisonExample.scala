@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -69,7 +70,8 @@ object MultiProviderComparisonExample {
       case Right(registry) =>
         given ModelRegistryService = registry
         val names                  = if (args.nonEmpty) args.toSeq else DefaultProviders
-        render(compare(names, DefaultPrompt)(name => Llm4sConfig.provider(name)), DefaultPrompt).foreach(logger.info(_))
+        render(compare(names, DefaultPrompt)(name => Llm4sConfig.provider(ProviderName(name))), DefaultPrompt)
+          .foreach(logger.info(_))
     }
 
   /**

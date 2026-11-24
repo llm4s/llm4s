@@ -222,7 +222,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   /** A loaded config's client as the facade hands it out, a failure read as Java reads it. */
   private def created(
-    loaded: Result[(String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)]
+    loaded: Result[org.llm4s.llmconnect.config.EmbeddingProviderConfig]
   ): Either[LlmException, JEmbeddingClient] =
     FacadeInternals.embeddingClient(loaded).left.map(new LlmException(_))
 

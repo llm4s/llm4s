@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{ PerplexityConfig, ProviderConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -30,6 +30,6 @@ class PerplexityInCodeConfigSpec extends AnyWordSpec with Matchers with EitherVa
 
   "llm4s-perplexity, configured in code" should {
     "build a Perplexity client from a model and key" in {
-      assertBuilds(PerplexityConfig.fromValues("sonar", Secret("pplx-test")).value, "perplexity")
+      assertBuilds(PerplexityConfig.fromValues(ModelName("sonar"), Secret("pplx-test")).value, "perplexity")
     }
   }

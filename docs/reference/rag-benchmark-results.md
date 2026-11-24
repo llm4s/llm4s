@@ -597,8 +597,8 @@ val runner = for {
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   llm <- LLMConnect.getClient(providerConfig)
-  (embedProvider, embedConfig) <- Llm4sConfig.embeddings()
-  embed <- EmbeddingClient.from(embedProvider, embedConfig)
+  embedConfig <- Llm4sConfig.embeddings()
+  embed <- EmbeddingClient.from(embedConfig)
 } yield BenchmarkRunner(llm, embed)
 
 // Run a suite

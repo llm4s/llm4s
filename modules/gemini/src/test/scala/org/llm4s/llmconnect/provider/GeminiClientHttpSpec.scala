@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -21,7 +22,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   private val testConfig = GeminiConfig(
     apiKey = Secret("test-key"),
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     baseUrl = "https://generativelanguage.googleapis.com/v1beta",
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -472,10 +473,13 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "send thinking as generationConfig.thinkingConfig: a budget on 2.5, a level on 3 and later" in {
-    requestBody(testConfig.withModel("gemini-2.5-flash"), CompletionOptions().withThinking(Thinking.Off))(
+    requestBody(testConfig.withModel(ModelName("gemini-2.5-flash")), CompletionOptions().withThinking(Thinking.Off))(
       "generationConfig"
     )("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> 0)
-    requestBody(testConfig.withModel("gemini-3-pro-preview"), CompletionOptions().withReasoning(ReasoningEffort.High))(
+    requestBody(
+      testConfig.withModel(ModelName("gemini-3-pro-preview")),
+      CompletionOptions().withReasoning(ReasoningEffort.High)
+    )(
       "generationConfig"
     )("thinkingConfig") shouldBe ujson.Obj("thinkingLevel" -> "HIGH")
     requestBody(testConfig, CompletionOptions().withReasoning(ReasoningEffort.High))(

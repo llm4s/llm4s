@@ -48,7 +48,7 @@ object StreamingWithProgressExample {
         logger.info("=" * 50)
       }
       client <- LLMConnect.getClient(providerCfg)
-      accumulator = StreamingAccumulator(providerCfg.model)
+      accumulator = StreamingAccumulator(providerCfg.model.asString)
       startTime   = System.currentTimeMillis()
       spinner     = Array('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
       _ = {

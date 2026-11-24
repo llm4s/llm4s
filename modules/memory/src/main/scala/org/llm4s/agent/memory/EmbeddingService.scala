@@ -96,7 +96,7 @@ object LLMEmbeddingService {
       LLMEmbeddingService(
         client,
         EmbeddingModelConfig(
-          providerConfig.model,
+          providerConfig.model.asString,
           dimensions
         )
       )

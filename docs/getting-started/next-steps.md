@@ -446,7 +446,7 @@ val result = for {
 
 **Problem: Model not found**
 - Verify `model` in the provider section is the provider's own model name (e.g. `gpt-4o-mini`, no `openai/` prefix)
-- Check `llm4s.providers.provider` names the section you meant
+- Check `llm4s.defaultProvider` names the section you meant
 - Check provider supports that model
 - Try a different model
 

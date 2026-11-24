@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.model._
 
 /**
@@ -111,15 +110,6 @@ object LLMConnectTestFixtures {
     toolCall = None,
     finishReason = None,
     thinkingDelta = Some("Let me think about this...")
-  )
-
-  // ================================= LOCAL MODELS =================================
-
-  // Use model names from ModelDimensionRegistry
-  val testLocalModels: LocalEmbeddingModels = LocalEmbeddingModels(
-    imageModel = "openclip-vit-b32",
-    audioModel = "wav2vec2-base",
-    videoModel = "timesformer-base"
   )
 
   // ================================= JSON RESPONSES =================================

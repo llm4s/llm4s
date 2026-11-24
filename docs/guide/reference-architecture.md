@@ -74,9 +74,8 @@ This is the app's whole `application.conf` in the enterprise overlay, mounted fr
 ([`application.conf`](https://github.com/llm4s/llm4s/blob/main/deploy/overlays/enterprise/application.conf)):
 
 ```hocon
+llm4s.defaultProvider = "gateway"                     # the section the service loads
 llm4s.providers {
-  provider = "gateway"                     # the section the service loads
-
   gateway {
     provider         = "openai-compatible"
     baseUrl          = "http://litellm:4000/v1"                    # the gateway's Service, not the vendor
@@ -217,6 +216,7 @@ import org.llm4s.metrics.CostTracker
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 import scala.concurrent.duration.*
 
@@ -230,7 +230,7 @@ val reliability = ReliabilityConfig(
 
 def reliableClient(section: String): Result[LLMClient] =
   for
-    config   <- Llm4sConfig.provider(section)
+    config   <- Llm4sConfig.provider(ProviderName(section))
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(config, LlmClientOptions(metrics = costs))

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -16,7 +17,12 @@ import ujson.read
 class JinaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
   private val cfg =
-    EmbeddingProviderConfig(baseUrl = "http://jina-test", model = "jina-embeddings-v3", apiKey = Secret("k"))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("jina"),
+      baseUrl = BaseUrl("http://jina-test"),
+      model = ModelName("jina-embeddings-v3"),
+      apiKey = Some(Secret("k"))
+    )
   private val ok = HttpResponse(200, """{"data":[{"embedding":[0.1]}]}""", Map.empty)
 
   private def request(purpose: InputPurpose, model: String = "jina-embeddings-v3") =

@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -24,10 +25,10 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
   private def network(text: String) = Llm4sConfig.httpNetwork(ConfigSource.string(text))
 
   private val section =
-    """llm4s.providers { provider = main, main { provider = fixturechat, model = m, apiKey = k } }"""
+    """llm4s.defaultProvider = main, llm4s.providers { main { provider = fixturechat, model = m, apiKey = k } }"""
 
   private def providerNetwork(text: String): HttpNetworkSettings =
-    Llm4sConfig.provider(ConfigSource.string(text), "main").value.asInstanceOf[FixtureChatConfig].network
+    Llm4sConfig.provider(ConfigSource.string(text), ProviderName("main")).value.asInstanceOf[FixtureChatConfig].network
 
   "llm4s.http" should "be the default settings when absent or empty" in {
     network("a = 1").value shouldBe HttpNetworkSettings.default
@@ -112,7 +113,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
         ConfigSource.string(s"""$section
         llm4s.providers.main.http.proxy.url = "ftp://x:1"
       """),
-        "main"
+        ProviderName("main")
       )
       .left
       .value
@@ -122,7 +123,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
         ConfigSource.string(s"""$section
         llm4s.providers.main.http = 3
       """),
-        "main"
+        ProviderName("main")
       )
       .isLeft shouldBe true
   }
@@ -140,7 +141,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "An embedding config" should "carry llm4s.http" in {
     given ProviderRegistry = ProviderRegistry.default
-    val (_, config) = EmbeddingsConfigLoader
+    val config = EmbeddingsConfigLoader
       .loadProviderFor(
         ConfigSource.string(
           s"""llm4s.http.proxy.url = "http://proxy.corp:3128"
@@ -155,7 +156,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
   "Llm4sConfig.listModels" should "list through the section's proxy" in {
     Using.resource(RecordingProxy.start(body = """{"data":[{"id":"m1"}]}""")) { proxy =>
       val result = Llm4sConfig.listModels(ConfigSource.string(s"""
-        llm4s.providers { provider = main, main { provider = fixturechat, model = m, apiKey = k, baseUrl = "http://models.provider.test/v1" } }
+        llm4s.defaultProvider = main, llm4s.providers { main { provider = fixturechat, model = m, apiKey = k, baseUrl = "http://models.provider.test/v1" } }
         llm4s.http.proxy { url = "${proxy.url}", nonProxyHosts = [] }
       """))
       result.value.map(_.name.asString) shouldBe List("m1")

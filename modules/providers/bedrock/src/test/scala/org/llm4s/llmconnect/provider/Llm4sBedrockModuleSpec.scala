@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.config.BedrockConfigKeys.*
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
 import org.llm4s.llmconnect.provider.BedrockTestSupport.*

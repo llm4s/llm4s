@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.annotation.Experimental
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ JlamaConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{
@@ -13,7 +14,6 @@ import org.llm4s.llmconnect.spi.{
   ProviderFeatures
 }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.nio.file.{ Path, Paths }
@@ -65,7 +65,7 @@ object JlamaProvider extends ProviderDescriptor:
     (for
       modelDir <- parseDir(section.extra(ModelDirKey))
       threads  <- parseThreads(section.extra(ThreadsKey))
-      config   <- JlamaConfig.fromValues(section.model.asString, modelDir, threads)
+      config   <- JlamaConfig.fromValues(ModelName(section.model.asString), modelDir, threads)
     yield config).left.map(ProviderConfig.inSection(context.providerName))
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

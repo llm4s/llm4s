@@ -151,11 +151,11 @@ object RAGBuilderExample extends App {
       llmClient     <- llmResult
       service       <- Llm4sConfig.modelRegistryService()
       embeddingPair <- Llm4sConfig.embeddings()
-      (providerName, embeddingCfg) = embeddingPair
+      embeddingCfg = embeddingPair
       rag <- RAG.build(
         RAG
           .builder()
-          .withEmbeddings(providerName, embeddingCfg.model)
+          .withEmbeddings(embeddingCfg.providerId.asString, embeddingCfg.model.asString)
           .withTopK(3)
           .withLLM(llmClient),
         _ => Right(embeddingCfg)

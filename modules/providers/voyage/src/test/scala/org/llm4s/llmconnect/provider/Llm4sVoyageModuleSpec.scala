@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -37,7 +37,7 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "bind VOYAGE_API_KEY to llm4s.credentials.voyage.apiKey" in {
       VoyageAIEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(VoyageConfigKeys.VOYAGE_API_KEY)
-      assertEmbeddingCredentialBindings(VoyageAIEmbeddingProvider, "voyage-3")
+      assertEmbeddingCredentialBindings(VoyageAIEmbeddingProvider, ModelName("voyage-3"))
     }
 
     "give the voyageai alias the voyage key" in {
@@ -46,12 +46,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "build a Voyage embedding provider from the selected block, as an application does" in {
-      val (_, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings("""llm4s.embeddings.model = "voyage/voyage-3"""", Map("VOYAGE_API_KEY" -> "pa-test"))
         .fold(error => fail(error.message), identity)
 
-      config.model shouldBe "voyage-3"
-      config.apiKey.reveal shouldBe "pa-test"
+      config.model.asString shouldBe "voyage-3"
+      config.apiKey.map(_.reveal) shouldBe Some("pa-test")
       assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config)
     }
   }
@@ -60,7 +60,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret("test-key"))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("test-key"))
+        )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config))
       }
     }
@@ -68,7 +73,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         VoyageAIEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -76,8 +86,13 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")
       ) { (baseUrl, keys) =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config.withApiKeyProvider(keys))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("test-key"))
+        )
+        assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }

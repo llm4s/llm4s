@@ -6,12 +6,7 @@ import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.{
-  NamedProviderConfig,
-  ProviderName,
-  ProvidersConfig,
-  RawNamedProviderSection
-}
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import com.typesafe.config.{ Config, ConfigFactory }
@@ -34,7 +29,7 @@ import scala.util.Try
  *
  * == Provider setup ==
  * Define named providers under `llm4s.providers.<name>` and optionally set
- * `llm4s.providers.provider` to choose the default provider. Then call
+ * `llm4s.defaultProvider` to choose the default provider. Then call
  * [[defaultProvider]] or resolve a named provider directly with
  * [[provider(name)*]].
  *
@@ -79,9 +74,6 @@ import scala.util.Try
  * per test or per tenant - call [[from]] and use the returned [[Llm4sSettings]], which
  * has the same methods: each method here calls the one of the same name on the [[Llm4sSettings]] of the
  * process-wide configuration.
- *
- * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
- *      `reference.conf` binds.
  */
 @Stable
 object Llm4sConfig {
@@ -140,7 +132,7 @@ object Llm4sConfig {
    * Useful for applications that need to resolve multiple configured provider
    * instances, including multiple accounts for the same provider type.
    */
-  def provider(name: String)(using ProviderRegistry): Result[ProviderConfig] = default.provider(name)
+  def provider(name: ProviderName)(using ProviderRegistry): Result[ProviderConfig] = default.provider(name)
 
   /**
    * Every section of `llm4s.providers`, each loaded or failed on its own: a section with no key available, or
@@ -166,11 +158,13 @@ object Llm4sConfig {
   // `private[llm4s]`, not `private[config]`: `llm4s-provider-testkit` loads a provider module's
   // section through it from a HOCON string and an injected environment. `ConfigSource` stays out
   // of every public signature.
-  private[llm4s] def provider(source: ConfigSource, name: String)(using ProviderRegistry): Result[ProviderConfig] =
+  private[llm4s] def provider(source: ConfigSource, name: ProviderName)(using
+    ProviderRegistry
+  ): Result[ProviderConfig] =
     of(source).provider(name)
 
   /** As [[Llm4sSettings.providerSection]]. */
-  private[llm4s] def providerSection(source: ConfigSource, name: String)(using
+  private[llm4s] def providerSection(source: ConfigSource, name: ProviderName)(using
     ProviderRegistry
   ): Result[NamedProviderConfig] =
     of(source).providerSection(name)
@@ -186,7 +180,7 @@ object Llm4sConfig {
     of(source).providers()
 
   /**
-   * Loads the configured default provider name from `llm4s.providers.provider`.
+   * Loads the configured default provider name from `llm4s.defaultProvider`.
    *
    * Fails if no default is set or no section has that name. No section is validated.
    */
@@ -235,15 +229,15 @@ object Llm4sConfig {
   /**
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
    */
-  def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] = default.listModels(name)
+  def listModels(name: ProviderName)(using ProviderRegistry): Result[List[DiscoveredModel]] = default.listModels(name)
 
-  private[llm4s] def listModels(source: ConfigSource, name: String)(using
+  private[llm4s] def listModels(source: ConfigSource, name: ProviderName)(using
     ProviderRegistry
   ): Result[List[DiscoveredModel]] =
     of(source).listModels(name)
 
   private[llm4s] def listModels(
-    name: String,
+    name: ProviderName,
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
@@ -306,69 +300,40 @@ object Llm4sConfig {
   def exchangeLogging(): Result[ProviderExchangeLogging] = default.exchangeLogging()
 
   /**
-   * The active embedding model, as [[textEmbeddingModel]] resolves it.
-   *
-   * @param provider   the embedding provider id, lower-cased
-   * @param modelName  the provider's model name
-   * @param dimensions the model's output dimensions
-   */
-  final case class TextEmbeddingModelSettings private (
-    provider: String,
-    modelName: String,
-    dimensions: Int
-  ) {
-
-    /** Sets the embedding provider id. */
-    def withProvider(provider: String): TextEmbeddingModelSettings = copy(provider = provider)
-
-    /** Sets the model name. */
-    def withModelName(modelName: String): TextEmbeddingModelSettings = copy(modelName = modelName)
-
-    /** Sets the output dimensions. */
-    def withDimensions(dimensions: Int): TextEmbeddingModelSettings = copy(dimensions = dimensions)
-  }
-
-  object TextEmbeddingModelSettings {
-
-    /** Creates a [[TextEmbeddingModelSettings]]. */
-    def apply(provider: String, modelName: String, dimensions: Int): TextEmbeddingModelSettings =
-      new TextEmbeddingModelSettings(provider, modelName, dimensions)
-  }
-
-  /**
    * Loads the active embedding provider and its configuration from the current environment.
    *
    * Reads `EMBEDDING_MODEL` in `provider/model` format (e.g.
    * `"openai/text-embedding-3-small"`, `"voyage/voyage-3"`,
-   * `"ollama/nomic-embed-text"`). Returns the provider name and typed config.
+   * `"ollama/nomic-embed-text"`). The config carries the provider as its `providerId`,
+   * so `EmbeddingClient.from(config)` needs nothing else.
    *
    * The provider is resolved through the given
    * [[org.llm4s.llmconnect.spi.ProviderRegistry]], so an embedding provider
    * supplied by a module - or registered explicitly - is configurable here
    * without `llm4s-core` knowing it exists.
    *
-   * @return a pair of `(providerName, EmbeddingProviderConfig)`, or a
+   * @return the provider's config, or a
    *         [[org.llm4s.error.ConfigurationError]] when `EMBEDDING_MODEL` is
    *         absent or the provider is unrecognised.
    */
-  def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = default.embeddings()
+  def embeddings()(using ProviderRegistry): Result[EmbeddingProviderConfig] = default.embeddings()
 
   /** [[embeddings()*]] for a given source; `llm4s-provider-testkit` reads embedding blocks through it. */
   private[llm4s] def embeddings(source: ConfigSource)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     of(source).embeddings()
 
   /** As [[Llm4sSettings.embeddingsFor]], for the process-wide configuration. */
   private[llm4s] def embeddingsFor(modelSpec: String)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     default.embeddingsFor(modelSpec)
 
   /** [[embeddingsFor(modelSpec:String)*]] for a given source. */
   private[llm4s] def embeddingsFor(source: ConfigSource, modelSpec: String)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     of(source).embeddingsFor(modelSpec)
 
   /**
@@ -381,13 +346,13 @@ object Llm4sConfig {
    * [[org.llm4s.llmconnect.spi.ProviderRegistry]]: a provider that is
    * configurable there is configurable here, by the same registry.
    *
-   * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
-   *         when `EMBEDDING_MODEL` is absent or unrecognised.
+   * @return the model and its dimensions, or a [[org.llm4s.error.ConfigurationError]] when `EMBEDDING_MODEL` is
+   *         absent or unrecognised. Its provider is `embeddings().map(_.providerId)`.
    */
-  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] = default.textEmbeddingModel()
+  def textEmbeddingModel()(using ProviderRegistry): Result[EmbeddingModelConfig] = default.textEmbeddingModel()
 
   private[llm4s] def textEmbeddingModel(source: ConfigSource)(using
     ProviderRegistry
-  ): Result[TextEmbeddingModelSettings] =
+  ): Result[EmbeddingModelConfig] =
     of(source).textEmbeddingModel()
 }

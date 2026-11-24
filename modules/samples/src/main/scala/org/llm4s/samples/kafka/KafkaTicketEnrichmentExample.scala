@@ -20,7 +20,7 @@ import scala.concurrent.duration.*
  * sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --bootstrap host:9092"
  * }}}
  *
- * Without `--scripted` the model is the default provider of `application.conf` (`llm4s.providers.provider`), and each
+ * Without `--scripted` the model is the default provider of `application.conf` (`llm4s.defaultProvider`), and each
  * call is traced to the configured tracing backend. Stop it with Ctrl-C: it stops consuming, finishes the records in
  * flight, commits their offsets and closes.
  */

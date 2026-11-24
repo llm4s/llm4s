@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpBody, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.config.PerplexityConfig
@@ -53,7 +54,7 @@ object PerplexityFixtures {
   ): PerplexityConfig =
     PerplexityConfig
       .fromValues(
-        model = model,
+        model = ModelName(model),
         apiKey = Secret("pplx-test-key"),
         baseUrl = baseUrl,
         webSearch = webSearch,

@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.error.AuthenticationError
 import org.llm4s.javaapi.{ LlmErrorKind, LlmException, Llm4s }
 import org.llm4s.llmconnect.EmbeddingClient
@@ -23,7 +24,12 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
   private val fixture: EmbeddingProvider =
     FixtureEmbeddingProvider
       .build(
-        EmbeddingProviderConfig(FixtureEmbeddingProvider.DefaultBaseUrl, "fixture-embed-small", Secret("sk-fixture")),
+        EmbeddingProviderConfig(
+          ProviderId("fixtureembedding"),
+          BaseUrl(FixtureEmbeddingProvider.DefaultBaseUrl),
+          ModelName("fixture-embed-small"),
+          Some(Secret("sk-fixture"))
+        ),
         EmbeddingBuildContext()
       )
       .toOption

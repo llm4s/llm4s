@@ -4,7 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -34,7 +34,7 @@ final case class WatsonXConfig(
   apiKey: Secret,
   projectId: String,
   spaceId: Option[String],
-  model: String,
+  model: ModelName,
   baseUrl: String,
   apiVersion: String,
   iamUrl: String,
@@ -44,13 +44,15 @@ final case class WatsonXConfig(
   override val network: HttpNetworkSettings = HttpNetworkSettings.default,
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("watsonx")
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): WatsonXConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): WatsonXConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("watsonx")
+  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): WatsonXConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[WatsonXConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig = copy(apiKeyProvider = provider)
   override def toString: String =
     s"WatsonXConfig(apiKey=$apiKey, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +
@@ -72,11 +74,11 @@ object WatsonXConfig:
   private val DefaultContextWindow     = 8192
   private val DefaultReserveCompletion = 4096
 
-  private def watsonxFallback(modelName: String): (Int, Int) =
+  private def watsonxFallback(modelName: String): ContextLimits =
     modelName match
-      case name if name.contains("mistral-large") => (32768, DefaultReserveCompletion)
-      case name if name.contains("llama-2")       => (4096, DefaultReserveCompletion)
-      case _                                      => (DefaultContextWindow, DefaultReserveCompletion)
+      case name if name.contains("mistral-large") => ContextLimits(32768, DefaultReserveCompletion)
+      case name if name.contains("llama-2")       => ContextLimits(4096, DefaultReserveCompletion)
+      case _                                      => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
 
   private val LocalHosts = Set("localhost", "127.0.0.1", "::1", "[::1]")
 
@@ -136,7 +138,7 @@ object WatsonXConfig:
         ConfigurationError("watsonx needs a projectId or a spaceId", List("projectId", "spaceId"))
       )
     yield
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("watsonx"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
@@ -147,7 +149,7 @@ object WatsonXConfig:
         apiKey = Secret(key),
         projectId = project.getOrElse(""),
         spaceId = space,
-        model = modelName,
+        model = ModelName(modelName),
         baseUrl = base,
         apiVersion = version,
         iamUrl = iam,

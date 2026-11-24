@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
@@ -43,7 +44,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
       new ZaiClient(
         ZaiConfig(
           apiKey = Secret("test-key"),
-          model = model,
+          model = ModelName(model),
           baseUrl = baseUrl,
           contextWindow = 128000,
           reserveCompletion = 4096

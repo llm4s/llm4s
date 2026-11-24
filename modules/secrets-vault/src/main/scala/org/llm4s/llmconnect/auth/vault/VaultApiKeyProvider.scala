@@ -26,7 +26,7 @@ import scala.util.Try
  * {{{
  * for
  *   keys   <- VaultApiKeyProvider(VaultSettings(vaultAddress, Secret(vaultToken), "llm4s/openai", "apiKey"))
- *   config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+ *   config <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
  *   client <- LLMConnect.getClient(config)
  * yield client
  * }}}

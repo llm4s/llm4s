@@ -29,14 +29,14 @@ Spring-specific code, and so does any extra the provider declares:
 
 ```properties
 # the default section
-llm4s.providers.provider=gemini-main
+llm4s.default-provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
 llm4s.providers.gemini-main.model=gemini-2.0-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
 ```
 
 ```properties
-llm4s.providers.provider=azure-main
+llm4s.default-provider=azure-main
 llm4s.providers.azure-main.provider=azure
 llm4s.providers.azure-main.model=my-deployment
 llm4s.providers.azure-main.api-key=${AZURE_OPENAI_API_KEY}
@@ -45,7 +45,7 @@ llm4s.providers.azure-main.api-version=2024-02-01
 ```
 
 ```properties
-llm4s.providers.provider=local
+llm4s.default-provider=local
 llm4s.providers.local.provider=openai-compatible
 llm4s.providers.local.model=my-model
 llm4s.providers.local.base-url=http://localhost:8000/v1
@@ -66,7 +66,7 @@ llm4s.providers.local.headers.X-Team-Id=team-7
   `llm4s.credentials.<provider>.api-key`, and llm4s's own conventional environment variable for the vendor
   (`GOOGLE_API_KEY`, `MISTRAL_API_KEY`, ...) before failing with an error that names both. Set `api-key` in a section
   that should use a second account.
-- **Several sections.** Define as many as you like; `llm4s.providers.provider` names the one the starter uses.
+- **Several sections.** Define as many as you like; `llm4s.default-provider` names the one the starter uses.
   If it is not set, the flat `llm4s.provider` can name a section instead.
 - **Which form wins.** As soon as any `llm4s.providers.*` property is set, the block is used and the flat
   `llm4s.model`, `llm4s.api-key`, `llm4s.base-url` ... are ignored. With none, the flat keys are read exactly as before.

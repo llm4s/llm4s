@@ -42,7 +42,7 @@ object HistoryDigestExample {
 
     val result = for {
       modelName    <- Llm4sConfig.defaultProvider().map(_.model)
-      tokenCounter <- OpenAITokenizers.counterFor(modelName).orElse(ConversationTokenCounter.cl100k())
+      tokenCounter <- OpenAITokenizers.counterFor(modelName.asString).orElse(ConversationTokenCounter.cl100k())
       demo         <- runHistoryDigestDemo(tokenCounter)
     } yield demo
 
