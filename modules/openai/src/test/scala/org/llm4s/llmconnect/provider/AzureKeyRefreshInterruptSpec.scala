@@ -39,7 +39,7 @@ class AzureKeyRefreshInterruptSpec extends AnyWordSpec with Matchers with TestTi
         AzureConfig(BaseUrl("https://r.openai.azure.com"), Secret(""), ModelName("gpt-4o")).withApiKeyProvider(
           Some(blocking)
         )
-      val client = OpenAIClient(config).fold(e => fail(e.message), identity)
+      val client = OpenAIClient.azure(config).fold(e => fail(e.message), identity)
 
       val holder = new Thread(() => client.complete(hello, CompletionOptions()): Unit)
       holder.setDaemon(true)

@@ -5,6 +5,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.syntax.toLLMError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -51,9 +52,12 @@ import scala.util.{ Try, Using }
  * @param metrics        Receives per-call latency and token-usage events.
  * @param exchangeLogging Controls whether raw request/response bodies are recorded.
  * @param httpClient     HTTP client (injectable for testing).
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class VertexAIClient(
+final class VertexAIClient private[provider] (
   config: VertexAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -67,11 +71,11 @@ class VertexAIClient(
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else VertexAIClient.DefaultRequestTimeout. */
-  protected[provider] def requestTimeout: FiniteDuration =
+  private[provider] def requestTimeout: FiniteDuration =
     config.timeouts.requestOr(VertexAIClient.DefaultRequestTimeout)
 
   /** How long a streamed call may take: the section's `timeouts.stream`, else VertexAIClient.DefaultStreamTimeout. */
-  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)
+  private[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)
 
   private val authProvider = new VertexAIAuthProvider(
     config.credentialFilePath,
@@ -597,19 +601,23 @@ object VertexAIClient {
   val ValidationTimeout: FiniteDuration = 10.seconds
   import org.llm4s.syntax.toResult
 
-  def apply(config: VertexAIConfig)(using ModelRegistryService): Result[VertexAIClient] =
-    Try(new VertexAIClient(config)).toResult
-
-  def apply(config: VertexAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
+  /**
+   * A [[VertexAIClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient`, when set, carries every request and stays the caller's to close.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   */
+  def apply(config: VertexAIConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
   ): Result[VertexAIClient] =
-    Try(new VertexAIClient(config, metrics)).toResult
-
-  def apply(
-    config: VertexAIConfig,
-    metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[VertexAIClient] =
-    Try(new VertexAIClient(config, metrics, exchangeLogging, httpClient)).toResult
+    Try(
+      new VertexAIClient(
+        config,
+        options.metrics,
+        options.exchangeLogging,
+        Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+      )
+    ).toResult
 }

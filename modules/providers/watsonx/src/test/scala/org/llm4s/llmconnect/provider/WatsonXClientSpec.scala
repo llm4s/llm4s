@@ -229,8 +229,9 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
   }
 
   test("apply leaves a supplied HTTP client open when closed, and closes one it built (#2341)") {
-    val http     = new MockHttpClient(Seq(iam, generation))
-    val supplied = WatsonXClient(config, httpClient = http).fold(e => fail(e.message), identity)
+    val http = new MockHttpClient(Seq(iam, generation))
+    val supplied = WatsonXClient(config, org.llm4s.llmconnect.LlmClientOptions().withHttpClient(http))
+      .fold(e => fail(e.message), identity)
     supplied.close()
     http.closed shouldBe false
 

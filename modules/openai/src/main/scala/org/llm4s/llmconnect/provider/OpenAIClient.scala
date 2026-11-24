@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.LlmClientOptions
 
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.openai.auth.{ SubjectTokenProvider, SubjectTokenType, WorkloadIdentity }
@@ -134,9 +135,12 @@ private[provider] trait OpenAIClientTransport {
  * @param metrics metrics collector for observability (default: noop)
  * @param provider the provider this client serves - `openai`, `azure` or `requesty` - which labels
  *                 its metrics, exchange log and errors
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class OpenAIClient private[provider] (
+final class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
@@ -167,10 +171,12 @@ class OpenAIClient private[provider] (
    * @param config OpenAI configuration with API key and base URL
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
+  private[provider] def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
+    ModelRegistryService
+  ) =
     this(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
 
-  def this(
+  private[provider] def this(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
@@ -183,7 +189,9 @@ class OpenAIClient private[provider] (
    * @param config Azure configuration with API key, endpoint, and API version
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
+  private[provider] def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
+    ModelRegistryService
+  ) =
     this(
       config.model.asString,
       OpenAIClientTransport.azure(config),
@@ -193,7 +201,7 @@ class OpenAIClient private[provider] (
       config.providerId
     )
 
-  def this(
+  private[provider] def this(
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
@@ -1141,56 +1149,32 @@ object OpenAIClient {
     builder.maxTokens(maxTokens)
 
   /**
-   * Creates an OpenAI client for direct OpenAI API access.
+   * A client for the OpenAI API (or Requesty, or another base URL the OpenAI SDK can call), or why one cannot be
+   * built: a config `OpenAIConfig.validate` refuses, or anything the SDK client's construction fails on, is a
+   * `Left`, never an exception. `options.httpClient` is ignored: this client sends its requests through the SDK.
    *
-   * @param config OpenAI configuration with API key, model, and base URL
-   * @param metrics metrics collector for observability
-   * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
+   * @param config  the API key or workload identity, model and base URL.
+   * @param options the metrics collector and exchange logging of the client; neither by default.
    */
-  def apply(
-    config: OpenAIConfig,
-    metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[OpenAIClient] =
-    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics, exchangeLogging)).toResult)
-
-  def apply(
-    config: OpenAIConfig,
-    metrics: org.llm4s.metrics.MetricsCollector
-  )(using ModelRegistryService): Result[OpenAIClient] =
-    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics)).toResult)
+  def apply(config: OpenAIConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenAIClient] =
+    OpenAIConfig
+      .validate(config)
+      .flatMap(valid => Try(new OpenAIClient(valid, options.metrics, options.exchangeLogging)).toResult)
 
   /**
-   * Convenience overload with noop metrics.
-   */
-  def apply(config: OpenAIConfig)(using ModelRegistryService): Result[OpenAIClient] =
-    apply(config, org.llm4s.metrics.MetricsCollector.noop)
-
-  /**
-   * Creates an OpenAI client for Azure OpenAI service.
+   * A client for an Azure OpenAI deployment, or why one cannot be built: anything the SDK client's construction
+   * fails on is a `Left`, never an exception. `options.httpClient` is ignored: this client sends its requests
+   * through the SDK.
    *
-   * @param config Azure configuration with API key, model, endpoint, and API version
-   * @param metrics metrics collector for observability
-   * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
+   * @param config  the key or credential, deployment, endpoint and API version.
+   * @param options the metrics collector and exchange logging of the client; neither by default.
    */
-  def apply(
-    config: AzureConfig,
-    metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
-
-  def apply(
-    config: AzureConfig,
-    metrics: org.llm4s.metrics.MetricsCollector
-  )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics)).toResult
-
-  /**
-   * Convenience overload with noop metrics.
-   */
-  def apply(config: AzureConfig)(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
+  def azure(config: AzureConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenAIClient] =
+    Try(new OpenAIClient(config, options.metrics, options.exchangeLogging)).toResult
 }
 
 private[provider] object OpenAIClientTransport {

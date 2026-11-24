@@ -1,7 +1,6 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.NamedProviderConfig
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, WatsonXConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -97,11 +96,4 @@ object WatsonXProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[WatsonXConfig](id, config)
-      .flatMap(
-        WatsonXClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(WatsonXClient(_, context.options))

@@ -4,7 +4,6 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.VertexAIAdcConfigLoader
 import org.llm4s.error.ConfigurationError
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -126,14 +125,7 @@ object VertexAIProvider extends ProviderDescriptor:
     ProviderDescriptor
       .expectConfig[VertexAIConfig](id, config)
       .flatMap(withWellKnownCredentialPath)
-      .flatMap(
-        VertexAIClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(VertexAIClient(_, context.options))
 
   /** Fills in gcloud's well-known ADC path, from the configuration edge, unless the config already has one. */
   private def withWellKnownCredentialPath(config: VertexAIConfig): Result[VertexAIConfig] =

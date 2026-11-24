@@ -29,7 +29,7 @@ object CachingGuideSnippets {
 
     for {
       cache <- InMemoryEmbeddingCache.create(maxSize = 10000, ttl = Some(1.hour))
-      cached = new CachedEmbeddingClient(base, cache)
+      cached = CachedEmbeddingClient(base, cache)
       _ <- cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
       _ <- cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
     } yield cached.cacheStats
@@ -49,7 +49,7 @@ object CachingGuideSnippets {
 
     for {
       cache <- InMemoryEmbeddingCache.create()
-      queries = new CachedEmbeddingClient(base, cache)
+      queries = CachedEmbeddingClient(base, cache)
       _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
       _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
       _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
@@ -65,7 +65,7 @@ object CachingGuideSnippets {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
 
     // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
-    InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+    InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(CachedEmbeddingClient(base, cache)))
     // end-guide-block
   }
 
@@ -81,7 +81,7 @@ object CachingGuideSnippets {
       CacheKeyGenerator.sha256(tenant, request.model.name.asString, request.purpose.toString, text)
 
     val cached =
-      InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
+      InMemoryEmbeddingCache.create().map(cache => CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
     cached.flatMap(
       _.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
@@ -140,7 +140,7 @@ object CachingGuideSnippets {
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.types.ProviderModelTypes.ModelName
 
-    new CachingLLMClient(
+    CachingLLMClient(
       baseClient = baseClient,
       embeddingClient = embeddingClient,
       embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
@@ -163,14 +163,13 @@ object CachingGuideSnippets {
     import org.llm4s.types.ProviderModelTypes.ModelName
 
     // The clock only decides whether an entry is still within its TTL. Tests pass a fixed, movable one.
-    new CachingLLMClient(
+    CachingLLMClient(
       baseClient,
       embeddingClient,
       EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
       cacheConfig,
-      tracing,
-      clock
-    )
+      tracing
+    ).withClock(clock)
     // end-guide-block
   }
 

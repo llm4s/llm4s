@@ -50,8 +50,8 @@ internal class RecordingClient(private val reply: Either<LLMError, Completion>) 
         onChunk: Function1<StreamedChunk, BoxedUnit>,
     ): Either<LLMError, Completion> = complete(conversation, options)
 
-    override fun contextWindow: Int = 4096
-    override fun reserveCompletion: Int = 512
+    override fun contextWindow(): Int = 4096
+    override fun reserveCompletion(): Int = 512
 }
 
 /** A reply with text, a model, usage, a cost and a tool call; Scala types appear only in building it. */

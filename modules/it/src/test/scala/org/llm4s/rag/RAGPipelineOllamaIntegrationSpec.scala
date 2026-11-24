@@ -150,14 +150,14 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   }
 
   private def newOllamaClient(): OllamaClient =
-    new OllamaClient(
+    OllamaClient(
       OllamaConfig(
         model = ModelName(llmModel),
         baseUrl = BaseUrl(ollamaBaseUrl),
         contextWindow = 8192,
         reserveCompletion = 4096
       )
-    )
+    ).fold(e => fail(e.message), identity)
 
   private def buildInMemoryRag(): RAG = {
     val config = RAGConfig.default

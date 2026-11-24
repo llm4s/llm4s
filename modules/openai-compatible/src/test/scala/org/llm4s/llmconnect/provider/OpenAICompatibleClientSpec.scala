@@ -5,7 +5,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, ServiceError }
-import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
+import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -40,7 +40,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     )
 
   private def client(cfg: OpenAICompatibleConfig, logging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled) =
-    OpenAICompatibleClient(cfg, exchangeLogging = logging).value
+    OpenAICompatibleClient(cfg, LlmClientOptions(exchangeLogging = logging)).value
 
   private def conversation = Conversation(Seq(UserMessage("hello")))
 

@@ -419,8 +419,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List("workloadIdentity.identityTokenFile")
           AnthropicClient(
             configFor(path),
-            org.llm4s.metrics.MetricsCollector.noop,
-            org.llm4s.llmconnect.ProviderExchangeLogging.Disabled
+            org.llm4s.llmconnect.LlmClientOptions(metrics = org.llm4s.metrics.MetricsCollector.noop)
           ).left.value shouldBe a[ConfigurationError]
           an[IllegalArgumentException] should be thrownBy new AnthropicClient(configFor(path))
         }

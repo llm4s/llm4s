@@ -55,7 +55,7 @@ object SemanticCachingSample extends App {
           val tracing        = new ConsoleTracing()
           val embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
           Using.resource(
-            new CachingLLMClient(
+            CachingLLMClient(
               baseClient = baseLLMClient,
               embeddingClient = embeddingClient,
               embeddingModel = embeddingModel,

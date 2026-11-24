@@ -18,7 +18,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
   "CachedEmbeddingClient" should "only call the base client for cache misses" in {
     val baseClient   = mock[EmbeddingProvider]
     val cache        = InMemoryEmbeddingCache.create().value
-    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+    val cachedClient = CachedEmbeddingClient(baseClient, cache)
 
     val request      = EmbeddingRequest(Seq("hello"), testModel)
     val mockVector   = Seq(0.1, 0.2, 0.3)
@@ -39,7 +39,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
   it should "process batch requests by hitting cache for existing strings" in {
     val baseClient   = mock[EmbeddingProvider]
     val cache        = InMemoryEmbeddingCache.create().value
-    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+    val cachedClient = CachedEmbeddingClient(baseClient, cache)
 
     // Pre-seed the cache for "text1"
     cache.put(CacheKeyGenerator.embeddingKey("text1", testModel.name, InputPurpose.Document), Seq(1.0))
@@ -61,7 +61,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
   it should "not cache base client errors, allowing the next call to retry" in {
     val baseClient   = mock[EmbeddingProvider]
     val cache        = InMemoryEmbeddingCache.create().value
-    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+    val cachedClient = CachedEmbeddingClient(baseClient, cache)
 
     val request   = EmbeddingRequest(Seq("hello"), testModel)
     val testError = EmbeddingError(code = Some("500"), message = "server error", provider = "test")
@@ -92,7 +92,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
   it should "deduplicate identical texts within the same batch before calling the base client" in {
     val baseClient   = mock[EmbeddingProvider]
     val cache        = InMemoryEmbeddingCache.create().value
-    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+    val cachedClient = CachedEmbeddingClient(baseClient, cache)
 
     // Request with duplicated inputs
     val request = EmbeddingRequest(Seq("duplicate text", "unique text", "duplicate text"), testModel)
@@ -117,14 +117,14 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
 
   it should "be an EmbeddingProvider, so an EmbeddingClient can wrap it" in {
     val base                          = mock[EmbeddingProvider]
-    val cached                        = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+    val cached                        = CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
     val asProvider: EmbeddingProvider = cached
     asProvider shouldBe cached
   }
 
   it should "keep the base response's usage, metadata and dim when it called the base client" in {
     val baseClient   = mock[EmbeddingProvider]
-    val cachedClient = new CachedEmbeddingClient(baseClient, InMemoryEmbeddingCache.create().value)
+    val cachedClient = CachedEmbeddingClient(baseClient, InMemoryEmbeddingCache.create().value)
     val request      = EmbeddingRequest(Seq("a", "b"), testModel)
     val usage        = EmbeddingUsage(promptTokens = 7, totalTokens = 7)
     val fresh = EmbeddingResponse(
@@ -156,7 +156,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
       override def clear(): Result[Unit]                                  = Left(boom)
     }
     val baseClient   = mock[EmbeddingProvider]
-    val cachedClient = new CachedEmbeddingClient(baseClient, failing)
+    val cachedClient = CachedEmbeddingClient(baseClient, failing)
     val request      = EmbeddingRequest(Seq("hello"), testModel)
     (baseClient.embed _).expects(request).returning(Right(EmbeddingResponse(Seq(Seq(0.5))))).twice()
 

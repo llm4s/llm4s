@@ -602,13 +602,16 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 /**
  * Test helper class that exposes private methods for unit testing.
  */
-class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends ZaiClient(config) {
+class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) {
+
+  // ZaiClient is final: the helper holds one and calls its package-private members.
+  private val client = new ZaiClient(config)
 
   def testCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
-    createRequestBody(conversation, options)
+    client.createRequestBody(conversation, options)
 
   def exposedCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
-    createRequestBody(conversation, options)
+    client.createRequestBody(conversation, options)
 
   def testParseCompletion(json: ujson.Value): Completion = {
     val choice  = json("choices")(0)

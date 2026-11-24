@@ -204,13 +204,15 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       })
       val cacheConfig =
         org.llm4s.llmconnect.caching.CacheConfig.create(0.9, 1.minute).fold(e => fail(e.message), identity)
-      new org.llm4s.llmconnect.caching.CachingLLMClient(
-        stub,
-        embeddings,
-        EmbeddingModelConfig(ModelName("embed-1"), 1),
-        cacheConfig,
-        new Recording
-      ).providerId shouldBe Some(ProviderId("openai"))
+      org.llm4s.llmconnect.caching
+        .CachingLLMClient(
+          stub,
+          embeddings,
+          EmbeddingModelConfig(ModelName("embed-1"), 1),
+          cacheConfig,
+          new Recording
+        )
+        .providerId shouldBe Some(ProviderId("openai"))
     }
 
     "take no server address from a config without a parsable endpoint" in {

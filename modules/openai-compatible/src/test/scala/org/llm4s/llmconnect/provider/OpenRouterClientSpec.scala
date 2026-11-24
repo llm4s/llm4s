@@ -323,8 +323,9 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   }
 }
 
-final private class OpenRouterClientTestHelper(cfg: OpenAIConfig)(using ModelRegistryService)
-    extends OpenRouterClient(cfg) {
+final private class OpenRouterClientTestHelper(cfg: OpenAIConfig)(using ModelRegistryService) {
+  // OpenRouterClient is final: the helper holds one and calls its package-private members.
+  private val client = new OpenRouterClient(cfg)
   def exposedCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
-    createRequestBody(conversation, options)
+    client.createRequestBody(conversation, options)
 }

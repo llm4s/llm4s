@@ -91,6 +91,8 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
 [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
 [`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
+[final provider clients with one factory](#provider-clients-are-final-with-one-factory-2910),
+[`CachingLLMClient` and `CachedEmbeddingClient`'s private constructors](#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910),
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801),
 [the Hugging Face image client on Inference Providers](#the-hugging-face-image-client-calls-inference-providers-2832),
@@ -488,6 +490,71 @@ sets it to the descriptor's canonical id in any case.
 `ModelDimensionRegistry.LocalProvider` is removed, and `ModelDimensionRegistry.getDimension("local", model)` no
 longer answers from a built-in table: `local` is a provider id like any other, answered only by a registered
 embedding provider of that id.
+
+## Provider clients are final, with one factory (#2910)
+
+Most applications never name a provider client: `LLMConnect.getClient` builds one from a named section and returns
+an `LLMClient`, and nothing changes for them. This is for code that builds a client class directly.
+
+Every provider client is now a final class whose constructor is not public, with **one factory** that takes the
+config and an `LlmClientOptions` and returns a `Result`. The metrics collector, the exchange logging and the HTTP
+client, which were positional arguments, are the options' fields, so a new option no longer changes a signature.
+A config the client refuses is a `Left`, usually a `ConfigurationError`; the constructors threw
+`IllegalArgumentException`.
+
+It applies to `AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`,
+`OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient` and `PerplexityClient`, and to the six vendor factories
+below. With `AnthropicClient` as the example:
+
+| Before | After |
+|---|---|
+| `new AnthropicClient(config)` | `AnthropicClient(config)`, a `Result[AnthropicClient]`; in a `for`, `client <- AnthropicClient(config)` |
+| `new AnthropicClient(config, metrics)`, `AnthropicClient(config, metrics)` | `AnthropicClient(config, LlmClientOptions(metrics = metrics))` |
+| `AnthropicClient(config, metrics, exchangeLogging)` | `AnthropicClient(config, LlmClientOptions(metrics, exchangeLogging))` |
+| `GeminiClient(config, metrics, exchangeLogging, httpClient)` | `GeminiClient(config, LlmClientOptions(metrics, exchangeLogging).withHttpClient(httpClient))` |
+| `OllamaClient(config, httpClient = http)` | `OllamaClient(config, LlmClientOptions().withHttpClient(http))` |
+| `OpenAIClient(azureConfig)`, `OpenAIClient(azureConfig, metrics)` | `OpenAIClient.azure(azureConfig)`, `OpenAIClient.azure(azureConfig, LlmClientOptions(metrics = metrics))` |
+| `new OpenAICompatibleClient(settings, dialect, metrics, exchangeLogging)` | `OpenAICompatibleClient(settings, dialect, LlmClientOptions(metrics, exchangeLogging))`, a `Result` |
+| `try new OpenRouterClient(config) catch { case e: IllegalArgumentException => ... }` | `OpenRouterClient(config)` is a `Left(ConfigurationError)` |
+| `val client: DeepSeekClient = ...`, `Result[ZaiClient]`, `case _: OpenRouterClient` | `OpenAICompatibleClient`: the vendor types are not public. To tell vendors apart, compare `client.providerId` |
+| `new DeepSeekClient(config, metrics)` | `DeepSeekClient(config, LlmClientOptions(metrics = metrics))`, a `Result[OpenAICompatibleClient]` |
+| `class MyClient(...) extends OpenAICompatibleClient(settings, dialect)` | an `OpenAICompatibleDialect` passed to `OpenAICompatibleClient(settings, dialect, options)`; wrap the client to change anything else |
+| `class MyClient(config) extends AnthropicClient(config)`, overriding a `protected` member | no replacement: the classes are final. Wrap the client in your own `LLMClient` |
+
+`LlmClientOptions` is in `org.llm4s.llmconnect`. As before, a client built on a vendor SDK (`AnthropicClient`,
+`OpenAIClient`, `BedrockClient`) ignores `options.httpClient`, as does `PerplexityClient`, and a client you give one to
+leaves it open when it is closed.
+
+**The vendor client types on `OpenAICompatibleClient` are no longer public.** `DeepSeekClient`, `ZaiClient`,
+`OpenRouterClient`, `MistralClient`, `CohereClient` and `XaiClient` were subclasses that added nothing to
+`OpenAICompatibleClient` but a vendor's settings and dialect. The classes are now private to
+`llm4s-openai-compatible`, and each name is only a factory: `DeepSeekClient(config, options)` and its five siblings
+return a `Result[OpenAICompatibleClient]`, which is the type to declare. A client's vendor is its `providerId`
+(`deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`).
+
+`OpenAIClient` has two factories because it serves two config types: `OpenAIClient(config: OpenAIConfig, options)` and
+`OpenAIClient.azure(config: AzureConfig, options)`. `OpenAICompatibleClient` has two as well, one for an
+`OpenAICompatibleConfig` and one for `Settings` and a dialect; the second takes its options explicitly.
+
+The members that were `protected[provider]` (`createRequestBody`, `parseCompletion`, `parseStreamingChunks`,
+`requestTimeout`, `streamTimeout` and the like) are `private[provider]`: they were never callable from outside
+`org.llm4s.llmconnect.provider`, and are no longer points to override.
+
+## `CachingLLMClient` and `CachedEmbeddingClient` have private constructors (#2910)
+
+Both classes are final and their constructors private, so that a setting can be added without breaking a caller.
+Build them with the companion's `apply`, which takes what the constructor took:
+
+| Before | After |
+|---|---|
+| `new CachingLLMClient(base, embeddings, model, config, tracing)` | `CachingLLMClient(base, embeddings, model, config, tracing)` |
+| `new CachingLLMClient(base, embeddings, model, config, tracing, clock)` | `CachingLLMClient(base, embeddings, model, config, tracing).withClock(clock)` |
+| `new CachedEmbeddingClient(base, cache)` | `CachedEmbeddingClient(base, cache)` |
+| `new CachedEmbeddingClient(base, cache, keyGenerator)` | `CachedEmbeddingClient(base, cache, keyGenerator)` |
+| a subclass of either | no replacement: wrap the client instead |
+
+`withClock` returns a new client with an empty cache, so call it where the client is built, not on one that has
+already answered requests.
 
 ## `ReliableClient` has a private constructor (#2797)
 

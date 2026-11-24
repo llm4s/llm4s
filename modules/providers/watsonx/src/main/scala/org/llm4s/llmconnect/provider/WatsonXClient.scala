@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -146,8 +147,11 @@ import scala.util.{ Try, Using }
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging optional provider exchange logging.
  * @param httpClient      used for both the model calls and the IAM exchange.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
-class WatsonXClient(
+final class WatsonXClient private[provider] (
   config: WatsonXConfig,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -167,10 +171,10 @@ class WatsonXClient(
   protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
-  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
+  private[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
 
   /** How long a streamed call may take: the section's `timeouts.stream`, else [[WatsonXClient.DefaultStreamTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
+  private[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
   /** An IAM token, and the API key it was exchanged for: a token from a key since rotated away is not reused. */
   final private case class IamToken(value: String, expiresAt: Long, apiKey: String)
@@ -893,17 +897,22 @@ object WatsonXClient {
     )
 
   /**
-   * Constructs a [[WatsonXClient]], wrapping any construction-time exception in a `Left`.
+   * A [[WatsonXClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient`, when set, carries every request and stays the caller's to close.
    *
-   * @param config          model, credentials, project or space and endpoints.
-   * @param metrics         receives per-call latency and token-usage events.
-   * @param exchangeLogging optional provider exchange logging.
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
    */
-  def apply(
-    config: WatsonXConfig,
-    metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[WatsonXClient] =
-    Try(new WatsonXClient(config, metrics, exchangeLogging, httpClient)).toResult
+  def apply(config: WatsonXConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[WatsonXClient] =
+    Try(
+      new WatsonXClient(
+        config,
+        options.metrics,
+        options.exchangeLogging,
+        Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+      )
+    ).toResult
 }

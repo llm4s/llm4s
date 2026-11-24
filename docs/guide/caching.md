@@ -61,7 +61,7 @@ val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
 for {
   cache <- InMemoryEmbeddingCache.create(maxSize = 10000, ttl = Some(1.hour))
-  cached = new CachedEmbeddingClient(base, cache)
+  cached = CachedEmbeddingClient(base, cache)
   _ <- cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
   _ <- cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
 } yield cached.cacheStats
@@ -79,7 +79,7 @@ val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
 for {
   cache <- InMemoryEmbeddingCache.create()
-  queries = new CachedEmbeddingClient(base, cache)
+  queries = CachedEmbeddingClient(base, cache)
   _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
   _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
   _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
@@ -99,7 +99,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
 
 // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
-InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(CachedEmbeddingClient(base, cache)))
 ```
 
 `cacheStats` returns `Some(CacheStats(size, hits, misses))` for a backend that keeps statistics (`InMemoryEmbeddingCache` does), and `None` for one that does not; `totalRequests` and `hitRatePercent` are computed from `hits` and `misses`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. `clearCache()` calls the backend's `clear()` and returns its `Result`: `InMemoryEmbeddingCache` empties itself and resets its statistics.
@@ -132,7 +132,7 @@ def tenantKey(tenant: String)(text: String, request: EmbeddingRequest): String =
   CacheKeyGenerator.sha256(tenant, request.model.name.asString, request.purpose.toString, text)
 
 val cached =
-  InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
+  InMemoryEmbeddingCache.create().map(cache => CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
 cached.flatMap(
   _.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
@@ -204,7 +204,7 @@ import org.llm4s.llmconnect.caching.CachingLLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
 
-new CachingLLMClient(
+CachingLLMClient(
   baseClient = baseClient,
   embeddingClient = embeddingClient,
   embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
@@ -245,7 +245,7 @@ Do not use `1.0` to mean "exact match". Similarity is computed in floating point
 
 - An entry older than `ttl` is skipped (one exactly `ttl` old is still used, as in the embedding cache), but it is **not removed**. It stays in memory until the least-recently-used rule evicts it, so `maxSize`, not `ttl`, is what bounds memory.
 - The lookup compares the new embedding with every stored entry, so its cost grows with `maxSize`. Keep it modest.
-- Use the `clock` constructor parameter to control time in tests. It is only consulted for the TTL:
+- Use `withClock` to control time in tests. The clock is only consulted for the TTL, and `withClock` returns a new client with an empty cache, so call it where the client is built:
 
 ```scala
 import org.llm4s.llmconnect.caching.CachingLLMClient
@@ -253,14 +253,13 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 // The clock only decides whether an entry is still within its TTL. Tests pass a fixed, movable one.
-new CachingLLMClient(
+CachingLLMClient(
   baseClient,
   embeddingClient,
   EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
   cacheConfig,
-  tracing,
-  clock
-)
+  tracing
+).withClock(clock)
 ```
 
 ### What is never cached

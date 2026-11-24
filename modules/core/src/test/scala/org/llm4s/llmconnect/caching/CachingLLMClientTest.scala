@@ -84,7 +84,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val tracing   = new MockTracing()
     val clock     = new MockClock()
 
-    val client = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, clock)
+    val client = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(clock)
 
     val conversation = Conversation.userOnly("Hello").getOrElse(fail())
 
@@ -109,7 +109,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(new MockClock())
     val image = ContentPart
       .image(
         org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
@@ -127,14 +127,13 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
   test("A conversation with a null part goes to the base client, never throws") {
     val mockLLM = new MockLLMClient()
     val client =
-      new CachingLLMClient(
+      CachingLLMClient(
         mockLLM,
         new MockEmbeddingClient(Map.empty),
         embeddingModel,
         config,
-        new MockTracing(),
-        new MockClock()
-      )
+        new MockTracing()
+      ).withClock(new MockClock())
     noException should be thrownBy client.complete(Conversation(Seq(UserMessage(null: Vector[ContentPart]))))
     mockLLM.callCount shouldBe 1
   }
@@ -143,7 +142,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(new MockClock())
 
     val conv = Conversation.userOnly("Hello").getOrElse(fail())
 
@@ -167,7 +166,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(new MockClock())
     val conv      = Conversation.userOnly("Hello").getOrElse(fail())
     val adaptive  = CompletionOptions().withThinking(Thinking.Adaptive).withReasoning(ReasoningEffort.Low)
 
@@ -190,7 +189,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(new MockClock())
     val conv      = Conversation.userOnly("Hello").getOrElse(fail())
 
     client.complete(conv, CompletionOptions())
@@ -204,7 +203,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
     val clock     = new MockClock()
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, clock)
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(clock)
 
     val conv = Conversation.userOnly("Hello").getOrElse(fail())
 
@@ -248,7 +247,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
   test("A tool loop bypasses the cache: step 2 is never served step 1's tool-call completion") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("weather" -> Seq(1.0, 0.0, 0.0)))
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
+    val client =
+      CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing()).withClock(new MockClock())
 
     val step1 = Conversation(Seq(UserMessage("What is the weather?")))
     val step2 = Conversation(
@@ -269,7 +269,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map.empty)
     val tracing   = new MockTracing()
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val client    = CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing).withClock(new MockClock())
 
     val conversation = Conversation(
       messages = List(
@@ -292,7 +292,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
   test("Security: Prompt text excludes assistant messages") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map.empty)
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
+    val client =
+      CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing()).withClock(new MockClock())
 
     val conversation = Conversation(
       messages = List(
