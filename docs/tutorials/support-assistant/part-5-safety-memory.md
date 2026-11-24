@@ -5,7 +5,7 @@ parent: Build a Support Assistant
 grand_parent: Tutorials
 nav_order: 5
 description: "Support assistant tutorial, part 5: LLM4S guardrails that mask personal data and refuse prompt injection, and a conversation that remembers the turn before."
-search_title: "Support assistant tutorial 5: guardrails, PII masking and memory in Scala"
+search_title: "Support assistant tutorial 5: guardrails and memory"
 ---
 
 # Part 5: safety and memory

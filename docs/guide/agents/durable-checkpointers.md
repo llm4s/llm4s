@@ -646,6 +646,7 @@ llm4s.agent {
 ```
 
 ```scala
+import org.llm4s.agent.Agent
 import org.llm4s.agent.service.RunSubmitter
 import org.llm4s.config.{ CheckpointerConfigLoader, RunQueueConfigLoader, RuntimeConfigLoader }
 
@@ -842,13 +843,14 @@ val config = RunConfig().withTenantId(TenantId("acme")).withMetadata(Map("custom
 runtime.start(threadId, graph, input, config)
 runtime.updateMetadata(threadId, ThreadMetadata("customer" -> "c-42", "channel" -> "email"), config)
 
-val page = store.threads(
+store.threads(
   ThreadQuery(Some(TenantId("acme")))
     .withStatus(ThreadStatus.Suspended)
     .withMetadata(ThreadMetadata("customer" -> "c-42"))
-)
-page.threads.foreach(t => println(s"${t.threadId.value} ${t.status} ${t.updatedAt}"))
-val next = page.next.map(cursor => store.threads(ThreadQuery(Some(TenantId("acme"))).withAfter(cursor)))
+).foreach { page =>
+  page.threads.foreach(t => println(s"${t.threadId.value} ${t.status} ${t.updatedAt}"))
+  val next = page.next.map(cursor => store.threads(ThreadQuery(Some(TenantId("acme"))).withAfter(cursor)))
+}
 ```
 
 - **Tenant-scoped.** Every query names one tenant (`None` finds only threads of no tenant) and never sees another's.

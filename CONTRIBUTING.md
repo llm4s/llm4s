@@ -475,9 +475,12 @@ matches the code. Which pages are checked, and the order to convert the rest in,
   meant to be copied on its own gets its missing imports written into it.
 - **`modules/samples/src/test/docs-snippets/skip.txt`** lists the blocks that cannot compile as written, one per
   line as `page | hash | action | detail`. `skip | reason` leaves the block out: an sbt build definition, Liquid
-  template lines, declared pseudocode. `with | import a.B; import c._` compiles it after those imports, for a
-  fragment that relies on imports shown earlier on the page. An entry whose block was edited or removed fails the
-  build, so every listed block is looked at again when it changes.
+  template lines, declared pseudocode, an outline with elided bodies. `with | import a.B; import c._` compiles it
+  after those imports, for a fragment that relies on imports shown earlier on the page. The same list can declare a
+  stand-in for a value an earlier block on the page defines or the prose names, typed and never evaluated:
+  `with | import org.llm4s.trace.store._; val store: InMemoryTraceStore = ???` (one statement per `;`, so a
+  stand-in cannot contain a `;` itself). An entry whose block was edited or removed fails the build, so every
+  listed block is looked at again when it changes.
 - **Values a page assumes** ("here `client` is any `LLMClient`") come from
   `modules/samples/src/test/scala/org/llm4s/samples/docs/SnippetEnv.scala`. Add a member only when the page text
   says the value is assumed; a name the page forgot to define or import is a bug to fix on the page.

@@ -1,6 +1,7 @@
 ---
 layout: page
 title: "RFC 0008: Generation controls and reported adjustments"
+description: "RFC 0008: typed generation controls in CompletionOptions and the adjustments a provider reports when it changes or drops one."
 parent: RFCs
 grand_parent: Reference
 nav_order: 8

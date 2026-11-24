@@ -3,8 +3,10 @@
 # <meta name="description"> (#2314). jekyll-seo-tag falls back to the site-wide description when a page sets none, so
 # a page without its own description looks like every other page in a search result.
 #
-# Pages checked: docs/index.md and every page under docs/{getting-started,guide,examples,reference,migrations,scala-ai,
-# advanced,api,community}. Scaladoc, design records and the other top-level pages are out of scope.
+# Pages checked: every page the site serves (#2833). In the source mode that is every docs/**/*.md with front matter
+# (a file without it is copied, not rendered), except under a directory Jekyll ignores (`_`-prefixed, other than
+# `_posts`) and the paths `exclude:` in docs/_config.yml names (design records, repository-only files). In the
+# built-site mode it is every .html except the generated Scaladoc under scaladoc/ and redirect_from stubs.
 #
 # Two modes, one rule set:
 #   scripts/check-doc-seo.sh                   the source: every page's front matter. No Jekyll needed, so it runs
@@ -48,7 +50,6 @@ import html, os, pathlib, re, sys
 from collections import defaultdict
 
 MODE, SITE, BASELINE = os.environ["MODE"], os.environ["SITE"], os.environ["BASELINE"]
-SECTIONS = ("getting-started", "guide", "examples", "reference", "migrations", "scala-ai", "advanced", "api", "community")
 DENY = {"home", "index", "overview"}
 DESC_MIN, DESC_MAX = 50, 170
 SEARCH_TITLE_MAX, TITLE_MAX = 60, 70
@@ -86,14 +87,33 @@ def front_matter(text):
             out[key] = (out[key] + " " + line.strip()).strip()
     return out
 
+def jekyll_excludes():
+    """The `exclude:` list of docs/_config.yml: paths relative to docs/, a trailing `/` for a directory."""
+    cfg = pathlib.Path("docs/_config.yml")
+    if not cfg.exists():
+        return []
+    m = re.search(r"^exclude:[ \t]*\n((?:[ \t]*(?:-.*|#.*)?\n)+)", cfg.read_text(encoding="utf-8"), re.M)
+    if not m:
+        return []
+    return [re.sub(r"\s+#.*$", "", l.strip()[1:]).strip().strip("\"'")
+            for l in m.group(1).splitlines() if l.strip().startswith("-")]
+
+def served(rel, excludes):
+    """Whether Jekyll renders docs/<rel>: not under an ignored `_` directory or an excluded path."""
+    parts = rel.split("/")
+    if any(part.startswith(("_", ".")) and part != "_posts" for part in parts[:-1]):
+        return False
+    for ex in excludes:
+        if ex.endswith("/") and (rel + "/").startswith(ex) or rel == ex.rstrip("/"):
+            return False
+    return True
+
 def collect_source():
     pages = {}
-    files = [pathlib.Path("docs/index.md")]
-    for sec in SECTIONS:
-        files += sorted(pathlib.Path("docs", sec).rglob("*.md"))
+    root = pathlib.Path("docs")
+    excludes = jekyll_excludes()
+    files = [p for p in sorted(root.rglob("*.md")) if served(p.relative_to(root).as_posix(), excludes)]
     for p in files:
-        if not p.exists():
-            continue
         fm = front_matter(p.read_text(encoding="utf-8"))
         if fm is None:      # no front matter: Jekyll copies the file, it is not a page
             continue
@@ -106,12 +126,8 @@ def collect_source():
 def collect_site():
     root = pathlib.Path(SITE)
     pages = {}
-    files = [root / "index.html"]
-    for sec in SECTIONS:
-        files += sorted((root / sec).rglob("*.html"))
+    files = [p for p in sorted(root.rglob("*.html")) if p.relative_to(root).parts[0] != "scaladoc"]
     for p in files:
-        if not p.exists():
-            continue
         text = p.read_text(encoding="utf-8", errors="replace")
         head = text[: text.find("</head>")] if "</head>" in text else text
         if re.search(r'http-equiv="refresh"', head, re.I):   # a redirect_from stub

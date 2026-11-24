@@ -2082,7 +2082,10 @@ lazy val samples = (project in file("modules//samples"))
     configPolicy    % Test,
     providerTestkit % Test,
     // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
-    repl % Test
+    repl % Test,
+    // Test scope: docs/guide/agents/durable-checkpointers.md's and multiple-machines.md's Postgres snippets are
+    // compiled (#2833).
+    agentCheckpointPostgres % Test
   )
   .settings(
     name := "llm4s-samples",

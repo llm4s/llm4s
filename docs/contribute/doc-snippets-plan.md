@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Checked Code Blocks
+description: "Which LLM4S documentation pages have their Scala code blocks compiled on every build, how a block is skipped, and the pages still to convert."
 parent: Contribute
 nav_order: 8
 ---
@@ -43,15 +44,82 @@ not convert the same one.
 
 | Page | Scala blocks | Status |
 |---|---|---|
-| `getting-started/configuration.md` | 14 | checked |
+| `ai-assistants.md` | 4 | checked |
+| `examples/index.md` | 9 | checked |
+| `getting-started/configuration-in-code.md` | 6 | checked |
+| `getting-started/configuration.md` | 18 | checked |
 | `getting-started/first-example.md` | 23 | checked |
-| `getting-started/installation.md` | 34 | checked |
+| `getting-started/installation.md` | 49 | checked |
+| `getting-started/local-jlama.md` | 3 | checked |
 | `getting-started/next-steps.md` | 10 | checked |
 | `getting-started/ollama-quickstart.md` | 7 | checked |
-| `getting-started/testing-guide.md` | 7 | checked |
+| `getting-started/repl.md` | 5 | checked |
+| `getting-started/testing-guide.md` | 8 | checked |
+| `guide/agents/delegation.md` | 6 | checked |
+| `guide/agents/durable-checkpointers.md` | 22 | checked |
+| `guide/agents/graphs.md` | 6 | checked |
+| `guide/agents/guardrails.md` | 27 | checked |
+| `guide/agents/handoffs.md` | 15 | checked |
+| `guide/agents/human-review.md` | 4 | checked |
+| `guide/agents/index.md` | 29 | checked |
+| `guide/agents/memory.md` | 29 | checked |
+| `guide/agents/middleware.md` | 13 | checked |
+| `guide/agents/multiple-machines.md` | 3 | checked |
+| `guide/agents/streaming.md` | 9 | checked |
 | `guide/basic-usage.md` | 14 | checked |
+| `guide/builtin-tools.md` | 7 | checked |
+| `guide/caching.md` | 9 | checked |
+| `guide/cats-effect.md` | 7 | checked |
+| `guide/context-window-pruning.md` | 25 | checked |
+| `guide/cost-controls.md` | 6 | checked |
+| `guide/custom-tools.md` | 8 | checked |
+| `guide/data-protection.md` | 3 | checked |
+| `guide/direct-style.md` | 11 | checked |
+| `guide/document-loaders.md` | 12 | checked |
+| `guide/embeddings.md` | 6 | checked |
 | `guide/error-handling.md` | 12 | checked |
-| `guide/providers.md` | 19 | checked |
+| `guide/for-python-developers.md` | 8 | checked |
+| `guide/http-transport.md` | 3 | checked |
+| `guide/image-generation.md` | 4 | checked |
+| `guide/jev.md` | 6 | checked |
+| `guide/kafka.md` | 9 | checked |
+| `guide/modular-rag-example.md` | 1 | checked |
+| `guide/multimodal.md` | 2 | checked |
+| `guide/observability/agents.md` | 5 | checked |
+| `guide/observability/enhanced-tracing-use-cases.md` | 14 | checked |
+| `guide/observability/provider-exchange-logging.md` | 6 | checked |
+| `guide/patterns/error-recovery.md` | 1 | checked |
+| `guide/patterns/multi-agent-orchestration.md` | 1 | checked |
+| `guide/patterns/production-monitoring.md` | 1 | checked |
+| `guide/patterns/rag-enterprise.md` | 1 | checked |
+| `guide/patterns/scaling-strategies.md` | 1 | checked |
+| `guide/patterns/security-best-practices.md` | 2 | checked |
+| `guide/permission-based-rag.md` | 23 | checked |
+| `guide/prompts.md` | 6 | checked |
+| `guide/providers.md` | 23 | checked |
+| `guide/rag-evaluation.md` | 9 | checked |
+| `guide/rag-query-transformers.md` | 7 | checked |
+| `guide/reference-architecture.md` | 4 | checked |
+| `guide/reliability.md` | 37 | checked |
+| `guide/replacing-a-python-sidecar.md` | 3 | checked |
+| `guide/secrets.md` | 3 | checked |
+| `guide/speech.md` | 5 | checked |
+| `guide/stt-domain-model.md` | 20 | checked |
+| `guide/tapir-tools.md` | 5 | checked |
+| `guide/vector-store.md` | 51 | checked |
+| `guide/zio.md` | 7 | checked |
+| `index.md` | 1 | checked |
+| `reference/doctor.md` | 2 | checked |
+| `reference/model-metadata.md` | 5 | checked |
+| `scala-ai/agents.md` | 2 | checked |
+| `scala-ai/llm-framework.md` | 3 | checked |
+| `scala-ai/providers.md` | 2 | checked |
+| `scala-ai/rag.md` | 4 | checked |
+| `tutorials/support-assistant/part-1-first-call.md` | 3 | checked |
+| `tutorials/support-assistant/part-2-typed-answers.md` | 3 | checked |
+| `tutorials/support-assistant/part-3-tools.md` | 3 | checked |
+| `tutorials/support-assistant/part-4-help-centre.md` | 4 | checked |
+| `tutorials/support-assistant/part-5-safety-memory.md` | 3 | checked |
 | `guide/migrating-from-langchain4j.md` | 9 | checked by `ComparisonGuideSpec` |
 
 ## To convert, in this order
@@ -65,70 +133,42 @@ not the page.
 | # | Page | Scala blocks |
 |---|---|---|
 | 1 | `getting-started/scala-cli.md` | 1 |
-| 2 | `index.md` | 3 |
-| 3 | `guide/vector-store.md` | 41 |
-| 4 | `guide/permission-based-rag.md` | 22 |
-| 5 | `guide/structured-output.md` | 6 |
-| 6 | `guide/image-generation.md` | 3 |
-| 7 | `guide/speech.md` | 5 |
-| 8 | `guide/builtin-tools.md` | 7 |
-| 9 | `guide/context-window-pruning.md` | 24 |
-| 10 | `guide/agents/index.md` | 25 |
-| 11 | `guide/agents/guardrails.md` | 24 |
-| 12 | `guide/agents/memory.md` | 29 |
-| 13 | `guide/agents/handoffs.md` | 15 |
-| 14 | `guide/agents/streaming.md` | 7 |
-| 15 | `guide/agents/durable-checkpointers.md` | 14 |
-| 16 | `guide/agents/human-review.md` | 4 |
-| 17 | `guide/agents/delegation.md` | 6 |
-| 18 | `guide/writing-a-provider.md` | 23 |
-| 19 | `guide/cats-effect.md` | 7 |
-| 20 | `guide/zio.md` | 7 |
-| 21 | `guide/caching.md` | 8 |
-| 22 | `guide/json-libraries.md` | 12 |
-| 23 | `guide/rag-evaluation.md` | 7 |
-| 24 | `guide/java.md` | 1 |
-| 25 | `guide/observability/index.md` | 21 |
-| 26 | `guide/observability/provider-exchange-logging.md` | 6 |
-| 27 | `guide/observability/micrometer.md` | 4 |
-| 28 | `guide/observability/enhanced-tracing-use-cases.md` | 14 |
-| 29 | `guide/production-deployment.md` | 15 |
-| 30 | `guide/rag-query-transformers.md` | 7 |
-| 31 | `guide/pekko.md` | 8 |
-| 32 | `guide/jev.md` | 6 |
-| 33 | `guide/derived-schemas.md` | 8 |
-| 34 | `guide/testing-with-the-testkit.md` | 20 |
-| 35 | `guide/multimodal.md` | 2 |
-| 36 | `guide/stt-domain-model.md` | 28 |
-| 37 | `examples/index.md` | 9 |
-| 38 | `examples/cookbook/caching.md` | 2 |
-| 39 | `examples/cookbook/document-qa.md` | 1 |
-| 40 | `examples/cookbook/email-extraction.md` | 1 |
-| 41 | `examples/cookbook/fallback.md` | 2 |
-| 42 | `examples/cookbook/folder-qa.md` | 2 |
-| 43 | `examples/cookbook/guardrails.md` | 1 |
-| 44 | `examples/cookbook/judge.md` | 1 |
-| 45 | `examples/cookbook/memory.md` | 1 |
-| 46 | `examples/cookbook/multi-agent-graph.md` | 1 |
-| 47 | `examples/cookbook/streaming.md` | 1 |
-| 48 | `examples/cookbook/structured-output.md` | 2 |
-| 49 | `examples/cookbook/summarise.md` | 1 |
-| 50 | `examples/cookbook/tool-calling.md` | 1 |
-| 51 | `reference/migration.md` | 85 |
-| 52 | `migrations/0-4-1-to-0-5-0.md` | 4 |
-| 53 | `migrations/0x-to-1x.md` | 3 |
-| 54 | `migrations/v0.2.9-to-v0.3.0.md` | 10 |
-| 55 | `reference/testing-guide.md` | 4 |
-| 56 | `reference/postgres-memory-store.md` | 4 |
-| 57 | `reference/workspace-sandbox.md` | 2 |
-| 58 | `reference/dependency-conflicts.md` | 1 |
-| 59 | `reference/api-stability.md` | 1 |
-| 60 | `reference/contributing.md` | 2 |
-| 61 | `reference/review-guidelines.md` | 57 |
-| 62 | `api/index.md` | 9 |
-| 63 | `guide/reliability.md` | 38 |
-| 64 | `reference/model-metadata.md` | 16 |
-| 65 | `reference/rag-benchmark-results.md` | 2 |
+| 2 | `guide/structured-output.md` | 6 |
+| 3 | `guide/writing-a-provider.md` | 23 |
+| 4 | `guide/json-libraries.md` | 12 |
+| 5 | `guide/java.md` | 1 |
+| 6 | `guide/observability/index.md` | 21 |
+| 7 | `guide/observability/micrometer.md` | 4 |
+| 8 | `guide/production-deployment.md` | 15 |
+| 9 | `guide/pekko.md` | 8 |
+| 10 | `guide/derived-schemas.md` | 8 |
+| 11 | `guide/testing-with-the-testkit.md` | 20 |
+| 12 | `examples/cookbook/caching.md` | 2 |
+| 13 | `examples/cookbook/document-qa.md` | 1 |
+| 14 | `examples/cookbook/email-extraction.md` | 1 |
+| 15 | `examples/cookbook/fallback.md` | 2 |
+| 16 | `examples/cookbook/folder-qa.md` | 2 |
+| 17 | `examples/cookbook/guardrails.md` | 1 |
+| 18 | `examples/cookbook/judge.md` | 1 |
+| 19 | `examples/cookbook/memory.md` | 1 |
+| 20 | `examples/cookbook/multi-agent-graph.md` | 1 |
+| 21 | `examples/cookbook/streaming.md` | 1 |
+| 22 | `examples/cookbook/structured-output.md` | 2 |
+| 23 | `examples/cookbook/summarise.md` | 1 |
+| 24 | `examples/cookbook/tool-calling.md` | 1 |
+| 25 | `reference/migration.md` | 85 |
+| 26 | `migrations/0-4-1-to-0-5-0.md` | 4 |
+| 27 | `migrations/0x-to-1x.md` | 3 |
+| 28 | `migrations/v0.2.9-to-v0.3.0.md` | 10 |
+| 29 | `reference/testing-guide.md` | 4 |
+| 30 | `reference/postgres-memory-store.md` | 4 |
+| 31 | `reference/workspace-sandbox.md` | 2 |
+| 32 | `reference/dependency-conflicts.md` | 1 |
+| 33 | `reference/api-stability.md` | 1 |
+| 34 | `reference/contributing.md` | 2 |
+| 35 | `reference/review-guidelines.md` | 57 |
+| 36 | `api/index.md` | 9 |
+| 37 | `reference/rag-benchmark-results.md` | 2 |
 
 ## Not planned
 

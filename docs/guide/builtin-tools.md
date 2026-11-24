@@ -148,8 +148,8 @@ import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
 val registry = for {
   config <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
   search <- DuckDuckGoSearchTool.create(config)
-  toolRegistry <- ToolRegistry.of(core :+ search)
   core   <- BuiltinTools.coreSafe
+  toolRegistry <- ToolRegistry.of(core :+ search)
 } yield toolRegistry
 ```
 

@@ -255,7 +255,7 @@ val result = manager.recordMessage(
 )
 
 // Record several messages at once
-val result = manager.recordConversation(
+val batch = manager.recordConversation(
   messages = Seq(UserMessage("And in Rome?"), AssistantMessage("Sunny, 24 degrees.")),
   conversationId = "conv-789"
 )
@@ -327,7 +327,7 @@ Fast but volatile - loses data on restart. Each store is an immutable value: a w
 new store, and `SimpleMemoryManager` keeps track of it for you.
 
 ```scala
-import org.llm4s.agent.memory.InMemoryStore
+import org.llm4s.agent.memory.{ InMemoryStore, SimpleMemoryManager }
 
 val store = InMemoryStore.empty
 val manager = SimpleMemoryManager.withStore(store)
@@ -492,6 +492,7 @@ above, with `recordMessage` or `recordConversation`.
 
 ```scala
 import org.llm4s.agent.memory._
+import org.llm4s.types.Result
 
 import scala.util.Using
 
