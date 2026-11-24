@@ -44,7 +44,7 @@ class IdempotencyKeySuspendSpec extends AnyFlatSpec with Matchers {
   private def builder(client: ScriptedLLMClient, keys: Keys): AgentBuilder =
     Agent
       .builder("assistant", client)
-      .withTools(SpecTools.set(keys.deploy))
+      .withToolSet(SpecTools.set(keys.deploy))
       .withRuntime(GraphRuntime(new InMemoryCheckpointer()))
 
   /** The keys of the two calls in a turn that never suspends. */

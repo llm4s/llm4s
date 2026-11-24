@@ -171,7 +171,7 @@ object ParallelDeepResearch {
       agent <- Agent
         .builder(AgentName, client)
         .withHarness(profile)
-        .withTools(tools)
+        .withToolSet(tools)
         .withOutput(DeepResearch.briefSchema)
         .withStreaming()
         .withMaxSteps(20)

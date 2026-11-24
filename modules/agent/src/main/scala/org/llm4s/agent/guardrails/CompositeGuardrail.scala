@@ -28,7 +28,7 @@ class CompositeGuardrail[A](
   def validate(value: A): Result[A] = run(value)(_.validate(value))
 
   /** As `validate(value)`, each guardrail validating with `context`, so a judge's calls are accounted. */
-  override def validate(value: A, context: UsageAccounting): Result[A] = run(value)(_.validate(value, context))
+  override def validateIn(value: A, context: UsageAccounting): Result[A] = run(value)(_.validateIn(value, context))
 
   private def run(value: A)(check: Guardrail[A] => Result[A]): Result[A] = mode match {
     case ValidationMode.All =>
@@ -127,8 +127,8 @@ object CompositeGuardrail {
     def validate(value: A): Result[A] =
       guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate))
 
-    override def validate(value: A, context: UsageAccounting): Result[A] =
-      guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate(_, context)))
+    override def validateIn(value: A, context: UsageAccounting): Result[A] =
+      guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validateIn(_, context)))
 
     val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"
 

@@ -123,4 +123,4 @@ object ExampleAgent:
     val tools = config.model match
       case AgentModel.Demo     => ToolSet.of(pauseTool(config.toolDelay, metrics))
       case AgentModel.Provider => Right(ToolSet.empty)
-    tools.flatMap(set => builder.withTools(set).build())
+    tools.flatMap(set => builder.withToolSet(set).build())

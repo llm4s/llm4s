@@ -200,7 +200,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
   it should "fail the check in a graph whose state has no message history" in {
     val wrapped = RAGGuardrail.withTurnContext(GroundingGuardrail(judge()))(fromSearch)
 
-    wrapped.validate("anything", testModelContext()) shouldBe a[Left[GraphError.UnknownStateKey, ?]]
+    wrapped.validateIn("anything", testModelContext()) shouldBe a[Left[GraphError.UnknownStateKey, ?]]
   }
 
   "RAGContext.fromToolResults" should "take the query from the user message and one chunk per named tool's result" in {

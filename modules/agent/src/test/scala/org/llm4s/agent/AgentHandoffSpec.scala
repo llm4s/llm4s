@@ -210,7 +210,7 @@ class AgentHandoffSpec extends AnyFlatSpec with Matchers {
       Agent
         .builder("physics", physicsClient)
         .withSystemPrompt("You are a physicist")
-        .withTools(SpecTools.set(gravity))
+        .withToolSet(SpecTools.set(gravity))
     val agent = built(
       Agent.builder("triage", root).withSystemPrompt("You are triage").withHandoffs(Handoff.to("physics", physics))
     )

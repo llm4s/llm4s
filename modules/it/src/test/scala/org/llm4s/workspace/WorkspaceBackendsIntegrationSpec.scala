@@ -81,7 +81,7 @@ private object LiveWorkspace {
       )
     Agent
       .builder("it", client)
-      .withTools(ToolSet.of(tool).fold(e => throw new IllegalStateException(e.message), identity))
+      .withToolSet(ToolSet.of(tool).fold(e => throw new IllegalStateException(e.message), identity))
       .build()
       .flatMap(_.run("go"))
       .fold(e => throw new IllegalStateException(e.message), _ => out.get)

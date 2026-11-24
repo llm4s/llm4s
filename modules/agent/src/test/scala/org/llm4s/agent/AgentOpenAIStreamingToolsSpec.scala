@@ -90,7 +90,7 @@ class AgentOpenAIStreamingToolsSpec extends AnyFlatSpec with TestTimeLimit with 
       val agent = built(
         Agent
           .builder("assistant", c)
-          .withTools(SpecTools.set(lookup))
+          .withToolSet(SpecTools.set(lookup))
           .withSystemPrompt("Use the tools to answer.")
           .withStreaming()
       )

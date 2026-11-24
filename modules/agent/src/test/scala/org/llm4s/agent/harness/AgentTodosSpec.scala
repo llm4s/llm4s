@@ -126,7 +126,7 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     def agent(builder: AgentBuilder) =
       built(
         builder
-          .withTools(
+          .withToolSet(
             org.llm4s.agent.SpecTools.set(
               org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
                 org.llm4s.agent.graph.tool.ToolOutcome

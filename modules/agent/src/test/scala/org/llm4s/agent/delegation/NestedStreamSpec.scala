@@ -492,7 +492,7 @@ class NestedStreamSpec
           ScriptedLLMClient.of(SpecTools.calling(SpecTools.call("k1", "gate")), CompletionFixture.simple("r"))
         )
         .withRuntime(runtime)
-        .withTools(SpecTools.set(gate))
+        .withToolSet(SpecTools.set(gate))
         .build()
         .value
       val delegate = SpecTools.tool("delegate") { (args, ctx) =>
@@ -515,7 +515,7 @@ class NestedStreamSpec
           ScriptedLLMClient.of(SpecTools.calling(SpecTools.call("c1", "delegate")), CompletionFixture.simple("ok"))
         )
         .withRuntime(runtime)
-        .withTools(SpecTools.set(delegate))
+        .withToolSet(SpecTools.set(delegate))
         .build()
         .value
       (parent, child)

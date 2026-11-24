@@ -50,7 +50,7 @@ class SqliteAbandonSpec extends AnyFlatSpec with Matchers with EitherValues with
       Agent
         .builder("assistant", client)
         .withRuntime(new GraphRuntime(store))
-        .withTools(SpecTools.set(good, slow))
+        .withToolSet(SpecTools.set(good, slow))
         .build()
         .value
   }

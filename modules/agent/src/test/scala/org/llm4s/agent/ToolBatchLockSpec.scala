@@ -53,7 +53,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "increment", "counter"), call("c2", "increment", "counter")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(increment(locked = true))))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(increment(locked = true))))
     toolResults(agent.run("go").value) shouldBe Vector("1", "2")
   }
 
@@ -62,7 +62,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "increment", "counter"), call("c2", "increment", "counter")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(increment(locked = false))))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(increment(locked = false))))
     toolResults(agent.run("go").value) shouldBe Vector("1", "1")
   }
 
@@ -92,7 +92,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("a", "work", "x"), call("b", "work", "y"), call("c", "work", "x")),
       CompletionFixture.simple("done")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     val result = agent.run("go").value
 
     toolResults(result) shouldBe Vector("x:met", "y:met", "x:met")
@@ -108,7 +108,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       built(
         Agent
           .builder("assistant", client)
-          .withTools(SpecTools.set(logging(log, Some(new CountDownLatch(2)), locked = false)))
+          .withToolSet(SpecTools.set(logging(log, Some(new CountDownLatch(2)), locked = false)))
       )
     toolResults(agent.run("go").value) shouldBe Vector("met", "met")
   }
@@ -127,7 +127,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     // c1 and c3 share the first snapshot; c2 waits for c1 and sees its write
     toolResults(agent.run("go").value) shouldBe Vector("1", "2", "1")
   }
@@ -150,7 +150,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "step", "one"), call("c2", "step", "two")),
       CompletionFixture.simple("all done")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     val thread = ThreadId("locked-recover")
 
     cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
@@ -184,7 +184,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "step", "one"), call("c2", "step", "two")),
       CompletionFixture.simple("all done")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     val thread = ThreadId("locked-cancel")
 
     val run = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -207,7 +207,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         calling(call("c1", "step"), call("c2", "step"), call("c3", "step")),
         CompletionFixture.simple("done")
       )
-      val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+      val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
       agent.run(ThreadId(s"budget-$maxSupersteps"), "go", RunConfig().withBudgets(RunBudgets(maxSupersteps)))
     }
     // input, model, 3 waves of calls with a collect after each, model, finish
@@ -227,7 +227,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "increment", "a"), call("c2", "increment", "boom"), call("c3", "increment", "b")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     toolResults(agent.run("go").value) shouldBe Vector("1", "2", "3")
   }
 
@@ -251,7 +251,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(tool))
+        .withToolSet(SpecTools.set(tool))
         .withMiddleware(new PermissionMiddleware(rules))
     )
     def approvals(result: AgentResult) = result.status match {
@@ -309,7 +309,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       built(
         Agent
           .builder("assistant", client)
-          .withTools(SpecTools.set(tool))
+          .withToolSet(SpecTools.set(tool))
           .withMiddleware(new PermissionMiddleware(rules), recording)
       )
   }
@@ -412,7 +412,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     // input, model, round one (c1 to c4) and its collect, round two (c5) and its collect, model, finish
     val result = agent.run(ThreadId("invalid-locks"), "go", RunConfig().withBudgets(RunBudgets(8))).value
     result.answer shouldBe Some("done")
@@ -435,7 +435,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     val client =
       ScriptedLLMClient.of(calling(call("c1", "step", "p"), call("c2", "step", "q")), CompletionFixture.simple("ok"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     val result = agent.run("go").value
     // scheduled without a lock beside q, p must not run beside it
     toolResults(result) shouldBe Vector(ujson.Obj("error" -> ToolLoop.RefusedWhenScheduled).render(), "q")
@@ -466,7 +466,7 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(tool))
+        .withToolSet(SpecTools.set(tool))
         .withMiddleware(new PermissionMiddleware(rules), blocking)
     )
     def approvals(result: AgentResult) = result.status match {
@@ -495,6 +495,6 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         ToolOutcome.success(ToolContent.Json(ujson.Str("x")))
       )
     val client = ScriptedLLMClient.of(CompletionFixture.simple("never"))
-    Agent.builder("assistant", client).withTools(SpecTools.set(sneaky)).build().isLeft shouldBe true
+    Agent.builder("assistant", client).withToolSet(SpecTools.set(sneaky)).build().isLeft shouldBe true
   }
 }

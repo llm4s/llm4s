@@ -671,11 +671,11 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
         new org.llm4s.agent.guardrails.OutputGuardrail {
           val name: String                            = "composite"
           def validate(value: String): Result[String] = composite.validate(value)
-          override def validate(
+          override def validateIn(
             value: String,
             context: org.llm4s.agent.graph.middleware.UsageAccounting
           ): Result[String] =
-            composite.validate(value, context)
+            composite.validateIn(value, context)
         }
       )
     )

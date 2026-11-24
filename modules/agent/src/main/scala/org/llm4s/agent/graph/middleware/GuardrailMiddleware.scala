@@ -50,7 +50,7 @@ object GuardrailMiddleware:
   ): Result[String] =
     val (last, failures) = guardrails.foldLeft((value, Vector.empty[(String, LLMError)])) {
       case ((current, failed), guardrail) =>
-        guardrail.validate(current, context) match
+        guardrail.validateIn(current, context) match
           case Right(next) => (next, failed)
           case Left(err)   => (current, failed :+ (guardrail.name -> err))
     }

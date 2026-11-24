@@ -260,7 +260,7 @@ private[pekko] object Fixtures {
         case Right(set) => set
         case Left(e)    => throw new AssertionError(e.message)
       }
-      agentOf(client)(_.withTools(tools))
+      agentOf(client)(_.withToolSet(tools))
     }
 
     /**

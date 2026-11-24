@@ -32,7 +32,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   "A token budget" should "end the turn TokenLimitReached before the next model call, without calling the model" in {
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("never sent"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     val result = agent.run(thread, "go", limited(30)).value
 
@@ -46,7 +46,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   it should "let a run overshoot by the call in flight, which is never interrupted" in {
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("never sent"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     val result = agent.run(thread, "go", limited(1)).value
 
@@ -57,7 +57,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   it should "complete a turn that answers within the budget" in {
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     agent.run(thread, "go", limited(31)).value.answer shouldBe Some("done")
     client.callCount shouldBe 2
@@ -71,7 +71,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       calling(call("c2", "echo")).withUsage(reasoning),
       CompletionFixture.simple("never sent")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     // 60 after the first call is under 100, 120 after the second is not; counting 15 a call would allow a third
     val result = agent.run(thread, "go", limited(100)).value
@@ -95,7 +95,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   it should "be a completed turn: the next turn, with its own budget, runs normally" in {
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("next turn"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     val stopped = agent.run(thread, "go", limited(30)).value
     stopped.status shouldBe AgentStatus.TokenLimitReached
@@ -114,7 +114,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       calling(call("c2", "echo")),
       CompletionFixture.simple("never sent")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo, flaky)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo, flaky)))
 
     // the first run's one call (30 tokens) is under its budget; its tool then fails the run
     cause(agent.run(thread, "go", limited(31)).error) shouldBe a[GraphError.ToolFailed]
@@ -135,7 +135,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       calling(call("c2", "echo")),
       CompletionFixture.simple("unlimited")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     agent.run(thread, "go").value.answer shouldBe Some("unlimited")
   }
@@ -174,7 +174,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       calling(call("c2", "echo")).withUsage(None),
       CompletionFixture.simple("never sent").withUsage(None)
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     val result = agent.run(thread, "go", limited(1)).value
 
@@ -224,7 +224,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     // no text: the answer is one tool call with large arguments, which the estimate must charge as output
     val big    = ToolCall(ToolCallId("c1"), "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
     val client = ScriptedLLMClient.of(calling(big).withUsage(None), CompletionFixture.simple("never sent"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
 
     val result = agent.run(thread, "go", limited(500)).value
 
@@ -242,7 +242,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     )
     val client =
       ScriptedLLMClient.of(calling(call("c1", "big")).withUsage(None), CompletionFixture.simple("never sent"))
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(big)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(big)))
 
     val result = agent.run(thread, "go", limited(1000)).value
 

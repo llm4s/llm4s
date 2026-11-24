@@ -265,7 +265,7 @@ class AgentAdmissionSpec
     val judging: InputGuardrail = new InputGuardrail {
       val name: String                            = "Judge"
       def validate(value: String): Result[String] = Right(value)
-      override def validate(value: String, context: UsageAccounting): Result[String] =
+      override def validateIn(value: String, context: UsageAccounting): Result[String] =
         context.accounted(judge).complete(Conversation(Seq(UserMessage(value))), CompletionOptions()).map(_ => value)
     }
     val store = new InMemoryCheckpointer()
@@ -291,7 +291,7 @@ class AgentAdmissionSpec
     val judging: InputGuardrail = new InputGuardrail {
       val name: String                            = "Judge"
       def validate(value: String): Result[String] = Right(value)
-      override def validate(value: String, context: UsageAccounting): Result[String] =
+      override def validateIn(value: String, context: UsageAccounting): Result[String] =
         context
           .accounted(judge)
           .complete(Conversation(Seq(UserMessage(value))), CompletionOptions())

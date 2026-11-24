@@ -32,7 +32,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(tools*))
+        .withToolSet(SpecTools.set(tools*))
         .withMiddleware(new ApprovalMiddleware(request => Some(s"review ${request.call.id}")))
     )
 
@@ -131,7 +131,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm", "go")), CompletionFixture.simple("confirmed"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(asker)))
 
     val parked = agent.run("ask me").value
     val (id, request) = parked.status match {

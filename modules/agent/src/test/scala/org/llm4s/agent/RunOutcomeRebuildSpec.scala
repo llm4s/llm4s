@@ -64,7 +64,7 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.of(call, CompletionFixture.simple("never sent"))
     val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(30L))
     val (live, rebuilt, outcome) =
-      liveAndRebuilt(Agent.builder("assistant", client).withTools(SpecTools.set(echo)), "go", budget)
+      liveAndRebuilt(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)), "go", budget)
     outcome shouldBe Some(RunOutcome.TokenLimitReached)
     live.value shouldBe AgentStatus.TokenLimitReached
     rebuilt shouldBe live

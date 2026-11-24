@@ -73,12 +73,12 @@ bytecode member. It covers every module in 1.0 Scope's Frozen-at-1.0 tier (`stab
 Everything else in the module is `@Experimental`: the graph runtime, checkpoints and the `Checkpointer` contract,
 events and streaming, middleware (`GuardrailMiddleware` included), the tool and tool-loop APIs, delegation, the
 harness, the run queue and worker (`agent.service`), encryption, metrics, the other guardrails and
-`org.llm4s.assistant`. So are the members of the Stable types that name them: on `AgentBuilder`, `withTools(ToolSet)`,
+`org.llm4s.assistant`. So are the members of the Stable types that name them: on `AgentBuilder`, `withToolSet`,
 `withMiddleware`, `withHarness`, `withSubagents`, `withDelegation`, `withMaxPromptSectionTokens`, `withRuntime`,
 `withStreaming` and `withInterruptBefore`/`After`; on `Agent`, `loop`, `delegation`, `children`, `subscribeChild`,
 `abandon`, `resume`, `startResume`, `stream`, `streamResume` and `streamRecover`; on `AgentResult`, `approve`,
 `reject`, `edit`, `reply` and `proceed`; `AgentRun.subscribe`; on `RunConfig`, `withInterruptBefore`/`After` and
-`withChildRetention`; `Guardrail.validate(value, context)`; and the `AgentStatus.Suspended` case. Streaming, human
+`withChildRetention`; `Guardrail.validateIn(value, context)`; and the `AgentStatus.Suspended` case. Streaming, human
 review and durable persistence are usable at 1.0, but not promised.
 
 The same check enforces [RFC 0004](../rfcs/#index): a public member of a `@Stable` type must not expose a
@@ -180,7 +180,10 @@ set (see [The Baseline](#the-baseline)).
 An `@Experimental` *member* of a Stable type is skipped only partly, because MiMa 1.1 reads a Scala 3 member's
 annotations from TASTy, for methods alone, and by name ([#2785](https://github.com/llm4s/llm4s/issues/2785)):
 
-- an `@Experimental def` is skipped, and so is **every overload of the same name**, Stable or not;
+- an `@Experimental def` is skipped, and so is **every overload of the same name**, Stable or not, so an
+  Experimental method never shares its name with a Stable one: `AgentBuilder.withToolSet` beside the Stable
+  `withTools(registry)`, `Guardrail.validateIn(value, context)` beside the Stable `validate(value)`
+  ([#2835](https://github.com/llm4s/llm4s/issues/2835));
 - an `@Experimental val` is still checked: write it as a `def`;
 - an `@Experimental` enum `case` (`AgentStatus.Suspended`) may change shape freely, but removing it is reported once,
   as the companion's field (`MissingFieldProblem`), which needs a filter.

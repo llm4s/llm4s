@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.{ Checkpointer, GraphRuntime }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, ContextWindowMiddleware, GuardrailMiddleware }
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.trace.Tracing
@@ -38,7 +38,16 @@ private[javaapi] object AgentBuilds {
   private def all[A, B](as: Vector[A])(f: A => Result[B]): Result[Vector[B]] =
     as.foldLeft[Result[Vector[B]]](Right(Vector.empty))((acc, a) => acc.flatMap(done => f(a).map(done :+ _)))
 
-  def build(spec: Spec): Result[JAgent] =
+
+  def build(spec: Spec): Result[JAgent] = agent(spec).map(a => new JAgent(FacadeToken.INSTANCE, Right(a)))
+
+  /**
+   * The agent `spec` describes. Its guardrails go through the Scala builder's `withInputGuardrails` and
+   * `withOutputGuardrails`, so they sit where a Scala agent's do: innermost, after every middleware (#2835). An input
+   * guardrail runs at admission wherever it sits, before the turn is stored; innermost, an output guardrail also
+   * checks the answer before any other middleware's `afterAgent` sees it.
+   */
+  def agent(spec: Spec): Result[Agent] =
     for {
       id     <- Option(spec.id).toRight(ValidationError.required("id"))
       client <- Option(spec.client).toRight(ValidationError.required("client"))
@@ -50,22 +59,20 @@ private[javaapi] object AgentBuilds {
         .toLeft(())
         .left
         .map(n => ValidationError("tools", s"two tools are named '$n'"))
-      input  <- spec.input.flatMap(all(_)(_.input))
-      output <- spec.output.flatMap(all(_)(_.output))
-      window <- spec.contextWindow
-      saved  <- spec.checkpointer
-      traced <- spec.tracing
-      middleware = Vector[Option[AgentMiddleware]](
-        Option.when(input.nonEmpty || output.nonEmpty)(new GuardrailMiddleware(input, output)),
-        window.map(new ContextWindowMiddleware(_))
-      ).flatten
+      input    <- spec.input.flatMap(all(_)(_.input))
+      output   <- spec.output.flatMap(all(_)(_.output))
+      window   <- spec.contextWindow
+      saved    <- spec.checkpointer
+      traced   <- spec.tracing
       registry <- ToolRegistry.of(tools.map(_.function))
       base     = Agent.builder(id, client.underlying).withTools(registry)
-      prompted = prompt.fold(base)(base.withSystemPrompt)
+      guarded  = base.withInputGuardrails(input*).withOutputGuardrails(output*)
+      prompted = prompt.fold(guarded)(guarded.withSystemPrompt)
       streamed = if (spec.streaming) prompted.withStreaming() else prompted
       stepped  = spec.maxSteps.fold(streamed)(streamed.withMaxSteps)
       stored   = saved.fold(stepped)(c => stepped.withRuntime(new GraphRuntime(c)))
       observed = traced.fold(stored)(stored.withTracing)
-      agent <- observed.withMiddleware(middleware*).build()
-    } yield new JAgent(FacadeToken.INSTANCE, Right(agent))
+      windowed = window.fold(observed)(w => observed.withMiddleware(new ContextWindowMiddleware(w)))
+      agent <- windowed.build()
+    } yield agent
 }

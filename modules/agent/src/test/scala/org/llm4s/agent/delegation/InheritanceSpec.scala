@@ -49,7 +49,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     def offered(grant: ToolGrant): Set[String] = {
       val client = RoutingClient(delegatingOnce.orElse(answering))
       lead(client)
-        .withTools(ToolSet.of(echo("a"), echo("b"), echo("c")).value)
+        .withToolSet(ToolSet.of(echo("a"), echo("b"), echo("c")).value)
         .withSubagents(
           researcher
             .withTools(ToolSet.of(echo("own")).value)
@@ -78,7 +78,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
     })
     val agent = lead(client)
-      .withTools(ToolSet.of(shared).value)
+      .withToolSet(ToolSet.of(shared).value)
       .withSubagents(researcher.withInheritance(Inheritance().withTools(ToolGrant.Only(Set("shared")))))
       .build()
       .value
@@ -90,7 +90,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val client = RoutingClient(PartialFunction.empty)
     def built(grant: ToolGrant) =
       lead(client)
-        .withTools(ToolSet.of(echo("a")).value)
+        .withToolSet(ToolSet.of(echo("a")).value)
         .withSubagents(researcher.withInheritance(Inheritance().withTools(grant)), general)
         .build()
     built(ToolGrant.Only(Set("a", "missing"))).left.value.message should include("has no tool 'missing'")
@@ -132,7 +132,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       ToolOutcome.success(ToolContent.Json(ujson.Str("own ran")))
     }
     val result = lead(client)
-      .withTools(ToolSet.of(strict, shared).value)
+      .withToolSet(ToolSet.of(strict, shared).value)
       .withSubagents(
         researcher
           .withTools(ToolSet.of(own).value)
@@ -172,7 +172,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
         )
     })
     val result = lead(client)
-      .withTools(ToolSet.of(strict, echo("parent_tool")).value)
+      .withToolSet(ToolSet.of(strict, echo("parent_tool")).value)
       .withMiddleware(contributing)
       .withSubagents(researcher.withInheritance(Inheritance().withMiddleware(MiddlewareId("contributing"))))
       .build()
@@ -1121,7 +1121,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
         Right(calling(ToolCall(ToolCallId("p1"), "peek", ujson.Obj("text" -> "x"))))
       case Lead(_) => Right(CompletionFixture.simple("done"))
     }
-    lead(client).withMaxSteps(5).withTools(ToolSet.of(peek).value).build().value.run(ThreadId("t1"), "go").value
+    lead(client).withMaxSteps(5).withToolSet(ToolSet.of(peek).value).build().value.run(ThreadId("t1"), "go").value
     seen.get shouldBe Some(4)
   }
 
@@ -1130,7 +1130,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val client = RoutingClient(delegatingOnce.orElse(answering))
     val rules  = Vector(PermissionRule.allow(Operation.Invoke, "**"))
     val agent = lead(client)
-      .withTools(ToolSet.of(echo("shared"), echo("private")).value)
+      .withToolSet(ToolSet.of(echo("shared"), echo("private")).value)
       .withMiddleware(new PermissionMiddleware(rules), memory)
       .withSubagents(
         researcher

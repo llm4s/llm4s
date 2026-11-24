@@ -45,7 +45,7 @@ class TimedOutEffectSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     built(
       Agent
         .builder("assistant", ScriptedLLMClient.of(calling(call("c1", "effect")), CompletionFixture.simple("done")))
-        .withTools(SpecTools.set(tool))
+        .withToolSet(SpecTools.set(tool))
         .withMiddleware(retry)
     )
 

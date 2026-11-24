@@ -117,7 +117,7 @@ class FormatSevenCheckpointSpec extends AnyFlatSpec with Matchers with EitherVal
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(deploy))
+        .withToolSet(SpecTools.set(deploy))
         .withMiddleware(new ApprovalMiddleware(request => Some(s"review ${request.call.id}")))
         .withRuntime(GraphRuntime(store))
     )

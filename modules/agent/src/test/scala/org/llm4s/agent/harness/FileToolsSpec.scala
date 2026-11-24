@@ -52,7 +52,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     limits: FileToolLimits = FileToolLimits.default
   ): Vector[String] =
     val client = ScriptedLLMClient.of((calls.map(c => batch(c)) :+ CompletionFixture.simple("done"))*)
-    results(built(Agent.builder("assistant", client).withTools(toolSet(backend, limits))).run("go").value)
+    results(built(Agent.builder("assistant", client).withToolSet(toolSet(backend, limits))).run("go").value)
 
   private def write(path: String, content: String) =
     FileTools.WriteFile -> ujson.Obj("path" -> path, "content" -> content)
@@ -304,7 +304,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     // as in docs/guide/agents/index.md, "Harness File Tools"
     val built = for {
       tools <- ToolSet.of(FileTools(StateFileBackend(), FileToolLimits(maxResultChars = 20000))*)
-      agent <- Agent.builder("coder", client).withTools(tools).build()
+      agent <- Agent.builder("coder", client).withToolSet(tools).build()
     } yield agent
     built.value.run("go").value.answer shouldBe Some("done")
   }
@@ -326,7 +326,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
         batch(read("/a.txt")),
         CompletionFixture.simple("done")
       )
-      results(built(Agent.builder("assistant", client).withTools(toolSet(b))).run("go").value).last shouldBe
+      results(built(Agent.builder("assistant", client).withToolSet(toolSet(b))).run("go").value).last shouldBe
         "     1\t1 2"
     }
   }
@@ -338,7 +338,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       CompletionFixture.simple("done")
     )
     results(
-      built(Agent.builder("assistant", client).withTools(toolSet(StateFileBackend()))).run("go").value
+      built(Agent.builder("assistant", client).withToolSet(toolSet(StateFileBackend()))).run("go").value
     ).last shouldBe "     1\tbefore"
   }
 
@@ -348,7 +348,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       CompletionFixture.simple("done")
     )
     val out = results(
-      built(Agent.builder("assistant", client).withTools(toolSet(StateFileBackend(maxBytes = 30)))).run("go").value
+      built(Agent.builder("assistant", client).withToolSet(toolSet(StateFileBackend(maxBytes = 30)))).run("go").value
     )
     out.take(2) shouldBe Vector("Created /a (10 bytes)", "Created /b (10 bytes)")
     out(2) should include("over this thread's limit of 30")
@@ -380,7 +380,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     val client = ScriptedLLMClient.of((calls.map(c => batch(c)) :+ CompletionFixture.simple("done"))*)
     val out = results(
-      built(Agent.builder("assistant", client).withTools(toolSet(StateFileBackend())).withMiddleware(rules))
+      built(Agent.builder("assistant", client).withToolSet(toolSet(StateFileBackend())).withMiddleware(rules))
         .run("go")
         .value
     )
@@ -415,7 +415,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       CompletionFixture.simple("done")
     )
     val tools  = ToolSet.of((FileTools(backend) :+ flaky(fixed))*).value
-    val agent  = built(Agent.builder("assistant", client).withTools(tools))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(tools))
     val thread = ThreadId("recovered")
     agent.run(thread, "go").isLeft shouldBe true
     fixed.set(true)
@@ -441,7 +441,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       batch(read("/a.txt")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(toolSet(backend)).withMiddleware(new CrashAfterEdit))
+    val agent = built(Agent.builder("assistant", client).withToolSet(toolSet(backend)).withMiddleware(new CrashAfterEdit))
     val thread = ThreadId("replayed")
     agent.run(thread, "go").isLeft shouldBe true
     val out = results(agent.recover(thread).value)
@@ -471,7 +471,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(toolSet(backend))
+        .withToolSet(toolSet(backend))
         .withMiddleware(BlockSecrets)
         .withRuntime(GraphRuntime(store))
     )
@@ -528,7 +528,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       built(
         Agent
           .builder("assistant", client)
-          .withTools(toolSet(StateFileBackend()))
+          .withToolSet(toolSet(StateFileBackend()))
           .withMiddleware(rules)
       ).run("go").value
     )

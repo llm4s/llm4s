@@ -29,7 +29,7 @@ class AgentTruncatedSpec extends AnyFlatSpec with Matchers with EitherValues {
     val echo =
       SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
     val client = ScriptedLLMClient.of(call, cut("partial"), CompletionFixture.simple("the rest"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)))
     val first  = agent.run("go").value
     first.status shouldBe AgentStatus.Truncated("partial")
     val second = agent.continueConversation(first, "go on").value

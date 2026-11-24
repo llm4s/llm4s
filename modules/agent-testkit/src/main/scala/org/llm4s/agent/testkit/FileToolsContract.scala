@@ -57,7 +57,7 @@ trait FileToolsContract extends AnyFlatSpecLike with Matchers with EitherValues:
     val agent =
       Agent
         .builder("contract", ScriptedLLMClient.sequence((replies :+ Reply.text("done"))*))
-        .withTools(tools)
+        .withToolSet(tools)
         .build()
         .value
     val config = RunConfig().withTenantId(tenant.map(TenantId(_)))

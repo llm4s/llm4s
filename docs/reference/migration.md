@@ -93,7 +93,33 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
-and [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805).
+[`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
+and [`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835).
+
+## `withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost (#2835)
+
+MiMa skips an `@Experimental` method together with every overload of its name, so an Experimental overload of a
+Stable method would leave the Stable one unchecked once the baseline is set. The two such overloads in `llm4s-agent`
+are renamed:
+
+| Before | After |
+|---|---|
+| `Agent.builder(id, client).withTools(toolSet)`, given a `ToolSet` | `.withToolSet(toolSet)`; `withTools(registry)` still takes a `ToolRegistry` |
+| `override def validate(value: A, context: UsageAccounting)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` |
+| `guardrail.validate(value, context)` | `guardrail.validateIn(value, context)` |
+
+`validate(value)` is unchanged. `RAGGuardrail.validateWithContext(output, ragContext)` is unchanged too: it validates
+against a `RAGContext`, which is why the stage form is not called `validateWithContext`. `TypedAgent.withTools`,
+`LoopAgent.withTools` and `ModelRequest.withTools` take only a `ToolSet` and keep their names.
+
+The Java facade's `inputGuardrails` and `outputGuardrails` now sit where a Scala agent's `withInputGuardrails` and
+`withOutputGuardrails` put them: innermost in the agent's middleware, after the facade's context window. Before, the
+facade installed its own `GuardrailMiddleware` first. Input guardrails run at admission wherever they sit, so a blocked
+query was already never stored; innermost, an output guardrail also checks the answer before any other middleware's
+`afterAgent` sees it, the order the Scala builder chose so that a middleware such as semantic memory never records a
+blocked answer. What a Java agent answers or blocks is unchanged, but its graph version changes (the guardrail
+middleware's id is `agent-guardrails` now), so a Java agent's thread suspended or in flight before the upgrade is not
+resumed by the upgraded agent: finish or abandon it first.
 
 ## `llm4s.providers.provider` is now `llm4s.defaultProvider` (#2806)
 
@@ -1074,7 +1100,7 @@ is a new stage that runs first: it may rewrite the query, and only the rewrite i
 | a `beforeAgent` hook that redacts, to keep text out of the store | override `admit(query, context: AdmissionContext): Result[String]`; `beforeAgent` still rewrites what joins the conversation, after the first checkpoint |
 | input guardrails ran after other middleware's `beforeAgent`, on what those returned | they run before every `beforeAgent`, on the query as submitted: a rewrite a guardrail depends on belongs in `admit` |
 | `GuardrailMiddleware(input, output).beforeAgent(text, context)` called directly | `.admit(text, context)` with an `AdmissionContext` (`MiddlewareTestKit.admissionContext()`) |
-| `override def validate(value: A, context: ModelContext)` in a guardrail | `context: UsageAccounting`, which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
+| `override def validate(value: A, context: ModelContext)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` ([renamed](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)), which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
 | `GuardrailBlocked(guardrail, reason: String)` | `reason: Option[String]`; `block(reason)` builds it |
 | `submitter.submit(thread, agent.id, QueuedInput.query(text))`, the query in the queue as submitted | `agent.admit(thread, text).map(QueuedInput.admitted)` first, to keep refused or unrewritten text out of the queue |
 

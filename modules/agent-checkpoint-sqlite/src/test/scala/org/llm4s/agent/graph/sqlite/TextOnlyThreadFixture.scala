@@ -87,7 +87,7 @@ object TextOnlyThreadFixture:
     Agent
       .builder("assistant", client)
       .withSystemPrompt("You are a fixture.")
-      .withTools(tools)
+      .withToolSet(tools)
       .withRuntime(GraphRuntime(store))
       .build()
       .fold(e => throw new IllegalStateException(e.message), identity)

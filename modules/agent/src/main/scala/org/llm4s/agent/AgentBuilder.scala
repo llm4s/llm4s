@@ -119,9 +119,13 @@ final class AgentBuilder private (
       outputGuardrails
     )
 
-  /** The agent's tools, replacing any set before, checked with the set's validator. */
+  /**
+   * The agent's tools, replacing any set before, checked with the set's validator. Named apart from the Stable
+   * [[withTools]] so that MiMa, which skips an `@Experimental` method with every overload of its name, still checks
+   * that one (#2835).
+   */
   @Experimental
-  def withTools(tools: ToolSet): AgentBuilder = copy(tools = tools.tools, validator = tools.validator)
+  def withToolSet(tools: ToolSet): AgentBuilder = copy(tools = tools.tools, validator = tools.validator)
 
   /**
    * The registry's tools, replacing any set before, each adapted with
