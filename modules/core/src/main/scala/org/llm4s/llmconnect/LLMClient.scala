@@ -11,11 +11,22 @@ import org.llm4s.util.BoundedJson
 import scala.util.Try
 
 /**
- * Core interface for interacting with Large Language Model providers.
+ * A connection to one model of one provider: the call every llm4s feature (agents, RAG, structured
+ * output) is built on.
  *
- * Abstracts communication with various LLM APIs (OpenAI, Azure OpenAI, Anthropic, etc.),
- * providing a unified interface for completion requests, streaming responses, and token management.
- * Implementations handle provider-specific authentication, message formatting, and tool calling.
+ * `complete` sends a [[org.llm4s.llmconnect.model.Conversation Conversation]] and returns the reply as a
+ * [[org.llm4s.llmconnect.model.Completion Completion]]; `streamComplete` delivers it chunk by chunk as it
+ * arrives. Every failure is a value, a `Left` of [[org.llm4s.error.LLMError LLMError]], never an exception.
+ * The provider's own wire format, authentication and tool-call encoding stay inside the implementation, so
+ * code written against this trait runs unchanged on any provider.
+ *
+ * Obtain one from configuration rather than constructing an implementation: read a provider section with
+ * `Llm4sConfig.defaultProvider()` (or `Llm4sConfig.provider(name)`) and pass it to
+ * [[LLMConnect.getClient]], with a `ModelRegistryService` and a `ProviderRegistry` in scope. A provider
+ * module on the classpath registers its provider; core ships none. In tests, use `llm4s-testkit`'s scripted
+ * client instead of a real provider.
+ *
+ * A client may hold connections and threads, so close it when done (`close()`, or `scala.util.Using`).
  */
 @Stable
 trait LLMClient extends AutoCloseable {

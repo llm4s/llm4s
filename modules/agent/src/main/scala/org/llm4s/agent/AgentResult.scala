@@ -19,6 +19,24 @@ import upickle.default.ReadWriter
 /**
  * How an agent's turn ended, or why it is waiting.
  *
+ * Every successful `Agent.run`, `resume` and `recover` returns an [[AgentResult]] whose `status` is one of these
+ * cases, so a caller matches on it to decide what to do next: read the answer of a `Completed` turn (also
+ * [[AgentResult.answer]]), continue or retry a `Truncated`, `StepLimitReached` or `TokenLimitReached` one,
+ * report a `Blocked` one, and answer the interrupts of a `Suspended` one with `Agent.resume`. A guardrail block,
+ * a cut-off answer, a spent budget and a pause for a person are outcomes, not errors: provider, tool and
+ * middleware failures are the `Left` of the run's `Result` instead, and never appear here.
+ *
+ * {{{
+ * agent.run("Summarise the release notes").map(_.status match
+ *   case AgentStatus.Completed(answer)     => answer
+ *   case AgentStatus.Truncated(partial)    => partial + " [cut off]"
+ *   case AgentStatus.Blocked(guardrail, _) => s"refused by $guardrail"
+ *   case AgentStatus.StepLimitReached      => "no answer within the step limit"
+ *   case AgentStatus.TokenLimitReached     => "no answer within the token budget"
+ *   case AgentStatus.Suspended(suspension) => s"waiting: $suspension"
+ * )
+ * }}}
+ *
  * `Completed`, `Truncated` and `Blocked` are closed: each is exactly the fields it has, and anything more about the
  * turn goes on [[AgentResult]]. `Suspended` holds a [[Suspension]], which can gain a kind of pending interrupt
  * without breaking a caller.

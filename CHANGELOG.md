@@ -600,7 +600,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
-- **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
+- **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect); the watsonx, Perplexity and Bedrock setup sections, typed tools and the media and store-contract pages are filled in, and `LLMClient`, `AgentStatus`, `ModelRegistryService` and `MCPClient` say how to obtain and use them [#2834](https://github.com/llm4s/llm4s/issues/2834).
 - **Fixed** 23 more guide pages have their Scala blocks compiled (agents, streaming, durable checkpointers, memory, ZIO, cats-effect, RAG, speech, tracing and others), which corrected code that did not compile against the API; guide specs fail when their copy of a page drifts ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 
 ### Build & tooling
