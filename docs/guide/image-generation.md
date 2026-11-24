@@ -149,8 +149,9 @@ val lion = for {
 | `outputCompression` | `Option[Int]` | OpenAI GPT Image | 0 to 100, for `jpeg` and `webp` |
 | `user` | `Option[String]` | OpenAI | An end-user identifier for abuse monitoring |
 
-Image generation records metrics through `InstrumentedImageGenerationClient` and a `MetricsCollector`; see
-[Monitoring](observability/#metrics).
+Image generation records metrics through `InstrumentedImageGenerationClient` and a `MetricsCollector`. The metrics are
+declared in `ImageMetrics` and recorded through the collector's generic `increment` and `observe`, so any backend that
+exports generic metrics exports them; see [Monitoring](observability/#metrics) for the series.
 
 ---
 

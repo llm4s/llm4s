@@ -26,16 +26,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       calls += "addTokens"
     override def recordCost(provider: String, model: String, costUsd: Double): Unit =
       calls += "recordCost"
-    override def observeImageGeneration(
-      provider: String,
-      model: String,
-      operation: String,
-      outcome: Outcome,
-      duration: FiniteDuration,
-      imageCount: Int
-    ): Unit = calls += "observeImageGeneration"
-    override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
-      calls += "recordImageGenerationCost"
     override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
       calls += "increment"
     override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
@@ -51,16 +41,9 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       boom
     override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = boom
     override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = boom
-    override def observeImageGeneration(
-      provider: String,
-      model: String,
-      operation: String,
-      outcome: Outcome,
-      duration: FiniteDuration,
-      imageCount: Int
-    ): Unit = boom
-    override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
-      boom
+    override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit       = boom
+    override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit = boom
+    override def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit                = boom
   }
 
   /** `name(paramType, ...)` for the public, non-static, non-synthetic methods a class declares. */
@@ -71,26 +54,15 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       .map(m => s"${m.getName}(${m.getParameterTypes.map(_.getSimpleName).mkString(", ")})")
       .toSet
 
-  "MetricsCollector.compose" should "forward observeImageGeneration to every collector" in {
+  "MetricsCollector.compose" should "forward a generic metric, as a module above core records one, to every collector" in {
     val a        = new Recording
     val b        = new Recording
     val composed = MetricsCollector.compose(a, b)
 
-    composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 1)
+    composed.increment(MetricsCollector.Errors, Seq("openai", "timeout"))
 
-    a.calls.toList shouldBe List("observeImageGeneration")
-    b.calls.toList shouldBe List("observeImageGeneration")
-  }
-
-  it should "forward recordImageGenerationCost to every collector" in {
-    val a        = new Recording
-    val b        = new Recording
-    val composed = MetricsCollector.compose(a, b)
-
-    composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-
-    a.calls.toList shouldBe List("recordImageGenerationCost")
-    b.calls.toList shouldBe List("recordImageGenerationCost")
+    a.calls.toList shouldBe List("increment")
+    b.calls.toList shouldBe List("increment")
   }
 
   it should "forward every method of the trait to every collector, in order" in {
@@ -101,8 +73,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
     composed.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
     composed.addTokens("openai", "gpt-4o", 10L, 20L)
     composed.recordCost("openai", "gpt-4o", 0.01)
-    composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 1)
-    composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
     composed.increment(Metric.counter("test.things", "things"), Seq.empty)
     composed.observe(Metric.timer("test.waits", "waits", Seq(1.second)), Seq.empty, 1.second)
     composed.set(Metric.gauge("test.level", "level"), Seq.empty, 1.0)
@@ -111,8 +81,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       "observeRequest",
       "addTokens",
       "recordCost",
-      "observeImageGeneration",
-      "recordImageGenerationCost",
       "increment",
       "observe",
       "set"
@@ -123,14 +91,24 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
     expected.toSet shouldBe publicMethodSignatures(classOf[MetricsCollector]).map(_.takeWhile(_ != '('))
   }
 
-  it should "keep forwarding the image-generation methods when an earlier collector throws" in {
+  it should "keep forwarding the generic methods when an earlier collector throws" in {
     val recording = new Recording
     val composed  = MetricsCollector.compose(new Throwing, recording)
 
-    composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 1)
-    composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
+    composed.increment(Metric.counter("test.things", "things"), Seq.empty)
+    composed.observe(Metric.timer("test.waits", "waits", Seq(1.second)), Seq.empty, 1.second)
+    composed.set(Metric.gauge("test.level", "level"), Seq.empty, 1.0)
 
-    recording.calls.toList shouldBe List("observeImageGeneration", "recordImageGenerationCost")
+    recording.calls.toList shouldBe List("increment", "observe", "set")
+  }
+
+  "MetricsCollector" should "declare no image-generation method: those metrics are llm4s-image's (#2801)" in {
+    publicMethodSignatures(classOf[MetricsCollector]).filter(_.toLowerCase.contains("image")) shouldBe empty
+  }
+
+  "MetricsCollector.Errors" should "be the failed-operations counter a backend exports as llm4s_errors_total" in {
+    MetricsCollector.Errors.name shouldBe "llm4s.errors"
+    MetricsCollector.Errors.labelNames shouldBe Vector("provider", "error_type")
   }
 
   it should "override every public method MetricsCollector declares, so no trait default is left in place" in {

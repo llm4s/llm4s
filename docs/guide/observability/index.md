@@ -584,7 +584,7 @@ stops its exporter, and a composed tracer closes the ones it wraps. Close the tr
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for image generation, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`), `llm4s-image` records image generation (`ImageMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Its `provider` argument is a metrics label, not a `ProviderId`: usually a provider's id, but for a `ReliableClient` whatever name you built it with. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -680,9 +680,9 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_errors_total` | counter | `provider`, `error_type` |
 | `llm4s_request_duration_seconds` | histogram | `provider`, `model`; buckets 0.1, 0.5, 1, 2, 5, 10, 30, 60 and 120 seconds |
-| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation`, `status` |
+| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation` (`generate` or `edit`), `status`; this and the four below are `ImageMetrics`, recorded by `llm4s-image`'s `InstrumentedImageGenerationClient` |
 | `llm4s_images_generated_total` | counter | `provider`, `model` |
-| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
+| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation`; buckets 1, 2, 5, 10, 30, 60, 120 and 300 seconds |
 | `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
 | `llm4s_retries_total` | counter | `provider`; a `ReliableClient` retry |
@@ -744,7 +744,7 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 
 ### Send metrics to more than one place
 
-`MetricsCollector.compose` forwards every `MetricsCollector` method, the two image-generation ones (`observeImageGeneration` and `recordImageGenerationCost`) included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
+`MetricsCollector.compose` forwards every `MetricsCollector` method, the generic `increment`, `observe` and `set` included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
 
 ```scala
 import org.llm4s.metrics.MetricsCollector
