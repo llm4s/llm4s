@@ -17,12 +17,12 @@ class PerplexityAdjustmentsSpec extends AnyWordSpec with Matchers:
 
   private val hello = Conversation(Seq(UserMessage("Hello")))
 
-  private def adjustments(options: CompletionOptions): List[RequestAdjustment] =
+  private def adjustments(options: CompletionOptions): Seq[RequestAdjustment] =
     client(new StubHttp(respond = _ => ok(response(s"[${textMessage("ok")}]"))))
       .complete(hello, options)
       .fold(e => fail(e.message), _.adjustments)
 
-  private def kinds(adjustments: List[RequestAdjustment]): List[(RequestOption, String)] =
+  private def kinds(adjustments: Seq[RequestAdjustment]): Seq[(RequestOption, String)] =
     adjustments.map(a => a.option -> a.getClass.getSimpleName)
 
   "the adjustments" should {

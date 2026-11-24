@@ -349,7 +349,7 @@ class OpenAICompatibleClient(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean
-  ): Result[(String, List[RequestAdjustment])] =
+  ): Result[(String, Seq[RequestAdjustment])] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
     // costs no round trip and names the problem. The check is on the messages that will be
     // sent, not the conversation: a dialect that drops empty assistant turns (Mistral) can
@@ -508,7 +508,7 @@ class OpenAICompatibleClient(
   private def buildRequest(
     conversation: Conversation,
     options: CompletionOptions
-  ): (ujson.Obj, List[RequestAdjustment]) = {
+  ): (ujson.Obj, Seq[RequestAdjustment]) = {
     val messages = sendableMessages(conversation, options).map {
       case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))

@@ -150,7 +150,7 @@ trait OpenAICompatibleDialect:
    * `Completion.adjustments` (RFC 0008). Standard: adds nothing, and reports a set
    * `CompletionOptions.reasoning` or `CompletionOptions.thinking` as `Dropped`.
    */
-  def addReasoning(@unused body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] =
+  def addReasoning(@unused body: ujson.Obj, model: String, options: CompletionOptions): Seq[RequestAdjustment] =
     UnmappedOptions.reasoningAndThinking(model, options)
 
   /**

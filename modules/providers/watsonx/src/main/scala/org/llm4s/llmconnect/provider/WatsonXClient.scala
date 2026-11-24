@@ -584,7 +584,7 @@ class WatsonXClient(
       case um: UserMessage        =>
         // checked by createRequestBody: every part is text or an inline image
         val content = um.parts match {
-          case Vector(ContentPart.Text(text)) => ujson.Str(text)
+          case Seq(ContentPart.Text(text))    => ujson.Str(text)
           case parts                          => ujson.Arr.from(parts.map(WatsonXClient.userPart))
         }
         Some(ujson.Obj("role" -> "user", "content" -> content))

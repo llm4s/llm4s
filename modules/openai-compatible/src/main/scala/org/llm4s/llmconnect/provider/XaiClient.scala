@@ -125,7 +125,7 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
    * `Thinking.Adaptive` is `NotNeeded` (the effort is all xAI takes) and `Thinking.Budget` is
    * `Dropped`. With neither set nothing is sent for them.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Seq[RequestAdjustment] = {
     val family = XaiDialect.family(model)
     val levels: Option[Seq[ReasoningEffort]] = family match {
       case XaiDialect.Family.Effort =>

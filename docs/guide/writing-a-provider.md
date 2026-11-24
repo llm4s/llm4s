@@ -746,7 +746,7 @@ final class AcmeClient(
 
 ### Content parts
 
-A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`: `Text`, `Image` and `Document`, each image
+A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`: `Text`, `Image` and `Document`, each image
 or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
 encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
 `UnsupportedContentPartError(providerName, part.kind, role.name)` for any other: never drop a part, and never turn

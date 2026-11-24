@@ -61,9 +61,9 @@ object Message {
   // parts (#1913), and any other as `parts`; both are read. So JSON written before parts reads, and
   // a text-only conversation serialises as it did - which keeps every ThinkingReplay binding, a
   // digest of this JSON, made before the change valid.
-  private[model] def partsJson(parts: Vector[ContentPart], obj: ujson.Obj): ujson.Obj = {
+  private[model] def partsJson(parts: Seq[ContentPart], obj: ujson.Obj): ujson.Obj = {
     parts match {
-      case Vector(ContentPart.Text(text)) => obj("content") = text
+      case Seq(ContentPart.Text(text)) => obj("content") = text
       case _                              => obj("parts") = ujson.read(write(parts))
     }
     obj
@@ -101,7 +101,7 @@ object Message {
   /** Whether any of `messages` carries an image or a document. */
   def hasMedia(messages: Seq[Message]): Boolean = {
     // a null part (or parts) is not plain text either: such a conversation goes to a client whose checks refuse it
-    def media(parts: Vector[ContentPart]) = parts == null || parts.exists(p => p == null || ContentPart.isMedia(p))
+    def media(parts: Seq[ContentPart]) = parts == null || parts.exists(p => p == null || ContentPart.isMedia(p))
     messages.exists {
       case um: UserMessage => media(um.parts)
       case tm: ToolMessage => media(tm.parts)
@@ -121,7 +121,7 @@ object Message {
   }
 
   /** A message's content with each media part named by its kind, for `toString`. */
-  private[model] def describe(parts: Vector[ContentPart]): String =
+  private[model] def describe(parts: Seq[ContentPart]): String =
     if (parts == null) "[null parts]"
     else
       parts
@@ -133,7 +133,7 @@ object Message {
         .mkString(" ")
 
   /** Whether `parts` has content: at least one part that is media or non-blank text, and no null part. */
-  private[llm4s] def hasContent(parts: Vector[ContentPart]): Boolean =
+  private[llm4s] def hasContent(parts: Seq[ContentPart]): Boolean =
     parts != null && !parts.contains(null) && parts.exists {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true
@@ -346,11 +346,11 @@ enum MessageRole(val name: String) {
  * @param parts the message's content, in order.
  */
 @Stable
-final class UserMessage(val parts: Vector[ContentPart]) extends Message with Serializable {
+final class UserMessage(val parts: Seq[ContentPart]) extends Message with Serializable {
   val role: MessageRole = MessageRole.User
 
   /** This message with `parts` instead. */
-  def withParts(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
+  def withParts(parts: Seq[ContentPart]): UserMessage = new UserMessage(parts)
 
   override def equals(other: Any): Boolean = other match {
     case that: UserMessage => parts == that.parts
@@ -372,7 +372,7 @@ final class UserMessage(val parts: Vector[ContentPart]) extends Message with Ser
 object UserMessage {
 
   /** A user message of `parts`. */
-  def apply(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
+  def apply(parts: Seq[ContentPart]): UserMessage = new UserMessage(parts)
 
   /** A user message of one text part. */
   def apply(content: String): UserMessage = new UserMessage(Vector(ContentPart.Text(content)))
@@ -623,14 +623,14 @@ object AssistantMessage {
  */
 @Stable
 final class ToolMessage(
-  val parts: Vector[ContentPart],
+  val parts: Seq[ContentPart],
   val toolCallId: ToolCallId
 ) extends Message
     with Serializable {
   val role: MessageRole = MessageRole.Tool
 
   /** This result with `parts` instead. */
-  def withParts(parts: Vector[ContentPart]): ToolMessage = new ToolMessage(parts, toolCallId)
+  def withParts(parts: Seq[ContentPart]): ToolMessage = new ToolMessage(parts, toolCallId)
 
   override def equals(other: Any): Boolean = other match {
     case that: ToolMessage => parts == that.parts && toolCallId == that.toolCallId
@@ -681,7 +681,7 @@ final class ToolMessage(
 object ToolMessage {
 
   /** A tool result of `parts`. */
-  def apply(parts: Vector[ContentPart], toolCallId: ToolCallId): ToolMessage = new ToolMessage(parts, toolCallId)
+  def apply(parts: Seq[ContentPart], toolCallId: ToolCallId): ToolMessage = new ToolMessage(parts, toolCallId)
 
   /** A tool result of one text part. */
   def apply(content: String, toolCallId: ToolCallId): ToolMessage =

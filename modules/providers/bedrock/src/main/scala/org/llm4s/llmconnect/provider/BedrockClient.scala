@@ -271,7 +271,7 @@ class BedrockClient(
   private def transformed(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[(Conversation, CompletionOptions, List[RequestAdjustment])] =
+  ): Result[(Conversation, CompletionOptions, Seq[RequestAdjustment])] =
     TransformationResult
       .transform(
         config.model.asString,

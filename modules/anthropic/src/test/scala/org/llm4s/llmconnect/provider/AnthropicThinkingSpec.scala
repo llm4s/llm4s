@@ -211,7 +211,7 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
       |"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}""".stripMargin
 
   /** The request body `complete` sends to `model`, and the completion's adjustments. */
-  private def sent(model: String, options: CompletionOptions): (ujson.Value, List[RequestAdjustment]) = {
+  private def sent(model: String, options: CompletionOptions): (ujson.Value, Seq[RequestAdjustment]) = {
     val seen   = new AtomicReference[String]()
     val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
     server.createContext(

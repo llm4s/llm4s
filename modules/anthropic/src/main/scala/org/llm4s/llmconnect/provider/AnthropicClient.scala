@@ -663,7 +663,7 @@ curl https://api.anthropic.com/v1/messages \
       case (um: UserMessage, _) =>
         flushResults()
         um.parts match {
-          case Vector(ContentPart.Text(text)) => paramsBuilder.addUserMessage(text)
+          case Seq(ContentPart.Text(text)) => paramsBuilder.addUserMessage(text)
           case parts =>
             paramsBuilder.addMessage(
               MessageParam
@@ -698,7 +698,7 @@ curl https://api.anthropic.com/v1/messages \
       case (tm: ToolMessage, index) if pairing.resultPaired(index) =>
         val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId.asString)
         tm.parts match {
-          case Vector(ContentPart.Text(text)) => result.content(text)
+          case Seq(ContentPart.Text(text)) => result.content(text)
           case parts =>
             result.contentOfBlocks(PartEncoding.withoutBlankText(parts).map(AnthropicClient.toolPart).asJava)
         }

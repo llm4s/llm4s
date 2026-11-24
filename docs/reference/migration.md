@@ -95,7 +95,25 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
 [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
-and [`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835).
+[`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)
+and [message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809).
+
+## Message parts, citations and adjustments are `Seq`s (#2809)
+
+The model's public signatures use `Seq` for a collection, as `AssistantMessage.toolCalls` already did. Stored JSON
+is unchanged: a message with one text part is still written as `content`, any other as `parts`, whatever `Seq`
+holds them.
+
+| Before | After |
+|---|---|
+| `UserMessage.parts`, `ToolMessage.parts`: `Vector[ContentPart]`; `apply(parts: Vector[...])`, `withParts(Vector[...])` | `Seq[ContentPart]`; a `List` or any other `Seq` is accepted |
+| `Completion.citations: List[Citation]`, `withCitations(List[...])` | `Seq[Citation]` |
+| `Completion.adjustments`, `TransformationResult.adjustments`: `List[RequestAdjustment]`; `RequestTransformer.transform` returns `(CompletionOptions, List[RequestAdjustment])` | `Seq[RequestAdjustment]` |
+| `OpenAICompatibleDialect.addReasoning(...)`: `List[RequestAdjustment]` | `Seq[RequestAdjustment]`: change the return type of an override |
+| `AgentEvents.ModelCallCompleted.adjustments: List[RequestAdjustment]` | `Seq[RequestAdjustment]` |
+
+Code that reads one of these as a `List` or `Vector` (`val parts: Vector[ContentPart] = message.parts`, a
+`case Vector(...)` or `::` pattern) calls `.toVector` / `.toList`, or uses `Seq` and `case Seq(...)`.
 
 ## `withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost (#2835)
 

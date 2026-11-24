@@ -1948,12 +1948,12 @@ def toolTurn(
 ## Citations and grounding sources
 
 A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
-`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+`Completion.citations`, a `Seq[Citation]` that is empty for every completion that has none:
 
 ```scala
 import org.llm4s.llmconnect.model.Completion
 
-def sources(completion: Completion): List[String] =
+def sources(completion: Completion): Seq[String] =
   completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
 ```
 

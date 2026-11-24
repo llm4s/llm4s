@@ -510,8 +510,8 @@ object PerplexityClient {
     ujson.Obj("type" -> "message", "role" -> role, "content" -> content)
 
   /** A user turn's content: its text, or `input_text` parts when it has several. Checked text-only before. */
-  private def textContent(parts: Vector[ContentPart]): ujson.Value = parts match {
-    case Vector(ContentPart.Text(text)) => ujson.Str(text)
+  private def textContent(parts: Seq[ContentPart]): ujson.Value = parts match {
+    case Seq(ContentPart.Text(text)) => ujson.Str(text)
     case _ =>
       ujson.Arr.from(parts.collect { case ContentPart.Text(text) => ujson.Obj("type" -> "input_text", "text" -> text) })
   }

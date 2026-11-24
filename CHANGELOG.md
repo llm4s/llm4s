@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `UserMessage.parts` and `ToolMessage.parts` are `Seq[ContentPart]`, and `Completion.citations`, the `RequestAdjustment` lists (`Completion`, `TransformationResult`, `OpenAICompatibleDialect.addReasoning`, `ModelCallCompleted`) are `Seq`s; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
   ([migration](docs/reference/migration.md#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set, and no client sends an unset one
@@ -343,6 +345,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** the model's public collections are `Seq`s: message parts (were `Vector`), `Completion.citations` and the request adjustments (were `List`); `MessagePartsWireFormatSpec` pins the stored JSON, which is unchanged [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
 - **Changed** `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set; every client sends a sampling parameter only when the caller set it, and a set one that a model cannot take is reported as a `RequestAdjustment` whatever its value (an explicit value equal to the old default used to go unreported). [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** `Completion.content` and `Completion.toolCalls` are read from `Completion.message` instead of being stored beside it, so they cannot disagree with it. **Removed** `Completion.withContent`, `withToolCalls` and `asText`. **Fixed** a completion assembled from a stream reports its tool calls on `toolCalls`, which each client used to copy over by hand. [#2807](https://github.com/llm4s/llm4s/issues/2807)

@@ -88,11 +88,11 @@ object PartEncoding {
    * `parts` without blank text parts: for a block-based API (Anthropic, Converse, Gemini) that refuses an empty
    * text block. A blank text part carries nothing, and a message of only blank text is refused by `validate`.
    */
-  private[llm4s] def withoutBlankText(parts: Vector[ContentPart]): Vector[ContentPart] =
+  private[llm4s] def withoutBlankText(parts: Seq[ContentPart]): Vector[ContentPart] =
     parts.filter {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true
-    }
+    }.toVector
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
   private[llm4s] val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
