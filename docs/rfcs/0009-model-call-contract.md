@@ -1,9 +1,11 @@
 ---
 layout: page
 title: "RFC 0009: The model call contract"
+description: "RFC 0009: the model call contract every LLM4S provider meets - request mapping, errors, streaming, tool calls and usage - and its shared checks."
 parent: RFCs
 grand_parent: Reference
 nav_order: 9
+cites_issues: all
 ---
 
 # RFC 0009: The model call contract

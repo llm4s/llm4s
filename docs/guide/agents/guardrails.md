@@ -6,6 +6,7 @@ search_title: "Agent guardrails in Scala: validate LLM input and output"
 nav_order: 2
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1521]
 ---
 
 # Guardrails

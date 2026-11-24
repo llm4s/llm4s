@@ -460,6 +460,16 @@ sbt scalafmtAll       # Format code
   breakage is listed in `scripts/docs-link-baseline.txt`; when you fix a listed link the check asks you to delete
   its line, and a new broken link is never added to that file (a `.md` link fails even if it is listed there).
   `scripts/check-docs-site-links.sh --print` shows what is broken now.
+- **Before pushing a docs change**, run `scripts/check-docs.sh`: it runs every documentation check of CI's Quick
+  Checks that needs no sbt (links, `llms.txt`, search titles and descriptions, `nav_order`, versions, the support
+  table, cited issues, ...) and lists the ones that failed. `--model FILE` adds the checks that read the build model
+  (`sbt "dumpBuildModel FILE"`), `--online` the state of each cited issue. The code blocks need sbt:
+  `sbt samples/Test/compile testDocs`.
+- **Issue links:** a page that links an llm4s issue says in its front matter how it cites it:
+  `cites_open_issues` ("tracked in", "not yet"), `cites_closed_issues` ("added in") or `cites_issues` (a pointer
+  whose state the text does not rely on; `cites_issues: all` for a release post, a migration guide or an RFC).
+  `scripts/check-cited-issues.sh` fails an undeclared link, and weekly CI fails a page whose open issue has closed.
+- **Description:** every page has a `description` of 50 to 170 characters (`scripts/check-doc-seo.sh`).
 
 ### Checked code blocks
 
@@ -475,9 +485,12 @@ matches the code. Which pages are checked, and the order to convert the rest in,
   meant to be copied on its own gets its missing imports written into it.
 - **`modules/samples/src/test/docs-snippets/skip.txt`** lists the blocks that cannot compile as written, one per
   line as `page | hash | action | detail`. `skip | reason` leaves the block out: an sbt build definition, Liquid
-  template lines, declared pseudocode. `with | import a.B; import c._` compiles it after those imports, for a
-  fragment that relies on imports shown earlier on the page. An entry whose block was edited or removed fails the
-  build, so every listed block is looked at again when it changes.
+  template lines, declared pseudocode, an outline with elided bodies. `with | import a.B; import c._` compiles it
+  after those imports, for a fragment that relies on imports shown earlier on the page. The same list can declare a
+  stand-in for a value an earlier block on the page defines or the prose names, typed and never evaluated:
+  `with | import org.llm4s.trace.store._; val store: InMemoryTraceStore = ???` (one statement per `;`, so a
+  stand-in cannot contain a `;` itself). An entry whose block was edited or removed fails the build, so every
+  listed block is looked at again when it changes.
 - **Values a page assumes** ("here `client` is any `LLMClient`") come from
   `modules/samples/src/test/scala/org/llm4s/samples/docs/SnippetEnv.scala`. Add a member only when the page text
   says the value is assumed; a name the page forgot to define or import is a bug to fix on the page.

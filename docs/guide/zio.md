@@ -77,7 +77,7 @@ client
 
 ```scala
 for {
-  agentZ <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  agentZ <- client.agent("assistant")(_.withTools(tools).withSystemPrompt("You are concise."))
   result <- agentZ.run("Summarise this")
   _      <- ZIO.debug(result.answer.toString)
 } yield ()

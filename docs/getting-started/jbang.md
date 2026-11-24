@@ -6,6 +6,7 @@ search_title: "Call an LLM from Java with JBang and LLM4S"
 parent: Build Tools and Playgrounds
 nav_order: 5
 grand_parent: Getting Started
+cites_closed_issues: [1496]
 ---
 
 # JBang Quick Start

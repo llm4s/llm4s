@@ -6,6 +6,8 @@ search_title: "Use LLM4S with Quarkus: the quarkus-llm4s extension"
 parent: Java and Kotlin
 nav_order: 409
 grand_parent: User Guide
+cites_open_issues: [1463, 2280]
+cites_closed_issues: [1496]
 ---
 
 # Using LLM4S with Quarkus

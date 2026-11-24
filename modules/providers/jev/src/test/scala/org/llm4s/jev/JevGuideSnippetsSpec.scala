@@ -1,5 +1,7 @@
 package org.llm4s.jev
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.security.Secret
 import org.llm4s.error.*
 import org.scalatest.EitherValues
@@ -12,6 +14,7 @@ import scala.concurrent.duration.*
  * The code in `docs/guide/jev.md`, compiled and run against the fake server, so the guide cannot drift from the API.
  * Each test is one snippet of the guide; change one and change the other.
  */
+@org.llm4s.tags.DocsSpec
 class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   import FakeJev.*
@@ -23,10 +26,12 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     """{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95}},"usage":{"input_tokens":296,"output_tokens":20}}"""
 
   "The guide's snippets" should "build a config in code" in {
+    // guide-block
     val config = JevConfig(apiKey = Secret("tsk-..."))
       .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
       .withTimeout(20.seconds)
       .withRetry(JevRetryPolicy(maxRetries = 3))
+    // end-guide-block
 
     config.validate.isRight shouldBe true
   }
@@ -35,6 +40,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     serve(ok(twoAnswers)) { (url, _) =>
       val config = JevConfig(Secret("tsk-..."), baseUrl = url)
 
+      // guide-block
       val decision = for {
         client <- JevClient(config)
         response <- client.evaluate(
@@ -56,12 +62,14 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
         urgent      <- response.noul("urgent")
         frustration <- response.score("frustration")
       } yield (department.choice, department.confidence, urgent.probability, frustration.score)
+      // end-guide-block
 
       decision.value shouldBe (("billing", 0.81, 0.95, 1.05))
     }
   }
 
   it should "handle the failures a call can have" in {
+    // guide-block
     def describe(error: LLMError): String = error match {
       case _: ValidationError     => "the request is wrong: fix it, retrying will not help"
       case _: AuthenticationError => "the key was rejected"
@@ -72,6 +80,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       case _: CancelledError      => "the calling thread was interrupted"
       case other                  => other.message
     }
+    // end-guide-block
 
     serve(Reply(401, """{"message":"Invalid API key"}""")) { (url, _) =>
       val client = JevClient(JevConfig(Secret("tsk-..."), baseUrl = url, retry = JevRetryPolicy.none)).value
@@ -99,5 +108,12 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       .flatMap(JevClient(_))
 
     client.isRight shouldBe true
+  }
+
+  "docs/guide/jev.md" should "show every block this spec runs, as written" in {
+    GuideMirror.missingFromPage(
+      "docs/guide/jev.md",
+      "modules/providers/jev/src/test/scala/org/llm4s/jev/JevGuideSnippetsSpec.scala"
+    ) shouldBe empty
   }
 }

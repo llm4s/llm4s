@@ -169,10 +169,18 @@ jobs:
       - name: Check llms.txt and llms-full.txt build from the docs
         run: scripts/check-llms-txt.sh
 
-      # The cited-issue check itself needs the network and runs weekly and on docs pull requests
-      # (docs-cited-issues.yml); its tests run it against a fake `gh`.
-      - name: Test the cited-issue check
-        run: scripts/test-check-cited-issues.sh
+      # Every page that links an llm4s issue declares how it cites it (#2833). The states need the network and are
+      # checked weekly and on docs pull requests (docs-cited-issues.yml); here the declarations are checked offline,
+      # and the tests run the check against a fake `gh`.
+      - name: Check every cited issue is declared
+        run: |
+          scripts/test-check-cited-issues.sh
+          scripts/check-cited-issues.sh --offline
+
+      # scripts/check-docs.sh runs the doc checks of this job in one command, for a local run before a push (#2833). Its
+      # test fails when this job runs a script the local command does not list.
+      - name: Test the local docs check
+        run: scripts/test-check-docs.sh
 
       # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
       # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that

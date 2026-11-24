@@ -4,7 +4,7 @@ title: Build a Support Assistant
 parent: Tutorials
 nav_order: 1
 has_children: true
-description: "Build a customer-support assistant with LLM4S, one part at a time: first call, typed answers, tools and an agent, help-centre answers, safety and memory, with exercises a test suite checks."
+description: "Build a customer-support assistant with LLM4S one part at a time: first call, typed answers, tools, help-centre answers, safety and memory, with exercises."
 search_title: "Tutorial: build a support assistant with LLM4S"
 ---
 

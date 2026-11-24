@@ -695,6 +695,7 @@ import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
+import org.llm4s.security.Secret
 
 object MultiTenantRAGExample extends App {
 
@@ -703,7 +704,7 @@ object MultiTenantRAGExample extends App {
   // 1. Setup
   val searchIndex = PgSearchIndex.fromJdbcUrl(
     "jdbc:postgresql://localhost:5432/postgres",
-    "postgres", "postgres", "vectors"
+    "postgres", Secret("postgres"), "vectors"
   ).getOrElse(throw new RuntimeException("Failed to create SearchIndex"))
 
   searchIndex.initializeSchema()

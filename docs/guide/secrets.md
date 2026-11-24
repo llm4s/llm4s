@@ -6,6 +6,7 @@ search_title: "Read LLM4S API keys from Vault or AWS Secrets Manager"
 parent: Operations
 nav_order: 704
 grand_parent: User Guide
+cites_closed_issues: [2479]
 ---
 
 # Secrets and API key providers

@@ -6,6 +6,8 @@ search_title: "Replace a Python LLM sidecar with LLM4S in Scala"
 parent: Coming from Another Library
 nav_order: 605
 grand_parent: User Guide
+cites_open_issues: [695, 1442]
+cites_closed_issues: [2284]
 ---
 
 # Replacing a Python Sidecar

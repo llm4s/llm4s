@@ -72,10 +72,12 @@ val audio = tts.synthesize("Hello, world!", TTSOptions(language = Some("en"), sp
 ### Audio Preprocessing
 
 ```scala
+import org.llm4s.speech.AudioMeta
 import org.llm4s.speech.processing.AudioPreprocessing
+import java.nio.file.{ Files, Paths }
 
-val audioBytes = // ... your audio data
-val audioMeta = AudioMeta(sampleRate = 44100, numChannels = 2, bitDepth = 16)
+val audioBytes = Files.readAllBytes(Paths.get("recording.pcm")) // raw 16-bit PCM samples
+val audioMeta  = AudioMeta(sampleRate = 44100, numChannels = 2, bitDepth = 16)
 
 // Convert to mono, resample to 16kHz for STT
 val processed = AudioPreprocessing.standardizeForSTT(

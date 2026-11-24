@@ -3,7 +3,7 @@ layout: landing
 title: Learn
 nav_order: 9.5
 permalink: /learn/
-description: "A free path to becoming an AI engineer with LLM4S: from your first LLM call to agents, RAG, tools and MCP, then real open-source contributions with Dev Hour, Discord and mentorship programs."
+description: "A free path to becoming an AI engineer with LLM4S: from a first LLM call to agents, RAG, tools and MCP, then open-source work with Dev Hour and mentors."
 ---
 
 <section class="lp-hero lp-hero--page" aria-labelledby="learn-hero">

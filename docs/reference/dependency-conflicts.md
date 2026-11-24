@@ -5,6 +5,7 @@ description: "Resolve LLM4S dependency conflicts in sbt, Maven and Gradle: the d
 search_title: "Resolve LLM4S dependency conflicts: sbt, Maven, Gradle"
 parent: Reference
 nav_order: 13
+cites_closed_issues: [1496]
 ---
 
 # Dependency Conflict Resolution

@@ -6,6 +6,7 @@ search_title: "Use your own sttp backend as the LLM4S HTTP transport"
 parent: Core
 nav_order: 112
 grand_parent: User Guide
+cites_closed_issues: [2341]
 ---
 
 # Your HTTP client

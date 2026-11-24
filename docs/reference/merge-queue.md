@@ -8,6 +8,7 @@ permalink: /contribute/merge-queue
 redirect_from:
   - /reference/merge-queue
   - /reference/merge-queue.html
+cites_closed_issues: [1638]
 ---
 
 # Protecting `main` from merge skew
