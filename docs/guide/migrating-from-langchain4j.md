@@ -159,10 +159,10 @@ val forecastTool = ToolBuilder[Map[String, Any], Forecast](
 
 ```scala
 val result = for {
-  tool  <- forecastTool
+  tool     <- forecastTool
   registry <- ToolRegistry.of(Seq(tool))
-  agent <- Agent.builder("forecast-agent", client).withTools(registry).build()
-  state <- agent.run("What is the weather in Oslo?")
+  agent    <- Agent.builder("forecast-agent", client).withTools(registry).build()
+  state    <- agent.run("What is the weather in Oslo?")
 } yield state
 ```
 

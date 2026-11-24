@@ -230,22 +230,26 @@ def checkTemperatureTool(tool: ToolFunction[Map[String, Any], String]): Unit = {
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius")) == Right(ujson.Str("212.0")))
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius", "precision" -> 3)) == Right(ujson.Str("212.000")))
 
-  // a missing argument is a HandlerError whose message names it
+  // a missing argument is InvalidArguments: the parameter error names it
   tool.execute(ujson.Obj("unit" -> "celsius")) match {
-    case Left(ToolCallError.HandlerError(name, message)) =>
+    case Left(error @ ToolCallError.InvalidArguments(name, List(parameter))) =>
       assert(name == "convert_temperature")
-      assert(message.contains("'value'") && message.contains("missing"))
-    case other => assert(false, s"expected a HandlerError, got $other")
+      assert(parameter.parameterName == "value")
+      assert(error.message.contains("'value'") && error.message.contains("missing"))
+    case other => assert(false, s"expected InvalidArguments, got $other")
   }
 
   // a wrong type is one too
   tool.execute(ujson.Obj("value" -> "hot", "unit" -> "celsius")) match {
-    case Left(ToolCallError.HandlerError(_, message)) => assert(message.contains("wrong type"))
-    case other                                        => assert(false, s"expected a HandlerError, got $other")
+    case Left(error: ToolCallError.InvalidArguments) => assert(error.message.contains("wrong type"))
+    case other                                       => assert(false, s"expected InvalidArguments, got $other")
   }
 
-  // so is the handler's own refusal
-  assert(tool.execute(ujson.Obj("value" -> 1, "unit" -> "kelvin")).isLeft)
+  // the handler's own refusal is a HandlerError with its message
+  tool.execute(ujson.Obj("value" -> 1, "unit" -> "kelvin")) match {
+    case Left(ToolCallError.HandlerError(_, message)) => assert(message.contains("kelvin"))
+    case other                                        => assert(false, s"expected a HandlerError, got $other")
+  }
 }
 ```
 

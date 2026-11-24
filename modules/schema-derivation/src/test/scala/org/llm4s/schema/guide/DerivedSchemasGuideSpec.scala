@@ -416,7 +416,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     tool.toolDefinition(strict = true)("function")("parameters") shouldBe
       org.llm4s.schema.SchemaOf[TypedTools.ForecastQuery].toJsonSchema()
 
-    def error(e: ToolParameterError) = Left(ToolCallError.HandlerError("get_forecast", e.message))
+    def error(e: ToolParameterError) = Left(ToolCallError.InvalidArguments("get_forecast", List(e)))
     tool.execute(ujson.Obj("city" -> "Paris", "days" -> 3, "extra" -> true)) shouldBe
       Right(ujson.Obj("city" -> "Paris", "days" -> 3, "summary" -> "Sunny"))
     tool.execute(ujson.Obj("city" -> "Paris", "days" -> 9)) shouldBe
@@ -427,11 +427,9 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       tool.execute(ujson.Obj("city" -> "Paris", "days" -> days)) shouldBe
         error(TypeMismatch("days", "integer", if (days.strOpt.isDefined) "string" else "number"))
     tool.execute(ujson.Str("Paris")) shouldBe Left(
-      ToolCallError.HandlerError(
+      ToolCallError.InvalidArguments(
         "get_forecast",
-        MultipleErrors(
-          List(InvalidNesting("city", "root", "string"), InvalidNesting("days", "root", "string"))
-        ).message
+        List(InvalidNesting("city", "root", "string"), InvalidNesting("days", "root", "string"))
       )
     )
   }

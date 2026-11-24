@@ -142,7 +142,7 @@ import scala.concurrent.Future
 
 def pekkoProgram(client: LLMClient, timeout: FiniteDuration)(using system: ActorSystem): Future[String] = {
   import system.dispatcher
-  val llm = LLMClientPekko(client)
+  val llm   = LLMClientPekko(client)
   val tools = temperature.flatMap(tool => ToolRegistry.of(Seq(tool)))
   tools.flatMap(registry => llm.agent("assistant")(_.withTools(registry))) match {
     case Left(error) => Future.successful(s"failed: ${error.message}")

@@ -258,10 +258,10 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
       )
       // the hand-written handler stops at the first, which is the typed tool's first
       typedAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", MultipleErrors(handWritten(arguments).left.getOrElse(Nil)).message)
+        ToolCallError.InvalidArguments("add", handWritten(arguments).left.getOrElse(Nil))
       )
       handBuiltAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", handWritten(arguments).left.getOrElse(Nil).head.message)
+        ToolCallError.InvalidArguments("add", handWritten(arguments).left.getOrElse(Nil).take(1))
       )
     }
   }
@@ -271,7 +271,9 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val errors    = List(MissingParameter("a", "integer", List("b")), TypeMismatch("b", "integer", "string"))
     decodeAdd(arguments) shouldBe Left(errors)
     decodeAdd(arguments) shouldBe handWritten(arguments)
-    typedAdd.execute(arguments) shouldBe Left(ToolCallError.HandlerError("add", MultipleErrors(errors).message))
+    typedAdd.execute(arguments) shouldBe Left(ToolCallError.InvalidArguments("add", errors))
+    typedAdd.execute(arguments).left.map(_.message) shouldBe
+      Left(s"has parameter issues:\n${errors.map(e => s"  - ${e.message}").mkString("\n")}")
   }
 
   it should "report a calculator operand of the wrong type as the hand-built calculator does" in {

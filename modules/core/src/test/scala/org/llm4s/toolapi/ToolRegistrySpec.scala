@@ -823,7 +823,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   // ============ OpenAI Tool Format ============
 
-  "ToolRegistry.getOpenAITools" should "generate OpenAI tool definitions" in {
+  "ToolFunction.toolDefinitions" should "generate the tool definitions of a registry's tools" in {
     val result = for {
       addTool  <- createAddTool()
       echoTool <- createEchoTool()
