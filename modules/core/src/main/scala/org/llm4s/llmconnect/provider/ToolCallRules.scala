@@ -11,7 +11,7 @@ import org.llm4s.util.BoundedJson
  * Part 3):
  *
  *  1. A call whose arguments are not a complete JSON object is a `Left`: never `{}`, never dropped, never passed on as
- *     a raw string. Arguments nested more than [[BoundedJson.MaxDepth]] levels deep stay unparsed, and fail the same
+ *     a raw string. Arguments nested more than `BoundedJson.MaxDepth` levels deep stay unparsed, and fail the same
  *     way (#1562).
  *  1. Absent or blank arguments are `{}` (a call to a tool with no parameters) only when the reply ended cleanly,
  *     with `ToolCalls` or `Stop`.

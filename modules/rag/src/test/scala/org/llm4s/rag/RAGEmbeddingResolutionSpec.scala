@@ -119,7 +119,8 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "fail naming the provider when no model can be found anywhere" in {
     given ProviderRegistry = ProviderRegistry.ofEmbeddings(new EmbeddingProviderDescriptor:
-      val id: ProviderId = ProviderId("modelless")
+      val id: ProviderId                                           = ProviderId("modelless")
+      val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
       def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
         Left(ConfigurationError("unreachable"))
     )

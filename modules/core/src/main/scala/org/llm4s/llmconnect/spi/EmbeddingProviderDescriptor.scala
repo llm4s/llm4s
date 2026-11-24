@@ -63,7 +63,7 @@ trait EmbeddingProviderDescriptor:
 
   /**
    * What this provider needs from `llm4s.embeddings.<id>`, and its defaults. Abstract, as
-   * [[ProviderDescriptor.configSpec]] is: a provider says what it needs. `EmbeddingConfigSpec()` is one that needs
+   * `ProviderDescriptor.configSpec` is: a provider says what it needs. `EmbeddingConfigSpec()` is one that needs
    * nothing but a model.
    */
   def configSpec: EmbeddingConfigSpec

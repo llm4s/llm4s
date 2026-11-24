@@ -126,14 +126,16 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
 
   /** Overrides nothing dimension-related: the default a third-party provider gets. */
   private object UndeclaredEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("undeclared")
+    val id: ProviderId                                           = ProviderId("undeclared")
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
   private object RegisteredLocalEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("local")
+    val id: ProviderId                                           = ProviderId("local")
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     override val modelDimensions: Map[String, Int] =
       Map("my-local-embedder" -> 384, "openclip-vit-b32" -> 1024)
@@ -143,7 +145,8 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
   }
 
   private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("fixturecloud")
+    val id: ProviderId                                           = ProviderId("fixturecloud")
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     override val modelDimensions: Map[String, Int] = Map("fixture-small" -> 256)
 
