@@ -49,7 +49,7 @@ object BasicLLMCallingWithTrace {
                 threadId = "sample-thread",
                 runId = java.util.UUID.randomUUID().toString,
                 agent = "sample-agent",
-                status = "completed",
+                status = TraceEvent.RunStatus.Completed,
                 messages = finalMessages,
                 usage = UsageSummary()
               )
@@ -67,7 +67,7 @@ object BasicLLMCallingWithTrace {
             }
 
           case Left(error) =>
-            tracer.traceError(new RuntimeException(error.formatted))
+            tracer.traceError(error, "completion")
             logger.error("Error: {}", error.formatted)
         }
         tracer.traceEvent("LLM conversation finished")

@@ -120,4 +120,9 @@ class OpenAICompatibleSmokeSpec extends AnyFlatSpec with Matchers with EitherVal
     else Map(Capability.StructuredOutput -> s"Groq's $model takes json_object, not a json_schema response format")
 
   registerCapabilityContract()
+
+  // ---- validate(): GET <baseUrl>/models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] = Some(client(Some("invalid-key-for-testing")))
+
+  registerValidationContract()
 }

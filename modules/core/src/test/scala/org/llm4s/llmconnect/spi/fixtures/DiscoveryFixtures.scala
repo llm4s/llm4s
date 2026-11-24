@@ -71,8 +71,9 @@ final class LinkageErrorProviderModule extends Llm4sProviderModule:
  * `EmbeddingProviderDescriptor` a separate trait.
  */
 object FixtureEmbeddings extends EmbeddingProviderDescriptor:
-  val id: ProviderId                = ProviderId("fixtureembed")
-  override val aliases: Set[String] = Set("fixture-embeddings")
+  val id: ProviderId                                           = ProviderId("fixtureembed")
+  val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
+  override val aliases: Set[String]                            = Set("fixture-embeddings")
 
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
     Right(
@@ -116,7 +117,8 @@ final class CollidingProviderModule extends Llm4sProviderModule:
 
 /** An embedding provider that collides with [[FixtureEmbeddings]]'s id, to exercise collision reporting. */
 object CollidingEmbeddings extends EmbeddingProviderDescriptor:
-  val id: ProviderId = ProviderId("fixtureembed")
+  val id: ProviderId                                           = ProviderId("fixtureembed")
+  val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
     Left(ConfigurationError("colliding embedding provider builds no embedding provider"))
@@ -160,6 +162,7 @@ object SkewedProvider extends ProviderDescriptor:
 /** An embedding provider whose id throws, as a version-skewed descriptor's can (#2812). */
 object SkewedEmbeddings extends EmbeddingProviderDescriptor:
   def id: ProviderId = throw new AbstractMethodError("org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor.id()")
+  val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddings.build(config)
 

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, ProcessingError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.*
@@ -97,6 +97,21 @@ final class JlamaClient private[provider] (
       }
       completion <- toCompletion(generation)
     yield (completion, generation.finish)
+
+  /**
+   * Loads the model, as the first completion would, and generates nothing: there is no endpoint and no key to
+   * check, so what can fail is the load. `Right(())` means the model is in memory and stays there for the calls that
+   * follow; a model that cannot be downloaded or loaded is the `ProcessingError` a completion gets.
+   *
+   * Not cheap the first time: a model not yet in `config.modelDir` is downloaded, and loading takes as long as it
+   * takes. Once the model is loaded it returns at once.
+   */
+  override def validate(): Result[Unit] =
+    if Thread.currentThread().isInterrupted then Left(CancelledError(s"$ProviderName.validate"))
+    else
+      CancelledError.attempt(s"$ProviderName.validate")(
+        validateNotClosed.flatMap(_ => locked(currentEngine)).map(_ => ())
+      )
 
   /** The loaded model, loading it on first use. A failed load is not kept: the next call tries again. */
   private def currentEngine: Result[JlamaEngine] =

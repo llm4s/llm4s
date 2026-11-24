@@ -72,8 +72,10 @@ final class GuardrailReviewMiddleware(
         verdict.answer match
           case GuardrailVerdict.Allow      => Right(text)
           case GuardrailVerdict.Edit(next) => Right(next)
-          case GuardrailVerdict.Block => Left(GuardrailBlocked(verdict.question.guardrail, verdict.question.reason))
+          case GuardrailVerdict.Block =>
+            Left(GuardrailBlocked(verdict.question.guardrail, Some(verdict.question.reason)))
       case None =>
         guarded match
-          case Left(blocked: GuardrailBlocked) => ask(GuardrailReview(phase, blocked.guardrail, blocked.reason, text))
-          case other                           => other
+          case Left(blocked: GuardrailBlocked) =>
+            ask(GuardrailReview(phase, blocked.guardrail, blocked.reason.getOrElse(blocked.message), text))
+          case other => other

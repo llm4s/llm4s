@@ -1107,7 +1107,7 @@ import org.llm4s.trace.{ TraceEvent, Tracing }
 val result = for {
   settings <- Llm4sConfig.tracing()
   tracer   <- Tracing.fromSettings(settings)
-  _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
+  _        <- tracer.traceEvent(TraceEvent.CustomEvent("query_received", ujson.Obj("tools" -> 1)))
   _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
   _         = tracer.close() // always shut down to flush pending spans
 } yield ()

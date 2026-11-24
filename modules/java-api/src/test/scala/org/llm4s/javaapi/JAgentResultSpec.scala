@@ -61,7 +61,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "carry a blocked turn's guardrail and reason, and nothing else" in {
-    val s = FacadeInternals.agentStatus(AgentStatus.Blocked("NoSecrets", "leaks a key"))
+    val s = FacadeInternals.agentStatus(AgentStatus.Blocked("NoSecrets", Some("leaks a key")))
     pending(AgentStatusKind.BLOCKED, s)
     s.answer shouldBe Optional.empty
     s.guardrail shouldBe Optional.of("NoSecrets")
@@ -111,7 +111,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val completed = FacadeInternals.agentStatus(AgentStatus.Completed(null))
     completed.answer shouldBe Optional.empty
     completed.toString shouldBe "COMPLETED()"
-    val blocked = FacadeInternals.agentStatus(AgentStatus.Blocked(null, null))
+    val blocked = FacadeInternals.agentStatus(AgentStatus.Blocked(null, None))
     blocked.guardrail shouldBe Optional.empty
     blocked.reason shouldBe Optional.empty
     blocked.toString shouldBe "BLOCKED(: )"

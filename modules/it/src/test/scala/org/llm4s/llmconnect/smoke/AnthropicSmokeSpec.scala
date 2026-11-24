@@ -103,4 +103,12 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(AnthropicClient(config("sk-ant-invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(AnthropicClient(config(key, "llm4s-no-such-model")))
+
+  registerValidationContract()
 }

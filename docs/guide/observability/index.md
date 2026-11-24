@@ -465,9 +465,10 @@ it. **[Agent tracing and metrics](agents)** is the description of that trace: th
   durable events: `agent.model_call_completed`, `agent.tool_executed`, `agent.handed_off`,
   `agent.guardrail_blocked` and, for a delegated subagent, `agent.task_ended`. A `TokenUsageRecorded` follows each
   model call that reports usage.
-- One `TraceEvent.AgentRunEnded` ends the run, with a status of `completed`, `step_limit_reached`,
-  `token_limit_reached`, `truncated`, `suspended`, `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed`, the
-  run's own usage, and `userId`, the run's `RunConfig.principal`.
+- One `TraceEvent.AgentRunEnded` ends the run, with the root agent and the agent active at the end, a status of
+  `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked` (the guardrail is
+  `blockedBy`), `cancelled`, `timed_out` or `failed`, the run's own usage, and `userId`, the run's
+  `RunConfig.principal`.
 - The durable events carry none of the messages, tool arguments or tool results. They are not free of data about
   the run: `graph.run_started`, `graph.run_resumed` and `graph.run_recovered` carry its `tenantId` and `principal`,
   and `graph.task_failed` and `graph.run_failed` carry the error's message (a guardrail block's names only the
@@ -766,7 +767,7 @@ val metered = MeteredCheckpointer(store.checkpointer, metrics) // every GraphRun
 | Metric (Prometheus series) | Type | Labels | Recorded by |
 |---|---|---|---|
 | `llm4s_agent_runs_started_total` | counter | `graph`, `trigger` (`start`, `resume`, `recover`) | checkpointer |
-| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`) | checkpointer |
+| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out`, `failed`) | checkpointer |
 | `llm4s_agent_run_duration_seconds` | histogram | `graph`, `status` | checkpointer |
 | `llm4s_agent_claims_total` | counter | `result` (`acquired`, `taken_over`, `busy`, `failed`) | checkpointer |
 | `llm4s_agent_claim_renewals_total` | counter | `result` (`renewed`, `lost`, `failed`) | checkpointer |
@@ -819,13 +820,25 @@ no tokens. `Right(())` means the provider accepted that request. A client never 
 | `ollama` | `POST /api/show` | no key | `ServiceError` 404, with the `ollama pull` hint |
 | `openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty` | `GET /models` | `AuthenticationError` | not checked |
 | `openrouter` | `GET /key` | `AuthenticationError` | not checked |
-| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama` | none | `Left(ValidationUnsupportedError)` | |
+| `cohere` | `GET /v1/models/<model>` on the native API | `AuthenticationError` | `ServiceError` 404 |
+| `perplexity` | `GET /v1/models` | `AuthenticationError` | not checked |
+| `azure` | `GET <endpoint>/openai/models` (`/openai/v1/models` on a v1 endpoint) | `AuthenticationError` | not checked: `model` is a deployment, which the listing does not hold |
+| `vertexai` | `GET /v1/publishers/google/models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `watsonx` | the IAM token exchange, afresh on every call | `AuthenticationError` | not checked, nor the project or the watsonx endpoint |
+| `jlama` | none: it loads the model, downloading it first if it is not there | no key | `ProcessingError` |
+| `bedrock`, `zai` | none | `Left(ValidationUnsupportedError)` | |
 
 A provider in the last row has no cheap authenticated request, so its client returns
-`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work. So does a client that does not
-implement the check, such as a test double. An endpoint that does not answer is a `NetworkError` or `TimeoutError`
-(the request waits ten seconds at most). Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what
-the client they wrap returns.
+`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work.
+
+- **`bedrock`**: the runtime API the client calls has no request that reads without generating and that the
+  permission a completion needs (`bedrock:InvokeModel`) authorises. `GetFoundationModel` is a control-plane request:
+  another SDK, another endpoint and another permission, so a client that works could fail it.
+- **`zai`**: Z.ai's API reference documents no model listing and no other request that neither generates nor bills.
+
+So does a client that does not implement the check, such as a test double. An endpoint that does not answer is a
+`NetworkError` or `TimeoutError` (the request waits ten seconds at most; `jlama`'s load takes as long as it takes).
+Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what the client they wrap returns.
 
 Use it at startup to fail fast on misconfiguration, treating "cannot check" as its own case:
 

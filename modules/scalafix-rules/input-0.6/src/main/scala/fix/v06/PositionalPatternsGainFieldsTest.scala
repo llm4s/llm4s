@@ -33,11 +33,6 @@ object PositionalPatternsGainFieldsTest {
     case ContentFilteredError(_, _, _, promptBlocked) => promptBlocked
   }
 
-  def failedModel(event: TraceEvent): Option[String] = event match {
-    case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _) => model
-    case _ => None
-  }
-
   // gained servedTier since 0.6.0 (#2750)
   def completionModel(event: TraceEvent): Option[String] = event match {
     case TraceEvent.CompletionReceived(_, model, _, _, _, _, _, _, _, _, _, _, _, _) => Some(model)

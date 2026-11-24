@@ -22,6 +22,22 @@ class TracingComposerConveniencesSpec extends AnyFlatSpec with Matchers {
     Completion("c-1", Instant.EPOCH, "the answer", "test-model", AssistantMessage("the answer"), usage = None)
   private val usage = TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30)
 
+  "Tracing.traceError" should "record an LLMError as it is: its message and type, with no exception (#2800)" in {
+    val seen = scala.collection.mutable.Buffer.empty[TraceEvent]
+    val tracing = new Tracing {
+      def traceEvent(event: TraceEvent): org.llm4s.types.Result[Unit] = { seen += event; Right(()) }
+    }
+    val error = org.llm4s.error.ProcessingError("store", "store down")
+    tracing.traceError(error, "commit") shouldBe Right(())
+    tracing.traceError(new IllegalStateException("boom"), "a step") shouldBe Right(())
+
+    val errors = seen.collect { case e: TraceEvent.ErrorOccurred => e }.toSeq
+    errors.map(e => (e.message, e.errorType, e.context, e.cause.isDefined)) shouldBe Seq(
+      (error.message, "ProcessingError", "commit", false),
+      ("boom", "IllegalStateException", "a step", true)
+    )
+  }
+
   private def traceAll(tracing: Tracing): Unit = {
     tracing.traceError(new IllegalStateException("boom"), "a step") shouldBe Right(())
     tracing.traceCompletion(completion, "test-model") shouldBe Right(())

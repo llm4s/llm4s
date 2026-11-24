@@ -88,6 +88,12 @@ object GraphTestSupport {
       org.llm4s.agent.AgentId.unsafe("test")
     )
 
+  /** An `AdmissionContext` for calling `admit` directly: a stage that runs inside `hook`'s task, counted by it. */
+  def testAdmissionContext(
+    hook: org.llm4s.agent.graph.middleware.ModelContext = testModelContext()
+  ): org.llm4s.agent.graph.middleware.AdmissionContext =
+    org.llm4s.agent.graph.middleware.AdmissionContext.within(hook, org.llm4s.agent.AgentId.unsafe("test"))
+
   def continue(command: Command): NodeResult = NodeResult.Continue(command)
 
   extension [O](admitted: org.llm4s.types.Result[RunHandle[O]])

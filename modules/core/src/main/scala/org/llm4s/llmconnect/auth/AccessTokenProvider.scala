@@ -40,11 +40,14 @@ trait AccessTokenProvider:
   def token(): Result[String]
 
   /**
-   * Reports that the server rejected `rejected`. The cached token is dropped only if it is that
+   * Reports that the server rejected `rejected`. A provider that caches drops the cached token only if it is that
    * token, so concurrent calls that all saw a 401 for the same token cause one refresh, and a late
    * report about an older token does not discard a newer one.
+   *
+   * Does nothing by default, which suits a provider that caches nothing: every [[token]] call then asks afresh. With
+   * it defaulted the trait has one abstract method, so a lambda is a provider: `() => readToken()`.
    */
-  def invalidate(rejected: String): Unit
+  def invalidate(@scala.annotation.unused rejected: String): Unit = ()
 
 /**
  * Caches the token `fetch` returns until `refreshMargin` before it expires - or half-way through
@@ -124,7 +127,7 @@ final class CachingAccessTokenProvider(
         }
 
   /** Interrupted while waiting for the lock, it returns without dropping anything, the flag set again. */
-  def invalidate(rejected: String): Unit =
+  override def invalidate(rejected: String): Unit =
     locked(()) {
       if cached.exists(_.token.value == rejected) then
         cached = None

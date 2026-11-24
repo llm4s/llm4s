@@ -18,9 +18,9 @@ object TracingExample {
         logger.info("1. Basic Enhanced Tracing")
         val basicTracer = Tracing.create(settings.withMode(TracingMode.Console))
 
-        val agentEvent = TraceEvent.AgentInitialized(
-          query = "What's the weather like?",
-          tools = Vector("weather", "calculator")
+        val agentEvent = TraceEvent.CustomEvent(
+          "query_received",
+          ujson.Obj("query" -> "What's the weather like?", "tools" -> ujson.Arr("weather", "calculator"))
         )
 
         val completionEvent = TraceEvent.CompletionReceived(
@@ -47,7 +47,7 @@ object TracingExample {
     result.fold(err => logger.error(s"Error: ${err.formatted}"), identity)
   }
 
-  private def example2(settings: TracingSettings, agentEvent: TraceEvent.AgentInitialized) = {
+  private def example2(settings: TracingSettings, agentEvent: TraceEvent) = {
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
     val consoleTracer  = Tracing.create(settings.withMode(TracingMode.Console))
@@ -58,7 +58,7 @@ object TracingExample {
     (consoleTracer, noOpTracer)
   }
 
-  private def example3(agentEvent: TraceEvent.AgentInitialized, consoleTracer: Tracing) = {
+  private def example3(agentEvent: TraceEvent, consoleTracer: Tracing) = {
     // Example 3: Filtered tracing (only error events)
     logger.info("3. Filtered Tracing (Only Errors)")
     val errorOnlyTracer = TracingComposer.filter(consoleTracer) { event =>
@@ -69,10 +69,7 @@ object TracingExample {
     errorOnlyTracer.traceEvent(agentEvent)
 
     // This will be traced (is an error)
-    val errorEvent = TraceEvent.ErrorOccurred(
-      error = new RuntimeException("Test error"),
-      context = "Enhanced tracing example"
-    )
+    val errorEvent = TraceEvent.ErrorOccurred.of(new RuntimeException("Test error"), "Enhanced tracing example")
     errorOnlyTracer.traceEvent(errorEvent)
   }
 
@@ -119,7 +116,7 @@ object TracingExample {
     complexTracer.traceEvent(tokenEvent)
   }
 
-  private def example6(basicTracer: Tracing, agentEvent: TraceEvent.AgentInitialized): Unit = {
+  private def example6(basicTracer: Tracing, agentEvent: TraceEvent): Unit = {
     // Example 6: Error handling
     logger.info("6. Error Handling")
     val result = basicTracer.traceEvent(agentEvent)

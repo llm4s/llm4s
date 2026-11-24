@@ -111,10 +111,11 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
  * [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor EmbeddingProviderDescriptor]], so a recipe registers it exactly as it would a provider module's descriptor.
  */
 object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
-  val id: ProviderId                             = ProviderId("bagofwords")
-  val Model: String                              = "words-256"
-  val Dimensions: Int                            = 256
-  override val modelDimensions: Map[String, Int] = Map(Model -> Dimensions)
+  val id: ProviderId                                           = ProviderId("bagofwords")
+  val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
+  val Model: String                                            = "words-256"
+  val Dimensions: Int                                          = 256
+  override val modelDimensions: Map[String, Int]               = Map(Model -> Dimensions)
 
   /** The vector of `text`: its word counts, hashed into buckets, at length 1 (all zeros for a text with no words). */
   def vector(text: String): Seq[Double] = {

@@ -96,9 +96,9 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     result shouldBe Right("eu-west-1")
   }
 
-  it should "fail naming the key and the generic <name> hint when the section omits it" in {
+  it should "fail naming the key and the section it is missing from when the section omits it" in {
     val message = expectMessage(ProviderDescriptor.requireExtra(providerName, section(), "region"))
-    message shouldBe s"Configured provider '$providerName' is missing region (llm4s.providers.<name>.region)"
+    message shouldBe s"Configured provider '$providerName' is missing region (llm4s.providers.$providerName.region)"
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -159,9 +159,9 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
       Right("https://default.example.com")
   }
 
-  it should "fail naming the generic <name> hint when neither the section nor the spec has one" in {
+  it should "fail naming the section when neither it nor the spec has a base URL" in {
     val message = expectMessage(ProviderDescriptor.resolveBaseUrl(providerName, section(), specNoDefault))
-    message shouldBe s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"
+    message shouldBe s"Configured provider '$providerName' is missing base URL (llm4s.providers.$providerName.baseUrl)"
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -195,7 +195,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     extras: Seq[ProviderConfigKey] = Seq(ProviderConfigKey.required("region", "the region")),
     apiKeyEnv: Seq[String] = Seq("EXAMPLE_API_KEY"),
     authExtras: Seq[ProviderConfigKey] = Seq(ProviderConfigKey.optional("tokenUrl", "the token URL")),
-    keylessWhen: Option[(String, String)] = Some("authentication" -> "entra-id")
+    keylessWhen: Option[KeylessSetting] = Some(KeylessSetting("authentication", "entra-id"))
   ): ProviderConfigSpec =
     ProviderConfigSpec(
       requiresApiKey,
@@ -257,12 +257,17 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     fullSpec().withAuthExtras(newAuthExtras) shouldBe fullSpec(authExtras = newAuthExtras)
   }
 
-  "withKeylessWhen" should "set keylessWhen from a key/value pair and leave every other field unchanged" in {
-    fullSpec().withKeylessWhen("mode", "keyless") shouldBe fullSpec(keylessWhen = Some("mode" -> "keyless"))
+  "withKeylessWhen" should "set keylessWhen from a setting and leave every other field unchanged" in {
+    val keyless = KeylessSetting("mode", "keyless")
+    fullSpec().withKeylessWhen(keyless) shouldBe fullSpec(keylessWhen = Some(keyless))
+    keyless.describe shouldBe "mode = \"keyless\""
+    KeylessSetting("mode", "a", "b", "a").values shouldBe Seq("a", "b")
+    KeylessSetting("mode", "a", "b").describe shouldBe "mode = \"a\" or \"b\""
   }
 
   it should "set keylessWhen from an Option, including clearing it with None" in {
-    fullSpec().withKeylessWhen(Some("mode" -> "keyless")) shouldBe fullSpec(keylessWhen = Some("mode" -> "keyless"))
+    val keyless = KeylessSetting("mode", "keyless")
+    fullSpec().withKeylessWhen(Some(keyless)) shouldBe fullSpec(keylessWhen = Some(keyless))
     fullSpec().withKeylessWhen(None) shouldBe fullSpec(keylessWhen = None)
   }
 

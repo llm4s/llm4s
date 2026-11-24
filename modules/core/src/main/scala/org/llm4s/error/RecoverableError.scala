@@ -27,7 +27,7 @@ import scala.concurrent.duration.FiniteDuration
  * }}}
  *
  * @see [[NonRecoverableError]] for errors that cannot be recovered
- * @see [[ErrorRecovery]] for retry utilities
+ * @see [[org.llm4s.reliability.ReliableClient]] for retrying a client's calls
  */
 @Stable
 trait RecoverableError extends LLMError {

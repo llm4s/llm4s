@@ -151,7 +151,7 @@ object CapabilityMatrix {
     val missing = modules.filterNot(m => reports.contains(m.moduleClass))
     if (report.hasFailures) Left(s"Provider discovery failed: ${report.failures.map(_.detail).mkString("; ")}")
     else if (report.hasCollisions)
-      Left(s"Provider ids collide: ${report.collisions.map(c => s"${c.kind} ${c.id}").mkString(", ")}")
+      Left(s"Provider ids collide: ${report.collisions.map(c => s"${c.kind.label} ${c.id.asString}").mkString(", ")}")
     else if (missing.nonEmpty)
       Left(
         s"Provider modules declared in META-INF/services but not discovered: ${missing.map(_.moduleClass).mkString(", ")}"
@@ -159,7 +159,7 @@ object CapabilityMatrix {
     else {
       val chat = for {
         module     <- modules
-        id         <- reports(module.moduleClass).providerIds
+        id         <- reports(module.moduleClass).providerIds.map(_.asString)
         descriptor <- registry.find(ProviderId(id)).toSeq
       } yield id -> (
         ChatFacts(
@@ -175,7 +175,7 @@ object CapabilityMatrix {
       )
       val embeddings = for {
         module     <- modules
-        id         <- reports(module.moduleClass).embeddingProviderIds
+        id         <- reports(module.moduleClass).embeddingProviderIds.map(_.asString)
         descriptor <- registry.findEmbedding(ProviderId(id)).toSeq
       } yield id -> (EmbeddingFacts(
         module.artifact,

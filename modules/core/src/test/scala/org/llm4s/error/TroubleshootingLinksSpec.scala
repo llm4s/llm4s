@@ -84,7 +84,7 @@ class TroubleshootingLinksSpec extends AnyWordSpec with Matchers:
 
   "A provider's HTTP error" should {
     def mapped(status: Int, body: String, headers: Map[String, Seq[String]] = Map.empty): LLMError =
-      HttpErrorMapper.mapHttpError(status, body, "openai", headers).left.toOption.get
+      Left(HttpErrorMapper.toError(status, body, "openai", headers)).left.toOption.get
 
     "on a 401 or 403, say to check the key's project or organisation, and link the entry" in
       Seq(401, 403).foreach { status =>

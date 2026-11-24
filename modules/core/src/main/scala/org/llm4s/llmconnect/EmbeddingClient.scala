@@ -84,12 +84,12 @@ final class EmbeddingClient private (
         case Left(error) =>
           t.traceEvent(
             TraceEvent.ErrorOccurred(
-              new RuntimeException(error.message),
+              error.message,
+              error.getClass.getSimpleName,
               TraceAttributeNames.Embeddings,
               operation = Some(TraceAttributeNames.Embeddings),
               model = Some(model),
               provider = providerId,
-              errorType = Some(error.getClass.getSimpleName),
               duration = duration
             )
           )

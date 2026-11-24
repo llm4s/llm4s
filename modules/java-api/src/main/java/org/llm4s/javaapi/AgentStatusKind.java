@@ -19,8 +19,8 @@ public enum AgentStatusKind {
   TRUNCATED,
 
   /**
-   * A guardrail refused the turn: {@link JAgentStatus#guardrail()} names it and
-   * {@link JAgentStatus#reason()} says why. The thread stays usable.
+   * A guardrail refused the turn: {@link JAgentStatus#guardrail()} names it and, on the result of the run that was
+   * blocked, {@link JAgentStatus#reason()} says why. The thread stays usable.
    */
   BLOCKED,
 

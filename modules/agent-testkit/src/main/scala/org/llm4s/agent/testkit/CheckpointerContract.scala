@@ -1782,7 +1782,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       Some(
         s.checkpoint("c2", Some("c1"), on = child, status = CheckpointStatus.Completed)
           .withOrigin(origin)
-          .withOutcome(RunOutcome.Blocked("LengthCheck", "too long"))
+          .withOutcome(RunOutcome.Blocked("LengthCheck"))
           .withTrace(origin.trace)
       ),
       on = child
@@ -1790,19 +1790,19 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.reopened()
     val latest = s.store.latest(child).value.value.checkpoint
     latest.origin shouldBe Some(origin)
-    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck"))
     // and the trace the work belongs to (design 4.58)
     latest.trace shouldBe origin.trace
     s.store.checkpoint(child, "c1").value.value.trace shouldBe None
     s.store.history(child, None, 10).value.map(c => (c.id, c.origin, c.outcome)) shouldBe Vector(
-      ("c2", Some(origin), Some(RunOutcome.Blocked("LengthCheck", "too long"))),
+      ("c2", Some(origin), Some(RunOutcome.Blocked("LengthCheck"))),
       ("c1", Some(origin), None)
     )
     s.store.checkpoint(child, "c1").value.value.origin shouldBe Some(origin)
     // a later checkpoint without an outcome clears it, and keeps the origin it carries
     s.commit(token, Some(s.checkpoint("c3", Some("c2"), on = child).withOrigin(origin)), on = child).value
     s.store.latest(child).value.value.checkpoint.outcome shouldBe None
-    s.store.checkpoint(child, "c2").value.value.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    s.store.checkpoint(child, "c2").value.value.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck"))
     val invalid = RunOutcome.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))
     s.commit(
       token,

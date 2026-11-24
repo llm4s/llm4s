@@ -58,13 +58,6 @@ class TraceCollectorPropertySpec
     )
 
   // Generators for every TraceEvent subtype
-  val genAgentInitialized: Gen[TraceEvent] =
-    for {
-      query <- genNonEmptyString
-      tools <- Gen.listOf(genNonEmptyString)
-      ts    <- genInstant
-    } yield TraceEvent.AgentInitialized(query, tools.toVector, ts)
-
   val genCompletionReceived: Gen[TraceEvent] =
     for {
       id        <- genId
@@ -97,7 +90,7 @@ class TraceCollectorPropertySpec
       msg     <- genNonEmptyString
       context <- Gen.alphaStr
       ts      <- genInstant
-    } yield TraceEvent.ErrorOccurred(new RuntimeException(msg), context, ts)
+    } yield TraceEvent.ErrorOccurred.of(new RuntimeException(msg), context).withTimestamp(ts)
 
   val genTokenUsageRecorded: Gen[TraceEvent] =
     for {
@@ -109,7 +102,7 @@ class TraceCollectorPropertySpec
 
   val genAgentRunEnded: Gen[TraceEvent] =
     for {
-      status <- genNonEmptyString
+      status <- Gen.oneOf(TraceEvent.RunStatus.values.toSeq)
       msgs   <- Gen.choose(0, 10)
       ts     <- genInstant
     } yield TraceEvent.AgentRunEnded(
@@ -162,7 +155,6 @@ class TraceCollectorPropertySpec
     } yield TraceEvent.CacheMiss(reason, ts)
 
   val genAnyTraceEvent: Gen[TraceEvent] = Gen.oneOf(
-    genAgentInitialized,
     genCompletionReceived,
     genToolExecutedSuccess,
     genToolExecutedFailure,
@@ -206,16 +198,7 @@ class TraceCollectorPropertySpec
 
   // ---- SpanKind mapping per event type ----
 
-  "TraceCollectorTracing" should "emit AgentCall spans for AgentInitialized" in {
-    forAll(genAgentInitialized) { event =>
-      store.clear()
-      val tc = collector()
-      tc.traceEvent(event)
-      store.getSpans(tc.traceId).head.kind shouldBe SpanKind.AgentCall
-    }
-  }
-
-  it should "emit LlmCall spans for CompletionReceived" in {
+  "TraceCollectorTracing" should "emit LlmCall spans for CompletionReceived" in {
     forAll(genCompletionReceived) { event =>
       store.clear()
       val tc = collector()
@@ -295,7 +278,7 @@ class TraceCollectorPropertySpec
     forAll(genNonEmptyString, Gen.alphaStr, genInstant) { (msg, context, ts) =>
       store.clear()
       val tc = collector()
-      tc.traceEvent(TraceEvent.ErrorOccurred(new RuntimeException(msg), context, ts))
+      tc.traceEvent(TraceEvent.ErrorOccurred.of(new RuntimeException(msg), context).withTimestamp(ts))
       val span = store.getSpans(tc.traceId).head
       span.status match {
         case SpanStatus.Error(errorMsg) => errorMsg should include(msg)

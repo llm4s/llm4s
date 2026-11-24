@@ -1,25 +1,25 @@
-package org.llm4s.llmconnect.streaming
+package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ProcessingError
 import org.llm4s.testutil.SmallStack
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class StreamingToolArgumentParserTest extends AnyFunSuite with Matchers {
+class ToolCallArgumentsTest extends AnyFunSuite with Matchers {
 
   private def malformed(raw: String): Boolean =
-    StreamingToolArgumentParser.parse(raw) match {
+    ToolCallRules.parseArguments(raw) match {
       case Left(e: ProcessingError) => e.message.contains("malformed tool call")
       case _                        => false
     }
 
   test("empty or blank input is {}, a call with no arguments") {
-    StreamingToolArgumentParser.parse("") shouldBe Right(ujson.Obj())
-    StreamingToolArgumentParser.parse("  ") shouldBe Right(ujson.Obj())
+    ToolCallRules.parseArguments("") shouldBe Right(ujson.Obj())
+    ToolCallRules.parseArguments("  ") shouldBe Right(ujson.Obj())
   }
 
   test("a JSON object is parsed as-is") {
-    StreamingToolArgumentParser.parse("""{"location":"SF"}""").map(_("location").str) shouldBe Right("SF")
+    ToolCallRules.parseArguments("""{"location":"SF"}""").map(_("location").str) shouldBe Right("SF")
   }
 
   // RFC 0009, Part 3, rule 1: a broken call is never {} and never a raw string
@@ -46,9 +46,9 @@ class StreamingToolArgumentParserTest extends AnyFunSuite with Matchers {
 
   test("an object nested 512 levels deep is parsed; nothing deeper than 512 levels is") {
     def nested(levels: Int) = """{"a":""" * (levels - 1) + "{}" + "}" * (levels - 1)
-    SmallStack.run(StreamingToolArgumentParser.parse(nested(512)).isRight) shouldBe Right(true)
+    SmallStack.run(ToolCallRules.parseArguments(nested(512)).isRight) shouldBe Right(true)
     SmallStack.run(
-      StreamingToolArgumentParser.parse(nested(513)).left.exists(_.message.contains("more than 512 levels deep"))
+      ToolCallRules.parseArguments(nested(513)).left.exists(_.message.contains("more than 512 levels deep"))
     ) shouldBe Right(true)
   }
 }

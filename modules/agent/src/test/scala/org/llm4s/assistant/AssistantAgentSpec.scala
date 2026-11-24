@@ -120,7 +120,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "describe a guardrail block as the response" in {
-    val state = emptySessionState().withResult(AgentResultFixture(AgentStatus.Blocked("NoSecrets", "leaks")))
+    val state = emptySessionState().withResult(AgentResultFixture(AgentStatus.Blocked("NoSecrets", Some("leaks"))))
     assistantAgent().extractFinalResponse(state) shouldBe Right("Blocked by guardrail 'NoSecrets': leaks")
   }
 

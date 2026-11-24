@@ -54,7 +54,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     result.status shouldBe a[AgentStatus.Blocked]
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "LengthCheck"
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too short")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too short")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 0
@@ -95,7 +95,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       .run("This query is too long")
       .value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too long")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too long")
     client.callCount shouldBe 0
   }
 
@@ -121,7 +121,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     val blocked = result.status.asInstanceOf[AgentStatus.Blocked]
     blocked.guardrail shouldBe "JSONValidator"
-    blocked.reason should include("not valid JSON")
+    blocked.reason.getOrElse("") should include("not valid JSON")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 1
@@ -173,7 +173,9 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val result = guarded(client, output = Seq(secretFree)).run("q").value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("response must not contain secrets")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include(
+      "response must not contain secrets"
+    )
     client.callCount shouldBe 2
   }
 
@@ -239,7 +241,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def wrapModelCall(request: ModelRequest, context: ModelContext)(
       next: ModelRequest => Result[ModelResponse]
     ): Result[ModelResponse] =
-      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", "not now")) else next(request)
+      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", Some("not now"))) else next(request)
   }
 
   "A GuardrailBlocked from a model wrapper" should "fail the run as Left, leaving the thread for recover" in {
@@ -249,7 +251,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val thread  = org.llm4s.agent.graph.ThreadId("wrapper-guardrail")
 
     val error = agent.run(thread, "q").error
-    cause(error) shouldBe GuardrailBlocked("ModelGuard", "not now")
+    cause(error) shouldBe GuardrailBlocked("ModelGuard", Some("not now"))
     // not a Block: the thread is Running, so a new turn is refused and recover continues it
     agent.run(thread, "another").error shouldBe a[GraphError.IncompleteRun]
     val recovered = agent.recover(thread).value

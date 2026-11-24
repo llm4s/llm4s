@@ -98,4 +98,10 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(DeepSeekClient(config("sk-invalid-key-for-testing")))
+
+  registerValidationContract()
 }

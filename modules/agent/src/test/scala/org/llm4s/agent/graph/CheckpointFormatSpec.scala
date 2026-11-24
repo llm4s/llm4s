@@ -241,7 +241,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     migrated.fencingToken shouldBe Some(FencingToken(7L))
     migrated.snapshot.frontier.head.passedBefore shouldBe false
     migrated.snapshot.frontier.head.replay shouldBe None
-    Checkpoint.CurrentFormat shouldBe 8
+    Checkpoint.CurrentFormat shouldBe 9
   }
 
   it should "read a format-6 checkpoint, written before task lineages, with every task of an empty lineage" in {
@@ -307,8 +307,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 9, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(9, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 10, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(10, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

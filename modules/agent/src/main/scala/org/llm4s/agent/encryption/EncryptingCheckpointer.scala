@@ -26,10 +26,13 @@ import scala.concurrent.duration.FiniteDuration
  *
  * '''What is encrypted''' - every value the application's codecs wrote: a checkpoint's state values, its pending
  * tasks' inputs and replayed routes, and its parked questions; a pending write's updates, route payloads and
- * question; a custom event's payload; and an effect record's outcome and presumed outcome.
+ * question; a custom event's payload; an effect record's outcome and presumed outcome; and the error text of a
+ * settled run's outcome (#2853) - a `RunOutcome.Failed`'s message and a `RunOutcome.OutputInvalid`'s errors, which
+ * can quote a tool's result or the model's answer.
  *
  * '''What stays in plain''', because the store orders, fences, lists or prunes by it: thread, run, checkpoint, task,
- * node, state-key, interrupt and tenant ids; statuses, outcomes and timestamps; the graph's id, version, fingerprint
+ * node, state-key, interrupt and tenant ids; statuses, timestamps and which way a run settled - an outcome's case,
+ * a blocking guardrail's name and a failure's kind; the graph's id, version, fingerprint
  * and shape; fencing tokens and sequence numbers; thread metadata; trace contexts; lineages, effect keys and the
  * digests recorded beside a value (an unkeyed digest lets someone who can guess a value confirm the guess); the
  * built-in events, which hold ids, counts, token usage and failure messages; and the size of every encrypted value.
@@ -91,7 +94,7 @@ final class EncryptingCheckpointer private (
         key    <- keys.current(tenant.map(TenantId(_)))
         seal = (place: Vector[String], value: ujson.Value) => thread.seal(key, place, value)
         checkpoint <- commit.checkpoint.fold[Result[Option[Checkpoint]]](Right(None))(c =>
-          checkpointed(seal, c).map(Some(_))
+          checkpointed(seal, c, sealing = true).map(Some(_))
         )
         writes <- traverse(commit.pendingWrites)(written(seal, _))
         events <- traverse(commit.events)(d =>
@@ -122,7 +125,7 @@ final class EncryptingCheckpointer private (
       case Some(stored) =>
         val open = cipher(threadId).open
         for
-          checkpoint <- checkpointed(open, stored.checkpoint)
+          checkpoint <- checkpointed(open, stored.checkpoint, sealing = false)
           writes     <- traverse(stored.pendingWrites)(written(open, _))
         yield Some(StoredCheckpoint(checkpoint, writes))
     }
@@ -130,7 +133,7 @@ final class EncryptingCheckpointer private (
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
     inner.history(threadId, before, limit).flatMap { found =>
       val open = cipher(threadId).open
-      traverse(found)(checkpointed(open, _))
+      traverse(found)(checkpointed(open, _, sealing = false))
     }
 
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
@@ -140,7 +143,9 @@ final class EncryptingCheckpointer private (
     inner.latestOfRuns(threadId, runIds).flatMap(opened(threadId, _))
 
   private def opened(threadId: ThreadId, found: Option[Checkpoint]): Result[Option[Checkpoint]] =
-    found.fold[Result[Option[Checkpoint]]](Right(None))(c => checkpointed(cipher(threadId).open, c).map(Some(_)))
+    found.fold[Result[Option[Checkpoint]]](Right(None))(c =>
+      checkpointed(cipher(threadId).open, c, sealing = false).map(Some(_))
+    )
 
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] =
     inner.effect(threadId, key).flatMap {
@@ -219,8 +224,11 @@ object EncryptingCheckpointer:
           .map(EncodedRoute.FanOut(join, node, _))
     }
 
-  /** `checkpoint` with every value of its snapshot through `codec`, each bound to the tenant, the checkpoint and its place. */
-  private def checkpointed(codec: Codec, checkpoint: Checkpoint): Result[Checkpoint] =
+  /**
+   * `checkpoint` with every value of its snapshot, and its outcome's error text, through `codec` - sealed when
+   * `sealing`, else opened - each bound to the tenant, the checkpoint and its place.
+   */
+  private def checkpointed(codec: Codec, checkpoint: Checkpoint, sealing: Boolean): Result[Checkpoint] =
     val place    = Vector("checkpoint") ++ tenantPlace(checkpoint.tenantId) :+ checkpoint.id
     val snapshot = checkpoint.snapshot
     for
@@ -242,7 +250,63 @@ object EncryptingCheckpointer:
           held     <- routed(codec, at, continuation.heldRoutes)
         yield continuation.withQuestion(question).withHeldRoutes(held)
       }
-    yield checkpoint.withSnapshot(snapshot.withState(state.toMap).withFrontier(frontier).withParked(parked))
+      outcome <- checkpoint.outcome.fold[Result[Option[RunOutcome]]](Right(None))(
+        settledAs(codec, place, _, sealing).map(Some(_))
+      )
+    yield checkpoint
+      .withSnapshot(snapshot.withState(state.toMap).withFrontier(frontier).withParked(parked))
+      .withOutcome(outcome)
+
+  /**
+   * `outcome` with its error text sealed, or opened (#2853), bound to its checkpoint as a state value is. The text
+   * keeps its field: sealed, a failure's message is the envelope's JSON, and an invalid output's errors are one
+   * element, the envelope of them all, so a store needs no column and no codec for it. Which way the run settled -
+   * the case, a guardrail's name, a failure's kind - stays readable; a `Blocked` outcome holds no text to seal.
+   */
+  private def settledAs(
+    codec: Codec,
+    place: Vector[String],
+    outcome: RunOutcome,
+    sealing: Boolean
+  ): Result[RunOutcome] =
+    val at = place :+ "outcome"
+    outcome match
+      case RunOutcome.Failed(kind, message) =>
+        texts(codec, at :+ "message", Vector(message), sealing).flatMap {
+          case Vector(one) => Right(RunOutcome.Failed(kind, one))
+          case other       => Left(malformed(at, s"a failure's message opened as ${other.size} texts"))
+        }
+      case RunOutcome.OutputInvalid(errors) =>
+        texts(codec, at :+ "errors", errors, sealing).map(RunOutcome.OutputInvalid(_))
+      case other => Right(other)
+
+  /**
+   * `all` through `codec` as one value, the JSON array of them. Sealed, they are one text: the envelope's JSON.
+   * Opened, one text that is an envelope gives back the texts it holds; texts that are no envelope are a
+   * plaintext, which `codec` refuses or passes on as the store's plaintext-reads setting says.
+   */
+  private def texts(
+    codec: Codec,
+    place: Vector[String],
+    all: Vector[String],
+    sealing: Boolean
+  ): Result[Vector[String]] =
+    val plain = ujson.Arr.from(all.map(ujson.Str(_)))
+    if sealing then codec(place, plain).map(envelope => Vector(ujson.write(envelope)))
+    else
+      val stored = all match
+        case Vector(one) => scala.util.Try(ujson.read(one)).toOption.filter(PayloadCipher.envelope(_).isDefined)
+        case _           => None
+      codec(place, stored.getOrElse(plain)).flatMap { opened =>
+        opened.arrOpt
+          .map(_.toVector.map(_.strOpt))
+          .filter(_.forall(_.isDefined))
+          .map(_.flatten)
+          .toRight(malformed(place, "an outcome's text did not open as a list of texts"))
+      }
+
+  private def malformed(place: Vector[String], problem: String): org.llm4s.error.LLMError =
+    org.llm4s.error.ValidationError(place.filter(_.nonEmpty).mkString("/"), problem)
 
   private def written(codec: Codec, write: PendingWrite): Result[PendingWrite] =
     val place = Vector("write", write.checkpointId, write.taskId)

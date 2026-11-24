@@ -88,7 +88,7 @@ final private[config] case class ProviderSections(
             ApiKeySource.WorkloadIdentity(s"llm4s.providers.${name.asName}.auth")
           else if descriptor.configSpec.isKeyless(raw.extras) then
             ApiKeySource.WorkloadIdentity(
-              s"llm4s.providers.${name.asName}.${descriptor.configSpec.keylessWhen.fold("")(_._1)}"
+              s"llm4s.providers.${name.asName}.${descriptor.configSpec.keylessWhen.fold("")(_.key)}"
             )
           else if raw.apiKeyFile.exists(_.trim.nonEmpty) then
             ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKeyFile")

@@ -54,7 +54,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "ConversationTokenCounter.openAI" should "create counter with cl100k_base tokenizer" in {
+  "ConversationTokenCounter.cl100k" should "create counter with cl100k_base tokenizer" in {
     val result = ConversationTokenCounter.cl100k()
 
     result.isRight shouldBe true

@@ -12,6 +12,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `AgentStatus.Blocked` and `TaskRefusal.Blocked` take `reason: Option[String]`, and `RunOutcome.Blocked` holds the guardrail's name only: a guardrail's reason is on the result of the run that was blocked and is never stored. Checkpoint format 9 ([#2853](https://github.com/llm4s/llm4s/issues/2853)); [migration](docs/reference/migration.md#a-guardrails-reason-is-never-stored-2853).
+- Input guardrails run when a turn is admitted, before it is stored and before any middleware's `beforeAgent`; `GuardrailBlocked.reason` is an `Option`; `Guardrail.validate(value, context)` takes a `UsageAccounting` ([#2854](https://github.com/llm4s/llm4s/issues/2854)); [migration](docs/reference/migration.md#a-turns-query-is-admitted-before-the-turn-is-stored-2854).
+- `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail block is
+  `blocked`, not `failed`, and a turn that hit its step or token limit or was cut off is `step_limit_reached`,
+  `token_limit_reached` or `truncated`, not `completed`; check alerts on `status="failed"` and `status="completed"`;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.AgentRunEnded.status` is a `TraceEvent.RunStatus`, not a `String`; a blocked run's status is `blocked`
+  with the guardrail in the new `blockedBy`, where it was `blocked:<guardrail>`, in `toJson` and every backend;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.AgentRunEnded.agent` is the run's root agent, not the agent active when it ended (the new `activeAgent`),
+  so the `invoke_agent <agent>` span of a run that handed off is named after the agent it was started on;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.ErrorOccurred` holds `message`, `errorType: String` and an optional `cause` instead of a `Throwable`:
+  build one with `ErrorOccurred.of(error, context)`, from an `LLMError` or a `Throwable`; an `LLMError` the library
+  traces is recorded under its own type, not `RuntimeException`, and with no stack trace;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `TraceEvent.ImageGenerationCompleted.provider` is an `Option[ProviderId]` and the event's last field, not a `String`
+  in second place;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `TraceEvent.AgentInitialized` is removed (nothing in the library emitted it), and with it the `LLM4S Agent Run`
+  trace and span the Langfuse and OpenTelemetry backends made of it; trace your own with `TraceEvent.CustomEvent`;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `LLMClientRetry` and `ErrorRecovery` (`recoverWithBackoff`, `CircuitBreaker`, `CircuitState`) are removed:
+  `ReliableClient` with a `RetryPolicy` is the one retry and circuit breaker; exhausted attempts return the last
+  error unchanged, not an `ExecutionError`, and an open circuit is a `CircuitOpenError`, which is not retried
+  ([#2798](https://github.com/llm4s/llm4s/issues/2798));
+  [migration](docs/reference/migration.md#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798).
+- `HttpErrorMapper.mapHttpError(...): Result[Nothing]` is `HttpErrorMapper.toError(status, body, provider, headers):
+  LLMError`, with no default for `headers`; `StreamingToolArgumentParser` is removed (`ToolCallRules.parseArguments`);
+  `CostEstimator.estimateFromMetadata` is internal ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811).
+- `ProviderConfigSpec.keylessWhen` is an `Option[KeylessSetting]`, not a tuple; `ProviderRegistryReport`,
+  `ProviderModuleReport`, `ProviderDiscoveryFailure` and `ProviderIdCollision` have no public `apply` or setters, a
+  collision's `kind` is a `ProviderCollisionKind` and ids are `ProviderId`; `EmbeddingProviderDescriptor.configSpec`
+  is abstract; an `AccessTokenProvider.invalidate` implementation needs `override`
+  ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811).
 - The `Result` object is `org.llm4s.types.Result`; `toResult` and `toLLMError` are extensions in `org.llm4s.syntax`
   (`TryOps`, `OptionOps`, `FutureOps`, `ThrowableOps` and `syntax.syntax` are gone); `ErrorMapper` is removed and
   `Try(...).toResult` no longer reads a 401 or 429 out of an exception's message; `Safety` is in `org.llm4s.error` and
@@ -130,6 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
+- **Changed** `HttpErrorMapper.mapHttpError` is `toError`, returning the `LLMError`; `ToolCallRules`, `PartEncoding`
+  and `HttpErrorMapper.mapStreamError` are public; `StreamingToolArgumentParser` is removed
+  ([migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `ProviderConfigSpec.keylessWhen` is a `KeylessSetting`; the registry report types are read-only with
+  `ProviderCollisionKind` and `ProviderId`; `EmbeddingProviderDescriptor.configSpec` is abstract;
+  `AccessTokenProvider.invalidate` has a default; `CostEstimator.estimateFromMetadata` is internal
+  ([migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
 - **Removed** Vertex AI's `endpoint` / `organization` aliases for `project` / `location`, and with them
   `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys` ([migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
 - **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
@@ -187,6 +232,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Removed** `LLMClientRetry` and `ErrorRecovery` (`recoverWithBackoff`, `CircuitBreaker`, `CircuitState`):
+  `ReliableClient` with a `RetryPolicy` is the one retry and circuit-breaker mechanism
+  ([migration](docs/reference/migration.md#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798)) [#2798](https://github.com/llm4s/llm4s/issues/2798).
+- **Changed** `TraceEvent.AgentRunEnded.status` is a `TraceEvent.RunStatus` with the guardrail in `blockedBy`, not a
+  `String` encoding `blocked:<guardrail>` [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Changed** `TraceEvent.ErrorOccurred` carries `message`, `errorType` and an optional `cause` instead of a `Throwable`,
+  so an `LLMError` is traced with its own type; `ErrorOccurred.of` and `Tracing.traceError` take either
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Changed** `TraceEvent.ImageGenerationCompleted.provider` is an `Option[ProviderId]`
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Removed** `TraceEvent.AgentInitialized`, which nothing in the library emitted
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
 - **Changed** `Result`'s helper object is in `org.llm4s.types` beside the type; the conversions (`toResult` on `Try`,
   `Option` and `Future`, `toLLMError`) and the `Result` combinators are Scala 3 extensions in the one object
   `org.llm4s.syntax`, imported explicitly; `Safety` moves to `org.llm4s.error` and `NetworkSecurity` to
@@ -209,7 +266,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** An Ollama session built by `llm4s-repl` is routed by the `llm4s.http` proxy and TLS settings, which the section-map loader dropped ([#2804](https://github.com/llm4s/llm4s/issues/2804)).
 - **Fixed** `CachingLLMClient` bypasses the cache for a conversation with a tool call or tool result, so a tool loop's next step is no longer served the first step's completion; `CachedEmbeddingClient` is an `EmbeddingProvider`, as `EmbeddingClient` now is, keeps the base response's `usage`, `metadata` and `dim`, and survives a failing `EmbeddingCache`, whose operations return `Result`s ([migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803)) [#2803](https://github.com/llm4s/llm4s/issues/2803).
 - **Fixed** `ModelRegistryConfig.default.withFilePath(...)` (or `withUrl`) loads that source instead of failing with "exactly one of resourcePath, filePath, or url", and `ModelRegistryService.lookup` no longer resolves an unknown id to the one model whose id contains it, so an unknown model never takes another's prices and capabilities [#2823](https://github.com/llm4s/llm4s/issues/2823).
-- **Fixed** `LLMClient.validate()` checks something: one model lookup, model listing or key lookup per provider, with the client's credentials and no completion; a client with no such request returns the new `ValidationUnsupportedError` instead of `Right(())`.
+- **Fixed** `LLMClient.validate()` checks something: one model lookup, model listing or key lookup per provider, with the client's credentials and no completion; a client with no such request returns the new `ValidationUnsupportedError` instead of `Right(())`. Azure OpenAI, Vertex AI, Cohere, Perplexity, watsonx and Jlama check too, so only Bedrock and Z.ai return it ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
   `ProviderModuleChecks.assertValidates` and `assertValidationUnsupported` check it ([guide](docs/guide/observability/index.md#startup-validation), [migration](docs/reference/migration.md#llmclientvalidate-checks-the-provider-2830)) [#2830](https://github.com/llm4s/llm4s/issues/2830).
 - **Fixed** context compression loses no content it cannot give back: without an `ArtifactStore` nothing is externalized (it went to a throwaway store); binary tool output is detected by content, not the word "base64", and stored whole or left; `TokenWindow` pins every leading system and digest message and trims whole tool-call turns; the subjective rules no longer rewrite user messages; `SemanticBlock.getBlockSummary` no longer throws on an empty block [#2817](https://github.com/llm4s/llm4s/issues/2817).
 - **Fixed** `TracingComposer.filter` and `transform` now apply to `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage`, which went
@@ -247,8 +304,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** the JWT secret pattern is linear (60 KB of `eyJ` took 4.7 s in `SecretLeakGuardrail` and in the redaction of every log and error message), a PEM private key is redacted whole, not only its header line, and OpenAI project keys and Anthropic keys holding `-` or `_` are matched whole [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Changed** `SecretType` is open, so `SecretLeakGuardrail` takes an application's own credential pattern: `new SecretType(name, pattern, placeholder)`
   ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
-- **Fixed** A guardrail's reason, which may quote the text it refused, no longer reaches the durable event log or a trace: `GuardrailBlocked.message`, which `TaskFailed` and `RunFailed` record, names only the guardrail. The guides now say what the checkpoint store still holds
+- **Fixed** A guardrail's reason, which may quote the text it refused, no longer reaches the durable event log or a trace: `GuardrailBlocked.message`, which `TaskFailed` and `RunFailed` record, names only the guardrail
   ([limits](docs/guide/agents/streaming.md#limits), [migration](docs/reference/migration.md#a-guardrail-blocks-message-names-only-the-guardrail-2793)) [#2793](https://github.com/llm4s/llm4s/issues/2793).
+- **Fixed** A guardrail's reason, which may quote the text it refused, is no longer stored: a blocked run's closing checkpoint records the guardrail's name (`RunOutcome.Blocked(guardrail)`), and `EncryptingCheckpointer` seals the error text of a failed run's outcome (`RunOutcome.Failed`'s message, `RunOutcome.OutputInvalid`'s errors) ([guide](docs/guide/agents/guardrails.md), [design](docs/design/typed-agent-runtime/4.62-admission-and-stored-outcomes.md)) [#2853](https://github.com/llm4s/llm4s/issues/2853).
+- **Added** `AgentMiddleware.admit` (experimental): a stage that runs before anything of a turn is stored and may rewrite or refuse its query. Input guardrails run there, so a blocked query is in no checkpoint, durable event, queue entry or trace, and a rewritten one is stored only as rewritten; `Agent.admit` and `QueuedInput.admitted` admit a query before it is queued ([guide](docs/guide/agents/middleware.md#admission), [design](docs/design/typed-agent-runtime/4.62-admission-and-stored-outcomes.md)) [#2854](https://github.com/llm4s/llm4s/issues/2854).
+- **Added** `GuardedContentContract` in `llm4s-agent-testkit`: what a guarded agent may leave in a store, for any `Checkpointer` and its queue ([guide](docs/guide/agents/contract-suites.md)) [#2853](https://github.com/llm4s/llm4s/issues/2853), [#2854](https://github.com/llm4s/llm4s/issues/2854).
 - **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
   its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
 - **Changed** `llm4s-agent` is tiered, with a small `@Stable` core (`Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, the run ids, `RunConfig` and its settings, the guardrail traits and four validators); the rest - graph runtime, checkpointers, events and streaming, middleware, tools, human review, delegation, harness, `assistant` - is `@Experimental`, as are the members of the Stable types that name it, and `sbt stabilityTierCheck` covers the module. Its Stable case classes are growth-safe, and so are the enum cases with fields of every frozen module ([#2781](https://github.com/llm4s/llm4s/issues/2781))
@@ -350,6 +410,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Observability
 
+- **Changed** `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail
+  block is `blocked`, not `failed`, and a limited or cut-off turn `step_limit_reached`, `token_limit_reached` or
+  `truncated`, not `completed`
+  ([migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829)) [#2829](https://github.com/llm4s/llm4s/issues/2829).
+- **Changed** A run that hands off keeps its `invoke_agent <agent>` span under the agent it was started on:
+  `TraceEvent.AgentRunEnded.agent` is the root agent, and the new `activeAgent` the one active at the end
+  [#2829](https://github.com/llm4s/llm4s/issues/2829).
+- **Fixed** An agent run's `chat <model>` span has the model call's duration, where it was a point: the durable
+  `ModelCallCompleted` event gains `duration`, measured around the client (zero in an event stored before), and a
+  positional pattern on it gains a field, which `PositionalPatternsGainFields` adds
+  ([guide](docs/guide/observability/agents.md#span-names-and-attributes)) [#2829](https://github.com/llm4s/llm4s/issues/2829).
 - **Fixed** `PrometheusMetrics` dropped `ReliableClient`'s retries, circuit-breaker transitions and errors: they are now generic metrics
   (`org.llm4s.reliability.ReliabilityMetrics`) that every backend exports, as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total`
   and `llm4s_reliability_errors_total` [#2801](https://github.com/llm4s/llm4s/issues/2801).

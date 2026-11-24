@@ -36,17 +36,19 @@ private[speech] object CloudSpeechSupport {
   /** The body of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
   def textBody(provider: String, response: HttpResponse, secret: Secret): Result[String] =
     if (success(response.statusCode)) Right(response.body)
-    else HttpErrorMapper.mapHttpError(response.statusCode, scrub(response.body, secret), provider, response.headers)
+    else Left(HttpErrorMapper.toError(response.statusCode, scrub(response.body, secret), provider, response.headers))
 
   /** The bytes of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
   def rawBody(provider: String, response: HttpRawResponse, secret: Secret): Result[Array[Byte]] =
     if (success(response.statusCode)) Right(response.body)
     else
-      HttpErrorMapper.mapHttpError(
-        response.statusCode,
-        scrub(new String(response.body, StandardCharsets.UTF_8), secret),
-        provider,
-        response.headers
+      Left(
+        HttpErrorMapper.toError(
+          response.statusCode,
+          scrub(new String(response.body, StandardCharsets.UTF_8), secret),
+          provider,
+          response.headers
+        )
       )
 
   /** `apiKey` unless it is blank, which would be sent as an empty credential (`Authorization: Bearer `). */

@@ -133,7 +133,7 @@ class SpanTreeSpec
     agent.run(ThreadId("t1"), "go").isLeft shouldBe true
 
     val ended = runEnds(tracing).loneElement
-    ended.status shouldBe "failed"
+    ended.status shouldBe TraceEvent.RunStatus.Failed
     val error = tracing.events.collect { case e: TraceEvent.ErrorOccurred => e }.loneElement
     error.timestamp shouldBe ended.timestamp
     error.span.value.startedAt shouldBe ended.timestamp
@@ -333,7 +333,7 @@ class SpanTreeSpec
     agent.recover(ThreadId("t1"), config()).value
 
     val children  = runEnds(tracing).filter(_.threadId != "t1")
-    val recovered = children.find(_.status == "completed").value
+    val recovered = children.find(_.status == TraceEvent.RunStatus.Completed).value
     val callSpan =
       AgentTraceSpans.toolCall(submitter, agent.children(ThreadId("t1")).value.loneElement.origin.call)
     recovered.span.value.parent shouldBe Some(callSpan)

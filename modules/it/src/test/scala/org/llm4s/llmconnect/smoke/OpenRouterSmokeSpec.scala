@@ -85,4 +85,10 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   override protected def contractClient(key: String): Result[LLMClient] = Right(new OpenRouterClient(config(key)))
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /key (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(Right(new OpenRouterClient(config("sk-or-invalid-key-for-testing"))))
+
+  registerValidationContract()
 }

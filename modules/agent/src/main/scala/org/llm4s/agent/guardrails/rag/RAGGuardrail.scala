@@ -2,7 +2,7 @@ package org.llm4s.agent.guardrails.rag
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.AgentRun
-import org.llm4s.agent.graph.middleware.ModelContext
+import org.llm4s.agent.graph.middleware.{ ModelContext, UsageAccounting }
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolMessage, UserMessage }
 import org.llm4s.types.Result
@@ -210,10 +210,14 @@ object RAGGuardrail {
     new OutputGuardrail {
       def validate(value: String): Result[String] = guardrail.validate(value)
 
-      override def validate(value: String, hook: ModelContext): Result[String] =
-        AgentRun.turnMessages(hook.state).flatMap { turn =>
-          retrieved(turn).fold[Result[String]](Right(value))(guardrail.validateWithContext(value, _, hook))
-        }
+      override def validate(value: String, context: UsageAccounting): Result[String] = context match {
+        case hook: ModelContext =>
+          AgentRun.turnMessages(hook.state).flatMap { turn =>
+            retrieved(turn).fold[Result[String]](Right(value))(guardrail.validateWithContext(value, _, hook))
+          }
+        // a stage with no turn to read - an admission - has nothing to check the answer against
+        case _ => guardrail.validate(value)
+      }
 
       val name: String                         = guardrail.name
       override def description: Option[String] = guardrail.description

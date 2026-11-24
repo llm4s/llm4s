@@ -97,7 +97,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("What is the refund window?").value
 
     result.status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "GroundingGuardrail"
         reason should include("not sufficiently grounded")
       case other => fail(s"expected Blocked, got $other")
@@ -151,8 +151,8 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
       RAGGuardrail.withTurnContext(GroundingGuardrail(judge()))(fromSearch)
     )
     blocking.run("What is the refund window?").value.status match {
-      case AgentStatus.Blocked(_, reason) => reason should include("no retrieved chunks")
-      case other                          => fail(s"expected Blocked, got $other")
+      case AgentStatus.Blocked(_, Some(reason)) => reason should include("no retrieved chunks")
+      case other                                => fail(s"expected Blocked, got $other")
     }
 
     val warning = agentWith(

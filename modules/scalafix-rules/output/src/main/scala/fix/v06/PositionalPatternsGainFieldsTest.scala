@@ -22,17 +22,12 @@ object PositionalPatternsGainFieldsTest {
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
   def model(event: ModelCallCompleted): String = event match {
-    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _) => model
+    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _, _) => model
   }
 
   // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone
   def blockedPrompt(error: ContentFilteredError): Boolean = error match {
     case ContentFilteredError(_, _, _, promptBlocked) => promptBlocked
-  }
-
-  def failedModel(event: TraceEvent): Option[String] = event match {
-    case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _, _) => model
-    case _ => None
   }
 
   // gained servedTier since 0.6.0 (#2750)

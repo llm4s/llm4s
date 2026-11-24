@@ -109,6 +109,10 @@ object ChildThread:
  * The answer itself is in the thread's state, so `Answered` carries none. A graph that is not an agent turn records
  * `Answered` when it completes and `Failed` when a node blocks it; any graph records `Blocked` for a
  * `GuardrailBlocked` Block and `OutputInvalid` for a `GraphError.OutputInvalid` one.
+ *
+ * An outcome is stored, so it holds no text a guardrail refused (#2853): `Blocked` names the guardrail and never
+ * its reason. `OutputInvalid` and `Failed` do hold error text, which
+ * [[org.llm4s.agent.encryption.EncryptingCheckpointer EncryptingCheckpointer]] seals.
  */
 @Experimental
 enum RunOutcome derives ReadWriter:
@@ -125,8 +129,12 @@ enum RunOutcome derives ReadWriter:
   /** An agent turn's answer, which is in the thread's state, was cut off at the model's output limit. */
   case Truncated
 
-  /** A guardrail blocked the run: its name and reason. */
-  case Blocked(guardrail: String, reason: String)
+  /**
+   * A guardrail blocked the run: its name. The reason it gave is not stored (#2853) - a reason may quote the text
+   * the guardrail refused - so it is on the result of the run that was blocked and nowhere else: a status rebuilt
+   * from this outcome has none.
+   */
+  case Blocked(guardrail: String)
 
   /**
    * The agent's typed answer failed its output schema twice (`GraphError.OutputInvalid`): every problem it was
@@ -142,7 +150,7 @@ object RunOutcome:
 
   /** The outcome of a run a node blocked with `error` ([[NodeResult.Block]]). */
   private[agent] def blocked(error: LLMError): RunOutcome = error match
-    case guardrail: GuardrailBlocked       => Blocked(guardrail.guardrail, guardrail.reason)
+    case guardrail: GuardrailBlocked       => Blocked(guardrail.guardrail)
     case invalid: GraphError.OutputInvalid => OutputInvalid(invalid.errors)
     case other                             => failed(other)
 

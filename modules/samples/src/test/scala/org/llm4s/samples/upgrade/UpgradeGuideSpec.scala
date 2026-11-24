@@ -60,7 +60,9 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     registry.report.failures shouldBe empty
 
     val found = registry.report.modules.map { module =>
-      module.moduleClass.split('.').last -> (module.providerIds.toSet, module.embeddingProviderIds.toSet)
+      module.moduleClass
+        .split('.')
+        .last -> (module.providerIds.map(_.asString).toSet, module.embeddingProviderIds.map(_.asString).toSet)
     }.toMap
 
     found shouldBe providerTable

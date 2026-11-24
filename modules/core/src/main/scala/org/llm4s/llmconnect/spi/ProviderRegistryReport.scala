@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * One [[Llm4sProviderModule]] that classpath discovery loaded.
@@ -15,32 +16,27 @@ import org.llm4s.annotation.Stable
 @Stable
 final case class ProviderModuleReport private (
   moduleClass: String,
-  providerIds: Seq[String],
+  providerIds: Seq[ProviderId],
   source: Option[String],
-  embeddingProviderIds: Seq[String]
+  embeddingProviderIds: Seq[ProviderId]
 ):
-
-  def withModuleClass(moduleClass: String): ProviderModuleReport       = copy(moduleClass = moduleClass)
-  def withProviderIds(providerIds: Seq[String]): ProviderModuleReport  = copy(providerIds = providerIds)
-  def withSource(source: String): ProviderModuleReport                 = copy(source = Some(source))
-  def withSource(source: Option[String]): ProviderModuleReport         = copy(source = source)
-  def withEmbeddingProviderIds(ids: Seq[String]): ProviderModuleReport = copy(embeddingProviderIds = ids)
 
   /** How this module's contribution reads in [[ProviderRegistryReport.describe]]. */
   def contribution: String =
-    val chat = if providerIds.isEmpty then Nil else Seq(providerIds.mkString(", "))
+    val chat = if providerIds.isEmpty then Nil else Seq(providerIds.map(_.asString).mkString(", "))
     val embedding =
-      if embeddingProviderIds.isEmpty then Nil else Seq(s"embeddings: ${embeddingProviderIds.mkString(", ")}")
+      if embeddingProviderIds.isEmpty then Nil
+      else Seq(s"embeddings: ${embeddingProviderIds.map(_.asString).mkString(", ")}")
     if chat.isEmpty && embedding.isEmpty then "no providers" else (chat ++ embedding).mkString("; ")
 
 object ProviderModuleReport:
 
   /** Creates a [[ProviderModuleReport]]. */
-  def apply(
+  private[llm4s] def apply(
     moduleClass: String,
-    providerIds: Seq[String],
+    providerIds: Seq[ProviderId],
     source: Option[String],
-    embeddingProviderIds: Seq[String] = Nil
+    embeddingProviderIds: Seq[ProviderId] = Nil
   ): ProviderModuleReport =
     new ProviderModuleReport(moduleClass, providerIds, source, embeddingProviderIds)
 
@@ -59,16 +55,12 @@ object ProviderModuleReport:
 final case class ProviderDiscoveryFailure private (
   detail: String,
   failure: Option[Throwable]
-):
-
-  def withDetail(detail: String): ProviderDiscoveryFailure              = copy(detail = detail)
-  def withFailure(failure: Throwable): ProviderDiscoveryFailure         = copy(failure = Some(failure))
-  def withFailure(failure: Option[Throwable]): ProviderDiscoveryFailure = copy(failure = failure)
+)
 
 object ProviderDiscoveryFailure:
 
   /** Creates a [[ProviderDiscoveryFailure]]. */
-  def apply(detail: String, failure: Option[Throwable] = None): ProviderDiscoveryFailure =
+  private[llm4s] def apply(detail: String, failure: Option[Throwable] = None): ProviderDiscoveryFailure =
     new ProviderDiscoveryFailure(detail, failure)
 
 /**
@@ -92,26 +84,25 @@ object ProviderDiscoveryFailure:
  */
 @Stable
 final case class ProviderIdCollision private (
-  kind: String,
-  id: String,
+  kind: ProviderCollisionKind,
+  id: ProviderId,
   keptModule: String,
   droppedModule: Option[String]
 ):
 
-  def withKind(kind: String): ProviderIdCollision                           = copy(kind = kind)
-  def withId(id: String): ProviderIdCollision                               = copy(id = id)
-  def withKeptModule(keptModule: String): ProviderIdCollision               = copy(keptModule = keptModule)
-  def withDroppedModule(droppedModule: String): ProviderIdCollision         = copy(droppedModule = Some(droppedModule))
-  def withDroppedModule(droppedModule: Option[String]): ProviderIdCollision = copy(droppedModule = droppedModule)
-
   /** What collided, for a message: `chat id 'acme'` or `chat alias 'google'`. */
   private[llm4s] def subject: String =
-    if kind.endsWith(" alias") then s"$kind '$id'" else s"$kind id '$id'"
+    if kind.isAlias then s"${kind.label} '${id.asString}'" else s"${kind.label} id '${id.asString}'"
 
 object ProviderIdCollision:
 
   /** Creates a [[ProviderIdCollision]]. */
-  def apply(kind: String, id: String, keptModule: String, droppedModule: Option[String]): ProviderIdCollision =
+  private[llm4s] def apply(
+    kind: ProviderCollisionKind,
+    id: ProviderId,
+    keptModule: String,
+    droppedModule: Option[String]
+  ): ProviderIdCollision =
     new ProviderIdCollision(kind, id, keptModule, droppedModule)
 
 /**
@@ -137,10 +128,8 @@ final case class ProviderRegistryReport private (
   collisions: Seq[ProviderIdCollision]
 ):
 
-  def withDiscovered(discovered: Boolean): ProviderRegistryReport                   = copy(discovered = discovered)
-  def withModules(modules: Seq[ProviderModuleReport]): ProviderRegistryReport       = copy(modules = modules)
-  def withFailures(failures: Seq[ProviderDiscoveryFailure]): ProviderRegistryReport = copy(failures = failures)
-  def withCollisions(collisions: Seq[ProviderIdCollision]): ProviderRegistryReport  = copy(collisions = collisions)
+  private[llm4s] def withCollisions(collisions: Seq[ProviderIdCollision]): ProviderRegistryReport =
+    copy(collisions = collisions)
 
   /** True when any service entry failed to load. */
   def hasFailures: Boolean = failures.nonEmpty
@@ -186,7 +175,7 @@ final case class ProviderRegistryReport private (
 object ProviderRegistryReport:
 
   /** Creates a [[ProviderRegistryReport]]. */
-  def apply(
+  private[llm4s] def apply(
     discovered: Boolean,
     modules: Seq[ProviderModuleReport] = Nil,
     failures: Seq[ProviderDiscoveryFailure] = Nil,
@@ -196,3 +185,18 @@ object ProviderRegistryReport:
 
   /** The report for a registry that was built explicitly rather than discovered. */
   val explicit: ProviderRegistryReport = ProviderRegistryReport(discovered = false)
+
+/**
+ * What two registrations collided over: a provider id or an alias, of a chat or an embedding provider.
+ *
+ * @param label how a message names it, e.g. `chat` or `embedding alias`
+ */
+@Stable
+enum ProviderCollisionKind(val label: String):
+  case Chat           extends ProviderCollisionKind("chat")
+  case Embedding      extends ProviderCollisionKind("embedding")
+  case ChatAlias      extends ProviderCollisionKind("chat alias")
+  case EmbeddingAlias extends ProviderCollisionKind("embedding alias")
+
+  /** Whether the collision is over an alias, not an id. */
+  def isAlias: Boolean = this == ChatAlias || this == EmbeddingAlias

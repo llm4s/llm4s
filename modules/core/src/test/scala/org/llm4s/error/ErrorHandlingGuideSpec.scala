@@ -1,10 +1,10 @@
 package org.llm4s.error
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.{ Completion, Conversation }
-import org.llm4s.error.EmbeddingError
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }
 import org.llm4s.types.Result
 import org.llm4s.syntax.toResult
@@ -62,11 +62,34 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   private val client = new SimpleMock("recovered")
 
-  private def recovering() = ErrorRecovery.recoverWithBackoff(
-    () => client.complete(conversation),
-    maxAttempts = 3,
-    baseDelay = 1.second
+  private val reliable = new ReliableClient(
+    client,
+    providerName = "openai",
+    config = ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))
   )
+
+  private def recovering() = reliable.complete(conversation)
+
+  /** A client whose every call is answered by `reply`, counting the calls. */
+  final private class Scripted(reply: Int => Result[Completion]) extends LLMClient {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      reply(calls.incrementAndGet())
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  /** A `ReliableClient` over `scripted` that waits no time between attempts. */
+  private def reliably(scripted: Scripted, config: ReliabilityConfig): ReliableClient =
+    new ReliableClient(scripted, "guide", config, sleep = _ => ())
+
+  private def retrying(maxAttempts: Int): ReliabilityConfig =
+    ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = maxAttempts, baseDelay = 1.millis))
 
   // ---- 6. Converting to exceptions
 
@@ -213,7 +236,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "recovering from failures" should {
-    "run the guide's recoverWithBackoff call as written, with a client and a conversation" in {
+    "run the guide's ReliableClient call as written, with a client and a conversation" in {
       recovering().map(_.content) shouldBe Right("recovered")
     }
   }
@@ -273,52 +296,69 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "retrying" should {
-    "retry a rate limit, give up with an ExecutionError, and not retry a permanent error" in {
-      var attempts = 0
-      val flaky: () => Result[String] = () => {
-        attempts += 1
-        if (attempts < 3) Left(RateLimitError("p", 1.millisecond)) else Right("done")
-      }
-      ErrorRecovery.recoverWithBackoff(flaky, maxAttempts = 5, baseDelay = 1.millisecond) shouldBe Right("done")
-      attempts shouldBe 3
+    "retry a rate limit, give up with the last error unchanged, and not retry a permanent error" in {
+      val limited = RateLimitError("p", 1.millisecond)
+      val flaky   = new Scripted(call => if (call < 3) Left(limited) else new SimpleMock("done").complete(conversation))
+      reliably(flaky, retrying(5)).complete(conversation).map(_.content) shouldBe Right("done")
+      flaky.calls.get() shouldBe 3
 
-      var calls                           = 0
-      val permanent: () => Result[String] = () => { calls += 1; Left(ValidationError("f", "r")) }
-      ErrorRecovery.recoverWithBackoff(permanent, maxAttempts = 5, baseDelay = 1.millisecond).left.value shouldBe a[
-        ValidationError
-      ]
-      calls shouldBe 1
+      val permanent = new Scripted(_ => Left(ValidationError("f", "r")))
+      reliably(permanent, retrying(5)).complete(conversation).left.value shouldBe a[ValidationError]
+      permanent.calls.get() shouldBe 1
 
-      val alwaysLimited: () => Result[String] = () => Left(RateLimitError("p", 1.millisecond))
-      ErrorRecovery
-        .recoverWithBackoff(alwaysLimited, maxAttempts = 2, baseDelay = 1.millisecond)
-        .left
-        .value shouldBe a[ExecutionError]
+      val alwaysLimited = new Scripted(_ => Left(limited))
+      reliably(alwaysLimited, retrying(2)).complete(conversation) shouldBe Left(limited)
+      alwaysLimited.calls.get() shouldBe 2
     }
 
     "retry a network error, but not a client-error status or an optimistic-lock failure, as section 4 says" in {
       def callsFor(error: LLMError): Int = {
-        var calls = 0
-        ErrorRecovery.recoverWithBackoff[String](() => { calls += 1; Left(error) }, 3, 1.millisecond, _ => ())
-        calls
+        val failing = new Scripted(_ => Left(error))
+        reliably(failing, retrying(3)).complete(conversation) shouldBe Left(error)
+        failing.calls.get()
       }
       callsFor(NetworkError("down", None, "https://x")) shouldBe 3
       callsFor(ServiceError(404, "p", "d")) shouldBe 1
       callsFor(OptimisticLockFailure("m", "id", 1L)) shouldBe 1
     }
 
-    "fail fast through a circuit breaker once it has opened" in {
-      val breaker = new ErrorRecovery.CircuitBreaker[String](failureThreshold = 2, recoveryTimeout = 30.seconds)
-      val failing = () => Left(NetworkError("down", None, "https://x")): Result[String]
-      breaker.execute(failing).left.value shouldBe a[NetworkError]
-      breaker.execute(failing).left.value shouldBe a[NetworkError]
+    "wait a rate limit's own delay and a service error's hint, and the policy's delay otherwise" in {
+      val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 3.seconds)
+      policy.delayFor(1, RateLimitError("p", 7.seconds)) shouldBe 7.seconds
+      policy.delayFor(1, RateLimitError("p")) shouldBe RateLimitError.DefaultRetryDelay
+      policy.delayFor(1, ServiceError(503, "p", "d").withRetryAfter(9.seconds)) shouldBe 9.seconds
+      Seq(1, 2, 3).map(policy.delayFor(_, ServiceError(503, "p", "d"))) shouldBe Seq(1.second, 2.seconds, 3.seconds)
+      policy.isRetryable(NetworkError("down", None, "https://x")) shouldBe true
+      policy.isRetryable(ValidationError("f", "r")) shouldBe false
+    }
 
-      var reached = false
-      val rejected = breaker.execute { () =>
-        reached = true; Right("ok")
-      }
-      rejected.left.value shouldBe a[ServiceError]
-      reached shouldBe false
+    "end with a TimeoutError once the deadline has passed" in {
+      val now     = new java.util.concurrent.atomic.AtomicReference(java.time.Instant.parse("2026-01-01T00:00:00Z"))
+      val failing = new Scripted(_ => Left(NetworkError("down", None, "https://x")))
+      val client = new ReliableClient(
+        failing,
+        "guide",
+        retrying(5).withDeadline(1.second),
+        clock = () => now.get(),
+        sleep = _ => now.updateAndGet(_.plusSeconds(2)): Unit
+      )
+      client.complete(conversation).left.value shouldBe a[TimeoutError]
+    }
+
+    "fail fast through the circuit breaker once it has opened, with a CircuitOpenError that is not retried" in {
+      val config = ReliabilityConfig(
+        retryPolicy = RetryPolicy.noRetry,
+        circuitBreaker = org.llm4s.reliability.CircuitBreakerConfig(failureThreshold = 2, recoveryTimeout = 30.seconds)
+      )
+      val failing = new Scripted(_ => Left(NetworkError("down", None, "https://x")))
+      val breaker = reliably(failing, config)
+      breaker.complete(conversation).left.value shouldBe a[NetworkError]
+      breaker.complete(conversation).left.value shouldBe a[NetworkError]
+
+      val rejected = breaker.complete(conversation).left.value
+      rejected shouldBe a[CircuitOpenError]
+      failing.calls.get() shouldBe 2
+      RetryPolicy.exponentialBackoff().isRetryable(rejected) shouldBe false
     }
   }
 }

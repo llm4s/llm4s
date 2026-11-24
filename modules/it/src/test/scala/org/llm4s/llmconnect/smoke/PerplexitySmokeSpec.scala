@@ -76,4 +76,10 @@ class PerplexitySmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   override protected def contractClient(key: String): Result[LLMClient] = PerplexityClient(config(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(PerplexityClient(config("invalid-key-for-testing")))
+
+  registerValidationContract()
 }

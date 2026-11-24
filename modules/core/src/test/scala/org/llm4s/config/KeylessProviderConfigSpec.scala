@@ -3,7 +3,13 @@ package org.llm4s.config
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  KeylessSetting,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
@@ -36,7 +42,7 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
   private object UndeclaredKeyless extends ProviderDescriptor:
     val id: ProviderId = ProviderId("undeclaredkeyless")
     val configSpec: ProviderConfigSpec =
-      ProviderConfigSpec(requiresApiKey = true, keylessWhen = Some("authentication" -> "token"))
+      ProviderConfigSpec(requiresApiKey = true, keylessWhen = Some(KeylessSetting("authentication", "token")))
     def buildConfig(providerName: String, section: NamedProviderConfig)(using
       ContextWindowResolver
     ): Result[ProviderConfig] = KeylessProvider.buildConfig(providerName, section)
@@ -97,7 +103,11 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
     "keep keylessWhen through its setters and the eight-argument apply" in {
       val spec = ProviderConfigSpec(true, false, None, "e.g.", None, Seq.empty, Seq.empty, Seq.empty)
       spec.keylessWhen shouldBe None
-      spec.withKeylessWhen("authentication", "token").keylessWhen shouldBe Some("authentication" -> "token")
+      val keyless = KeylessSetting("authentication", "token", "workload")
+      spec.withKeylessWhen(keyless).keylessWhen shouldBe Some(keyless)
+      // either value selects it, ignoring case and surrounding blanks
+      spec.withKeylessWhen(keyless).isKeyless(Map("authentication" -> " Workload ")) shouldBe true
+      spec.withKeylessWhen(keyless).isKeyless(Map("authentication" -> "api-key")) shouldBe false
       spec.withKeylessWhen(None).isKeyless(Map("authentication" -> "token")) shouldBe false
     }
   }

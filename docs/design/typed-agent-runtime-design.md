@@ -456,6 +456,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.59 | [Stage 5 slice O2: run, claim, queue and child-task metrics](typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md) ([#2138](https://github.com/llm4s/llm4s/issues/2138)) |
 | 4.60 | [Stage 5 slice P1: example service and a three-instance deployment](typed-agent-runtime/4.60-stage-5-slice-p1-example-service-and-a-three-instance-deployment.md) ([#2139](https://github.com/llm4s/llm4s/issues/2139)) |
 | 4.61 | [Stage 5 slice P2: exit test, guide and parity matrix](typed-agent-runtime/4.61-stage-5-slice-p2-exit-test-guide-and-parity-matrix.md) ([#2140](https://github.com/llm4s/llm4s/issues/2140)) |
+| 4.62 | [What a guardrail refused stays out of the store: stored outcomes and the admission stage](typed-agent-runtime/4.62-admission-and-stored-outcomes.md) ([#2853](https://github.com/llm4s/llm4s/issues/2853), [#2854](https://github.com/llm4s/llm4s/issues/2854)) |
 
 ### 4.9 Stage 0 carry-forward
 

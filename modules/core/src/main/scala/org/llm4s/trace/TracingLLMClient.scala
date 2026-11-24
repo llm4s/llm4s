@@ -102,13 +102,13 @@ final class TracingLLMClient private (
         )
       case Left(error) =>
         TraceEvent.ErrorOccurred(
-          new RuntimeException(error.message),
+          error.message,
+          error.getClass.getSimpleName,
           TraceAttributeNames.Chat,
           timestamp = at,
           operation = Some(TraceAttributeNames.Chat),
           model = requestModel,
           provider = providerId,
-          errorType = Some(error.getClass.getSimpleName),
           duration = Some(duration),
           // a filtered reply is billed: its tokens reach the trace, as a success's do (#2676)
           usage = error match {
