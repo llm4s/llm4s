@@ -14,7 +14,7 @@
 
 1. **Use `Result[A]` instead of exceptions** - `type Result[+A] = Either[LLMError, A]`
 2. **Use `Llm4sConfig` at the app edge** - Never use `sys.env`, `System.getenv`, or `ConfigSource.default` directly in core code; `Llm4sConfig.from(config)` reads a `Config` the app already has
-3. **Use type-safe newtypes** - `ModelName`, `ApiKey`, `ConversationId` etc.
+3. **Use type-safe newtypes** - a model id is a `ModelName`, a provider id a `ProviderId`, a section name a `ProviderName`, a base URL a `BaseUrl`, a tool call's id a `ToolCallId`, wherever it crosses a public API. Metrics labels (`MetricsCollector`'s `provider`, `ReliableClient`'s `providerName`) and the Java facade's boundary stay `String`. New newtypes are opaque types (`docs/reference/contributing.md`, "Follow the naming conventions")
 4. **Scala 3 idioms are welcome** - `opaque type`, `using` clauses, `enum` and `extension` are all in use. Do not rewrite them to a Scala 2.13-compatible subset; see [#1127](https://github.com/llm4s/llm4s/issues/1127)
 
 ## Status
@@ -23,7 +23,7 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Architecture rules
 
-**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
+**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `security`, `syntax`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
 - No vendor SDK (`com.anthropic`, `com.azure`, `com.openai`), observability, JDBC, parsing or speech dependency in core. `commonSettings` carries no JDBC driver: declare one per module. The build has no third-party resolvers; think hard before adding one.
 - Nothing in core imports `org.llm4s.agent` or `org.llm4s.assistant`. Core's trace specs build `TraceEvent.AgentRunEnded` directly.
 - A utility with one consuming module lives in that module, not core. A helper only llm4s modules use is `private[llm4s]`.
@@ -31,7 +31,8 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 **Providers.** A provider is a `ProviderDescriptor` (or `EmbeddingProviderDescriptor`), never an edit to shared files: list it in an `Llm4sProviderModule` declared in `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule`, a `class` with a public no-arg constructor, never an `object`. `ProviderRegistry.of` / `.ofModules` / `.withProvider` do explicit registration.
 - **Core ships no provider, no provider list and no main services entry.** Never add one back.
-- Each provider module proves itself in an `Llm4s<Name>ModuleSpec` built on `llm4s-provider-testkit`'s `ProviderModuleChecks`: discovery, sole supplier, explicit registration, a config-to-client round trip per descriptor, plus `assertModelCallContract` (RFC 0009: the nine cases, `CleanText` always applies) and `assertRefusesForeignConfig` and `assertCredentialBindings` where they apply.
+- Each provider module proves itself in an `Llm4s<Name>ModuleSpec` built on `llm4s-provider-testkit`'s `ProviderModuleChecks`: discovery, sole supplier, explicit registration, a config-to-client round trip per descriptor, plus `assertModelCallContract` (RFC 0009: the nine cases, `CleanText` always applies) and `assertRefusesForeignConfig` and `assertCredentialBindings` where they apply; an embedding provider that sends HTTP also runs `assertEmbeddingUsesSuppliedHttpClient`.
+- A `ProviderConfig` implements `model` (a `ModelName`), `timeouts`, `network`, `apiKeyProvider` and their setters, with no defaults; the loader refuses a `timeouts` or `http` block the config does not take.
 - **OpenAI-compatible** (`/chat/completions`): first check whether the generic `openai-compatible` provider covers it with config alone; otherwise a dialect (`OpenAICompatibleDialect`) and descriptor in `modules/openai-compatible`, as Mistral and Cohere are. Never another copy of the client. `OpenAIConfig` lives there; `llm4s-openai` depends on it, never the reverse.
 - **Anything else**: `modules/providers/<name>`, artifact `llm4s-<name>`, depending only on core. `modules/providers/voyage` is the template, `modules/ollama` the chat plus embeddings example.
 - A streamed tool call's continuation deltas carry only `index`; a client must give each its call's id (`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id.
@@ -55,6 +56,9 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 - **Growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`, `ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`, `ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`, `RateLimitConfig`, `ContextConfig`, and any new one that may grow) are `final case class X private (...)` with a companion `apply` carrying the defaults and `with*` setters (an `Option` field's setter takes the value or an `Option`). `.copy` is private and stays private.
   - To add a field: add it to the constructor and, with a default, to `apply`; add `withX`. Before the MiMa baseline (0.7.0) that is all: one `apply` per type, no forwarding overload. From the baseline on, also keep the previous `apply` as an overload without defaults that forwards.
   - A type with an upickle `macroRW` keeps its constructor defaults, because the reader fills missing keys from them.
+  - The provider SPI's context and option types (`ProviderConfigContext`, `ProviderBuildContext`, `EmbeddingConfigContext`, `EmbeddingBuildContext`, `EmbeddingClientOptions`, `EmbeddingProviderSection`) and `ContextLimits` follow the same pattern.
+- **Stored JSON never changes by accident.** A change to a type inside stored messages, checkpoints, durable events or the exchange log pins the wire format with a test written against the old code first.
+- `org.llm4s.context`: token counting is `@Stable`, the compression pipeline `@Experimental`. Core maps no model to a tokenizer (`OpenAITokenizers` is in `llm4s-openai`). Multimodal embedding (`MultimodalEmbeddingProvider`, `MultimediaEmbeddingRequest`, `EmbeddingVector`) is in `llm4s-rag`; `EmbeddingProvider` is text only.
 - **Durations are `FiniteDuration`, points in time `Instant`.** Never a raw `Int`/`Long` with the unit in its name (`timeoutMs`), and never a plain `Duration`, which admits `Duration.Inf`.
   - Wire formats keep their units: convert at the boundary (`.toMillis`; `DurationJson.millisRW` or `WireDurations` for a `macroRW`, with `@upickle.implicits.key` pinning a renamed field).
   - Round up with `DurationRounding` where an API reads `0` as "no timeout".
@@ -194,6 +198,10 @@ Every token read stays in context for the rest of the session, so read narrowly.
   - sbt: `... 2>&1 | tail -40`, or `grep -E '\[error\]|\*\*\* FAILED|Tests: |Failed tests'`.
   - gh: `gh pr view N --json title,state,mergeable,statusCheckRollup`, `gh run view ID --log-failed | tail -80`.
   - git: `git diff --stat` before any full diff, then diff file by file.
+- **Docs changes:** run `scripts/check-docs.sh` before pushing; it runs every doc check of Quick Checks that needs no sbt (`--model FILE` adds the build-model ones, `--online` the cited issues' states).
+  - Every page has a 50 to 170 character `description`. A page that links an llm4s issue declares it in front matter: `cites_open_issues`, `cites_closed_issues` or `cites_issues` (`all` for release posts, migration guides and RFCs).
+  - A spec that copies a page's code marks the copy `// guide-block` ... `// end-guide-block`; `GuideMirror` fails it when the page drifts. A `skip.txt` `with` entry may declare stand-ins (`val x: T = ???`).
+  - `modules/samples/notebooks/*.ipynb` import the latest published release and stay on its API.
 - **A large output saved to a file:** `grep` or `tail` it. Never Read the whole file back.
 - **Subagents get this file automatically.** Don't tell them to read CLAUDE.md; point them at the section, issue or files they need.
 
@@ -215,7 +223,8 @@ for the most recent one, `git rebase --signoff main` for a branch of them, then
 
 **Nothing in the library reads `LLM_MODEL`** (removed with legacy single-provider loading in #903).
 Chat providers are named sections in the application's `application.conf`;
-`llm4s.providers.provider` names the default that `Llm4sConfig.defaultProvider()` loads.
+`llm4s.defaultProvider` names the default that `Llm4sConfig.defaultProvider()` loads
+(`llm4s.default-provider` in Spring and Quarkus properties).
 **Credentials belong to a vendor, keyed by provider id; clients belong to a use.** A client's key
 is its own `apiKey` (chat section `llm4s.providers.<name>`, embeddings block
 `llm4s.embeddings.<id>`, reranker `llm4s.rerank.cohere`), else `llm4s.credentials.<id>.apiKey`,
@@ -226,12 +235,12 @@ else an error naming both. So with `OPENAI_API_KEY` set a section needs only `pr
 ```hocon
 # src/main/resources/application.conf
 llm4s {
-  providers {
-    provider = "openai-main"          # the default: the name of a section below
+  defaultProvider = "openai-main"     # the default: the name of a section below
 
+  providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -253,8 +262,8 @@ llm4s {
   `Left` under its name; `providers()`, which fails if any section is invalid, is `private[llm4s]`.
 - Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
   (model `llama3:latest` - `ollama pull llama3` first, or set `OLLAMA_MODEL`) and
-  binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the
-  library's. Add other sections in the git-ignored `application.local.conf` beside it.
+  binds `LLM4S_PROVIDER` (to `llm4s.defaultProvider`), `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the
+  samples' bindings, not the library's. Add other sections in the git-ignored `application.local.conf` beside it.
 - Things that read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the
   config-policy env check (`EnvCheckPolicies`). The `modules/it` `@Cloud` smoke suites read their
   API keys directly.
@@ -316,10 +325,10 @@ Try("123".toInt).toResult
 ### Configuration
 
 ```scala
-// GOOD - the section llm4s.providers.provider names, from application.conf
+// GOOD - the section llm4s.defaultProvider names, from application.conf
 val provider: Result[ProviderConfig] = Llm4sConfig.defaultProvider()
 // or a specific named section:
-val named: Result[ProviderConfig] = Llm4sConfig.provider("openai-main")
+val named: Result[ProviderConfig] = Llm4sConfig.provider(ProviderName("openai-main"))
 
 // BAD - llm4s-openai already binds OPENAI_API_KEY to llm4s.credentials.openai.apiKey
 val apiKey = sys.env.get("OPENAI_API_KEY")
@@ -329,7 +338,8 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 - Types: `PascalCase` (`LLMClient`, `CompletionResponse`)
 - Values/functions: `camelCase` (`apiKey`, `createClient`)
-- Constants: `SCREAMING_SNAKE_CASE` (`DEFAULT_TIMEOUT`)
+- Constants: `PascalCase` (`DefaultTimeout`); an external identifier keeps its spelling (`TokenizerId.CL100K_BASE`)
+- Factories, sum types and accessors: see `docs/reference/contributing.md`, "Follow the naming conventions"
 
 ### Scalafix Rules
 
@@ -346,12 +356,13 @@ An `Agent` is built once, with its tools, guardrails, handoffs and middleware, a
 
 ```scala
 for {
-  providerConfig  <- Llm4sConfig.defaultProvider()   // llm4s.providers.<default> in application.conf
+  providerConfig  <- Llm4sConfig.defaultProvider()   // the section llm4s.defaultProvider names
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)
+  tools  <- ToolRegistry.of(Seq(myTool))             // ToolRegistry is a trait
   agent  <- Agent.builder("assistant", client)       // the id is an AgentId
-              .withTools(new ToolRegistry(Seq(myTool)))
+              .withTools(tools)                      // a typed ToolSet goes to withToolSet
               .withSystemPrompt("You are a helpful assistant")
               .build()
   result <- agent.run("Query here")                  // Result[AgentResult]
@@ -359,8 +370,8 @@ for {
 ```
 
 `AgentResult` carries `threadId`, `runId`, `activeAgent`, `status`, `messages` and `usage`.
-`AgentStatus` is `Completed(answer)`, `Truncated(partialAnswer)`, `Blocked(guardrail, reason)`, `StepLimitReached` or
-`Suspended(suspension)` (a `Suspension`: approvals, questions, breakpoints, delegated); a guardrail block is an outcome, not a `Left`. Provider, tool and
+`AgentStatus` is `Completed(answer)`, `Truncated(partialAnswer)`, `Blocked(guardrail, reason)` (`reason` an
+`Option[String]`, never stored), `StepLimitReached`, `TokenLimitReached` or `Suspended(suspension)` (a `Suspension`: approvals, questions, breakpoints, delegated); a guardrail block is an outcome, not a `Left`. Provider, tool and
 middleware failures are `Left(GraphError...)`. `agent.start(...)` returns an `AgentRun` with
 `await()` and `cancel()`; `recover(threadId)` and `resume(threadId, answers)` continue a thread
 that failed or suspended.
@@ -385,7 +396,7 @@ runtime. Search tool config comes from `ToolsConfigLoader.load*SearchTool()`.
 ```scala
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-// each returns Result[Seq[ToolFunction[_, _]]]
+// each returns Result[Seq[ToolFunction[_]]]
 BuiltinTools.coreSafe          // DateTime, Calculator, UUID, JSON
 BuiltinTools.withHttpSafe()    // + read-only HTTP (web search is configured separately)
 BuiltinTools.withFilesSafe()   // + read-only file access
@@ -394,24 +405,22 @@ BuiltinTools.developmentSafe() // All tools (use with caution)
 
 ### Guardrails
 
-Guardrails are middleware on the agent, not per-run arguments.
+Guardrails are set on the agent's builder, not per-run arguments.
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
 val agent = Agent.builder("assistant", client)
-  .withMiddleware(
-    new GuardrailMiddleware(
-      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-      output = Seq(new JSONValidator())
-    )
-  )
+  .withInputGuardrails(LengthCheck(1, 10000), ProfanityFilter())
+  .withOutputGuardrails(JSONValidator())
   .build()
 ```
 
-A block ends the run `AgentStatus.Blocked(guardrail, reason)`; an output block replaces the stored
-answer with a refusal. `new ContextWindowMiddleware(config)` prunes what is sent to the model, never
+Builder guardrails sit innermost, in Scala and in the Java facade. Input guardrails run at admission
+(`AgentMiddleware.admit`): before the query is stored for `run`, `start` and `stream`, and for a run
+queue only when its submitter calls `Agent.admit` first. A block ends the run
+`AgentStatus.Blocked(guardrail, reason)`; an output block replaces the stored answer with a refusal.
+`withMiddleware(new GuardrailMiddleware(...))` is the `@Experimental` route for custom placement. `new ContextWindowMiddleware(config)` prunes what is sent to the model, never
 what the thread stores.
 
 Built-in guardrails:
