@@ -4,7 +4,7 @@ title: Security Best Practices
 description: "Secure LLM4S applications: API keys from files, Vault or AWS Secrets Manager, prompt injection and PII guardrails, encrypted checkpoints and the sandbox."
 search_title: "LLM application security: prompt injection, keys and PII"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 6
 ---
 

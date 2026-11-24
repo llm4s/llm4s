@@ -3,8 +3,9 @@ layout: page
 title: Error Handling
 description: "Handle failures in LLM4S with Result[A] and LLMError: the basic pattern, for-comprehensions, error types, converting to exceptions and combining results."
 search_title: "Error handling in Scala LLM apps: Result and LLMError"
-parent: User Guide
-nav_order: 5
+parent: Core
+nav_order: 103
+grand_parent: User Guide
 ---
 
 # Error Handling with Result

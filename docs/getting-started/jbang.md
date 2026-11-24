@@ -3,8 +3,9 @@ layout: page
 title: JBang Quick Start
 description: "Run a first LLM call from one Java file with JBang and llm4s-java-api: dependencies declared in the file, no build tool, no project."
 search_title: "Call an LLM from Java with JBang and LLM4S"
-parent: Getting Started
-nav_order: 10
+parent: Build Tools and Playgrounds
+nav_order: 5
+grand_parent: Getting Started
 ---
 
 # JBang Quick Start

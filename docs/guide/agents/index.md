@@ -3,7 +3,7 @@ layout: page
 title: Agents
 description: "Build AI agents in Scala with LLM4S: tools, multi-turn conversations, guardrails, handoffs, memory, streaming and multi-agent coordination."
 search_title: "Build AI agents in Scala with LLM4S"
-nav_order: 12
+nav_order: 200
 parent: User Guide
 has_children: true
 ---
@@ -334,6 +334,72 @@ model <---------- tool results
   v
 finish node (output guardrails) ---> Completed | Blocked (turn removed)
 ```
+
+### Typed Tools
+
+An agent's tools are `AgentTool`s (`org.llm4s.agent.graph.tool`). A core `ToolFunction` - one built with
+`ToolBuilder`, a [built-in tool](../builtin-tools), an MCP tool - becomes one through `AgentTool.fromToolFunction`,
+which is what `withTools(registry)` does for every tool of a `ToolRegistry`. Writing an `AgentTool` yourself gives
+the tool what a `ToolFunction` has no place for: arguments decoded to your own type, the run's `ToolContext`, and
+an outcome that can update thread state, ask for approval or ask the caller a question.
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.toolapi.{ Schema, SchemaDefinition }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+final case class Search(query: String) derives ReadWriter
+
+val searchSchema: SchemaDefinition[Search] =
+  Schema.`object`[Search]("Search").withRequiredField("query", Schema.string("The query"))
+
+val search: AgentTool[Search] =
+  AgentTool(AgentToolSpec[Search]("search", "Searches the catalogue", searchSchema)) { (args, _) =>
+    if args.query.isBlank then ToolOutcome.Error("the query is empty")
+    else ToolOutcome.success(ToolContent.Json(ujson.Arr(ujson.Str(s"a result for ${args.query}"))))
+  }
+
+def searchAgent(client: LLMClient): Result[Agent] =
+  for
+    tools <- ToolSet.of(search)
+    agent <- Agent.builder("assistant", client).withTools(tools).build()
+  yield agent
+```
+
+The pieces:
+
+- **`AgentToolSpec[A]`** is what the model and the loop are told: a `name` (it must match `[a-zA-Z0-9_-]{1,64}`), a
+  `description`, the argument `schema`, and a `ReadWriter[A]` that decodes the arguments. A call's arguments are
+  validated against the schema and decoded before the tool runs, so `execute` receives an `A`, never raw JSON.
+  `withValidation` adds a check on the decoded value, whose `Left` is an error the model sees; `withHints`,
+  `withTimeout`, `withResources` and `withLocks` are under
+  [Tool Permissions, Timeouts and Locks](#tool-permissions-timeouts-and-locks).
+- **`AgentTool(spec)(run)`** makes a tool from a spec and a function `(A, ToolContext) => ToolOutcome`. Its second
+  parameter list is preceded by an optional `writes`, the state keys the tool's updates may touch.
+- **`ToolContext`** is the call the tool is running in: `run` (the `RunContext`), `toolCallId`, `idempotencyKey`
+  (the same in every run of one call; see [Tool Side Effects](#tool-side-effects)), `state` (the thread's state)
+  and `approved`.
+- **`ToolSet.of(tools*)`** is the only way to build a `ToolSet`, and returns a `Result`: it refuses, in one
+  `ValidationError` listing every problem, an invalid or duplicate tool name, an argument schema whose root is not
+  an object, and a schema keyword the argument validator does not check. `withTools(tools)` takes the set.
+
+A tool answers with a `ToolOutcome`:
+
+| Outcome | What happens |
+|---|---|
+| `ToolOutcome.success(content, update)` | The call succeeded. `content` is a `ToolContent` for the model: `ToolContent.Json(value)`, or `ToolContent.Parts(parts)` for [images and documents](../multimodal). `update`, optional, is a `StateUpdate` to keys the tool declares in `writes` |
+| `ToolOutcome.Error(message)` | A tool-level failure: the model sees `message`, and the run continues |
+| `ToolOutcome.NeedsApproval(reason)` | The run suspends until the call is approved, rejected or edited ([Human Review](human-review)) |
+| `ToolOutcome.Ask(question)` | A question for the caller. Only a tool extending `AgentTool.Asking` asks one |
+| `ToolOutcome.Fatal(error)` | An infrastructure failure: the run fails with `GraphError.ToolFailed` |
+
+A tool that asks extends `AgentTool.Asking[A, Q, Ans]`, with a `ReadWriter` for the question type `Q` and the
+answer type `Ans`. It calls `ask(question)` from `execute`, the run ends `Suspended` with the question under
+`questions`, and when the caller replies the loop calls the tool's `resume(args, question, answer, context)`
+([Human Review](human-review#five-ways-a-turn-waits)).
 
 ### Parallel Tool Calls
 

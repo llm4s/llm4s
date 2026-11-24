@@ -3,8 +3,9 @@ layout: page
 title: Secrets and API Keys
 description: "Choose where a provider's API key comes from: config, environment, a mounted file, HashiCorp Vault or AWS Secrets Manager, with caching and rotation."
 search_title: "Read LLM4S API keys from Vault or AWS Secrets Manager"
-parent: User Guide
-nav_order: 62
+parent: Operations
+nav_order: 704
+grand_parent: User Guide
 ---
 
 # Secrets and API key providers

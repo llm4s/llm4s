@@ -1,9 +1,13 @@
 ---
 layout: page
 title: Verifying Releases
-parent: Reference
-nav_order: 30
+parent: Contribute
+nav_order: 7
 description: "How to check that an LLM4S jar, SBOM or container image was built by the project's release workflow: PGP signatures and SLSA build provenance."
+permalink: /contribute/verifying-releases
+redirect_from:
+  - /reference/verifying-releases
+  - /reference/verifying-releases.html
 ---
 
 # Verifying Releases
@@ -101,7 +105,7 @@ It downloads each published jar (the POM for the BOM and the relocation stubs) f
 
 ## Check an SBOM
 
-The SBOMs and licence reports are assets of the GitHub Release for the tag ([Software Bill of Materials](sbom)),
+The SBOMs and licence reports are assets of the GitHub Release for the tag ([Software Bill of Materials](../reference/sbom)),
 and are attested there, by the release workflow's `sbom` job. They are not published to Maven Central: releases up to
 0.6.0 also uploaded a `-cyclonedx.json` beside each module there, which carries a PGP signature but no attestation.
 
@@ -162,6 +166,6 @@ their paths).
 
 ## See also
 
-- [Software Bill of Materials](sbom): what the SBOMs cover and how they are scanned
+- [Software Bill of Materials](../reference/sbom): what the SBOMs cover and how they are scanned
 - [Release Process](release): how a release is cut, and the checks run after it
-- [Security Reference](security): the threat model
+- [Security Reference](../reference/security): the threat model

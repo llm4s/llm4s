@@ -172,7 +172,7 @@ final class MigrationSnippets {
             .build();
         LlmResult<JLlmClient> anthropic = Llm4s.anthropic()
             .apiKey(anthropicKey)
-            .model("claude-sonnet-4-20250514")
+            .model("claude-sonnet-5-5")
             .build();
         LlmResult<JLlmClient> ollama = Llm4s.ollama()
             .baseUrl("http://localhost:11434")

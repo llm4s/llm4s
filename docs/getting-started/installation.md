@@ -509,7 +509,7 @@ Java v2 `bedrockruntime` artifact (Apache-2.0, the same SDK release train `llm4s
 ```hocon
 llm4s.providers.claude-bedrock {
   provider = "bedrock"
-  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile id
   region   = ${?AWS_REGION}
 }
 ```
@@ -894,7 +894,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Tes
 
 `CheckpointerContract`, the suite every `Checkpointer` must pass: commits, event numbering, compaction, run-claim
 leases and fencing, and two runtimes contending over one store. It requires JDK 21, as `llm4s-agent` does. See
-[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite).
+[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite). The module's other
+suites (`RunQueueContract`, `LongTermStoreContract`, `FileBackendContract`, `FileToolsContract`, `DelegationContract`
+and `ReplayContract`) are in [Store Contract Suites](../guide/agents/contract-suites).
 
 ### For Workspace (Containerized Execution)
 

@@ -3,8 +3,9 @@ layout: page
 title: Kafka
 description: "Enrich a Kafka topic with an LLM using fs2-kafka and LLM4S: bounded concurrency, retries, a dead-letter topic and offsets committed after the produce."
 search_title: "Enrich a Kafka topic with an LLM in Scala"
-parent: User Guide
-nav_order: 44
+parent: RAG and Data
+nav_order: 310
+grand_parent: User Guide
 ---
 
 # Enrich a Kafka topic with an LLM

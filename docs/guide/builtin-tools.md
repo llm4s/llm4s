@@ -3,8 +3,9 @@ layout: page
 title: Built-in Tools
 description: "Ready-made agent tools in LLM4S: calculator, date and time, UUID, JSON, files, HTTP, shell and web search, with the bundles and their configuration."
 search_title: "Built-in agent tools in LLM4S: files, HTTP, web search"
-parent: User Guide
-nav_order: 10
+parent: Agents
+nav_order: 212
+grand_parent: User Guide
 ---
 
 # Built-in Tools

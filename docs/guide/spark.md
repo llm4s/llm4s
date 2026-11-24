@@ -3,8 +3,9 @@ layout: page
 title: Spark and Databricks
 description: "Enrich a Spark or Databricks DataFrame with LLM calls from Scala: one client per partition, retries and rate limits, and failed calls kept as data."
 search_title: "Call LLMs from Spark and Databricks with LLM4S"
-parent: User Guide
-nav_order: 32
+parent: RAG and Data
+nav_order: 308
+grand_parent: User Guide
 ---
 
 # Using LLM4S from Spark and Databricks

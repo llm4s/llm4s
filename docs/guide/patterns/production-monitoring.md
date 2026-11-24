@@ -4,7 +4,7 @@ title: Production Monitoring
 description: "Monitor LLM4S applications in production: Langfuse or OpenTelemetry tracing, Prometheus or Micrometer metrics, agent runtime metrics and cost tracking."
 search_title: "Monitor LLM applications in production: metrics and alerts"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 3
 ---
 

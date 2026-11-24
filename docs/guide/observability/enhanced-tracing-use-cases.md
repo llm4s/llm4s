@@ -4,7 +4,7 @@ title: Enhanced Tracing Use Cases
 description: "Use cases for in-process tracing in LLM4S with TraceCollectorTracing and InMemoryTraceStore: trace lookup by id, deterministic agent tests and latency."
 search_title: "In-process LLM tracing use cases in Scala"
 parent: Monitoring
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 3
 ---
 

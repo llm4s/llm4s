@@ -1,10 +1,11 @@
 ---
 layout: page
 title: Apache Pekko Integration
-parent: User Guide
+parent: Frameworks and Runtimes
 description: "Use LLM4S with Apache Pekko: llm4s-pekko exposes streamed completions and agent runs as Pekko Streams Sources with backpressure and cancellation."
 search_title: "LLM4S with Apache Pekko Streams: stream LLM output"
-nav_order: 24
+nav_order: 504
+grand_parent: User Guide
 ---
 
 # Apache Pekko Integration

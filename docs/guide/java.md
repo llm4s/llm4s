@@ -3,8 +3,9 @@ layout: page
 title: Java
 description: "Call an LLM from Java with llm4s-java-api: add the dependency, configure a provider, send a prompt or conversation and read failures without Scala."
 search_title: "Call LLMs from Java with LLM4S"
-parent: User Guide
-nav_order: 19
+parent: Java and Kotlin
+nav_order: 401
+grand_parent: User Guide
 ---
 
 # Using LLM4S from Java
@@ -130,7 +131,7 @@ llm4s {
 
     claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
 
     ollama-local {
@@ -211,7 +212,7 @@ model name):
 
 ```java
 LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
-LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
+LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-5-5"));
 LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 ```
 

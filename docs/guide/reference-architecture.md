@@ -3,8 +3,9 @@ layout: page
 title: Reference Architecture
 description: "Deploy LLM4S behind an AI gateway: secret injection, egress policy, failover, quotas and spend, with tested Kubernetes manifests."
 search_title: "LLM4S enterprise reference architecture"
-parent: User Guide
-nav_order: 46
+parent: Operations
+nav_order: 702
+grand_parent: User Guide
 ---
 
 # Enterprise Reference Architecture

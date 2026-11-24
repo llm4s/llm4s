@@ -3,8 +3,9 @@ layout: page
 title: Coming from sttp-ai or openai-scala-client
 description: "Move a Scala app from sttp-ai or openai-scala-client to LLM4S: calls side by side with compiled code, and when to stay on your client."
 search_title: "Migrate from sttp-ai or openai-scala-client to LLM4S"
-parent: User Guide
-nav_order: 41
+parent: Coming from Another Library
+nav_order: 603
+grand_parent: User Guide
 ---
 
 # Coming from sttp-ai or openai-scala-client
@@ -21,8 +22,9 @@ Every LLM4S snippet below is compiled by a test in this repository (`ScalaClient
 that the code on this page is, word for word, the code it compiles. All but the two configuration snippets are also
 run, against `llm4s-testkit`'s scripted client, with no network. The sttp-ai and openai-scala-client code is quoted
 from their own documentation, with the page it comes from under each quote, and the names in the tables link to where
-each project documents them. They were checked on 2026-11-05 against sttp-ai 0.12.0 (whose documentation examples still
-say 0.11.0; the names quoted here are unchanged in the 0.12.0 sources) and openai-scala-client 1.6.0.
+each project documents them. They were checked on 2026-11-24 against sttp-ai 0.12.0 (whose documentation examples still
+say 0.11.0; the names quoted here are unchanged in the 0.12.0 sources) and openai-scala-client 2.0.1
+(the 1.x line, 1.7.2, stays on Akka and its README calls it the legacy branch).
 
 1. TOC
 {:toc}
@@ -95,7 +97,7 @@ service
     CreateChatCompletionSettings(model = ModelId.gpt_5_4_mini)
   )
   .map(response => println(response.contentHead))
-  .andThen { case _ => service.close() } // close a service when done with it - it owns an HTTP pool and an actor system
+  .andThen { case _ => service.close() } // close a service when done with it - it owns its HTTP client
 ~~~
 
 *(From [the openai-scala-client README][c-readme].)* In LLM4S the provider and model are not in the code: they come from
@@ -239,7 +241,7 @@ model sees and can retry. `ToolBuilder` builds the same `ToolFunction` from a ha
 ## 4. Streaming
 
 sttp-ai streams through its fs2, ZIO, Akka, Pekko or Ox module ([streaming][s-streaming]); openai-scala-client returns
-an Akka Streams `Source` from `openai-scala-client-stream` ([streaming][c-streaming]). LLM4S's core call takes a
+an `AsyncStream` from `openai-scala-client-stream`, where 1.x returned an Akka `Source` ([streaming][c-streaming]). LLM4S's core call takes a
 callback that receives each chunk, and returns the whole completion when the stream ends:
 
 ```scala
@@ -280,7 +282,7 @@ llm4s {
 
     claude {                          # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
   }
 }
@@ -352,8 +354,8 @@ Nothing forces a switch in one go. Both libraries and LLM4S can sit in the same 
 
 ## Sources
 
-Fetched on 2026-11-05. sttp-ai's documentation site documents the latest release; openai-scala-client's links are
-pinned to the `v1.6.0` tag.
+Fetched on 2026-11-24. sttp-ai's documentation site documents the latest release; openai-scala-client's links are
+pinned to the `v2.0.1` tag.
 
 | Page | Names used |
 |---|---|
@@ -379,8 +381,8 @@ pinned to the `v1.6.0` tag.
 [s-testing]: https://sttp-ai.softwaremill.com/agents/testing.html
 [s-streaming]: https://sttp-ai.softwaremill.com/openai/streaming.html
 [s-compatible]: https://sttp-ai.softwaremill.com/openai/compatible-apis.html
-[c-readme]: https://github.com/cequence-io/openai-scala-client/blob/v1.6.0/README.md
-[c-chat]: https://github.com/cequence-io/openai-scala-client/blob/v1.6.0/docs/chat-completions.md
-[c-streaming]: https://github.com/cequence-io/openai-scala-client/blob/v1.6.0/docs/streaming.md
-[c-providers]: https://github.com/cequence-io/openai-scala-client/blob/v1.6.0/docs/providers.md
-[c-adapters]: https://github.com/cequence-io/openai-scala-client/blob/v1.6.0/docs/adapters.md
+[c-readme]: https://github.com/cequence-io/openai-scala-client/blob/v2.0.1/README.md
+[c-chat]: https://github.com/cequence-io/openai-scala-client/blob/v2.0.1/docs/chat-completions.md
+[c-streaming]: https://github.com/cequence-io/openai-scala-client/blob/v2.0.1/docs/streaming.md
+[c-providers]: https://github.com/cequence-io/openai-scala-client/blob/v2.0.1/docs/providers.md
+[c-adapters]: https://github.com/cequence-io/openai-scala-client/blob/v2.0.1/docs/adapters.md

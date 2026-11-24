@@ -3,8 +3,9 @@ layout: page
 title: Scala CLI Quick Start
 description: "Call an LLM from a single Scala CLI file with LLM4S: dependencies declared in the file, no sbt project, and a first answer in minutes."
 search_title: "Call an LLM from Scala CLI with LLM4S"
-parent: Getting Started
-nav_order: 8
+parent: Build Tools and Playgrounds
+nav_order: 1
+grand_parent: Getting Started
 ---
 
 # Scala CLI Quick Start

@@ -3,8 +3,9 @@ layout: page
 title: Image Generation
 description: "Generate images from Scala with LLM4S: OpenAI GPT Image and DALL-E, Stability AI, Hugging Face or a Stable Diffusion server, with options."
 search_title: "Generate images in Scala with LLM4S"
-parent: User Guide
-nav_order: 8
+parent: Core
+nav_order: 116
+grand_parent: User Guide
 ---
 
 # Image Generation with LLM4S
@@ -84,6 +85,14 @@ def drawWithStability(apiKey: String): Either[org.llm4s.error.LLMError, Generate
 
 The Hugging Face Inference API needs an access token. The default model is
 `stabilityai/stable-diffusion-xl-base-1.0`.
+
+> **Checked 2026-11-24: do not rely on this client as shipped.** It posts to
+> `https://api-inference.huggingface.co/models/<model>`. That host name did not resolve on that date, and Hugging
+> Face's [Inference Providers documentation](https://huggingface.co/docs/inference-providers/index) names only
+> `https://router.huggingface.co`. The default model's
+> [page](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) is still on the Hub, neither gated nor
+> disabled, but the Hub lists it as served for text-to-image by a third-party provider, not by Hugging Face's own
+> `hf-inference`. The base URL is not configurable.
 
 ```scala
 import org.llm4s.imagegeneration._

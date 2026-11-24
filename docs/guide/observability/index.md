@@ -3,8 +3,9 @@ layout: page
 title: Monitoring
 description: "Monitor LLM4S applications in production: logging, tracing with Langfuse or OpenTelemetry, metrics, token usage and cost, and provider reliability."
 search_title: "Monitor LLM apps in Scala: tracing, metrics and cost"
-nav_order: 21
-parent: User Guide
+nav_order: 705
+parent: Operations
+grand_parent: User Guide
 has_children: true
 ---
 
@@ -190,9 +191,10 @@ the candidates retrieved and the chunks kept.
 | `chat <model>` (a completion, plain or streamed) | `CLIENT` | `gen_ai.operation.name` = `chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, `gen_ai.request.max_tokens` (when set), `gen_ai.request.presence_penalty`, `gen_ai.request.frequency_penalty`, `server.address`, `llm4s.model_call.tool_calls`, `llm4s.model_call.streamed`, `llm4s.service_tier` (the tier the provider reports serving it at, when it reports one) and, for OpenAI and Azure OpenAI, `openai.response.service_tier`; with `captureContent`, `gen_ai.input.messages` and `gen_ai.output.messages` |
 | `embeddings <model>` | `CLIENT` | `gen_ai.operation.name` = `embeddings`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `operation` (the client's label), `input_count` |
 | `chat <model>` / `embeddings <model>` of a failed call | `CLIENT`, status `ERROR` (the error message, redacted) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `error.type` (the `LLMError`'s type, e.g. `RateLimitError`) |
-| `chat <model>` (an agent's model call) | `CLIENT` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` |
-| `invoke_agent <agent>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.provider.name` (the run's first model call's), `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, thread, run, status |
-| `execute_tool <tool>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; with `captureContent` (for `ToolExecuted`), `tool.input` and `tool.output` |
+
+An agent run's spans (`invoke_agent <agent>`, its `chat <model>` and `execute_tool <tool>` spans, and the
+`graph.*` and `agent.*` events) are listed, attribute by attribute, in
+[Agent tracing and metrics](agents#span-names-and-attributes).
 
 Only model, embedding and image generation calls (and their failures) are `CLIENT` spans; every other span, such as cost,
 cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
@@ -203,10 +205,13 @@ cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
 provider through `LLMClient.providerId`.
 
 **Message content is opt-in.** Prompts and completions often hold personal or confidential data, so by default no span
-carries them, nor an agent's query or a tool's input and output. Set `llm4s.tracing.opentelemetry.captureContent = true`
+carries them. Set `llm4s.tracing.opentelemetry.captureContent = true`
 (or `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`) to record them as `gen_ai.input.messages` /
 `gen_ai.output.messages`, in the conventions' JSON form; every piece of text passes through llm4s' secret redaction
-first and is cut to 1000 characters.
+first and is cut to 1000 characters. The setting applies to `TracingLLMClient`'s spans and to the
+`TraceEvent.AgentInitialized` (its query) and `TraceEvent.ToolExecuted` (`tool.input`, `tool.output`) events. It does
+not apply to an agent run's spans, which never carry message content in OpenTelemetry
+([Content](agents#content)).
 
 `TokenUsageRecorded` remains an `INTERNAL` span `Token Usage - <operation>`: it records usage, not a call. GenAI
 metrics (call duration and token usage) are not spans: [`llm4s-observability-micrometer`](micrometer) records them.
@@ -437,69 +442,48 @@ Langfuse provides purpose-built LLM observability. When configured, LLM4S automa
 
 ### What Gets Captured
 
-| Event Type | Description | Data Included |
+| Langfuse object | From | Data included |
 |------------|-------------|---------------|
-| **Traces** | Top-level request lifecycle | Query, final output, duration |
-| **Generations** | Each LLM call | Model, prompt, completion, tokens, latency |
-| **Spans** | Tool executions, retrieval ops | Tool name, input/output, duration |
-| **Events** | Custom markers | User-defined metadata |
-
-### Trace Structure Example
-
-An agent run that calls one tool appears in Langfuse as one trace, in the session of its thread:
-
-```
-Trace <the run's trace id>            session = thread id; input = first user message, output = last answer
-└── invoke_agent support              the run: agent, status and usage in its metadata
-    ├── chat gpt-4o                   generation: model, prompt, completion, token usage
-    ├── execute_tool search_docs      span: the tool's input and output
-    ├── chat gpt-4o                   generation: the final answer
-    └── one span per message of the turn
-```
-
-The names are the ones the next section lists; a subagent's run nests under the `execute_tool task` that started it.
+| **Trace** | An agent run (`TraceEvent.AgentRunEnded`) | Session = the thread, input = the turn's first user message, output = its last assistant message, the run's `userId`, and one span per message of the turn |
+| **Generation** | A completion outside an agent run (`TraceEvent.CompletionReceived`) | Model and the completion's content; not the prompt |
+| **Generation** | An agent's model call (`agent.model_call_completed`) | Model and token usage; the event's data as metadata. No prompt or completion |
+| **Span** | An agent's tool call (`agent.tool_executed`) | The event's data as metadata. No tool input or output |
+| **Span** | A `TraceEvent.ToolExecuted` you trace yourself (`traceToolCall`); an agent run sends none | The tool's arguments and result |
+| **Event** | Every other event, your own `CustomEvent`s included | The event's data |
 
 ### What an agent run sends
 
-An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each run:
+An agent built with `Agent.builder(...).withTracing(tracing)` sends each run as one trace: the run is an
+`invoke_agent <agent>` span, and each of its durable events is a span under it (`chat <model>`,
+`execute_tool <tool>`, `graph.*`, `agent.*`), with a subagent's run nested under the `task` tool call that started
+it. **[Agent tracing and metrics](agents)** is the description of that trace: the
+[span names and attributes](agents#span-names-and-attributes) in OpenTelemetry and in Langfuse, the
+[run's status](agents#the-runs-status) values, how handoffs, suspensions, resumes and recoveries appear, and
+[which content is recorded](agents#content). It is kept in one place so that it stays right; in short:
 
-- `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
-  `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
-  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content.
-  `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
-  the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
-- a `TokenUsageRecorded` for each model call that reports usage;
-- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
-  (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
-  `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
-  out or failed), the run's own `UsageSummary` - the model calls this run made, summed from its
-  `agent.model_call_completed` events, not the thread's total, so per-run figures add up - and
-  `userId`, the run's `RunConfig.principal` (`None` when the run names none).
+- The events are `graph.*` for the runtime's own (run, task and checkpoint lifecycle) and `agent.*` for the agent's
+  durable events: `agent.model_call_completed`, `agent.tool_executed`, `agent.handed_off`,
+  `agent.guardrail_blocked` and, for a delegated subagent, `agent.task_ended`. A `TokenUsageRecorded` follows each
+  model call that reports usage.
+- One `TraceEvent.AgentRunEnded` ends the run, with a status of `completed`, `step_limit_reached`,
+  `token_limit_reached`, `truncated`, `suspended`, `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed`, the
+  run's own usage, and `userId`, the run's `RunConfig.principal`.
+- The durable events carry none of the messages, tool arguments or tool results. They are not free of data about
+  the run: `graph.run_started`, `graph.run_resumed` and `graph.run_recovered` carry its `tenantId` and `principal`,
+  and `graph.task_failed` and `graph.run_failed` carry the error's message (a guardrail block's names only the
+  guardrail, `Guardrail '<name>' blocked`, never its reason; any other error's is sent as it is).
+- Message content reaches tracing only in `AgentRunEnded.messages`. Langfuse records it, as the trace's input and
+  output and one span per message; OpenTelemetry records only a message count.
+- In Langfuse a trace is private: `public` is `false` unless `llm4s.tracing.langfuse.public = true`.
 
-A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
-`AgentRunEnded`; it is traced as soon as the run's last event has been, with no fixed delay.
-Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's content is not in
-it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
-names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
+A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no `AgentRunEnded`.
+(The kernel's own `TracingSubscriber`, used for graphs that are not agents, names agent events `graph.custom`;
+`withTracing` on an agent names them `agent.*`.)
 
-Every one of these events is placed in one trace (`TraceEvent.span`, design 4.58): the run is a span, each event a
-span under it - a tool call's spanning its duration - and a subagent's run is a span under the `task` tool call that
-started it, whichever machine runs it. A run continues an upstream trace when given its context:
-
-```scala
-import org.llm4s.trace.TraceContext
-
-val upstream = TraceContext.parse(request.header("traceparent")).toOption
-agent.run(threadId, query, RunConfig().withTraceContext(upstream), Nil)
-```
-
-The run's span then takes that context as its remote parent and keeps its trace id. A `resume` or `recover` given
-no context continues the trace its work started in, which the thread's checkpoints record.
+The two backends the agent guide does not cover show `AgentRunEnded` like this:
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; `userId` is the run's `userId`, and is not sent for a run without one; `public` is `false` unless `llm4s.tracing.langfuse.public = true`. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
-| OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status (`ERROR` when failed, cancelled or timed out), message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; it is the parent of the run's `chat <model>` (`CLIENT`, per-call `gen_ai.usage.*`) and `execute_tool <tool>` (`INTERNAL`) spans and its other events, and a subagent's `invoke_agent` is under its `execute_tool task`. No attribute carries message content |
 | `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost; like every event of the run it is stored in the run's own trace, with its span id, parent and start |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
 

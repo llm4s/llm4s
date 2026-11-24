@@ -89,7 +89,7 @@ description: "A free path to becoming an AI engineer with LLM4S: from your first
         <div>
           <h3>Contribute</h3>
           <p>Read the contributing guide, pick a good first issue, ask questions on Discord and bring your work to Dev Hour.</p>
-          <p class="lp-steps__links"><a href="{{ '/reference/contributing' | relative_url }}">Contributing guide</a> <a href="https://github.com/llm4s/llm4s/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues</a> <a href="{{ '/contribute/' | relative_url }}">Ways to contribute</a></p>
+          <p class="lp-steps__links"><a href="{{ '/contribute/contributing' | relative_url }}">Contributing guide</a> <a href="https://github.com/llm4s/llm4s/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues</a> <a href="{{ '/contribute/' | relative_url }}">Ways to contribute</a></p>
         </div>
       </li>
     </ol>
@@ -145,7 +145,7 @@ description: "A free path to becoming an AI engineer with LLM4S: from your first
     <div class="lp-split__text">
       <p class="lp-eyebrow">Your first pull request</p>
       <h2 id="first-pr">How to make your first contribution</h2>
-      <p>The <a href="{{ '/reference/contributing' | relative_url }}">contributing guide</a> has the details. In short:</p>
+      <p>The <a href="{{ '/contribute/contributing' | relative_url }}">contributing guide</a> has the details. In short:</p>
     </div>
     <ol class="lp-numbered">
       <li>Read the contributing guide and the code of conduct.</li>
