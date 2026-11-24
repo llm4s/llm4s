@@ -609,6 +609,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its filters compare exactly instead of with `LIKE` on the JSON text; earlier rows still read
   [#2759](https://github.com/llm4s/llm4s/issues/2759);
   [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
+- **Fixed** An S3 listing goes on past a page whose every object is filtered out, so `RAG.sync` no longer deletes the
+  documents after it; a truncated page without a next one is an error [#2914](https://github.com/llm4s/llm4s/issues/2914).
 
 ### Observability
 
