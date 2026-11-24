@@ -92,6 +92,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801),
 [the Hugging Face image client on Inference Providers](#the-hugging-face-image-client-calls-inference-providers-2832),
+[the config-policy `prod` preset's model generations](#the-config-policy-prod-preset-allows-model-generations-2885),
 [the OpenAI image client's default model](#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884),
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
@@ -477,6 +478,23 @@ OpenAI shut down `dall-e-2`, the client's old default, on 2026-05-12, and `editI
   `style` with an `ImageValidationError` before any request: those models always return base64 and take no style.
 - **`OpenAIImageClient.deprecationWarningMessage` is removed**; `retirementWarning(model): Option[String]` covers every
   image model OpenAI has shut down or is shutting down, with OpenAI's replacements.
+
+## The config-policy `prod` preset allows model generations (#2885)
+
+`ConfigPolicy.prodSafeDefaults` allowed only `openai/gpt-4o(-mini)`, `anthropic/claude-3-5-sonnet.*`,
+`gemini/gemini-2.x` and `deepseek/deepseek-chat`, all retired or retiring, and capped OpenAI at 128000 and Anthropic at
+200000 tokens, below today's 1M windows, so a production config on a current model failed it.
+
+- **Models**: each allowed provider is limited to its vendor's current generations, `ConfigPolicy.ModelFamilies`
+  (GPT-5 and GPT-6; Claude 5 and later, Opus and Sonnet from 4.6, Haiku 4.5; Gemini 3; `deepseek-chat` and
+  `deepseek-reasoner`; any Azure deployment). `bedrock` is allowed, for the same Claude families. A config on a
+  retired generation (`gpt-4o-mini`, `claude-3-5-sonnet-*`, `gemini-2.5-pro`) now fails with `[allowedModels]`:
+  move it to a current model, or allow the model in your own policy with
+  `withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "openai/gpt-4o-mini")*)`.
+- **Caps**: openai and azure 1050000, anthropic and bedrock 1000000, gemini 1048576, deepseek 163840: the largest
+  window among each provider's current models in the bundled metadata.
+- **`EnvCheckPolicies`' `staging-balanced` preset** allows the OpenAI, Anthropic and Gemini families above by pattern,
+  in place of four pinned names (`PolicyBuilder.allowedModelPatterns` is **added**).
 
 ## `Secret` or `Secret.token`: which one stays registered (#2824)
 

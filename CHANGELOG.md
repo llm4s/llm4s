@@ -623,6 +623,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Fixed** the config-policy `prod` and `staging-balanced` presets allowed only retired models (`gpt-4o`, `claude-3-5-sonnet`, `gemini-2.x`, `gemini-1.5-pro`) and capped windows below current models: they allow each vendor's current model generations (`ConfigPolicy.ModelFamilies`, Bedrock's Claude ids included), and each cap is the largest current window in the bundled model metadata ([migration](docs/reference/migration.md#the-config-policy-prod-preset-allows-model-generations-2885)) [#2885](https://github.com/llm4s/llm4s/issues/2885).
 - **Added** `scripts/check-docs.sh` runs every documentation check of Quick Checks that needs no sbt; every docs page needs a `description`, and a page that links an llm4s issue must declare how it cites it ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 - **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrate_1_0` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.
 - **Changed** The scalafix rule `ResultSyntaxMoved` also rewrites the imports of `TokenizerId`, `EmbeddingError`

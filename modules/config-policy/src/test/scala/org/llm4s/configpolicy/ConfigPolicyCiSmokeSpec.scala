@@ -41,7 +41,7 @@ class ConfigPolicyCiSmokeSpec extends AnyWordSpec with Matchers {
         "prod",
         "prod-safe",
         "LLM_PROVIDER"         -> "openai",
-        "LLM_MODEL"            -> "gpt-4o-mini",
+        "LLM_MODEL"            -> "gpt-5.6-luna",
         "LLM_MAX_TOKENS"       -> "2048",
         "LLM_REASONING_BUDGET" -> "5000",
         "LLM_REGION"           -> "eastus"
@@ -53,7 +53,7 @@ class ConfigPolicyCiSmokeSpec extends AnyWordSpec with Matchers {
         "staging",
         "staging-balanced",
         "LLM_PROVIDER"         -> "gemini",
-        "LLM_MODEL"            -> "gemini-1.5-pro",
+        "LLM_MODEL"            -> "gemini-3.8-flash",
         "LLM_MAX_TOKENS"       -> "4096",
         "LLM_REASONING_BUDGET" -> "8000",
         "LLM_REGION"           -> "westeurope"

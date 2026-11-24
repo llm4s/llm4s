@@ -61,7 +61,7 @@ class DefaultPoliciesSpec extends AnyFunSpec with Matchers {
 
   describe("DefaultPolicies.stagingBalancedDefaults") {
     it("should enforce staging policies") {
-      val cfg    = prodGood.copy(provider = Some("gemini"), model = Some("gemini-1.5-pro"), maxTokens = Some(4096))
+      val cfg    = prodGood.copy(provider = Some("gemini"), model = Some("gemini-3.8-flash"), maxTokens = Some(4096))
       val result = ConfigPolicyRunner.evaluate(cfg, "staging", DefaultPolicies.stagingBalancedDefaults)
       result.passed shouldBe true
     }
