@@ -1,13 +1,14 @@
 package org.llm4s.toolapi.builtin.http
 
-import org.llm4s.toolapi.ToolCallInfo
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.{ IdempotencyKey, ToolCallInfo }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** `HTTPTool` sends an agent call's idempotency key as `Idempotency-Key` on a write (#1740). */
 class HttpIdempotencyKeySpec extends AnyFlatSpec with Matchers {
 
-  private val call = Some(ToolCallInfo("call_1", "key-1"))
+  private val call = Some(ToolCallInfo(ToolCallId("call_1"), IdempotencyKey("key-1")))
 
   "HTTPTool" should "add Idempotency-Key to a POST, PUT, PATCH or DELETE run as an agent's call" in {
     Seq("POST", "put", "Patch", "DELETE").foreach { method =>

@@ -172,7 +172,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
   it should "keep a turn that ends without an answer in the session, its reason as the response" in {
     val looping = new LLMClient {
-      private val call = ToolCall("c", "missing_tool", ujson.Obj())
+      private val call = ToolCall(ToolCallId("c"), "missing_tool", ujson.Obj())
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(Completion("loop", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call))))
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(

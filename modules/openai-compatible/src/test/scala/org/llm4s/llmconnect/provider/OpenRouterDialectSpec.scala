@@ -46,7 +46,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
       CompletionOptions(),
       AssistantMessage(Some("text")),
       AssistantMessage(Some("")),
-      AssistantMessage(None, List(ToolCall("c", "f", ujson.Obj())))
+      AssistantMessage(None, List(ToolCall(ToolCallId("c"), "f", ujson.Obj())))
     )("messages")
     messages(0)("content") shouldBe ujson.Str("text")
     messages(1)("content") shouldBe ujson.Str("")
@@ -152,7 +152,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
           |"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}""".stripMargin
       )
     )
-    completion.toolCalls shouldBe Seq(ToolCall("c1", "f", ujson.Obj("a" -> 1)))
+    completion.toolCalls shouldBe Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj("a" -> 1)))
     completion.message.text shouldBe None
   }
 }

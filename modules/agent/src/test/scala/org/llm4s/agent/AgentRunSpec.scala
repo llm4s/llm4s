@@ -28,7 +28,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(s"tool did not build: $e"), identity)
 
   private def toolCalls(calls: (String, String, ujson.Value)*): Completion = {
-    val message = AssistantMessage(None, calls.map((id, name, args) => ToolCall(id, name, args)))
+    val message = AssistantMessage(None, calls.map((id, name, args) => ToolCall(ToolCallId(id), name, args)))
     CompletionFixture.withMessage(message)
   }
 

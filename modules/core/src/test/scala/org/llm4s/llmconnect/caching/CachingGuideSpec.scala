@@ -358,9 +358,13 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       )
       val (client, llm, _, _, _) = fixture(embedder = embedder)
       val first =
-        Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("thinking"), ToolMessage("alpha", "call-1")))
+        Conversation(
+          Seq(UserMessage("what is 2+2"), AssistantMessage("thinking"), ToolMessage("alpha", ToolCallId("call-1")))
+        )
       val second =
-        Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("other"), ToolMessage("beta", "call-1")))
+        Conversation(
+          Seq(UserMessage("what is 2+2"), AssistantMessage("other"), ToolMessage("beta", ToolCallId("call-1")))
+        )
       client.complete(first)
       client.complete(second)
       llm.calls.get shouldBe 2

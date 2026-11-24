@@ -234,7 +234,7 @@ trait GuardedContentContract extends AnyFlatSpecLike with Matchers with EitherVa
     val recorded = Recorded(newStores().checkpointer)
     val tracing  = RecordingTracing()
     val thread   = ThreadId(s"rewrite-resume-${unique()}")
-    val client   = Scripted(calling(ToolCall("c1", "lookup", ujson.Obj("text" -> "x"))), text("noted"))
+    val client   = Scripted(calling(ToolCall(ToolCallId("c1"), "lookup", ujson.Obj("text" -> "x"))), text("noted"))
     val lookup   = AgentTool(textSpec("lookup"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("found"))))
     val agent = builder(client, recorded, tracing)
       .withTools(ToolSet.of(lookup).value)

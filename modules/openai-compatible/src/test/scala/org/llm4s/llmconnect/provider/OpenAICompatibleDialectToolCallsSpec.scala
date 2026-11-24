@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.ToolCall
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId }
 import org.llm4s.testutil.SmallStack
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -29,14 +29,16 @@ final class OpenAICompatibleDialectToolCallsSpec extends AnyFlatSpec with Matche
 
   "lenientToolCalls" should "parse well-formed arguments" in {
     OpenAICompatibleDialect.lenientToolCalls(call("""{"a":1}""")) shouldBe
-      Right(Seq(ToolCall("c1", "f", ujson.Obj("a" -> 1))))
+      Right(Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj("a" -> 1))))
   }
 
   it should "read absent, null or blank arguments as {}, a call with no arguments" in {
     val absent = ujson.Arr(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("name" -> "f")))
-    OpenAICompatibleDialect.lenientToolCalls(absent) shouldBe Right(Seq(ToolCall("c1", "f", ujson.Obj())))
+    OpenAICompatibleDialect.lenientToolCalls(absent) shouldBe Right(Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj())))
     Seq[ujson.Value](ujson.Null, "", "  ").foreach { blank =>
-      OpenAICompatibleDialect.lenientToolCalls(call(blank)) shouldBe Right(Seq(ToolCall("c1", "f", ujson.Obj())))
+      OpenAICompatibleDialect.lenientToolCalls(call(blank)) shouldBe Right(
+        Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj()))
+      )
     }
   }
 

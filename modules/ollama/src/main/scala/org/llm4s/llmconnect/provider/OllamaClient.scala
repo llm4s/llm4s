@@ -410,7 +410,7 @@ class OllamaClient(
         if (am.toolCalls.nonEmpty)
           message("tool_calls") = ujson.Arr.from(am.toolCalls.zipWithIndex.map { case (tc, index) =>
             ujson.Obj(
-              "id" -> tc.id,
+              "id" -> tc.id.asString,
               "function" -> ujson.Obj(
                 "index"     -> index,
                 "name"      -> tc.name,
@@ -421,7 +421,7 @@ class OllamaClient(
         message
       case tm: ToolMessage =>
         val toolCallId = tm.toolCallId
-        val message    = ujson.Obj("role" -> "tool", "content" -> tm.content, "tool_call_id" -> toolCallId)
+        val message    = ujson.Obj("role" -> "tool", "content" -> tm.content, "tool_call_id" -> toolCallId.asString)
         toolNames.get(toolCallId).foreach(name => message("tool_name") = name)
         message
     })
@@ -666,7 +666,7 @@ object OllamaClient {
           Either.cond(ids.claim(serverId), serverId, malformed(s"tool call id '$serverId' is used more than once"))
         case None => Right(ids.nextId())
       }
-    } yield ToolCall(id, name, args)
+    } yield ToolCall(ToolCallId(id), name, args)
 
   /**
    * The reply's [[FinishReason]] from its last line's `done_reason` (RFC 0009): `stop` is `ToolCalls` when the reply

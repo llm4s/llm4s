@@ -56,7 +56,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private def calling(call: ToolCall): Completion =
     Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
 
-  private val toolCall                       = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall                       = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion = calling(toolCall)
 
   private case class EchoResult(echo: String)
@@ -139,7 +139,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   it should "report an unknown tool as Errored with no ToolCallStarted" in {
-    val unknown = ToolCall("call-9", "nope", ujson.Obj())
+    val unknown = ToolCall(ToolCallId("call-9"), "nope", ujson.Obj())
     val (result, c) =
       collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
     result.map(_.answer) shouldBe Right(Some("sorry"))
@@ -152,7 +152,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "keep a model-invented tool name out of the durable log" in {
     val marker   = "INVENTED-7731"
-    val unknown  = ToolCall("call-9", s"tool_$marker", ujson.Obj())
+    val unknown  = ToolCall(ToolCallId("call-9"), s"tool_$marker", ujson.Obj())
     val (_, c)   = collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
     val executed = c.durable.collect { case e @ AgentEvents.ToolExecuted(_) => e }
     executed should have size 1
@@ -163,7 +163,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "report each non-handoff call of a mixed handoff batch as Errored" in {
     val target  = Agent.builder("physics", Scripted(Right(answer("E=mc^2"))))
-    val handoff = ToolCall("call-h", "handoff_to_physics", ujson.Obj())
+    val handoff = ToolCall(ToolCallId("call-h"), "handoff_to_physics", ujson.Obj())
     val mixed = Completion(
       "turn-1",
       Instant.EPOCH,
@@ -182,7 +182,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   it should "report invalid arguments as Errored with no ToolCallStarted" in {
-    val invalid = ToolCall("call-2", "echo", ujson.Obj("other" -> 1))
+    val invalid = ToolCall(ToolCallId("call-2"), "echo", ujson.Obj("other" -> 1))
     val (_, c)  = collect(agentWith(Scripted(Right(calling(invalid)), Right(answer("sorry"))), echoTool), "go")
     c.all.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty
     c.durable.collect { case AgentEvents.ToolExecuted(t) => t.outcome } shouldBe Vector(ToolExecutionOutcome.Errored)
@@ -333,7 +333,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val marker  = "SECRET-42"
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> marker))
+    val call    = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
       Right(Completion("c1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)),
       Right(answer(s"the answer is $marker"))

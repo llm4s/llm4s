@@ -55,7 +55,7 @@ class BedrockToolInputDepthSpec extends AnyWordSpec with Matchers {
       outcome.set(SmallStack.run {
         val first = Conversation(Seq(UserMessage("weather?")))
         client.complete(first, CompletionOptions()).flatMap { completion =>
-          val turn = Conversation(first.messages ++ Seq(completion.message, ToolMessage("Sunny", "tc-1")))
+          val turn = Conversation(first.messages ++ Seq(completion.message, ToolMessage("Sunny", ToolCallId("tc-1"))))
           client.complete(turn, CompletionOptions())
         } match {
           case Right(_) =>

@@ -5,7 +5,7 @@ import org.llm4s.agent.graph.{ RunConfig, TenantId, ThreadId }
 import org.llm4s.agent.graph.tool.ToolSet
 import org.llm4s.agent.harness.{ FileBackend, FileToolLimits, FileTools }
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.{ ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpecLike
@@ -52,7 +52,7 @@ trait FileToolsContract extends AnyFlatSpecLike with Matchers with EitherValues:
   /** Runs `batches`, each one model message, then a final answer; every tool result, in order. */
   private def run(backend: FileBackend, tenant: Option[String], batches: Vector[Vector[Call]]): Vector[String] =
     val ids     = Iterator.from(1)
-    val replies = batches.map(b => Reply.toolCalls(b.map((n, a) => ToolCall(s"c${ids.next()}", n, a))*))
+    val replies = batches.map(b => Reply.toolCalls(b.map((n, a) => ToolCall(ToolCallId(s"c${ids.next()}"), n, a))*))
     val tools   = ToolSet.of(FileTools(backend, FileToolLimits.default)*).value
     val agent =
       Agent

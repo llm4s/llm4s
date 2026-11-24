@@ -36,7 +36,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
     arguments: ujson.Value,
     callId: String = "call_123"
   ): AgentResult = {
-    val call = ToolCall(callId, tool.name, arguments)
+    val call = ToolCall(ToolCallId(callId), tool.name, arguments)
     val client = ScriptedLLMClient.of(
       CompletionFixture.withMessage(AssistantMessage(None, Seq(call))),
       CompletionFixture.simple("The tool failed, sorry.")
@@ -62,7 +62,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
     val result  = runFailing(failing("add_inventory_item", "unused"), ujson.Null)
     val message = onlyToolMessage(result)
 
-    message.toolCallId shouldBe "call_123"
+    message.toolCallId shouldBe ToolCallId("call_123")
     message.content should not be empty
     message.validate.isRight shouldBe true
     result.answer shouldBe Some("The tool failed, sorry.")

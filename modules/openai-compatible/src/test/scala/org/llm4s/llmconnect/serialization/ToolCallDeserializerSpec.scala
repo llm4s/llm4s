@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.serialization
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.llmconnect.LLMConnectTestFixtures
 import org.llm4s.testutil.SmallStack
 import org.scalatest.funsuite.AnyFunSuite
@@ -14,7 +15,7 @@ class ToolCallDeserializerSpec extends AnyFunSuite with Matchers {
     val toolCalls = StandardToolCallDeserializer.deserializeToolCalls(json)
 
     toolCalls.length shouldBe 1
-    toolCalls.head.id shouldBe "call_abc123"
+    toolCalls.head.id shouldBe ToolCallId("call_abc123")
     toolCalls.head.name shouldBe "get_weather"
     toolCalls.head.arguments("location").str shouldBe "San Francisco"
   }
@@ -24,9 +25,9 @@ class ToolCallDeserializerSpec extends AnyFunSuite with Matchers {
     val toolCalls = StandardToolCallDeserializer.deserializeToolCalls(json)
 
     toolCalls.length shouldBe 2
-    toolCalls.head.id shouldBe "call_1"
+    toolCalls.head.id shouldBe ToolCallId("call_1")
     toolCalls.head.name shouldBe "get_weather"
-    toolCalls(1).id shouldBe "call_2"
+    toolCalls(1).id shouldBe ToolCallId("call_2")
     toolCalls(1).name shouldBe "search_web"
   }
 
@@ -51,7 +52,7 @@ class ToolCallDeserializerSpec extends AnyFunSuite with Matchers {
     val toolCalls = StandardToolCallDeserializer.deserializeToolCalls(json)
 
     toolCalls.length shouldBe 1
-    toolCalls.head.id shouldBe "call_complex"
+    toolCalls.head.id shouldBe ToolCallId("call_complex")
     toolCalls.head.name shouldBe "create_user"
     toolCalls.head.arguments("name").str shouldBe "John"
     toolCalls.head.arguments("age").num shouldBe 30

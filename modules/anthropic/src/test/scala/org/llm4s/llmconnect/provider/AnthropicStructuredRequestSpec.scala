@@ -116,8 +116,8 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
         SystemMessage("S"),
         UserMessage("q1"),
         AssistantMessage(Some("a1"), Seq.empty),
-        AssistantMessage(None, Seq(ToolCall("call_1", "lookup", ujson.Obj("x" -> 1)))),
-        ToolMessage("result-text", "call_1"),
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("call_1"), "lookup", ujson.Obj("x" -> 1)))),
+        ToolMessage("result-text", ToolCallId("call_1")),
         UserMessage("q2")
       )
     )

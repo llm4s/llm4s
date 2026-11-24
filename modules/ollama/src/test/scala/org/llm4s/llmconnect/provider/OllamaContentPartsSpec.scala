@@ -51,11 +51,15 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   }
 
   "A tool result" should "join its text parts and refuse media" in {
-    val call      = ToolCall("c1", "fetch", ujson.Obj())
+    val call      = ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())
     val assistant = AssistantMessage(None, Seq(call))
-    body(UserMessage("go"), assistant, ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1"))
+    body(
+      UserMessage("go"),
+      assistant,
+      ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1"))
+    )
       .value("messages")(2)("content") shouldBe ujson.Str("a\nb")
-    body(UserMessage("go"), assistant, ToolMessage(Vector(image), "c1")).left.value shouldBe
+    body(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c1"))).left.value shouldBe
       UnsupportedContentPartError("ollama", image.kind, "tool")
   }
 

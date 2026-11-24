@@ -1156,6 +1156,43 @@ must stop on one, map it there: `result.left.map(e => ProcessingError("tool", e.
 No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs. The type
 arguments are rewritten by `ToolFunctionOneTypeParameter`.
 
+## A tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey` (#2815)
+
+`ToolCall.id`, `ToolMessage.toolCallId` and `ToolCallInfo.toolCallId` were `String`s, and `ToolCallInfo.idempotencyKey`
+a `String`, while the agent held its own `ToolCallId` and `IdempotencyKey`. There is one of each now, in core: opaque
+types over `String`, built with `apply` and read with `asString`. `ToolCallId` is in `org.llm4s.llmconnect.model`, beside
+`ToolCall`, and `IdempotencyKey` in `org.llm4s.toolapi`, beside `ToolCallInfo`. The agent's events (`ToolExecuted`,
+`ToolCallStarted`, `ToolCallResult`) and `MessageUpdate.EditToolCall` carry them too.
+
+```scala
+import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolCallId, ToolMessage }
+
+val call   = ToolCall(ToolCallId("call_1"), "weather", ujson.Obj("city" -> "Paris"))
+val turn   = AssistantMessage(None, Seq(call))
+val result = ToolMessage("sunny", call.id)
+```
+
+| Before | After |
+|---|---|
+| `ToolCall("c1", name, args)`, `call.withId("c1")` | `ToolCall(ToolCallId("c1"), name, args)`, `call.withId(ToolCallId("c1"))` |
+| `ToolMessage(text, "c1")`, `Message.tool(text, "c1")` | `ToolMessage(text, ToolCallId("c1"))`, `Message.tool(text, ToolCallId("c1"))` |
+| `ToolCallInfo("c1", "key")` | `ToolCallInfo(ToolCallId("c1"), IdempotencyKey("key"))` |
+| `call.id` or `info.idempotencyKey` where a `String` is needed (a header, a map key, `s"..."` is fine as it is) | `call.id.asString`, `info.idempotencyKey.asString` |
+| `import org.llm4s.agent.graph.{ IdempotencyKey, ToolCallId }` | `import org.llm4s.llmconnect.model.ToolCallId` and `import org.llm4s.toolapi.IdempotencyKey` |
+| `toolCallId.value`, `key.value` (the agent's types) | `toolCallId.asString`, `key.asString` |
+| `ToolCallId(request.call.id)` | `request.call.id`, or `request.toolCallId` |
+| `ToolExecuted(agent, "c1", ...)`, `.idempotencyKey: Option[String]` | `ToolExecuted(agent, ToolCallId("c1"), ...)`, `Option[IdempotencyKey]` |
+
+Stored conversations, checkpoints and events are unchanged: both types are written as the plain JSON strings they
+were. Java and Kotlin see a `String` (an opaque type erases to it), and the Java facade's `JToolCall.id()`,
+`JMessage.toolCallId()` and `JToolArgs` keep returning `String`s.
+
+A comparison with a `String` no longer compiles, `call.id == "c1"` and ScalaTest's `call.id shouldBe "c1"` alike:
+compare with `ToolCallId("c1")`, or read `call.id.asString`.
+
+The Scalafix rule `ToolCallIdTyped` (also in `Llm4sMigrate_1_0`) wraps an id or key set from a `String`, adds
+`.asString` to every other read, and moves the agent's imports ([Scalafix](scalafix)).
+
 ## `SchemaDefinition` gains a union and a raw JSON Schema case (#2814)
 
 `SchemaDefinition` is sealed, so its cases had to be complete before the baseline. Two are new:

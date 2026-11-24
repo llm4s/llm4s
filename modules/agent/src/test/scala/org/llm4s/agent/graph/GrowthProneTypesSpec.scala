@@ -1,10 +1,11 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.middleware.{ ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentToolFixtures, AgentToolSpec, ToolContext, ToolSet }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ ToolCall, UserMessage }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -19,11 +20,11 @@ class GrowthProneTypesSpec extends AnyFlatSpec with Matchers {
   private val run   = testRunContext()
   private val state = ThreadState.empty(Map.empty)
   private val spec  = AgentToolSpec[Search]("search", "Searches", searchSchema)
-  private val call  = ToolCall("call-1", "search", ujson.Obj("query" -> "x"))
+  private val call  = ToolCall(ToolCallId("call-1"), "search", ujson.Obj("query" -> "x"))
   private val idem  = IdempotencyKey("key-1")
 
   "ToolCallId and ToolName" should "wrap and unwrap a string" in {
-    ToolCallId("call-1").value shouldBe "call-1"
+    ToolCallId("call-1").asString shouldBe "call-1"
     ToolName("search").value shouldBe "search"
   }
 

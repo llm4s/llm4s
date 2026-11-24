@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -165,7 +166,7 @@ class GrowthSafeToolTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "change each field through its setter" in {
-    val call = ToolCallInfo(toolCallId = "call_1", idempotencyKey = "k" * 64)
+    val call = ToolCallInfo(toolCallId = ToolCallId("call_1"), idempotencyKey = IdempotencyKey("k" * 64))
     val e    = SafeParameterExtractor(ujson.Obj()).withParams(ujson.Obj("a" -> 1)).withCall(call)
     e shouldBe SafeParameterExtractor(ujson.Obj("a" -> 1), Some(call))
     e.getInt("a") shouldBe Right(1)

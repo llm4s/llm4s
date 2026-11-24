@@ -66,7 +66,9 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     val specials = "page <|endoftext|> more <|fim_prefix|> x <|fim_middle|> y <|fim_suffix|> z <|endofprompt|>"
     Seq(ConversationTokenCounter.cl100k(), ConversationTokenCounter.o200k()).foreach { result =>
       val counter = result.fold(e => fail(e.message), identity)
-      counter.countMessage(ToolMessage(specials, "c1")) should be > counter.countMessage(ToolMessage("page", "c1"))
+      counter.countMessage(ToolMessage(specials, ToolCallId("c1"))) should be > counter.countMessage(
+        ToolMessage("page", ToolCallId("c1"))
+      )
       counter.countMessage(UserMessage(specials)) should be > 0
       counter.countMessage(AssistantMessage(specials)) should be > 0
       counter.countConversation(Conversation(Seq(UserMessage(specials)))) should be > 0
@@ -119,7 +121,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     val message = AssistantMessage(
       content = "Let me check that.",
       toolCalls = Seq(
-        ToolCall(id = "call_1", name = "get_weather", arguments = ujson.Obj("city" -> "London"))
+        ToolCall(id = ToolCallId("call_1"), name = "get_weather", arguments = ujson.Obj("city" -> "London"))
       )
     )
 
@@ -131,7 +133,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
 
   it should "count tool messages correctly" in {
     val counter = ConversationTokenCounter.cl100k().toOption.get
-    val message = ToolMessage(content = """{"temp": 20}""", toolCallId = "call_1")
+    val message = ToolMessage(content = """{"temp": 20}""", toolCallId = ToolCallId("call_1"))
 
     val tokens = counter.countMessage(message)
 
@@ -302,6 +304,6 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     val text = counter.countMessage(UserMessage("look"))
     counter.countMessage(UserMessage(Vector(ContentPart.Text("look"), image, image))) shouldBe
       text + 2 * ContentPart.EstimatedImageTokens
-    counter.countMessage(ToolMessage(Vector(image), "c")) should be >= ContentPart.EstimatedImageTokens
+    counter.countMessage(ToolMessage(Vector(image), ToolCallId("c"))) should be >= ContentPart.EstimatedImageTokens
   }
 }

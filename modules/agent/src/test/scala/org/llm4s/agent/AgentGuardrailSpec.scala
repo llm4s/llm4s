@@ -263,7 +263,10 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def handoffTo(target: String): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, Seq(ToolCall("call_h", s"handoff_to_$target", ujson.Obj("reason" -> "specialist"))))
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("call_h"), s"handoff_to_$target", ujson.Obj("reason" -> "specialist")))
+      )
     )
 
   private def rejectNo: InputGuardrail = new InputGuardrail {

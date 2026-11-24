@@ -72,14 +72,15 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
   private val finalReply = openAICompletion("Sunny.", "anthropic/claude-sonnet")
 
   private val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
-  private val answer  = ToolMessage("sunny", "call-1")
+  private val answer  = ToolMessage("sunny", ToolCallId("call-1"))
 
-  private val withDetails = AssistantMessage(None, Seq(ToolCall("call-1", "get_weather", ujson.Obj("city" -> "Paris"))))
-    .withThinking(
-      ThinkingBlock.Text("Thinking.") +: details.arr.toSeq.map(item =>
-        ThinkingBlock.Opaque("openrouter", item.render())
+  private val withDetails =
+    AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "Paris"))))
+      .withThinking(
+        ThinkingBlock.Text("Thinking.") +: details.arr.toSeq.map(item =>
+          ThinkingBlock.Opaque("openrouter", item.render())
+        )
       )
-    )
 
   /** Serves `replies` in order, recording each request body. */
   private def withReplies(replies: String*)(test: (String, () => Seq[ujson.Value]) => Any): Unit = {

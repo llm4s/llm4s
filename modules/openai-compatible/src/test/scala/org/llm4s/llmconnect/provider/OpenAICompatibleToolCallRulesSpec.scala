@@ -74,7 +74,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
     calls("""[{"function":{"name":"lookup","arguments":"{}"}}]""").left.map(_.message.contains("OpenRouter")) shouldBe
       Left(true)
     calls("""[{"id":"c1","function":{"name":"lookup","arguments":""}}]""") shouldBe
-      Right(Seq(ToolCall("c1", "lookup", ujson.Obj())))
+      Right(Seq(ToolCall(ToolCallId("c1"), "lookup", ujson.Obj())))
     malformed(calls("""[{"id":"c1","function":{"name":"lookup","arguments":"{bad"}}]""")) shouldBe true
   }
 }

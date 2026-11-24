@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.VersionedJson
-import org.llm4s.llmconnect.model.{ ContentPart, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ ContentPart, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,7 +24,10 @@ class ContentPartsMigrationSpec extends AnyFlatSpec with Matchers with EitherVal
       ujson.Obj("id" -> "2.0/tool/c1", "message" -> ujson.Obj("type" -> "tool", "toolCallId" -> "c1", "content" -> "r"))
     )
     Messages.key.decode(VersionedJson(1, v1)).value shouldBe
-      Vector(StoredMessage("0.0/user", UserMessage("hi")), StoredMessage("2.0/tool/c1", ToolMessage("r", "c1")))
+      Vector(
+        StoredMessage("0.0/user", UserMessage("hi")),
+        StoredMessage("2.0/tool/c1", ToolMessage("r", ToolCallId("c1")))
+      )
     val update = ujson.read(
       upickle.default.write[MessageUpdate](MessageUpdate.Append(StoredMessage("0.0/user", UserMessage("hi"))))
     )
@@ -45,10 +48,10 @@ class ContentPartsMigrationSpec extends AnyFlatSpec with Matchers with EitherVal
     results.updateVersion.current shouldBe 2
     val v1 =
       ujson.Obj("assistantMessageId" -> "7.0/assistant", "toolCallId" -> "c2", "content" -> "good", "isError" -> false)
-    val expected = ToolResult("7.0/assistant", "c2", Vector(ContentPart.Text("good")), isError = false)
+    val expected = ToolResult("7.0/assistant", ToolCallId("c2"), Vector(ContentPart.Text("good")), isError = false)
     results.decodeUpdate(VersionedJson(1, v1)).value shouldBe expected
     results.decode(VersionedJson(1, ujson.Arr(v1))).value shouldBe Vector(expected)
-    val withImage = ToolResult("7.0/assistant", "c3", Vector(image), isError = false)
+    val withImage = ToolResult("7.0/assistant", ToolCallId("c3"), Vector(image), isError = false)
     results.decode(results.encode(Vector(withImage))).value shouldBe Vector(withImage)
   }
 
@@ -65,7 +68,9 @@ class ContentPartsMigrationSpec extends AnyFlatSpec with Matchers with EitherVal
       Vector(
         EncodedOperation.Update(
           "tool-results",
-          ToolLoop.results.encodeUpdate(ToolResult("2.0/assistant", "c1", Vector(mediaOf(byte)), isError = false))
+          ToolLoop.results.encodeUpdate(
+            ToolResult("2.0/assistant", ToolCallId("c1"), Vector(mediaOf(byte)), isError = false)
+          )
         )
       ),
       Vector.empty

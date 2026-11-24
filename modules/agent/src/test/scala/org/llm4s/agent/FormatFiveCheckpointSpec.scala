@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{
   Checkpoint,
@@ -8,7 +9,6 @@ import org.llm4s.agent.graph.{
   EventDraft,
   EventRecord,
   GraphRuntime,
-  IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
   PendingWrite,

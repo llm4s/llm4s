@@ -36,7 +36,10 @@ class ExecuteToolSpec extends AnyFlatSpec with Matchers with EitherValues with O
 
   private def calls(calls: (String, ujson.Obj)*): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, calls.zipWithIndex.map { case ((_, args), i) => ToolCall(s"x$i", "execute", args) })
+      AssistantMessage(
+        None,
+        calls.zipWithIndex.map { case ((_, args), i) => ToolCall(ToolCallId(s"x$i"), "execute", args) }
+      )
     )
 
   private def results(runner: Recording, batches: Seq[Completion], middleware: Option[PermissionMiddleware] = None) = {
