@@ -31,10 +31,15 @@ trait TutorialSpecSupport { self: Assertions =>
 
   /** The `// snippet:` regions of a source file under `modules/samples/src/main/scala/.../supportassistant/`. */
   def regions(sourceFile: String): List[String] =
+    regionsOf(s"modules/samples/src/main/scala/org/llm4s/samples/tutorial/supportassistant/$sourceFile")
+
+  /** The `// snippet:` regions of a test source under `modules/samples/src/test/scala/.../supportassistant/`. */
+  def testRegions(sourceFile: String): List[String] =
+    regionsOf(s"modules/samples/src/test/scala/org/llm4s/samples/tutorial/supportassistant/$sourceFile")
+
+  private def regionsOf(relative: String): List[String] =
     """(?ms)^[ ]*// snippet: ([a-z-]+)\n(.*?)^[ ]*// end snippet$""".r
-      .findAllMatchIn(
-        read(s"modules/samples/src/main/scala/org/llm4s/samples/tutorial/supportassistant/$sourceFile")
-      )
+      .findAllMatchIn(read(relative))
       .map(m => normalise(m.group(2)))
       .toList
 

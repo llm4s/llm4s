@@ -4,7 +4,7 @@ title: Build a Support Assistant
 parent: Tutorials
 nav_order: 1
 has_children: true
-description: "Build a customer-support assistant with LLM4S one part at a time: first call, typed answers, tools, help-centre answers, safety and memory, with exercises."
+description: "Build a customer-support assistant with LLM4S one part at a time, from a first call to tools, RAG, guardrails, tests and an observed HTTP service."
 search_title: "Tutorial: build a support assistant with LLM4S"
 ---
 
@@ -14,7 +14,7 @@ search_title: "Tutorial: build a support assistant with LLM4S"
 Acme Shop is a small online shop, and its customers write in about orders, deliveries and refunds. Over this series
 you build the assistant that answers them: first a plain answer, then a typed ticket the rest of the system can
 route, then an agent that looks up the order and the refund policy before it answers, reads the help centre, and
-keeps personal data out of the model's sight.
+keeps personal data out of the model's sight. Then you test it, and serve it over HTTP with traces and metrics.
 {: .fs-6 .fw-300 }
 
 ## The parts
@@ -26,6 +26,8 @@ keeps personal data out of the model's sight.
 | [3. Tools and an agent](part-3-tools) | Look up an order and the refund policy | typed tools, `ToolRegistry`, an agent |
 | [4. Help-centre answers](part-4-help-centre) | Answer from the help-centre articles, citing them | RAG: ingest, embed, retrieve, cite |
 | [5. Safety and memory](part-5-safety-memory) | Mask personal data, refuse prompt injection, remember the turn before | guardrails, `PIIMasker`, `continueConversation` |
+| [6. Testing it](part-6-testing) | Unit tests against a fake model, and an evaluation a judge model scores | `llm4s-testkit`, `respondingTo`, `LLMFactualityGuardrail` |
+| [7. Serving and observing it](part-7-serving) | An HTTP endpoint, a trace of every run, Prometheus metrics, then deployment | `withTracing`, `MetricsCollector`, `PrometheusMetrics` |
 
 ## How the series works
 
@@ -41,7 +43,7 @@ sbt "samples/runMain org.llm4s.samples.tutorial.supportassistant.Part1FirstCall"
 sbt "samples/runMain org.llm4s.samples.tutorial.supportassistant.Part1FirstCall --live"   # your provider
 ```
 
-Each part has a spec, `Part1Spec` to `Part5Spec`, that runs the part's code against scripted clients and checks that
+Each part has a spec, `Part1Spec` to `Part7Spec`, that runs the part's code against scripted clients and checks that
 every Scala block on its page is the code in the source file, word for word. CI runs them on every pull request, so
 the tutorial cannot drift from the library.
 
