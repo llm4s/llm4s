@@ -31,11 +31,11 @@ import java.security.MessageDigest
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  *
- * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
- * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Experimental
-final class MistralClient private[provider] (
+final private[provider] class MistralClient(
   config: MistralConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -63,7 +63,7 @@ final class MistralClient private[provider] (
 object MistralClient {
 
   /**
-   * A [[MistralClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * The Mistral client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
    * `Left(ConfigurationError)`, and nothing is thrown.
    *
    * @param config  the provider's configuration.
@@ -72,7 +72,7 @@ object MistralClient {
    */
   def apply(config: MistralConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
-  ): Result[MistralClient] =
+  ): Result[OpenAICompatibleClient] =
     OpenAICompatibleClient.keyed("Mistral", config.apiKey, config.apiKeyProvider)(options)(
       new MistralClient(config, _, _, _)
     )

@@ -38,11 +38,11 @@ import org.llm4s.types.Result
  *                use [[org.llm4s.metrics.MetricsCollector.noop]] when metrics are not needed
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
  *
- * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
- * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Stable
-final class ZaiClient private[provider] (
+final private[provider] class ZaiClient(
   config: ZaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -66,10 +66,11 @@ final class ZaiClient private[provider] (
       httpClient
     )
 
+@Stable
 object ZaiClient {
 
   /**
-   * A [[ZaiClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * The Z.ai client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
    * `Left(ConfigurationError)`, and nothing is thrown.
    *
    * @param config  the provider's configuration.
@@ -78,7 +79,7 @@ object ZaiClient {
    */
   def apply(config: ZaiConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
-  ): Result[ZaiClient] =
+  ): Result[OpenAICompatibleClient] =
     OpenAICompatibleClient.keyed("Z.ai", config.apiKey, config.apiKeyProvider)(options)(
       new ZaiClient(config, _, _, _)
     )

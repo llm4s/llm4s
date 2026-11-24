@@ -392,8 +392,8 @@ A config the client refuses is a `Left`, usually a `ConfigurationError`; the con
 `IllegalArgumentException`.
 
 It applies to `AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`,
-`OpenAICompatibleClient`, `DeepSeekClient`, `ZaiClient`, `OpenRouterClient`, `MistralClient`, `CohereClient`,
-`XaiClient`, `BedrockClient`, `WatsonXClient` and `PerplexityClient`. With `AnthropicClient` as the example:
+`OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient` and `PerplexityClient`, and to the six vendor factories
+below. With `AnthropicClient` as the example:
 
 | Before | After |
 |---|---|
@@ -405,12 +405,21 @@ It applies to `AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient
 | `OpenAIClient(azureConfig)`, `OpenAIClient(azureConfig, metrics)` | `OpenAIClient.azure(azureConfig)`, `OpenAIClient.azure(azureConfig, LlmClientOptions(metrics = metrics))` |
 | `new OpenAICompatibleClient(settings, dialect, metrics, exchangeLogging)` | `OpenAICompatibleClient(settings, dialect, LlmClientOptions(metrics, exchangeLogging))`, a `Result` |
 | `try new OpenRouterClient(config) catch { case e: IllegalArgumentException => ... }` | `OpenRouterClient(config)` is a `Left(ConfigurationError)` |
+| `val client: DeepSeekClient = ...`, `Result[ZaiClient]`, `case _: OpenRouterClient` | `OpenAICompatibleClient`: the vendor types are not public. To tell vendors apart, compare `client.providerId` |
+| `new DeepSeekClient(config, metrics)` | `DeepSeekClient(config, LlmClientOptions(metrics = metrics))`, a `Result[OpenAICompatibleClient]` |
 | `class MyClient(...) extends OpenAICompatibleClient(settings, dialect)` | an `OpenAICompatibleDialect` passed to `OpenAICompatibleClient(settings, dialect, options)`; wrap the client to change anything else |
 | `class MyClient(config) extends AnthropicClient(config)`, overriding a `protected` member | no replacement: the classes are final. Wrap the client in your own `LLMClient` |
 
 `LlmClientOptions` is in `org.llm4s.llmconnect`. As before, a client built on a vendor SDK (`AnthropicClient`,
 `OpenAIClient`, `BedrockClient`) ignores `options.httpClient`, as does `PerplexityClient`, and a client you give one to
 leaves it open when it is closed.
+
+**The vendor client types on `OpenAICompatibleClient` are no longer public.** `DeepSeekClient`, `ZaiClient`,
+`OpenRouterClient`, `MistralClient`, `CohereClient` and `XaiClient` were subclasses that added nothing to
+`OpenAICompatibleClient` but a vendor's settings and dialect. The classes are now private to
+`llm4s-openai-compatible`, and each name is only a factory: `DeepSeekClient(config, options)` and its five siblings
+return a `Result[OpenAICompatibleClient]`, which is the type to declare. A client's vendor is its `providerId`
+(`deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`).
 
 `OpenAIClient` has two factories because it serves two config types: `OpenAIClient(config: OpenAIConfig, options)` and
 `OpenAIClient.azure(config: AzureConfig, options)`. `OpenAICompatibleClient` has two as well, one for an

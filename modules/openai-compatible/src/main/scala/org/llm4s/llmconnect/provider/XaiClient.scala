@@ -28,11 +28,11 @@ import org.llm4s.types.Result
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  *
- * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
- * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Experimental
-final class XaiClient private[provider] (
+final private[provider] class XaiClient(
   config: XaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -60,7 +60,7 @@ final class XaiClient private[provider] (
 object XaiClient {
 
   /**
-   * A [[XaiClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * The xAI client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
    * `Left(ConfigurationError)`, and nothing is thrown.
    *
    * @param config  the provider's configuration.
@@ -69,7 +69,7 @@ object XaiClient {
    */
   def apply(config: XaiConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
-  ): Result[XaiClient] =
+  ): Result[OpenAICompatibleClient] =
     OpenAICompatibleClient.keyed("xAI", config.apiKey, config.apiKeyProvider)(options)(
       new XaiClient(config, _, _, _)
     )

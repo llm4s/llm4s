@@ -36,11 +36,11 @@ import java.nio.charset.StandardCharsets
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  *
- * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
- * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Experimental
-final class CohereClient private[provider] (
+final private[provider] class CohereClient(
   config: CohereConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -68,7 +68,7 @@ final class CohereClient private[provider] (
 object CohereClient {
 
   /**
-   * A [[CohereClient]] for `config`, or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * The Cohere client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
    * `Left(ConfigurationError)`, and nothing is thrown.
    *
    * @param config  the provider's configuration.
@@ -77,7 +77,7 @@ object CohereClient {
    */
   def apply(config: CohereConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
-  ): Result[CohereClient] =
+  ): Result[OpenAICompatibleClient] =
     OpenAICompatibleClient.keyed("Cohere", config.apiKey, config.apiKeyProvider)(options)(
       new CohereClient(config, _, _, _)
     )

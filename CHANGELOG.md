@@ -188,7 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
   ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
-- `new AnthropicClient(...)`, and `new` on any other provider client, no longer compiles: the clients are final with a non-public constructor and one factory, `X(config, options: LlmClientOptions)`; the positional `apply(config, metrics, exchangeLogging, httpClient)` overloads are removed, and an Azure client is `OpenAIClient.azure(config, options)`
+- `new AnthropicClient(...)`, and `new` on any other provider client, no longer compiles: the clients are final with a non-public constructor and one factory, `X(config, options: LlmClientOptions)`; the positional `apply(config, metrics, exchangeLogging, httpClient)` overloads are removed, an Azure client is `OpenAIClient.azure(config, options)`, and the vendor client types on `OpenAICompatibleClient` (`DeepSeekClient`, `ZaiClient`, `OpenRouterClient`, `MistralClient`, `CohereClient`, `XaiClient`) are no longer public: their factories return an `OpenAICompatibleClient`
   ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - `new CachingLLMClient(...)` and `new CachedEmbeddingClient(...)` no longer compile: both are final with a private constructor. Drop the `new`; `CachingLLMClient`'s `clock` parameter is `.withClock(clock)`
   ([migration](docs/reference/migration.md#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
@@ -265,7 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
-- **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient` and its dialect clients, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception
+- **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception. The six vendor clients on `OpenAICompatibleClient` are private classes, built by `DeepSeekClient(config, options)` and its siblings as an `OpenAICompatibleClient`
   ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
