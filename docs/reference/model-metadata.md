@@ -98,8 +98,8 @@ The snapshot is refreshed from upstream as a step of every release ([Release Pro
    a current id.
 3. Compare every override with upstream's new entry: delete a whole entry upstream now carries unchanged, and a patch
    whose keys upstream now sets the same way or whose id upstream dropped (it would only be skipped with a warning).
-   A new id in a family a patch covers (another Bedrock region, a point release) gets the patch only once the
-   vendor's documentation confirms it applies.
+   A new id in a family a patch covers (another Bedrock region, a point release) gets the same patch, so the family
+   stays consistent; `ModelRegistryServiceSpec` fails on an unpatched member.
 4. Run the tests of the modules that read the registry (`core`, `capabilities`, the provider modules, `java-api` and
    `config-policy`): some pin a window or a capability flag from the bundled data.
 
