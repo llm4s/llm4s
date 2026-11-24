@@ -439,7 +439,7 @@ def confirmAll(agent: Agent, result: AgentResult): Result[AgentResult] =
     case _ => Right(result)
 
 def transferAgent(client: org.llm4s.llmconnect.LLMClient): Result[Agent] =
-  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withTools(tools).build())
+  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withToolSet(tools).build())
 ```
 
 Each entry of `suspension.questions` is a `ToolQuestionRequest` carrying the tool call and the question as JSON,
