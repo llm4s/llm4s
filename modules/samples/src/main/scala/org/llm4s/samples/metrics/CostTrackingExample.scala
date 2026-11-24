@@ -148,7 +148,7 @@ object CostTrackingExample {
 
   private def requestCost(client: LLMClient): Result[RequestCost] =
     for {
-      conversation <- Conversation.create(UserMessage(RequestPrompt))
+      conversation <- Conversation.create(Seq(UserMessage(RequestPrompt)))
       completion   <- client.complete(conversation)
     } yield RequestCost(completion.model, completion.usage, completion.estimatedCost)
 
