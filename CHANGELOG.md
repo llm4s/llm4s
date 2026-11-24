@@ -188,6 +188,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
   ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- `new AnthropicClient(...)`, and `new` on any other provider client, no longer compiles: the clients are final with a non-public constructor and one factory, `X(config, options: LlmClientOptions)`; the positional `apply(config, metrics, exchangeLogging, httpClient)` overloads are removed, an Azure client is `OpenAIClient.azure(config, options)`, and the vendor client types on `OpenAICompatibleClient` (`DeepSeekClient`, `ZaiClient`, `OpenRouterClient`, `MistralClient`, `CohereClient`, `XaiClient`) are no longer public: their factories return an `OpenAICompatibleClient`
+  ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
+- `new CachingLLMClient(...)` and `new CachedEmbeddingClient(...)` no longer compile: both are final with a private constructor. Drop the `new`; `CachingLLMClient`'s `clock` parameter is `.withClock(clock)`
+  ([migration](docs/reference/migration.md#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
@@ -262,6 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Providers
 
 - **Fixed** A `temperature` or thinking budget set for Claude Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, Fable or Mythos was sent and answered 400: no sampling parameter and no `budget_tokens` goes to these models (Anthropic, Bedrock, an OpenAI-compatible gateway), by the catalog's `supports_sampling_params` (new `ModelCapabilities.supportsSamplingParams`) or the model's name, and each drop is a `RequestAdjustment`. [#2909](https://github.com/llm4s/llm4s/issues/2909)
+- **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception. The six vendor clients on `OpenAICompatibleClient` are private classes, built by `DeepSeekClient(config, options)` and its siblings as an `OpenAICompatibleClient`
+  ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
   and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
@@ -452,6 +458,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Changed** `ReliableClient`'s constructor is private: build one with `ReliableClient(underlying, providerName, config)` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `.withMetrics(collector)`
   ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** `CachingLLMClient` and `CachedEmbeddingClient` are final with a private constructor: build one with the companion's `apply`, and give a `CachingLLMClient` a clock of your own with `withClock`
+  ([migration](docs/reference/migration.md#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Changed** A `TracingBackend` declares its own `aliases`, and `llm4s-observability-otel` declares `otel`, which core's mode parser no longer names; `TRACING_MODE=otel` works as before. Two backends answering to one name are a `ConfigurationError` naming both
   ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
 - **Removed** `Tracing.create`, which logged a missing or failing backend and returned `NoOpTracing`: `Tracing.fromSettings` returns the error
@@ -618,6 +626,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its filters compare exactly instead of with `LIKE` on the JSON text; earlier rows still read
   [#2759](https://github.com/llm4s/llm4s/issues/2759);
   [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
+- **Fixed** An S3 listing goes on past a page whose every object is filtered out, so `RAG.sync` no longer deletes the
+  documents after it; a truncated page without a next one is an error [#2914](https://github.com/llm4s/llm4s/issues/2914).
 
 ### Observability
 

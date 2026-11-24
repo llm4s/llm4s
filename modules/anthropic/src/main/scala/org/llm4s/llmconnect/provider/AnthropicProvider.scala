@@ -102,4 +102,4 @@ object AnthropicProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[AnthropicConfig](id, config)
-      .flatMap(AnthropicClient(_, context.metrics, context.exchangeLogging))
+      .flatMap(AnthropicClient(_, context.options))

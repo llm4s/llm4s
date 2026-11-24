@@ -88,7 +88,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
         )
         .value
         .withNetwork(via(HttpProxy("127.0.0.1", proxy.port)))
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       client.complete(hello, CompletionOptions()).value.content shouldBe "azure"
       proxy.requests.head.target should startWith("http://my-resource.openai.test/openai/deployments/gpt-4o/")
       client.close()
@@ -106,7 +106,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
         val config = AzureConfig
           .keyless(BaseUrl("http://my-resource.openai.test"), ModelName("gpt-4o"), tokens)
           .withNetwork(via(HttpProxy("127.0.0.1", proxy.port)))
-        val client = OpenAIClient(config).value
+        val client = OpenAIClient.azure(config).value
         client.complete(hello, CompletionOptions()).value.content shouldBe "keyless"
         val request = proxy.requests.head
         request.target should startWith("http://my-resource.openai.test/openai/deployments/gpt-4o/")

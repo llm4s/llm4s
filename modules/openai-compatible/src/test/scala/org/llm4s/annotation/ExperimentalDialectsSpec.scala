@@ -16,19 +16,20 @@ import org.scalatest.matchers.should.Matchers
 /**
  * 1.0 Scope freezes `llm4s-openai-compatible` but not its Mistral, Cohere and xAI dialects (Beta). They
  * are `@Experimental` so the exception is in the code, and `stabilityTierCheck` fails the build if
- * any of them turns `@Stable` by accident.
+ * any of them turns `@Stable` by accident. The client classes are private to the module (#2910), so it is
+ * their public companions, the factories, that carry the annotation.
  */
 class ExperimentalDialectsSpec extends AnyFlatSpec with Matchers {
 
   "The Mistral, Cohere and xAI dialects" should "be @Experimental and not @Stable" in {
     Seq[Class[?]](
-      classOf[MistralClient],
+      MistralClient.getClass,
       classOf[MistralConfig],
       MistralProvider.getClass,
-      classOf[CohereClient],
+      CohereClient.getClass,
       classOf[CohereConfig],
       CohereProvider.getClass,
-      classOf[XaiClient],
+      XaiClient.getClass,
       classOf[XaiConfig],
       XaiProvider.getClass,
       XaiModelLister.getClass

@@ -79,7 +79,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "give the key function the text, the model name and the purpose" in {
       val seen = ListBuffer.empty[(String, String, InputPurpose)]
-      val cached = new CachedEmbeddingClient(
+      val cached = CachedEmbeddingClient(
         new FakeEmbeddingClient,
         InMemoryEmbeddingCache.create().value,
         (text, model, purpose) => {
@@ -96,7 +96,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "keep a query for model m apart from a document for a model named m#query" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+      val cached = CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m"), 3), InputPurpose.Query))
       cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m#query"), 3)))
       base.calls.get shouldBe 2
@@ -152,7 +152,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "forget everything, statistics included, on clearCache" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+      val cached = CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       cached.clearCache() shouldBe Right(())
 
@@ -164,7 +164,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "send a text repeated inside one request once, while the statistics count every lookup" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+      val cached = CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("a", "a", "b"), ModelA)).value.embeddings should have size 3
 
       base.requests.map(_.input) shouldBe List(Seq("a", "b"))
@@ -174,7 +174,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "work with a backend of your own" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, new MapEmbeddingCache)
+      val cached = CachedEmbeddingClient(base, new MapEmbeddingCache)
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       base.calls.get shouldBe 1
@@ -191,7 +191,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "not cache a failure" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+      val cached = CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       base.failing = true
       cached.embed(EmbeddingRequest(Seq("x"), ModelA)).isLeft shouldBe true
       base.failing = false

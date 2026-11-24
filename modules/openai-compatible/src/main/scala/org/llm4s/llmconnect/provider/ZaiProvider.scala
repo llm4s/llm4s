@@ -3,7 +3,6 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.NamedProviderConfig
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ZaiConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -42,5 +41,5 @@ object ZaiProvider extends ProviderDescriptor:
     ProviderDescriptor
       .expectConfig[ZaiConfig](id, config)
       .flatMap(
-        ZaiClient(_, context.metrics, context.exchangeLogging, Llm4sHttpClient.suppliedOrFromConfig(context.httpClient))
+        ZaiClient(_, context.options)
       )

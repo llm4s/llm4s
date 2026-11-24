@@ -7,6 +7,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{
   AuthenticationError,
+  ConfigurationError,
   ContentFilteredError,
   LLMError,
   NetworkError,
@@ -17,6 +18,7 @@ import org.llm4s.error.{
 }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.auth.{
   AccessTokenProvider,
   ApiKeyProvider,
@@ -66,6 +68,10 @@ import scala.util.{ Try, Using }
  *  - one provider exchange recorded per call, success or failure; and the
  *    response body closed on every path, success or failure.
  *
+ * Build one with the companion's `apply`: from an `OpenAICompatibleConfig`, or from [[OpenAICompatibleClient.Settings]]
+ * and a dialect. The constructor is not public, so nothing outside this module extends the class: a vendor's
+ * departures from the standard format are an [[OpenAICompatibleDialect]], never a subclass.
+ *
  * @param settings        where to send requests and what to report.
  * @param dialect         how this provider departs from the standard format.
  * @param metrics         receives per-call latency and token-usage events.
@@ -74,7 +80,7 @@ import scala.util.{ Try, Using }
  *                        by default one built from `settings.network`, closed with this client.
  */
 @Stable
-class OpenAICompatibleClient(
+class OpenAICompatibleClient private[provider] (
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
@@ -112,9 +118,9 @@ class OpenAICompatibleClient(
 
   // The supplied client, or one routed by the settings' proxy and TLS settings; scoped to the provider package so
   // specs can substitute one
-  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
-  private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val endpoint                                = s"${settings.baseUrl.asUrl}/chat/completions"
+  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
+  private val logger                                = org.slf4j.LoggerFactory.getLogger(getClass)
+  private val endpoint                              = s"${settings.baseUrl.asUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
   protected def providerName: String      = settings.providerName
@@ -198,7 +204,7 @@ class OpenAICompatibleClient(
    * `rawStream` for the exchange log. An error body is scrubbed of registered credentials before it is
    * mapped to an error.
    */
-  protected[provider] def consumeStream(
+  private[provider] def consumeStream(
     statusCode: Int,
     body: InputStream,
     rawStream: StringBuilder,
@@ -401,11 +407,11 @@ class OpenAICompatibleClient(
    * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
    * answered hung the caller. Scoped to the provider package so specs can shorten it.
    */
-  protected[provider] def requestTimeout: FiniteDuration =
+  private[provider] def requestTimeout: FiniteDuration =
     settings.timeouts.requestOr(OpenAICompatibleClient.RequestTimeout)
 
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration =
+  private[provider] def streamTimeout: FiniteDuration =
     settings.timeouts.streamOr(OpenAICompatibleClient.StreamTimeout)
 
   /**
@@ -442,7 +448,7 @@ class OpenAICompatibleClient(
    * sent once, its values comma-joined in order, which HTTP defines as equivalent (RFC 9110
    * section 5.3). Scoped to the provider package so specs can inspect them.
    */
-  protected[provider] def requestHeaders(token: Option[String]): Map[String, String] =
+  private[provider] def requestHeaders(token: Option[String]): Map[String, String] =
     Map("Content-Type" -> "application/json") ++
       token.map(t => "Authorization" -> s"Bearer $t") ++
       OpenAICompatibleClient.combineRepeated(dialect.headers)
@@ -510,7 +516,7 @@ class OpenAICompatibleClient(
    * Builds the request body for `conversation`, without the `stream` flag.
    * Scoped to the provider package so specs can inspect it.
    */
-  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
+  private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
     buildRequest(conversation, options)._1
 
   /** The request body, as [[createRequestBody]] builds it, and what the dialect could not send (RFC 0008). */
@@ -596,7 +602,7 @@ class OpenAICompatibleClient(
    * call whose arguments are not a JSON object, or that has none in a reply that did not end with `tool_calls` or
    * `stop`, is a `Left`, the malformed-tool-call `ProcessingError` (RFC 0009, Part 3).
    */
-  protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
+  private[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
     val choice       = json("choices")(0)
     val message      = choice("message")
     val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Unknown)
@@ -725,7 +731,7 @@ class OpenAICompatibleClient(
    * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
    * would lose its quotes if parsed.
    */
-  protected[provider] def parseStreamingChunks(
+  private[provider] def parseStreamingChunks(
     json: ujson.Value,
     toolCalls: StreamToolCalls = new StreamToolCalls
   ): Seq[StreamedChunk] =
@@ -1094,28 +1100,71 @@ object OpenAICompatibleClient {
     )
 
   /**
+   * Why a client may not be built from `settings` and `dialect`, as a `ConfigurationError`: an `Authorization`
+   * header over a refreshed bearer, a refreshed bearer or an exchange over an insecure URL, or a blank static key.
+   * The constructor refuses the same three by throwing, for a client built inside this module without the check.
+   */
+  private[provider] def check(settings: Settings, dialect: OpenAICompatibleDialect): Result[Unit] =
+    val refusal =
+      Option
+        .when(overridesDynamicBearer(settings.credential, dialect.headers))(AuthorizationHeaderRefusal)
+        .orElse(insecureDynamicCredential(settings))
+        .orElse(blankStaticKey(settings))
+    refusal.map(ConfigurationError(_)).toLeft(())
+
+  /**
    * A client for a generic OpenAI-compatible endpoint: the standard dialect,
    * plus `config.headers` on every request, asking for streamed usage unless
-   * `config.streamUsage` is off.
+   * `config.streamUsage` is off. A config `OpenAICompatibleConfig.validate` refuses is a `Left`.
+   *
+   * @param config  the endpoint, model and credential.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
    */
-  def apply(
-    config: OpenAICompatibleConfig,
-    metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[OpenAICompatibleClient] =
+  def apply(config: OpenAICompatibleConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenAICompatibleClient] =
     // A config built with `apply` or the `with*` setters skipped `fromValues`; its rules are applied here too.
     OpenAICompatibleConfig
       .validate(config)
       .flatMap(valid =>
-        Try(
-          new OpenAICompatibleClient(
-            settings(valid),
-            OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage),
-            metrics,
-            exchangeLogging,
-            httpClient
-          )
-        ).toResult
+        apply(settings(valid), OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage), options)
       )
+
+  /**
+   * A client that sends requests where `settings` says, in the format `dialect` describes. Settings that cannot
+   * carry their credential are a `Left(ConfigurationError)`: an `Authorization` header in the dialect over a
+   * refreshed bearer, a refreshed bearer or a token exchange over a URL that is not secure, or a blank static key.
+   *
+   * @param settings where to send requests and what to report.
+   * @param dialect  how this provider departs from the standard format.
+   * @param options  the metrics collector, exchange logging and HTTP client of the client.
+   */
+  def apply(settings: Settings, dialect: OpenAICompatibleDialect, options: LlmClientOptions)(using
+    ModelRegistryService
+  ): Result[OpenAICompatibleClient] =
+    check(settings, dialect).flatMap(_ =>
+      Try(
+        new OpenAICompatibleClient(
+          settings,
+          dialect,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      ).toResult
+    )
+
+  /**
+   * A dialect client for `config`, built by `make` from the collector, exchange logging and HTTP client of
+   * `options`, once its key is known not to be blank; anything `make` throws is a `Left`.
+   */
+  private[provider] def keyed[C](displayName: String, apiKey: Secret, keys: Option[ApiKeyProvider])(
+    options: LlmClientOptions
+  )(make: (MetricsCollector, ProviderExchangeLogging, Llm4sHttpClient) => C): Result[C] =
+    requireKey(displayName, apiKey, keys).flatMap(_ =>
+      Try(
+        make(options.metrics, options.exchangeLogging, Llm4sHttpClient.suppliedOrFromConfig(options.httpClient))
+      ).toResult
+    )
 }

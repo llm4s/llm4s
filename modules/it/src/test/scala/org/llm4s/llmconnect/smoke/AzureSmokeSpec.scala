@@ -83,7 +83,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   private val options: CompletionOptions = CompletionOptions(maxTokens = Some(16))
 
   private def completes(cfg: AzureConfig): Unit = {
-    val client     = OpenAIClient(cfg).value
+    val client     = OpenAIClient.azure(cfg).value
     val completion = client.complete(conversation, options)
     client.close()
 
@@ -101,7 +101,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   it should "stream a basic request and report its usage" in {
     requireCredentials()
 
-    val client = OpenAIClient(classic(credentials.get)).value
+    val client = OpenAIClient.azure(classic(credentials.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, options)(c => chunks += c)
     client.close()
@@ -131,7 +131,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
     // Needs a real resource: an unknown host fails before any key is checked.
     Tier.require(endpoint.isDefined && deployment.isDefined, "AZURE_API_BASE and AZURE_OPENAI_DEPLOYMENT not set")
 
-    val client = OpenAIClient(classic("invalid-key-for-testing")).value
+    val client = OpenAIClient.azure(classic("invalid-key-for-testing")).value
     val result = client.complete(conversation, options)
     client.close()
 
@@ -143,13 +143,13 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   override protected def providerLabel: String                          = "Azure OpenAI"
   override protected def apiKeyEnvVar: String                           = Required
   override protected def contractKey: Option[String]                    = credentials
-  override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(classic(key))
+  override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient.azure(classic(key))
 
   registerCapabilityContract()
 
   // ---- validate(): the resource's model listing; the deployment is not looked up (#2855) ----
   override protected def invalidKeyClient: Option[Result[LLMClient]] =
-    endpoint.map(at => OpenAIClient(config("invalid-key-for-testing", at)))
+    endpoint.map(at => OpenAIClient.azure(config("invalid-key-for-testing", at)))
   override protected def noInvalidKeyClient: String = "AZURE_API_BASE not set: there is no resource to refuse a key"
 
   registerValidationContract()

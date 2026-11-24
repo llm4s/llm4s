@@ -2,18 +2,17 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import scala.util.Try
 
 /**
  * Mistral AI client, over Mistral's OpenAI-format `/v1/chat/completions` API.
@@ -31,9 +30,12 @@ import scala.util.Try
  * @param config          Mistral configuration: API key, model, base URL and context settings.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ *
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Experimental
-class MistralClient(
+final private[provider] class MistralClient(
   config: MistralConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -60,25 +62,20 @@ class MistralClient(
 @Experimental
 object MistralClient {
 
-  def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
-    OpenAICompatibleClient
-      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new MistralClient(config)).toResult)
-
-  def apply(config: MistralConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[MistralClient] =
-    OpenAICompatibleClient
-      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new MistralClient(config, metrics)).toResult)
-
-  def apply(
-    config: MistralConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[MistralClient] =
-    OpenAICompatibleClient
-      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging, httpClient)).toResult)
+  /**
+   * The Mistral client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * `Left(ConfigurationError)`, and nothing is thrown.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
+   */
+  def apply(config: MistralConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenAICompatibleClient] =
+    OpenAICompatibleClient.keyed("Mistral", config.apiKey, config.apiKeyProvider)(options)(
+      new MistralClient(config, _, _, _)
+    )
 }
 
 /**

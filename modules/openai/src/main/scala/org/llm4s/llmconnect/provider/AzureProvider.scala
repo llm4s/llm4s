@@ -154,4 +154,4 @@ object AzureProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[AzureConfig](id, config)
-      .flatMap(OpenAIClient(_, context.metrics, context.exchangeLogging))
+      .flatMap(OpenAIClient.azure(_, context.options))

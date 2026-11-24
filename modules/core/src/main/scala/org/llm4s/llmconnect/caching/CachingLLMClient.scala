@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory
  * {{{
  * for {
  *   config <- CacheConfig.create(similarityThreshold = 0.95, ttl = 1.hour, maxSize = 1000)
- * } yield new CachingLLMClient(
+ * } yield CachingLLMClient(
  *   baseClient = openAIClient,
  *   embeddingClient = embeddingClient,
  *   embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536),
@@ -57,19 +57,30 @@ import org.slf4j.LoggerFactory
  * @param embeddingModel Configuration for the embedding model used.
  * @param config Cache configuration (threshold, TTL, max size).
  * @param tracing Tracing instance for observability.
- * @param clock Clock for TTL verification (defaults to UTC).
+ *
+ * Build one with the companion's `apply`, and give it a clock of your own with [[withClock]]. The constructor is private, so that a setting can be added without
+ * breaking a caller, and the class is final: wrap it to change what it does.
  */
 @Stable
-class CachingLLMClient(
+final class CachingLLMClient private (
   baseClient: LLMClient,
   embeddingClient: EmbeddingProvider,
   embeddingModel: EmbeddingModelConfig,
   config: CacheConfig,
   tracing: Tracing,
-  clock: java.time.Clock = java.time.Clock.systemUTC()
+  clock: java.time.Clock
 ) extends LLMClient {
 
   private val logger = LoggerFactory.getLogger(getClass)
+
+  /**
+   * This client reading the time an entry is stored at, and the time its TTL is checked against, from `clock`
+   * instead of the system's UTC clock: a test moves a clock of its own past the TTL instead of waiting.
+   *
+   * It returns a new client with an empty cache, so call it where the client is built, before the first request.
+   */
+  def withClock(clock: java.time.Clock): CachingLLMClient =
+    new CachingLLMClient(baseClient, embeddingClient, embeddingModel, config, tracing, clock)
 
   private val cache: java.util.Map[String, CacheEntry] = java.util.Collections.synchronizedMap(
     new java.util.LinkedHashMap[String, CacheEntry](config.maxSize, 0.75f, true) {
@@ -227,4 +238,26 @@ class CachingLLMClient(
   override def close(): Unit = baseClient.close()
 
   override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = baseClient.providerId
+}
+
+object CachingLLMClient {
+
+  /**
+   * A client that answers a prompt semantically close to an earlier one from its cache, and asks `baseClient`
+   * otherwise.
+   *
+   * @param baseClient the client asked on a cache miss
+   * @param embeddingClient embeds each prompt: an `EmbeddingClient`, or any `EmbeddingProvider`
+   * @param embeddingModel the embedding model `embeddingClient` is asked for
+   * @param config the similarity threshold, the entries' time to live and how many are kept
+   * @param tracing receives a `cache_hit` or `cache_miss` event per call
+   */
+  def apply(
+    baseClient: LLMClient,
+    embeddingClient: EmbeddingProvider,
+    embeddingModel: EmbeddingModelConfig,
+    config: CacheConfig,
+    tracing: Tracing
+  ): CachingLLMClient =
+    new CachingLLMClient(baseClient, embeddingClient, embeddingModel, config, tracing, java.time.Clock.systemUTC())
 }

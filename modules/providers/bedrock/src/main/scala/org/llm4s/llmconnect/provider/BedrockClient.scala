@@ -14,6 +14,7 @@ import org.llm4s.error.{
   TimeoutError,
   ValidationError
 }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ BedrockConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.*
@@ -126,8 +127,11 @@ import scala.util.Try
  * @param config          region, model, credentials and endpoint.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging optional provider exchange logging.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
-class BedrockClient(
+final class BedrockClient private[provider] (
   config: BedrockConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
@@ -174,13 +178,13 @@ class BedrockClient(
   protected def modelName: ModelName      = config.model
 
   /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
-  protected[provider] def requestTimeout: Option[FiniteDuration] = config.timeouts.request
+  private[provider] def requestTimeout: Option[FiniteDuration] = config.timeouts.request
 
   /**
    * How long a `ConverseStream` call may take, from the request to the end of the stream: the section's
    * `timeouts.stream`, else no limit.
    */
-  protected[provider] def streamTimeout: Option[FiniteDuration] = config.timeouts.stream
+  private[provider] def streamTimeout: Option[FiniteDuration] = config.timeouts.stream
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
@@ -1012,12 +1016,18 @@ object BedrockClient {
       Try(java.util.Base64.getDecoder.decode(data)).getOrElse(data.getBytes(java.nio.charset.StandardCharsets.UTF_8))
     )
 
-  def apply(
-    config: BedrockConfig,
-    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-  )(using ModelRegistryService): Result[BedrockClient] =
-    Try(new BedrockClient(config, metrics, exchangeLogging)).toResult
+  /**
+   * A [[BedrockClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient` is ignored: this client sends its requests through the vendor's SDK.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   */
+  def apply(config: BedrockConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[BedrockClient] =
+    Try(new BedrockClient(config, options.metrics, options.exchangeLogging)).toResult
 
   private def credentialsFor(config: BedrockConfig): AwsCredentialsProvider =
     config.credentials match {
