@@ -9,7 +9,7 @@ import scalafix.v1._
  * `OpenAIToolHelper` (#2360), `AnsiColors` (#2358), the embeddings sample's settings on `Llm4sConfig` (#2265), and
  * `APIError`, `SystemError` and the `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` constructors
  * (#2819), and `ErrorMapper`, `DefaultErrorMapper`, the `AsyncResult` object and `Result.combine` / `fromBoolean` /
- * `fromBooleanWithValue` / `fromFuture` (#2821).
+ * `fromBooleanWithValue` / `fromFuture` (#2821), and `TraceEvent.AgentInitialized` (#2800).
  */
 class RemovedApis_1_0 extends SemanticRule("RemovedApis_1_0") {
 
@@ -43,6 +43,8 @@ object RemovedApis_1_0 {
 
   private val resultHelper =
     """org/llm4s/(AsyncResult\.|Result\.(combine|fromBoolean|fromBooleanWithValue|fromFuture)\((\+\d+)?\)\.)""".r
+
+  private val agentInitialized = """org/llm4s/trace/TraceEvent\.AgentInitialized[#.]""".r
 
   private val config = "org/llm4s/config/Llm4sConfig."
 
@@ -118,6 +120,13 @@ object RemovedApis_1_0 {
           ("Result.combine, fromBoolean, fromBooleanWithValue, fromFuture and the AsyncResult object are removed; use a " +
             "for comprehension, Either.cond, or future.toResult (import org.llm4s.syntax.toResult): " +
             Migration.guide10("result-helpers-and-conversions-move-and-errormapper-is-removed-2821"))
+      )
+    else if (agentInitialized.matches(symbol))
+      Some(
+        "agentInitializedRemoved" ->
+          ("TraceEvent.AgentInitialized is removed: nothing in the library emitted it; trace your own with " +
+            "TraceEvent.CustomEvent(name, data): " +
+            Migration.guide10("traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800"))
       )
     else if (sampleSettings.contains(symbol))
       Some(

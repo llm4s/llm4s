@@ -76,7 +76,203 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`Llm4sConfig.providerConfigs()` returns each section's `Result`](#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804),
 [`ToolRegistry` is a trait built with `ToolRegistry.of`](#toolregistry-is-a-trait-built-with-toolregistryof-2816),
 [`SchemaDefinition` gains a union and a raw JSON Schema case](#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814),
-and [a tool handler has one error type](#a-tool-handler-has-one-error-type-2815).
+[a tool handler has one error type](#a-tool-handler-has-one-error-type-2815),
+[a guardrail's reason is never stored](#a-guardrails-reason-is-never-stored-2853),
+[a turn's query is admitted before the turn is stored](#a-turns-query-is-admitted-before-the-turn-is-stored-2854),
+[an agent run's trace and metrics report one status](#an-agent-runs-trace-and-metrics-report-one-status-2829),
+[`TraceEvent` carries an error as it is, and `AgentInitialized` is removed](#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800),
+[one retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed](#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798),
+and [the provider SPI's error mapping, published helpers and report types](#provider-spi-error-mapping-published-helpers-report-types-2811).
+
+## Provider SPI: error mapping, published helpers, report types (#2811)
+
+**`HttpErrorMapper.toError`.** `mapHttpError` returned a `Result[Nothing]` that was always a `Left`; `toError`
+returns the error, and `headers` has no default.
+
+| Before | After |
+|---|---|
+| `HttpErrorMapper.mapHttpError(status, body, provider, headers)` | `Left(HttpErrorMapper.toError(status, body, provider, headers))` |
+| `HttpErrorMapper.mapHttpError(status, body, provider)` | `Left(HttpErrorMapper.toError(status, body, provider, Map.empty))` |
+
+**Helpers you can now call.** `ToolCallRules.checked`, `parseArguments` and `wholeCall`, `PartEncoding.check` and
+`encodeAll`, and `HttpErrorMapper.mapStreamError` are public. A provider outside `org.llm4s` no longer writes its
+own tool-call check: pass the parsed `Completion` through `ToolCallRules.checked`.
+
+| Before | After |
+|---|---|
+| `StreamingToolArgumentParser.parse(raw)` | `ToolCallRules.parseArguments(raw)` |
+| `CostEstimator.estimateFromMetadata(metadata, usage)` | `CostEstimator.estimate(model, usage)` |
+
+**`keylessWhen`.**
+
+| Before | After |
+|---|---|
+| `keylessWhen = Some("authentication" -> "entra-id")` | `keylessWhen = Some(KeylessSetting("authentication", "entra-id"))` |
+| `spec.keylessWhen.map(_._1)` | `spec.keylessWhen.map(_.key)` |
+
+`withKeylessWhen(key, value)` still works and now takes more values.
+
+**Registry report.** `ProviderRegistryReport`, `ProviderModuleReport`, `ProviderDiscoveryFailure` and
+`ProviderIdCollision` are read-only: no public `apply`, no `with*` setters.
+
+| Before | After |
+|---|---|
+| `collision.kind == "chat"` | `collision.kind == ProviderCollisionKind.Chat` |
+| `collision.kind.endsWith("alias")` | `collision.kind.isAlias` |
+| `module.providerIds.contains("openai")` | `module.providerIds.contains(ProviderId("openai"))` |
+| `collision.id` as a `String` | `collision.id.asString` |
+
+**Descriptors.** `EmbeddingProviderDescriptor.configSpec` is abstract: a descriptor that relied on the default adds
+`val configSpec = EmbeddingConfigSpec()`. `AccessTokenProvider.invalidate` has a no-op default: an implementation
+adds `override`, and a provider that caches nothing can be a lambda.
+
+`requireExtra` and `resolveBaseUrl` name the section in their hint (`llm4s.providers.my-section.region`), where
+they printed `llm4s.providers.<name>.region`.
+
+## One retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed (#2798)
+
+`ReliableClient` with a `RetryPolicy` is the library's one retry and circuit breaker.
+
+| Before | After |
+|---|---|
+| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `new ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
+| `LLMClientRetry.streamCompleteWithRetry(...)` | the same client's `streamComplete`; a stream that has delivered a chunk is still not retried |
+| `ErrorRecovery.recoverWithBackoff(() => client.complete(c), 3, 1.second)` | the `ReliableClient` above |
+| `new ErrorRecovery.CircuitBreaker[A](failureThreshold, recoveryTimeout)` | `ReliabilityConfig(circuitBreaker = CircuitBreakerConfig(failureThreshold, recoveryTimeout))` |
+| `ErrorRecovery.CircuitState` / `Open` / `Closed` / `HalfOpen` | `org.llm4s.reliability.CircuitState` |
+
+What changes in behaviour:
+
+- When the attempts run out you get the last attempt's error unchanged, not an `ExecutionError` wrapping it.
+- An open circuit refuses a call with a `CircuitOpenError`, which is not retried. `ErrorRecovery.CircuitBreaker`
+  returned a retryable `ServiceError` 503.
+- Waits come from the `RetryPolicy` (exponential by default). `LLMClientRetry`'s fixed 30 second cap is gone: set
+  `maxDelay`.
+- `ReliabilityConfig` has a deadline, five minutes by default; past it the result is a `TimeoutError`.
+
+`ReliableClient` retries model calls. To retry an operation of your own, use a `RetryPolicy` directly:
+`policy.isRetryable(error)` and `policy.delayFor(attemptNumber, error)`.
+
+## An agent run's trace and metrics report one status (#2829)
+
+`llm4s.agent.runs.ended` and `llm4s.agent.run.duration` took their `status` label from the runtime's terminal event, so a
+guardrail block counted as `failed` and a turn that hit a limit as `completed`, while the run's trace reported `blocked`,
+`step_limit_reached` and `token_limit_reached`. Both now report one status, a `TraceEvent.RunStatus`.
+
+| `status` label before | After |
+|---|---|
+| `failed`, for a guardrail block | `blocked` |
+| `completed`, for a turn that reached `withMaxSteps` | `step_limit_reached` |
+| `completed`, for a turn that reached `RunBudgets.maxTokens` | `token_limit_reached` |
+| `completed`, for an answer cut off at the output limit | `truncated` |
+
+- **Check alerts and dashboards on `status="failed"` and `status="completed"`.** A failure-rate alert no longer fires on
+  guardrail blocks; add `status="blocked"` if it should. A completion rate no longer counts limited or cut-off turns.
+- No label names the guardrail: that is the trace's `blocked_by`. A graph that is not an agent turn still ends
+  `completed`, `suspended`, `failed`, `cancelled` or `timed_out`.
+
+`TraceEvent.AgentRunEnded` changes with it:
+
+| Before | After |
+|---|---|
+| `status: String` (`"completed"`, ..., `"blocked:<guardrail>"`) | `status: TraceEvent.RunStatus`. `status.name` is the old string, except that a block is `"blocked"` and `blockedBy` is `Some(guardrail)` |
+| `Set("failed", "cancelled", "timed_out").contains(e.status)` | `e.status.isError` |
+| `TraceEvent.AgentRunEnded(thread, run, agent, "completed", messages, usage)` | `TraceEvent.AgentRunEnded(thread, run, agent, TraceEvent.RunStatus.Completed, messages, usage)` |
+| `agent`: the agent active when the run ended | `agent`: the run's root agent. `activeAgent`: the agent active when it ended |
+
+- The `invoke_agent <agent>` span (OpenTelemetry) and observation (Langfuse) of a run that handed off is named after the
+  agent the run was started on, with the agent active at the end as `active_agent`. A query that groups runs by span name
+  or `gen_ai.agent.name` now files such a run under its root agent.
+- In `toJson`, Langfuse's metadata, OpenTelemetry's `status` attribute and `TraceCollector`, a blocked run's `status` is
+  `blocked` and the guardrail is `blocked_by`. A filter on a `status` starting `blocked:` matches nothing from this
+  version on.
+- `AgentRunEnded` has fourteen fields: match `case e: TraceEvent.AgentRunEnded` and read its fields.
+- An agent's `chat <model>` span has the model call's duration, where it was a point at the call's end: a query on
+  span duration now sees model calls. The durable `AgentEvents.ModelCallCompleted` gains `duration: FiniteDuration`
+  (stored in milliseconds; zero for usage recorded without a call and in an event stored before), so a positional
+  pattern on it takes an eleventh binder, which the `PositionalPatternsGainFields` Scalafix rule adds: match
+  `case AgentEvents.ModelCallCompleted(m)` and read its fields.
+
+## `TraceEvent` carries an error as it is, and `AgentInitialized` is removed (#2800)
+
+`ErrorOccurred` held a `Throwable`, but an `LLMError` is not one, so the library wrapped each in
+`new RuntimeException(error.message)`: a backend reported `RuntimeException` as the type, with a stack trace of the
+tracing code. The event now holds the error's `message`, its `errorType` and an optional `cause`.
+
+| Before | After |
+|---|---|
+| `TraceEvent.ErrorOccurred(throwable, context)` | `TraceEvent.ErrorOccurred.of(throwable, context)` |
+| `TraceEvent.ErrorOccurred(new RuntimeException(error.message), context, errorType = Some(...))` | `TraceEvent.ErrorOccurred.of(error, context)` for an `LLMError` |
+| `tracing.traceError(new RuntimeException(error.formatted))` | `tracing.traceError(error, context)` |
+| `e.error.getMessage`, `e.error.getClass.getSimpleName` | `e.message`, `e.errorType` |
+| `e.error` | `e.cause`: `Some` for an error built from a `Throwable`, `None` for an `LLMError` |
+| `e.errorType: Option[String]` | `e.errorType: String` |
+| `e.withError(throwable)` | `e.withMessage(...)`, `withErrorType(...)`, `withCause(throwable)` |
+| `TraceEvent.AgentInitialized(query, tools)` | Removed: nothing in the library emitted it. Trace your own with `TraceEvent.CustomEvent(name, data)` |
+| `TraceEvent.ImageGenerationCompleted(model, provider, operation, ...)`, `provider: String` | `TraceEvent.ImageGenerationCompleted(model, operation, ..., provider = Some(ProviderId("openai")))`. `provider: Option[ProviderId]` is the last field |
+| `case TraceEvent.ToolExecuted(name, _, _, _, _, _)` | `case e: TraceEvent.ToolExecuted => e.name` |
+
+- **The recorded type of a library error changes.** The errors `TracingLLMClient`, `EmbeddingClient` and an agent run
+  trace are `LLMError`s: `error_type` (Langfuse metadata, `TraceCollector`, the console) and OpenTelemetry's
+  `error.type` on an `Error` span are now the error's own type, such as `RateLimitError` or `NodeFailed`, where they
+  were `RuntimeException`. They carry no stack trace: Langfuse's `stack_trace` is empty and OpenTelemetry records no
+  `exception` event for them. An error traced from a `Throwable` is recorded as before.
+- An exception without a message has the message `""`, where it was `null`.
+- `ErrorOccurred.of(throwable, context)` reads the exception's message when the event is built, so
+  `traceError(throwable)` reads it even into a `NoOpTracing`.
+- Langfuse no longer creates the `LLM4S Agent Run` trace `AgentInitialized` produced, and OpenTelemetry no longer the
+  span of that name; an agent run's trace comes from `AgentRunEnded`.
+- Events are growth-safe to build (`apply` and the `with*` setters) but a positional pattern names every field, so it
+  stops compiling when one is added: match by type. The scalafix rule `PositionalPatternsGainFields` no longer pads a
+  positional `ErrorOccurred` pattern, because its first field changed type.
+
+## A guardrail's reason is never stored (#2853)
+
+A guardrail's reason can quote the text it refused, so it is no longer written to the checkpoint store. It is on the
+result of the run that was blocked, and nowhere else.
+
+| Before | After |
+|---|---|
+| `case AgentStatus.Blocked(guardrail, reason)` with `reason: String` | `reason: Option[String]`: `Some` on the blocked run's result, `None` on a status rebuilt from the thread |
+| `RunOutcome.Blocked(guardrail, reason)` | `RunOutcome.Blocked(guardrail)` |
+| `TaskRefusal.Blocked(guardrail, reason: String)` | `reason: Option[String]`; `describe`, the parent model's tool error, names the guardrail only |
+| the reason read back from a thread later | keep it yourself when the run returns it |
+
+- **Checkpoint format 9.** A format-8 checkpoint loads, and the reason its `Blocked` outcome held is dropped as it is
+  read. Rows written before keep the reason in the store until they are pruned or their thread is deleted. A build
+  from before this change refuses a format-9 checkpoint. Neither SQL store's schema changes.
+- **`EncryptingCheckpointer` seals an outcome's error text**: a `RunOutcome.Failed`'s message and a
+  `RunOutcome.OutputInvalid`'s errors. Its case, a guardrail's name and a failure's kind stay readable. A store
+  encrypted before this change holds those texts in plain, which a read now refuses (`EncryptionError.NotEncrypted`)
+  unless `EncryptionSettings().withPlaintextReads(true)` is set while old rows remain. A failed run's message is still
+  in its `RunFailed` event in plain.
+- Java and Kotlin: `JAgentStatus.reason()` was already an `Optional`; it is empty on a status read back from a thread.
+
+## A turn's query is admitted before the turn is stored (#2854)
+
+A turn's first checkpoint holds its query, and every middleware hook ran after it was written. `AgentMiddleware.admit`
+is a new stage that runs first: it may rewrite the query, and only the rewrite is stored, or refuse it with
+`block(reason)`, and then nothing of the query is stored. Input guardrails run there.
+
+| Before | After |
+|---|---|
+| a `beforeAgent` hook that redacts, to keep text out of the store | override `admit(query, context: AdmissionContext): Result[String]`; `beforeAgent` still rewrites what joins the conversation, after the first checkpoint |
+| input guardrails ran after other middleware's `beforeAgent`, on what those returned | they run before every `beforeAgent`, on the query as submitted: a rewrite a guardrail depends on belongs in `admit` |
+| `GuardrailMiddleware(input, output).beforeAgent(text, context)` called directly | `.admit(text, context)` with an `AdmissionContext` (`MiddlewareTestKit.admissionContext()`) |
+| `override def validate(value: A, context: ModelContext)` in a guardrail | `context: UsageAccounting`, which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
+| `GuardrailBlocked(guardrail, reason: String)` | `reason: Option[String]`; `block(reason)` builds it |
+| `submitter.submit(thread, agent.id, QueuedInput.query(text))`, the query in the queue as submitted | `agent.admit(thread, text).map(QueuedInput.admitted)` first, to keep refused or unrewritten text out of the queue |
+
+- `admit` cannot read or update thread state, emit an event, ask a question or call a tool; a middleware that asks
+  from it is refused. `GuardrailReviewMiddleware`, which asks, still runs in `beforeAgent`.
+- A refused query still starts a run, which holds the refusing guardrail's name and no query, so the
+  `agent.guardrail_blocked` event, the `RunFailed` and a queue entry's close are as before.
+- The reason is on the result of the call that admitted and ran the turn. A queued entry admitted by its submitter,
+  and a turn held at a breakpoint before its first step and resumed, end `AgentStatus.Blocked(guardrail, None)`.
+- Admission runs before the thread is claimed: a start the runtime then refuses (`ThreadBusy`, ...) has had its
+  guardrails run.
+- No checkpoint format or store schema change: an input stored before reads as not yet admitted, and its input step
+  admits it.
 
 ## A tool handler has one error type (#2815)
 
@@ -440,15 +636,16 @@ sends the provider one cheap request, and a client with no such request says so.
 
 | Before | After |
 |---|---|
-| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`) or a key lookup (`openrouter`) |
+| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`, `cohere`, `vertexai`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`, `azure`, `perplexity`), a key lookup (`openrouter`), the IAM token exchange (`watsonx`) or loading the model (`jlama`) (#2855) |
 | a wrong key or an unreachable endpoint passes | `Left(AuthenticationError)`, `Left(NetworkError)` and the like, as a completion would fail |
-| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
+| `bedrock`, `zai`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
 | your own `LLMClient` that does not override `validate()`: `Right(())` | `Left(ValidationUnsupportedError)`; override `validate()` to check, or to return `Right(())` in a test double whose code under test calls it |
 | `client.validate().isRight` in a startup check or readiness probe | match `Left(_: ValidationUnsupportedError)` as "cannot check", or the probe fails for the providers in the third row |
 
 `validate()` is now a network call with a timeout of ten seconds: do not call it on every readiness probe without
 caching its result. A provider author's own `OpenAICompatibleDialect` validates with `GET /models` unless it
-overrides `validationPath`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
+overrides `validationUrl(baseUrl, model)`, and one whose vendor refuses a key with a status other than 401 or 403
+overrides `refusesCredential`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
 `ProviderModuleChecks.assertValidates` / `assertValidationUnsupported` check them.
 
 ## A guardrail block's message names only the guardrail (#2793)
@@ -460,9 +657,10 @@ events, a run queue entry's failure, logs and traces record.
 | Before | After |
 |---|---|
 | `error.message` of a `GuardrailBlocked`, for the reason | `error.reason` (`case blocked: GuardrailBlocked => blocked.reason`) |
-| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, reason)` from the run; the event names the guardrail only |
+| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, Some(reason))` from the run that was blocked; the event names the guardrail only |
 
-`AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked` are unchanged and still carry the reason. Events
+The reason is no longer stored at all, and `AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked`
+changed with that: see [a guardrail's reason is never stored](#a-guardrails-reason-is-never-stored-2853). Events
 already stored keep the message they were written with.
 
 ## Model registry sources, exact lookup and a sealed `RequestTransformer` (#2823)
@@ -707,8 +905,8 @@ created `public: false`, and nothing is hard-coded as the user.
 - **`userId` is the run's.** The agent's tracing sets the new `TraceEvent.AgentRunEnded.userId` from
   `RunConfig.principal`, and Langfuse receives it as the trace's `userId`; a run without a principal sends none. A
   dashboard filtered on the user `llm4s-user` matches nothing from this version on.
-- `AgentRunEnded` has a twelfth field, so a positional pattern on it no longer compiles: match `case e:
-  TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
+- `AgentRunEnded` gains the field `userId` (it has fourteen fields in all), so a positional pattern on it no longer
+  compiles: match `case e: TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
 
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
