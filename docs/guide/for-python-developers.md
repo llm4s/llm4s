@@ -250,9 +250,9 @@ import org.llm4s.types.Result
 
 def describe(result: AgentResult): String =
   result.status match {
-    case AgentStatus.Completed(answer)  => answer
+    case AgentStatus.Completed(answer)     => answer
     case AgentStatus.Blocked(guardrail, _) => s"Blocked by $guardrail"
-    case other                          => s"Stopped: $other"
+    case other                             => s"Stopped: $other"
   }
 
 def twoTurns(client: LLMClient, tools: ToolRegistry): Result[Seq[String]] =
