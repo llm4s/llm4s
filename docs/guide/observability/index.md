@@ -453,6 +453,17 @@ Langfuse Cloud on 2026-11-16, and this backend no longer uses it, so it works wi
 self-hosted Langfuse v3.22 or later. It needs no OpenTelemetry SDK, and it is not the
 [OpenTelemetry backend](#opentelemetry-integration), which exports over gRPC.
 
+> **Checked 2026-11-24: Langfuse Cloud no longer accepts what this backend sends.** `llm4s-observability` posts
+> trace, span, generation and event objects to Langfuse's legacy batch ingestion API, `POST /api/public/ingestion`.
+> Langfuse [removed it from Langfuse Cloud on 2026-11-16](https://langfuse.com/docs/compatibility), and a
+> self-hosted Langfuse v4 in its default `events_only` write mode rejects it too; only a self-hosted v3 server still
+> takes it. Langfuse's replacement is its OpenTelemetry endpoint, `/api/public/otel/v1/traces`
+> ([OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry)), over OTLP/HTTP only (no
+> gRPC). Until the `langfuse` mode moves to it, reach Langfuse Cloud through the
+> [OpenTelemetry backend](#opentelemetry-integration), which exports OTLP over gRPC: point it at an OpenTelemetry
+> Collector whose `otlphttp` exporter sends to Langfuse's endpoint with the `Authorization: Basic` and
+> `x-langfuse-ingestion-version: 4` headers.
+
 ### What Gets Captured
 
 When configured, LLM4S automatically traces:
