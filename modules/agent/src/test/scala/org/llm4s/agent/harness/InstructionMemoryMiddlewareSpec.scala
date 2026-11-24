@@ -38,7 +38,8 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
     def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
-      if (seen.size == 1) Right(completion(AssistantMessage(None, Seq(ToolCall("c1", "noop", ujson.Obj())))))
+      if (seen.size == 1)
+        Right(completion(AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "noop", ujson.Obj())))))
       else Right(completion(AssistantMessage("done")))
     }
   }
@@ -178,7 +179,7 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
               None,
               paths.zipWithIndex.map { case (path, i) =>
                 ToolCall(
-                  s"e$i",
+                  ToolCallId(s"e$i"),
                   FileTools.EditFile,
                   ujson.Obj("path" -> path.value, "old_string" -> "one", "new_string" -> "two")
                 )

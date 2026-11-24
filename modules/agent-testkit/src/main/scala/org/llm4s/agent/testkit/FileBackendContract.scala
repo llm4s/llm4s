@@ -5,7 +5,7 @@ import org.llm4s.agent.graph.{ ReplaySupport, RunConfig, RunContext, StateUpdate
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Glob, LockKey, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.harness.{ BackendRefused, FileBackend, FileContext, VPath }
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.{ ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
@@ -59,7 +59,7 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
   private def run(backend: FileBackend, tenant: Option[String], batches: Vector[Vector[String]]): Vector[String] =
     val ids = Iterator.from(1)
     val replies = batches.map(batch =>
-      Reply.toolCalls(batch.map(c => ToolCall(s"c${ids.next()}", "fs", ujson.Obj("text" -> c)))*)
+      Reply.toolCalls(batch.map(c => ToolCall(ToolCallId(s"c${ids.next()}"), "fs", ujson.Obj("text" -> c)))*)
     ) :+
       Reply.text("done")
     val agent  = Agent.builder("contract", ScriptedLLMClient.sequence(replies*)).withTools(tools(backend)).build().value

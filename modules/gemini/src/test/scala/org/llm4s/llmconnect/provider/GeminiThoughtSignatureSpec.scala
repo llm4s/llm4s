@@ -167,7 +167,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       message.thinkingBinding shouldBe defined
       val blocks = blocksOf(message, provider)
       blocks should have size 1
-      blocks.head("call").str shouldBe message.toolCalls.head.id
+      blocks.head("call").str shouldBe message.toolCalls.head.id.asString
       blocks.head("sig").str shouldBe "SIG-CALL"
     }
 
@@ -352,7 +352,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
       val first = client.complete(firstTurn, CompletionOptions()).value.message
       first.toolCalls.map(_.id) should not be Seq("")
-      first.toolCalls.map(_.id.nonEmpty) shouldBe Seq(true)
+      first.toolCalls.map(_.id.asString.nonEmpty) shouldBe Seq(true)
 
       wire.body = response(text("Sunny."))
       client.complete(continuation(first), CompletionOptions()).value
@@ -386,7 +386,9 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
       wire.body = response(text("Sunny."))
       val handBuilt =
-        Conversation(Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", "")))
+        Conversation(
+          Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", ToolCallId("")))
+        )
       client.complete(handBuilt, CompletionOptions()).value
 
       val sent = modelPartsOf(wire.lastRequest).filter(_.obj.contains("functionCall"))
@@ -490,7 +492,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       message.hasSealedThinking shouldBe true
       val blocks = blocksOf(message, provider)
       blocks should have size 1
-      blocks.head("call").str shouldBe completion.toolCalls.head.id
+      blocks.head("call").str shouldBe completion.toolCalls.head.id.asString
       blocks.head("sig").str shouldBe "SIG-STREAM"
 
       wire.body = response(text("Sunny."))
@@ -621,7 +623,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   }
 
   it should "send a function call's signature but not the thought summary text kept beside it" in {
-    val call = ToolCall(id = "call-1", name = "f", arguments = ujson.Obj())
+    val call = ToolCall(id = ToolCallId("call-1"), name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
       text = None,
       toolCalls = Seq(call),
@@ -637,7 +639,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   }
 
   it should "not attach a signature to a call it does not belong to" in {
-    val call = ToolCall(id = "real-id", name = "f", arguments = ujson.Obj())
+    val call = ToolCall(id = ToolCallId("real-id"), name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
       text = None,
       toolCalls = Seq(call),
@@ -653,7 +655,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val parsed = GeminiThoughtSignatures.Parsed(
       text = "hi",
       thought = "hmm",
-      calls = Seq(ToolCall("a", "f", ujson.Obj()), ToolCall("b", "g", ujson.Obj())),
+      calls = Seq(ToolCall(ToolCallId("a"), "f", ujson.Obj()), ToolCall(ToolCallId("b"), "g", ujson.Obj())),
       signatures = Seq.empty
     )
 

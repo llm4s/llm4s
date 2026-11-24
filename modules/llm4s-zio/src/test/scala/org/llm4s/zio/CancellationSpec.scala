@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   ToolMessage
 }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -121,7 +122,7 @@ object CancellationSpec extends ZIOSpecDefault {
           case Right(t) => t
           case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
         }
-        val call = ToolCall(id = "c1", name = "block", arguments = ujson.Obj())
+        val call = ToolCall(id = ToolCallId("c1"), name = "block", arguments = ujson.Obj())
         // Calls the tool until a tool result is in the conversation, then answers: a recovered run
         // does not repeat the model calls it already finished.
         val scripted: LLMClient = new LLMClient {

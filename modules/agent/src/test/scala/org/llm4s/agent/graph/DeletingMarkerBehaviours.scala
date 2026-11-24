@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError

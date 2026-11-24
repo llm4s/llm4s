@@ -222,7 +222,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   it should "estimate a usage-less tool-only answer from its whole message, its tool call's arguments included" in {
     // no text: the answer is one tool call with large arguments, which the estimate must charge as output
-    val big    = ToolCall("c1", "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
+    val big    = ToolCall(ToolCallId("c1"), "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
     val client = ScriptedLLMClient.of(calling(big).withUsage(None), CompletionFixture.simple("never sent"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
 

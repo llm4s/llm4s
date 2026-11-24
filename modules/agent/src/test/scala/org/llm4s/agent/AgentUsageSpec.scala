@@ -30,7 +30,10 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
     )
 
   private def handoffTo(target: String): AssistantMessage =
-    AssistantMessage(None, Seq(ToolCall(s"tc-$target", s"handoff_to_$target", ujson.Obj("reason" -> "delegate"))))
+    AssistantMessage(
+      None,
+      Seq(ToolCall(ToolCallId(s"tc-$target"), s"handoff_to_$target", ujson.Obj("reason" -> "delegate")))
+    )
 
   "Agent" should "accumulate usage and cost across the model calls of a turn" in {
     val model = "fake/model"
@@ -41,7 +44,7 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
       handler = _ => Right("ok")
     )
     val client = ScriptedLLMClient.of(
-      completion(model, AssistantMessage(None, Seq(ToolCall("tc_1", "echo", ujson.Obj()))), 10, 2, 0.01),
+      completion(model, AssistantMessage(None, Seq(ToolCall(ToolCallId("tc_1"), "echo", ujson.Obj()))), 10, 2, 0.01),
       completion(model, AssistantMessage("done"), 4, 3, 0.02)
     )
 

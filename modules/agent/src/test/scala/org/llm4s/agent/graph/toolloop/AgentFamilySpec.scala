@@ -40,7 +40,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
     def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
-      val call = ToolCall(s"c${seen.size}", "echo", ujson.Obj("text" -> s"step ${seen.size}"))
+      val call = ToolCall(ToolCallId(s"c${seen.size}"), "echo", ujson.Obj("text" -> s"step ${seen.size}"))
       Right(completion(AssistantMessage(None, Seq(call))))
     }
   }
@@ -53,7 +53,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   private val tools = ToolSet.of(echo).value
 
   private def echoCall(id: String): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(id, "echo", ujson.Obj("text" -> id))))
+    _ => AssistantMessage(None, Seq(ToolCall(ToolCallId(id), "echo", ujson.Obj("text" -> id))))
 
   private def answer(text: String): Vector[Message] => AssistantMessage = _ => AssistantMessage(text)
 
@@ -98,7 +98,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     model.seen.size shouldBe 2
     state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached), Some(idA))
     // both batches were collected: the history ends with the second call's result
-    messagesOf(state).last shouldBe ToolMessage("step 2", "c2")
+    messagesOf(state).last shouldBe ToolMessage("step 2", ToolCallId("c2"))
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
   }
@@ -180,7 +180,10 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "refuse a history that is not a valid conversation" in {
     val model = ScriptedModel(answer("never"))
     val loop  = family(LoopAgent(idA, model, tools))
-    val cut   = Vector(UserMessage("hi"), AssistantMessage(None, Seq(ToolCall("t1", "echo", ujson.Obj("text" -> "x")))))
+    val cut = Vector(
+      UserMessage("hi"),
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("t1"), "echo", ujson.Obj("text" -> "x"))))
+    )
     val (_, error) = runInMemory(loop.graph, AgentInput("go", cut)).failed
     error.message should include("Invalid conversation")
     model.calls shouldBe 0
@@ -193,8 +196,9 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
       if context.approved then ToolOutcome.success(ToolContent.Json(ujson.Str(args.text)))
       else ToolOutcome.NeedsApproval("check")
     )
-    val idle  = ScriptedModel()
-    val model = ScriptedModel(_ => AssistantMessage(None, Seq(ToolCall("g1", "gated", ujson.Obj("text" -> "ok")))))
+    val idle = ScriptedModel()
+    val model =
+      ScriptedModel(_ => AssistantMessage(None, Seq(ToolCall(ToolCallId("g1"), "gated", ujson.Obj("text" -> "ok")))))
     val loop = ToolLoop
       .build(
         "family",
@@ -208,7 +212,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     first.interrupts.map(_.resumeNode) shouldBe Vector(NodeId("b/approval"))
     first.state.get(LoopKeys.activeAgent).value shouldBe Some(idB)
     val Vector((id, request)) = loop.requests(first).value
-    request.call.id shouldBe "g1"
+    request.call.id shouldBe ToolCallId("g1")
     loop.questions(first).value shouldBe empty
 
     val resumed =
@@ -218,7 +222,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
       case GraphError.NodeFailed(node, _, _) => node shouldBe NodeId("b/model")
       case other                             => fail(s"not a node failure: $other")
     }
-    resumed.failed._1.get(Messages.key).value.last.message shouldBe ToolMessage("ok", "g1")
+    resumed.failed._1.get(Messages.key).value.last.message shouldBe ToolMessage("ok", ToolCallId("g1"))
     idle.calls shouldBe 0
   }
 

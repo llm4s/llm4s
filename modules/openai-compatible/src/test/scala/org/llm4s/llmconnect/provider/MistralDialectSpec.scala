@@ -40,8 +40,11 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
       Conversation(
         Seq(
           UserMessage("Weather?"),
-          AssistantMessage(None, List(ToolCall("call_0fypS1hVX", "get_weather", ujson.Obj("city" -> "Paris")))),
-          ToolMessage("""{"temp":21}""", "call_0fypS1hVX")
+          AssistantMessage(
+            None,
+            List(ToolCall(ToolCallId("call_0fypS1hVX"), "get_weather", ujson.Obj("city" -> "Paris")))
+          ),
+          ToolMessage("""{"temp":21}""", ToolCallId("call_0fypS1hVX"))
         )
       ),
       CompletionOptions()

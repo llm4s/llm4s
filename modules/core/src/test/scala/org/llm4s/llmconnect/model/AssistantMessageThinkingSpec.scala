@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -7,7 +8,7 @@ import java.time.Instant
 
 class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
 
-  private val call = ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris"))
 
   private val signed = AssistantMessage(
     text = Some("Checking."),
@@ -54,7 +55,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
 
   // #2809: an assistant message is stored flat, its text under `content`, as the other roles are
   "An assistant message's JSON" should "be flat, with its text under content" in {
-    val call = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
+    val call = ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
 
     write[Message](AssistantMessage("Hello")) shouldBe """{"type":"assistant","content":"Hello","toolCalls":[]}"""
     write[Message](AssistantMessage(None, Seq(call))) shouldBe
@@ -64,7 +65,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "still read the nested shape and the contentOpt key it was stored with before" in {
-    val call = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
+    val call = ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
     val stored =
       """{"type":"assistant","data":{"contentOpt":"Checking.","toolCalls":[{"id":"c1","name":"weather",""" +
         """"arguments":{"city":"Paris"}}],"thinking":[{"type":"text","text":"hmm"}],"thinkingBinding":"abc"}}"""

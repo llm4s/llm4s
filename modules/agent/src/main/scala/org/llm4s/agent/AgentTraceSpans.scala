@@ -1,7 +1,9 @@
 package org.llm4s.agent
 
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.events.ToolExecutionOutcome
-import org.llm4s.agent.graph.{ FencingToken, IdempotencyKey, RunId, ThreadId }
+import org.llm4s.agent.graph.{ FencingToken, RunId, ThreadId }
 import org.llm4s.trace.TraceContext
 
 /**
@@ -13,7 +15,7 @@ import org.llm4s.trace.TraceContext
  *    may be reused (a recovery under the same id, a reused `RunConfig`) but a token never is - under the context it
  *    continues (`RunConfig.traceContext`, a child's `RunOrigin.trace`) when it has one, else as the root of a trace of
  *    its own.
- *  - A tool call's span is derived from the trace and the call's [[org.llm4s.agent.graph.IdempotencyKey]] - not from
+ *  - A tool call's span is derived from the trace and the call's [[org.llm4s.toolapi.IdempotencyKey]] - not from
  *    the run, nor from the provider's call id, which a later model request may reuse - so a parent run recovered under
  *    a new `RunId`, in the same trace, names the same span for the same call, a call of another request another span,
  *    and the child a call started stays under it. That span is the call's one logical span, placed by the event of the
@@ -41,15 +43,15 @@ private[agent] object AgentTraceSpans:
     continues.fold(TraceContext.rootFor(key))(_.spanFor(key))
 
   def toolCall(run: TraceContext, call: IdempotencyKey): TraceContext =
-    run.spanFor(named("llm4s.tool", call.value))
+    run.spanFor(named("llm4s.tool", call.asString))
 
   /** A phase of a tool call that suspended it, announced by event `seq`: a span of its own, never the call's. */
   def toolCallPhase(run: TraceContext, call: IdempotencyKey, seq: Long): TraceContext =
-    run.spanFor(named("llm4s.tool-phase", call.value, seq.toString))
+    run.spanFor(named("llm4s.tool-phase", call.asString, seq.toString))
 
   /** A tool call's span from an event stored before it recorded its key: unique to the event. */
-  def toolCallWithoutKey(run: TraceContext, threadId: ThreadId, toolCallId: String, seq: Long): TraceContext =
-    run.spanFor(named("llm4s.tool-unkeyed", threadId.value, toolCallId, seq.toString))
+  def toolCallWithoutKey(run: TraceContext, threadId: ThreadId, toolCallId: ToolCallId, seq: Long): TraceContext =
+    run.spanFor(named("llm4s.tool-unkeyed", threadId.value, toolCallId.asString, seq.toString))
 
   /** Whether a tool call that ended `outcome` only suspended: the call goes on in a later run. */
   def suspends(outcome: ToolExecutionOutcome): Boolean = outcome match

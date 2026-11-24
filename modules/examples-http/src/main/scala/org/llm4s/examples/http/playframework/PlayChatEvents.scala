@@ -29,7 +29,7 @@ object PlayChatEvents {
       .collect {
         case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
         case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
-          event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+          event("tool_call", ChatProtocol.toolCall(t.toolCallId.asString, t.tool))
         case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
       }
       .recover { case error => event("error", ChatProtocol.streamError(HttpErrors.of(llmError(error)))) }

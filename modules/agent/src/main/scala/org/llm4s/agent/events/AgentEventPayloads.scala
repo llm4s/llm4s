@@ -1,7 +1,8 @@
 package org.llm4s.agent.events
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage }
+import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage, ToolCallId }
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationJson
 import org.slf4j.LoggerFactory
@@ -200,36 +201,36 @@ enum ToolExecutionOutcome derives ReadWriter:
  * One tool call's outcome; `duration` is the middleware chain's, zero for a call refused before it.
  * `tool` is the called tool's name when the agent has that tool, else `"<unknown>"`
  * (`ToolLoop.UnknownTool`): a name the model invented is not stored. `idempotencyKey` is the call's
- * [[org.llm4s.agent.graph.IdempotencyKey]] (a digest, no content), which names the call's trace span
+ * [[org.llm4s.toolapi.IdempotencyKey]] (a digest, no content), which names the call's trace span
  * (design 4.58); `None` in an event stored before it existed.
  */
 @Experimental
 final case class ToolExecuted private (
   agent: String,
-  toolCallId: String,
+  toolCallId: ToolCallId,
   tool: String,
   duration: FiniteDuration,
   outcome: ToolExecutionOutcome,
-  idempotencyKey: Option[String] = None
+  idempotencyKey: Option[IdempotencyKey] = None
 ):
-  def withAgent(value: String): ToolExecuted                  = copy(agent = value)
-  def withToolCallId(value: String): ToolExecuted             = copy(toolCallId = value)
-  def withTool(value: String): ToolExecuted                   = copy(tool = value)
-  def withDuration(value: FiniteDuration): ToolExecuted       = copy(duration = value)
-  def withOutcome(value: ToolExecutionOutcome): ToolExecuted  = copy(outcome = value)
-  def withIdempotencyKey(value: String): ToolExecuted         = copy(idempotencyKey = Some(value))
-  def withIdempotencyKey(value: Option[String]): ToolExecuted = copy(idempotencyKey = value)
+  def withAgent(value: String): ToolExecuted                          = copy(agent = value)
+  def withToolCallId(value: ToolCallId): ToolExecuted                 = copy(toolCallId = value)
+  def withTool(value: String): ToolExecuted                           = copy(tool = value)
+  def withDuration(value: FiniteDuration): ToolExecuted               = copy(duration = value)
+  def withOutcome(value: ToolExecutionOutcome): ToolExecuted          = copy(outcome = value)
+  def withIdempotencyKey(value: IdempotencyKey): ToolExecuted         = copy(idempotencyKey = Some(value))
+  def withIdempotencyKey(value: Option[IdempotencyKey]): ToolExecuted = copy(idempotencyKey = value)
 
 @Experimental
 object ToolExecuted:
 
   def apply(
     agent: String,
-    toolCallId: String,
+    toolCallId: ToolCallId,
     tool: String,
     duration: FiniteDuration,
     outcome: ToolExecutionOutcome,
-    idempotencyKey: Option[String] = None
+    idempotencyKey: Option[IdempotencyKey] = None
   ): ToolExecuted =
     new ToolExecuted(agent, toolCallId, tool, duration, outcome, idempotencyKey)
 
@@ -305,24 +306,25 @@ object ThinkingDelta:
 
 /** A tool call passed its argument checks and is about to run through the middleware chain. */
 @Experimental
-final case class ToolCallStarted private (toolCallId: String, tool: String, arguments: ujson.Value) derives ReadWriter:
-  def withToolCallId(value: String): ToolCallStarted     = copy(toolCallId = value)
+final case class ToolCallStarted private (toolCallId: ToolCallId, tool: String, arguments: ujson.Value)
+    derives ReadWriter:
+  def withToolCallId(value: ToolCallId): ToolCallStarted = copy(toolCallId = value)
   def withTool(value: String): ToolCallStarted           = copy(tool = value)
   def withArguments(value: ujson.Value): ToolCallStarted = copy(arguments = value)
 
 @Experimental
 object ToolCallStarted:
-  def apply(toolCallId: String, tool: String, arguments: ujson.Value): ToolCallStarted =
+  def apply(toolCallId: ToolCallId, tool: String, arguments: ujson.Value): ToolCallStarted =
     new ToolCallStarted(toolCallId, tool, arguments)
 
 /** The result the loop recorded for a call, as the model will see it. */
 @Experimental
-final case class ToolCallResult private (toolCallId: String, content: String, isError: Boolean) derives ReadWriter:
-  def withToolCallId(value: String): ToolCallResult = copy(toolCallId = value)
-  def withContent(value: String): ToolCallResult    = copy(content = value)
-  def withIsError(value: Boolean): ToolCallResult   = copy(isError = value)
+final case class ToolCallResult private (toolCallId: ToolCallId, content: String, isError: Boolean) derives ReadWriter:
+  def withToolCallId(value: ToolCallId): ToolCallResult = copy(toolCallId = value)
+  def withContent(value: String): ToolCallResult        = copy(content = value)
+  def withIsError(value: Boolean): ToolCallResult       = copy(isError = value)
 
 @Experimental
 object ToolCallResult:
-  def apply(toolCallId: String, content: String, isError: Boolean): ToolCallResult =
+  def apply(toolCallId: ToolCallId, content: String, isError: Boolean): ToolCallResult =
     new ToolCallResult(toolCallId, content, isError)

@@ -38,7 +38,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
   /** A child that calls `tool` every step and never answers. */
   private def looping(tool: String): PartialFunction[Vector[Message], Result[Completion]] = {
     case Child("researcher", messages) =>
-      Right(calling(ToolCall(s"k${toolResults(messages).size}", tool, ujson.Obj("text" -> "x"))))
+      Right(calling(ToolCall(ToolCallId(s"k${toolResults(messages).size}"), tool, ujson.Obj("text" -> "x"))))
   }
 
   private def answering: PartialFunction[Vector[Message], Result[Completion]] = { case Child("researcher", _) =>
@@ -74,7 +74,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "shared", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "shared", ujson.Obj("text" -> "x"))))
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
     })
     val agent = lead(client)
@@ -117,8 +117,8 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
         Right(
           calling(
-            ToolCall("k1", "shared", ujson.Obj("text" -> "forbidden")),
-            ToolCall("k2", "own", ujson.Obj("text" -> "forbidden"))
+            ToolCall(ToolCallId("k1"), "shared", ujson.Obj("text" -> "forbidden")),
+            ToolCall(ToolCallId("k2"), "own", ujson.Obj("text" -> "forbidden"))
           )
         )
       case Child("researcher", messages) =>
@@ -165,7 +165,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "mtool", ujson.Obj("text" -> "forbidden"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "mtool", ujson.Obj("text" -> "forbidden"))))
       case Child("researcher", messages) =>
         Right(
           CompletionFixture.simple(ujson.write(ujson.Obj("summary" -> toolResults(messages).mkString, "sources" -> 0)))
@@ -222,7 +222,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
       case Child("researcher", messages) =>
         Right(
           CompletionFixture.simple(
@@ -252,7 +252,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
       case Child("researcher", messages) =>
         Right(
           CompletionFixture.simple(ujson.write(ujson.Obj("summary" -> toolResults(messages).mkString, "sources" -> 0)))
@@ -282,7 +282,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
       case Child("researcher", messages) =>
         Right(
           CompletionFixture.simple(
@@ -425,7 +425,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     def run(grant: TaskBudget): (Int, Option[Instant]) = {
       val client = RoutingClient(delegatingOnce.orElse {
         case Child("researcher", messages) if toolResults(messages).isEmpty =>
-          Right(calling(ToolCall("k1", "peek", ujson.Obj("text" -> "x"))))
+          Right(calling(ToolCall(ToolCallId("k1"), "peek", ujson.Obj("text" -> "x"))))
         case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
       })
       lead(client)
@@ -576,7 +576,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
     })
     val agent = lead(client)
@@ -742,7 +742,8 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val reasoning = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 60, thinkingTokens = Some(45))
     val thinking: PartialFunction[Vector[Message], Result[Completion]] = { case Child("researcher", messages) =>
       Right(
-        calling(ToolCall(s"k${toolResults(messages).size}", "probe", ujson.Obj("text" -> "x"))).withUsage(reasoning)
+        calling(ToolCall(ToolCallId(s"k${toolResults(messages).size}"), "probe", ujson.Obj("text" -> "x")))
+          .withUsage(reasoning)
       )
     }
     val ran    = new AtomicInteger(0)
@@ -1117,7 +1118,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("p1", "peek", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("p1"), "peek", ujson.Obj("text" -> "x"))))
       case Lead(_) => Right(CompletionFixture.simple("done"))
     }
     lead(client).withMaxSteps(5).withTools(ToolSet.of(peek).value).build().value.run(ThreadId("t1"), "go").value

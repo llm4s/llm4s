@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.syntax.toResult
@@ -86,7 +87,7 @@ private[graph] object KeyDigest:
 
 /**
  * One external effect, the identity its replay evidence is kept under (design §4.24): the SHA-256 of
- * the thread that performs it, a base key - the tool call's [[IdempotencyKey]] or the task's
+ * the thread that performs it, a base key - the tool call's [[org.llm4s.toolapi.IdempotencyKey]] or the task's
  * [[RunContext.taskKey]] - the `operation` (the kind of effect, such as `file.edit`) and a
  * discriminator naming what it touches (a path, sorted source ids). Effects of one task differ in
  * operation or discriminator, so they never suppress one another; a fork's re-run of its source's
@@ -112,7 +113,7 @@ object EffectKey:
     discriminator: Seq[String]
   ): EffectKey =
     // the base names the effect's task (its lineage included) or the call (whose key carries it)
-    val parts = Seq("llm4s-effect-v1", threadId.value, base.value, operation, discriminator.size.toString)
+    val parts = Seq("llm4s-effect-v1", threadId.value, base.asString, operation, discriminator.size.toString)
     new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
 
   /** The scope of every effect key of thread `threadId`. */

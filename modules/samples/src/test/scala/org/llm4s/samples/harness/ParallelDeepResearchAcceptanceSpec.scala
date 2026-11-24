@@ -93,7 +93,7 @@ class ParallelDeepResearchAcceptanceSpec
   private def brief(result: AgentResult): DeepResearch.Brief = result.decodeOutput[DeepResearch.Brief].value
 
   private def toolResults(result: AgentResult): Map[String, ToolMessage] =
-    result.messages.collect { case t: ToolMessage => t.toolCallId -> t }.toMap
+    result.messages.collect { case t: ToolMessage => t.toolCallId.asString -> t }.toMap
 
   private def events(store: Checkpointer, thread: ThreadId): Vector[EventRecord] =
     store.eventsAfter(thread, 0L, 10_000).value
@@ -318,7 +318,7 @@ class ParallelDeepResearchAcceptanceSpec
     val report = result.messages
       .collect { case a: AssistantMessage => a.toolCalls }
       .flatten
-      .find(_.id == "report")
+      .find(_.id == ToolCallId("report"))
       .value
       .arguments("content")
       .str

@@ -253,7 +253,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     result.answer shouldBe Some("handled it")
     val toolMessages = result.messages.collect { case m: ToolMessage => m }
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("backend unavailable")
   }
 

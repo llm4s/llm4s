@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolCallId, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ completion => completionOf, transport }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.SmallStack
@@ -69,13 +69,13 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     completion.toolCalls should have size 2
 
     // Validate first tool call
-    completion.toolCalls(0).id shouldBe "call-1"
+    completion.toolCalls(0).id shouldBe ToolCallId("call-1")
     completion.toolCalls(0).name shouldBe "search"
     completion.toolCalls(0).arguments("query").str shouldBe "test"
     completion.toolCalls(0).arguments("limit").num shouldBe 10.0
 
     // Validate second tool call
-    completion.toolCalls(1).id shouldBe "call-2"
+    completion.toolCalls(1).id shouldBe ToolCallId("call-2")
     completion.toolCalls(1).name shouldBe "calculate"
     completion.toolCalls(1).arguments("a").num shouldBe 5.0
     completion.toolCalls(1).arguments("b").num shouldBe 3.0

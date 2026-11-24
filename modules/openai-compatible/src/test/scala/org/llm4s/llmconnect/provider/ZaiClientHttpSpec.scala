@@ -225,7 +225,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 200, zaiCompletion("ok"))
     } { baseUrl =>
       val client   = new ZaiClient(localConfig(baseUrl))
-      val toolConv = Conversation(Seq(ToolMessage("result", "call-42")))
+      val toolConv = Conversation(Seq(ToolMessage("result", ToolCallId("call-42"))))
       client.complete(toolConv, CompletionOptions())
     }
 }

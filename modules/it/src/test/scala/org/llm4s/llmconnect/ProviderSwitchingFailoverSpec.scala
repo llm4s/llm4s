@@ -259,7 +259,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
             val call = completion.toolCalls.loneElement
             call.name shouldBe "get_weather"
             call.arguments shouldBe ujson.Obj("city" -> "Paris")
-            call.id should not be empty
+            call.id.asString should not be empty
           }
         }
       }

@@ -20,13 +20,13 @@ import java.time.Instant
  */
 class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
-  private val toolCall = ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris"))
 
   private val full: Completion = Completion(
     id = "reply-1",
     created = Instant.EPOCH,
     model = "gpt-4o-2024-08-06",
-    message = AssistantMessage("Let me check.", Seq(toolCall, ToolCall("call-2", "clock", ujson.Obj())))
+    message = AssistantMessage("Let me check.", Seq(toolCall, ToolCall(ToolCallId("call-2"), "clock", ujson.Obj())))
       .withThinking("The user wants the weather."),
     usage = Some(
       TokenUsage(
@@ -193,7 +193,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val throwing = new Recording(throw new IllegalStateException("provider bug"))
     Llm4s.wrapClient(throwing).completion("q").getError().getMessage should include("provider bug")
 
-    val unreadable = full.withMessage(full.message.withToolCalls(Seq(ToolCall("c", "t", null))))
+    val unreadable = full.withMessage(full.message.withToolCalls(Seq(ToolCall(ToolCallId("c"), "t", null))))
     Llm4s.wrapClient(replying(unreadable)).completion("q").isFailure shouldBe true
   }
 

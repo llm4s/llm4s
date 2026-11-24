@@ -1,5 +1,6 @@
 package org.llm4s.schema
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.error.{ LLMError, NotFoundError }
 import org.llm4s.schema.TypedToolFixtures.*
 import org.llm4s.toolapi.*
@@ -28,7 +29,7 @@ object ScopedToolFixtures {
   /** Reports what its scope says about the call. */
   def describe(name: String): Result[ToolFunction[Sum]] =
     Tool.scoped[AddArgs, Sum](name, "Add numbers, saying which call it served") { a =>
-      Sum(a.a + a.b, ToolScope.idempotencyKey, ToolScope.call.map(_.toolCallId))
+      Sum(a.a + a.b, ToolScope.idempotencyKey, ToolScope.call.map(_.toolCallId.asString))
     }
 
   /** Every way to end a call early, chosen by `a`. */
@@ -122,7 +123,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
 
   it should "write a successful handler's result with its ReadWriter" in {
     val tool = built(describe("sum"))
-    tool.execute(ujson.Obj("a" -> 2, "b" -> 3), ToolCallInfo("call-1", "key-1")) shouldBe
+    tool.execute(ujson.Obj("a" -> 2, "b" -> 3), ToolCallInfo(ToolCallId("call-1"), IdempotencyKey("key-1"))) shouldBe
       Right(upickle.default.writeJs(Sum(5, "key-1", Some("call-1"))))
     built(noArgs).execute(ujson.Null) shouldBe Right(ujson.Str("pong"))
   }
@@ -191,7 +192,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
   "ToolScope" should "give the handler the call's idempotency key and id when the call supplies them" in {
     val tool  = built(describe("sum"))
     val args  = ujson.Obj("a" -> 1, "b" -> 1)
-    val call  = ToolCallInfo("call-9", "agent-key-9")
+    val call  = ToolCallInfo(ToolCallId("call-9"), IdempotencyKey("agent-key-9"))
     val first = tool.execute(args, call)
     first shouldBe Right(upickle.default.writeJs(Sum(2, "agent-key-9", Some("call-9"))))
     tool.execute(args, call) shouldBe first // a replay of the same call

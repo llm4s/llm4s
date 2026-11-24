@@ -47,10 +47,14 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
   }
 
   test("a tool result is its text parts, and media in one is refused") {
-    val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
-    body(UserMessage("go"), assistant, ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1"))
+    val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())))
+    body(
+      UserMessage("go"),
+      assistant,
+      ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1"))
+    )
       .value("messages")(2)("content") shouldBe ujson.Str("a\nb")
-    body(UserMessage("go"), assistant, ToolMessage(Vector(image), "c1")).left.value shouldBe
+    body(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c1"))).left.value shouldBe
       UnsupportedContentPartError("watsonx", image.kind, "tool")
   }
 

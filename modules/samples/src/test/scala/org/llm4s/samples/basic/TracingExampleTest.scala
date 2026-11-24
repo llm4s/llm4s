@@ -3,7 +3,7 @@ package org.llm4s.samples.basic
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{ NoOpTracing, Tracing, TracingComposer, TraceEvent, TracingMode }
-import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId, UsageSummary }
 import org.llm4s.llmconnect.config.TracingSettings
 import scala.concurrent.duration.*
 import java.time.Instant
@@ -152,7 +152,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     // Test all event types
     val events = Seq(
       TraceEvent.CompletionReceived("id", "model", 0, "content"),
-      TraceEvent.ToolExecuted("tool", "input", "output", 100.millis, true),
+      TraceEvent.ToolExecuted("tool", ToolCallId("input").asString, "output", 100.millis, true),
       TraceEvent.ErrorOccurred.of(new RuntimeException("error"), "context"),
       TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
       TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),

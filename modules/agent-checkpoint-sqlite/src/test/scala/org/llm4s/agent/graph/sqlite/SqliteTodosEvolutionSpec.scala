@@ -27,7 +27,7 @@ class SqliteTodosEvolutionSpec extends AnyFlatSpec with Matchers with EitherValu
         None,
         Seq(
           ToolCall(
-            "w1",
+            ToolCallId("w1"),
             "write_todos",
             ujson.Obj("todos" -> ujson.Arr(items.map(c => ujson.Obj("content" -> c, "status" -> "pending"))*))
           )

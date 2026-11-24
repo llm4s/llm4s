@@ -29,7 +29,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val messages = Seq(
       UserMessage("Get data"),
       AssistantMessage("Fetching..."),
-      ToolMessage(largeJson, "call_1"),
+      ToolMessage(largeJson, ToolCallId("call_1")),
       AssistantMessage("Here's the data.")
     )
     val cap = 500
@@ -216,7 +216,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
 
   it should "never truncate tool messages" in {
     val longTool = """{"data": """ + "\"" + ("x" * 2000) + "\"}"
-    val messages = Seq(ToolMessage(longTool, "call_1"))
+    val messages = Seq(ToolMessage(longTool, ToolCallId("call_1")))
 
     val result = CompressionRule.truncateVerboseResponses.transform(messages)
 
@@ -287,7 +287,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       SystemMessage("You are helpful"),
       UserMessage("Hello"),
       AssistantMessage("Hi!"),
-      ToolMessage("result", "call_1"),
+      ToolMessage("result", ToolCallId("call_1")),
       AssistantMessage("Done")
     )
     val cap = 1000

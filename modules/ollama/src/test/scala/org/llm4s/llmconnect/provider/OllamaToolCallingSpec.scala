@@ -41,8 +41,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
   private def requestBody(conversation: Conversation, options: CompletionOptions = CompletionOptions()): ujson.Obj =
     bodyBuilder.createRequestBody(conversation, options, stream = false).fold(e => fail(e.message), identity)
 
-  private val weather = ToolCall("call_a", "get_weather", ujson.Obj("location" -> "Paris"))
-  private val time    = ToolCall("call_b", "get_time", ujson.Obj("zone" -> "UTC"))
+  private val weather = ToolCall(ToolCallId("call_a"), "get_weather", ujson.Obj("location" -> "Paris"))
+  private val time    = ToolCall(ToolCallId("call_b"), "get_time", ujson.Obj("zone" -> "UTC"))
 
   /** A fake `/api/chat`: answers each request with the next of `responses`, recording what it was sent. */
   private def withOllama(responses: String*)(test: (OllamaClient, () => List[ujson.Value]) => Any): Unit = {
@@ -114,7 +114,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       calls should have size 1
       calls.head("function")("name").str shouldBe "get_weather"
       calls.head("function")("arguments") shouldBe ujson.Obj("location" -> "Paris")
-      calls.head("id").str shouldBe weather.id
+      calls.head("id").str shouldBe weather.id.asString
       calls.head("function")("index").num shouldBe 0
     }
 
@@ -123,7 +123,10 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         Conversation(
           Seq(
             UserMessage("both?"),
-            AssistantMessage(None, Seq(weather, time, ToolCall("c3", "get_weather", ujson.Obj("location" -> "Rome"))))
+            AssistantMessage(
+              None,
+              Seq(weather, time, ToolCall(ToolCallId("c3"), "get_weather", ujson.Obj("location" -> "Rome")))
+            )
           )
         )
       )
@@ -162,7 +165,9 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     "send arguments that arrive as a JSON string as an object, and anything else as an empty object" in {
       def argumentsSent(arguments: ujson.Value): ujson.Value =
         requestBody(
-          Conversation(Seq(UserMessage("q"), AssistantMessage(None, Seq(ToolCall("c", "get_weather", arguments)))))
+          Conversation(
+            Seq(UserMessage("q"), AssistantMessage(None, Seq(ToolCall(ToolCallId("c"), "get_weather", arguments))))
+          )
         )("messages")(1)("tool_calls")(0)("function")("arguments")
 
       argumentsSent(ujson.Str("""{"location":"Rome"}""")) shouldBe ujson.Obj("location" -> "Rome")
@@ -180,7 +185,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       // when the request body is rendered, so it is refused before parsing and sent as `{}`, as any
       // string that is not a JSON object is. On a 1 MB stack, so an overflow is a `Left` here (#1562).
       val deep = "{\"a\":" * 100000 + "1" + "}" * 100000
-      val call = ToolCall("c", "get_weather", ujson.Str(deep))
+      val call = ToolCall(ToolCallId("c"), "get_weather", ujson.Str(deep))
       val outcome = SmallStack.run {
         val body = requestBody(Conversation(Seq(UserMessage("q"), AssistantMessage(None, Seq(call)))))
         val sent = body("messages")(1)("tool_calls")(0)("function")("arguments")
@@ -200,11 +205,11 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       result("role").str shouldBe "tool"
       result("content").str shouldBe "Sunny"
       result("tool_name").str shouldBe "get_weather"
-      result("tool_call_id").str shouldBe weather.id
+      result("tool_call_id").str shouldBe weather.id.asString
     }
 
     "send a server-provided call id on both the assistant's call and the result that answers it" in {
-      val serverCall = ToolCall("call_from_server_7", "get_weather", ujson.Obj("location" -> "Paris"))
+      val serverCall = ToolCall(ToolCallId("call_from_server_7"), "get_weather", ujson.Obj("location" -> "Paris"))
       val body = requestBody(
         Conversation(
           Seq(UserMessage("weather?"), AssistantMessage(None, Seq(serverCall)), ToolMessage("Sunny", serverCall.id))
@@ -232,7 +237,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     }
 
     "omit `tool_name` when the call a result answers is not in the conversation" in {
-      val body = requestBody(Conversation(Seq(UserMessage("q"), ToolMessage("orphan", "call_unknown"))))
+      val body = requestBody(Conversation(Seq(UserMessage("q"), ToolMessage("orphan", ToolCallId("call_unknown")))))
 
       body("messages")(1)("role").str shouldBe "tool"
       body("messages")(1).obj.contains("tool_name") shouldBe false
@@ -251,7 +256,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val toolCall = completion.toolCalls.head
         toolCall.name shouldBe "get_weather"
         toolCall.arguments shouldBe ujson.Obj("location" -> "Paris")
-        (toolCall.id should fullyMatch).regex(callId)
+        (toolCall.id.asString should fullyMatch).regex(callId)
         completion.message.toolCalls shouldBe completion.toolCalls
         completion.message.text shouldBe None
         completion.content shouldBe ""
@@ -311,8 +316,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
         calls.map(_.name) shouldBe List("get_weather", "get_time")
         calls.map(_.id).distinct should have size 2
-        calls.map(c => indexOf(c.id)) shouldBe List(0, 1)
-        calls.map(c => prefixOf(c.id)).distinct should have size 1
+        calls.map(c => indexOf(c.id.asString)) shouldBe List(0, 1)
+        calls.map(c => prefixOf(c.id.asString)).distinct should have size 1
       }
     }
 
@@ -323,7 +328,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val second = ask(client).toOption.get.toolCalls.head.id
 
         first should not be second
-        prefixOf(first) should not be prefixOf(second)
+        prefixOf(first.asString) should not be prefixOf(second.asString)
       }
     }
 
@@ -585,7 +590,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         completion.toolCalls should have size 1
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments shouldBe ujson.Obj("location" -> "Paris")
-        (completion.toolCalls.head.id should fullyMatch).regex(callId)
+        (completion.toolCalls.head.id.asString should fullyMatch).regex(callId)
         chunks.flatMap(_.toolCall) should have size 1
         chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
         completion.usage.map(_.totalTokens) shouldBe Some(15)
@@ -647,8 +652,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val calls = stream(client)._1.toOption.get.toolCalls
 
         calls.map(_.name) shouldBe List("get_weather", "get_time", "get_weather")
-        calls.map(c => indexOf(c.id)) shouldBe List(0, 1, 2)
-        calls.map(c => prefixOf(c.id)).distinct should have size 1
+        calls.map(c => indexOf(c.id.asString)) shouldBe List(0, 1, 2)
+        calls.map(c => prefixOf(c.id.asString)).distinct should have size 1
         calls.map(_.id).distinct should have size 3
       }
     }
@@ -659,7 +664,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val first  = stream(client)._1.toOption.get.toolCalls.head.id
         val second = stream(client)._1.toOption.get.toolCalls.head.id
 
-        prefixOf(first) should not be prefixOf(second)
+        prefixOf(first.asString) should not be prefixOf(second.asString)
       }
     }
 

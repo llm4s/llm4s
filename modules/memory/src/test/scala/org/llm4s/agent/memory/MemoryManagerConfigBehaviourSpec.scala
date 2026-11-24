@@ -178,7 +178,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       SystemMessage("You are a helpful assistant"),
       UserMessage("Who created Scala?"),
       AssistantMessage("Martin Odersky created Scala."),
-      ToolMessage("{\"result\": 42}", "call-1")
+      ToolMessage("{\"result\": 42}", ToolCallId("call-1"))
     )
     val recorded = llmManager(autoExtract = true, client).recordConversation(conversation, "conv-2").value
 

@@ -1,6 +1,6 @@
 package org.llm4s.springai
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -9,7 +9,7 @@ import java.time.Instant
 // RFC 0009: an llm4s completion's reason reaches Spring AI as it was, where it once was guessed from the tool calls
 class SpringAiFinishReasonSpec extends AnyFlatSpec with Matchers {
 
-  private val call = ToolCall("c1", "weather", ujson.Obj())
+  private val call = ToolCall(ToolCallId("c1"), "weather", ujson.Obj())
 
   private def completion(reason: FinishReason, calls: List[ToolCall] = Nil) =
     Completion(

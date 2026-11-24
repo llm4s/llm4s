@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.annotation.Experimental
@@ -11,7 +12,7 @@ import java.time.Instant
 
 /**
  * Where a child thread came from (design 4.41): the thread whose run started it (`parent`), the tool call of that run
- * that started it (`call`, the call's [[IdempotencyKey]]), the agent it runs (`agent`), when it was first admitted
+ * that started it (`call`, the call's [[org.llm4s.toolapi.IdempotencyKey]]), the agent it runs (`agent`), when it was first admitted
  * (`startedAt`, by the runtime's clock: [[GraphRuntime.startChild]] stamps it, whatever the caller passed), and how
  * deep it is: `1` for a child of a top-level thread, one more for each level below.
  *

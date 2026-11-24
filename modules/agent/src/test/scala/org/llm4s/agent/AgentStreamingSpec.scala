@@ -123,7 +123,7 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   it should "send no TextDelta for a tool-call-only stream, and complete as without streaming" in {
-    val call = ToolCall("call-1", "handoff_to_nobody", ujson.Obj())
+    val call = ToolCall(ToolCallId("call-1"), "handoff_to_nobody", ujson.Obj())
     // a tool call the agent does not know: the loop records an error result and asks again;
     // the second answer is text
     final class ToolThenText extends LLMClient:
@@ -168,7 +168,7 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   "A handoff" should "be reported as a durable HandedOff event" in {
     val target = Agent.builder("physics", Streaming(Seq("E=mc^2")))
-    val call   = ToolCall("call-1", "handoff_to_physics", ujson.Obj())
+    val call   = ToolCall(ToolCallId("call-1"), "handoff_to_physics", ujson.Obj())
     val root = new LLMClient:
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Right(Completion("c", Instant.EPOCH, "m", AssistantMessage(None, Seq(call)), usage))

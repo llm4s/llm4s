@@ -408,11 +408,11 @@ class BedrockClient(
               drain()
             case StreamSignal.ToolStart(index, id, name) =>
               toolIds(index) = id
-              emit(StreamedChunk(messageId, None, Some(ToolCall(id, name, ujson.Obj())), None))
+              emit(StreamedChunk(messageId, None, Some(ToolCall(ToolCallId(id), name, ujson.Obj())), None))
               drain()
             case StreamSignal.ToolArgs(index, fragment) =>
               toolIds.get(index).foreach { id =>
-                emit(StreamedChunk(messageId, None, Some(ToolCall(id, "", ujson.Str(fragment))), None))
+                emit(StreamedChunk(messageId, None, Some(ToolCall(ToolCallId(id), "", ujson.Str(fragment))), None))
               }
               drain()
             case StreamSignal.Stop(reason) =>
@@ -603,7 +603,7 @@ class BedrockClient(
         val textBlocks = msg.text.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
         val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
-            ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
+            ToolUseBlock.builder().toolUseId(tc.id.asString).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
           )
         }
         val blocks = reasoningBlocks ++ textBlocks ++ toolBlocks
@@ -627,7 +627,7 @@ class BedrockClient(
       case (msg: ToolMessage, _) =>
         val resultBlock = ToolResultBlock
           .builder()
-          .toolUseId(msg.toolCallId)
+          .toolUseId(msg.toolCallId.asString)
           .content(PartEncoding.withoutBlankText(msg.parts).map(BedrockClient.toolPart(nextName())).asJava)
           .build()
         Some(
@@ -682,7 +682,9 @@ class BedrockClient(
           val tu = block.toolUse()
           BedrockClient
             .toolCallArguments(tu.input())
-            .map(arguments => calls :+ ToolCall(id = tu.toolUseId(), name = tu.name(), arguments = arguments))
+            .map(arguments =>
+              calls :+ ToolCall(id = ToolCallId(tu.toolUseId()), name = tu.name(), arguments = arguments)
+            )
         }
       }
 
@@ -760,7 +762,7 @@ class BedrockClient(
       case msg: UserMessage      => ujson.Obj("role" -> "user", "content" -> Message.textWithMedia(msg))
       case msg: AssistantMessage => ujson.Obj("role" -> "assistant", "content" -> msg.content)
       case msg: ToolMessage =>
-        ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> Message.textWithMedia(msg))
+        ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId.asString, "content" -> Message.textWithMedia(msg))
     }
     val logged = ujson.Obj("modelId" -> config.model.asString, "region" -> config.region)
     options.temperature.foreach(t => logged("temperature") = t)

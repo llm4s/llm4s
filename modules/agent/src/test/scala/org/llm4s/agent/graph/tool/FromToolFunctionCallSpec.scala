@@ -1,8 +1,9 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.agent.graph.{ IdempotencyKey, ThreadState, ToolCallId }
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.agent.graph.ThreadState
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
-import org.llm4s.toolapi.{ Schema, ToolBuilder }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, ToolBuilder }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

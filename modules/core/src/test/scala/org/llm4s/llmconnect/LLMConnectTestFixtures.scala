@@ -23,13 +23,13 @@ object LLMConnectTestFixtures {
   // ================================= TOOL CALLS =================================
 
   val sampleToolCall: ToolCall = ToolCall(
-    id = "call_abc123",
+    id = ToolCallId("call_abc123"),
     name = "get_weather",
     arguments = ujson.Obj("location" -> "San Francisco", "unit" -> "celsius")
   )
 
   val sampleToolCall2: ToolCall = ToolCall(
-    id = "call_def456",
+    id = ToolCallId("call_def456"),
     name = "search_web",
     arguments = ujson.Obj("query" -> "Scala programming")
   )
@@ -41,7 +41,7 @@ object LLMConnectTestFixtures {
 
   val toolResponse: ToolMessage = ToolMessage(
     content = """{"temperature": 18, "condition": "sunny"}""",
-    toolCallId = "call_abc123"
+    toolCallId = ToolCallId("call_abc123")
   )
 
   // ================================= CONVERSATIONS =================================

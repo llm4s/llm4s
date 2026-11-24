@@ -107,8 +107,8 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   // --- tool pairs ---
 
-  private def call(id: String)       = ToolCall(id, "t", ujson.Obj())
-  private def toolResult(id: String) = ToolMessage(s"r$id", id)
+  private def call(id: String)       = ToolCall(ToolCallId(id), "t", ujson.Obj())
+  private def toolResult(id: String) = ToolMessage(s"r$id", ToolCallId(id))
 
   private def toolHistory: Seq[Message] = Seq(
     SystemMessage("sys"),
@@ -167,9 +167,9 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "count minified JSON by its tokens, not by its spaces" in {
     minifiedJson.exists(_.isWhitespace) shouldBe false
     // any BPE tokenizer averages at most four characters a token on JSON
-    ContextPruning.defaultTokenCounter(ToolMessage(minifiedJson, "c1")) should be >= minifiedJson.length / 4
+    ContextPruning.defaultTokenCounter(ToolMessage(minifiedJson, ToolCallId("c1"))) should be >= minifiedJson.length / 4
     ContextPruning.defaultTokenCounter(
-      AssistantMessage(None, Seq(ToolCall("c1", "t", ujson.read(minifiedJson))))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "t", ujson.read(minifiedJson))))
     ) should be >= minifiedJson.length / 4
   }
 
@@ -185,7 +185,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     val withCalls =
       AssistantMessage(
         Some(text),
-        Seq(ToolCall("c1", "search", ujson.Arr(ujson.read(minifiedJson).arr.take(100).toSeq*)))
+        Seq(ToolCall(ToolCallId("c1"), "search", ujson.Arr(ujson.read(minifiedJson).arr.take(100).toSeq*)))
       )
     val counted = ContextPruning.defaultTokenCounter(plain)
     ContextPruning.defaultTokenCounter(withCalls) should be > counted + 1_000
@@ -206,9 +206,9 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "count a message with an inline document, document included" in {
     val bytes = org.llm4s.media.MediaSource.Inline(IArray.fill[Byte](64 * 1024)(1))
     val pdf   = ContentPart.document(bytes, org.llm4s.media.MediaType.Pdf).value
-    val asked = ToolMessage(Vector(ContentPart.Text("report"), pdf), "c1")
+    val asked = ToolMessage(Vector(ContentPart.Text("report"), pdf), ToolCallId("c1"))
     ContextPruning.defaultTokenCounter(asked) should be > ContextPruning.defaultTokenCounter(
-      ToolMessage("report", "c1")
+      ToolMessage("report", ToolCallId("c1"))
     )
     ContextPruning.defaultTokenCounter(asked) shouldBe ContextPruning.defaultTokenCounter(asked)
   }
@@ -224,13 +224,13 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     ContextPruning.countWith(None)(tenWords) shouldBe 13
     ContextPruning.wordEstimate(tenWords) shouldBe 13
     ContextPruning.countWith(None)(
-      ToolMessage("""{"a":1,"b":2}""", "c1")
+      ToolMessage("""{"a":1,"b":2}""", ToolCallId("c1"))
     ) shouldBe 1 // one "word": why cl100k is the default
   }
 
   it should "count a tool result containing special-token names instead of failing" in {
     val page = "a page about LLMs: <|endoftext|> ends a document, <|fim_prefix|> starts a fill-in"
-    ContextPruning.defaultTokenCounter(ToolMessage(page, "c1")) should be > 10
+    ContextPruning.defaultTokenCounter(ToolMessage(page, ToolCallId("c1"))) should be > 10
     ContextPruning
       .prune(
         Seq(UserMessage("q1"), AssistantMessage("a1"), UserMessage(page)),
@@ -243,8 +243,8 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "let pruning drop an old tool result that does not fit maxTokens" in {
     val old = Seq(
       UserMessage("q1"),
-      AssistantMessage(None, Seq(ToolCall("c1", "search", ujson.Obj("q" -> "items")))),
-      ToolMessage(minifiedJson, "c1"),
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "search", ujson.Obj("q" -> "items")))),
+      ToolMessage(minifiedJson, ToolCallId("c1")),
       AssistantMessage("a1")
     )
     val current = UserMessage("q2")
@@ -564,11 +564,11 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       SystemMessage("sys"),
       UserMessage("q1"),
       AssistantMessage(None, Seq(call("0"))),
-      ToolMessage("a long earlier tool result", "0"),
+      ToolMessage("a long earlier tool result", ToolCallId("0")),
       AssistantMessage("a1"),
       UserMessage("q2"),
       AssistantMessage(None, Seq(call("1"))),
-      ToolMessage("the current tool result", "1")
+      ToolMessage("the current tool result", ToolCallId("1"))
     )
     // copies every assistant and tool message, truncating tool results: none is the same reference
     val copying = PruningStrategy.Custom(_.map {

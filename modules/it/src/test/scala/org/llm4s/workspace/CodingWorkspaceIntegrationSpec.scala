@@ -98,7 +98,8 @@ class CodingWorkspaceIntegrationSpec extends AnyFlatSpec with Matchers with Eith
 
   /** The scripted model: the reply to the last message of the conversation. */
   private def model(): ScriptedLLMClient = ScriptedLLMClient.respondingTo(Function.unlift { (c: Conversation) =>
-    def call(id: String, name: String, args: (String, ujson.Value)*) = ToolCall(id, name, ujson.Obj.from(args))
+    def call(id: String, name: String, args: (String, ujson.Value)*) =
+      ToolCall(ToolCallId(id), name, ujson.Obj.from(args))
     c.messages.lastOption.collect {
       case u: UserMessage if u.content == Query =>
         Reply.toolCalls(
@@ -108,14 +109,15 @@ class CodingWorkspaceIntegrationSpec extends AnyFlatSpec with Matchers with Eith
             "todos" -> ujson.Arr(ujson.Obj("content" -> "Fix and check", "status" -> "in_progress"))
           )
         )
-      case t: ToolMessage if t.toolCallId == "plan" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("plan") =>
         Reply.toolCalls(
           call("fix", "edit_file", "path" -> "/src/Greeter.scala", "old_string" -> "Helo,", "new_string" -> "Hello,"),
           call("test", "write_file", "path"   -> "/src/GreeterSpec.scala", "content" -> Test),
           call("readme", "write_file", "path" -> "/README.md", "content"             -> "Fixed.")
         )
-      case t: ToolMessage if t.toolCallId == "readme" => Reply.toolCalls(call("check", "execute", "command" -> Check))
-      case t: ToolMessage if t.toolCallId == "check"  => Reply.text(Answer)
+      case t: ToolMessage if t.toolCallId == ToolCallId("readme") =>
+        Reply.toolCalls(call("check", "execute", "command" -> Check))
+      case t: ToolMessage if t.toolCallId == ToolCallId("check") => Reply.text(Answer)
     }
   })
 
@@ -165,7 +167,9 @@ class CodingWorkspaceIntegrationSpec extends AnyFlatSpec with Matchers with Eith
     Files.readString(root.resolve("src/Greeter.scala")) shouldBe Fixed
     Files.readString(root.resolve("src/GreeterSpec.scala")) shouldBe Test
     Files.exists(root.resolve("README.md")) shouldBe false
-    suspended.messages.collect { case t: ToolMessage if t.toolCallId == "readme" => t.content }.mkString should
+    suspended.messages.collect {
+      case t: ToolMessage if t.toolCallId == ToolCallId("readme") => t.content
+    }.mkString should
       include("Denied: write /README.md")
 
     val second = SqliteCheckpointer.open(db).value

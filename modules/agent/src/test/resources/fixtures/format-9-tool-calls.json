@@ -1,0 +1,458 @@
+{
+  "threadId": "tool-call-ids",
+  "checkpoint": {
+    "formatVersion": 9,
+    "id": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/7",
+    "parent": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/6",
+    "threadId": "tool-call-ids",
+    "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+    "status": "Suspended",
+    "createdAt": "2026-11-24T13:55:33.006792Z",
+    "snapshot": {
+      "graphId": "assistant",
+      "graphVersion": "00d9658669312663017c8ed13de2924d4a60682899603cd6c1aa731a65747a76",
+      "fingerprint": "74532fd9002b6d5736a50deb721a93a7eb0ef7ca11d6fcccf35dacdfbfb0e875",
+      "superstep": 6,
+      "state": {
+        "messages": {
+          "version": 2,
+          "value": [
+            {
+              "id": "0.0/user",
+              "message": {
+                "type": "user",
+                "content": "echo then deploy"
+              }
+            },
+            {
+              "id": "1.0/assistant",
+              "message": {
+                "type": "assistant",
+                "toolCalls": [
+                  {
+                    "id": "c1",
+                    "name": "echo",
+                    "arguments": {
+                      "text": "hi"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "3.0/tool/c1",
+              "message": {
+                "type": "tool",
+                "toolCallId": "c1",
+                "content": "hi"
+              }
+            },
+            {
+              "id": "4.0/assistant",
+              "message": {
+                "type": "assistant",
+                "toolCalls": [
+                  {
+                    "id": "c2",
+                    "name": "deploy",
+                    "arguments": {
+                      "text": "prod"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "active-agent": {
+          "version": 1,
+          "value": "assistant"
+        },
+        "usage": {
+          "version": 1,
+          "value": {
+            "requestCount": 2,
+            "inputTokens": 20,
+            "outputTokens": 40,
+            "byModel": {
+              "test-model": {
+                "requestCount": 2,
+                "inputTokens": 20,
+                "outputTokens": 40
+              }
+            }
+          }
+        },
+        "turn": {
+          "version": 1,
+          "value": {
+            "steps": 2,
+            "outcome": null,
+            "startAgent": "assistant"
+          }
+        },
+        "delegation-counted": {
+          "version": 1,
+          "value": []
+        }
+      },
+      "frontier": [],
+      "staticJoins": [],
+      "dynamicJoins": [
+        {
+          "joinId": "assistant/tool-batch",
+          "fanOutTask": "4.0",
+          "expected": [
+            "5.0"
+          ],
+          "arrived": []
+        }
+      ],
+      "parked": [
+        {
+          "interruptId": "5.0",
+          "resumeNode": "assistant/approval",
+          "question": {
+            "version": 1,
+            "value": {
+              "assistantMessageId": "4.0/assistant",
+              "call": {
+                "id": "c2",
+                "name": "deploy",
+                "arguments": {
+                  "text": "prod"
+                }
+              },
+              "reason": "review c2",
+              "source": {
+                "$type": "Middleware",
+                "id": "approval"
+              },
+              "idempotencyKey": "a0c477740688081fef9e1cfbb97251b5c6316657ad0bd7943d612944115bac32"
+            }
+          },
+          "originTask": "5.0",
+          "originNode": "assistant/call-tool",
+          "joinId": "assistant/tool-batch",
+          "fanOutTask": "4.0",
+          "originLineage": "cd46872236ecba87d1f95196fab2fdf7adc29fabdee0297abb37413388a62699",
+          "questionDigest": "d372c00a3511f158ed459c1cfb4009b8bc161ec38c69e9e7b4023fee0b366db9"
+        }
+      ],
+      "paused": true,
+      "shape": {
+        "entry": "input",
+        "nodes": [
+          "assistant/approval",
+          "assistant/call-tool",
+          "assistant/collect",
+          "assistant/finish",
+          "assistant/model",
+          "input"
+        ],
+        "edges": {},
+        "staticJoins": [],
+        "dynamicJoins": {
+          "assistant/tool-batch": "assistant/collect"
+        },
+        "resumes": [
+          "assistant/approval"
+        ],
+        "keys": [
+          "active-agent",
+          "delegation-counted",
+          "delegation-grant",
+          "delegation-input",
+          "delegation-prior-usage",
+          "delegation-timed-out",
+          "messages",
+          "tool-results",
+          "transfer",
+          "turn",
+          "usage"
+        ]
+      }
+    },
+    "fencingToken": 1,
+    "trace": "00-5529f4c1bdef34e773ff656cb6a900dc-2753b9696c4a32d9-01"
+  },
+  "pendingWrites": [],
+  "events": [
+    {
+      "threadId": "tool-call-ids",
+      "seq": 1,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/1",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.853629Z",
+      "event": {
+        "$type": "RunStarted",
+        "tenantId": null,
+        "principal": null
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 2,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/1",
+      "taskId": "0.0",
+      "nodeId": "input",
+      "timestamp": "2026-11-24T13:55:32.923035Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 3,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/2",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.931434Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 1
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 4,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/2",
+      "taskId": "1.0",
+      "nodeId": "assistant/model",
+      "timestamp": "2026-11-24T13:55:32.966113Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 5,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/2",
+      "taskId": "1.0",
+      "nodeId": "assistant/model",
+      "timestamp": "2026-11-24T13:55:32.955695Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.model_call_completed",
+        "version": 1,
+        "payload": {
+          "agent": "assistant",
+          "model": "test-model",
+          "attempts": 1,
+          "toolCalls": 1,
+          "usage": {
+            "promptTokens": 10,
+            "completionTokens": 20,
+            "totalTokens": 30,
+            "thinkingTokens": null
+          },
+          "estimatedCost": null,
+          "finishReason": "Unknown",
+          "duration": 11
+        }
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 6,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/3",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.969339Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 2
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 7,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/3",
+      "taskId": "2.0",
+      "nodeId": "assistant/call-tool",
+      "timestamp": "2026-11-24T13:55:32.983538Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 8,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/3",
+      "taskId": "2.0",
+      "nodeId": "assistant/call-tool",
+      "timestamp": "2026-11-24T13:55:32.982446Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.tool_executed",
+        "version": 1,
+        "payload": {
+          "agent": "assistant",
+          "toolCallId": "c1",
+          "tool": "echo",
+          "duration": 2,
+          "outcome": "Succeeded",
+          "idempotencyKey": "e6e37ac644aec9c1f1b1b7c02ff2080ea6061ce963ca556ac2d1f18575ee5fa3"
+        }
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 9,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/4",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.985945Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 3
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 10,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/4",
+      "taskId": "3.0",
+      "nodeId": "assistant/collect",
+      "timestamp": "2026-11-24T13:55:32.990590Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 11,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/5",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.991966Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 4
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 12,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/5",
+      "taskId": "4.0",
+      "nodeId": "assistant/model",
+      "timestamp": "2026-11-24T13:55:32.996261Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 13,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/5",
+      "taskId": "4.0",
+      "nodeId": "assistant/model",
+      "timestamp": "2026-11-24T13:55:32.994687Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.model_call_completed",
+        "version": 1,
+        "payload": {
+          "agent": "assistant",
+          "model": "test-model",
+          "attempts": 1,
+          "toolCalls": 1,
+          "usage": {
+            "promptTokens": 10,
+            "completionTokens": 20,
+            "totalTokens": 30,
+            "thinkingTokens": null
+          },
+          "estimatedCost": null,
+          "finishReason": "Unknown",
+          "duration": 1
+        }
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 14,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/6",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:32.998117Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 5
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 15,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/6",
+      "taskId": "5.0",
+      "nodeId": "assistant/call-tool",
+      "timestamp": "2026-11-24T13:55:33.003543Z",
+      "event": {
+        "$type": "TaskSuspended",
+        "interruptId": "5.0"
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 16,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/6",
+      "taskId": "5.0",
+      "nodeId": "assistant/call-tool",
+      "timestamp": "2026-11-24T13:55:33.000936Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.tool_executed",
+        "version": 1,
+        "payload": {
+          "agent": "assistant",
+          "toolCallId": "c2",
+          "tool": "deploy",
+          "duration": 0,
+          "outcome": "NeedsApproval",
+          "idempotencyKey": "a0c477740688081fef9e1cfbb97251b5c6316657ad0bd7943d612944115bac32"
+        }
+      }
+    },
+    {
+      "threadId": "tool-call-ids",
+      "seq": 17,
+      "runId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830",
+      "token": 1,
+      "checkpointId": "0f6da7ae-3b95-463b-9f90-d9f71e1ff830/7",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-24T13:55:33.006907Z",
+      "event": {
+        "$type": "RunSuspended",
+        "interrupts": [
+          "5.0"
+        ]
+      }
+    }
+  ]
+}
