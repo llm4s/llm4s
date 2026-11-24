@@ -37,12 +37,12 @@ llm4s.defaultProvider = "openai-main"         # the default section
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 
   azure-main {
     provider   = "azure"
-    model      = "gpt-4o"
+    model      = "gpt-5.6-terra"
     endpoint   = ${?AZURE_API_BASE}
     apiVersion = ${?AZURE_API_VERSION}
   }

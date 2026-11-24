@@ -37,7 +37,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
    * The cheapest reasoning model in the gpt-5 family. The registry flags it `supports_reasoning`,
    * so it gets `reasoning_effort`, `max_completion_tokens` and no sampling parameters.
    */
-  private val ReasoningModel = "gpt-5-mini"
+  private val ReasoningModel = "gpt-5.6-luna" // gpt-5-mini shuts down on 2026-12-11 (OpenAI deprecations page)
 
   private def config(key: String, model: String = "gpt-4o-mini"): OpenAIConfig =
     OpenAIConfig
@@ -155,7 +155,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def apiKeyEnvVar: String                           = "OPENAI_API_KEY"
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(config(key))
-  // gpt-5-mini reasons. OpenAI reports reasoning tokens, not the reasoning text. max_completion_tokens counts the
+  // gpt-5.6-luna reasons. OpenAI reports reasoning tokens, not the reasoning text. max_completion_tokens counts the
   // reasoning too, so the cap leaves room for the answer after it.
   override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
     OpenAIClient(config(key, ReasoningModel)).map { client =>

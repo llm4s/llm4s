@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
   ([migration](docs/reference/migration.md#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- `LangfuseBatchSender` has `sendTraces` and `sendScores` in place of `sendBatch`, `LANGFUSE_URL` is the host (`LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`), and an unplaced run's Langfuse trace id is `TraceContext.rootFor(runId).traceId`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
 - A model id is a `ModelName` wherever it crosses a public API (`Completion.model`, `UsageSummary.byModel`, `ModelMetadata.modelId`, `ModelRegistryService.lookup`, `RequestTransformer`, `EmbeddingModelConfig.name`, trace events, every `fromValues`), and a provider config's base URL is a `BaseUrl`; stored JSON is unchanged
   ([migration](docs/reference/migration.md#model-ids-are-modelname-provider-ids-providerid-and-provider-configs-base-urls-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
 - A provider id is a `ProviderId` in `ModelMetadata.provider`, `ModelRegistryService.lookup(provider, model)`, `listByProvider` and `listProviders`, `ContextWindowResolver`, `ModelDimensionRegistry.getDimension` and `ModelRef`
@@ -168,6 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MetricsCollector.recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` are removed: `ReliableClient` records
   `ReliabilityMetrics.Retries`, `CircuitBreakerTransitions` and `Errors` through `increment`, so a collector that overrode them overrides `increment`;
   [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
+- `HuggingFaceClient` calls Hugging Face Inference Providers (`hf-inference`); `HuggingFaceConfig` gains `baseUrl`, and
+  `Parameters.inferenceSteps` is `num_inference_steps`; [migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832).
 - `MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed, with `MicrometerMetrics.Names`' five image constants: the image metrics are `ImageMetrics` in `llm4s-image`, recorded through `increment`/`observe`; the exported series are unchanged;
   [migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801).
 - `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
@@ -252,6 +256,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
+  `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
+  and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
+- **Added** Bundled model metadata for `claude-sonnet-5-5`, `claude-haiku-5-5`, their Bedrock ids, `gpt-5.6-luna`,
+  `gpt-5.6-terra` and `gemini-3.8-flash`, as overrides until the next LiteLLM refresh [#2832](https://github.com/llm4s/llm4s/issues/2832).
 - **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** A provider module's client reports `FinishReason.Unknown` where it read no finish reason, and Perplexity ignores a reported cost that is not a number in favour of the estimate. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
@@ -608,12 +617,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** The image generation metrics are `ImageMetrics` in `llm4s-image`, generic metrics every backend exports; `MetricsCollector` has no image method. Every exported series keeps its name, type, labels and buckets, pinned by `ImageMetricsSeriesSpec`
   ([migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801)) [#2801](https://github.com/llm4s/llm4s/issues/2801).
 - **Added** `MetricsCollector.Errors`, the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so a module above core adds its failed operations to it [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Fixed** The `langfuse` tracing mode sends OTLP/HTTP JSON to Langfuse's OpenTelemetry endpoint (`/api/public/otel/v1/traces`),
+  as Langfuse removed `/api/public/ingestion` from Langfuse Cloud on 2026-11-16; `RAGASLangfuseObserver` scores go to `/api/public/scores`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
 - **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
   `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
   (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
 
 ### Documentation
 
+- **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
+  `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`); the watsonx pages say it ships unverified, the
+  observability guide that Langfuse Cloud removed the ingestion API the `langfuse` mode uses, and the release checklist gains the checks [#2832](https://github.com/llm4s/llm4s/issues/2832).
 - **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).

@@ -38,7 +38,7 @@ Keep keys out of code and out of checked-in files. In order of preference:
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # instead of apiKey
 }
 ```

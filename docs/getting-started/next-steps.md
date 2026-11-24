@@ -445,14 +445,14 @@ val result = for {
 - Check key starts with correct prefix (`sk-` for OpenAI, `sk-ant-` for Anthropic)
 
 **Problem: Model not found**
-- Verify `model` in the provider section is the provider's own model name (e.g. `gpt-4o-mini`, no `openai/` prefix)
+- Verify `model` in the provider section is the provider's own model name (e.g. `gpt-5.6-luna`, no `openai/` prefix)
 - Check `llm4s.defaultProvider` names the section you meant
 - Check provider supports that model
 - Try a different model
 
 **Problem: Slow responses**
 - Use streaming for real-time feedback
-- Consider using a faster model (gpt-4o-mini, a Claude Haiku model)
+- Consider using a faster model (gpt-5.6-luna, a Claude Haiku model)
 - Check your internet connection
 
 **Problem: Token limit errors**

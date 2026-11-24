@@ -177,7 +177,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     ctx.getStartupFailure shouldBe null
     val props = ctx.getBean(classOf[Llm4sProperties])
     props.provider shouldBe "openai"
-    props.model shouldBe "gpt-4o"
+    props.model shouldBe "gpt-5.6-terra"
     props.apiKey shouldBe "sk-from-env" // the ${OPENAI_API_KEY} placeholder, resolved
     ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
     ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
@@ -562,7 +562,11 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         val health = ctx.getBean(classOf[LlmIndicator]).health()
 
         health.getStatus shouldBe Status.UP
-        health.getDetails.asScala.toMap shouldBe Map("provider" -> "openai", "model" -> "gpt-4o", "probe" -> "disabled")
+        health.getDetails.asScala.toMap shouldBe Map(
+          "provider" -> "openai",
+          "model"    -> "gpt-5.6-terra",
+          "probe"    -> "disabled"
+        )
         (health.toString should not).include("sk-from-env")
       }
     }

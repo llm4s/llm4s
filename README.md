@@ -102,7 +102,7 @@ Spring AI, Koog and Embabel, with a source and a date for every claim, and
 
 ## Features
 
-- **Multi-Provider Support**: Eighteen chat providers behind one API: OpenAI, Azure OpenAI, Requesty, Anthropic, Google Gemini, Vertex AI, Amazon Bedrock, IBM watsonx.ai, Mistral, Cohere, DeepSeek, xAI, Z.ai, OpenRouter, Perplexity, Ollama, Jlama (a model run inside your JVM) and any OpenAI-compatible endpoint.
+- **Multi-Provider Support**: Eighteen chat providers behind one API: OpenAI, Azure OpenAI, Requesty, Anthropic, Google Gemini, Vertex AI, Amazon Bedrock, IBM watsonx.ai (Beta, unverified against the live service), Mistral, Cohere, DeepSeek, xAI, Z.ai, OpenRouter, Perplexity, Ollama, Jlama (a model run inside your JVM) and any OpenAI-compatible endpoint.
 - **Execution Environments**: Run LLM-driven operations in secure, containerized or non-containerized setups.
 - **Error Handling**: Robust mechanisms to catch, log, and recover from failures gracefully.
 - **MCP Support**: Model Context Protocol primitives for richer tool and context integration.
@@ -256,7 +256,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -565,7 +565,7 @@ Tracing
 Example (no application.conf required):
 
 ```
-sbt -Dllm4s.defaultProvider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+sbt -Dllm4s.defaultProvider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-5.6-terra -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
 Or with an `openai-main` section (`provider = "openai"` and a `model`) in

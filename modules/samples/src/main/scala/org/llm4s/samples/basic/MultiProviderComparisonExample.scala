@@ -26,9 +26,9 @@ import scala.util.Using
  * {{{
  * llm4s {
  *   providers {
- *     openai-main    { provider = "openai",    model = "gpt-4o-mini" }
- *     anthropic-main { provider = "anthropic", model = "claude-haiku-4-5-latest" }
- *     gemini-main    { provider = "gemini",    model = "gemini-2.0-flash" }
+ *     openai-main    { provider = "openai",    model = "gpt-5.6-luna" }
+ *     anthropic-main { provider = "anthropic", model = "claude-haiku-5-5" }
+ *     gemini-main    { provider = "gemini",    model = "gemini-3.8-flash" }
  *   }
  * }
  * }}}

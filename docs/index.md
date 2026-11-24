@@ -148,7 +148,7 @@ val ticket: Result[Ticket] = for {
     <div class="lp-chips-block">
       <h3>Model providers</h3>
       <ul class="lp-chips">
-        <li>OpenAI</li><li>Azure OpenAI</li><li>Requesty</li><li>Anthropic</li><li>Google Gemini</li><li>Vertex AI</li><li>Amazon Bedrock</li><li>IBM watsonx.ai</li><li>Mistral</li><li>Cohere</li><li>DeepSeek</li><li>xAI</li><li>Z.ai</li><li>OpenRouter</li><li>Perplexity</li><li>Ollama</li><li>Jlama (in your JVM)</li><li>Any OpenAI-compatible endpoint</li>
+        <li>OpenAI</li><li>Azure OpenAI</li><li>Requesty</li><li>Anthropic</li><li>Google Gemini</li><li>Vertex AI</li><li>Amazon Bedrock</li><li>IBM watsonx.ai (Beta, unverified against the live service)</li><li>Mistral</li><li>Cohere</li><li>DeepSeek</li><li>xAI</li><li>Z.ai</li><li>OpenRouter</li><li>Perplexity</li><li>Ollama</li><li>Jlama (in your JVM)</li><li>Any OpenAI-compatible endpoint</li>
       </ul>
       <h3>Languages, frameworks and runtimes</h3>
       <ul class="lp-chips lp-chips--alt">

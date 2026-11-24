@@ -116,7 +116,7 @@ class MathResponse(BaseModel):
 
 client = OpenAI()
 completion = client.chat.completions.parse(
-    model="gpt-4o-2024-08-06",
+    model="gpt-5.6-luna",
     messages=[
         {"role": "system", "content": "You are a helpful math tutor."},
         {"role": "user", "content": "solve 8x + 31 = 2"},
@@ -436,7 +436,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }

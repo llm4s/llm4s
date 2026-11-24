@@ -58,7 +58,7 @@ description: "Why build LLM applications in Scala on the JVM, what LLM4S gives a
       <h2 id="why-llm4s-heading">What LLM4S gives a team</h2>
     </header>
     <ul class="lp-grid lp-grid--3">
-      <li class="lp-card"><p class="lp-card__glyph">providers</p><h3>Multi-provider through one SPI</h3><p>Eighteen chat providers: OpenAI, Azure OpenAI, Requesty, Anthropic, Gemini, Vertex AI, Amazon Bedrock, IBM watsonx.ai, Mistral, Cohere, DeepSeek, xAI, Z.ai, OpenRouter, Perplexity, Ollama, Jlama (a model run inside your JVM) and any OpenAI-compatible endpoint, plus five embedding providers. Each is a module found on the classpath.</p><a href="{{ '/guide/providers' | relative_url }}">Providers</a></li>
+      <li class="lp-card"><p class="lp-card__glyph">providers</p><h3>Multi-provider through one SPI</h3><p>Eighteen chat providers: OpenAI, Azure OpenAI, Requesty, Anthropic, Gemini, Vertex AI, Amazon Bedrock, IBM watsonx.ai (Beta, unverified against the live service), Mistral, Cohere, DeepSeek, xAI, Z.ai, OpenRouter, Perplexity, Ollama, Jlama (a model run inside your JVM) and any OpenAI-compatible endpoint, plus five embedding providers. Each is a module found on the classpath.</p><a href="{{ '/guide/providers' | relative_url }}">Providers</a></li>
       <li class="lp-card"><p class="lp-card__glyph">agents</p><h3>Agents with guardrails</h3><p>Input and output guardrails, including LLM-as-judge, handoffs, delegation, human review, streaming events and a typed graph runtime with durable checkpoints in SQLite or PostgreSQL.</p><a href="{{ '/guide/agents/' | relative_url }}">Agents</a></li>
       <li class="lp-card"><p class="lp-card__glyph">rag</p><h3>RAG and memory</h3><p>Loaders, chunking, pgvector, Qdrant, SQLite and Elasticsearch stores, hybrid search, reranking, permission-aware retrieval, GraphRAG and RAGAS-style evaluation.</p><a href="{{ '/guide/vector-store' | relative_url }}">Vector stores</a></li>
       <li class="lp-card"><p class="lp-card__glyph">mcp</p><h3>Tools and MCP</h3><p>A tool API with typed tools, built-in tools, and Model Context Protocol client and server with stdio, SSE and Streamable HTTP transports, bearer-token auth and public-bind protection.</p><a href="{{ '/guide/custom-tools' | relative_url }}">Tools</a></li>
@@ -73,7 +73,7 @@ description: "Why build LLM applications in Scala on the JVM, what LLM4S gives a
     <header class="lp-section__head">
       <p class="lp-eyebrow">How it differs</p>
       <h2 id="unique-heading">Compared with Python-first stacks and other JVM libraries</h2>
-      <p>Facts and trade-offs, not rankings. The full, sourced table is on <a href="{{ '/guide/comparison' | relative_url }}">Comparing LLM4S</a>, last verified 2026-10-11 against LangChain4j, Spring AI, Koog and Embabel.</p>
+      <p>Facts and trade-offs, not rankings. The full, sourced table is on <a href="{{ '/guide/comparison' | relative_url }}">Comparing LLM4S</a>, last verified 2026-11-24 against LangChain4j 1.24.0, Spring AI 2.1.0, Koog 1.3.0 and Embabel 1.5.4.</p>
     </header>
     <div class="lp-grid lp-grid--2">
       <div class="lp-card lp-card--flat">

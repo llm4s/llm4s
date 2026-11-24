@@ -574,7 +574,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 ```
 
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
-`llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
+`llm4s-core`. It is Beta and ships unverified against the live watsonx.ai service: no test has run against a real
+account. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
 ### For Perplexity
 
@@ -936,7 +937,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -1065,7 +1066,7 @@ Response: LLM4S is working!
 **Solution**: make `llm4s.defaultProvider` match a section name exactly, and add the module
 for the provider id (for example `llm4s-openai` for `provider = "openai"`; see
 [Optional Dependencies](#optional-dependencies)). Model names go in the section's `model`
-without a provider prefix: `model = "gpt-4o"` for OpenAI, not `openai/gpt-4o`.
+without a provider prefix: `model = "gpt-5.6-terra"` for OpenAI, not `openai/gpt-5.6-terra`.
 
 ### Compilation Errors
 

@@ -88,7 +88,7 @@ a request, and neither throws: a missing key is a failed result that names it.
 ```java
 LlmResult<JLlmClient> openai = Llm4s.openAi()
     .apiKey(apiKey)
-    .model("gpt-4o-mini")
+    .model("gpt-5.6-luna")
     .build();
 LlmResult<JLlmClient> fromConfig = Llm4s.createDefaultClient();   // application.conf
 ```
@@ -346,7 +346,7 @@ The builders, in Java:
 ```java
 LlmResult<JLlmClient> openai = Llm4s.openAi()
     .apiKey(openAiKey)
-    .model("gpt-4o-mini")
+    .model("gpt-5.6-luna")
     .build();
 LlmResult<JLlmClient> azure = Llm4s.azureOpenAi()
     .endpoint("https://my-resource.openai.azure.com")

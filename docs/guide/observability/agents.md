@@ -107,11 +107,11 @@ machine names the same spans without coordination. A run that called one tool, a
 ```text
 invoke_agent assistant                     the run (sent when the run ends)
 ├── graph.run_started
-├── chat gpt-4o                            a model call
+├── chat gpt-5.6-terra                            a model call
 ├── Token Usage - agent_completion         its usage
 ├── execute_tool search_docs               a tool call, spanning its duration
 ├── graph.checkpoint_committed
-├── chat gpt-4o
+├── chat gpt-5.6-terra
 ├── Token Usage - agent_completion
 └── graph.run_completed
 ```
@@ -142,7 +142,7 @@ spans are named after the event: `graph.<event>` for the runtime's events (`grap
 | Span | From | OpenTelemetry | Langfuse |
 |---|---|---|---|
 | `invoke_agent <agent>` | `TraceEvent.AgentRunEnded`, once, when the run ends | `INTERNAL`; `gen_ai.operation.name` = `invoke_agent`, `gen_ai.agent.name`, `gen_ai.conversation.id` (the thread), `gen_ai.provider.name` (the run's first model call's), `thread_id`, `run_id`, `agent`, `active_agent`, `status`, `blocked_by` (a blocked run's guardrail), `message_count`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`; a delegated child's also `llm4s.parent.thread_id` and `llm4s.parent.run_id`. Status `ERROR` when `status` is `failed`, `cancelled` or `timed_out` | A span observation; metadata `framework`, `agent`, `active_agent`, `status`, `blocked_by`, `thread_id`, `run_id`, `message_count`, `input_tokens`, `output_tokens`, `total_cost` and a child's `parent_thread_id`, `parent_run_id`; input the turn's first user message, output its last assistant message. Level `ERROR` (and `statusMessage` = the status) for the same three statuses |
-| `chat <model>` | `agent.model_call_completed` | `CLIENT`; `gen_ai.operation.name` = `chat`, `gen_ai.request.model`, `gen_ai.agent.name` (the agent that made the call), `gen_ai.conversation.id`, `gen_ai.provider.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` | A generation with `model` and `usage` (`input`, `output`, `total`, `unit` = `TOKENS`); metadata is the event's data |
+| `chat <model>` | `agent.model_call_completed` | `CLIENT`; `gen_ai.operation.name` = `chat`, `gen_ai.request.model`, `gen_ai.agent.name` (the agent that made the call), `gen_ai.conversation.id`, `gen_ai.provider.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` | A generation with `model` and `usage` (`input`, `output`, `total`); metadata is the event's data |
 | `execute_tool <tool>` | `agent.tool_executed` | `INTERNAL`; `gen_ai.operation.name` = `execute_tool`, `gen_ai.tool.name`, `tool.name`, `gen_ai.tool.call.id`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `data` (the event as JSON). Status `ERROR` when the outcome is `Errored` | A span; level `ERROR` when the outcome is `Errored`; metadata is the event's data |
 | `Token Usage - agent_completion` | `TraceEvent.TokenUsageRecorded`, one per model call that reported usage | `INTERNAL`; `gen_ai.request.model`, `operation`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.total_tokens` | An event with the same counts |
 | `Error` | `TraceEvent.ErrorOccurred` with context `agent run`, for a failed run or one that ended without a terminal event | `INTERNAL`; `error.message`, `error.type` (the error's type, such as `NodeFailed`), `context` | An event, level `ERROR` |
@@ -150,10 +150,13 @@ spans are named after the event: `graph.<event>` for the runtime's events (`grap
 
 Every event's data holds `threadId`, `runId`, `seq`, `checkpointId`, `taskId` and `nodeId`, and the event's own
 fields: for an agent event `name`, `version` and `payload`. Output token counts include thinking tokens, as billed.
-In Langfuse, a top-level run also creates the trace itself (name `LLM4S Agent Run`, session id = the thread id,
-`userId` the run's `RunConfig.principal`, left out for a run that names none, `public: false` unless
-`llm4s.tracing.langfuse.public = true`, tags `llm4s`, `agent`, `conversation`) and adds one span per message of the
-turn under the run (`User Input <n>`, `LLM Generation <n>`, `System Message <n>`, or the message's class name).
+In Langfuse, a top-level run's span also sets the trace itself (`langfuse.trace.name` `LLM4S Agent Run`,
+`session.id` the thread id, `user.id` the run's `RunConfig.principal`, left out for a run that names none,
+`langfuse.trace.public` `false` unless `llm4s.tracing.langfuse.public = true`, `langfuse.trace.tags` `llm4s`,
+`agent`, `conversation`) and adds one span per message of the turn under the run (`User Input <n>`,
+`LLM Generation <n>`, `System Message <n>`, or the message's class name). Every Langfuse observation is an
+OpenTelemetry span sent to Langfuse's OTLP endpoint, with its fields as `langfuse.*` attributes (see
+[Monitoring](index#what-gets-captured)).
 
 A tool call and a model call span their duration: a `chat <model>` span starts when the agent called the client and
 ends when the call's result was recorded, so it covers a `ReliableClient`'s retries of that call. Every other event is
@@ -171,9 +174,9 @@ was started on, and `activeAgent` the agent active when the run ended.
 | What happened | In the trace |
 |---|---|
 | A handoff | Same run, same trace: an `agent.handed_off` span (`from`, `to`), later `chat` spans carry the new agent's `gen_ai.agent.name`. `invoke_agent` stays named after the root agent; its `active_agent` is the agent active at the end |
-| A delegated subagent | A nested span, not a separate trace: the child's `invoke_agent` sits under the parent's `execute_tool task` span, on whichever machine ran it, with `llm4s.parent.*` set. In Langfuse the child creates no trace of its own. The parent's `agent.task_ended` carries the child's status and usage |
+| A delegated subagent | A nested span, not a separate trace: the child's `invoke_agent` sits under the parent's `execute_tool task` span, on whichever machine ran it, with `llm4s.parent.*` set. In Langfuse the child sets no trace attributes of its own. The parent's `agent.task_ended` carries the child's status and usage |
 | Suspended for approval or a question | `invoke_agent` with status `suspended`, sent when the run suspends; the suspending tool call is a span of its own (`execute_tool <tool>` with outcome `NeedsApproval` or `Asked`) |
-| Resumed | A new run with its own `invoke_agent`, in the same trace: under the context the first run continued, or else under the first run's span. In Langfuse each top-level run sends the trace again - an upsert by trace id, so the trace's input, output, metadata and timestamp are its latest run's - and its run span has no parent |
+| Resumed | A new run with its own `invoke_agent`, in the same trace: under the context the first run continued, or else under the first run's span. In Langfuse each top-level run sets the trace again - Langfuse merges a trace's attributes by trace id, so the trace's input, output and metadata are its latest run's - and its run span has no parent |
 | Recovered after a crash | A new run starting `graph.run_recovered` (with `takenOverFrom` when it took over an expired claim), placed as a resume is. The run that died sent no `AgentRunEnded`, so its events point at a run span the backend never receives |
 | Blocked by a guardrail | `agent.guardrail_blocked` (`guardrail`, `phase`), then `graph.task_failed` and `graph.run_failed`; status `blocked`, `blocked_by` the guardrail; no messages; not an `ERROR` span |
 | Step or token limit | Status `step_limit_reached` or `token_limit_reached`; not an `ERROR` span |

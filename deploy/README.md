@@ -49,7 +49,7 @@ system properties in `JAVA_OPTS` for the section and a Secret for the key:
 # a patch for the Deployment's container
 env:
   - name: JAVA_OPTS
-    value: "-Dllm4s.defaultProvider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o-mini"
+    value: "-Dllm4s.defaultProvider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-5.6-luna"
   - name: OPENAI_API_KEY
     valueFrom:
       secretKeyRef:

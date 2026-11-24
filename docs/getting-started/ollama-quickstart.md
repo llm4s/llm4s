@@ -705,7 +705,7 @@ docker-compose exec ollama ollama pull llama3.1
 > ```hocon
 > openai-main {
 >   provider = "openai"
->   model    = "gpt-4o"
+>   model    = "gpt-5.6-terra"
 > }
 > ```
 >

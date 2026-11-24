@@ -156,7 +156,7 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
     val config = Llm4sConfig.providerFrom(withKey).fold(error => fail(error.formatted), identity)
 
     config.providerId.asString shouldBe "openai"
-    config.model.asString shouldBe "gpt-4o-mini"
+    config.model.asString shouldBe "gpt-5.6-luna"
   }
 
   it should "load ollama.conf, the -Dconfig.resource alternative, with the Ollama section as its default" in {

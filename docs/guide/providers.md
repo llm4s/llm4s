@@ -76,7 +76,7 @@ llm4s {
   providers {
     openai-main {                     # key from OPENAI_API_KEY
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
 
     claude {                          # key from ANTHROPIC_API_KEY
@@ -143,7 +143,7 @@ llm4s {
   providers {
     openai-main {
       provider     = "openai"
-      model        = "gpt-4o"
+      model        = "gpt-5.6-terra"
       # apiKey     = ${?OPENAI_BATCH_API_KEY}  # optional; default: OPENAI_API_KEY
       organization = ${?OPENAI_ORGANIZATION}   # optional, for multi-workspace accounts
       # baseUrl    = "https://my-proxy.example.com/v1"  # optional; default https://api.openai.com/v1
@@ -332,7 +332,7 @@ llm4s {
 
 ### Available Models
 
-Gemini models such as `gemini-2.5-flash`, `gemini-2.5-pro` and the Gemini 3 previews; see
+Gemini models such as `gemini-3.8-flash`, `gemini-3.5-flash-lite` and the Gemini 4 models (`gemini-4-hydrogen`); see
 [Google's model list](https://ai.google.dev/gemini-api/docs/models).
 
 ### Costs
@@ -367,7 +367,7 @@ search, and the sources behind a grounded answer arrive on `Completion.citations
 ```hocon
 llm4s.providers.gemini-search {
   provider     = "gemini"
-  model        = "gemini-2.5-flash"
+  model        = "gemini-3.8-flash"
   googleSearch = true
 }
 ```
@@ -828,7 +828,7 @@ llm4s {
   providers {
     openrouter-main {
       provider = "openrouter"
-      model = "anthropic/claude-3.5-sonnet"
+      model = "anthropic/claude-sonnet-5.5"
       # apiKey defaults to OPENROUTER_API_KEY
       # baseUrl defaults to https://openrouter.ai/api/v1
     }
@@ -1364,7 +1364,7 @@ A gateway that authenticates with its own header rather than a bearer token take
 internal-gateway {
   provider = "openai-compatible"
   baseUrl = "https://llm-gateway.internal.example/v1"
-  model = "gpt-4o-mini"
+  model = "gpt-5.6-luna"
   headers {
     X-Team = "search"
     X-Gateway-Token = ${?GATEWAY_TOKEN}
@@ -2086,7 +2086,7 @@ import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def azureClient(using ModelRegistryService) =
   val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
-  LLMConnect.getClient(AzureConfig.keyless(BaseUrl("https://my-resource.openai.azure.com"), ModelName("gpt-4o"), tokens))
+  LLMConnect.getClient(AzureConfig.keyless(BaseUrl("https://my-resource.openai.azure.com"), ModelName("gpt-5.6-terra"), tokens))
 ```
 
 Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the
@@ -2121,7 +2121,7 @@ metadata server of the GCE, GKE or Cloud Run workload. See [Google Vertex AI](#g
    module binds it to the vendor's shared key:
 
 ```hocon
-openai-main { provider = "openai", model = "gpt-4o" }
+openai-main { provider = "openai", model = "gpt-5.6-terra" }
 ```
 
 ```bash
@@ -2195,7 +2195,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
       baseUrl  = "https://proxy.example.com/openai"
       baseUrl  = ${?OPENAI_BASE_URL}   # optional: overrides the line above when set
     }
@@ -2308,7 +2308,7 @@ ollama serve
 ### "Model not found"
 
 Check the `model` key of the section you selected, and that its `provider` is the one serving
-that model (`model = "gpt-4o"` under `provider = "openai"`; no `openai/` prefix):
+that model (`model = "gpt-5.6-terra"` under `provider = "openai"`; no `openai/` prefix):
 
 ```bash
 # Check available models

@@ -79,6 +79,12 @@ thinking budget ([RFC 0008](../rfcs/0008-generation-controls)):
 }
 ```
 
+The overrides also carry whole entries for current models the snapshot predates, copied from LiteLLM's upstream file
+and checked against the vendor's pricing page: on 2026-11-24, `claude-sonnet-5-5`, `claude-haiku-5-5`,
+`anthropic.claude-sonnet-5-5` and `us.anthropic.claude-sonnet-5-5` (Bedrock), `gpt-5.6-luna`, `gpt-5.6-terra`,
+`gemini-3.8-flash` and `gemini/gemini-3.8-flash`, the ids the guides' examples use. The next refresh of the snapshot
+makes them redundant; delete them then.
+
 ## Looking a model up
 
 `lookup(modelId)` and `lookup(provider, modelName)` return a `Result[ModelMetadata]`. An id that is not an exact key
@@ -89,7 +95,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 def describe(registry: ModelRegistryService): Unit =
-  registry.lookup(ModelName("gpt-4o")) match {
+  registry.lookup(ModelName("gpt-5.6-terra")) match {
     case Right(metadata) =>
       println(s"Context window: ${metadata.contextWindow.getOrElse("unknown")}")
       println(s"Output limit: ${metadata.reserveCompletion.getOrElse("unknown")}")
@@ -125,7 +131,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 def estimate(registry: ModelRegistryService): Option[Double] =
-  registry.lookup(ModelName("gpt-4o")).toOption.flatMap(_.pricing.estimateCost(inputTokens = 10000, outputTokens = 2000))
+  registry.lookup(ModelName("gpt-5.6-terra")).toOption.flatMap(_.pricing.estimateCost(inputTokens = 10000, outputTokens = 2000))
 ```
 
 `estimateCost` multiplies by `pricing.inputCostPerToken` and `pricing.outputCostPerToken`, and is `None` when either

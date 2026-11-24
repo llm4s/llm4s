@@ -20,7 +20,7 @@ import org.llm4s.samples.util.AgentResults
  *   providers {
  *     openai-main {
  *       provider = "openai"
- *       model = "gpt-4o-mini"
+ *       model = "gpt-5.6-luna"
  *     }
  *   }
  * }

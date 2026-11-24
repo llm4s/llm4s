@@ -38,7 +38,7 @@ llm4s.defaultProvider = "claude-bedrock"      # the default section
 llm4s.providers {
   claude-bedrock {
     provider = "bedrock"
-    model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    model    = "us.anthropic.claude-sonnet-5-5"
     region   = ${?AWS_REGION}
   }
 }
@@ -49,7 +49,7 @@ Configured settings:
 - `region`: required, never defaulted (`${?AWS_REGION}`). A model is only available in specific regions;
   an explicit region prevents sending requests to the wrong region.
 - `model`: Bedrock model ID or regional inference profile ID (e.g.
-  `"anthropic.claude-3-5-sonnet-20241022-v2:0"` or `"us.anthropic.claude-3-5-sonnet-20241022-v2:0"`).
+  `"anthropic.claude-sonnet-5-5"` or `"us.anthropic.claude-sonnet-5-5"`; Claude Sonnet 5.5 is served on `bedrock-runtime` only through its geo (`us.`, `eu.`, ...) and `global.` profiles).
 - `profile`: optional named AWS shared-config profile (`${?AWS_PROFILE}`).
 - `accessKeyId`, `secretAccessKey`, `sessionToken`: explicit static credentials (`${?AWS_ACCESS_KEY_ID}`,
   `${?AWS_SECRET_ACCESS_KEY}`, `${?AWS_SESSION_TOKEN}`). `accessKeyId` and `secretAccessKey` must be set
@@ -66,7 +66,7 @@ Example with a shared profile and timeouts:
 ```hocon
 llm4s.providers.bedrock-prod {
   provider = "bedrock"
-  model    = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  model    = "us.anthropic.claude-sonnet-5-5"
   region   = "us-east-1"
   profile  = "production"
   timeouts {

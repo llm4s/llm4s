@@ -241,7 +241,8 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     sdConfig.provider shouldBe ImageGenerationProvider.StableDiffusion
 
     val hfConfig = HuggingFaceConfig(apiKey = Secret("test-key"))
-    hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
+    hfConfig.model shouldBe "stabilityai/stable-diffusion-3-medium-diffusers"
+    hfConfig.baseUrl shouldBe "https://router.huggingface.co/hf-inference"
     hfConfig.timeout shouldBe 120000.millis
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
 

@@ -218,17 +218,17 @@ object AdaptiveWindowingExample {
 
     // Simulate different model configurations
     val models = Map(
-      "gpt-4o" -> (
-        "openai/gpt-4o",
-        128_000,
-        Some(0.0000025),
-        Some(0.000010)
+      "gpt-5.6-terra" -> (
+        "openai/gpt-5.6-terra",
+        922_000,
+        Some(0.000002),
+        Some(0.000012)
       ),
-      "claude-3.5-sonnet" -> (
-        "anthropic/claude-3-5-sonnet-latest",
-        200_000,
-        Some(0.000003),
-        Some(0.000015)
+      "claude-sonnet-5.5" -> (
+        "anthropic/claude-sonnet-5-5",
+        1_000_000,
+        Some(0.000002),
+        Some(0.000010)
       ),
       "ollama-local" -> (
         "ollama/mistral",

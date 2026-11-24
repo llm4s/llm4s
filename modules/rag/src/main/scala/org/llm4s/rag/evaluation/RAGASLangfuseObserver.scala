@@ -3,11 +3,11 @@ package org.llm4s.rag.evaluation
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.llmconnect.utils.CodePointBoundary
-import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller }
+import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller, LangfuseOtlp, TraceContext }
+import org.llm4s.trace.LangfuseOtlp.{ Observation, ObservationType, TraceAttributes }
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
@@ -19,7 +19,11 @@ import java.util.UUID
  * - Composite RAGAS scores
  * - Evaluation details and metadata
  *
- * @param langfuseUrl The Langfuse API URL
+ * An evaluation's trace and its `Evaluation Details` span go to Langfuse's OpenTelemetry endpoint
+ * (`/api/public/otel/v1/traces`) as OTLP spans, and its scores to `POST /api/public/scores`, each score naming
+ * the trace's id, 32 hex digits (#2883).
+ *
+ * @param langfuseUrl The Langfuse host (a URL ending in one of Langfuse's API paths names the host it is on)
  * @param publicKey Langfuse public key
  * @param secretKey Langfuse secret key
  * @param environment Environment name (e.g., "production", "development")
@@ -47,225 +51,191 @@ class RAGASLangfuseObserver(
   batchSender: LangfuseBatchSender = new org.llm4s.trace.DefaultLangfuseBatchSender()
 ) {
 
-  private val logger         = LoggerFactory.getLogger(getClass)
-  private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
-  private def uuid: String   = UUID.randomUUID().toString
-  private val config         = LangfuseHttpApiCaller(langfuseUrl, publicKey, secretKey)
+  private val logger       = LoggerFactory.getLogger(getClass)
+  private def uuid: String = UUID.randomUUID().toString
+  private val config       = LangfuseHttpApiCaller(langfuseUrl, publicKey, secretKey)
+  private val deployment   = LangfuseOtlp.Deployment(environment, release, version)
 
-  protected def sendBatch(events: Seq[ujson.Obj]): Unit =
-    batchSender.sendBatch(events, config)
+  private def send(spans: Seq[Observation], scores: Seq[ujson.Obj]): Unit = {
+    if (spans.nonEmpty)
+      batchSender.sendTraces(LangfuseOtlp.request(spans, deployment, RAGASLangfuseObserver.Scope), config)
+    batchSender.sendScores(scores, config)
+  }
 
   /**
    * Log a single evaluation result to Langfuse.
    *
-   * Creates a trace with the evaluation details and scores for each metric.
+   * Without `traceId` it creates a trace, `RAGAS Evaluation`, with the evaluation's details as a span under it. With
+   * one it adds the details span to that trace. Either way it scores the trace for each metric and for the composite
+   * RAGAS score.
    *
    * @param result The evaluation result to log
-   * @param traceId Optional trace ID to link to an existing trace
+   * @param traceId Optional id of an existing Langfuse trace to score: for a trace llm4s sent, its OpenTelemetry trace
+   *                id, 32 hex digits. The details span is sent only when the id is one; the scores are sent either way
    */
   def logEvaluation(result: EvalResult, traceId: Option[String] = None): Unit = {
-    val effectiveTraceId = traceId.getOrElse(uuid)
-    val now              = nowIso
+    val now = Instant.now()
+    // the context the details span is under: a new trace's root, or a span of the given trace
+    val root = traceId match {
+      case None     => Some(TraceContext.random())
+      case Some(id) => TraceContext.of(id, "0000000000000001").toOption.map(_.spanFor(s"ragas:$uuid"))
+    }
+    val effectiveTraceId = traceId.orElse(root.map(_.traceId)).getOrElse("")
 
     logger.info(s"[RAGASLangfuseObserver] Logging RAGAS evaluation to Langfuse: traceId=$effectiveTraceId")
+    if (root.isEmpty)
+      logger.warn(
+        s"[RAGASLangfuseObserver] traceId $effectiveTraceId is not an OpenTelemetry trace id (32 hex digits); " +
+          "sending its scores without the Evaluation Details span"
+      )
 
-    val events = scala.collection.mutable.ListBuffer[ujson.Obj]()
-
-    // Create trace event if no existing trace ID provided
-    if (traceId.isEmpty) {
-      events += createTraceEvent(result, effectiveTraceId, now)
+    val spans = root.toSeq.flatMap { context =>
+      val trace = Option.when(traceId.isEmpty)(traceObservation(result, context, now))
+      trace.toSeq :+ evaluationSpan(result, context, trace.map(_.context.spanId), now)
     }
 
-    // Create score events for each metric
-    result.metrics.foreach(metric => events += createScoreEvent(metric, effectiveTraceId, now))
+    // a score for each metric, then the composite RAGAS score
+    val scores = result.metrics.map(metric => metricScore(metric, effectiveTraceId)) :+
+      score(effectiveTraceId, "ragas_score", result.ragasScore, "Composite RAGAS score (mean of all metrics)")
 
-    // Create composite RAGAS score event
-    events += createCompositeScoreEvent(result.ragasScore, effectiveTraceId, now)
-
-    // Create span with evaluation details
-    events += createEvaluationSpan(result, effectiveTraceId, now)
-
-    sendBatch(events.toSeq)
+    send(spans, scores)
   }
 
   /**
-   * Log a batch evaluation summary to Langfuse.
+   * Log a batch evaluation summary to Langfuse: a trace, `RAGAS Batch Evaluation`, scored with each metric's average
+   * and the overall RAGAS score.
    *
    * @param summary The evaluation summary to log
    */
   def logEvaluationSummary(summary: EvalSummary): Unit = {
-    val traceId = uuid
-    val now     = nowIso
+    val context = TraceContext.random()
+    val now     = Instant.now()
 
     logger.info(s"[RAGASLangfuseObserver] Logging RAGAS summary to Langfuse: ${summary.sampleCount} samples")
 
-    val events = scala.collection.mutable.ListBuffer[ujson.Obj]()
-
-    // Create summary trace
-    events += createSummaryTraceEvent(summary, traceId, now)
-
-    // Create average score events
-    summary.averages.foreach { case (metricName, avgScore) =>
-      events += ujson.Obj(
-        "id"        -> uuid,
-        "timestamp" -> now,
-        "type"      -> "score-create",
-        "body" -> ujson.Obj(
-          "id"      -> uuid,
-          "traceId" -> traceId,
-          "name"    -> s"avg_$metricName",
-          "value"   -> avgScore,
-          "comment" -> s"Average $metricName across ${summary.sampleCount} samples"
-        )
-      )
-    }
-
-    // Create overall RAGAS score
-    events += ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "score-create",
-      "body" -> ujson.Obj(
-        "id"      -> uuid,
-        "traceId" -> traceId,
-        "name"    -> "avg_ragas_score",
-        "value"   -> summary.overallRagasScore,
-        "comment" -> s"Overall RAGAS score across ${summary.sampleCount} samples"
-      )
+    val avgObj = ujson.Obj()
+    summary.averages.foreach { case (name, score) => avgObj(name) = score }
+    val metadata = ujson.Obj(
+      "environment"    -> environment,
+      "release"        -> release,
+      "version"        -> version,
+      "evaluationType" -> "batch"
+    )
+    val trace = Observation(
+      context,
+      None,
+      "RAGAS Batch Evaluation",
+      ObservationType.Span,
+      now,
+      now,
+      input = Some(ujson.Obj("sampleCount" -> summary.sampleCount)),
+      output = Some(ujson.Obj("overallRagasScore" -> summary.overallRagasScore, "averages" -> avgObj)),
+      metadata = metadata,
+      trace = Some(TraceAttributes("RAGAS Batch Evaluation", None, None, Seq.empty, metadata, public = false))
     )
 
-    sendBatch(events.toSeq)
+    // a score for each metric's average, then the overall RAGAS score
+    val scores = summary.averages.toSeq.map { case (metricName, avgScore) =>
+      score(context.traceId, s"avg_$metricName", avgScore, s"Average $metricName across ${summary.sampleCount} samples")
+    } :+ score(
+      context.traceId,
+      "avg_ragas_score",
+      summary.overallRagasScore,
+      s"Overall RAGAS score across ${summary.sampleCount} samples"
+    )
+
+    send(Seq(trace), scores)
   }
 
-  private def createTraceEvent(result: EvalResult, traceId: String, now: String): ujson.Obj =
-    ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "trace-create",
-      "body" -> ujson.Obj(
-        "id"        -> traceId,
-        "timestamp" -> now,
-        "name"      -> "RAGAS Evaluation",
-        "input" -> ujson.Obj(
+  private def traceObservation(result: EvalResult, context: TraceContext, now: Instant): Observation = {
+    val metadata = ujson.Obj(
+      "environment"    -> environment,
+      "release"        -> release,
+      "version"        -> version,
+      "hasGroundTruth" -> result.sample.groundTruth.isDefined,
+      "evaluatedAt"    -> result.evaluatedAt
+    )
+    Observation(
+      context,
+      None,
+      "RAGAS Evaluation",
+      ObservationType.Span,
+      now,
+      now,
+      input = Some(
+        ujson.Obj(
           "question" -> result.sample.question,
           "answer"   -> result.sample.answer,
           "contexts" -> ujson.Arr(result.sample.contexts.map(ujson.Str(_)): _*)
-        ),
-        "output" -> ujson.Obj(
-          "ragasScore"  -> result.ragasScore,
-          "metricCount" -> result.metrics.size
-        ),
-        "metadata" -> ujson.Obj(
-          "environment"    -> environment,
-          "release"        -> release,
-          "version"        -> version,
-          "hasGroundTruth" -> result.sample.groundTruth.isDefined,
-          "evaluatedAt"    -> result.evaluatedAt
         )
-      )
+      ),
+      output = Some(ujson.Obj("ragasScore" -> result.ragasScore, "metricCount" -> result.metrics.size)),
+      metadata = metadata,
+      trace = Some(TraceAttributes("RAGAS Evaluation", None, None, Seq.empty, metadata, public = false))
+    )
+  }
+
+  private def score(traceId: String, name: String, value: Double, comment: String): ujson.Obj =
+    ujson.Obj(
+      "id"       -> uuid,
+      "traceId"  -> traceId,
+      "name"     -> name,
+      "value"    -> value,
+      "dataType" -> "NUMERIC",
+      "comment"  -> comment
     )
 
-  private def createScoreEvent(metric: MetricResult, traceId: String, now: String): ujson.Obj = {
+  private def metricScore(metric: MetricResult, traceId: String): ujson.Obj = {
     val commentDetails = metric.details
       .take(3)
       .map { case (k, v) =>
         s"$k: ${CodePointBoundary.take(v.toString, 50)}"
       }
       .mkString(", ")
-
-    ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "score-create",
-      "body" -> ujson.Obj(
-        "id"      -> uuid,
-        "traceId" -> traceId,
-        "name"    -> metric.metricName,
-        "value"   -> metric.score,
-        "comment" -> (if (commentDetails.nonEmpty) commentDetails else "No additional details")
-      )
+    score(
+      traceId,
+      metric.metricName,
+      metric.score,
+      if (commentDetails.nonEmpty) commentDetails else "No additional details"
     )
   }
 
-  private def createCompositeScoreEvent(ragasScore: Double, traceId: String, now: String): ujson.Obj =
-    ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "score-create",
-      "body" -> ujson.Obj(
-        "id"      -> uuid,
-        "traceId" -> traceId,
-        "name"    -> "ragas_score",
-        "value"   -> ragasScore,
-        "comment" -> "Composite RAGAS score (mean of all metrics)"
-      )
-    )
-
-  private def createEvaluationSpan(result: EvalResult, traceId: String, now: String): ujson.Obj = {
+  private def evaluationSpan(
+    result: EvalResult,
+    trace: TraceContext,
+    parent: Option[String],
+    now: Instant
+  ): Observation = {
     val metricsObj = ujson.Obj()
     result.metrics.foreach(m => metricsObj(m.metricName) = m.score)
 
-    ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "span-create",
-      "body" -> ujson.Obj(
-        "id"        -> uuid,
-        "traceId"   -> traceId,
-        "timestamp" -> now,
-        "name"      -> "Evaluation Details",
-        "startTime" -> now,
-        "endTime"   -> now,
-        "input" -> ujson.Obj(
+    Observation(
+      trace.spanFor(s"details:$uuid"),
+      parent,
+      "Evaluation Details",
+      ObservationType.Span,
+      now,
+      now,
+      input = Some(
+        ujson.Obj(
           "question"       -> result.sample.question,
           "answer"         -> CodePointBoundary.take(result.sample.answer, 500),
           "contextCount"   -> result.sample.contexts.size,
           "hasGroundTruth" -> result.sample.groundTruth.isDefined
-        ),
-        "output" -> ujson.Obj(
-          "metrics"    -> metricsObj,
-          "ragasScore" -> result.ragasScore
-        ),
-        "metadata" -> ujson.Obj(
-          "sampleMetadata" -> ujson.Obj.from(result.sample.metadata.map { case (k, v) => k -> ujson.Str(v) })
         )
-      )
-    )
-  }
-
-  private def createSummaryTraceEvent(summary: EvalSummary, traceId: String, now: String): ujson.Obj = {
-    val avgObj = ujson.Obj()
-    summary.averages.foreach { case (name, score) =>
-      avgObj(name) = score
-    }
-
-    ujson.Obj(
-      "id"        -> uuid,
-      "timestamp" -> now,
-      "type"      -> "trace-create",
-      "body" -> ujson.Obj(
-        "id"        -> traceId,
-        "timestamp" -> now,
-        "name"      -> "RAGAS Batch Evaluation",
-        "input" -> ujson.Obj(
-          "sampleCount" -> summary.sampleCount
-        ),
-        "output" -> ujson.Obj(
-          "overallRagasScore" -> summary.overallRagasScore,
-          "averages"          -> avgObj
-        ),
-        "metadata" -> ujson.Obj(
-          "environment"    -> environment,
-          "release"        -> release,
-          "version"        -> version,
-          "evaluationType" -> "batch"
-        )
+      ),
+      output = Some(ujson.Obj("metrics" -> metricsObj, "ragasScore" -> result.ragasScore)),
+      metadata = ujson.Obj(
+        "sampleMetadata" -> ujson.Obj.from(result.sample.metadata.map { case (k, v) => k -> ujson.Str(v) })
       )
     )
   }
 }
 
 object RAGASLangfuseObserver {
+
+  /** The instrumentation scope of the spans the observer sends. */
+  private val Scope = "org.llm4s.rag.evaluation.RAGASLangfuseObserver"
 
   /**
    * Create an observer from Langfuse configuration.

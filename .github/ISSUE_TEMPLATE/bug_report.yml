@@ -134,7 +134,7 @@ body:
     attributes:
       label: Model Information
       description: Provide the specific model name and version.
-      placeholder: "e.g., gpt-4o, claude-sonnet-4-5-latest, gemini-2.0-flash"
+      placeholder: "e.g., gpt-5.6-luna, claude-sonnet-5-5, gemini-3.8-flash"
     validations:
       required: true
 
@@ -160,7 +160,7 @@ body:
     attributes:
       label: Configuration (if relevant)
       description: Provide the relevant `application.conf` sections (e.g. your `llm4s.providers` section) and any environment variables they bind. **Please anonymize API keys and sensitive data.**
-      placeholder: "llm4s.providers {\n  provider = \"openai-main\"\n  openai-main {\n    provider = \"openai\"\n    model = \"gpt-4o-mini\"\n    apiKey = ${?OPENAI_API_KEY}  # value redacted\n  }\n}\nTRACING_MODE=console"
+      placeholder: "llm4s.providers {\n  provider = \"openai-main\"\n  openai-main {\n    provider = \"openai\"\n    model = \"gpt-5.6-luna\"\n    apiKey = ${?OPENAI_API_KEY}  # value redacted\n  }\n}\nTRACING_MODE=console"
       render: "hocon"
 
   - type: textarea
