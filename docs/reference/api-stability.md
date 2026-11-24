@@ -26,7 +26,7 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 | Release type | Guarantee |
 |---|---|
 | **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
-| **From the baseline to 1.0** (0.7.0 to 1.0.0) | A patch release makes no binary-breaking change in a frozen module. A minor release may still break one, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0 is the next release after 0.7.0. A frozen API found wrong in between is still fixed, in 1.0, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member; a 0.7.x patch release makes no binary-breaking change in a frozen module ([After the baseline](#after-the-baseline)) |
 | **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes, after a deprecation |
 
 The 0.7.0 baseline makes every break visible and reviewed; the compatibility promise starts at 1.0.
@@ -224,6 +224,17 @@ frozen module ([#1281](https://github.com/llm4s/llm4s/issues/1281)); until it is
 `llm4s-agent` takes the same baseline as the other frozen modules: [RFC 0001](../rfcs/0001-agent-baseline), which
 proposed a later one, was rejected once the graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) was complete.
 
+### After the baseline
+
+The release after 0.7.0 is 1.0. No minor release is planned between them, and 1.0 does not wait for the baseline to
+survive a number of releases. Once `mimaBaselineVersion` is `Some("0.7.0")`, CI compares every frozen module on `main`
+with 0.7.0, so a break in the baselined surface is reported on the pull request that makes it. A break found
+necessary before 1.0 is still made: the API is fixed outright, and the break is recorded as a narrow MiMa filter with
+its reason, a line under the CHANGELOG's *Breaking changes* and a note in the [Migration Guide](migration)
+([Adding a Binary-Incompatible Change](#adding-a-binary-incompatible-change)). The filters in `build.sbt` at 1.0 are
+then the reviewed list of everything that changed in the frozen modules between 0.7.0 and 1.0. A 0.7.x patch release,
+cut only for a critical fix, makes no binary-breaking change in a frozen module.
+
 ### Setting and bumping the baseline
 
 `mimaBaselineVersion` and `mimaBaselineOverrides` are plain `val`s, not sbt settings, so they are edited in
@@ -280,7 +291,7 @@ Once a baseline is set, a change to a frozen module that breaks binary compatibi
 ```scala
 // build.sbt, in the module's settings
 mimaBinaryIssueFilters ++= Seq(
-  // Agent.run gained a parameter (a minor release between 0.7.0 and 1.0); migration note: "Agent.run takes ...".
+  // Agent.run gained a parameter (between 0.7.0 and 1.0); migration note: "Agent.run takes ...".
   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.Agent.run")
 )
 ```

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Release readiness: a MiMa dry run (#1281). Proves, before 0.5.0 exists, that "set mimaBaselineVersion and let
+# Release readiness: a MiMa dry run (#1281). Proves, before 0.7.0 exists, that "set mimaBaselineVersion and let
 # MiMa check the frozen modules" will work, by checking the build against a copy of itself.
 #
 # MiMa compares a module with the artifact of the same name in a previous release, so it can check nothing until
-# 0.5.0 is published (`mimaBaselineVersion` is `None` in build.sbt). This script does the 0.5.0 steps early, against
+# 0.7.0 is published (`mimaBaselineVersion` is `None` in build.sbt). This script does the 0.7.0 steps early, against
 # a throwaway version and a temporary repository, in a scratch clone of HEAD, and checks that they work:
 #
 #   1. Clone HEAD into a temp directory (the working tree you run this from is not touched; uncommitted changes are
@@ -25,7 +25,7 @@
 #      failure that is not MiMa's - the probe baseline not resolving - is reported as that, never as the control.
 #
 # It proves the wiring: coordinates, the Scala 3 `_3` suffix, resolution, and the exclusion. It does not prove that
-# any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script, not a CI job: it
+# any API is compatible with anything: there is no 0.7.0 baseline yet. It is a manual script, not a CI job: it
 # publishes the whole build, which is the heavy part.
 #
 # Usage: scripts/mima-dry-run.sh [--no-negative-control] [--keep] [--list-frozen] [REPO_ROOT]

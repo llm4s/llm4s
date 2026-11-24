@@ -45,13 +45,14 @@ version number:
 | Release | Frozen modules |
 |---|---|
 | **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and ships with no `@deprecated` shim. |
-| **From the baseline to 1.0** (0.7.0 to 1.0.0) | A patch release makes no binary-breaking change. A minor release may still break a frozen API: each break has a narrow MiMa filter, a line under the CHANGELOG's *Breaking changes* and a migration note, and ships with no shim and no `@deprecated` member. |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0 is the next release after 0.7.0. A frozen API found wrong in between is still fixed, in 1.0: each break has a narrow MiMa filter, a line under the CHANGELOG's *Breaking changes* and a migration note, and ships with no shim and no `@deprecated` member. A 0.7.x patch release makes no binary-breaking change. |
 | **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version, after a deprecation ([Deprecating and removing](#deprecating-and-removing)). |
 
 1.0 is the compatibility promise. The 0.7.0 baseline is not: it makes every break visible, because MiMa reports it
 and it needs a reviewed filter, but between 0.7.0 and 1.0 an API that is wrong is still fixed outright. The release
-sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 1.0; 0.5.0, 0.5.1 and 0.6.0 set no
-baseline, and until 0.7.0 the check passes without checking anything. See [The Baseline](api-stability#the-baseline).
+sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 1.0 with no release in between
+([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set no baseline, and until 0.7.0
+the check passes without checking anything. See [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
 follows the release it ships in, and `llm4s-bom` pins that one version for every artifact.
@@ -108,7 +109,7 @@ These are the rules the codebase follows so a minor release does not break anyon
 
 A change that cannot avoid breaking binary compatibility follows
 [Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change). Between the baseline and 1.0
-it is a minor-release change: a narrow `ProblemFilters.exclude` entry that says why, a CHANGELOG *Breaking changes*
+it ships in 1.0: a narrow `ProblemFilters.exclude` entry that says why, a CHANGELOG *Breaking changes*
 line and a migration note, with no `@deprecated` shim. From 1.0 it is a major-release change, after a deprecation.
 
 ---
@@ -153,6 +154,12 @@ series and the minimum JDK are raised only in a **minor** release, never a patch
 is announced in the CHANGELOG under *Changed* with a migration note. See
 [1.0 Scope](v1-scope#scala-and-jdk-support) and the
 [programme issue](https://github.com/llm4s/llm4s/issues/1126) for the reasoning.
+
+The artifacts are **classpath libraries**. They are not JPMS modules or OSGi bundles: no jar has a
+`module-info.class`, an `Automatic-Module-Name` or OSGi headers. This follows from the layout. Code that moves to
+another artifact keeps its `org.llm4s.*` package, so packages are split across artifacts by design:
+`org.llm4s.llmconnect.provider`, for one, has classes in `llm4s-core` and in more than a dozen provider modules. The
+module path does not allow two modules to hold the same package, so put the jars on the classpath.
 
 ---
 

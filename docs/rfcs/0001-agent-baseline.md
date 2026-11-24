@@ -26,6 +26,11 @@ distinct status for an answer cut at the token limit from RFC 0009) land before 
 final by closing #1266, which happens before the baseline release. The per-module override (#2355) stays
 available if that release slips.
 
+**Note (2026-11-24).** The release plan this RFC refers to has changed since: 1.0 follows the 0.7.0 baseline
+directly, with no release in between. The "two more releases" above and the "survived two releases after the
+baseline" condition quoted from #1281 in the proposal below are therefore history, not the plan; see
+[After the baseline](../reference/api-stability#after-the-baseline). The proposal is kept as it was written.
+
 ## Summary
 
 [1.0 Scope](../reference/v1-scope) puts `org.llm4s.agent` (`llm4s-agent`) in the Frozen-at-1.0 tier, and
