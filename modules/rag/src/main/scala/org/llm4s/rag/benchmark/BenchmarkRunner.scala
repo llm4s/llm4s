@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.model.ModelRegistryService
@@ -167,7 +168,7 @@ class BenchmarkRunner(
 
         // Run RAGAS evaluation
         val embeddingModelConfig = EmbeddingModelConfig(
-          config.embeddingConfig.model,
+          ModelName(config.embeddingConfig.model),
           config.embeddingConfig.dimensions
         )
 

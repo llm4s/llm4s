@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -30,7 +31,8 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
 
   private given registry: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def caps(model: String): Option[ModelCapabilities] = registry.lookup(model).toOption.map(_.capabilities)
+  private def caps(model: String): Option[ModelCapabilities] =
+    registry.lookup(ModelName(model)).toOption.map(_.capabilities)
 
   private def plan(model: String, options: CompletionOptions, maxTokens: Int = 64000): Plan =
     AnthropicThinking.plan(model, options, maxTokens, caps(model))
@@ -230,7 +232,7 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
         model = ModelName(model),
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 200000,
         reserveCompletion = 4096
       )

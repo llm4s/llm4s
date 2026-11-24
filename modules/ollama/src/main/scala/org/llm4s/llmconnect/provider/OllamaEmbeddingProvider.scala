@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
@@ -39,8 +41,8 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
   val id: ProviderId = ProviderId("ollama")
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-    defaultBaseUrl = Some("http://localhost:11434"),
-    defaultModel = Some("nomic-embed-text"),
+    defaultBaseUrl = Some(BaseUrl("http://localhost:11434")),
+    defaultModel = Some(ModelName("nomic-embed-text")),
     // Ollama ignores the field when run locally, but the client still wants a string.
     defaultApiKey = Some("not-required")
   )
@@ -52,14 +54,14 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
    * is 384-dimensional, `:335m` is 1024 - so only `:latest`, which is what the
    * untagged name means, is folded onto these.
    */
-  override val modelDimensions: Map[String, Int] = Map(
-    "nomic-embed-text"  -> 768,
-    "mxbai-embed-large" -> 1024,
-    "all-minilm"        -> 384
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("nomic-embed-text")  -> 768,
+    ModelName("mxbai-embed-large") -> 1024,
+    ModelName("all-minilm")        -> 384
   )
 
-  override def dimensionsOf(model: String): Option[Int] =
-    modelDimensions.get(model.stripSuffix(":latest"))
+  override def dimensionsOf(model: ModelName): Option[Int] =
+    modelDimensions.get(ModelName(model.asString.stripSuffix(":latest")))
 
   /**
    * Builds the provider for the SPI; see [[fromConfig]] for the direct route. Requests go through the caller's
@@ -79,7 +81,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("ollama.embed") {
-          val model = request.model.name
+          val model = request.model.name.asString
           val input = request.input
 
           // One request per text, stopping at the first failure: a cancelled call must not go on to

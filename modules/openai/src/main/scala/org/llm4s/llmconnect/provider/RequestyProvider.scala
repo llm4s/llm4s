@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, ProviderModelLister, RequestyModelLister }
@@ -26,7 +27,7 @@ object RequestyProvider extends ProviderDescriptor:
    * This was `DefaultConfig.DEFAULT_REQUESTY_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://router.requesty.ai/v1"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://router.requesty.ai/v1")
 
   /** The key falls back to `llm4s.credentials.requesty.apiKey`, bound to `REQUESTY_API_KEY`. */
   val configSpec: ProviderConfigSpec =
@@ -42,7 +43,7 @@ object RequestyProvider extends ProviderDescriptor:
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       config <- OpenAIConfig.fromValues(
-        section.model.asString,
+        section.model,
         apiKey,
         baseUrl,
         section.extra(OpenAIConfig.OrganizationKey),

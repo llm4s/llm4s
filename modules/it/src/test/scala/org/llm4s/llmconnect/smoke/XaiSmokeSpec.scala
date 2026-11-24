@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
@@ -36,7 +37,7 @@ class XaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
   private val model: String          = Option(System.getenv("XAI_MODEL")).filter(_.nonEmpty).getOrElse("grok-4.7")
 
   private def config(key: String): XaiConfig =
-    XaiConfig.fromValues(modelName = model, apiKey = Secret(key), baseUrl = XaiConfig.DEFAULT_BASE_URL).value
+    XaiConfig.fromValues(modelName = ModelName(model), apiKey = Secret(key), baseUrl = XaiConfig.DEFAULT_BASE_URL).value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 

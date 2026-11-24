@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.JinaConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
@@ -74,18 +76,18 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.jina.ai/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.jina.ai/v1")),
     // Bound to the shared llm4s.credentials.jina.apiKey in this module's reference.conf.
     apiKeyEnv = Seq(JinaConfigKeys.JINA_API_KEY)
   )
 
   /** Default output dimensions; the client does not send a `dimensions` parameter. */
-  override val modelDimensions: Map[String, Int] = Map(
-    "jina-embeddings-v3"           -> 1024,
-    "jina-embeddings-v4"           -> 2048,
-    "jina-clip-v2"                 -> 1024,
-    "jina-embeddings-v2-base-en"   -> 768,
-    "jina-embeddings-v2-base-code" -> 768
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("jina-embeddings-v3")           -> 1024,
+    ModelName("jina-embeddings-v4")           -> 2048,
+    ModelName("jina-clip-v2")                 -> 1024,
+    ModelName("jina-embeddings-v2-base-en")   -> 768,
+    ModelName("jina-embeddings-v2-base-code") -> 768
   )
 
   /** Builds the provider for the SPI: the task follows each request's purpose; see [[fromConfig]] to fix the task. */
@@ -164,8 +166,8 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("jina.embed")(
-          taskFor(request.model.name, explicitTask.getOrElse(JinaTask.forPurpose(request.purpose))).flatMap(sent =>
-            send(request, sent)
+          taskFor(request.model.name.asString, explicitTask.getOrElse(JinaTask.forPurpose(request.purpose))).flatMap(
+            sent => send(request, sent)
           )
         )
 
@@ -173,7 +175,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
         request: EmbeddingRequest,
         sentTask: Option[JinaTask]
       ): Result[EmbeddingResponse] = {
-        val model = request.model.name
+        val model = request.model.name.asString
         val input = request.input
         val payload = Obj(
           "input" -> Arr.from(input),

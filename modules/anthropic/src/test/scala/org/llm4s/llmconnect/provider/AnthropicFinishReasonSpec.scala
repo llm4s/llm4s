@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, NetworkError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -28,7 +29,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     AnthropicConfig(
       apiKey = Secret("test-key"),
       model = ModelName("claude-sonnet-4-5"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 200000,
       reserveCompletion = 4096
     )

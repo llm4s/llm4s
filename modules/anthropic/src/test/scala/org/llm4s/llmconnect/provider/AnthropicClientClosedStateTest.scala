@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,7 +24,7 @@ class AnthropicClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: AnthropicConfig = AnthropicConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = ModelName("claude-sonnet-4-5-latest"),
-    baseUrl = "https://example.invalid/v1",
+    baseUrl = BaseUrl("https://example.invalid/v1"),
     contextWindow = 200000,
     reserveCompletion = 8192
   )

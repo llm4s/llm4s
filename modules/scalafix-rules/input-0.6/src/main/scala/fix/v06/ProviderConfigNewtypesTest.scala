@@ -1,5 +1,5 @@
 /*
-rule = ProviderConfigNewtypes
+rules = [ProviderConfigNewtypes, ModelIdNewtypes]
 */
 package fix.v06
 

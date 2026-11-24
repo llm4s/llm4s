@@ -38,7 +38,7 @@ class DeepSeekClient(
       OpenAICompatibleClient.Settings(
         providerName = "deepseek",
         displayName = "DeepSeek",
-        model = config.model.asString,
+        model = config.model,
         baseUrl = config.baseUrl,
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,

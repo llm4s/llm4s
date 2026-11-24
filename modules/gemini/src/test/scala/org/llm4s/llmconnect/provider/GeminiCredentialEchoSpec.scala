@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -21,7 +22,7 @@ final class GeminiCredentialEchoSpec extends AnyFlatSpec with Matchers {
       val config = GeminiConfig(
         apiKey = Secret(echoKey),
         model = ModelName("gemini-2.0-flash"),
-        baseUrl = baseUrl,
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = 1048576,
         reserveCompletion = 8192
       )
@@ -35,7 +36,7 @@ final class GeminiCredentialEchoSpec extends AnyFlatSpec with Matchers {
       val config = GeminiConfig(
         apiKey = Secret(echoKey),
         model = ModelName("gemini 1.5"),
-        baseUrl = "http://127.0.0.1:1/v1beta",
+        baseUrl = BaseUrl("http://127.0.0.1:1/v1beta"),
         contextWindow = 1048576,
         reserveCompletion = 8192
       )

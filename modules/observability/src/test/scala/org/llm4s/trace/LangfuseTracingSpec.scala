@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -217,7 +218,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val tracing    = makeTracing(mockClient)
     val usage      = TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150)
 
-    val result = tracing.traceTokenUsage(usage, "gpt-4o", "completion")
+    val result = tracing.traceTokenUsage(usage, ModelName("gpt-4o"), "completion")
 
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 1

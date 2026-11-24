@@ -5,11 +5,10 @@ import scalafix.v1._
 /**
  * Every rule that brings code compiled against llm4s 0.6.x to the current release, in one run: the rules for the
  * breaking changes since 0.6.0, [[ThinkingReplacesBudgetTokens]], [[FinishReasonTyped]], [[CompressionRuleTransform]],
- * [[AgentCopyToWithSetters]], [[ResultSyntaxMoved]], [[ProviderConfigNewtypes]], [[ToolFunctionOneTypeParameter]],
- * [[PositionalPatternsGainFields]], [[SamplingOptionsOptional]], [[CompletionFromMessage]],
- * [[MessageAndConversationShapes]], [[ClientEntryPoints]], [[ToolCallIdTyped]] and the [[AgentStatusGainsTruncated]]
- * lint. It grows as the
- * 1.0 breaks land (#1281).
+ * [[AgentCopyToWithSetters]], [[ResultSyntaxMoved]], [[ProviderConfigNewtypes]], [[ModelIdNewtypes]],
+ * [[ToolFunctionOneTypeParameter]], [[PositionalPatternsGainFields]], [[SamplingOptionsOptional]],
+ * [[CompletionFromMessage]], [[MessageAndConversationShapes]], [[ClientEntryPoints]], [[ToolCallIdTyped]] and the
+ * [[AgentStatusGainsTruncated]] lint. It grows as the 1.0 breaks land (#1281).
  *
  * It leaves out the rules for the 0.5.1 breaks that 0.6.x code is already past (`CredentialsToSecret`,
  * `CompletionCreatedToInstant`, `FromValuesKeyFirst`, ...), which would rewrite it a second time; [[Llm4sMigrateFrom_0_5]]
@@ -30,6 +29,7 @@ class Llm4sMigrateFrom_0_6 extends SemanticRule("Llm4sMigrateFrom_0_6") {
     new AgentStatusGainsTruncated,
     new ResultSyntaxMoved,
     new ProviderConfigNewtypes,
+    new ModelIdNewtypes,
     new SamplingOptionsOptional,
     new CompletionFromMessage,
     new MessageAndConversationShapes,

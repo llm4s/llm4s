@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.toolloop.ToolLoopFixtures.{ answered, completion }
 import org.llm4s.agent.graph.*
@@ -157,7 +158,7 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     private val n = new AtomicInteger()
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val s = scores(n.getAndIncrement())
-      Right(Completion("id", Instant.EPOCH, "test", AssistantMessage(s)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test"), AssistantMessage(s)))
     }
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit

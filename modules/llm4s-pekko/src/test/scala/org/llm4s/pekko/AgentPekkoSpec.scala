@@ -1,5 +1,6 @@
 package org.llm4s.pekko
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
@@ -55,7 +56,7 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
   private val Patience = 60.seconds
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))
@@ -242,7 +243,7 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   /** Records every request; answers with `reply(callIndex)`. */

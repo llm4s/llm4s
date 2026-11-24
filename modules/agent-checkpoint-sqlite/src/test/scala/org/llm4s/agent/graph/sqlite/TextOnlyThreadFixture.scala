@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{ GraphRuntime, ThreadId }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
@@ -40,7 +41,7 @@ object TextOnlyThreadFixture:
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )

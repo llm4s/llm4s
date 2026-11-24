@@ -116,18 +116,18 @@ object EmbeddingProviderSection:
 @Stable
 final case class EmbeddingConfigSpec private (
   requiresApiKey: Boolean,
-  defaultBaseUrl: Option[String],
-  defaultModel: Option[String],
+  defaultBaseUrl: Option[BaseUrl],
+  defaultModel: Option[ModelName],
   defaultApiKey: Option[String],
   apiKeyEnv: Seq[String],
   extras: Seq[ProviderConfigKey]
 ) {
   def withExtras(extras: Seq[ProviderConfigKey]): EmbeddingConfigSpec  = copy(extras = extras)
   def withRequiresApiKey(requiresApiKey: Boolean): EmbeddingConfigSpec = copy(requiresApiKey = requiresApiKey)
-  def withDefaultBaseUrl(defaultBaseUrl: String): EmbeddingConfigSpec  = copy(defaultBaseUrl = Some(defaultBaseUrl))
-  def withDefaultBaseUrl(defaultBaseUrl: Option[String]): EmbeddingConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
-  def withDefaultModel(defaultModel: String): EmbeddingConfigSpec             = copy(defaultModel = Some(defaultModel))
-  def withDefaultModel(defaultModel: Option[String]): EmbeddingConfigSpec     = copy(defaultModel = defaultModel)
+  def withDefaultBaseUrl(defaultBaseUrl: BaseUrl): EmbeddingConfigSpec = copy(defaultBaseUrl = Some(defaultBaseUrl))
+  def withDefaultBaseUrl(defaultBaseUrl: Option[BaseUrl]): EmbeddingConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
+  def withDefaultModel(defaultModel: ModelName): EmbeddingConfigSpec           = copy(defaultModel = Some(defaultModel))
+  def withDefaultModel(defaultModel: Option[ModelName]): EmbeddingConfigSpec   = copy(defaultModel = defaultModel)
   def withDefaultApiKey(defaultApiKey: String): EmbeddingConfigSpec         = copy(defaultApiKey = Some(defaultApiKey))
   def withDefaultApiKey(defaultApiKey: Option[String]): EmbeddingConfigSpec = copy(defaultApiKey = defaultApiKey)
   def withApiKeyEnv(apiKeyEnv: Seq[String]): EmbeddingConfigSpec            = copy(apiKeyEnv = apiKeyEnv)
@@ -138,8 +138,8 @@ object EmbeddingConfigSpec:
   /** Creates a [[EmbeddingConfigSpec]]. Named arguments are the supported way to construct one. */
   def apply(
     requiresApiKey: Boolean = false,
-    defaultBaseUrl: Option[String] = None,
-    defaultModel: Option[String] = None,
+    defaultBaseUrl: Option[BaseUrl] = None,
+    defaultModel: Option[ModelName] = None,
     defaultApiKey: Option[String] = None,
     apiKeyEnv: Seq[String] = Seq.empty,
     extras: Seq[ProviderConfigKey] = Seq.empty
@@ -175,10 +175,10 @@ object EmbeddingConfigSpec:
    *
    * @param modelOverride the `<model>` half of a unified `EMBEDDING_MODEL`, when one was given.
    */
-  def resolveModel(id: ProviderId, modelOverride: Option[String], spec: EmbeddingConfigSpec): Result[ModelName] =
-    nonEmpty(modelOverride)
-      .orElse(spec.defaultModel)
+  def resolveModel(id: ProviderId, modelOverride: Option[ModelName], spec: EmbeddingConfigSpec): Result[ModelName] =
+    nonEmpty(modelOverride.map(_.asString))
       .map(ModelName(_))
+      .orElse(spec.defaultModel)
       .toRight(
         ConfigurationError(
           s"Missing ${id.asString} embeddings model (set EMBEDDING_MODEL=${id.asString}/<model>, llm4s.embeddings.model)"
@@ -188,8 +188,8 @@ object EmbeddingConfigSpec:
   /** Resolves the base URL: the section first, then the spec's default. */
   def resolveBaseUrl(id: ProviderId, section: EmbeddingProviderSection, spec: EmbeddingConfigSpec): Result[BaseUrl] =
     nonEmpty(section.baseUrl.map(_.asUrl))
-      .orElse(spec.defaultBaseUrl)
       .map(BaseUrl(_))
+      .orElse(spec.defaultBaseUrl)
       .toRight(
         ConfigurationError(
           s"Missing ${id.asString} embeddings base URL (${fieldPath(id, "baseUrl")})"

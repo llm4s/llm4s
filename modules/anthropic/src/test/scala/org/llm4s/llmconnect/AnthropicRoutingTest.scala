@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
@@ -20,7 +21,7 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
   private val anthropic: ProviderConfig = AnthropicConfig(
     apiKey = Secret("key"),
     model = ModelName("claude-3-sonnet"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )

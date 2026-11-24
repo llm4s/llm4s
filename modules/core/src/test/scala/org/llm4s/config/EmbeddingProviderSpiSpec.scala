@@ -40,8 +40,8 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
       requiresApiKey = true,
-      defaultBaseUrl = Some("https://fixture.example/v1"),
-      defaultModel = Some("fixture-default-model"),
+      defaultBaseUrl = Some(BaseUrl("https://fixture.example/v1")),
+      defaultModel = Some(ModelName("fixture-default-model")),
       apiKeyEnv = Seq("FIXTURE_API_KEY")
     )
 
@@ -54,8 +54,8 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     val id: ProviderId = ProviderId("keylessfixture")
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-      defaultBaseUrl = Some("http://localhost:9999"),
-      defaultModel = Some("fixture-default"),
+      defaultBaseUrl = Some(BaseUrl("http://localhost:9999")),
+      defaultModel = Some(ModelName("fixture-default")),
       defaultApiKey = Some("fixture-not-required")
     )
 
@@ -165,7 +165,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
       // the shared `llm4s.credentials.<id>.apiKey` fallback happens in the loader.
       val config = FixtureEmbeddings
-        .buildConfig(EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))), EmbeddingConfigContext(Some("m")))
+        .buildConfig(
+          EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))),
+          EmbeddingConfigContext(Some(ModelName("m")))
+        )
         .value
 
       config shouldBe EmbeddingProviderConfig(
@@ -185,7 +188,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
       override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
         requiresApiKey = true,
-        defaultBaseUrl = Some("https://acme.example/v1")
+        defaultBaseUrl = Some(BaseUrl("https://acme.example/v1"))
       )
 
       def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
@@ -280,8 +283,8 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       val id: ProviderId = ProviderId("regionalfixture")
 
       val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-        defaultBaseUrl = Some("https://regional.fixture.example/v1"),
-        defaultModel = Some("regional-small"),
+        defaultBaseUrl = Some(BaseUrl("https://regional.fixture.example/v1")),
+        defaultModel = Some(ModelName("regional-small")),
         extras = Seq(
           ProviderConfigKey.required("region", "the region serving the model").withEnv("REGIONAL_FIXTURE_REGION"),
           ProviderConfigKey.optional("task", "what the vectors are for", default = Some("retrieval"))

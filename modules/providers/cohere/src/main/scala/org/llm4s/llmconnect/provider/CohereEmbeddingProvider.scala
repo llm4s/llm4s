@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.CohereEmbeddingConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
@@ -80,18 +82,18 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.cohere.com"),
+    defaultBaseUrl = Some(BaseUrl("https://api.cohere.com")),
     // Bound to the shared llm4s.credentials.cohere.apiKey in this module's reference.conf.
     apiKeyEnv = Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY)
   )
 
   /** Default output dimensions; the client does not send an `output_dimension` parameter. */
-  override val modelDimensions: Map[String, Int] = Map(
-    "embed-v4.0"                    -> 1536,
-    "embed-english-v3.0"            -> 1024,
-    "embed-multilingual-v3.0"       -> 1024,
-    "embed-english-light-v3.0"      -> 384,
-    "embed-multilingual-light-v3.0" -> 384
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("embed-v4.0")                    -> 1536,
+    ModelName("embed-english-v3.0")            -> 1024,
+    ModelName("embed-multilingual-v3.0")       -> 1024,
+    ModelName("embed-english-light-v3.0")      -> 384,
+    ModelName("embed-multilingual-light-v3.0") -> 384
   )
 
   /** Builds the provider for the SPI: the input type follows each request's purpose; see [[fromConfig]] to fix it. */
@@ -177,7 +179,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
         CancelledError.attempt("cohere.embed")(embedBatches(request))
 
       private def embedBatches(request: EmbeddingRequest): Result[EmbeddingResponse] = {
-        val model     = request.model.name
+        val model     = request.model.name.asString
         val input     = request.input
         val inputType = explicitInputType.getOrElse(CohereInputType.forPurpose(request.purpose))
         val metadata = Map(

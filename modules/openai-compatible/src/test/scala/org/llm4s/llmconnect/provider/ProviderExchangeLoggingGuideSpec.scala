@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.testutil.GuideMirror
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
@@ -49,7 +50,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
     DeepSeekConfig(
       apiKey = Secret(apiKey),
       model = ModelName("deepseek-chat"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 8192
     )
@@ -149,7 +150,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
         val completion =
           clientWith(baseUrl, sink).complete(conversation("hi"), CompletionOptions()).getOrElse(fail("call failed"))
 
-        completion.model shouldBe "another-model"
+        completion.model shouldBe ModelName("another-model")
         recorded.head.model shouldBe Some("deepseek-chat")
     }
 

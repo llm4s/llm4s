@@ -169,7 +169,7 @@ object FileEmbedder {
         EmbeddingVector(
           id = s"${file.getName}#chunk_$i",
           modality = Modality.Text,
-          model = textModel.name,
+          model = textModel.name.asString,
           values = l2(vec),
           meta = Map(
             "provider" -> resp.metadata.getOrElse("provider", "unknown"),
@@ -201,7 +201,7 @@ object FileEmbedder {
           EmbeddingVector(
             id = file.getName,
             modality = modality,
-            model = model.name,
+            model = model.name.asString,
             values = l2(raw),
             meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
           )
@@ -239,7 +239,7 @@ object FileEmbedder {
                 EmbeddingVector(
                   id = s"${file.getName}#${prefix}_$i",
                   modality = modality,
-                  model = model.name,
+                  model = model.name.asString,
                   values = l2(vec),
                   meta = resp.metadata ++ Map("mime" -> mime)
                 )

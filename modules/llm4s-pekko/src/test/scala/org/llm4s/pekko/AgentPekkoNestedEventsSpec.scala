@@ -1,5 +1,6 @@
 package org.llm4s.pekko
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Sink
 import org.llm4s.agent.Agent
@@ -55,7 +56,7 @@ object AgentPekkoNestedEventsSpec {
 
   private def completion(text: String, calls: Seq[ToolCall] = Nil): Completion = {
     val message = if (calls.isEmpty) AssistantMessage(text, Seq.empty) else AssistantMessage(None, calls)
-    Completion("n", Instant.EPOCH, "m", message, Some(TokenUsage(1, 1, 2)))
+    Completion("n", Instant.EPOCH, ModelName("m"), message, Some(TokenUsage(1, 1, 2)))
   }
 
   /** The lead delegates once to a streaming text subagent; its first call waits for `subscribed`. */

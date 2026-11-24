@@ -1,5 +1,6 @@
 package org.llm4s.schema
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -19,7 +20,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       asked.set(Some(options))
-      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     }
 
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(

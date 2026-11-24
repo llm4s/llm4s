@@ -1,5 +1,6 @@
 package org.llm4s.repl
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -353,7 +354,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   private def completion(text: String): Completion =
-    Completion("c1", Instant.EPOCH, "test-model", AssistantMessage(text))
+    Completion("c1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text))
 
   private class FixedClient(answer: Completion) extends LLMClient {
     @volatile var closed                                                                              = false

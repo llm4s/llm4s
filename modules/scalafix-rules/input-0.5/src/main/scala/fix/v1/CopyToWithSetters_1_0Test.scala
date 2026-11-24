@@ -1,5 +1,5 @@
 /*
-rule = CopyToWithSetters_1_0
+rules = [CopyToWithSetters_1_0, ModelIdNewtypes]
 */
 package fix.v1
 

@@ -241,10 +241,10 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       tokenExchange     <- tokenExchangeOf(providerName, section)
       config <- OpenAICompatibleConfig
         .fromValues(
-          model = ModelName(section.model.asString),
+          model = section.model,
           baseUrl = baseUrl,
           apiKey = section.apiKey.map(k => Secret(k.asKey)),
-          contextWindow = contextWindow.orElse(registryWindow(baseUrl)),
+          contextWindow = contextWindow.orElse(registryWindow(baseUrl.asUrl)),
           reserveCompletion = reserveCompletion,
           headers = section.headers,
           streamUsage = streamUsage,
@@ -289,7 +289,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     explicit: Option[String]
   )(using resolver: ContextWindowResolver): Option[Int] =
     explicit.orElse(inferRegistryProvider(baseUrl)).flatMap { registryProvider =>
-      resolver.strictContextWindow(registryProvider, model) match
+      resolver.strictContextWindow(ProviderId(registryProvider), ModelName(model)) match
         case Some(window) if window < OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW =>
           val message =
             s"Configured provider '$providerName': ignoring the model registry's contextWindow $window for " +

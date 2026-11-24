@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.RateLimitError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -107,7 +108,7 @@ class PythonDevelopersGuideSpec extends AnyFlatSpec with Matchers with EitherVal
       .buildWithEmbeddings(
         RAGConfig.default.withLLM(client),
         EmbeddingClient(embeddings),
-        EmbeddingModelConfig("fixed", 2)
+        EmbeddingModelConfig(ModelName("fixed"), 2)
       )
       .value
     Using.resource(rag) { rag =>

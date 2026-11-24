@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ZaiConfig }
@@ -23,7 +24,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
   private def client(dialect: OpenAICompatibleDialect) =
     new OpenAICompatibleClient(
       OpenAICompatibleClient.settings(
-        OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "http://localhost:1/v1")
+        OpenAICompatibleConfig(model = ModelName("m"), baseUrl = BaseUrl("http://localhost:1/v1"))
       ),
       dialect
     )
@@ -79,7 +80,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
         ZaiConfig(
           apiKey = Secret("test-key"),
           model = ModelName("glm-4.7"),
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = 128000,
           reserveCompletion = 4096
         )
@@ -115,7 +116,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
       "messages" -> ujson.Arr(ujson.Obj("role" -> "assistant", "reasoning_content" -> "Check.")),
       "thinking" -> ujson.Obj("type" -> "enabled", "clear_thinking" -> true)
     )
-    ZaiDialect.addReasoning(body, "glm-4.7", CompletionOptions())
+    ZaiDialect.addReasoning(body, ModelName("glm-4.7"), CompletionOptions())
     body("thinking") shouldBe ujson.Obj("type" -> "enabled", "clear_thinking" -> false)
   }
 

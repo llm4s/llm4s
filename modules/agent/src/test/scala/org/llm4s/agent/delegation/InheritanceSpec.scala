@@ -1,5 +1,6 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentStatus, CompletionFixture }
 import org.llm4s.agent.graph.{ CheckpointStatus, GraphError, GraphRuntime, RunBudgets, RunConfig, ThreadId }
 import org.llm4s.agent.graph.middleware.{
@@ -974,7 +975,10 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       )(
         next: org.llm4s.agent.graph.middleware.ModelRequest => Result[org.llm4s.agent.graph.middleware.ModelResponse]
       ): Result[org.llm4s.agent.graph.middleware.ModelResponse] = {
-        context.recordUsage("summariser", TokenUsage(promptTokens = 1, completionTokens = 1, totalTokens = 2))
+        context.recordUsage(
+          ModelName("summariser"),
+          TokenUsage(promptTokens = 1, completionTokens = 1, totalTokens = 2)
+        )
         next(request).flatMap(r =>
           if (failing.getAndSet(false)) Left(ProcessingError("model", "lost after the call")) else Right(r)
         )

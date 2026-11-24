@@ -247,7 +247,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("local-vllm")) match
         case Right(cfg: OpenAICompatibleConfig) =>
           cfg.model.asString shouldBe "Qwen/Qwen2.5-7B-Instruct"
-          cfg.baseUrl shouldBe "http://localhost:8000/v1"
+          cfg.baseUrl shouldBe BaseUrl("http://localhost:8000/v1")
           cfg.apiKey shouldBe None
           cfg.contextWindow shouldBe OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
           cfg.reserveCompletion shouldBe OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION

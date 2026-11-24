@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -29,7 +30,7 @@ class RAGBuildWithEmbeddingsSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private val model = EmbeddingModelConfig("caller-model", 2)
+  private val model = EmbeddingModelConfig(ModelName("caller-model"), 2)
 
   "RAG.buildWithEmbeddings" should "embed with the caller's client and model, resolving no provider" in {
     val provider = new RecordingProvider

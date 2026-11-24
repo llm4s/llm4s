@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -45,7 +46,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
       if toolRules && broken then Left(ProcessingError("reference-tool-calls", "malformed tool call"))
       else
         Right(
-          Completion("r", Instant.EPOCH, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
+          Completion("r", Instant.EPOCH, ModelName("m"), AssistantMessage(Option(text).filter(_.nonEmpty), calls))
             .withFinishReason(finish)
         )
 

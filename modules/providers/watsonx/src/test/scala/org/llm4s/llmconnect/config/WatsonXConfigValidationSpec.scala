@@ -18,11 +18,19 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
     apiKey: String = "key",
     project: Option[String] = Some("p"),
     space: Option[String] = None,
-    baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL,
+    baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL.asUrl,
     apiVersion: String = WatsonXConfig.DEFAULT_API_VERSION,
     iamUrl: String = WatsonXConfig.DEFAULT_IAM_URL
   ) =
-    WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl, apiVersion, iamUrl)
+    WatsonXConfig.fromValues(
+      ModelName("ibm/granite-13b-instruct-v2"),
+      Secret(apiKey),
+      project,
+      space,
+      BaseUrl(baseUrl),
+      apiVersion,
+      iamUrl
+    )
 
   test(
     "each of apiKey, baseUrl, apiVersion and iamUrl, blank or whitespace, is a ConfigurationError naming the field"
@@ -167,5 +175,5 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
     WatsonXProvider.id.asString shouldBe "watsonx"
     WatsonXProvider.configSpec.requiresApiKey shouldBe true
     WatsonXProvider.configSpec.apiKeyEnv shouldBe Seq("WATSONX_API_KEY")
-    WatsonXProvider.configSpec.defaultBaseUrl.exists(_.startsWith("https://")) shouldBe true
+    WatsonXProvider.configSpec.defaultBaseUrl.exists(_.asUrl.startsWith("https://")) shouldBe true
   }

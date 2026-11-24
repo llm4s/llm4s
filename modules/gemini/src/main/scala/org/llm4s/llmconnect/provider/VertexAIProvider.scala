@@ -92,7 +92,7 @@ object VertexAIProvider extends ProviderDescriptor:
       projectId <- ProviderDescriptor.requireExtra(context.providerName, section, ProjectKey)
       search    <- GeminiGrounding.googleSearch(context.providerName, section)
       config <- VertexAIConfig.fromValues(
-        modelName = section.model.asString,
+        modelName = section.model,
         projectId = projectId,
         location = location,
         credentialFilePath = section.apiKey.map(_.asKey)

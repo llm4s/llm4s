@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.MistralConfig
@@ -29,15 +30,15 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
     val standard = new OpenAICompatibleDialect {}
     val body     = ujson.Obj("model" -> "m")
 
-    standard.addReasoning(body, "m", reasoning) shouldBe dropped("m")
+    standard.addReasoning(body, ModelName("m"), reasoning) shouldBe dropped("m")
     body shouldBe ujson.Obj("model" -> "m")
-    standard.addReasoning(body, "m", CompletionOptions()) shouldBe empty
+    standard.addReasoning(body, ModelName("m"), CompletionOptions()) shouldBe empty
   }
 
   it should "report nothing from the dialects that map reasoning themselves" in {
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.2", reasoning) shouldBe empty
-    XaiDialect.addReasoning(ujson.Obj(), "grok-4.6", reasoning) shouldBe empty
-    OpenRouterDialect.addReasoning(ujson.Obj(), "anthropic/claude-sonnet-4", reasoning) shouldBe empty
+    ZaiDialect.addReasoning(ujson.Obj(), ModelName("glm-5.2"), reasoning) shouldBe empty
+    XaiDialect.addReasoning(ujson.Obj(), ModelName("grok-4.6"), reasoning) shouldBe empty
+    OpenRouterDialect.addReasoning(ujson.Obj(), ModelName("anthropic/claude-sonnet-4"), reasoning) shouldBe empty
   }
 
   "OpenAICompatibleClient" should "put the dialect's report on the completion, from complete and from a stream" in {
@@ -48,7 +49,8 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
         sendSseResponse(exchange, openAISseBody(Seq("Hi"), model))
       else sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
     } { baseUrl =>
-      val client = new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), baseUrl, 128000, 4096))
+      val client =
+        new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), BaseUrl(baseUrl), 128000, 4096))
 
       client.complete(hello, reasoning).value.adjustments shouldBe dropped(model)
       client.streamComplete(hello, reasoning)(_ => ()).value.adjustments shouldBe dropped(model)
@@ -64,7 +66,8 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
       request.obj.contains("service_tier") shouldBe false
       sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
     } { baseUrl =>
-      val client = new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), baseUrl, 128000, 4096))
+      val client =
+        new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), BaseUrl(baseUrl), 128000, 4096))
       client.complete(hello, CompletionOptions().withServiceTier(ServiceTier.Flex)).value.adjustments shouldBe List(
         RequestAdjustment.Dropped(RequestOption.ServiceTier, "Mistral has no service tier to choose; Flex is not sent")
       )

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{
   AuthenticationError,
@@ -177,7 +178,7 @@ class BedrockClient(
 
   protected def clientDescription: String = s"Bedrock client for model ${config.model}"
   protected def providerName: String      = "bedrock"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
   protected[provider] def requestTimeout: Option[FiniteDuration] = config.timeouts.request
@@ -196,7 +197,7 @@ class BedrockClient(
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   // the model's registry entry, for whether it takes cache checkpoints (see BedrockPromptCache)
-  private lazy val capabilities = registryService.lookup(config.model.asString).toOption.map(_.capabilities)
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
 
   private def cachePlan(options: CompletionOptions): BedrockPromptCache.Plan =
     BedrockPromptCache.plan(config.model.asString, options, capabilities)
@@ -274,7 +275,7 @@ class BedrockClient(
   ): Result[(Conversation, CompletionOptions, Seq[RequestAdjustment])] =
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
@@ -347,7 +348,7 @@ class BedrockClient(
     // the visitor; a Finished already queued by the handler makes this one a no-op.
     future.whenComplete((_, error) => if (error != null) queue.put(StreamSignal.Finished(Some(error))))
 
-    val accumulator = StreamingAccumulator(config.model.asString)
+    val accumulator = StreamingAccumulator(config.model)
     val messageId   = java.util.UUID.randomUUID().toString
     val toolIds     = scala.collection.mutable.Map.empty[Int, String]
     // reasoning blocks by content-block index, so each keeps its own text and signature
@@ -443,7 +444,7 @@ class BedrockClient(
                   else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
                 c
                   .withMessage(message)
-                  .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)))
+                  .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
                   .withServedTier(servedTier)
               }
           }
@@ -704,10 +705,10 @@ class BedrockClient(
         Completion(
           id = java.util.UUID.randomUUID().toString,
           created = Instant.now(),
-          model = config.model.asString,
+          model = config.model,
           message = message,
           usage = usage,
-          estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)),
+          estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
           finishReason = stopReason.fold(FinishReason.Unknown)(BedrockClient.finishReason),
           servedTier = BedrockClient.servedTier(response.serviceTier())
         )
@@ -794,7 +795,7 @@ class BedrockClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = responseBody
       ),
       result

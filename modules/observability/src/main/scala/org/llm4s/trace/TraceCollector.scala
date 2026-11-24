@@ -89,7 +89,7 @@ class TraceCollectorTracing[F[_]](
       case e: TraceEvent.CompletionReceived =>
         val attributes = Map(
           "completion_id"    -> SpanValue.StringValue(e.id),
-          "model"            -> SpanValue.StringValue(e.model),
+          "model"            -> SpanValue.StringValue(e.model.asString),
           "tool_calls_count" -> SpanValue.LongValue(e.toolCalls.toLong),
           "content"          -> SpanValue.StringValue(e.content)
         ) ++ e.servedTier.map(t => "service_tier" -> SpanValue.StringValue(TraceEvent.serviceTierName(t)))
@@ -161,7 +161,7 @@ class TraceCollectorTracing[F[_]](
           endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "model"             -> SpanValue.StringValue(e.model),
+            "model"             -> SpanValue.StringValue(e.model.asString),
             "operation"         -> SpanValue.StringValue(e.operation),
             "prompt_tokens"     -> SpanValue.LongValue(e.usage.promptTokens.toLong),
             "completion_tokens" -> SpanValue.LongValue(e.usage.completionTokens.toLong),
@@ -229,7 +229,7 @@ class TraceCollectorTracing[F[_]](
           endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "model"         -> SpanValue.StringValue(e.model),
+            "model"         -> SpanValue.StringValue(e.model.asString),
             "operation"     -> SpanValue.StringValue(e.operation),
             "input_count"   -> SpanValue.LongValue(e.inputCount.toLong),
             "prompt_tokens" -> SpanValue.LongValue(e.usage.promptTokens.toLong),
@@ -249,7 +249,7 @@ class TraceCollectorTracing[F[_]](
           status = SpanStatus.Ok,
           attributes = Map(
             "cost_usd"    -> SpanValue.DoubleValue(e.costUsd),
-            "model"       -> SpanValue.StringValue(e.model),
+            "model"       -> SpanValue.StringValue(e.model.asString),
             "operation"   -> SpanValue.StringValue(e.operation),
             "token_count" -> SpanValue.LongValue(e.tokenCount.toLong),
             "cost_type"   -> SpanValue.StringValue(e.costType)
@@ -316,7 +316,7 @@ class TraceCollectorTracing[F[_]](
 
       case e: TraceEvent.ImageGenerationCompleted =>
         val baseAttrs: Map[String, SpanValue] = Map(
-          "model"       -> SpanValue.StringValue(e.model),
+          "model"       -> SpanValue.StringValue(e.model.asString),
           "operation"   -> SpanValue.StringValue(e.operation),
           "image_count" -> SpanValue.LongValue(e.imageCount.toLong),
           "size"        -> SpanValue.StringValue(e.size),

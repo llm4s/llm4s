@@ -22,7 +22,7 @@ import scala.concurrent.duration.DurationInt
  */
 class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg  = EmbeddingModelConfig("jina-embeddings-v3", 1024)
+  private val modelCfg  = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
   private val secretKey = "jina-SECRET-key-123"
 
   private def cfg(base: String = "http://jina-test") =
@@ -71,7 +71,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     val http = new MockHttpClient(ok(Seq(Seq(1.0))))
     val res = JinaEmbeddingProvider
       .forTest(cfg(), http, task)
-      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(model, 1024)))
+      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName(model), 1024)))
     (res, http.lastBody.map(read(_)))
   }
 
@@ -92,7 +92,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
       val http = new MockHttpClient(ok(Seq(Seq(1.0))))
       val res = JinaEmbeddingProvider
         .forTest(cfg(), http, t)
-        .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("jina-embeddings-v4", 2048)))
+        .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("jina-embeddings-v4"), 2048)))
       res.left.toOption.get.message should include(t.wireName)
       http.lastBody shouldBe None
     }

@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.JLlmClientTestFactory
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -13,9 +14,9 @@ class LlmHealthIndicatorSpec extends AnyFlatSpec with Matchers {
 
   private val stubLlmClient: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   }

@@ -26,7 +26,7 @@ class JinaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   private val ok = HttpResponse(200, """{"data":[{"embedding":[0.1]}]}""", Map.empty)
 
   private def request(purpose: InputPurpose, model: String = "jina-embeddings-v3") =
-    EmbeddingRequest(Seq("text"), EmbeddingModelConfig(model, 1024), purpose)
+    EmbeddingRequest(Seq("text"), EmbeddingModelConfig(ModelName(model), 1024), purpose)
 
   /** The `task` field of the request the provider sent, if it sent one, and the response metadata. */
   private def sent(
@@ -56,7 +56,10 @@ class JinaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "still send retrieval.passage when the request does not say, as every request did before" in {
-    sent(followingPurpose, EmbeddingRequest(Seq("text"), EmbeddingModelConfig("jina-embeddings-v3", 1024)))._1 shouldBe
+    sent(
+      followingPurpose,
+      EmbeddingRequest(Seq("text"), EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024))
+    )._1 shouldBe
       Some("retrieval.passage")
   }
 

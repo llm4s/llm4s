@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.EmbeddingClientOptions
@@ -14,18 +15,18 @@ import org.llm4s.llmconnect.EmbeddingClientOptions
  *                      `defaultModel`.
  */
 @Stable
-final case class EmbeddingConfigContext private (modelOverride: Option[String]):
+final case class EmbeddingConfigContext private (modelOverride: Option[ModelName]):
 
   /** Sets the model, which takes precedence over the provider's default. */
-  def withModelOverride(modelOverride: String): EmbeddingConfigContext = copy(modelOverride = Some(modelOverride))
+  def withModelOverride(modelOverride: ModelName): EmbeddingConfigContext = copy(modelOverride = Some(modelOverride))
 
   /** Sets, or clears, the model, which takes precedence over the provider's default. */
-  def withModelOverride(modelOverride: Option[String]): EmbeddingConfigContext = copy(modelOverride = modelOverride)
+  def withModelOverride(modelOverride: Option[ModelName]): EmbeddingConfigContext = copy(modelOverride = modelOverride)
 
 object EmbeddingConfigContext:
 
   /** The context for a selection; with no argument, the section alone decides the model. */
-  def apply(modelOverride: Option[String] = None): EmbeddingConfigContext =
+  def apply(modelOverride: Option[ModelName] = None): EmbeddingConfigContext =
     new EmbeddingConfigContext(modelOverride)
 
 /**

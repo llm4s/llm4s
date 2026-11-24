@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.*
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
@@ -140,12 +141,16 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
       given org.llm4s.llmconnect.config.ContextWindowResolver =
         org.llm4s.llmconnect.config.ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
       val creds = BedrockCredentials(Secret("AKID"), Secret("secret"))
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds), Some("p")).isLeft shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(accessKeyId = Secret(" ")))).isLeft shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(secretAccessKey = Secret("")))).isLeft shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds)).isRight shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", None, Some("p")).isRight shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1").isRight shouldBe true
+      BedrockConfig.fromValues(ModelName("m"), "us-east-1", Some(creds), Some("p")).isLeft shouldBe true
+      BedrockConfig
+        .fromValues(ModelName("m"), "us-east-1", Some(creds.copy(accessKeyId = Secret(" "))))
+        .isLeft shouldBe true
+      BedrockConfig
+        .fromValues(ModelName("m"), "us-east-1", Some(creds.copy(secretAccessKey = Secret(""))))
+        .isLeft shouldBe true
+      BedrockConfig.fromValues(ModelName("m"), "us-east-1", Some(creds)).isRight shouldBe true
+      BedrockConfig.fromValues(ModelName("m"), "us-east-1", None, Some("p")).isRight shouldBe true
+      BedrockConfig.fromValues(ModelName("m"), "us-east-1").isRight shouldBe true
     }
 
     "build through the factory to a Left, not an exception, for an unusable endpoint" in {

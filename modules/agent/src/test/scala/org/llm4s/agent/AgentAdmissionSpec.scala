@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.GraphTestSupport.awaited
@@ -337,7 +338,7 @@ class AgentAdmissionSpec
     AgentInput("hello").admission shouldBe None
 
     val admitted = AgentInput("hello").withAdmission(
-      Admission(Vector(AgentId.unsafe("assistant")), UsageSummary().add("m", TokenUsage(1, 2, 3), None))
+      Admission(Vector(AgentId.unsafe("assistant")), UsageSummary().add(ModelName("m"), TokenUsage(1, 2, 3), None))
         .withRefusedBy("NoCards")
     )
     upickle.default.read[AgentInput](upickle.default.writeJs(admitted)) shouldBe admitted

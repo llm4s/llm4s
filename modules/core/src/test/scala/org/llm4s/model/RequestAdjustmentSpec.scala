@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
@@ -43,7 +44,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     ModelRegistryTestSupport.defaultServiceResult().fold(e => fail(e.message), identity)
 
   private def transformer: RequestTransformer =
-    RequestTransformer.withOverrides(Map("narrow" -> constrained), service)
+    RequestTransformer.withOverrides(Map(ModelName("narrow") -> constrained), service)
 
   private def withPingTool(options: CompletionOptions): CompletionOptions =
     ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
@@ -64,7 +65,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
         .withResponseFormat(ResponseFormat.Json)
     )
 
-    val result = TransformationResult.transform("narrow", options, messages, transformer).value
+    val result = TransformationResult.transform(ModelName("narrow"), options, messages, transformer).value
 
     result.adjustments.map(_.option) shouldBe List(
       RequestOption.Temperature,
@@ -82,11 +83,11 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     )
     result.adjustments.tail.foreach(_ shouldBe a[Dropped])
     // the options are the ones transformOptions returns
-    result.options shouldBe transformer.transformOptions("narrow", options, dropUnsupported = true).value
+    result.options shouldBe transformer.transformOptions(ModelName("narrow"), options, dropUnsupported = true).value
   }
 
   test("an unset temperature is not reported on a model with a fixed temperature, since none is sent") {
-    val result = TransformationResult.transform("narrow", CompletionOptions(), messages, transformer).value
+    val result = TransformationResult.transform(ModelName("narrow"), CompletionOptions(), messages, transformer).value
 
     result.adjustments shouldBe empty
     result.options.temperature shouldBe None
@@ -96,7 +97,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     // #2807: with a non-Option `topP = 1.0` an explicit 1.0 could not be told from "unset" and went unreported
     val options = CompletionOptions().withTopP(1.0).withPresencePenalty(0.0)
 
-    val result = TransformationResult.transform("narrow", options, messages, transformer).value
+    val result = TransformationResult.transform(ModelName("narrow"), options, messages, transformer).value
 
     result.adjustments.map(_.option) shouldBe List(RequestOption.TopP, RequestOption.PresencePenalty)
     result.options.topP shouldBe None
@@ -105,7 +106,9 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
 
   test("an option the model supports is not reported") {
     val result =
-      TransformationResult.transform("gpt-4o", CompletionOptions(temperature = Some(0.7)), messages, transformer).value
+      TransformationResult
+        .transform(ModelName("gpt-4o"), CompletionOptions(temperature = Some(0.7)), messages, transformer)
+        .value
 
     result.adjustments shouldBe empty
     result.options.temperature shouldBe Some(0.7)
@@ -115,10 +118,10 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     val options = CompletionOptions(temperature = Some(0.7))
 
     TransformationResult
-      .transform("narrow", options, messages, transformer, dropUnsupported = false)
+      .transform(ModelName("narrow"), options, messages, transformer, dropUnsupported = false)
       .isLeft shouldBe true
     TransformationResult
-      .transform("gpt-4o", options, messages, transformer, dropUnsupported = false)
+      .transform(ModelName("gpt-4o"), options, messages, transformer, dropUnsupported = false)
       .value
       .adjustments shouldBe empty
   }
@@ -128,7 +131,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     // the default temperature, 0.7, is itself adjusted on this model (tested above)
     val options = CompletionOptions(temperature = Some(1.0)).withResponseFormat(schema)
 
-    val result = TransformationResult.transform("narrow", options, messages, transformer).value
+    val result = TransformationResult.transform(ModelName("narrow"), options, messages, transformer).value
 
     result.options.responseFormat shouldBe None
     result.adjustments shouldBe List(
@@ -152,7 +155,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     TransformationResult(CompletionOptions(), messages).adjustments shouldBe empty
     TransformationResult(CompletionOptions(), messages).withAdjustments(adjustments).adjustments shouldBe adjustments
 
-    val completion = Completion("id", Instant.EPOCH, "m", AssistantMessage("hi"))
+    val completion = Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("hi"))
     completion.adjustments shouldBe empty
     completion.withAdjustments(adjustments).adjustments shouldBe adjustments
     completion.withAdjustments(adjustments).withAdjustments(Nil) shouldBe completion
@@ -163,11 +166,11 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     val usage       = TokenUsage(1, 2, 3)
     val message     = AssistantMessage("there")
     val citations   = List(Citation("https://example.invalid"))
-    val set = Completion("id", Instant.EPOCH, "m", AssistantMessage("hi"))
+    val set = Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("hi"))
       .withAdjustments(adjustments)
       .withId("id2")
       .withCreated(Instant.EPOCH.plusSeconds(1))
-      .withModel("m2")
+      .withModel(ModelName("m2"))
       .withMessage(message)
       .withUsage(usage)
       .withEstimatedCost(BigDecimal("0.5"))
@@ -187,8 +190,8 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
 
     val created = Instant.EPOCH
     val message = AssistantMessage("hi")
-    Completion("id", created, "m", message, None, None, Nil) shouldBe
-      Completion("id", created, "m", message)
+    Completion("id", created, ModelName("m"), message, None, None, Nil) shouldBe
+      Completion("id", created, ModelName("m"), message)
   }
 
   test("a client that sends no reasoning setting reports a requested one as dropped, and nothing otherwise") {

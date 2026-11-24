@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.ZaiConfig
@@ -45,7 +46,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
         ZaiConfig(
           apiKey = Secret("test-key"),
           model = ModelName(model),
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = 128000,
           reserveCompletion = 4096
         )
@@ -151,7 +152,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "report that Thinking.Off still thinks, naming the model, and a level it overrode" in {
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.3", off.withReasoning(ReasoningEffort.Medium)) shouldBe List(
+    ZaiDialect.addReasoning(ujson.Obj(), ModelName("glm-5.3"), off.withReasoning(ReasoningEffort.Medium)) shouldBe List(
       RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", "glm-5.3 always thinks"),
       RequestAdjustment.Adjusted(RequestOption.Reasoning, "medium", "low", "thinking = Off takes precedence")
     )
@@ -160,20 +161,36 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
   "Z.ai's reports" should "name only the levels it has no Z.ai level for, not its own scale" in {
     ZaiDialect.addReasoning(
       ujson.Obj(),
-      "glm-5.2",
+      ModelName("glm-5.2"),
       CompletionOptions().withReasoning(ReasoningEffort.High)
     ) shouldBe Nil
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.2", CompletionOptions().withReasoning(ReasoningEffort.Minimal)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-5.2"),
+      CompletionOptions().withReasoning(ReasoningEffort.Minimal)
+    ) shouldBe
       List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "minimal", "low", "glm-5.2 has no minimal level"))
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.3", CompletionOptions().withReasoning(ReasoningEffort.XHigh)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-5.3"),
+      CompletionOptions().withReasoning(ReasoningEffort.XHigh)
+    ) shouldBe
       List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "xhigh", "max", "glm-5.3 has no xhigh level"))
   }
 
   it should "call adaptive thinking not needed on a GLM model, and drop a budget" in {
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-4.7", CompletionOptions().withThinking(Thinking.Adaptive)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-4.7"),
+      CompletionOptions().withThinking(Thinking.Adaptive)
+    ) shouldBe
       List(RequestAdjustment.NotNeeded(RequestOption.Thinking, "glm-4.7 thinks by default"))
     ZaiDialect
-      .addReasoning(ujson.Obj(), "glm-4.7", CompletionOptions().withThinking(Thinking.budget(4096).toOption.get))
+      .addReasoning(
+        ujson.Obj(),
+        ModelName("glm-4.7"),
+        CompletionOptions().withThinking(Thinking.budget(4096).toOption.get)
+      )
       .map(_.option) shouldBe List(RequestOption.Thinking)
   }
 

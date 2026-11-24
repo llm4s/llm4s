@@ -1,5 +1,6 @@
 package org.llm4s.agent.events
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage, ToolCallId }
 import org.llm4s.toolapi.IdempotencyKey
@@ -14,7 +15,6 @@ import scala.util.Try
 // Durable payloads: committed with the task that emitted them, replayable. They carry no message content.
 
 // A provider id is stored as its canonical string, so an event written before the field was typed still reads (#2275).
-private given ReadWriter[ProviderId] = upickle.default.readwriter[String].bimap[ProviderId](_.asString, ProviderId(_))
 
 private val logger = LoggerFactory.getLogger("org.llm4s.agent.events.AgentEventPayloads")
 
@@ -115,7 +115,7 @@ object CallUsage:
 @Experimental
 final case class ModelCallCompleted private (
   agent: String,
-  model: String,
+  model: ModelName,
   attempts: Int,
   toolCalls: Int,
   usage: Option[CallUsage],
@@ -127,7 +127,7 @@ final case class ModelCallCompleted private (
   duration: FiniteDuration = Duration.Zero
 ):
   def withAgent(value: String): ModelCallCompleted                        = copy(agent = value)
-  def withModel(value: String): ModelCallCompleted                        = copy(model = value)
+  def withModel(value: ModelName): ModelCallCompleted                     = copy(model = value)
   def withAttempts(value: Int): ModelCallCompleted                        = copy(attempts = value)
   def withToolCalls(value: Int): ModelCallCompleted                       = copy(toolCalls = value)
   def withUsage(value: CallUsage): ModelCallCompleted                     = copy(usage = Some(value))
@@ -147,7 +147,7 @@ final case class ModelCallCompleted private (
 object ModelCallCompleted:
   def apply(
     agent: String,
-    model: String,
+    model: ModelName,
     attempts: Int,
     toolCalls: Int,
     usage: Option[CallUsage],

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -84,11 +85,11 @@ class MultimodalEmbeddingTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "MultimediaEmbeddingRequest" should "default its metadata and change each field through its setter" in {
-    val model   = EmbeddingModelConfig("m", 4)
+    val model   = EmbeddingModelConfig(ModelName("m"), 4)
     val request = MultimediaEmbeddingRequest(Seq.empty, model, Modality.Audio)
     request.meta shouldBe empty
 
-    val other = EmbeddingModelConfig("clip", 8)
+    val other = EmbeddingModelConfig(ModelName("clip"), 8)
     val image = RawMediaInput(Array[Byte](1), "image/png")
     val changed =
       request.withInputs(Seq(image)).withModel(other).withModality(Modality.Image).withMeta(Map("k" -> "v"))

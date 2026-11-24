@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.services
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.{ FakeLlmClient, GuideDocs, LlmErrorKind, Llm4s }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -34,7 +35,7 @@ class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matche
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val n       = sent.synchronized { sent += conversation; sent.size - 1 }
       val message = script(n)
-      Right(Completion(s"s$n", Instant.EPOCH, "scripted", message))
+      Right(Completion(s"s$n", Instant.EPOCH, ModelName("scripted"), message))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

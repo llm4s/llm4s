@@ -1,5 +1,6 @@
 package org.llm4s.testutil
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.scalatest.flatspec.AnyFlatSpec
@@ -50,7 +51,7 @@ class BagOfWordsMockSpec extends AnyFlatSpec with Matchers {
 
   "BagOfWordsMock provider" should "return one vector per input, in order, and count calls" in {
     val provider = new MockEmbeddingProviders.BagOfWordsMock(16)
-    val config   = EmbeddingModelConfig("mock-model", 16)
+    val config   = EmbeddingModelConfig(ModelName("mock-model"), 16)
 
     val response = provider.embed(EmbeddingRequest(Seq("first text", "second text"), config))
 

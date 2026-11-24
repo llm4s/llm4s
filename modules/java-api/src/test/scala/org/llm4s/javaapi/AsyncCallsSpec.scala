@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, NetworkError, ProcessingError }
@@ -66,7 +67,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         LockSupport.parkNanos(1000000L)
       if (Thread.currentThread().isInterrupted) interrupted.countDown()
       if (release.getCount == 0 && !Thread.currentThread().isInterrupted)
-        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("late")))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("late")))
       else Left(CancelledError("Blocking"))
     }
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
@@ -291,7 +292,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         arrived.countDown()
         val text = conversation.messages.collect { case u: UserMessage => u.content }.last
         if (arrived.await(secs, TimeUnit.SECONDS))
-          Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
+          Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text)))
         else Left(ProcessingError("concurrency", "the calls did not run at once"))
       }
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
@@ -365,7 +366,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       EmbeddingClient(new EmbeddingProvider {
         def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = reply(request)
       })(using ModelRegistryService.fromModels(Nil)),
-      EmbeddingModelConfig("embed-model", 2)
+      EmbeddingModelConfig(ModelName("embed-model"), 2)
     )
 
   "JEmbeddingClient.embedAsync" should "complete with one vector per text" in {

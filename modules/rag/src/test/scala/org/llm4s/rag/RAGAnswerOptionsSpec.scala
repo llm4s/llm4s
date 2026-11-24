@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -32,7 +33,7 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "answer",
           created = Instant.EPOCH,
-          model = "mock",
+          model = ModelName("mock"),
           message = AssistantMessage("42"),
           usage = Some(TokenUsage(10, 2, 12))
         )

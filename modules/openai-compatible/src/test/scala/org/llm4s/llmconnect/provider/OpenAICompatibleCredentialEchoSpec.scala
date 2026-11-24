@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -24,7 +25,11 @@ final class OpenAICompatibleCredentialEchoSpec extends AnyFlatSpec with Matchers
     .isolated {
       CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
         val config =
-          OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = baseUrl, apiKey = Some(Secret(echoKey)))
+          OpenAICompatibleConfig(
+            model = ModelName("local-model"),
+            baseUrl = BaseUrl(baseUrl),
+            apiKey = Some(Secret(echoKey))
+          )
         OpenAICompatibleClient(config).value.complete(hello, opts)
       }
     }
@@ -32,7 +37,13 @@ final class OpenAICompatibleCredentialEchoSpec extends AnyFlatSpec with Matchers
   it should "keep an echoed key out of DeepSeek's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
       val config =
-        DeepSeekConfig(apiKey = Secret(echoKey), model = ModelName("deepseek-chat"), baseUrl = baseUrl, 128000, 4096)
+        DeepSeekConfig(
+          apiKey = Secret(echoKey),
+          model = ModelName("deepseek-chat"),
+          baseUrl = BaseUrl(baseUrl),
+          128000,
+          4096
+        )
       DeepSeekClient(config).value.complete(hello, opts)
     }
   }
@@ -43,7 +54,7 @@ final class OpenAICompatibleCredentialEchoSpec extends AnyFlatSpec with Matchers
         MistralConfig(
           apiKey = Secret(echoKey),
           model = ModelName("mistral-small-latest"),
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           128000,
           4096
         )
@@ -54,28 +65,30 @@ final class OpenAICompatibleCredentialEchoSpec extends AnyFlatSpec with Matchers
   it should "keep an echoed key out of Cohere's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
       val config =
-        CohereConfig(apiKey = Secret(echoKey), model = ModelName("command-r"), baseUrl = baseUrl, 128000, 4096)
+        CohereConfig(apiKey = Secret(echoKey), model = ModelName("command-r"), baseUrl = BaseUrl(baseUrl), 128000, 4096)
       CohereClient(config).value.complete(hello, opts)
     }
   }
 
   it should "keep an echoed key out of Z.ai's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = ZaiConfig(apiKey = Secret(echoKey), model = ModelName("glm-4.6"), baseUrl = baseUrl, 128000, 4096)
+      val config =
+        ZaiConfig(apiKey = Secret(echoKey), model = ModelName("glm-4.6"), baseUrl = BaseUrl(baseUrl), 128000, 4096)
       ZaiClient(config).value.complete(hello, opts)
     }
   }
 
   it should "keep an echoed key out of xAI's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = XaiConfig(apiKey = Secret(echoKey), model = ModelName("grok-4"), baseUrl = baseUrl, 128000, 4096)
+      val config =
+        XaiConfig(apiKey = Secret(echoKey), model = ModelName("grok-4"), baseUrl = BaseUrl(baseUrl), 128000, 4096)
       XaiClient(config).value.complete(hello, opts)
     }
   }
 
   it should "keep an echoed key out of OpenRouter's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = OpenAIConfig.fromValues("openai/gpt-4o", Secret(echoKey), baseUrl).value
+      val config = OpenAIConfig.fromValues(ModelName("openai/gpt-4o"), Secret(echoKey), BaseUrl(baseUrl)).value
       OpenRouterClient(config).value.complete(hello, opts)
     }
   }

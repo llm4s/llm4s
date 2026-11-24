@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -28,7 +29,7 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
     val id: ProviderId = ProviderId("keylessfixture")
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec
-        .apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq("KEYLESSFIXTURE_API_KEY"))
+        .apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl), Seq("KEYLESSFIXTURE_API_KEY"))
         .withExtras(Seq(ProviderConfigKey.optional("authentication", "how to authenticate", Some("key"))))
         .withKeylessWhen("authentication", "token")
     def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =

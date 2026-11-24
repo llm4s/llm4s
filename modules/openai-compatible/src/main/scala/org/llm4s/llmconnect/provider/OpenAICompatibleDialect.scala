@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{
   CompletionOptions,
@@ -68,7 +70,7 @@ trait OpenAICompatibleDialect:
    * @param baseUrl the client's base URL, without a trailing slash
    * @param model   the configured model, for a request that looks it up
    */
-  def validationUrl(baseUrl: String, @unused model: String): Option[String] = Some(s"$baseUrl/models")
+  def validationUrl(baseUrl: BaseUrl, @unused model: ModelName): Option[String] = Some(s"${baseUrl.asUrl}/models")
 
   /**
    * Whether an error response refuses the credential although its status is neither 401 nor 403, which are an
@@ -150,8 +152,8 @@ trait OpenAICompatibleDialect:
    * `Completion.adjustments` (RFC 0008). Standard: adds nothing, and reports a set
    * `CompletionOptions.reasoning` or `CompletionOptions.thinking` as `Dropped`.
    */
-  def addReasoning(@unused body: ujson.Obj, model: String, options: CompletionOptions): Seq[RequestAdjustment] =
-    UnmappedOptions.reasoningAndThinking(model, options)
+  def addReasoning(@unused body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] =
+    UnmappedOptions.reasoningAndThinking(model.asString, options)
 
   /**
    * Adds an assistant turn's thinking - its

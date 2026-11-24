@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.agent.delegation.TypedAgent
 import org.llm4s.llmconnect.LLMClient
@@ -14,7 +15,7 @@ object NestedFixtures {
 
   def completion(text: String, calls: Seq[ToolCall] = Nil): Completion = {
     val message = if (calls.isEmpty) AssistantMessage(text, Seq.empty) else AssistantMessage(None, calls)
-    Completion("n", Instant.EPOCH, "m", message, Some(TokenUsage(1, 1, 2)))
+    Completion("n", Instant.EPOCH, ModelName("m"), message, Some(TokenUsage(1, 1, 2)))
   }
 
   /**

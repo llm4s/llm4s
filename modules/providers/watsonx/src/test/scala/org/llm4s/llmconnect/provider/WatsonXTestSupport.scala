@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpBody, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
@@ -87,7 +88,7 @@ object WatsonXTestConfig {
     projectId = "project-1",
     spaceId = None,
     model = ModelName("ibm/granite-13b-instruct-v2"),
-    baseUrl = "https://wx.example.com",
+    baseUrl = BaseUrl("https://wx.example.com"),
     apiVersion = "2026-09-25",
     iamUrl = StubHttp.IamUrl,
     contextWindow = 8192,

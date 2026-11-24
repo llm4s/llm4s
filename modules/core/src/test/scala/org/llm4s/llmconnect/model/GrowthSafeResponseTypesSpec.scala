@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -77,7 +78,7 @@ class GrowthSafeResponseTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "UsageSummary" should "change each field through its setter" in {
-    val byModel = Map("gpt-4o" -> ModelUsage(requestCount = 1L))
+    val byModel = Map(ModelName("gpt-4o") -> ModelUsage(requestCount = 1L))
     val summary = UsageSummary()
       .withRequestCount(1L)
       .withInputTokens(20L)

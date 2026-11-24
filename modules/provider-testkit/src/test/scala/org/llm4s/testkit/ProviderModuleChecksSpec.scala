@@ -107,7 +107,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
           Some(Secret("k"))
         )
       )
-      provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("acme-small", 2))).isRight shouldBe true
+      provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("acme-small"), 2))).isRight shouldBe true
     }
 
     "fail when the descriptor refuses the config" in {
@@ -151,6 +151,6 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "offer the same checks without mixing the trait in" in {
       ProviderModuleChecks.assertRegistrableWith(new Llm4sAcmeModule)
-      ProviderModuleChecks.defaultModelRegistry.lookup("gpt-4o").isRight shouldBe true
+      ProviderModuleChecks.defaultModelRegistry.lookup(ModelName("gpt-4o")).isRight shouldBe true
     }
   }

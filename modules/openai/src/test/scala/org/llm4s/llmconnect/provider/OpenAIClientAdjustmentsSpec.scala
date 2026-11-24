@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, RequestOption, UserMessage }
@@ -29,7 +31,7 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
     """{"id":"c1","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}"""
 
   private def config(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl("https://example.invalid/v1")).value
 
   /** A client for `model`, and the requests it sends. */
   private def client(model: String): (OpenAIClient, ListBuffer[ChatCompletionCreateParams]) = {

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.graph.{ GraphRuntime, GraphSnapshot, InterruptId, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
@@ -40,7 +41,7 @@ object LocksFixture:
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )

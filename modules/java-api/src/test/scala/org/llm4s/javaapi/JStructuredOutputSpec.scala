@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.javaapi.StructuredRecords.*
@@ -21,7 +22,7 @@ class JStructuredOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val options = new AtomicReference[CompletionOptions]()
     override def complete(conversation: Conversation, opts: CompletionOptions): Result[Completion] = {
       options.set(opts)
-      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(
       onChunk: StreamedChunk => Unit

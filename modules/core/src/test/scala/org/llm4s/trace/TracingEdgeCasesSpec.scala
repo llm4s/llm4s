@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -125,7 +126,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    combined.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    combined.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
@@ -137,7 +138,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    combined.traceTokenUsage(TokenUsage(10, 5, 15), "gpt-4", "test") shouldBe Right(())
+    combined.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("gpt-4"), "test") shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
@@ -175,7 +176,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer   = new RecordingTracing(events)
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    filtered.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
     events should have size 1
   }
 
@@ -184,7 +185,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer   = new RecordingTracing(events)
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.traceTokenUsage(TokenUsage(10, 5, 15), "m", "o") shouldBe Right(())
+    filtered.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("m"), "o") shouldBe Right(())
     events should have size 1
   }
 
@@ -243,7 +244,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer      = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    transformed.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
     events should have size 1
   }
 
@@ -252,7 +253,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer      = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.traceTokenUsage(TokenUsage(10, 5, 15), "m", "o") shouldBe Right(())
+    transformed.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("m"), "o") shouldBe Right(())
     events should have size 1
   }
 
@@ -327,7 +328,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "comp-1",
       created = Instant.EPOCH,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Hello"), Seq.empty)
     )
 

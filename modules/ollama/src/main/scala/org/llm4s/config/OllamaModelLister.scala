@@ -28,7 +28,7 @@ object OllamaModelLister extends ProviderModelLister:
     for
       ollama <- config.requireProvider(ProviderId("ollama"))
       // The same default as a chat section's (#1991): a section without `baseUrl` means the local server.
-      baseUrl = ollama.baseUrl.getOrElse(BaseUrl(OllamaProvider.DefaultBaseUrl))
+      baseUrl = ollama.baseUrl.getOrElse(OllamaProvider.DefaultBaseUrl)
       models <- listOllamaModels(baseUrl, httpClient)
     yield models
 

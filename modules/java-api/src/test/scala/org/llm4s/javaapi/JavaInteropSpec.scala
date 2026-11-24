@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -37,7 +38,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def answering(answer: String): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
@@ -65,9 +66,9 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val streaming = StreamFixtures.Scripted(
       onChunk => {
         onChunk(StreamedChunk(id = "c", content = Some("4")))
-        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("4")))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("4")))
       },
-      () => Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("4")))
+      () => Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("4")))
     )
     val log = JavaInteropCheck
       .streaming(StreamFixtures.jAgentOf(streaming)(_.withStreaming()), new java.util.concurrent.CountDownLatch(0))

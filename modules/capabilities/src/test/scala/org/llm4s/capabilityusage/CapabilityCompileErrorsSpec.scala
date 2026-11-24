@@ -2,6 +2,8 @@
 // anything package-private.
 package org.llm4s.capabilityusage
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.capability.*
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ ContentPart, Conversation, UserMessage }
@@ -23,7 +25,7 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
     c.describe(image, "One-line alt text").map(_.content)
 
   def checkedOnce(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] =
-    client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")
+    client.requireCapabilities[Vision & Tools](ProviderId("openai"), ModelName("gpt-4o"))
 
   "A Capable[Tools]" should "not be accepted where a Capable[Vision] is needed" in {
     val errors = scala.compiletime.testing.typeCheckErrors(
@@ -82,7 +84,7 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
   it should "be refused when it is not given at all" in {
     val errors = messages(
       scala.compiletime.testing.typeCheckErrors(
-        """def f(client: LLMClient)(using ModelRegistryService) = client.requireCapabilities("openai", "gpt-4o")"""
+        """def f(client: LLMClient)(using ModelRegistryService) = client.requireCapabilities(ProviderId("openai"), ModelName("gpt-4o"))"""
       )
     )
     errors should include("No capability set was given")
@@ -96,10 +98,10 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
 
   it should "type its result with the set it checked" in {
     scala.compiletime.testing.typeCheckErrors(
-      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")"""
+      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision & Tools](ProviderId("openai"), ModelName("gpt-4o"))"""
     ) shouldBe Nil
     scala.compiletime.testing.typeCheckErrors(
-      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision]("openai", "gpt-4o")"""
+      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision](ProviderId("openai"), ModelName("gpt-4o"))"""
     ) should not be empty
   }
 

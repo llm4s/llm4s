@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.model.UnmappedOptions
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,7 +25,7 @@ class ServiceTierSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "c",
       created = java.time.Instant.EPOCH,
-      model = "m",
+      model = ModelName("m"),
       message = AssistantMessage(text = None)
     )
     completion.servedTier shouldBe None

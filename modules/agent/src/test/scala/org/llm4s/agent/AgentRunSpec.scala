@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, ThreadId }
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
@@ -110,7 +111,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     result.usage.requestCount shouldBe 3
     result.usage.inputTokens shouldBe (10 + 10 + 100)
     result.usage.outputTokens shouldBe (20 + 20 + 7)
-    result.usage.byModel.keySet shouldBe Set("test-model")
+    result.usage.byModel.keySet shouldBe Set(ModelName("test-model"))
   }
 
   it should "send the system prompt first on every call, and never store it" in {

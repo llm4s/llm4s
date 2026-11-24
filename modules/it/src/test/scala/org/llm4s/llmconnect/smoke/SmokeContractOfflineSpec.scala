@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Local
@@ -68,16 +70,24 @@ class SmokeContractOfflineSpec
   }
 
   private def deepSeek(): LLMClient =
-    DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
+    DeepSeekClient(
+      DeepSeekConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    ).value
 
   private def openRouter(): LLMClient =
-    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value)
+    new OpenRouterClient(
+      OpenAIConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    )
 
   private def cohere(): LLMClient =
-    CohereClient(CohereConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
+    CohereClient(
+      CohereConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    ).value
 
   private def openAI(): LLMClient =
-    OpenAIClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), s"${server.baseUrl}/v1").value).value
+    OpenAIClient(
+      OpenAIConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(s"${server.baseUrl}/v1")).value
+    ).value
 
   /**
    * The real clients the contract runs through, with how each reports reasoning: DeepSeek returns the thinking text
@@ -245,7 +255,8 @@ class SmokeContractOfflineSpec
     val gone = new FakeOpenAIServer()
     val base = gone.baseUrl
     gone.close()
-    val client = DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), base).value).value
+    val client =
+      DeepSeekClient(DeepSeekConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(base)).value).value
     failedMessage(SmokeChecks.run(Capability.SystemPrompt, client)).value should startWith("[system message]")
     client.close()
   }
@@ -264,7 +275,7 @@ class SmokeContractOfflineSpec
     Completion(
       id = "stub",
       created = Instant.EPOCH,
-      model = "stub",
+      model = ModelName("stub"),
       message = AssistantMessage(text = Some(content), toolCalls = toolCalls),
       usage = usage
     )

@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.llmconnect.provider.CostEstimator
 import org.llm4s.model.{ ModelRegistryService, ModelRegistryTestSupport }
@@ -57,7 +58,8 @@ class SpringAiUsageSpec extends AnyFlatSpec with Matchers {
   it should "price a cached Anthropic request through the bridge as llm4s's own client's usage is priced" in {
     val model   = "claude-sonnet-4-5"
     val bridged = SpringAiMapping.tokenUsage(anthropicUsage()).getOrElse(fail("no usage"))
-    val pricing = summon[ModelRegistryService].lookup(model).toOption.map(_.pricing).getOrElse(fail("no model"))
+    val pricing =
+      summon[ModelRegistryService].lookup(ModelName(model)).toOption.map(_.pricing).getOrElse(fail("no model"))
     val expected = for {
       in    <- pricing.inputCostPerToken
       read  <- pricing.cacheReadInputTokenCost
@@ -65,11 +67,11 @@ class SpringAiUsageSpec extends AnyFlatSpec with Matchers {
       out   <- pricing.outputCostPerToken
     } yield uncached * in + reads * read + writes * write + output * out
     expected shouldBe defined
-    CostEstimator.estimate(model, bridged).get.toDouble shouldBe expected.get +- 1e-12
-    CostEstimator.estimate(model, bridged) shouldBe CostEstimator.estimate(model, llm4sAnthropic)
+    CostEstimator.estimate(ModelName(model), bridged).get.toDouble shouldBe expected.get +- 1e-12
+    CostEstimator.estimate(ModelName(model), bridged) shouldBe CostEstimator.estimate(ModelName(model), llm4sAnthropic)
     // passed through as Spring AI reports it, the request cost no more than its uncached input and output
     val passedThrough = TokenUsage(uncached, output, uncached + output, cachedTokens = Some(reads))
-    CostEstimator.estimate(model, passedThrough).get.toDouble should be < expected.get
+    CostEstimator.estimate(ModelName(model), passedThrough).get.toDouble should be < expected.get
   }
 
   it should "add Bedrock Converse's cache counts to its prompt, keeping its total, which already has them" in {

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy, HttpTls }
@@ -28,19 +29,19 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
   private val hello = Conversation(Seq(UserMessage("hello")))
 
   // A host that does not resolve: only the proxy can answer for it.
-  private val BaseUrl = "http://api.openai.test/v1"
+  private val ApiBaseUrl = "http://api.openai.test/v1"
 
   private def openAI(baseUrl: String, network: HttpNetworkSettings): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value.withNetwork(network)
+    OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).value.withNetwork(network)
 
   private def via(proxy: HttpProxy) = HttpNetworkSettings(proxy = Some(proxy.withNonProxyHosts(Nil)))
 
   "OpenAIClient with a proxy" should "send the completion through it" in {
     Using.resource(RecordingProxy.start(body = LocalProviderTestServer.openAICompletion("proxied", "gpt-4o"))) {
       proxy =>
-        val client = OpenAIClient(openAI(BaseUrl, via(HttpProxy("127.0.0.1", proxy.port)))).value
+        val client = OpenAIClient(openAI(ApiBaseUrl, via(HttpProxy("127.0.0.1", proxy.port)))).value
         client.complete(hello, CompletionOptions()).value.content shouldBe "proxied"
-        proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", s"$BaseUrl/chat/completions"))
+        proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", s"$ApiBaseUrl/chat/completions"))
         proxy.requests.head.header("authorization") shouldBe Some("Bearer sk-test")
         client.close()
     }
@@ -54,10 +55,10 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
       )
     ) { proxy =>
       val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword(Secret("s3cret")))
-      val client   = OpenAIClient(openAI(BaseUrl, settings)).value
+      val client   = OpenAIClient(openAI(ApiBaseUrl, settings)).value
       client.complete(hello, CompletionOptions()).value.content shouldBe "authenticated"
       proxy.requests.head.header("proxy-authorization") shouldBe None
-      proxy.authorized.map(_.target) shouldBe Vector(s"$BaseUrl/chat/completions")
+      proxy.authorized.map(_.target) shouldBe Vector(s"$ApiBaseUrl/chat/completions")
       client.close()
     }
   }
@@ -79,7 +80,12 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
   "OpenAIClient for Azure with a proxy" should "send the completion through it" in {
     Using.resource(RecordingProxy.start(body = LocalProviderTestServer.openAICompletion("azure", "gpt-4o"))) { proxy =>
       val config = AzureConfig
-        .fromValues("gpt-4o", Secret("azure-key"), "http://my-resource.openai.test", "2025-01-01-preview")
+        .fromValues(
+          ModelName("gpt-4o"),
+          Secret("azure-key"),
+          BaseUrl("http://my-resource.openai.test"),
+          "2025-01-01-preview"
+        )
         .value
         .withNetwork(via(HttpProxy("127.0.0.1", proxy.port)))
       val client = OpenAIClient(config).value
@@ -98,7 +104,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
           override def invalidate(rejected: Secret): Unit = ()
         }
         val config = AzureConfig
-          .keyless("http://my-resource.openai.test", ModelName("gpt-4o"), tokens)
+          .keyless(BaseUrl("http://my-resource.openai.test"), ModelName("gpt-4o"), tokens)
           .withNetwork(via(HttpProxy("127.0.0.1", proxy.port)))
         val client = OpenAIClient(config).value
         client.complete(hello, CompletionOptions()).value.content shouldBe "keyless"
@@ -125,7 +131,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
 
   "OpenAIClient with a trust store it cannot read" should "refuse to build, never naming the password" in {
     val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some(Secret("never-printed"))))
-    val error  = OpenAIClient(openAI(BaseUrl, broken)).left.value
+    val error  = OpenAIClient(openAI(ApiBaseUrl, broken)).left.value
     error.message should (include("tls.trustStore").and(not).include("never-printed"))
   }
 }

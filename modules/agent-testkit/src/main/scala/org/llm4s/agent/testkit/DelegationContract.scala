@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildFailure, TaskRequest, TypedAgent }
 import org.llm4s.agent.graph.{ Checkpointer, CheckpointStatus, GraphRuntime, ThreadId }
@@ -189,7 +190,7 @@ object DelegationContract:
     Completion(
       id = "delegation-contract",
       created = Instant.EPOCH,
-      model = "contract-model",
+      model = ModelName("contract-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop

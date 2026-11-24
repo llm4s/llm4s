@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -149,7 +149,7 @@ private[config] object EmbeddingsConfigLoader {
       resolved   <- resolveApiKey(section, keyFile, descriptor, source)
       config <- descriptor.buildConfig(
         section.withApiKey(resolved.map(_.value)).withExtras(extras),
-        EmbeddingConfigContext(selected.modelOverride)
+        EmbeddingConfigContext(selected.modelOverride.map(ModelName(_)))
       )
       network <- HttpNetworkReader.load(source)
       // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS

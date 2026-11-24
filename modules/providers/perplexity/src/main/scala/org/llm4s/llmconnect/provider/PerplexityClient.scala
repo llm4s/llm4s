@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ProcessingError, ServiceError, ValidationError }
@@ -93,7 +94,7 @@ class PerplexityClient(
 
   protected def clientDescription: String = s"Perplexity Agent API client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   private val replayOrigin = ReplayOrigin(ProviderName, config.model.asString)
 
@@ -260,14 +261,14 @@ class PerplexityClient(
     Completion(
       id = if (reply.id.nonEmpty) reply.id else java.util.UUID.randomUUID().toString,
       created = reply.created.getOrElse(Instant.now()),
-      model = reply.model.getOrElse(config.model.asString),
+      model = reply.model.map(ModelName(_)).getOrElse(config.model),
       message = message,
       usage = reply.usage,
       // a reported cost that is not a number has no decimal value: the estimate stands in for it
       estimatedCost = reply.cost
         .filter(_.isFinite)
         .map(BigDecimal.decimal)
-        .orElse(reply.usage.flatMap(CostEstimator.estimate(config.model.asString, _))),
+        .orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
       citations = reply.citations,
       finishReason = finishReasonOf(reply)
     )
@@ -360,7 +361,7 @@ class PerplexityClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = Option(responseBody).filter(_.nonEmpty)
       ),
       result

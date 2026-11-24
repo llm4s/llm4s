@@ -2056,11 +2056,11 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.auth.azure.AzureEntraId
 import org.llm4s.llmconnect.config.AzureConfig
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def azureClient(using ModelRegistryService) =
   val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
-  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", ModelName("gpt-4o"), tokens))
+  LLMConnect.getClient(AzureConfig.keyless(BaseUrl("https://my-resource.openai.azure.com"), ModelName("gpt-4o"), tokens))
 ```
 
 Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the

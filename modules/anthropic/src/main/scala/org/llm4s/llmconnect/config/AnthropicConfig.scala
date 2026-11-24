@@ -42,7 +42,7 @@ import org.llm4s.types.Result
 final case class AnthropicConfig private (
   apiKey: Secret,
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   workloadIdentity: Option[AnthropicWorkloadIdentity],
@@ -52,7 +52,7 @@ final case class AnthropicConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                     = ProviderId("anthropic")
-  override def endpointUrl: Option[BaseUrl]                               = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                               = Some(baseUrl)
   override def withModel(model: ModelName): AnthropicConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
@@ -62,7 +62,7 @@ final case class AnthropicConfig private (
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): AnthropicConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): AnthropicConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): AnthropicConfig = copy(reserveCompletion = reserveCompletion)
   def withWorkloadIdentity(workloadIdentity: AnthropicWorkloadIdentity): AnthropicConfig =
@@ -83,7 +83,7 @@ object AnthropicConfig {
    * This was `DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-anthropic` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://api.anthropic.com"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.anthropic.com")
 
   private val standardReserve = 4096
 
@@ -95,7 +95,7 @@ object AnthropicConfig {
   def apply(
     apiKey: Secret,
     model: ModelName,
-    baseUrl: String,
+    baseUrl: BaseUrl,
     contextWindow: Int,
     reserveCompletion: Int,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
@@ -121,12 +121,12 @@ object AnthropicConfig {
    * consult the bundled model catalogue.
    */
   def apply(apiKey: Secret, model: ModelName): AnthropicConfig = {
-    val ContextLimits(cw, rc) = anthropicFallback(model.asString)
+    val ContextLimits(cw, rc) = anthropicFallback(model)
     apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
   }
 
-  private def anthropicFallback(modelName: String): ContextLimits =
-    modelName match {
+  private def anthropicFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
       case name if name.contains("claude-3")       => ContextLimits(200000, standardReserve)
       case name if name.contains("claude-3.5")     => ContextLimits(200000, standardReserve)
       case name if name.contains("claude-instant") => ContextLimits(100000, standardReserve)
@@ -178,7 +178,7 @@ object AnthropicConfig {
               List("apiKey", "workloadIdentity")
             )
           )
-          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "Anthropic", WorkloadIdentityHosts)
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl.asUrl, "baseUrl", "Anthropic", WorkloadIdentityHosts)
         yield config
 
   /**
@@ -193,17 +193,17 @@ object AnthropicConfig {
    * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String,
+    baseUrl: BaseUrl,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[AnthropicConfig] =
     (for {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("anthropic"),
+        lookupProviders = Seq(ProviderId("anthropic")),
         modelName = modelName,
         defaultContextWindow = 200000,
         defaultReserve = standardReserve,
@@ -211,7 +211,7 @@ object AnthropicConfig {
       )
       AnthropicConfig(
         apiKey = apiKey,
-        model = ModelName(modelName),
+        model = modelName,
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc,

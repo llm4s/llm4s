@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
@@ -30,7 +31,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
     val id: ProviderId = ProviderId("authfixture")
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec
-        .apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq("AUTHFIXTURE_API_KEY"))
+        .apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl), Seq("AUTHFIXTURE_API_KEY"))
         .withAuthExtras(
           Seq(
             ProviderConfigKey.required("tokenUrl", "the token endpoint"),

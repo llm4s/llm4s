@@ -1,5 +1,6 @@
 package org.llm4s.knowledgegraph.extraction
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
@@ -33,7 +34,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
 
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
@@ -67,7 +68,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
     val jsonResponse = """{"nodes": [], "edges": []}"""
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
@@ -89,7 +90,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
     val badJson = "not valid json {"
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(badJson), Nil),
       usage = None
@@ -112,7 +113,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
     val jsonMissingNodes = """{"edges": []}"""
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonMissingNodes), Nil),
       usage = None
@@ -134,7 +135,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
     val jsonMissingEdges = """{"nodes": []}"""
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonMissingEdges), Nil),
       usage = None
@@ -180,7 +181,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
 
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
@@ -217,7 +218,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
 
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
@@ -251,7 +252,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
 
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
@@ -293,7 +294,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
 
     val completion = Completion(
       id = "test-id",
-      model = "test-model",
+      model = ModelName("test-model"),
       created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None

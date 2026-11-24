@@ -50,7 +50,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val completion = new BedrockClient(config(url)).complete(conversation, CompletionOptions()).toOption.value
 
         completion.content shouldBe "Hello! How can I help you?"
-        completion.model shouldBe Model
+        completion.model.asString shouldBe Model
         completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((10, 8, 18))
       }
     }
@@ -261,7 +261,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         chunks.flatMap(_.content) shouldBe List("Hel", "lo!")
         val completion = result.toOption.value
         completion.content shouldBe "Hello!"
-        completion.model shouldBe Model
+        completion.model.asString shouldBe Model
         completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((10, 5))
         chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       }
