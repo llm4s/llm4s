@@ -83,13 +83,13 @@ case class MCPServerOptions(
  */
 class MCPServer(
   options: MCPServerOptions,
-  tools: Seq[ToolFunction[_, _]]
+  tools: Seq[ToolFunction[_]]
 ) {
   private val logger                           = LoggerFactory.getLogger(getClass)
   private var server: Option[HttpServer]       = None
   private var executorService: ExecutorService = _
 
-  private val toolMap: Map[String, ToolFunction[_, _]] = tools.map(t => t.name -> t).toMap
+  private val toolMap: Map[String, ToolFunction[_]] = tools.map(t => t.name -> t).toMap
 
   // SSE connection management – one entry per open SSE connection
   private case class SSEConnection(

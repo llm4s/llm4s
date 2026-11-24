@@ -14,7 +14,7 @@ import org.llm4s.types.Result
  *     */
  *   def findOrders(customerId: String): Result[List[Order]]
  *
- * val tools: Result[Seq[ToolFunction[?, ?]]] = Tools.derive[CustomerService](liveService)
+ * val tools: Result[Seq[ToolFunction[?]]] = Tools.derive[CustomerService](liveService)
  * }}}
  */
 @Experimental
@@ -36,5 +36,5 @@ object Tools {
    * @tparam S the trait or class whose methods are the tools; its Scaladoc and annotations describe them
    * @return the tools, or the first `ValidationError` a parameter's schema gave (see [[SchemaOf]])
    */
-  inline def derive[S](service: S): Result[Seq[ToolFunction[?, ?]]] = ${ ToolMacros.deriveImpl[S]('service) }
+  inline def derive[S](service: S): Result[Seq[ToolFunction[?]]] = ${ ToolMacros.deriveImpl[S]('service) }
 }

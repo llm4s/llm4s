@@ -48,8 +48,8 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): Result[ToolFunction[Map[String, Any], String]] =
-    ToolBuilder[Map[String, Any], String](name, description, schema)
+  ): Result[ToolFunction[String]] =
+    ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
       .buildSafe()
 

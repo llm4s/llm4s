@@ -25,13 +25,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   implicit val stringResultRW: ReadWriter[StringResult] = macroRW
 
   // Helper to create test tools — returns Result, never extracts
-  def createAddTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+  def createAddTool(): Result[ToolFunction[MathResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Addition parameters")
       .withProperty(Schema.property("a", Schema.number("First number")))
       .withProperty(Schema.property("b", Schema.number("Second number")))
 
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "add",
       "Adds two numbers",
       schema
@@ -43,13 +43,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     }.buildSafe()
   }
 
-  def createMultiplyTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+  def createMultiplyTool(): Result[ToolFunction[MathResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Multiplication parameters")
       .withProperty(Schema.property("a", Schema.number("First number")))
       .withProperty(Schema.property("b", Schema.number("Second number")))
 
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "multiply",
       "Multiplies two numbers",
       schema
@@ -61,12 +61,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     }.buildSafe()
   }
 
-  def createEchoTool(): Result[ToolFunction[Map[String, Any], StringResult]] = {
+  def createEchoTool(): Result[ToolFunction[StringResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Echo parameters")
       .withProperty(Schema.property("message", Schema.string("Message to echo")))
 
-    ToolBuilder[Map[String, Any], StringResult](
+    ToolBuilder[StringResult](
       "echo",
       "Echoes the message",
       schema
@@ -75,12 +75,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   /** Tool that sleeps for a given number of milliseconds then returns. Used for timeout tests. */
-  def createSleepTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+  def createSleepTool(): Result[ToolFunction[MathResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Sleep parameters")
       .withProperty(Schema.property("ms", Schema.integer("Milliseconds to sleep")))
 
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "sleep",
       "Sleeps for given ms",
       schema
@@ -95,12 +95,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   /** Tool that fails with IOException the first N times then succeeds. Used for retry tests. */
-  def createFlakyTool(failCount: Int): Result[ToolFunction[Map[String, Any], MathResult]] = {
+  def createFlakyTool(failCount: Int): Result[ToolFunction[MathResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Flaky parameters")
       .withProperty(Schema.property("x", Schema.number("Value")))
     val counter = new java.util.concurrent.atomic.AtomicInteger(0)
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "flaky",
       "Fails N times then succeeds",
       schema
@@ -117,11 +117,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   /** Tool that always returns Left (handler error). Not retryable. */
-  def createFailingTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+  def createFailingTool(): Result[ToolFunction[MathResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Fail parameters")
       .withProperty(Schema.property("x", Schema.number("Value")))
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "fail",
       "Always fails",
       schema
@@ -481,7 +481,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Blocking tool")
       .withProperty(Schema.property("ms", Schema.integer("Sleep ms")))
-    val hangingTool = ToolBuilder[Map[String, Any], MathResult](
+    val hangingTool = ToolBuilder[MathResult](
       "hang",
       "Blocks until interrupted",
       schema
@@ -520,7 +520,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Blocking tool")
       .withProperty(Schema.property("ms", Schema.integer("Sleep ms")))
-    val interruptSafeSleepTool = ToolBuilder[Map[String, Any], MathResult](
+    val interruptSafeSleepTool = ToolBuilder[MathResult](
       "sleep-interruptible",
       "Sleeps for given ms, swallowing interruption like a well-behaved worker",
       schema
@@ -563,7 +563,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Fast tool")
       .withProperty(Schema.property("ms", Schema.integer("Sleep ms")))
-    val fastTool = ToolBuilder[Map[String, Any], MathResult](
+    val fastTool = ToolBuilder[MathResult](
       "fast",
       "Completes quickly",
       schema
@@ -616,7 +616,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Slow-first tool")
       .withProperty(Schema.property("x", Schema.number("Value")))
-    val slowFirstTool = ToolBuilder[Map[String, Any], MathResult](
+    val slowFirstTool = ToolBuilder[MathResult](
       "slowfirst",
       "Blocks on first call, fast on retry",
       schema
@@ -654,7 +654,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Blocker")
       .withProperty(Schema.property("ms", Schema.integer("Sleep ms")))
-    val hangingTool = ToolBuilder[Map[String, Any], MathResult](
+    val hangingTool = ToolBuilder[MathResult](
       "blocker",
       "Hangs indefinitely",
       schema
@@ -742,7 +742,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val schema = Schema
       .`object`[Map[String, Any]]("Tracked tool")
       .withProperty(Schema.property("x", Schema.number("Value")))
-    val trackedTool = ToolBuilder[Map[String, Any], MathResult](
+    val trackedTool = ToolBuilder[MathResult](
       "tracked",
       "Fails 3 times then succeeds",
       schema
@@ -860,7 +860,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   "ToolRegistry.execute cancellation" should "return Cancelled, keeping the flag, when the caller is interrupted during a timed call" in {
     val workerInterrupted = new java.util.concurrent.atomic.AtomicBoolean(false)
-    val blocking = ToolBuilder[Map[String, Any], MathResult](
+    val blocking = ToolBuilder[MathResult](
       "blocker",
       "Blocks",
       Schema.`object`[Map[String, Any]]("p")
@@ -889,7 +889,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   it should "return Cancelled when the tool throws InterruptedException" in {
-    val thrower = ToolBuilder[Map[String, Any], MathResult](
+    val thrower = ToolBuilder[MathResult](
       "thrower",
       "Throws",
       Schema.`object`[Map[String, Any]]("p")
@@ -904,7 +904,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   it should "return Cancelled, not retry, and restore the flag, when the tool throws a wrapped interruption with the flag cleared" in {
     val attempts = new java.util.concurrent.atomic.AtomicInteger(0)
-    val wrapping = ToolBuilder[Map[String, Any], MathResult](
+    val wrapping = ToolBuilder[MathResult](
       "wrapper",
       "Wraps its interruption in an IOException",
       Schema.`object`[Map[String, Any]]("p")
@@ -924,7 +924,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   it should "return Cancelled, not retry, when a retry sleep is interrupted" in {
     val attempts = new java.util.concurrent.atomic.AtomicInteger(0)
-    val failing = ToolBuilder[Map[String, Any], MathResult](
+    val failing = ToolBuilder[MathResult](
       "flaky",
       "Fails with IO",
       Schema.`object`[Map[String, Any]]("p")
@@ -951,14 +951,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   "ToolRegistry.executeAsync" should "not leave a Cancelled call's interrupt flag on its pool thread" in {
-    val thrower = ToolBuilder[Map[String, Any], MathResult](
+    val thrower = ToolBuilder[MathResult](
       "thrower",
       "Throws",
       Schema.`object`[Map[String, Any]]("p")
     ).withHandler(_ => throw new InterruptedException("stop"))
       .buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val sleeper = ToolBuilder[Map[String, Any], MathResult](
+    val sleeper = ToolBuilder[MathResult](
       "sleeper",
       "Sleeps briefly",
       Schema.`object`[Map[String, Any]]("p")

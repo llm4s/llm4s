@@ -18,8 +18,8 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
   final private case class Pong(ok: Boolean)
   private given ReadWriter[Pong] = macroRW
 
-  private val tool: ToolFunction[Map[String, Any], Pong] =
-    ToolBuilder[Map[String, Any], Pong]("ping", "ping", Schema.`object`[Map[String, Any]]("none"))
+  private val tool: ToolFunction[Pong] =
+    ToolBuilder[Pong]("ping", "ping", Schema.`object`[Map[String, Any]]("none"))
       .withHandler(_ => Right(Pong(true)))
       .buildSafe()
       .getOrElse(fail("tool"))

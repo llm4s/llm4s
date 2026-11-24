@@ -58,7 +58,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     }
   }
 
-  private def ask(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
+  private def ask(client: OllamaClient, tools: Seq[ToolFunction[_]] = Seq(weatherTool)): Result[Completion] =
     client.complete(
       Conversation(Seq(UserMessage("What is the weather in Paris?"))),
       CompletionOptions().withTools(tools)
@@ -458,7 +458,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     // What Ollama answers (HTTP 400) when `tools` is sent to a model whose capabilities lack it.
     val unsupported = """{"error":"registry.ollama.ai/library/llama3:latest does not support tools"}"""
 
-    def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
+    def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_]] = Seq(weatherTool)): Result[Completion] =
       client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
         CompletionOptions().withTools(tools)
@@ -820,8 +820,8 @@ private object OllamaToolCallingSpec {
   implicit private val weatherRW: ReadWriter[Weather] = macroRW
 
   /** A tool whose definition the client has to send. */
-  val weatherTool: ToolFunction[Map[String, Any], Weather] =
-    ToolBuilder[Map[String, Any], Weather](
+  val weatherTool: ToolFunction[Weather] =
+    ToolBuilder[Weather](
       "get_weather",
       "Get the current weather in a location",
       Schema

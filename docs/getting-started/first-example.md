@@ -223,7 +223,7 @@ class ToolExample(client: LLMClient) {
 
   def run(): Unit = {
     val result = for {
-      weatherTool <- ToolBuilder[Map[String, Any], String](
+      weatherTool <- ToolBuilder[String](
                        "get_weather",
                        "Get current weather for a location",
                        weatherSchema
@@ -374,7 +374,7 @@ class ComprehensiveAgent(client: LLMClient) {
 
     // Tools belong to the agent, so give them to the builder
     val result = for {
-      calcTool <- ToolBuilder[Map[String, Any], String](
+      calcTool <- ToolBuilder[String](
                     "calculate",
                     "Evaluate a mathematical expression",
                     calcSchema

@@ -18,7 +18,7 @@ class EndpointSchemaSpec extends AnyFlatSpec with Matchers with EitherValues {
   private val binaryQueryCodec: Codec[List[String], Array[Byte], CodecFormat.TextPlain] =
     Codec.listHead(Codec.string.map(_.getBytes)(new String(_)).schema(Schema.schemaForByteArray))
 
-  private def built(tools: EndpointTool*): Seq[ToolFunction[?, ?]] =
+  private def built(tools: EndpointTool*): Seq[ToolFunction[?]] =
     EndpointTools.registry(base, new Recording().backend, tools*).value.tools
 
   private def schemaOf(tool: EndpointTool, strict: Boolean = false): ujson.Value =

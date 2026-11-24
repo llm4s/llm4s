@@ -1124,6 +1124,17 @@ A `Left("message")` still compiles and is still a `HandlerError`. A getter's err
 | `SafeParameterExtractor.enhanced(json)` | `SafeParameterExtractor(json)` |
 | `validateRequired("a" -> "string", "n" -> "integer")`: `Either[List[ToolParameterError], Unit]` | `validateRequired("a" -> ToolParameterType.String, "n" -> ToolParameterType.Integer)`: `Either[ToolParameterError, Unit]`, a `MultipleErrors` when several |
 | `ToolCallErrorJson.toJson(error)("error")` | `("message")`, or `error.formatted` for the old text |
+| `ToolBuilder[Map[String, Any], String](name, description, schema)` | `ToolBuilder[String](name, description, schema)` |
+| `ToolFunction[A, R]`, `Seq[ToolFunction[_, _]]`, `ToolFunction[?, ?]` | `ToolFunction[R]`, `Seq[ToolFunction[_]]`, `ToolFunction[?]` |
+| `tool.withSchema[U](schema)`: a `ToolFunction[U, R]` | `tool.withSchema(schema)`: the same `ToolFunction[R]` |
+
+`ToolFunction` and `ToolBuilder` had two type parameters, and the first, the arguments type, was a phantom: no member
+read it, every built-in tool set it to `Map[String, Any]`, and every consumer took `ToolFunction[_, _]`. It is gone:
+`ToolFunction[R]` and `ToolBuilder[R]` keep the handler's result type, and take any `SchemaDefinition[_]`. The typed
+tools of `llm4s-schema-derivation` (`Tool.of[A, R]`, `Tool.scoped`, `Tool.fromMethod`) keep their own type parameters
+and return a `ToolFunction[R]`. The Scalafix rule `ToolFunctionOneTypeParameter` drops the first type argument
+wherever both are written. A type parameter of your own that only named the arguments
+(`def tool[T, R](...): ToolFunction[T, R]`) is left declared and unused: delete it by hand.
 
 What changes without a compile error:
 
@@ -1141,7 +1152,8 @@ What changes without a compile error:
 `ToolCallError` is not an `LLMError`: a tool call's failure is sent back to the model as a result. Where a program
 must stop on one, map it there: `result.left.map(e => ProcessingError("tool", e.formatted))`.
 
-No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs.
+No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs. The type
+arguments are rewritten by `ToolFunctionOneTypeParameter`.
 
 ## `SchemaDefinition` gains a union and a raw JSON Schema case (#2814)
 
@@ -3451,7 +3463,7 @@ unchanged.
 private:
 
 - **Construction is unchanged**: `Schema.string(...)`, `Schema.property(...)`, `ToolBuilder` and `X(...)` with the same
-  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[T, R](...)`).
+  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[R](...)`).
 - **Replace `.copy` with a setter**:
 
   | Type | Setters |

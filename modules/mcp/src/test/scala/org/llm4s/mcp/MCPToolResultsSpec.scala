@@ -137,14 +137,14 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
     (ids should not).contain("")
   }
 
-  private class StubClient(var tools: Result[Seq[ToolFunction[?, ?]]]) extends MCPClient {
-    var closes                                               = 0
-    override def initialize(): Result[Unit]                  = Right(())
-    override def getTools(): Result[Seq[ToolFunction[?, ?]]] = tools
-    override def close(): Unit                               = closes += 1
+  private class StubClient(var tools: Result[Seq[ToolFunction[?]]]) extends MCPClient {
+    var closes                                            = 0
+    override def initialize(): Result[Unit]               = Right(())
+    override def getTools(): Result[Seq[ToolFunction[?]]] = tools
+    override def close(): Unit                            = closes += 1
   }
 
-  private def probeTool = ToolFunction[ujson.Value, ujson.Value](
+  private def probeTool = ToolFunction[ujson.Value](
     "probe",
     "probe",
     org.llm4s.toolapi.ObjectSchema[ujson.Value]("p", Seq.empty, additionalProperties = false),

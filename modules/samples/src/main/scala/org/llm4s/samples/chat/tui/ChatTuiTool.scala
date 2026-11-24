@@ -97,8 +97,8 @@ object ChatTuiTool:
    * only if the underlying [[org.llm4s.toolapi.ToolBuilder ToolBuilder]] fails — practically
    * impossible here because the handler is always supplied.
    */
-  def tool(workspaceRoot: Path): Result[ToolFunction[Map[String, Any], ReadFileResult]] =
-    ToolBuilder[Map[String, Any], ReadFileResult](Name, Description, schema)
+  def tool(workspaceRoot: Path): Result[ToolFunction[ReadFileResult]] =
+    ToolBuilder[ReadFileResult](Name, Description, schema)
       .withHandler { params =>
         for {
           rawPath <- params.getString("path")

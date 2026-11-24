@@ -28,7 +28,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   final case class EchoResult(value: String)
   object EchoResult { implicit val rw: ReadWriter[EchoResult] = macroRW }
 
-  private val echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private val echoTool = ToolBuilder[EchoResult](
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))

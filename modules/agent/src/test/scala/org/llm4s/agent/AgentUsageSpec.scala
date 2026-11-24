@@ -34,7 +34,7 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
 
   "Agent" should "accumulate usage and cost across the model calls of a turn" in {
     val model = "fake/model"
-    val tool = ToolFunction[ujson.Value, String](
+    val tool = ToolFunction[String](
       name = "echo",
       description = "Echo tool",
       schema = Schema.`object`[ujson.Value]("Empty args"),

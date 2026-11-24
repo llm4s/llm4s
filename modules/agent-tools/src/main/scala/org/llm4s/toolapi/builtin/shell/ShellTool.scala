@@ -122,8 +122,8 @@ object ShellTool {
    *
    * @param config Shell configuration with required allowedCommands
    */
-  def createSafe(config: ShellConfig): Result[ToolFunction[Map[String, Any], ShellResult]] =
-    ToolBuilder[Map[String, Any], ShellResult](
+  def createSafe(config: ShellConfig): Result[ToolFunction[ShellResult]] =
+    ToolBuilder[ShellResult](
       name = "shell_command",
       description = s"Execute shell commands. " +
         s"Allowed commands: ${config.allowedCommands.mkString(", ")}. " +

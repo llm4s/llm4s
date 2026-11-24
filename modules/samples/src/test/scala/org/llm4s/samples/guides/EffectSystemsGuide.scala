@@ -22,8 +22,8 @@ object EffectSystemsGuide {
   val greeting: Conversation = Conversation(Seq(UserMessage("Say hello in five words.")))
   val question: String       = "What should I pack for Oslo?"
 
-  val temperature: Result[ToolFunction[Map[String, Any], Double]] =
-    ToolBuilder[Map[String, Any], Double](
+  val temperature: Result[ToolFunction[Double]] =
+    ToolBuilder[Double](
       "get_temperature",
       "Current temperature in a city, in Celsius.",
       Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("city", Schema.string("City name")))

@@ -615,8 +615,8 @@ sbt "samples/runMain org.llm4s.samples.toolapi.WeatherToolExample"
 
 **Key code:**
 ```scala
-val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] =
-  ToolBuilder[Map[String, Any], WeatherResult]("get_weather", "Get current weather for a location", schema)
+val toolSafe: Result[ToolFunction[WeatherResult]] =
+  ToolBuilder[WeatherResult]("get_weather", "Get current weather for a location", schema)
     .withHandler(weatherHandler)
     .buildSafe()
 ```

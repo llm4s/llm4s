@@ -41,7 +41,7 @@ val orders: Map[String, OrderStatus] = Map(
   "A-1002" -> OrderStatus("A-1002", "processing", 18.00)
 )
 
-val orderTool: Result[ToolFunction[OrderQuery, OrderStatus]] =
+val orderTool: Result[ToolFunction[OrderStatus]] =
   Tool.of[OrderQuery, OrderStatus]("lookup_order", "The status and total of a customer's order") { query =>
     orders.get(query.orderId).toRight(s"There is no order ${query.orderId}")
   }
@@ -63,7 +63,7 @@ val policies: Map[String, String] = Map(
   "exchange" -> "Exchanges are free within 30 days of delivery."
 )
 
-val policyTool: Result[ToolFunction[PolicyQuery, Policy]] =
+val policyTool: Result[ToolFunction[Policy]] =
   Tool.of[PolicyQuery, Policy]("refund_policy", "Acme Shop's policy on refunds, returns and exchanges") { query =>
     val topic = query.topic.toLowerCase
     policies

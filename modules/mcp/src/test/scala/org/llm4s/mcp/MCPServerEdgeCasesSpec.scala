@@ -437,7 +437,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val schema = Schema
       .`object`[Map[String, Any]]("Params")
       .withProperty(Schema.property("message", Schema.string("Msg")))
-    ToolBuilder[Map[String, Any], String]("ping", "Echoes", schema)
+    ToolBuilder[String]("ping", "Echoes", schema)
       .withHandler((p: SafeParameterExtractor) => p.getString("message").map(m => s"Echo: $m"))
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)
@@ -447,7 +447,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val schema = Schema
       .`object`[Map[String, Any]]("Params")
       .withProperty(Schema.property("input", Schema.string("Input")))
-    ToolBuilder[Map[String, Any], String]("fail_tool", "Always fails", schema)
+    ToolBuilder[String]("fail_tool", "Always fails", schema)
       .withHandler((_: SafeParameterExtractor) => Left("intentional failure"))
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)
@@ -455,7 +455,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   private def buildIntTool() = {
     val schema = Schema.`object`[Map[String, Any]]("Params")
-    ToolBuilder[Map[String, Any], Int]("int_tool", "Returns integer 42", schema)
+    ToolBuilder[Int]("int_tool", "Returns integer 42", schema)
       .withHandler((_: SafeParameterExtractor) => Right(42))
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)
@@ -463,7 +463,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   private def buildObjTool() = {
     val schema = Schema.`object`[Map[String, Any]]("Params")
-    ToolBuilder[Map[String, Any], Map[String, Int]]("obj_tool", "Returns an object", schema)
+    ToolBuilder[Map[String, Int]]("obj_tool", "Returns an object", schema)
       .withHandler((_: SafeParameterExtractor) => Right(Map("answer" -> 42)))
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)

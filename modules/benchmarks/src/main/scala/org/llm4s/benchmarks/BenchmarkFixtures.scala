@@ -42,7 +42,7 @@ object BenchmarkFixtures {
         .`object`[Map[String, Any]](s"Parameters for echo tool $i")
         .withProperty(Schema.property("message", Schema.string("Message to echo")))
 
-      ToolBuilder[Map[String, Any], String](
+      ToolBuilder[String](
         s"echo_$i",
         s"Echoes a message (tool $i)",
         schema

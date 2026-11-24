@@ -55,8 +55,8 @@ object ToolCallingRecipe extends RecipeApp {
 
   val rates: Map[(String, String), Double] = Map(("USD", "EUR") -> 0.92, ("EUR", "USD") -> 1.09)
 
-  val exchangeRate: Result[ToolFunction[Map[String, Any], ExchangeRate]] =
-    ToolBuilder[Map[String, Any], ExchangeRate](
+  val exchangeRate: Result[ToolFunction[ExchangeRate]] =
+    ToolBuilder[ExchangeRate](
       "exchange_rate",
       "Today's exchange rate from one currency to another",
       Schema

@@ -24,8 +24,8 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
   private val Passage = "Refunds are accepted within 30 days of purchase."
 
   /** A retrieval tool: whatever the query, it returns [[Passage]]. */
-  private def searchTool(name: String = "search"): ToolFunction[Map[String, Any], Found] =
-    ToolBuilder[Map[String, Any], Found](
+  private def searchTool(name: String = "search"): ToolFunction[Found] =
+    ToolBuilder[Found](
       name,
       "Searches the documents",
       Schema.`object`[Map[String, Any]]("Search parameters").withRequiredField("query", Schema.string("The query"))

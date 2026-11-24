@@ -199,8 +199,8 @@ object RagGuardrailsGuideSpec {
   final case class Passages(passages: Seq[String]) derives ReadWriter
 
   /** The agent's retrieval tool: whatever the query, it finds the refund policy. */
-  val searchDocs: ToolFunction[Map[String, Any], Passages] =
-    ToolBuilder[Map[String, Any], Passages](
+  val searchDocs: ToolFunction[Passages] =
+    ToolBuilder[Passages](
       "search_docs",
       "Searches the product documentation.",
       Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("query", Schema.string("The query")))

@@ -63,7 +63,7 @@ import org.llm4s.toolapi.builtin.http.HttpConfig
 val tools = BuiltinTools.customSafe(
   fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")))),
   httpConfig = Some(HttpConfig.restricted(Seq("api.example.com")))
-) // Result[Seq[ToolFunction[_, _]]]
+) // Result[Seq[ToolFunction[_]]]
 ```
 
 ## 2. Register the tools

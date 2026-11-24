@@ -78,7 +78,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // snippet: agents/weather
   def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for {
-    forecast <- ToolBuilder[Map[String, Any], String](
+    forecast <- ToolBuilder[String](
       name = "get_forecast",
       description = "Returns today's forecast for a city",
       schema = Schema

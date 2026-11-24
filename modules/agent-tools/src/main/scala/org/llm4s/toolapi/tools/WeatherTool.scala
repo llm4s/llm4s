@@ -57,7 +57,7 @@ object WeatherTool {
   /**
    * The weather tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] = ToolBuilder[Map[String, Any], WeatherResult](
+  val toolSafe: Result[ToolFunction[WeatherResult]] = ToolBuilder[WeatherResult](
     "get_weather",
     "Retrieves current weather for the given location.",
     weatherParamsSchema

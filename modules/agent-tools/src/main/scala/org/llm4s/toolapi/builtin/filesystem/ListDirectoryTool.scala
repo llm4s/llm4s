@@ -90,8 +90,8 @@ object ListDirectoryTool {
   /**
    * Create a list directory tool with the given configuration, returning a Result for safe error handling.
    */
-  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], ListDirectoryResult]] =
-    ToolBuilder[Map[String, Any], ListDirectoryResult](
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[ListDirectoryResult]] =
+    ToolBuilder[ListDirectoryResult](
       name = "list_directory",
       description = s"List contents of a directory. Returns file names, sizes, and types. " +
         s"Maximum entries: $MaxEntries. " +
@@ -110,7 +110,7 @@ object ListDirectoryTool {
   /**
    * Default list directory tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], ListDirectoryResult]] = createSafe()
+  val toolSafe: Result[ToolFunction[ListDirectoryResult]] = createSafe()
 
   private def listDirectory(
     pathStr: String,

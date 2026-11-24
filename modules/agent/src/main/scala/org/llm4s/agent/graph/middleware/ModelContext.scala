@@ -247,7 +247,7 @@ object ModelContext:
       case other => str(other.content)
 
   /** The schemas a request is sent with, rendered for the usage estimate: each tool's definition and a JSON schema. */
-  private[agent] def definitions(tools: Seq[ToolFunction[?, ?]], format: Option[ResponseFormat]): Seq[String] =
+  private[agent] def definitions(tools: Seq[ToolFunction[?]], format: Option[ResponseFormat]): Seq[String] =
     // total, as the estimate is: a null field contributes nothing
     val defined = nonNull(tools).flatMap(t => Try(t.toolDefinition(strict = false).render()).toOption)
     val schema = Try(Option(format).flatten.collect { case ResponseFormat.JsonSchema(schema, name, _) =>

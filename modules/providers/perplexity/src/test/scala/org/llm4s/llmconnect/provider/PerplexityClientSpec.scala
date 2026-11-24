@@ -25,7 +25,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     http -> client(http).complete(conversation, options)
   }
 
-  private val weatherTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val weatherTool: ToolFunction[?] = ToolBuilder[String](
     "get_weather",
     "Weather for a city",
     Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("the city")))

@@ -343,7 +343,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       .`object`[Map[String, Any]]("Ping parameters")
       .withProperty(Schema.property("message", Schema.string("Message to echo")))
 
-    ToolBuilder[Map[String, Any], String]("ping", "Echoes a message", schema)
+    ToolBuilder[String]("ping", "Echoes a message", schema)
       .withHandler((params: SafeParameterExtractor) => params.getString("message").map(m => s"Echo: $m"))
       .buildSafe()
       .fold(e => throw new RuntimeException(s"Tool build failed: ${e.formatted}"), identity)

@@ -31,7 +31,7 @@ import scala.util.{ Try, boundary }
  * case class WeatherArgs(@description("City name") city: String, @description("Days ahead") days: Int)
  *   derives SchemaOf, ReadWriter
  *
- * val weather: Result[ToolFunction[WeatherArgs, Forecast]] =
+ * val weather: Result[ToolFunction[Forecast]] =
  *   Tool.of[WeatherArgs, Forecast]("get_weather", "Gets a forecast")(args => forecast(args.city, args.days))
  * }}}
  *
@@ -65,9 +65,9 @@ object Tool {
    */
   def of[A, R](name: String, description: String)(
     handler: A => Either[String, R]
-  )(using schemaOf: SchemaOf[A], reader: Reader[A], writer: ReadWriter[R]): Result[ToolFunction[A, R]] =
+  )(using schemaOf: SchemaOf[A], reader: Reader[A], writer: ReadWriter[R]): Result[ToolFunction[R]] =
     parametersOf(name, schemaOf).map { parameters =>
-      ToolFunction[A, R](
+      ToolFunction[R](
         name,
         description,
         parameters,
@@ -102,9 +102,9 @@ object Tool {
    */
   def scoped[A, R](name: String, description: String)(
     handler: ToolScope ?=> A => R
-  )(using schemaOf: SchemaOf[A], reader: Reader[A], writer: ReadWriter[R]): Result[ToolFunction[A, R]] =
+  )(using schemaOf: SchemaOf[A], reader: Reader[A], writer: ReadWriter[R]): Result[ToolFunction[R]] =
     parametersOf(name, schemaOf).map { parameters =>
-      ToolFunction[A, R](
+      ToolFunction[R](
         name,
         description,
         parameters,
@@ -129,7 +129,7 @@ object Tool {
    *   @description("Cancel an order that has not shipped yet")
    *   def cancelOrder(@description("The order's id, for example O-17") orderId: String): Either[String, Cancellation]
    *
-   * val cancel: Result[ToolFunction[?, Cancellation]] = Tool.fromMethod(orders.cancelOrder)
+   * val cancel: Result[ToolFunction[Cancellation]] = Tool.fromMethod(orders.cancelOrder)
    * }}}
    *
    *  - '''Name''': the method's [[toolName]], else its name in `snake_case` (`cancelOrder` is `cancel_order`).
@@ -151,10 +151,10 @@ object Tool {
    * empty parameter list is passed as a function: `Tool.fromMethod(() => service.ping())`.
    *
    * @param method the method, eta-expanded: `service.method`
-   * @return the tool (a `ToolFunction[?, R]` for the method's result `R`), or a `ValidationError` when a parameter's
+   * @return the tool (a `ToolFunction[R]` for the method's result `R`), or a `ValidationError` when a parameter's
    *         schema cannot be built (see [[SchemaOf]])
    */
-  transparent inline def fromMethod[F](inline method: F): Result[ToolFunction[?, ?]] =
+  transparent inline def fromMethod[F](inline method: F): Result[ToolFunction[?]] =
     ${ ToolMacros.fromMethodImpl[F]('method) }
 
   private[schema] def parametersOf[A](name: String, schemaOf: SchemaOf[A]): Result[ObjectSchema[A]] =

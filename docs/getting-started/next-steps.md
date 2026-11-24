@@ -188,9 +188,9 @@ val searchSchema = Schema
   .`object`[Map[String, Any]]("Search parameters")
   .withProperty(Schema.property("query", Schema.string("What to search for")))
 
-val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", searchSchema)
+val tool = ToolBuilder[String]("search", "Search the web", searchSchema)
   .withHandler(params => params.getString("query").map(search))
-  .buildSafe()   // Result[ToolFunction[Map[String, Any], String]]
+  .buildSafe()   // Result[ToolFunction[String]]
 ```
 
 [Learn more →](/guide/builtin-tools)
@@ -372,7 +372,7 @@ def getCurrentTime(): String =
   java.time.LocalDateTime.now().toString
 
 val result = for {
-  timeTool <- ToolBuilder[Map[String, Any], String](
+  timeTool <- ToolBuilder[String](
                 "get_time",
                 "Get current date and time",
                 Schema.`object`[Map[String, Any]]("No parameters")

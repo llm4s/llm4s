@@ -29,7 +29,7 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def tool(name: String) =
-    ToolBuilder[Map[String, Any], String](
+    ToolBuilder[String](
       name,
       s"$name tool",
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))

@@ -144,7 +144,7 @@ val addSchema = Schema
   .withRequiredField("a", Schema.integer("The first"))
   .withRequiredField("b", Schema.integer("The second"))
 
-val addTool = ToolBuilder[Map[String, Any], ujson.Value]("add", "Adds two integers", addSchema)
+val addTool = ToolBuilder[ujson.Value]("add", "Adds two integers", addSchema)
   .withHandler { extractor =>
     toCirce(extractor.params).as[AddArgs] match {
       case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
@@ -291,7 +291,7 @@ given JsonValueCodec[AddArgs]   = JsonCodecMaker.make
 given JsonValueCodec[AddResult] = JsonCodecMaker.make
 given ReadWriter[AddResult]     = jsoniterReadWriter[AddResult]
 
-val addToolViaJsoniter = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+val addToolViaJsoniter = ToolBuilder[AddResult]("add", "Adds two integers", addSchema)
   .withHandler { extractor =>
     Try(readJsoniter[AddArgs](extractor.params)).toEither
       .map(args => AddResult(args.a.toLong + args.b))

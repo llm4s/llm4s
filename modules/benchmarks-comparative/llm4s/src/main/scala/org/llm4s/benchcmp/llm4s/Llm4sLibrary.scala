@@ -21,7 +21,7 @@ final class Llm4sLibrary(baseUrl: String) extends ChatLibrary:
 
   private val agent: Agent = Llm4sLibrary.orThrow(
     for
-      lookup <- ToolBuilder[Map[String, Any], String](
+      lookup <- ToolBuilder[String](
         "lookup",
         "Looks up the value stored under a key",
         Schema

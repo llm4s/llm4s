@@ -27,7 +27,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
   private val ShortClaude = "anthropic.claude-sonnet-4-20250514-v1:0"
   private val Nova        = "amazon.nova-pro-v1:0"
 
-  private val tool = ToolBuilder[Map[String, Any], String](
+  private val tool = ToolBuilder[String](
     "get_weather",
     "Returns current weather for a location",
     Schema

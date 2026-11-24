@@ -121,7 +121,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
   "a client with webSearch" should "send the web_search tool beside the caller's tools" in {
     withServer(searchedReply) { (baseUrl, seen) =>
       val tool = org.llm4s.toolapi
-        .ToolBuilder[Map[String, Any], String](
+        .ToolBuilder[String](
           "lookup",
           "Looks up",
           org.llm4s.toolapi.Schema

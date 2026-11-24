@@ -372,7 +372,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def echoTools: ToolRegistry =
-    ToolBuilder[Map[String, Any], JAgentResultSpec.Echo](
+    ToolBuilder[JAgentResultSpec.Echo](
       "echo",
       "Echoes the input",
       Schema.`object`[Map[String, Any]]("Echo").withProperty(Schema.property("input", Schema.string("Input")))

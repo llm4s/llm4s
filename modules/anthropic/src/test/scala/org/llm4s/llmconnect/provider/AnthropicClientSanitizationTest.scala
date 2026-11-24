@@ -48,8 +48,8 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): Result[ToolFunction[Map[String, Any], String]] =
-    ToolBuilder[Map[String, Any], String](name, description, schema)
+  ): Result[ToolFunction[String]] =
+    ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
       .buildSafe()
 
@@ -57,7 +57,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
    * Convert via the real client method and return the input-schema as JSON string
    *  using the same Jackson mapper the client uses internally.
    */
-  private def schemaJsonOf(toolResult: Result[ToolFunction[Map[String, Any], String]]): String =
+  private def schemaJsonOf(toolResult: Result[ToolFunction[String]]): String =
     toolResult match {
       case Right(tool) =>
         val sdkTool = client.convertToolToAnthropicTool(tool)

@@ -210,7 +210,7 @@ runs the loop:
 case class WeatherInput(location: String) derives SchemaOf, ReadWriter
 case class Weather(location: String, report: String) derives ReadWriter
 
-val weatherTool: Result[ToolFunction[WeatherInput, Weather]] =
+val weatherTool: Result[ToolFunction[Weather]] =
   Tool.of[WeatherInput, Weather]("get_weather", "Get the current weather for a location") { input =>
     Right(Weather(input.location, "22°C, sunny"))
   }

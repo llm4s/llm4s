@@ -16,11 +16,11 @@ import scala.concurrent.duration.*
  */
 class MCPToolRegistryFailurePathsSpec extends AnyFlatSpec with Matchers {
 
-  private class StubClient(init: Result[Unit], tools: Result[Seq[ToolFunction[?, ?]]]) extends MCPClient {
-    val closes                                               = new AtomicInteger(0)
-    override def initialize(): Result[Unit]                  = init
-    override def getTools(): Result[Seq[ToolFunction[?, ?]]] = tools
-    override def close(): Unit                               = closes.incrementAndGet(): Unit
+  private class StubClient(init: Result[Unit], tools: Result[Seq[ToolFunction[?]]]) extends MCPClient {
+    val closes                                            = new AtomicInteger(0)
+    override def initialize(): Result[Unit]               = init
+    override def getTools(): Result[Seq[ToolFunction[?]]] = tools
+    override def close(): Unit                            = closes.incrementAndGet(): Unit
   }
 
   private val config = MCPServerConfig.streamableHTTP("stub", "http://127.0.0.1:1/mcp", 5.seconds)

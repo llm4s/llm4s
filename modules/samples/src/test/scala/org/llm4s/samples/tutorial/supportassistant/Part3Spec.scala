@@ -58,7 +58,7 @@ class Part3Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   }
 
   /** Exercise 3: delivery_estimate answers 2 days for a shipped order, 4 for one processing, an error otherwise. */
-  private def checkDeliveryTool(tool: => Result[ToolFunction[DeliveryQuery, DeliveryEstimate]]): Unit = {
+  private def checkDeliveryTool(tool: => Result[ToolFunction[DeliveryEstimate]]): Unit = {
     val built = tool.fold(e => fail(e.message), identity)
     built.name shouldBe "delivery_estimate"
     built.execute(ujson.Obj("orderId" -> "A-1001")).map(_("workingDays").num) shouldBe Right(2.0)

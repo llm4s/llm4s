@@ -336,7 +336,7 @@ object ExaSearchTool {
     config: Option[ExaSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
+  ): Result[ToolFunction[ExaSearchResult]] =
     // Validate entire config using shared validators
     for {
       validatedConfig <- validateToolConfig(toolConfig)
@@ -360,7 +360,7 @@ object ExaSearchTool {
         case None                 => Right(defaultConfig)
       }
 
-      tool <- ToolBuilder[Map[String, Any], ExaSearchResult](
+      tool <- ToolBuilder[ExaSearchResult](
         name = "exa_search",
         description =
           "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
@@ -393,7 +393,7 @@ object ExaSearchTool {
     config: Option[ExaSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
+  ): Result[ToolFunction[ExaSearchResult]] =
     // Validate only the parameters this function receives
     for {
       validatedApiKey <- validateApiKey(Secret(apiKey))
