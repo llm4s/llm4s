@@ -1,9 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,10 +18,17 @@ import org.llm4s.testutil.EchoedCredentials
 /** `OllamaEmbeddingProvider` against a local server: the requests it sends and every way the reply can go. */
 class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
 
-  private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig("nomic-embed-text", 2))
+  private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig(ModelName("nomic-embed-text"), 2))
 
   private def provider(baseUrl: String, apiKey: String = "not-required") =
-    OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Secret(apiKey)))
+    OllamaEmbeddingProvider.fromConfig(
+      EmbeddingProviderConfig(
+        ProviderId("ollama"),
+        BaseUrl(baseUrl),
+        ModelName("nomic-embed-text"),
+        Some(Secret(apiKey))
+      )
+    )
 
   /** A local port nothing is listening on, so connecting is refused at once. */
   private def closedPort(): Int = {

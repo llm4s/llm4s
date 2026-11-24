@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.OllamaThink.{ Controls, Plan }
@@ -157,7 +159,14 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
         }
       } { url =>
         val client =
-          new OllamaClient(OllamaConfig(model = "qwen3", baseUrl = url, contextWindow = 4096, reserveCompletion = 512))
+          new OllamaClient(
+            OllamaConfig(
+              model = ModelName("qwen3"),
+              baseUrl = BaseUrl(url),
+              contextWindow = 4096,
+              reserveCompletion = 512
+            )
+          )
         test(client, shows, chats)
         client.close()
       }
@@ -167,7 +176,7 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
       server(Some("""{"thinking":{"values":["low","medium","high"],"default":"medium"}}""")) { (client, shows, chats) =>
         val high       = CompletionOptions().withReasoning(ReasoningEffort.High)
         val completion = client.complete(Conversation(Seq(UserMessage("Hi"))), high).toOption.value
-        client.streamComplete(Conversation(Seq(UserMessage("Hi"))), high, _ => ()).isRight shouldBe true
+        client.streamComplete(Conversation(Seq(UserMessage("Hi"))), high)(_ => ()).isRight shouldBe true
         completion.adjustments shouldBe empty
         completion.thinking shouldBe Some("hmm")
         chats.asScala.map(_("think")).toList shouldBe List(ujson.Str("high"), ujson.Str("high"))

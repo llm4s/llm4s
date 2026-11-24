@@ -12,21 +12,23 @@ import org.llm4s.error.LLMError
 import org.llm4s.util.Redaction
 
 /**
- * HuggingFace Inference API client for image generation.
+ * Hugging Face Inference Providers client for image generation, through Hugging Face's own `hf-inference` provider.
  *
- * This client provides access to HuggingFace's hosted diffusion models through their
- * Inference API. It supports popular models like Stable Diffusion and other text-to-image
- * models available on the HuggingFace Hub.
+ * It posts the documented text-to-image request (`inputs` plus `parameters`) to
+ * `<baseUrl>/models/<model>` on the Inference Providers router and reads the image back as raw bytes
+ * ([[https://huggingface.co/docs/inference-providers/tasks/text-to-image text-to-image task]]). The legacy
+ * `api-inference.huggingface.co` host is not used. The model must be one `hf-inference` serves for text-to-image;
+ * models served only by third-party providers (fal, Replicate, ...) need those providers' own request formats.
  *
- * @param config Configuration containing API key and model settings
+ * @param config Configuration containing API key, model and base URL
  *
  * @example
  * {{{
  * val config = HuggingFaceConfig(
  *   apiKey = Secret("your-hf-token"),
- *   model = "stabilityai/stable-diffusion-2-1"
+ *   model = "stabilityai/stable-diffusion-3-medium-diffusers"
  * )
- * val client = new HuggingFaceClient(config)
+ * val client = new HuggingFaceClient(config, HttpClient())
  *
  * client.generateImage("a beautiful sunset over mountains") match {
  *   case Right(image) => println(s"Generated image: $${image.size}")
@@ -204,19 +206,20 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(ImageUnknownError.apply)) }
 
   /**
-   * Check the health status of the HuggingFace Inference API.
+   * Check whether Hugging Face's `hf-inference` provider serves the configured model.
+   *
+   * Reads the model's provider mapping from the Hub API
+   * (`GET https://huggingface.co/api/models/<model>?expand[]=inferenceProviderMapping`,
+   * [[https://huggingface.co/docs/inference-providers/hub-api#get-model-providers Hub API]]): healthy when
+   * `hf-inference` is listed with status `live`, degraded when it is missing, staging or the Hub answers with an error.
    *
    * @return Either an error or the current service status
    */
   override def health(): Either[LLMError, ServiceStatus] = {
-    val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
-    val headers = Map(
-      "Authorization" -> s"Bearer ${config.apiKey.reveal}",
-      "Content-Type"  -> "application/json"
-    )
+    val headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}")
 
     httpClient
-      .get(testUrl, headers, 10.seconds)
+      .get(HuggingFaceClient.providerMappingUrl(config.model), headers, 10.seconds)
       .toEither
       .left
       .map(e =>
@@ -225,9 +228,17 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
         )
       )
       .map { response =>
-        if (response.statusCode == 200)
-          ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
-        else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
+        if (response.statusCode != 200)
+          ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
+        else
+          HuggingFaceClient.hfInferenceStatus(response.body) match {
+            case Some("live") =>
+              ServiceStatus(HealthStatus.Healthy, s"hf-inference serves ${config.model}")
+            case Some(other) =>
+              ServiceStatus(HealthStatus.Degraded, s"hf-inference lists ${config.model} as $other")
+            case None =>
+              ServiceStatus(HealthStatus.Degraded, s"hf-inference does not serve ${config.model}")
+          }
       }
   }
 
@@ -238,8 +249,12 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    *                             to be serialized into JSON format.
    * @return The JSON string representation of the provided `HuggingClientPayload` object.
    */
-  def createJsonPayload(huggingClientPayload: HuggingClientPayload): String =
-    upickle.default.write(huggingClientPayload)
+  def createJsonPayload(huggingClientPayload: HuggingClientPayload): String = {
+    val json = upickle.default.writeJs(huggingClientPayload)
+    // Leave an absent optional parameter out rather than sending it as null.
+    json("parameters").obj.filterInPlace { case (_, value) => value != ujson.Null }
+    ujson.write(json)
+  }
 
   /**
    * Builds the JSON payload required for the HuggingFace Inference API
@@ -260,7 +275,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   )
 
   /**
-   * Makes an HTTP POST request to the HuggingFace Inference API and returns the raw response bytes.
+   * Makes an HTTP POST request to `<baseUrl>/models/<model>` and returns the raw response bytes.
    *
    * Uses `postRaw` so the binary image payload is never decoded through a charset,
    * preventing the corruption that occurred when `BodyHandlers.ofString` decoded bytes
@@ -270,7 +285,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @return Either an ImageGenerationError if the request fails, or the raw image bytes on success.
    */
   def makeHttpRequest(payload: String): Either[LLMError, Array[Byte]] = {
-    val url = s"https://api-inference.huggingface.co/models/${config.model}"
+    val url = s"${config.baseUrl.stripSuffix("/")}/models/${config.model}"
     val headers = Map(
       "Authorization" -> s"Bearer ${config.apiKey.reveal}",
       "Content-Type"  -> "application/json"
@@ -298,4 +313,35 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
         }
       }
   }
+}
+
+private[provider] object HuggingFaceClient {
+
+  /** The Hub API URL that lists the providers serving `model`. */
+  def providerMappingUrl(model: String): String =
+    s"https://huggingface.co/api/models/$model?expand[]=inferenceProviderMapping"
+
+  /** The `hf-inference` entry's status in a Hub API model-info body, if it lists one. */
+  def hfInferenceStatus(body: String): Option[String] =
+    scala.util
+      .Try(ujson.read(body))
+      .toOption
+      .flatMap(_.objOpt)
+      .flatMap(_.get("inferenceProviderMapping"))
+      .flatMap(mapping => providerStatus(mapping, "hf-inference"))
+
+  // The Hub has answered with an object keyed by provider and with an array of entries naming the provider.
+  private def providerStatus(mapping: ujson.Value, provider: String): Option[String] =
+    mapping match {
+      case obj: ujson.Obj =>
+        obj.value
+          .get(provider)
+          .map(entry => entry.objOpt.flatMap(_.get("status")).flatMap(_.strOpt).getOrElse("unknown"))
+      case arr: ujson.Arr =>
+        arr.value
+          .flatMap(_.objOpt)
+          .find(_.get("provider").flatMap(_.strOpt).contains(provider))
+          .map(_.get("status").flatMap(_.strOpt).getOrElse("unknown"))
+      case _ => None
+    }
 }

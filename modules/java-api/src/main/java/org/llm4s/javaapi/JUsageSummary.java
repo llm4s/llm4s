@@ -27,6 +27,8 @@ public final class JUsageSummary {
   private final long thinkingTokens;
   private final BigDecimal totalCost;
   private final Map<String, JModelUsage> byModel;
+  private final long cachedTokens;
+  private final long cacheCreationTokens;
 
   JUsageSummary(
       long requestCount,
@@ -34,13 +36,17 @@ public final class JUsageSummary {
       long outputTokens,
       long thinkingTokens,
       BigDecimal totalCost,
-      Map<String, JModelUsage> byModel) {
+      Map<String, JModelUsage> byModel,
+      long cachedTokens,
+      long cacheCreationTokens) {
     this.requestCount = requestCount;
     this.inputTokens = inputTokens;
     this.outputTokens = outputTokens;
     this.thinkingTokens = thinkingTokens;
     this.totalCost = totalCost;
     this.byModel = byModel;
+    this.cachedTokens = cachedTokens;
+    this.cacheCreationTokens = cacheCreationTokens;
   }
 
   /** Model calls, across every model. */
@@ -76,6 +82,16 @@ public final class JUsageSummary {
     return byModel;
   }
 
+  /** Input tokens served from a provider's prompt cache, across every model; a part of {@code inputTokens}. */
+  public long cachedTokens() {
+    return cachedTokens;
+  }
+
+  /** Input tokens written into a provider's prompt cache, across every model; a part of {@code inputTokens}. */
+  public long cacheCreationTokens() {
+    return cacheCreationTokens;
+  }
+
   @Override
   public boolean equals(Object other) {
     return other instanceof JUsageSummary that
@@ -83,6 +99,8 @@ public final class JUsageSummary {
         && inputTokens == that.inputTokens
         && outputTokens == that.outputTokens
         && thinkingTokens == that.thinkingTokens
+        && cachedTokens == that.cachedTokens
+        && cacheCreationTokens == that.cacheCreationTokens
         && totalCost.compareTo(that.totalCost) == 0
         && byModel.equals(that.byModel);
   }
@@ -90,7 +108,14 @@ public final class JUsageSummary {
   @Override
   public int hashCode() {
     return Objects.hash(
-        requestCount, inputTokens, outputTokens, thinkingTokens, totalCost.stripTrailingZeros(), byModel);
+        requestCount,
+        inputTokens,
+        outputTokens,
+        thinkingTokens,
+        totalCost.stripTrailingZeros(),
+        byModel,
+        cachedTokens,
+        cacheCreationTokens);
   }
 
   @Override

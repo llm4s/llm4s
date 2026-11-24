@@ -2,7 +2,7 @@ package org.llm4s.javaapi.rag
 
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.javaapi.{ FacadeInternals, JMessage, JMessageRole, LlmResult }
-import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolCall, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolCall, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.rag.{ RAG, RAGAnswerResult, RAGSearchResult }
 import org.llm4s.types.Result
 
@@ -293,11 +293,11 @@ object JRag {
                   .Try(ujson.read(call.argumentsJson))
                   .toOption
                   .toRight(ValidationError.invalid(s"history[$index]", s"tool call ${call.id} has invalid JSON"))
-                  .map(args => calls :+ ToolCall(call.id, call.name, args))
+                  .map(args => calls :+ ToolCall(ToolCallId(call.id), call.name, args))
               )
             }
-            .map(calls => AssistantMessage(contentOpt = Option(message.content).filter(_.nonEmpty), toolCalls = calls))
-        case JMessageRole.TOOL => Right(ToolMessage(message.content, message.toolCallId.orElse("")))
+            .map(calls => AssistantMessage(text = Option(message.content).filter(_.nonEmpty), toolCalls = calls))
+        case JMessageRole.TOOL => Right(ToolMessage(message.content, ToolCallId(message.toolCallId.orElse(""))))
         case JMessageRole.SYSTEM =>
           Left(
             ValidationError.invalid(

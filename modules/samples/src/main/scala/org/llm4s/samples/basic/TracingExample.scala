@@ -1,9 +1,10 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.TokenUsage
-import org.llm4s.trace.{ Tracing, TraceEvent, TracingComposer, TracingMode }
+import org.llm4s.trace.{ NoOpTracing, Tracing, TraceEvent, TracingComposer, TracingMode }
 import org.slf4j.LoggerFactory
 
 object TracingExample {
@@ -16,16 +17,16 @@ object TracingExample {
       settings <- Llm4sConfig.tracing()
       _ = {
         logger.info("1. Basic Enhanced Tracing")
-        val basicTracer = Tracing.create(settings.withMode(TracingMode.Console))
+        val basicTracer = Tracing.fromSettings(settings.withMode(TracingMode.Console)).getOrElse(new NoOpTracing())
 
-        val agentEvent = TraceEvent.AgentInitialized(
-          query = "What's the weather like?",
-          tools = Vector("weather", "calculator")
+        val agentEvent = TraceEvent.CustomEvent(
+          "query_received",
+          ujson.Obj("query" -> "What's the weather like?", "tools" -> ujson.Arr("weather", "calculator"))
         )
 
         val completionEvent = TraceEvent.CompletionReceived(
           id = "test-123",
-          model = "gpt-4",
+          model = ModelName("gpt-5.6-terra"),
           toolCalls = 2,
           content = "I'll check the weather for you."
         )
@@ -41,24 +42,24 @@ object TracingExample {
         example5(consoleTracer, noOpTracer)
         example6(basicTracer, agentEvent)
         example7(settings)
-        example8(settings)
+        example8()
       }
     } yield ()
     result.fold(err => logger.error(s"Error: ${err.formatted}"), identity)
   }
 
-  private def example2(settings: TracingSettings, agentEvent: TraceEvent.AgentInitialized) = {
+  private def example2(settings: TracingSettings, agentEvent: TraceEvent) = {
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
-    val consoleTracer  = Tracing.create(settings.withMode(TracingMode.Console))
-    val noOpTracer     = Tracing.create(settings.withMode(TracingMode.NoOp))
+    val consoleTracer  = Tracing.fromSettings(settings.withMode(TracingMode.Console)).getOrElse(new NoOpTracing())
+    val noOpTracer     = Tracing.fromSettings(settings.withMode(TracingMode.NoOp)).getOrElse(new NoOpTracing())
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
 
     composedTracer.traceEvent(agentEvent)
     (consoleTracer, noOpTracer)
   }
 
-  private def example3(agentEvent: TraceEvent.AgentInitialized, consoleTracer: Tracing) = {
+  private def example3(agentEvent: TraceEvent, consoleTracer: Tracing) = {
     // Example 3: Filtered tracing (only error events)
     logger.info("3. Filtered Tracing (Only Errors)")
     val errorOnlyTracer = TracingComposer.filter(consoleTracer) { event =>
@@ -69,10 +70,7 @@ object TracingExample {
     errorOnlyTracer.traceEvent(agentEvent)
 
     // This will be traced (is an error)
-    val errorEvent = TraceEvent.ErrorOccurred(
-      error = new RuntimeException("Test error"),
-      context = "Enhanced tracing example"
-    )
+    val errorEvent = TraceEvent.ErrorOccurred.of(new RuntimeException("Test error"), "Enhanced tracing example")
     errorOnlyTracer.traceEvent(errorEvent)
   }
 
@@ -104,7 +102,7 @@ object TracingExample {
         case e: TraceEvent.TokenUsageRecorded =>
           TraceEvent.TokenUsageRecorded(
             usage = e.usage,
-            model = s"[COST] ${e.model}",
+            model = ModelName(s"[COST] ${e.model}"),
             operation = e.operation
           )
         case other => other
@@ -113,13 +111,13 @@ object TracingExample {
 
     val tokenEvent = TraceEvent.TokenUsageRecorded(
       usage = TokenUsage(10, 20, 30),
-      model = "gpt-4",
+      model = ModelName("gpt-5.6-terra"),
       operation = "completion"
     )
     complexTracer.traceEvent(tokenEvent)
   }
 
-  private def example6(basicTracer: Tracing, agentEvent: TraceEvent.AgentInitialized): Unit = {
+  private def example6(basicTracer: Tracing, agentEvent: TraceEvent): Unit = {
     // Example 6: Error handling
     logger.info("6. Error Handling")
     val result = basicTracer.traceEvent(agentEvent)
@@ -132,21 +130,21 @@ object TracingExample {
   private def example7(settings: TracingSettings): Unit = {
     // Example 7: Type-safe mode creation
     logger.info("7. Type-Safe Mode Creation")
-    // Langfuse is a Named mode served by llm4s-observability; without keys it falls back to NoOp.
+    // Langfuse is a Named mode served by llm4s-observability; without keys this sample falls back to NoOp, visibly.
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
-      val tracer = Tracing.create(settings.withMode(mode))
+      val tracer = Tracing.fromSettings(settings.withMode(mode)).getOrElse(new NoOpTracing())
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
   }
 
-  private def example8(settings: TracingSettings): Unit = {
+  private def example8(): Unit = {
     // Example 8: Environment-based configuration
     logger.info("8. Environment-Based Configuration")
     val envTracer = Llm4sConfig
       .tracing()
-      .map(Tracing.create)
-      .fold(_ => Tracing.create(settings.withMode(TracingMode.NoOp)), identity)
+      .flatMap(Tracing.fromSettings)
+      .getOrElse(new NoOpTracing())
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
 
     logger.info("Enhanced Tracing Example Complete!")

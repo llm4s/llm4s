@@ -3,8 +3,10 @@ layout: page
 title: Providers
 description: "Which LLM providers LLM4S supports, including OpenAI, Anthropic, Azure, Gemini and Ollama, how to select one and configure its API key and models."
 search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
-parent: User Guide
-nav_order: 2
+parent: Core
+nav_order: 102
+grand_parent: User Guide
+cites_closed_issues: [1023, 1133, 1215, 2274]
 ---
 
 # Providers Guide
@@ -46,7 +48,7 @@ CI, so this table does not repeat it:
 | **Jlama** | `jlama` | In-process | A small open model run inside your JVM: no API key, no server (`llm4s-jlama`, Experimental) | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 | **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
-| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
+| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`); see [Amazon Bedrock](#amazon-bedrock) | Medium |
 | **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
@@ -58,8 +60,8 @@ Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your o
 ### How It Works
 
 Each provider you use is a **named section** under `llm4s.providers` in your own
-`application.conf`. `llm4s.providers.provider` names the default section, which
-`Llm4sConfig.defaultProvider()` loads; `Llm4sConfig.provider("<name>")` loads any section by name.
+`application.conf`. `llm4s.defaultProvider` names the default section, which
+`Llm4sConfig.defaultProvider()` loads; `Llm4sConfig.provider(ProviderName("<name>"))` loads any section by name.
 A section's API key comes from its own `apiKey` when it sets one, and otherwise from its
 vendor's shared key, `llm4s.credentials.<provider>.apiKey`, which each provider module binds to
 the vendor's conventional variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). So with the
@@ -70,17 +72,16 @@ second account.
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {                     # key from OPENAI_API_KEY
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
 
     claude {                          # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
   }
 }
@@ -88,9 +89,10 @@ llm4s {
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val default = Llm4sConfig.defaultProvider()   // openai-main
-val claude  = Llm4sConfig.provider("claude")  // any section, by name
+val claude  = Llm4sConfig.provider(ProviderName("claude"))  // any section, by name
 ```
 
 Only the section being loaded is validated, so a section with no key available - or whose
@@ -137,12 +139,11 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider     = "openai"
-      model        = "gpt-4o"
+      model        = "gpt-5.6-terra"
       # apiKey     = ${?OPENAI_BATCH_API_KEY}  # optional; default: OPENAI_API_KEY
       organization = ${?OPENAI_ORGANIZATION}   # optional, for multi-workspace accounts
       # baseUrl    = "https://my-proxy.example.com/v1"  # optional; default https://api.openai.com/v1
@@ -192,6 +193,16 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 `temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
+`llm4s-openai` speaks Chat Completions, where some models restrict tool calls (OpenAI's model pages for
+[`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna) and
+[`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra), checked 2026-11-24):
+
+- `gpt-6-luna` calls functions there only with `reasoning_effort: none`. A request with tools is sent `none`
+  whatever `reasoning` or `thinking` asked, and the `Completion` reports what was overridden as a
+  `RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking` unless it was `Off`).
+- `gpt-6.1-terra` calls tools only through the Responses API, which `llm4s-openai` does not use yet: a request with
+  tools is refused with a `ValidationError` before anything is sent. Without tools it works as any reasoning model.
+
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
 returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
 inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
@@ -240,9 +251,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "anthropic-main"
   providers {
-    provider = "anthropic-main"
-
     anthropic-main {
       provider = "anthropic"
       model    = "claude-opus-4-6"
@@ -255,7 +265,7 @@ llm4s {
 
 ### Available Models
 
-Claude models such as `claude-opus-4-6`, `claude-sonnet-4-5` and `claude-haiku-4-5`; see
+Claude models such as `claude-opus-4-6`, `claude-sonnet-5-5` and `claude-haiku-4-5`; see
 [Anthropic's model list](https://docs.anthropic.com/en/docs/about-claude/models). The context window of each comes from
 the [model registry](../reference/model-metadata).
 
@@ -277,7 +287,7 @@ cites arrive on `Completion.citations` (see [Citations and grounding sources](#c
 ```hocon
 llm4s.providers.claude-search {
   provider  = "anthropic"
-  model     = "claude-sonnet-4-5"
+  model     = "claude-sonnet-5-5"
   webSearch = true
 }
 ```
@@ -318,12 +328,11 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "gemini-main"
   providers {
-    provider = "gemini-main"
-
     gemini-main {
       provider = "gemini"            # "google" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       # apiKey = ${?GEMINI_TEAM_API_KEY}   # optional; default: GOOGLE_API_KEY or GEMINI_API_KEY
       # baseUrl = "..."              # optional; default https://generativelanguage.googleapis.com/v1beta
     }
@@ -333,7 +342,7 @@ llm4s {
 
 ### Available Models
 
-Gemini models such as `gemini-2.5-flash`, `gemini-2.5-pro` and the Gemini 3 previews; see
+Gemini models such as `gemini-3.8-flash`, `gemini-3.5-flash-lite` and the Gemini 4 models (`gemini-4-hydrogen`); see
 [Google's model list](https://ai.google.dev/gemini-api/docs/models).
 
 ### Costs
@@ -368,7 +377,7 @@ search, and the sources behind a grounded answer arrive on `Completion.citations
 ```hocon
 llm4s.providers.gemini-search {
   provider     = "gemini"
-  model        = "gemini-2.5-flash"
+  model        = "gemini-3.8-flash"
   googleSearch = true
 }
 ```
@@ -396,12 +405,11 @@ above registers both.
 
 ```hocon
 llm4s {
+  defaultProvider = "vertex-main"
   providers {
-    provider = "vertex-main"
-
     vertex-main {
       provider = "vertexai"          # "vertex" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       project  = ${?VERTEXAI_PROJECT}
       location = "europe-west4"      # optional
       apiKey   = ${?GOOGLE_APPLICATION_CREDENTIALS}  # optional: path to a credential file
@@ -421,9 +429,9 @@ it, and `GOOGLE_API_KEY` / `GEMINI_API_KEY` apply to the Gemini API provider onl
 
 `project` and `location` are Vertex AI's own keys ([provider-specific keys](#provider-specific-keys)).
 Before [#1215](https://github.com/llm4s/llm4s/issues/1215) Vertex read the project from `endpoint`
-and the region from `organization`. Those names are no longer read: they are unknown keys, logged
-with a warning and ignored, so a section that still sets `endpoint` instead of `project` fails to
-load. See the [migration note](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
+and the region from `organization`. Those names are no longer read: `endpoint` is an unknown key,
+logged with a warning and ignored, so a section that still sets it instead of `project` fails to
+load, and a section that sets `organization` and no `location` fails, naming the fix. See the [migration note](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ---
 
@@ -439,6 +447,8 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 | Perplexity | `webSearch`, `contextWindow`, `reserveCompletion` |
+| IBM watsonx.ai | `projectId` or `spaceId` (one required), `apiVersion`, `iamUrl` |
+| Amazon Bedrock | `region` (required), `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` |
 | Jlama | `modelDir`, `threads` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
@@ -467,8 +477,8 @@ unchanged.
 > mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
-> which held; it has not been run yet. Until it has
-> been run, treat tool calling and streaming as unconfirmed.
+> which held; it had not been run as of 2026-11-24, so `llm4s-watsonx` ships unverified against the live service.
+> Until it has been run, treat tool calling and streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
@@ -491,6 +501,25 @@ llm4s.providers.watsonx-main {
 and refreshes before it expires. The conversation goes as structured `messages` with roles
 (`system`, `user`, `assistant`, `tool`), so user content is data and cannot forge a turn.
 
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A watsonx.ai model id, `<vendor>/<model>`, such as `ibm/granite-4-h-small` or `openai/gpt-oss-120b`. Which models a region serves, and which of them call tools, is in IBM's watsonx.ai documentation and changes over time; the module checks no list |
+| `apiKey` | no | An IBM Cloud API key; default `llm4s.credentials.watsonx.apiKey`, which `WATSONX_API_KEY` binds. A section with neither fails to load, naming both |
+| `projectId` | one of the two | The watsonx.ai project inference runs in, and is billed to |
+| `spaceId` | one of the two | A deployment space, used instead of a project. Setting both, or neither, fails the config |
+| `baseUrl` | no | The region's endpoint; default `https://us-south.ml.cloud.ibm.com` (Dallas). Another region is another host, such as `https://eu-de.ml.cloud.ibm.com`; the project or space must be in that region |
+| `apiVersion` | no | The `version` query parameter every request carries; default `2026-09-25` |
+| `iamUrl` | no | The IAM token endpoint; default `https://iam.cloud.ibm.com/identity/token` |
+| `timeouts` | no | `timeouts { request = 2m, stream = 10m }`, the defaults when the block is absent ([Timeouts](../getting-started/configuration#timeouts)) |
+
+**Not supported:**
+
+- **Embeddings.** `llm4s-watsonx` registers a chat provider only.
+- **Images by URL and documents.** A user message may carry text and inline images (sent as `data:` URLs); a
+  `MediaSource.Url` image or any document part is refused before the IAM exchange, so nothing is sent.
+- **Service tiers** have no counterpart and are reported as dropped on `Completion.adjustments`, as are the
+  reasoning and thinking settings the list below says are not sent.
+
 Behaviour to know about:
 
 - **Tools.** `CompletionOptions.tools` are sent as `tools` with `tool_choice_option: "auto"`, a reply's
@@ -499,9 +528,9 @@ Behaviour to know about:
   Whether a model supports tools depends on the model; a model that does not is answered by the service,
   and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
   given a generated one.
-- **Sampling options.** `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
-  1.0) when set. `presencePenalty` and `frequencyPenalty` go as `presence_penalty` and `frequency_penalty`
-  when not 0.0, their default, so leaving them alone sends nothing new; the service checks their range.
+- **Sampling options.** `temperature`, `maxTokens` (as `max_tokens`), `topP` (as `top_p`), `presencePenalty`
+  and `frequencyPenalty` (as `presence_penalty` and `frequency_penalty`) are sent only when set; unset, the
+  model's own defaults apply. The service checks their range.
 - **Structured output.** `responseFormat` goes as `response_format`: `ResponseFormat.Json` as
   `{"type": "json_object"}`, and `ResponseFormat.JsonSchema(schema, name, strict)` as
   `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": ...}}`, the shapes IBM's
@@ -543,6 +572,11 @@ Behaviour to know about:
 ---
 
 ## Perplexity
+
+> **Beta, never run against the live service** ([1.0 scope](../reference/v1-scope)). The request and reply shapes
+> are those of Perplexity's Agent API reference (read 2026-11-05) and are pinned by the module's unit tests, which
+> need no account; the `@Cloud` suite named at the end of this section has not been run. The module's API is
+> `@Experimental`.
 
 `llm4s-perplexity` calls Perplexity's [Agent API](https://docs.perplexity.ai/docs/agent-api/quickstart)
 (`POST https://api.perplexity.ai/v1/agent`), which replaced Sonar Chat Completions: Perplexity
@@ -588,6 +622,74 @@ llm4s.providers.perplexity-main {
 - No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
   the service with `PERPLEXITY_API_KEY`.
 
+## Amazon Bedrock
+
+> **Beta** ([1.0 scope](../reference/v1-scope)).
+
+Models hosted on AWS (Anthropic Claude, Meta Llama, Mistral, Amazon Nova and Titan, and others), through
+Bedrock's Converse and ConverseStream APIs. It lives in its own module, `llm4s-bedrock`, built on the AWS SDK for
+Java v2 `bedrockruntime` artifact; adding the dependency registers the `bedrock` provider. It is a chat provider
+only: the module has no embedding provider.
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.claude-bedrock {
+  provider = "bedrock"
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile; or a bare model id, anthropic....
+  region   = ${?AWS_REGION}                     # required, never defaulted
+}
+```
+
+**Credentials.** Bedrock has no API key: it authenticates with AWS credentials, so there is no
+`llm4s.credentials.bedrock` block and no `apiKey`. The section's explicit `accessKeyId` and `secretAccessKey` are
+used when it sets them; otherwise its `profile`; otherwise the AWS SDK's default credential chain (environment
+variables, `~/.aws/credentials`, an EC2 instance profile, an ECS task role).
+
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A Bedrock model id, or a regional inference profile id (`us.`, `eu.`, `apac.` or `global.` before the model id) |
+| `region` | yes | The AWS region that hosts the model, e.g. `us-east-1`. Bind it with `${?AWS_REGION}`; a section without it is refused |
+| `profile` | no | A shared-config profile to authenticate with (`${?AWS_PROFILE}`) |
+| `accessKeyId`, `secretAccessKey` | no | Explicit static credentials (`${?AWS_ACCESS_KEY_ID}`, `${?AWS_SECRET_ACCESS_KEY}`). Set both or neither, and not together with `profile` |
+| `sessionToken` | no | The session token of temporary credentials (`${?AWS_SESSION_TOKEN}`); needs the two keys above |
+| `baseUrl` | no | An endpoint override: a VPC endpoint, or a test server |
+| `timeouts` | no | `timeouts { request = 3m, stream = 15m }`. `request` is the SDK's API-call timeout for `Converse`; `stream` is a deadline on the whole `ConverseStream` call. Without the block the SDK keeps its default for requests and a stream has no limit. Either expiry is a `TimeoutError` ([Timeouts](../getting-started/configuration#timeouts)) |
+
+No environment variable is read by the module itself: the `AWS_*` names above are the conventional ones, bound in
+the section with `${?...}`, or found by the AWS SDK's default chain.
+
+**Model ids** are Bedrock's, not the vendor's: `anthropic.claude-sonnet-5-5`, or its US inference profile
+`us.anthropic.claude-sonnet-5-5`, not the Anthropic API's `claude-sonnet-5-5`. Which Regions serve a model, and
+whether it takes the bare model id or only an inference profile (Claude Sonnet 5.5 takes only a profile), is on the
+model's page in the [Bedrock model cards](https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html);
+a model's Legacy and end-of-life dates are in the
+[model lifecycle](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html) pages. (Model ids
+checked 2026-11-24.)
+The context window and the completion reserve come from the [model registry](../reference/model-metadata), for a
+bare id and for an inference profile alike.
+
+Behaviour to know about:
+
+- **Streaming and tools.** `complete` uses Converse and `streamComplete` ConverseStream, both with tool calling.
+  `onChunk` runs on the calling thread, in order; interrupting that thread cancels the request and returns
+  `Left(CancelledError)`.
+- **Structured output is not enforced.** The client does not read `CompletionOptions.responseFormat`, so the model
+  sees only your conversation: put the format in the prompt ([Structured Output](structured-output#8-what-each-provider-does-with-the-schema)).
+- **Reasoning.** `CompletionOptions`' reasoning and thinking settings are not sent, and the completion reports
+  them as dropped ([Cost Controls](cost-controls)). Reasoning blocks a model returns are kept, and signed and
+  redacted ones go back unchanged on the next turn ([Thinking in conversation history](#thinking-in-conversation-history)).
+- **Prompt caching and service tiers** are sent, as `cachePoint` blocks and `serviceTier`
+  ([Cost Controls](cost-controls)).
+- **Images and documents** go inline or as an `s3://` URL ([Multimodal content](multimodal)).
+- **Errors.** `ThrottlingException` and `ServiceQuotaExceededException` become `RateLimitError`,
+  `ValidationException` a `ValidationError`, `AccessDeniedException` (and any 401 or 403) an
+  `AuthenticationError`, a timeout a `TimeoutError`.
+- **Tests.** `sbt bedrock/test` runs the unit tests with no AWS account. The `@Cloud` suite `BedrockSmokeSpec`
+  runs the client against the service and needs AWS credentials.
+
 ## Azure OpenAI
 
 Azure OpenAI ships in `llm4s-openai` with OpenAI itself; see
@@ -617,9 +719,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "azure-main"
   providers {
-    provider = "azure-main"
-
     azure-main {
       provider   = "azure"
       model      = "gpt-4o"                  # your deployment name
@@ -701,9 +802,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "deepseek-main"
   providers {
-    provider = "deepseek-main"
-
     deepseek-main {
       provider = "deepseek"
       model = "deepseek-chat"
@@ -738,7 +838,7 @@ llm4s {
   providers {
     openrouter-main {
       provider = "openrouter"
-      model = "anthropic/claude-3.5-sonnet"
+      model = "anthropic/claude-sonnet-5.5"
       # apiKey defaults to OPENROUTER_API_KEY
       # baseUrl defaults to https://openrouter.ai/api/v1
     }
@@ -872,10 +972,10 @@ and you bind environment variables to it with HOCON substitutions, under names y
 
 ```hocon
 llm4s {
+  defaultProvider = "groq-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
   providers {
     # the default named provider; LLM4S_PROVIDER overrides it when set
-    provider = "groq-main"
-    provider = ${?LLM4S_PROVIDER}
 
     groq-main {
       provider = "openai-compatible"
@@ -897,8 +997,8 @@ For an endpoint chosen entirely from the environment, the conventional names are
 `OPENAI_COMPATIBLE_API_KEY` (optional), which `OpenAICompatibleConfigKeys` names:
 
 ```hocon
+llm4s.defaultProvider = "compatible-env"
 llm4s.providers {
-  provider = "compatible-env"
   compatible-env {
     provider = "openai-compatible"
     baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}
@@ -925,8 +1025,9 @@ Then load it by name, or as the default:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
-val groq: Result[ProviderConfig]  = Llm4sConfig.provider("groq-main")
+val groq: Result[ProviderConfig]  = Llm4sConfig.provider(ProviderName("groq-main"))
 val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 ```
 
@@ -934,8 +1035,8 @@ val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 
 It sends the plain chat-completions format and reads the plain reply: text, **streaming**,
 **tool calling** (streamed and not), `response_format` for JSON output, and token usage. Every
-request carries `temperature` and `top_p`; `max_tokens` is sent when set, and
-`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop` or
+request carries `temperature`, `top_p`, `max_tokens`, `presence_penalty` and `frequency_penalty` only
+when you set them, so an unset one is the endpoint's own default. It never sends `stop` or
 `tool_choice`. Whether a feature works also depends on the endpoint and the
 model: tool calling on a local server usually needs a server flag, as the recipes note.
 
@@ -1197,7 +1298,7 @@ lmstudio {
 ```
 
 - Use the identifier LM Studio shows for the loaded model, or list them with
-  `Llm4sConfig.listModels("lmstudio")`.
+  `Llm4sConfig.listModels(ProviderName("lmstudio"))`.
 
 #### llama.cpp (`llama-server`)
 
@@ -1273,7 +1374,7 @@ A gateway that authenticates with its own header rather than a bearer token take
 internal-gateway {
   provider = "openai-compatible"
   baseUrl = "https://llm-gateway.internal.example/v1"
-  model = "gpt-4o-mini"
+  model = "gpt-5.6-luna"
   headers {
     X-Team = "search"
     X-Gateway-Token = ${?GATEWAY_TOKEN}
@@ -1292,11 +1393,9 @@ Allow it explicitly, and pin the models and the endpoint:
 import org.llm4s.configpolicy.{ CatalogEnvironment, ConfigPolicy }
 
 val policy = ConfigPolicy.prodSafeDefaults
-  .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
-  .withAllowedModelPatterns(
-    "^openai/gpt-4o(-mini)?$", // ...and the other preset patterns you still need
-    "^openai-compatible/openai/gpt-oss-120b$"
-  )
+  .withAllowedProviders("openai", "anthropic", "bedrock", "azure", "gemini", "deepseek", "openai-compatible")
+  // the preset's own patterns, plus the endpoint's model
+  .withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "^openai-compatible/openai/gpt-oss-120b$")*)
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
     "openai-compatible",
@@ -1306,7 +1405,11 @@ val policy = ConfigPolicy.prodSafeDefaults
 ```
 
 - `withAllowedProviders` and `withAllowedModelPatterns` **replace** the preset's lists; repeat
-  the entries you want to keep.
+  the entries you want to keep. `ConfigPolicy.prodModelPatterns` is the preset's model list: each provider's
+  current model generations (`ConfigPolicy.ModelFamilies`: GPT-5 and GPT-6, Claude 5 and later with Opus and
+  Sonnet from 4.6 and Haiku 4.5, the same Claude families on Bedrock, Gemini 3, DeepSeek's two models, any Azure
+  deployment), so a new release in a current generation passes and a retired generation such as `gpt-4o` does not
+  (see `modules/config-policy/README.md`).
 - The `prod` preset also requires every section whose provider needs a key to set its own
   `apiKey` (rule `ownApiKey`, `withOwnApiKeyRequired`). The generic provider's `apiKey` is
   optional, so it is not checked; the rule is about sections that would otherwise inherit a
@@ -1322,8 +1425,9 @@ val policy = ConfigPolicy.prodSafeDefaults
   `withRequiredBaseUrlPattern(env, pattern)`, is checked against every provider without a pin of
   its own, not only `openai-compatible`; if you use it, name every endpoint in it (for example
   `https://(api\.openai\.com|api\.groq\.com/openai)/v1`).
-- Context caps work the same way. The `prod` preset caps each of its providers at its current
-  models' window (openai and azure 128000, anthropic 200000, gemini 1048576, deepseek 131072) and
+- Context caps work the same way. The `prod` preset caps each of its providers at the largest window among its
+  current models in the bundled model metadata (openai and azure 1050000, anthropic and bedrock 1000000, gemini
+  1048576, deepseek 163840) and
   any other provider, `openai-compatible` included, at an environment-wide 1048576; `dev` caps
   everything at 1048576. So Groq, Together or Fireworks at 131072 and xAI at 500000 pass as they
   are. Set a per-provider cap with `withMaxContextWindow(env, provider, max)`, as above, to hold a
@@ -1360,8 +1464,9 @@ the section's key and headers:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
-Llm4sConfig.listModels("groq-main")   // GET <baseUrl>/models
+Llm4sConfig.listModels(ProviderName("groq-main"))   // GET <baseUrl>/models
 ```
 
 **No API key for a local server.** Leave `apiKey` out - do not set a placeholder. OpenAI's SDKs
@@ -1450,9 +1555,8 @@ export MISTRAL_API_KEY=your-key
 
 ```hocon
 llm4s {
+  defaultProvider = "mistral-main"
   providers {
-    provider = "mistral-main"
-
     mistral-main {
       provider = "mistral"
       model = "mistral-large-latest"
@@ -1503,9 +1607,8 @@ export COHERE_API_KEY=your-key
 
 ```hocon
 llm4s {
+  defaultProvider = "cohere-main"
   providers {
-    provider = "cohere-main"
-
     cohere-main {
       provider = "cohere"
       model = "command-a-03-2025"
@@ -1559,9 +1662,8 @@ export XAI_API_KEY=xai-...
 
 ```hocon
 llm4s {
+  defaultProvider = "xai-main"
   providers {
-    provider = "xai-main"
-
     xai-main {
       provider = "xai"
       model = "grok-4.7"
@@ -1643,9 +1745,8 @@ In `application.conf`:
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
-
     ollama-local {
       provider = "ollama"
       model    = "mistral"
@@ -1886,12 +1987,12 @@ def toolTurn(
 ## Citations and grounding sources
 
 A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
-`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+`Completion.citations`, a `Seq[Citation]` that is empty for every completion that has none:
 
 ```scala
 import org.llm4s.llmconnect.model.Completion
 
-def sources(completion: Completion): List[String] =
+def sources(completion: Completion): Seq[String] =
   completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
 ```
 
@@ -1959,8 +2060,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-azure-identity" % llm4sVersion
 and set `authentication = "entra-id"` in the section, with no `apiKey`:
 
 ```hocon
+llm4s.defaultProvider = "azure-prod"
 llm4s.providers {
-  provider = "azure-prod"
   azure-prod {
     provider       = "azure"
     endpoint       = "https://my-resource.openai.azure.com"
@@ -1985,18 +2086,20 @@ section fails with a configuration error naming it. `llm4s-azure-identity` bring
 `azure-identity` (with `azure-core`, MSAL4J, Netty and Reactor), which is why it is a module of its
 own: `llm4s-openai` alone puts no Azure SDK on your classpath.
 
-In code, any `AccessTokenProvider` authenticates a config, and `AzureEntraId` makes one from Azure's
-`DefaultAzureCredential` or from any other `TokenCredential`:
+In code, any `AccessTokenProvider` authenticates a config - its one method, `current()`, returns the bearer token
+as a `Secret`, so your own is a lambda such as `() => readToken().map(Secret.token)` - and `AzureEntraId` makes
+one from Azure's `DefaultAzureCredential` or from any other `TokenCredential`:
 
 ```scala
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.auth.azure.AzureEntraId
 import org.llm4s.llmconnect.config.AzureConfig
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def azureClient(using ModelRegistryService) =
   val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
-  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", "gpt-4o", tokens))
+  LLMConnect.getClient(AzureConfig.keyless(BaseUrl("https://my-resource.openai.azure.com"), ModelName("gpt-5.6-terra"), tokens))
 ```
 
 Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the
@@ -2031,7 +2134,7 @@ metadata server of the GCE, GKE or Cloud Run workload. See [Google Vertex AI](#g
    module binds it to the vendor's shared key:
 
 ```hocon
-openai-main { provider = "openai", model = "gpt-4o" }
+openai-main { provider = "openai", model = "gpt-5.6-terra" }
 ```
 
 ```bash
@@ -2101,12 +2204,11 @@ override the URL:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
       baseUrl  = "https://proxy.example.com/openai"
       baseUrl  = ${?OPENAI_BASE_URL}   # optional: overrides the line above when set
     }
@@ -2164,13 +2266,14 @@ Configure one named section per provider, then load the default or any section b
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // conversation: the Conversation to send
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  primaryConfig  <- Llm4sConfig.defaultProvider()      // llm4s.providers.provider
-  fallbackConfig <- Llm4sConfig.provider("claude")     // llm4s.providers.claude
+  primaryConfig  <- Llm4sConfig.defaultProvider()      // llm4s.defaultProvider
+  fallbackConfig <- Llm4sConfig.provider(ProviderName("claude"))     // llm4s.providers.claude
   primary  <- LLMConnect.getClient(primaryConfig)
   fallback <- LLMConnect.getClient(fallbackConfig)
 } yield primary.complete(conversation).orElse(fallback.complete(conversation))
@@ -2218,7 +2321,7 @@ ollama serve
 ### "Model not found"
 
 Check the `model` key of the section you selected, and that its `provider` is the one serving
-that model (`model = "gpt-4o"` under `provider = "openai"`; no `openai/` prefix):
+that model (`model = "gpt-5.6-terra"` under `provider = "openai"`; no `openai/` prefix):
 
 ```bash
 # Check available models

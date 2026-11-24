@@ -1,9 +1,10 @@
 package org.llm4s.javaapi
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Suspension, AgentNode, AgentStatus }
-import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
+import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId, NodeId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{
@@ -47,7 +48,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     ran.clear()
     val client =
       scripted(Right(calling(call("c1", "deploy", "one"), call("c2", "deploy", "two"))), Right(completion("done")))
-    val agent = jAgentOf(client)(_.withTools(tools).withInterruptBefore(AgentNode.Tool))
+    val agent = jAgentOf(client)(_.withToolSet(tools).withInterruptBefore(AgentNode.Tool))
     val first = agent.run("deploy").get()
     first.status.kind shouldBe AgentStatusKind.SUSPENDED
     val List(p1, p2) = pendingOf(first): @unchecked
@@ -106,7 +107,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     ran.clear()
     val client =
       scripted(Right(calling(call("c1", "deploy", "one"), call("c2", "deploy", "two"))), Right(completion("ok")))
-    val agent        = jAgentOf(client)(_.withTools(tools).withMiddleware(new Environment))
+    val agent        = jAgentOf(client)(_.withToolSet(tools).withMiddleware(new Environment))
     val first        = agent.run("deploy").get()
     val List(p1, p2) = pendingOf(first): @unchecked
     (p1.kind, p1.toolName(), p1.argumentsJson()) shouldBe

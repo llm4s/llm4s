@@ -1,5 +1,6 @@
 package org.llm4s.schema
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -25,12 +26,10 @@ class DerivedAgentOutputSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val reply = replies(asked.size)
       asked.add(options)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

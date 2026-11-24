@@ -3,8 +3,9 @@ layout: page
 title: Monitoring
 description: "Monitor LLM4S applications in production: logging, tracing with Langfuse or OpenTelemetry, metrics, token usage and cost, and provider reliability."
 search_title: "Monitor LLM apps in Scala: tracing, metrics and cost"
-nav_order: 21
-parent: User Guide
+nav_order: 705
+parent: Operations
+grand_parent: User Guide
 has_children: true
 ---
 
@@ -143,7 +144,7 @@ llm4s {
 
 ### OpenTelemetry Integration
 
-For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (alias `otel`) exports traces via OTLP:
+For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (or `otel`, an alias the module's backend declares) exports traces via OTLP:
 
 ```bash
 TRACING_MODE=opentelemetry
@@ -172,9 +173,10 @@ tracer traces its own calls:
 
 ```scala
 import org.llm4s.trace.TracingLLMClient
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 val traced     = TracingLLMClient(client, tracing, providerConfig) // request model and server.address from the config
-val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTracing(tracing))
+val embeddings = EmbeddingClient.from(embeddingConfig.withProviderId(ProviderId("openai"))).map(_.withTracing(tracing))
 ```
 
 A `RAG` built `withTracing(tracing)` traces every model call it makes the same way, with the call's usage also
@@ -190,9 +192,10 @@ the candidates retrieved and the chunks kept.
 | `chat <model>` (a completion, plain or streamed) | `CLIENT` | `gen_ai.operation.name` = `chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, `gen_ai.request.max_tokens` (when set), `gen_ai.request.presence_penalty`, `gen_ai.request.frequency_penalty`, `server.address`, `llm4s.model_call.tool_calls`, `llm4s.model_call.streamed`, `llm4s.service_tier` (the tier the provider reports serving it at, when it reports one) and, for OpenAI and Azure OpenAI, `openai.response.service_tier`; with `captureContent`, `gen_ai.input.messages` and `gen_ai.output.messages` |
 | `embeddings <model>` | `CLIENT` | `gen_ai.operation.name` = `embeddings`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `operation` (the client's label), `input_count` |
 | `chat <model>` / `embeddings <model>` of a failed call | `CLIENT`, status `ERROR` (the error message, redacted) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `error.type` (the `LLMError`'s type, e.g. `RateLimitError`) |
-| `chat <model>` (an agent's model call) | `CLIENT` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` |
-| `invoke_agent <agent>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.provider.name` (the run's first model call's), `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, thread, run, status |
-| `execute_tool <tool>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; with `captureContent` (for `ToolExecuted`), `tool.input` and `tool.output` |
+
+An agent run's spans (`invoke_agent <agent>`, its `chat <model>` and `execute_tool <tool>` spans, and the
+`graph.*` and `agent.*` events) are listed, attribute by attribute, in
+[Agent tracing and metrics](agents#span-names-and-attributes).
 
 Only model, embedding and image generation calls (and their failures) are `CLIENT` spans; every other span, such as cost,
 cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
@@ -203,10 +206,13 @@ cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
 provider through `LLMClient.providerId`.
 
 **Message content is opt-in.** Prompts and completions often hold personal or confidential data, so by default no span
-carries them, nor an agent's query or a tool's input and output. Set `llm4s.tracing.opentelemetry.captureContent = true`
+carries them. Set `llm4s.tracing.opentelemetry.captureContent = true`
 (or `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`) to record them as `gen_ai.input.messages` /
 `gen_ai.output.messages`, in the conventions' JSON form; every piece of text passes through llm4s' secret redaction
-first and is cut to 1000 characters.
+first and is cut to 1000 characters. The setting applies to `TracingLLMClient`'s spans and to the
+`TraceEvent.AgentInitialized` (its query) and `TraceEvent.ToolExecuted` (`tool.input`, `tool.output`) events. It does
+not apply to an agent run's spans, which never carry message content in OpenTelemetry
+([Content](agents#content)).
 
 `TokenUsageRecorded` remains an `INTERNAL` span `Token Usage - <operation>`: it records usage, not a call. GenAI
 metrics (call duration and token usage) are not spans: [`llm4s-observability-micrometer`](micrometer) records them.
@@ -253,7 +259,10 @@ com.example.DatadogTracingBackend
 
 `TRACING_MODE=datadog` then selects it. `Tracing.fromSettings(settings)` returns a
 `ConfigurationError` when no backend serves the configured mode, and the backend's own error when
-`create` fails; `Tracing.create(settings)` logs either and falls back to `NoOpTracing`. Where
+`create` fails. A backend that answers to more than one name declares the others as `aliases`
+(`override val aliases = Set("dd")`); `Llm4sConfig.tracing` replaces an alias by the backend's mode, so the backend
+always reads its own `llm4s.tracing.<mode>` block. Two backends that answer to one name are a `ConfigurationError`
+naming both when that name is selected. Where
 services files do not survive packaging (some shaded jars), register the backend explicitly:
 `Tracing.fromSettings(settings, TracingBackends.of(new DatadogTracingBackend))`.
 
@@ -433,73 +442,92 @@ parsed match {
 
 ## Langfuse Monitoring Workflow
 
-Langfuse provides purpose-built LLM observability. When configured, LLM4S automatically traces:
+Langfuse provides purpose-built LLM observability. The `langfuse` backend sends each event as OpenTelemetry spans, over OTLP/HTTP with JSON,
+to Langfuse's [OpenTelemetry endpoint](https://langfuse.com/integrations/native/opentelemetry),
+`<LANGFUSE_URL>/api/public/otel/v1/traces`, with `Authorization: Basic` (the public key and secret key) and
+`x-langfuse-ingestion-version: 4`, which Langfuse v4 needs to show the data in real time. Each span is a Langfuse
+observation whose `langfuse.*` attributes carry its type, input, output, metadata, level, model and usage; a run's
+span also sets the trace's name, session, user, tags, metadata and visibility. Langfuse
+[removed its legacy batch ingestion API](https://langfuse.com/docs/compatibility), `/api/public/ingestion`, from
+Langfuse Cloud on 2026-11-16, and this backend no longer uses it, so it works with Langfuse Cloud and with a
+self-hosted Langfuse v3.22 or later. It needs no OpenTelemetry SDK, and it is not the
+[OpenTelemetry backend](#opentelemetry-integration), which exports over gRPC.
+
+> **Checked 2026-11-24: Langfuse Cloud no longer accepts what this backend sends.** `llm4s-observability` posts
+> trace, span, generation and event objects to Langfuse's legacy batch ingestion API, `POST /api/public/ingestion`.
+> Langfuse [removed it from Langfuse Cloud on 2026-11-16](https://langfuse.com/docs/compatibility), and a
+> self-hosted Langfuse v4 in its default `events_only` write mode rejects it too; only a self-hosted v3 server still
+> takes it. Langfuse's replacement is its OpenTelemetry endpoint, `/api/public/otel/v1/traces`
+> ([OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry)), over OTLP/HTTP only (no
+> gRPC). Until the `langfuse` mode moves to it, reach Langfuse Cloud through the
+> [OpenTelemetry backend](#opentelemetry-integration), which exports OTLP over gRPC: point it at an OpenTelemetry
+> Collector whose `otlphttp` exporter sends to Langfuse's endpoint with the `Authorization: Basic` and
+> `x-langfuse-ingestion-version: 4` headers.
 
 ### What Gets Captured
 
-| Event Type | Description | Data Included |
+When configured, LLM4S automatically traces:
+
+| Langfuse object | From | Data included |
 |------------|-------------|---------------|
-| **Traces** | Top-level request lifecycle | Query, final output, duration |
-| **Generations** | Each LLM call | Model, prompt, completion, tokens, latency |
-| **Spans** | Tool executions, retrieval ops | Tool name, input/output, duration |
-| **Events** | Custom markers | User-defined metadata |
+| **Trace** | An agent run (`TraceEvent.AgentRunEnded`) | Set on the run's span: session = the thread, input = the turn's first user message, output = its last assistant message, the run's user, and one span per message of the turn |
+| **Generation** | A completion outside an agent run (`TraceEvent.CompletionReceived`) | Model, token usage when the completion reports it, and the completion's content; not the prompt |
+| **Generation** | An agent's model call (`agent.model_call_completed`) | Model and token usage; the event's data as metadata. No prompt or completion |
+| **Span** | An agent's tool call (`agent.tool_executed`) | The event's data as metadata. No tool input or output |
+| **Span** | A `TraceEvent.ToolExecuted` you trace yourself (`traceToolCall`); an agent run sends none | The tool's arguments and result |
+| **Span** | Cache hits and misses, image generations, RAG operations | The event's figures as input, output and metadata |
+| **Event** | Every other event, your own `CustomEvent`s included | The event's data |
 
-### Trace Structure Example
+The span attributes are Langfuse's: `langfuse.observation.type` (`span`, `generation` or `event`),
+`langfuse.observation.input` and `.output` (JSON text), `langfuse.observation.metadata.<key>`,
+`langfuse.observation.level` and `.status_message`, `langfuse.observation.model.name`,
+`langfuse.observation.usage_details` (`input`, `output` as billed, thinking included, and `total`), and
+`langfuse.environment`, `langfuse.release` and `langfuse.version` from `LANGFUSE_ENV`, `_RELEASE` and `_VERSION`. A
+run's span adds `langfuse.trace.name`, `session.id`, `user.id`, `langfuse.trace.tags`, `langfuse.trace.public` and
+`langfuse.trace.metadata.<key>`.
 
-An agent run that calls one tool appears in Langfuse as one trace, in the session of its thread:
+An event placed in a trace keeps that trace's ids, so the spans of an agent run and of its subagents form one tree.
+A run with no placement is the trace `TraceContext.rootFor(runId)`, whose ids derive from the run id; any other
+event with none is a trace of its own. Each `traceEvent` call is one POST. Nothing is retried: a failed export, or
+spans Langfuse reports as rejected, is logged with the response body redacted and returned as a `Left`.
 
-```
-Trace <the run's trace id>            session = thread id; input = first user message, output = last answer
-└── invoke_agent support              the run: agent, status and usage in its metadata
-    ├── chat gpt-4o                   generation: model, prompt, completion, token usage
-    ├── execute_tool search_docs      span: the tool's input and output
-    ├── chat gpt-4o                   generation: the final answer
-    └── one span per message of the turn
-```
-
-The names are the ones the next section lists; a subagent's run nests under the `execute_tool task` that started it.
+`RAGASLangfuseObserver` (`llm4s-rag`) sends an evaluation's trace the same way, and its scores to
+`/api/public/scores`, each naming the trace's 32-hex-digit id.
 
 ### What an agent run sends
 
-An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each run:
+An agent built with `Agent.builder(...).withTracing(tracing)` sends each run as one trace: the run is an
+`invoke_agent <agent>` span, and each of its durable events is a span under it (`chat <model>`,
+`execute_tool <tool>`, `graph.*`, `agent.*`), with a subagent's run nested under the `task` tool call that started
+it. **[Agent tracing and metrics](agents)** is the description of that trace: the
+[span names and attributes](agents#span-names-and-attributes) in OpenTelemetry and in Langfuse, the
+[run's status](agents#the-runs-status) values, how handoffs, suspensions, resumes and recoveries appear, and
+[which content is recorded](agents#content). It is kept in one place so that it stays right; in short:
 
-- `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
-  `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
-  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content.
-  `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
-  the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
-- a `TokenUsageRecorded` for each model call that reports usage;
-- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
-  (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
-  `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
-  out or failed), the run's own `UsageSummary` - the model calls this run made, summed from its
-  `agent.model_call_completed` events, not the thread's total, so per-run figures add up - and
-  `userId`, the run's `RunConfig.principal` (`None` when the run names none).
+- The events are `graph.*` for the runtime's own (run, task and checkpoint lifecycle) and `agent.*` for the agent's
+  durable events: `agent.model_call_completed`, `agent.tool_executed`, `agent.handed_off`,
+  `agent.guardrail_blocked` and, for a delegated subagent, `agent.task_ended`. A `TokenUsageRecorded` follows each
+  model call that reports usage.
+- One `TraceEvent.AgentRunEnded` ends the run, with the root agent and the agent active at the end, a status of
+  `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked` (the guardrail is
+  `blockedBy`), `cancelled`, `timed_out` or `failed`, the run's own usage, and `userId`, the run's
+  `RunConfig.principal`.
+- The durable events carry none of the messages, tool arguments or tool results. They are not free of data about
+  the run: `graph.run_started`, `graph.run_resumed` and `graph.run_recovered` carry its `tenantId` and `principal`,
+  and `graph.task_failed` and `graph.run_failed` carry the error's message (a guardrail block's names only the
+  guardrail, `Guardrail '<name>' blocked`, never its reason; any other error's is sent as it is).
+- Message content reaches tracing only in `AgentRunEnded.messages`. Langfuse records it, as the trace's input and
+  output and one span per message; OpenTelemetry records only a message count.
+- In Langfuse a trace is private: `langfuse.trace.public` is `false` unless `llm4s.tracing.langfuse.public = true`.
 
-A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
-`AgentRunEnded`; it is traced as soon as the run's last event has been, with no fixed delay.
-Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's content is not in
-it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
-names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
+A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no `AgentRunEnded`.
+(The kernel's own `TracingSubscriber`, used for graphs that are not agents, names agent events `graph.custom`;
+`withTracing` on an agent names them `agent.*`.)
 
-Every one of these events is placed in one trace (`TraceEvent.span`, design 4.58): the run is a span, each event a
-span under it - a tool call's spanning its duration - and a subagent's run is a span under the `task` tool call that
-started it, whichever machine runs it. A run continues an upstream trace when given its context:
-
-```scala
-import org.llm4s.trace.TraceContext
-
-val upstream = TraceContext.parse(request.header("traceparent")).toOption
-agent.run(threadId, query, RunConfig().withTraceContext(upstream), Nil)
-```
-
-The run's span then takes that context as its remote parent and keeps its trace id. A `resume` or `recover` given
-no context continues the trace its work started in, which the thread's checkpoints record.
+The two backends the agent guide does not cover show `AgentRunEnded` like this:
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; `userId` is the run's `userId`, and is not sent for a run without one; `public` is `false` unless `llm4s.tracing.langfuse.public = true`. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
-| OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status (`ERROR` when failed, cancelled or timed out), message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; it is the parent of the run's `chat <model>` (`CLIENT`, per-call `gen_ai.usage.*`) and `execute_tool <tool>` (`INTERNAL`) spans and its other events, and a subagent's `invoke_agent` is under its `execute_tool task`. No attribute carries message content |
 | `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost; like every event of the run it is stored in the run's own trace, with its span id, parent and start |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
 
@@ -515,14 +543,18 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability" % llm4sVersion
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=<your-langfuse-public-key>
 LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
-LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted URL
+LANGFUSE_URL=https://cloud.langfuse.com  # the default; https://us.cloud.langfuse.com, or a self-hosted base URL
 ```
 
 Both keys are required. With either missing, `Tracing.fromSettings` returns a
 `ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
-(LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
+(LANGFUSE_PUBLIC_KEY)`. An application that would rather run untraced than stop says so where it
+builds the tracer: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
-**Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
+`LANGFUSE_URL` is the host: the backend appends `/api/public/otel/v1/traces`. A URL that still ends in the legacy
+`/api/public/ingestion` path is read as the host it is on.
+
+**Traces are private.** Every trace is sent with `langfuse.trace.public = false`, so only members of your Langfuse project can
 open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace
 holds the turn's messages; to share traces by link all the same, set it in `application.conf`:
 
@@ -532,7 +564,7 @@ llm4s.tracing.langfuse.public = true
 
 Only `true` turns it on. A trace's user is the run's `RunConfig.principal`
 (`agent.run(query, RunConfig().withPrincipal(Principal("user-42")))`), which Langfuse's per-user views and costs
-group by; a run without a principal sends no `userId`. Send an id you are content for Langfuse to hold - an opaque
+group by; a run without a principal sends no `user.id`. Send an id you are content for Langfuse to hold - an opaque
 one, not an email address.
 
 To read the Langfuse settings whatever `TRACING_MODE` selects (for example to combine Langfuse with
@@ -550,7 +582,7 @@ import scala.concurrent.duration.*
 tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query_123")))
 
 // Trace token usage explicitly
-tracing.traceTokenUsage(usage, model = "gpt-4o", operation = "completion")
+tracing.traceTokenUsage(usage, model = "gpt-5.6-terra", operation = "completion")
 
 // Trace a finished agent run (an agent built withTracing does this itself, once per run)
 tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage))
@@ -558,7 +590,7 @@ tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, mess
 // Trace costs
 tracing.traceCost(
   costUsd = 0.0234,
-  model = "gpt-4o",
+  model = "gpt-5.6-terra",
   operation = "completion",
   tokenCount = 1500,
   costType = "total"
@@ -595,7 +627,7 @@ stops its exporter, and a composed tracer closes the ones it wraps. Close the tr
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for image generation, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`), `llm4s-image` records image generation (`ImageMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Its `provider` argument is a metrics label, not a `ProviderId`: usually a provider's id, but for a `ReliableClient` whatever name you built it with. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -633,7 +665,7 @@ Pass the collector to the client when you build it:
 
 ```scala
 import org.llm4s.config.{Llm4sConfig, MetricsConfigLoader}
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 
 val application = for {
@@ -642,7 +674,7 @@ val application = for {
   given ModelRegistryService = registryService
   configured <- MetricsConfigLoader.default()
   (metrics, endpoint) = configured
-  client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+  client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)).left.map { error =>
     endpoint.foreach(_.stop()) // release the server if client creation fails
     error
   }
@@ -691,36 +723,36 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_errors_total` | counter | `provider`, `error_type` |
 | `llm4s_request_duration_seconds` | histogram | `provider`, `model`; buckets 0.1, 0.5, 1, 2, 5, 10, 30, 60 and 120 seconds |
-| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation`, `status` |
+| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation` (`generate` or `edit`), `status`; this and the four below are `ImageMetrics`, recorded by `llm4s-image`'s `InstrumentedImageGenerationClient` |
 | `llm4s_images_generated_total` | counter | `provider`, `model` |
-| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
+| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation`; buckets 1, 2, 5, 10, 30, 60, 120 and 300 seconds |
 | `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
 | `llm4s_retries_total` | counter | `provider`; a `ReliableClient` retry |
 | `llm4s_circuit_breaker_transitions_total` | counter | `provider`, `state` (`open`, `closed` or `half-open`) |
 | `llm4s_reliability_errors_total` | counter | `provider`, `error_type`; what a `ReliableClient` call ended on |
 
-After one successful call and one rate-limited call to `gpt-4o`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
+After one successful call and one rate-limited call to `gpt-5.6-terra`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
 
 ```text
-llm4s_cost_usd_total{model="gpt-4o",provider="openai"} 0.0021
+llm4s_cost_usd_total{model="gpt-5.6-terra",provider="openai"} 0.0021
 llm4s_errors_total{error_type="rate_limit",provider="openai"} 1.0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.1"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.5"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="1.0"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="2.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="5.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="10.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="30.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="60.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="120.0"} 2
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="+Inf"} 2
-llm4s_request_duration_seconds_count{model="gpt-4o",provider="openai"} 2
-llm4s_request_duration_seconds_sum{model="gpt-4o",provider="openai"} 91.5
-llm4s_requests_total{model="gpt-4o",provider="openai",status="error_rate_limit"} 1.0
-llm4s_requests_total{model="gpt-4o",provider="openai",status="success"} 1.0
-llm4s_tokens_total{model="gpt-4o",provider="openai",type="input"} 120.0
-llm4s_tokens_total{model="gpt-4o",provider="openai",type="output"} 30.0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="0.1"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="0.5"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="1.0"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="2.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="5.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="10.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="30.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="60.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="120.0"} 2
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="+Inf"} 2
+llm4s_request_duration_seconds_count{model="gpt-5.6-terra",provider="openai"} 2
+llm4s_request_duration_seconds_sum{model="gpt-5.6-terra",provider="openai"} 91.5
+llm4s_requests_total{model="gpt-5.6-terra",provider="openai",status="error_rate_limit"} 1.0
+llm4s_requests_total{model="gpt-5.6-terra",provider="openai",status="success"} 1.0
+llm4s_tokens_total{model="gpt-5.6-terra",provider="openai",type="input"} 120.0
+llm4s_tokens_total{model="gpt-5.6-terra",provider="openai",type="output"} 30.0
 ```
 
 ### Scrape it and alert on it
@@ -755,13 +787,13 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 
 ### Send metrics to more than one place
 
-`MetricsCollector.compose` forwards every `MetricsCollector` method, the two image-generation ones (`observeImageGeneration` and `recordImageGenerationCost`) included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
+`MetricsCollector.compose` forwards every `MetricsCollector` method, the generic `increment`, `observe` and `set` included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
 
 ```scala
 import org.llm4s.metrics.MetricsCollector
 
 val both = MetricsCollector.compose(metrics, myCollector)
-// LLMConnect.getClient(providerConfig, both)
+// LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = both))
 ```
 
 ### Agent runtime metrics
@@ -782,7 +814,7 @@ val metered = MeteredCheckpointer(store.checkpointer, metrics) // every GraphRun
 | Metric (Prometheus series) | Type | Labels | Recorded by |
 |---|---|---|---|
 | `llm4s_agent_runs_started_total` | counter | `graph`, `trigger` (`start`, `resume`, `recover`) | checkpointer |
-| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`) | checkpointer |
+| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out`, `failed`) | checkpointer |
 | `llm4s_agent_run_duration_seconds` | histogram | `graph`, `status` | checkpointer |
 | `llm4s_agent_claims_total` | counter | `result` (`acquired`, `taken_over`, `busy`, `failed`) | checkpointer |
 | `llm4s_agent_claim_renewals_total` | counter | `result` (`renewed`, `lost`, `failed`) | checkpointer |
@@ -812,7 +844,7 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Limits
 
-- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own `collector` argument and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
+- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own collector (`withMetrics`) and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
 - **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
 - **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
 - **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.
@@ -835,13 +867,25 @@ no tokens. `Right(())` means the provider accepted that request. A client never 
 | `ollama` | `POST /api/show` | no key | `ServiceError` 404, with the `ollama pull` hint |
 | `openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty` | `GET /models` | `AuthenticationError` | not checked |
 | `openrouter` | `GET /key` | `AuthenticationError` | not checked |
-| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama` | none | `Left(ValidationUnsupportedError)` | |
+| `cohere` | `GET /v1/models/<model>` on the native API | `AuthenticationError` | `ServiceError` 404 |
+| `perplexity` | `GET /v1/models` | `AuthenticationError` | not checked |
+| `azure` | `GET <endpoint>/openai/models` (`/openai/v1/models` on a v1 endpoint) | `AuthenticationError` | not checked: `model` is a deployment, which the listing does not hold |
+| `vertexai` | `GET /v1/publishers/google/models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `watsonx` | the IAM token exchange, afresh on every call | `AuthenticationError` | not checked, nor the project or the watsonx endpoint |
+| `jlama` | none: it loads the model, downloading it first if it is not there | no key | `ProcessingError` |
+| `bedrock`, `zai` | none | `Left(ValidationUnsupportedError)` | |
 
 A provider in the last row has no cheap authenticated request, so its client returns
-`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work. So does a client that does not
-implement the check, such as a test double. An endpoint that does not answer is a `NetworkError` or `TimeoutError`
-(the request waits ten seconds at most). Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what
-the client they wrap returns.
+`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work.
+
+- **`bedrock`**: the runtime API the client calls has no request that reads without generating and that the
+  permission a completion needs (`bedrock:InvokeModel`) authorises. `GetFoundationModel` is a control-plane request:
+  another SDK, another endpoint and another permission, so a client that works could fail it.
+- **`zai`**: Z.ai's API reference documents no model listing and no other request that neither generates nor bills.
+
+So does a client that does not implement the check, such as a test double. An endpoint that does not answer is a
+`NetworkError` or `TimeoutError` (the request waits ten seconds at most; `jlama`'s load takes as long as it takes).
+Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what the client they wrap returns.
 
 Use it at startup to fail fast on misconfiguration, treating "cannot check" as its own case:
 
@@ -983,7 +1027,7 @@ Pricing varies by provider and changes over time. For cost tracking:
 // Track cost through tracing (pricing logic is your responsibility)
 tracing.traceCost(
   costUsd = estimatedCost,
-  model = "gpt-4o",
+  model = "gpt-5.6-terra",
   operation = "completion",
   tokenCount = usage.totalTokens,
   costType = "total"

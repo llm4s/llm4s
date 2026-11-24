@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.security.{ KnownSecrets, Secret }
@@ -14,10 +15,15 @@ final class CohereEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers 
 
   "CohereEmbeddingProvider" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret(echoKey))
+      val config = EmbeddingProviderConfig(
+        providerId = ProviderId("cohere"),
+        baseUrl = BaseUrl(baseUrl),
+        model = ModelName("embed-english-v3.0"),
+        apiKey = Some(Secret(echoKey))
+      )
       CohereEmbeddingProvider
         .fromConfig(config)
-        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("embed-english-v3.0", 8)))
+        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("embed-english-v3.0"), 8)))
     }
   }
 }

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -22,8 +24,8 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   // Test configuration
   private val testConfig = ZaiConfig(
     apiKey = Secret("test-api-key"),
-    model = "GLM-4.7",
-    baseUrl = "https://api.z.ai/api/paas/v4",
+    model = ModelName("GLM-4.7"),
+    baseUrl = BaseUrl("https://api.z.ai/api/paas/v4"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )
@@ -142,9 +144,9 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "include tool calls in assistant message" in {
     val helper   = new ZaiClientTestHelper(testConfig)
-    val toolCall = ToolCall("call-123", "calculate", ujson.Obj("expression" -> "2+2"))
+    val toolCall = ToolCall(ToolCallId("call-123"), "calculate", ujson.Obj("expression" -> "2+2"))
     val conversation =
-      Conversation(Seq(AssistantMessage(contentOpt = None, toolCalls = List(toolCall))))
+      Conversation(Seq(AssistantMessage(text = None, toolCalls = List(toolCall))))
     val options = CompletionOptions()
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
@@ -159,7 +161,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "create valid request body for tool message" in {
     val helper       = new ZaiClientTestHelper(testConfig)
-    val conversation = Conversation(Seq(ToolMessage("Result: 4", "call-123")))
+    val conversation = Conversation(Seq(ToolMessage("Result: 4", ToolCallId("call-123"))))
     val options      = CompletionOptions()
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
@@ -171,7 +173,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize tool message correctly via ZaiClient" in {
     val client       = new ZaiClientTestHelper(testConfig)
-    val conversation = Conversation(Seq(ToolMessage("Result: 4", "call-123")))
+    val conversation = Conversation(Seq(ToolMessage("Result: 4", ToolCallId("call-123"))))
 
     val requestBody = client.exposedCreateRequestBody(conversation, CompletionOptions())
     val toolMsg     = requestBody("messages")(0)
@@ -184,7 +186,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include temperature and top_p options" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(temperature = 0.5, topP = 0.9)
+    val options      = CompletionOptions(temperature = Some(0.5), topP = Some(0.9))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 
@@ -205,7 +207,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include presence_penalty when non-zero" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(presencePenalty = 0.5)
+    val options      = CompletionOptions(presencePenalty = Some(0.5))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 
@@ -215,7 +217,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include frequency_penalty when non-zero" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(frequencyPenalty = 0.3)
+    val options      = CompletionOptions(frequencyPenalty = Some(0.3))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 
@@ -271,7 +273,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     completion.id shouldBe "chatcmpl-123"
     completion.created shouldBe Instant.ofEpochSecond(1677652288L)
-    completion.model shouldBe "GLM-4.7"
+    completion.model shouldBe ModelName("GLM-4.7")
     completion.content shouldBe "Hello! How can I help you today?"
     completion.usage shouldBe Some(TokenUsage(10, 15, 25))
     completion.toolCalls shouldBe empty
@@ -333,7 +335,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     completion.toolCalls should have size 1
     val toolCall = completion.toolCalls(0)
-    toolCall.id shouldBe "call-abc"
+    toolCall.id shouldBe ToolCallId("call-abc")
     toolCall.name shouldBe "get_weather"
     toolCall.arguments("city").str shouldBe "London"
   }
@@ -405,10 +407,10 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val toolCalls = helper.testParseToolCalls(json)
 
     toolCalls should have size 2
-    toolCalls(0).id shouldBe "call-1"
+    toolCalls(0).id shouldBe ToolCallId("call-1")
     toolCalls(0).name shouldBe "func1"
     toolCalls(0).arguments("a").num.toInt shouldBe 1
-    toolCalls(1).id shouldBe "call-2"
+    toolCalls(1).id shouldBe ToolCallId("call-2")
     toolCalls(1).name shouldBe "func2"
     toolCalls(1).arguments("b").num.toInt shouldBe 2
   }
@@ -424,7 +426,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val toolCalls = helper.testParseToolCalls(json)
 
     toolCalls should have size 1
-    toolCalls(0).id shouldBe ""
+    toolCalls(0).id shouldBe ToolCallId("")
     toolCalls(0).name shouldBe ""
     toolCalls(0).arguments shouldBe a[ujson.Obj]
   }
@@ -642,13 +644,11 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
     Completion(
       id = json("id").str,
       created = Instant.ofEpochSecond(json("created").num.toLong),
-      content = contentStr,
-      model = json("model").str,
+      model = ModelName(json("model").str),
       message = AssistantMessage(
-        contentOpt = Some(contentStr),
+        text = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
-      toolCalls = toolCalls.toList,
       usage = usage
     )
   }
@@ -678,7 +678,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
           val function = call("function")
           val rawArgs  = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("")
           ToolCall(
-            id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
+            id = ToolCallId(call.obj.get("id").flatMap(_.strOpt).getOrElse("")),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
             arguments = ujson.Str(rawArgs)
           )
@@ -720,7 +720,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
   }
 
   def testParseStreamingArguments(raw: String): Result[ujson.Value] =
-    org.llm4s.llmconnect.streaming.StreamingToolArgumentParser.parse(raw)
+    ToolCallRules.parseArguments(raw)
 }
 
 // ============ Metrics Tests ============
@@ -728,8 +728,8 @@ class ZaiClientMetricsSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = ZaiConfig(
     apiKey = Secret("test-key"),
-    model = "test-model",
-    baseUrl = "http://test.com",
+    model = ModelName("test-model"),
+    baseUrl = BaseUrl("http://test.com"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )

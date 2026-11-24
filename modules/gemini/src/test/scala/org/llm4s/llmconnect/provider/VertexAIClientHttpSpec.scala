@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -28,7 +29,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   private val testConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -185,7 +186,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       case Left(e)  => fail(s"expected an empty answer, got $e")
     }
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.toolCalls shouldBe empty
     completion.usage shouldBe Some(noPartsUsage)
   }
@@ -350,7 +351,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "vertexai"
+    exchanges.head.provider.asString shouldBe "vertexai"
     exchanges.head.model shouldBe Some("gemini-2.0-flash")
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("Hello!")
@@ -379,7 +380,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), chunk => chunks += chunk)
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(chunk => chunks += chunk)
 
     result.isRight shouldBe true
     result.toOption.get.content should include("Hello")
@@ -410,7 +411,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     )
 
     client.complete(conversation("Hi"), reasoning).toOption.value.adjustments shouldBe dropped
-    client.streamComplete(conversation("Hi"), reasoning, _ => ()).toOption.value.adjustments shouldBe dropped
+    client.streamComplete(conversation("Hi"), reasoning)(_ => ()).toOption.value.adjustments shouldBe dropped
     client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
   }
 
@@ -435,7 +436,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         ProviderExchangeLogging.Disabled,
         mockHttp
       )
-    client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.get.citations shouldBe List(
+    client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ()).toOption.get.citations shouldBe List(
       Citation(url = "https://src/a", title = Some("A")),
       Citation(url = "https://src/b", title = Some("B"))
     )
@@ -458,7 +459,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     val usage = result.toOption.get.usage.get
@@ -484,7 +485,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.get.usage shouldBe Some(
+    client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ()).toOption.get.usage shouldBe Some(
       TokenUsage(
         promptTokens = 100,
         completionTokens = 5,
@@ -511,7 +512,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       mockHttp
     )
     val chunks = ListBuffer.empty[StreamedChunk]
-    val completion = client.streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
+    val completion = client.streamComplete(conversation("Hi"), CompletionOptions())(chunks += _) match {
       case Right(c) => c
       case Left(e)  => fail(s"expected an empty answer, got $e")
     }
@@ -526,7 +527,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       val chunks = ListBuffer.empty[StreamedChunk]
       noContentMessage(
         streamingClient(s"data: ${ujson.read(body).render()}\n\n")
-          .streamComplete(conversation("Hi"), CompletionOptions(), chunks += _),
+          .streamComplete(conversation("Hi"), CompletionOptions())(chunks += _),
         filtered
       ) should include(expected)
       chunks.flatMap(_.content) shouldBe empty
@@ -535,7 +536,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   it should "end the stream with a ContentFilteredError naming the block reason when Gemini blocks the prompt" in {
     noContentMessage(
-      streamingClient(s"data: $promptBlockedBody\n\n").streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+      streamingClient(s"data: $promptBlockedBody\n\n").streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
     ) should include("blockReason PROHIBITED_CONTENT")
   }
 
@@ -554,7 +555,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[org.llm4s.error.AuthenticationError]
@@ -571,7 +572,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("q", Schema.string("query")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("search", "Search tool", schema)
+    val toolResult = ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
@@ -601,7 +602,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("x", Schema.integer("x")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("my_tool", "My tool description", schema)
+    val toolResult = ToolBuilder[String]("my_tool", "My tool description", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
@@ -719,7 +720,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(body)).complete(conversation("Hi"), CompletionOptions())
 
   private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] =
-    streamingClient(sse).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
+    streamingClient(sse).streamComplete(conversation("Hi"), CompletionOptions())(onChunk)
 
   // ---- service tier (#2726) ----
 

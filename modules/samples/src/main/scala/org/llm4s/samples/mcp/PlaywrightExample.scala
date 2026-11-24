@@ -40,14 +40,14 @@ object PlaywrightExample {
         |  3. Node.js or npx not properly installed
         |""".stripMargin)
 
-  private def logToolsInfo(tools: Seq[ToolFunction[?, ?]]): Unit = {
+  private def logToolsInfo(tools: Seq[ToolFunction[?]]): Unit = {
     logger.info("📦 Available Playwright tools ({} total):", tools.size)
     tools.zipWithIndex.foreach { case (tool, index) =>
       logger.info("   {}. {}: {}", index + 1, tool.name, tool.description)
     }
   }
 
-  private def checkForTools(mcpRegistry: MCPToolRegistry): Either[String, Seq[ToolFunction[?, ?]]] = {
+  private def checkForTools(mcpRegistry: MCPToolRegistry): Either[String, Seq[ToolFunction[?]]] = {
     val allTools = mcpRegistry.getAllTools
     val result   = Either.cond(allTools.nonEmpty, allTools, "No tools available from Playwright MCP server")
     result.bimap(_ => logNoToolsError(), tools => logToolsInfo(tools))

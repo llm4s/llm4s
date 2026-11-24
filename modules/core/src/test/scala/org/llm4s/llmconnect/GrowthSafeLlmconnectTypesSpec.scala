@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.caching.CacheStats
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.{
   EmbeddingProviderSection,
+  ProviderCollisionKind,
   ProviderConfigKey,
   ProviderDiscoveryFailure,
   ProviderIdCollision,
@@ -12,6 +13,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistryReport
 }
 import org.llm4s.llmconnect.streaming.SSEParser.SSEEvent
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,17 +44,33 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     val section = EmbeddingProviderSection()
     section.apiKey shouldBe None
     section.baseUrl shouldBe None
-    section.model shouldBe None
     section.timeouts shouldBe ProviderTimeouts.default
+    section.extras shouldBe Map.empty
 
     val timeouts = ProviderTimeouts(request = Some(3.seconds))
-    val set      = section.withApiKey(Secret("k")).withBaseUrl("http://b").withModel("m").withTimeouts(timeouts)
-    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some("http://b"), Some("m"), timeouts)
+    val set = section
+      .withApiKey(Secret("k"))
+      .withBaseUrl(BaseUrl("http://b"))
+      .withTimeouts(timeouts)
+    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some(BaseUrl("http://b")), timeouts)
 
-    val cleared = set.withApiKey(None).withBaseUrl(None).withModel(None)
+    val cleared = set.withApiKey(None).withBaseUrl(None)
     cleared shouldBe EmbeddingProviderSection(timeouts = timeouts)
-    set.withApiKey(Some(Secret("k2"))).withBaseUrl(Some("http://c")).withModel(Some("m2")) shouldBe
-      EmbeddingProviderSection(Some(Secret("k2")), Some("http://c"), Some("m2"), timeouts)
+    set
+      .withApiKey(Some(Secret("k2")))
+      .withBaseUrl(Some(BaseUrl("http://c"))) shouldBe
+      EmbeddingProviderSection(Some(Secret("k2")), Some(BaseUrl("http://c")), timeouts)
+  }
+
+  it should "hold the provider's declared extras, and keep their values out of toString (#2811)" in {
+    val section = EmbeddingProviderSection().withExtras(Map("region" -> "eu-west-secret-1"))
+    section.extra("region") shouldBe Some("eu-west-secret-1")
+    section.extra("absent") shouldBe None
+    section shouldBe EmbeddingProviderSection(extras = Map("region" -> "eu-west-secret-1"))
+    section.toString should include("region -> ***")
+    (section.toString should not).include("eu-west-secret-1")
+    EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://user:pw@host.example/v1?token=abc"))).toString should
+      (not.include("pw@").and(not).include("abc"))
   }
 
   "ProviderConfigKey" should "default to optional with no default or env" in {
@@ -75,58 +93,33 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     ProviderConfigKey.optional("r", "d").withEnv("R").env shouldBe Some("R")
   }
 
-  "ProviderModuleReport" should "default to no embedding ids and be changed by its setters" in {
-    val report = ProviderModuleReport("a.Module", Seq("x"), None)
+  // The registry report types are what the registry hands out, never what a caller builds (#2811): their `apply`
+  // is `private[llm4s]` and they have no setters.
+  "ProviderModuleReport" should "default to no embedding ids and carry its ids as ProviderId" in {
+    val report = ProviderModuleReport("a.Module", Seq(ProviderId("x")), None)
     report.embeddingProviderIds shouldBe Nil
-
-    val changed = report
-      .withModuleClass("b.Module")
-      .withProviderIds(Seq("y"))
-      .withSource("file:/b.jar")
-      .withEmbeddingProviderIds(Seq("e"))
-    changed shouldBe ProviderModuleReport("b.Module", Seq("y"), Some("file:/b.jar"), Seq("e"))
-    changed.withSource(None).source shouldBe None
-    changed.withSource(Some("dir")).source shouldBe Some("dir")
+    report.providerIds shouldBe Seq(ProviderId("X"))
   }
 
-  "ProviderDiscoveryFailure" should "default to no throwable and be changed by its setters" in {
-    val failure = ProviderDiscoveryFailure("broken")
-    failure.failure shouldBe None
-    val boom    = new IllegalStateException("boom")
-    val changed = failure.withDetail("really broken").withFailure(boom)
-    changed.detail shouldBe "really broken"
-    changed.failure shouldBe Some(boom)
-    changed.withFailure(None).failure shouldBe None
-    changed.withFailure(Some(boom)).failure shouldBe Some(boom)
+  "ProviderDiscoveryFailure" should "default to no throwable" in {
+    ProviderDiscoveryFailure("broken").failure shouldBe None
   }
 
-  "ProviderIdCollision" should "be built by apply and changed by its setters" in {
-    val collision = ProviderIdCollision("chat", "acme", "b.Module", None)
-    val changed = collision
-      .withKind("embedding")
-      .withId("acme2")
-      .withKeptModule("c.Module")
-      .withDroppedModule("a.Module")
-    changed shouldBe ProviderIdCollision("embedding", "acme2", "c.Module", Some("a.Module"))
-    changed.withDroppedModule(None).droppedModule shouldBe None
-    changed.withDroppedModule(Some("z")).droppedModule shouldBe Some("z")
+  "ProviderIdCollision" should "say what collided with a kind, not a string" in {
+    val collision = ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "b.Module", None)
+    collision.kind.label shouldBe "chat"
+    collision.kind.isAlias shouldBe false
+    ProviderCollisionKind.values.filter(_.isAlias).map(_.label) shouldBe Array("chat alias", "embedding alias")
   }
 
-  "ProviderRegistryReport" should "default to empty lists and be changed by its setters" in {
+  "ProviderRegistryReport" should "default to empty lists" in {
     val report = ProviderRegistryReport(discovered = true)
     report.modules shouldBe Nil
     report.failures shouldBe Nil
     report.collisions shouldBe Nil
 
-    val module    = ProviderModuleReport("a.Module", Seq("x"), None)
-    val failure   = ProviderDiscoveryFailure("broken")
-    val collision = ProviderIdCollision("chat", "x", "a.Module", None)
-    val changed = report
-      .withDiscovered(false)
-      .withModules(Seq(module))
-      .withFailures(Seq(failure))
-      .withCollisions(Seq(collision))
-    changed shouldBe ProviderRegistryReport(false, Seq(module), Seq(failure), Seq(collision))
+    val collision = ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("x"), "a.Module", None)
+    report.withCollisions(Seq(collision)).collisions shouldBe Seq(collision)
     ProviderRegistryReport.explicit shouldBe ProviderRegistryReport(discovered = false)
   }
 

@@ -78,6 +78,21 @@ object PolicyBuilder {
         }
     }
 
+  /** Passes a model matching one of `patterns`, regular expressions over the whole bare model id. */
+  def allowedModelPatterns(patterns: Seq[String], envs: Set[String] = Set.empty): EnvConfigPolicy =
+    new EnvConfigPolicy {
+      override val name: String = "allowed-models"
+      private val compiled      = patterns.map(_.r)
+
+      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
+        if (!shouldRun(envs, env)) PolicySkip(name)
+        else {
+          val model = config.model.getOrElse("")
+          if (model.nonEmpty && compiled.exists(_.matches(model))) PolicyPass(name)
+          else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
+        }
+    }
+
   def maxTokensLimit(max: Int, envs: Set[String] = Set.empty): EnvConfigPolicy =
     new EnvConfigPolicy {
       override val name: String = "max-tokens-limit"
@@ -164,13 +179,8 @@ object DefaultPolicies {
 
   val stagingBalancedDefaults: List[EnvConfigPolicy] = List(
     allowedProviders(Set("openai", "anthropic", "gemini", "azure"), Set("staging")),
-    allowedModels(
-      Set(
-        "gpt-4o-mini",
-        "gpt-4o",
-        "claude-3-5-sonnet",
-        "gemini-1.5-pro"
-      ),
+    allowedModelPatterns(
+      Seq(ConfigPolicy.ModelFamilies.OpenAI, ConfigPolicy.ModelFamilies.Anthropic, ConfigPolicy.ModelFamilies.Gemini),
       Set("staging")
     ),
     maxTokensLimit(8192, Set("staging")),

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, ProviderTimeouts }
@@ -17,13 +18,14 @@ class VoyageAIEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
 
   private def config(timeouts: ProviderTimeouts): EmbeddingProviderConfig =
     EmbeddingProviderConfig(
-      baseUrl = "http://localhost:1",
-      model = "voyage-3",
-      apiKey = Secret("test-key"),
+      providerId = ProviderId("voyage"),
+      baseUrl = BaseUrl("http://localhost:1"),
+      model = ModelName("voyage-3"),
+      apiKey = Some(Secret("test-key")),
       timeouts = timeouts
     )
 
-  private def request: EmbeddingRequest = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("voyage-3", 3))
+  private def request: EmbeddingRequest = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("voyage-3"), 3))
 
   /** The timeout the provider passed to the HTTP client for one `embed`. */
   private def timeoutUsed(timeouts: ProviderTimeouts): Option[FiniteDuration] = {

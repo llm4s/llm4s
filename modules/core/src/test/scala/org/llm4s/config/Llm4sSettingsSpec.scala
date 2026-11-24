@@ -3,7 +3,7 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.{ Config, ConfigFactory }
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -20,7 +20,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
   private def parse(hocon: String): Config = ConfigFactory.parseString(hocon)
 
   private def section(name: String, body: String, default: Boolean = true): String =
-    val selected = if default then s"""llm4s.providers.provider = "$name"\n""" else ""
+    val selected = if default then s"""llm4s.defaultProvider = "$name"\n""" else ""
     s"${selected}llm4s.providers.$name { $body }\n"
 
   private def settings(hocon: String): Llm4sSettings = Llm4sConfig.from(parse(hocon)).value
@@ -47,7 +47,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
       val cfg = settings(section("tenant-a", """provider = "fixturechat", model = "model-a", apiKey = "key-a""""))
         .defaultProvider()
         .value
-      fixture(cfg).model shouldBe "model-a"
+      fixture(cfg).model.asString shouldBe "model-a"
       fixture(cfg).apiKey shouldBe "key-a"
     }
 
@@ -66,14 +66,14 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
 
       clients.value match
         case (ca: FixtureChatClient, cb: FixtureChatClient) =>
-          ca.config.model shouldBe "model-a"
+          ca.config.model.asString shouldBe "model-a"
           ca.config.apiKey shouldBe "key-a"
-          cb.config.model shouldBe "model-b"
+          cb.config.model.asString shouldBe "model-b"
           cb.config.apiKey shouldBe "key-b"
         case other => fail(s"Expected two FixtureChatClients, got $other")
 
       // The process-wide default is untouched by either.
-      fixture(Llm4sConfig.defaultProvider().value).model shouldBe "fixture-model"
+      fixture(Llm4sConfig.defaultProvider().value).model.asString shouldBe "fixture-model"
     }
 
     "resolve a named section and list the sections" in {
@@ -86,7 +86,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
         section("main", """provider = "fixturechat", model = "m1", apiKey = "k1"""") +
           section("other", """provider = "fixturechat", model = "m2", apiKey = "k2"""", default = false)
       )
-      fixture(s.provider("other").value).model shouldBe "m2"
+      fixture(s.provider(ProviderName("other")).value).model.asString shouldBe "m2"
       s.defaultProviderName().value shouldBe ProviderName("main")
       s.providers().value.namedProviders.keySet shouldBe Set(ProviderName("main"), ProviderName("other"))
       val sections = s.providerConfigs().value
@@ -140,16 +140,16 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
           |}
           |""".stripMargin
       )
-      val (provider, cfg) = s.embeddings().value
-      provider shouldBe "fixtureembedding"
-      cfg.model shouldBe "fixture-embed-small"
-      s.textEmbeddingModel().value.modelName shouldBe "fixture-embed-small"
+      val cfg = s.embeddings().value
+      cfg.providerId.asString shouldBe "fixtureembedding"
+      cfg.model.asString shouldBe "fixture-embed-small"
+      s.textEmbeddingModel().value.name shouldBe ModelName("fixture-embed-small")
     }
 
     "report a section that is not there as Llm4sConfig does" in {
       val s = settings(section("main", """provider = "fixturechat", model = "m", apiKey = "k""""))
-      s.provider("missing").isLeft shouldBe true
-      s.listModels("missing").isLeft shouldBe true
+      s.provider(ProviderName("missing")).isLeft shouldBe true
+      s.listModels(ProviderName("missing")).isLeft shouldBe true
     }
 
     "fail with a ConfigurationError, not an exception, when the config cannot be resolved" in {
@@ -165,7 +165,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
     }
 
     "route a section built in code by llm4s.http, as it routes a configured one (#2804)" in {
-      import org.llm4s.config.ProvidersConfigModel.{ ApiKey, ModelName, NamedProviderConfig, ProviderId }
+      import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
       val section = NamedProviderConfig(ProviderId("fixturechat"), ModelName("m"), None, Some(ApiKey("k")))
       val built = settings("""llm4s.http.proxy.url = "http://proxy.corp:3128" """)
         .providerFromSection(ProviderName("built"), section)

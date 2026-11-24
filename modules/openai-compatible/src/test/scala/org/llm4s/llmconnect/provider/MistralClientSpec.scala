@@ -1,11 +1,13 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.MistralConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolCallId, ToolMessage, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
@@ -47,8 +49,8 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   private def config(baseUrl: String): MistralConfig =
     MistralConfig(
       apiKey = Secret("test-key"),
-      model = "mistral-small-latest",
-      baseUrl = baseUrl,
+      model = ModelName("mistral-small-latest"),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -183,7 +185,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       err => fail(s"Expected Right, got Left($err)"),
       completion => {
         completion.content shouldBe ""
-        completion.message.contentOpt shouldBe Some("")
+        completion.message.text shouldBe Some("")
         completion.toolCalls shouldBe empty
       }
     )
@@ -553,8 +555,8 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   "MistralClient" should "return correct context window from config" in {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
-      model = "mistral-small-latest",
-      baseUrl = "https://example.invalid",
+      model = ModelName("mistral-small-latest"),
+      baseUrl = BaseUrl("https://example.invalid"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -565,8 +567,8 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
   it should "return correct reserve completion from config" in {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
-      model = "mistral-small-latest",
-      baseUrl = "https://example.invalid",
+      model = ModelName("mistral-small-latest"),
+      baseUrl = BaseUrl("https://example.invalid"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -675,7 +677,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "mistral"
+    exchanges.head.provider.asString shouldBe "mistral"
     exchanges.head.model shouldBe Some("mistral-small-latest")
     exchanges.head.requestBody should include("hello")
     exchanges.head.responseBody.value should include("Logged response")
@@ -696,7 +698,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       exchange.getResponseBody.close()
     } { baseUrl =>
       val client           = new MistralClient(config(baseUrl))
-      val toolConversation = Conversation(Seq(UserMessage("Hello"), ToolMessage("tool result", "call-123")))
+      val toolConversation = Conversation(Seq(UserMessage("Hello"), ToolMessage("tool result", ToolCallId("call-123"))))
 
       client.complete(toolConversation, CompletionOptions()).map(_.content) shouldBe Right("done")
     }

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
@@ -30,8 +32,8 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
 
   private val geminiConfig = GeminiConfig(
     apiKey = Secret("test-key"),
-    model = "gemini-2.0-flash",
-    baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+    model = ModelName("gemini-2.0-flash"),
+    baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
     contextWindow = 1048576,
     reserveCompletion = 8192
   )
@@ -39,7 +41,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   private val vertexConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -124,7 +126,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, textReply, Map.empty)))
     val client = gemini(mockHttp)
-    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions())(_ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
@@ -132,7 +134,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()) match {
+    gemini(mockHttp).streamComplete(question, CompletionOptions())(_ => ()) match {
       case Left(e: ServiceError) => e.httpStatus shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }
@@ -148,7 +150,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     val client = vertex(mockHttp, textReply)
-    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions())(_ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
@@ -156,7 +158,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    vertex(mockHttp, textReply).streamComplete(question, CompletionOptions(), _ => ()) match {
+    vertex(mockHttp, textReply).streamComplete(question, CompletionOptions())(_ => ()) match {
       case Left(e: ServiceError) => e.httpStatus shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }

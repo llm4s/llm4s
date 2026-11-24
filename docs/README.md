@@ -16,7 +16,7 @@ Beginner-friendly guides:
 ### 📖 [User Guide](https://llm4s.org/guide/)
 
 Available guides:
-- **[Image Generation](guide/image-generation.md)** - DALL-E and image providers
+- **[Image Generation](guide/image-generation.md)** - OpenAI GPT Image and other image providers
 - **[Speech](guide/speech.md)** - STT and TTS
 
 Other features are documented via examples and design documents.
@@ -53,9 +53,15 @@ The design documents of the agent framework and its features are in [design/](de
 - **[Migration Guide](reference/migration.md)** - Upgrade between versions
 - **[Scalafix Rules](reference/scalafix.md)** - Code quality
 - **[Glossary](reference/glossary.md)** - Definitions of the terms LLM4S uses
-- **[Test Coverage](reference/test-coverage.md)** - Testing guidelines
-- **[Release Process](reference/release.md)** - How releases work
 - **[Roadmap](reference/roadmap.md)** - Single source of truth for project status
+
+### [Contribute](https://llm4s.org/contribute/)
+
+The contributor pages are published under `/contribute/`; their sources stay in `reference/`.
+
+- **[Contributing Guide](reference/contributing.md)** - How to submit your first PR
+- **[Test Coverage](reference/test-coverage.md)** - Coverage tooling and thresholds
+- **[Release Process](reference/release.md)** - How releases work
 
 ### 🌐 [Community](https://llm4s.org/community/)
 

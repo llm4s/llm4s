@@ -11,14 +11,14 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
   case class TestResult(message: String)
   implicit val testResultRW: ReadWriter[TestResult] = macroRW[TestResult]
 
-  def createTestTool(name: String = "test_tool"): Result[ToolFunction[Map[String, Any], TestResult]] = {
+  def createTestTool(name: String = "test_tool"): Result[ToolFunction[TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("requiredString", Schema.string("A required string parameter")))
       .withProperty(Schema.property("requiredNumber", Schema.number("A required number parameter")))
       .withProperty(Schema.property("optionalBool", Schema.boolean("An optional boolean parameter")))
 
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       name,
       "Test tool for parameter validation",
       schema
@@ -256,7 +256,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         )
       )
 
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       "complex_tool",
       "Tool with nested parameters",
       schema

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -50,7 +50,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "contribute both halves under the id ollama" in {
       val module = new Llm4sOllamaModule
-      module.chatProviders shouldBe Seq(OllamaProvider)
+      module.providers shouldBe Seq(OllamaProvider)
       module.embeddingProviders shouldBe Seq(OllamaEmbeddingProvider)
     }
   }
@@ -78,12 +78,12 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
           .loadProvider("local", s"""llm4s.providers.local { provider = "ollama", model = "llama3.1"$section }""", env)
           .map(_.asInstanceOf[OllamaConfig].baseUrl)
 
-      baseUrl("") shouldBe Right("http://localhost:11434")
-      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right("http://gpu-box:11434")
+      baseUrl("") shouldBe Right(BaseUrl("http://localhost:11434"))
+      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right(BaseUrl("http://gpu-box:11434"))
 
       val bound = ", baseUrl = ${?OLLAMA_BASE_URL}"
-      baseUrl(bound) shouldBe Right("http://localhost:11434")
-      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right("http://ollama:11434")
+      baseUrl(bound) shouldBe Right(BaseUrl("http://localhost:11434"))
+      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right(BaseUrl("http://ollama:11434"))
     }
 
     "refuse a config belonging to another provider" in {
@@ -166,17 +166,39 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("nomic-embed-text"),
+          apiKey = Some(Secret("test-key"))
+        )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
       }
+    }
+
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        OllamaEmbeddingProvider,
+        EmbeddingProviderConfig(
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
+      )
     }
 
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"embedding":[0.1,0.2]}""")
       ) { (baseUrl, keys) =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(keys))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("nomic-embed-text"),
+          apiKey = Some(Secret("test-key"))
+        )
+        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }

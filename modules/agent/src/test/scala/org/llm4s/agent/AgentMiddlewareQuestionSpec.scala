@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.events.GuardrailPhase
@@ -8,7 +9,6 @@ import org.llm4s.agent.graph.{
   EventRecord,
   GraphError,
   GraphRuntime,
-  IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
   RunEvent,
@@ -211,7 +211,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       CompletionFixture.simple("both")
     )
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(new Environment(ran)))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(new Environment(ran)))
     val parked = agent.run("deploy").value
     val asked  = askedOf(parked)
     asked.map(_._2.hook) shouldBe Vector(MiddlewareHook.WrapToolCall, MiddlewareHook.WrapToolCall)
@@ -234,7 +234,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val env     = new Environment(ran)
     val client  = ScriptedLLMClient.of(calling(call("c1", "deploy", "one")), CompletionFixture.simple("done"))
     val approve = new ApprovalMiddleware(_ => Some("check"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(env, approve))
+    val agent =
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(env, approve))
     val parked = agent.run("deploy").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val approval = asked.status match {
@@ -258,7 +259,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     }
     val env    = new Environment(new CopyOnWriteArrayList[String]())
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withMiddleware(env))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(confirm)).withMiddleware(env))
     val parked = agent.run("go").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val question = asked.status match {
@@ -288,7 +289,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         if calls.incrementAndGet() == 1 then next() else askAbout(Need("late"))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withMiddleware(late))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(confirm)).withMiddleware(late))
     val parked = agent.run("go").value
     val id = parked.status match {
       case AgentStatus.Suspended(s) if s.questions.sizeIs == 1 => s.questions.head._1
@@ -308,7 +309,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         ToolOutcome.Ask("anything")
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(rogue))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(rogue))
     cause(agent.run("go").error) match {
       case GraphError.ToolFailed(_, _, cause) => cause.message should include("asked a question it does not declare")
       case other                              => fail(s"expected ToolFailed, got $other")
@@ -322,7 +323,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
         ToolOutcome.Ask(42)
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(deploy)).withMiddleware(wrong))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(wrong))
     cause(agent.run("go").error) match {
       case GraphError.ToolFailed(_, _, cause) => cause.message should include("asked a question of another type")
       case other                              => fail(s"expected ToolFailed, got $other")
@@ -391,7 +392,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   "GuardrailReviewMiddleware" should "ask a reviewer about a refused answer instead of blocking, and allow it" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     val client                   = ScriptedLLMClient.of(CompletionFixture.simple("far too long"))
     val agent =
       built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Nil, Seq(tooLong))))
@@ -407,7 +408,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "use the reviewer's edit, or block as GuardrailMiddleware would" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     def agentOver(client: ScriptedLLMClient) =
       built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Nil, Seq(tooLong))))
 
@@ -431,7 +432,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "review a refused query before anything is stored, and pass text the guardrails accept" in {
-    val short  = new LengthCheck(1, 5)
+    val short  = LengthCheck(1, 5)
     val client = ScriptedLLMClient.of(CompletionFixture.simple("ok"), CompletionFixture.simple("fine"))
     val agent = built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Seq(short), Nil)))
     val parked        = agent.run("a very long query").value
@@ -469,7 +470,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     agentOver(GuardrailVerdict.Edit("edited")).answer shouldBe Some("edited")
     calls.get shouldBe 1
     agentOver(GuardrailVerdict.Block).status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "judge"
         reason should include("score 1")
       case other => fail(s"expected Blocked, got $other")
@@ -478,7 +479,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "run the guardrails again, and ask again, when the hook runs on different text" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     val review                   = new GuardrailReviewMiddleware(Nil, Seq(tooLong))
     val verdict                  = upickle.default.writeJs[GuardrailVerdict](GuardrailVerdict.Allow)
     val asked = upickle.default.writeJs(GuardrailReview(GuardrailPhase.Output, tooLong.name, "r", "far too long"))
@@ -509,7 +510,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     approval.answered shouldBe empty
     approval.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     approval.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
-    approval.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    approval.withCall(call("c2", "deploy")).call.id shouldBe ToolCallId("c2")
     approval.withReason("because").reason shouldBe "because"
     approval.withSource(ApprovalSource.Middleware(mw)).source shouldBe ApprovalSource.Middleware(mw)
     approval.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
@@ -518,7 +519,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     (question.approved, question.answered) shouldBe ((false, Vector.empty))
     question.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     question.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
-    question.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    question.withCall(call("c2", "deploy")).call.id shouldBe ToolCallId("c2")
     question.withQuestion(ujson.Num(3)).question shouldBe ujson.Num(3)
     question.withApproved(true).approved shouldBe true
     question.withAnswered(Vector(given1)).answered shouldBe Vector(given1)

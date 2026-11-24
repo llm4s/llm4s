@@ -49,8 +49,8 @@ trait MetricsRecording {
     provider: String,
     model: String,
     operation: => Result[A],
-    extractUsage: A => Option[TokenUsage] = (_: A) => None,
-    extractCost: A => Option[Double] = (_: A) => None
+    extractUsage: A => Option[TokenUsage],
+    extractCost: A => Option[Double]
   ): Result[A] = {
     val startNanos = System.nanoTime()
     val result     = operation

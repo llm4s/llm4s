@@ -79,7 +79,7 @@ class ConfigurationMetadataSpec extends AnyFlatSpec with Matchers {
 
   it should "list nothing else but the llm4s.providers, credentials, embeddings, tracing and http blocks" in {
     (listed.keySet -- properties.keySet) shouldBe Set(
-      "llm4s.providers.provider",
+      "llm4s.default-provider",
       "llm4s.providers",
       "llm4s.credentials",
       "llm4s.embeddings.model",

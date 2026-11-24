@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
@@ -23,7 +24,7 @@ import java.time.Instant
  *
  * Based on the mock-backed cases of `LangfuseTracingIntegrationSpec` in #1035 by
  * @kannupriyakalra. The cases that `LangfuseTracingSpec` and `LangfuseTracingEdgeCasesSpec`
- * already had (batch shapes per event, the Basic auth header, the ingestion URL suffix,
+ * already had (span shapes per event, the Basic auth header, the endpoint path,
  * skipping export when a key is empty) are not repeated; the token-usage counts and the shared
  * trace id went into `LangfuseTracingEdgeCasesSpec`.
  */
@@ -41,11 +42,11 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         httpClient = http,
         restoreInterrupt = () => ()
       ) {
-    val batches: mutable.Buffer[Seq[ujson.Obj]] = mutable.Buffer.empty
+    val batches: mutable.Buffer[Seq[SentSpan]] = mutable.Buffer.empty
 
-    override protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
-      batches += events
-      super.sendBatch(events)
+    override protected def sendBatch(request: ujson.Obj): Result[Unit] = {
+      batches += SentSpan.all(request.render())
+      super.sendBatch(request)
     }
   }
 
@@ -59,9 +60,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
       Right(completion)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -74,13 +73,13 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     implicit val rw: ReadWriter[EchoResult] = macroRW
   }
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
 
-  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
 
   private val client = () =>
     new SequencedClient(
@@ -88,25 +87,22 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         Completion(
           "turn-1",
           Instant.EPOCH,
-          "",
-          "test-model",
+          ModelName("test-model"),
           AssistantMessage("", Seq(toolCall)),
-          List(toolCall),
           Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
         ),
         Completion(
           "turn-2",
           Instant.EPOCH,
-          "Echoed.",
-          "test-model",
+          ModelName("test-model"),
           AssistantMessage("Echoed."),
           usage = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))
         )
       )
     )
 
-  private def run(): (RecordingLangfuseTracing, MockHttpClient, Seq[ujson.Obj]) = {
-    val http    = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
+  private def run(): (RecordingLangfuseTracing, MockHttpClient, Seq[SentSpan]) = {
+    val http    = new MockHttpClient(HttpResponse(200, "{}"))
     val tracing = new RecordingLangfuseTracing(http)
 
     val result = for {
@@ -123,18 +119,34 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     (tracing, http, tracing.batches.toSeq.flatten)
   }
 
-  private def graphEvents(events: Seq[ujson.Obj]): Seq[ujson.Obj] =
-    events.filter(e => e("type").str == "event-create" && e("body")("name").str.startsWith("graph."))
+  private def graphEvents(spans: Seq[SentSpan]): Seq[SentSpan] =
+    spans.filter(s => s.kind == "event" && s.name.startsWith("graph."))
 
-  private def names(events: Seq[ujson.Obj]): Seq[String] = graphEvents(events).map(_("body")("name").str)
+  private def names(spans: Seq[SentSpan]): Seq[String] = graphEvents(spans).map(_.name)
 
-  "LangfuseTracing, for an agent run with a tool call" should "post every batch it builds to the ingestion endpoint" in {
+  "LangfuseTracing, for an agent run with a tool call" should "post every export it builds to the OTel endpoint" in {
     val (tracing, http, _) = run()
 
     tracing.batches should not be empty
     http.postCallCount shouldBe tracing.batches.size
-    http.lastUrl shouldBe Some("https://langfuse.example.com/api/public/ingestion")
-    ujson.read(http.lastBody.getOrElse(fail("nothing was posted")))("batch").arr should not be empty
+    http.lastUrl shouldBe Some("https://langfuse.example.com/api/public/otel/v1/traces")
+    SentSpan.all(http.lastBody.getOrElse(fail("nothing was posted"))) should not be empty
+  }
+
+  it should "send the whole run as one trace, every span under the run's" in {
+    val (_, _, spans) = run()
+
+    spans.map(_.traceId).distinct should have size 1
+    val runSpan = spans.find(_.name == "invoke_agent assistant").getOrElse(fail("no run span"))
+    runSpan.setsTrace shouldBe true
+    runSpan.parentSpanId shouldBe None
+    runSpan.output.str shouldBe "Echoed."
+    val ids = spans.map(_.spanId).toSet
+    spans
+      .filterNot(_ eq runSpan)
+      .foreach(s => ids should contain(s.parentSpanId.getOrElse(fail(s"${s.name} has no parent"))))
+    spans.filter(_.kind == "generation").map(_.name).distinct shouldBe Seq("chat test-model")
+    spans.find(_.name == "execute_tool echo") should not be empty
   }
 
   it should "send the run's graph events as custom events, from its start to its completion" in {
@@ -144,14 +156,14 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     all.head shouldBe "graph.run_started"
     all.last shouldBe "graph.run_completed"
     all should contain("graph.task_completed")
-    graphEvents(events).foreach(_("body")("metadata")("source").str shouldBe "custom_event")
+    graphEvents(events).foreach(_.meta("source").str shouldBe "custom_event")
   }
 
   it should "send a task for each model call, and for the tool between them" in {
     val (_, _, events) = run()
 
-    val completed = graphEvents(events).filter(_("body")("name").str == "graph.task_completed")
-    completed.map(_("body")("input")("nodeId").str) shouldBe Seq(
+    val completed = graphEvents(events).filter(_.name == "graph.task_completed")
+    completed.map(_.input("nodeId").str) shouldBe Seq(
       "input",
       "assistant/model",
       "assistant/call-tool",
@@ -164,7 +176,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
   it should "give every event the same run and thread, in order" in {
     val (_, _, events) = run()
 
-    val inputs = graphEvents(events).map(_("body")("input"))
+    val inputs = graphEvents(events).map(_.input)
     inputs.map(_("runId").str).distinct should have size 1
     inputs.map(_("threadId").str).distinct should have size 1
     inputs.map(_("seq").num) shouldBe sorted

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -26,7 +28,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     model: String = "anthropic/claude-sonnet"
   ) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = model, baseUrl = baseUrl)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = ModelName(model), baseUrl = BaseUrl(baseUrl))),
       dialect
     )
 
@@ -71,14 +73,15 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
   private val finalReply = openAICompletion("Sunny.", "anthropic/claude-sonnet")
 
   private val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
-  private val answer  = ToolMessage("sunny", "call-1")
+  private val answer  = ToolMessage("sunny", ToolCallId("call-1"))
 
-  private val withDetails = AssistantMessage(None, Seq(ToolCall("call-1", "get_weather", ujson.Obj("city" -> "Paris"))))
-    .withThinking(
-      ThinkingBlock.Text("Thinking.") +: details.arr.toSeq.map(item =>
-        ThinkingBlock.Opaque("openrouter", item.render())
+  private val withDetails =
+    AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "Paris"))))
+      .withThinking(
+        ThinkingBlock.Text("Thinking.") +: details.arr.toSeq.map(item =>
+          ThinkingBlock.Opaque("openrouter", item.render())
+        )
       )
-    )
 
   /** Serves `replies` in order, recording each request body. */
   private def withReplies(replies: String*)(test: (String, () => Seq[ujson.Value]) => Any): Unit = {
@@ -143,7 +146,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     withReplies(routed, finalReply) { (baseUrl, seen) =>
       val c     = client(baseUrl, model = "openrouter/auto")
       val first = c.complete(Conversation(history), CompletionOptions()).value
-      first.model shouldBe "openai/o3"
+      first.model shouldBe ModelName("openai/o3")
       first.message.hasSealedThinking shouldBe true
       c.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
 
@@ -171,7 +174,9 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     withReplies(toolCallReply) { (baseUrl, _) =>
       val first = client(baseUrl).complete(Conversation(history), CompletionOptions()).value
       val otherModel = new OpenAICompatibleClient(
-        OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = "google/gemini-2.5-pro", baseUrl = baseUrl)),
+        OpenAICompatibleClient.settings(
+          OpenAICompatibleConfig(model = ModelName("google/gemini-2.5-pro"), baseUrl = BaseUrl(baseUrl))
+        ),
         OpenRouterDialect
       )
       val turn = assistantTurn(
@@ -230,7 +235,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
 
     withReplies(sse, finalReply) { (baseUrl, seen) =>
       val c        = client(baseUrl)
-      val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
+      val streamed = c.streamComplete(Conversation(history), CompletionOptions())(_ => ()).value
       val joinedText = ujson.Obj(
         "type"      -> "reasoning.text",
         "text"      -> "Paris weather.",
@@ -258,8 +263,8 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     // reported, and the items are replayed while the configured model is unchanged
     withReplies(sse.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")) { (baseUrl, _) =>
       val c        = client(baseUrl, model = "openrouter/auto")
-      val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
-      streamed.model shouldBe "openai/o3"
+      val streamed = c.streamComplete(Conversation(history), CompletionOptions())(_ => ()).value
+      streamed.model shouldBe ModelName("openai/o3")
       val turn =
         assistantTurn(c.createRequestBody(Conversation(history :+ streamed.message :+ answer), CompletionOptions()))
       turn("reasoning_details").arr should have size 2

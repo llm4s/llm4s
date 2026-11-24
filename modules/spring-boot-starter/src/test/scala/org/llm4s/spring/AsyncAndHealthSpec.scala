@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmErrorKind, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -61,7 +62,7 @@ object AsyncAndHealthSpec {
             throw e
         }
       }
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 512
@@ -90,7 +91,9 @@ object AsyncAndHealthSpec {
     override def awaitTermination(t: Long, u: TimeUnit): Boolean = pool.awaitTermination(t, u)
   }
 
-  def ok(text: String): Result[Completion] = Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
+  def ok(text: String): Result[Completion] = Right(
+    Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text))
+  )
 
   def echo: FakeProvider = new FakeProvider(_ => ok("echo"))
 

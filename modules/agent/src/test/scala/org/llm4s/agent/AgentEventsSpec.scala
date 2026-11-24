@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ModelCallCompleted, ToolExecutionOutcome }
@@ -41,9 +42,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       val index = sent.size
       sent.add(conversation)
       responses(index)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -52,25 +51,26 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text), usage = usage)
+      .withFinishReason(FinishReason.Stop)
 
   private def calling(call: ToolCall): Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+    Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)
 
-  private val toolCall                       = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall                       = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion = calling(toolCall)
 
   private case class EchoResult(echo: String)
   private object EchoResult:
     given ReadWriter[EchoResult] = macroRW
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
 
-  private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?, ?]*): AgentBuilder =
+  private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?]*): AgentBuilder =
     Agent.builder("assistant", client).withTools(ToolRegistry.of(tools).toOption.get)
 
   final private class Gathered(runs: Int):
@@ -140,7 +140,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   it should "report an unknown tool as Errored with no ToolCallStarted" in {
-    val unknown = ToolCall("call-9", "nope", ujson.Obj())
+    val unknown = ToolCall(ToolCallId("call-9"), "nope", ujson.Obj())
     val (result, c) =
       collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
     result.map(_.answer) shouldBe Right(Some("sorry"))
@@ -153,7 +153,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "keep a model-invented tool name out of the durable log" in {
     val marker   = "INVENTED-7731"
-    val unknown  = ToolCall("call-9", s"tool_$marker", ujson.Obj())
+    val unknown  = ToolCall(ToolCallId("call-9"), s"tool_$marker", ujson.Obj())
     val (_, c)   = collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
     val executed = c.durable.collect { case e @ AgentEvents.ToolExecuted(_) => e }
     executed should have size 1
@@ -164,14 +164,12 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "report each non-handoff call of a mixed handoff batch as Errored" in {
     val target  = Agent.builder("physics", Scripted(Right(answer("E=mc^2"))))
-    val handoff = ToolCall("call-h", "handoff_to_physics", ujson.Obj())
+    val handoff = ToolCall(ToolCallId("call-h"), "handoff_to_physics", ujson.Obj())
     val mixed = Completion(
       "turn-1",
       Instant.EPOCH,
-      "",
-      "test-model",
+      ModelName("test-model"),
       AssistantMessage(None, Seq(handoff, toolCall)),
-      List(handoff, toolCall),
       usage
     )
     val builder = agentWith(Scripted(Right(mixed), Right(answer("one at a time"))), echoTool)
@@ -185,7 +183,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   it should "report invalid arguments as Errored with no ToolCallStarted" in {
-    val invalid = ToolCall("call-2", "echo", ujson.Obj("other" -> 1))
+    val invalid = ToolCall(ToolCallId("call-2"), "echo", ujson.Obj("other" -> 1))
     val (_, c)  = collect(agentWith(Scripted(Right(calling(invalid)), Right(answer("sorry"))), echoTool), "go")
     c.all.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty
     c.durable.collect { case AgentEvents.ToolExecuted(t) => t.outcome } shouldBe Vector(ToolExecutionOutcome.Errored)
@@ -256,7 +254,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   "A guardrail" should "send GuardrailBlocked(Input) for an input block" in {
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("never"))))
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 3)), output = Nil))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 3)), output = Nil))
     val (result, c) = collect(builder, "far too long")
     result.map(_.status) should matchPattern { case Right(AgentStatus.Blocked("LengthCheck", _)) => }
     c.durable.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe
@@ -266,7 +264,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   it should "send GuardrailBlocked(Output) for an output block" in {
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("much too long"))))
-      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(LengthCheck(1, 3))))
     val (result, c) = collect(builder, "hi")
     result.map(_.status) should matchPattern { case Right(AgentStatus.Blocked("LengthCheck", _)) => }
     c.durable.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe
@@ -277,7 +275,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("ok"))))
       .withMiddleware(
-        new GuardrailMiddleware(input = Seq(new LengthCheck(1, 30)), output = Seq(new LengthCheck(1, 30)))
+        new GuardrailMiddleware(input = Seq(LengthCheck(1, 30)), output = Seq(LengthCheck(1, 30)))
       )
     val (_, c) = collect(builder, "hi")
     c.all.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe empty
@@ -336,9 +334,9 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val marker  = "SECRET-42"
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> marker))
+    val call    = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
-      Right(Completion("c1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)),
+      Right(Completion("c1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)),
       Right(answer(s"the answer is $marker"))
     )
     val agent = Agent
@@ -362,7 +360,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val runtime = GraphRuntime(store)
     val agent = Agent
       .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
-      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(LengthCheck(1, 3))))
       .withRuntime(runtime)
       .build()
       .fold(e => fail(e.message), identity)
@@ -420,7 +418,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val judging = new AgentMiddleware:
       val id = MiddlewareId("judge")
       override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
-        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
     val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.adjustments) } shouldBe
@@ -504,9 +502,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val streamed = new LLMClient:
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(NetworkError("complete is not called when the agent streams", None, "test"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
         onChunk(StreamedChunk(id = "s", content = Some("cut"), finishReason = Some(FinishReason.Length)))
@@ -524,7 +520,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val judging = new AgentMiddleware:
       val id = MiddlewareId("judge")
       override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
-        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
     val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.finishReason) } shouldBe

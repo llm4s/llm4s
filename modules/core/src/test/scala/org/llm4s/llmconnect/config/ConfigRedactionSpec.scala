@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,9 +17,10 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
 
   "EmbeddingProviderConfig toString" should "not leak apiKey values" in {
     val cfg = EmbeddingProviderConfig(
-      baseUrl = "https://example.invalid",
-      model = "text-embedding-3-large",
-      apiKey = Secret(secret)
+      providerId = ProviderId("fixtureembedding"),
+      baseUrl = BaseUrl("https://example.invalid"),
+      model = ModelName("text-embedding-3-large"),
+      apiKey = Some(Secret(secret))
     )
 
     (cfg.toString should not).include(secret)

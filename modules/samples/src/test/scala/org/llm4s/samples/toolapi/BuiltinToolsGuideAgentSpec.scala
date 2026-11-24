@@ -1,5 +1,8 @@
 package org.llm4s.samples.toolapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.agent.Agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -19,20 +22,21 @@ import java.time.Instant
  * script, not a model: it asks for the calculator once and then answers with what the tool returned, which shows
  * the registry built from a bundle really is what the agent runs its tool calls against.
  */
+@org.llm4s.tags.DocsSpec
 class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherValues {
+
+  "docs/guide/builtin-tools.md" should "show every block this spec runs, as written" in {
+    GuideMirror.missingFromPage(
+      "docs/guide/builtin-tools.md",
+      "modules/samples/src/test/scala/org/llm4s/samples/toolapi/BuiltinToolsGuideAgentSpec.scala"
+    ) shouldBe empty
+  }
 
   private class CalculatorScript extends LLMClient {
     private var calls = 0
 
     private def reply(message: AssistantMessage): Completion =
-      Completion(
-        id = s"script-$calls",
-        created = Instant.EPOCH,
-        content = message.content,
-        model = "script",
-        message = message,
-        toolCalls = message.toolCalls.toList
-      )
+      Completion(id = s"script-$calls", created = Instant.EPOCH, model = ModelName("script"), message = message)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
@@ -41,9 +45,13 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
         case None =>
           reply(
             AssistantMessage(
-              contentOpt = None,
+              text = None,
               toolCalls = Seq(
-                ToolCall("call-1", "calculator", ujson.Obj("operation" -> "percentage", "a" -> 15, "b" -> 850))
+                ToolCall(
+                  ToolCallId("call-1"),
+                  "calculator",
+                  ujson.Obj("operation" -> "percentage", "a" -> 15, "b" -> 850)
+                )
               )
             )
           )
@@ -51,9 +59,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
       })
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -65,12 +71,14 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
     val client = new CalculatorScript
 
     // The snippet of the guide, from here ...
+    // guide-block
     val result = for {
       tools        <- BuiltinTools.coreSafe
       toolRegistry <- ToolRegistry.of(tools)
       agent        <- Agent.builder("calculator-agent", client).withTools(toolRegistry).build()
       state        <- agent.run("What is 15% of 850?")
     } yield state
+    // end-guide-block
     // ... to here.
 
     val answer = result.value.answer.getOrElse(fail(s"the run did not complete: ${result.value.status}"))

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ NetworkError, ProcessingError, RateLimitError, ServiceError, TimeoutError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -22,8 +24,8 @@ import org.llm4s.model.ModelRegistryService
 private[provider] object OllamaRequestBodyTestHelper {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = OllamaConfig(
-    model = "llama3.1",
-    baseUrl = "http://localhost:11434",
+    model = ModelName("llama3.1"),
+    baseUrl = BaseUrl("http://localhost:11434"),
     contextWindow = 4096,
     reserveCompletion = 512
   )
@@ -69,8 +71,8 @@ class OllamaClientSpec extends AnyFunSuite {
 
   test("ollama client accepts custom metrics collector") {
     val config = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl("http://localhost:11434"),
       contextWindow = 4096,
       reserveCompletion = 512
     )
@@ -85,8 +87,8 @@ class OllamaClientSpec extends AnyFunSuite {
 
   test("ollama client uses noop metrics by default") {
     val config = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl("http://localhost:11434"),
       contextWindow = 4096,
       reserveCompletion = 512
     )
@@ -106,8 +108,8 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = OllamaConfig(
-    model = "llama3.1",
-    baseUrl = "http://localhost:11434",
+    model = ModelName("llama3.1"),
+    baseUrl = BaseUrl("http://localhost:11434"),
     contextWindow = 4096,
     reserveCompletion = 512
   )
@@ -169,14 +171,14 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(body)))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
 
     assert(result.isRight)
     assert(recorded.size == 1)
 
     val exchange = recorded.head
-    assert(exchange.provider == "ollama")
+    assert(exchange.provider.asString == "ollama")
     assert(exchange.model.contains("llama3.1"))
     assert(exchange.requestBody.contains("\"model\":\"llama3.1\""))
     assert(exchange.requestBody.contains("\"stream\":false"))
@@ -241,7 +243,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
     (mockHttp.onPost _).when(*, *, *, *).returns(Left(failure))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
 
     assert(result == Left(failure))
@@ -301,7 +303,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val conv = Conversation(messages =
       Seq(
         UserMessage("Hello"),
-        ToolMessage("tool result", "call-1")
+        ToolMessage("tool result", ToolCallId("call-1"))
       )
     )
     val body = OllamaRequestBodyTestHelper.createRequestBody(conv, CompletionOptions(), stream = false)
@@ -320,7 +322,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   }
 
   test("request body includes temperature and topP in options") {
-    val options = CompletionOptions(temperature = 0.7, topP = 0.9)
+    val options = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
     val conv    = Conversation(messages = Seq(UserMessage("Hello")))
     val body    = OllamaRequestBodyTestHelper.createRequestBody(conv, options, stream = false)
     val opts    = body("options")
@@ -351,7 +353,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       )
 
     assert(client.complete(conversation("Hello"), reasoning).toOption.get.adjustments == dropped)
-    assert(client.streamComplete(conversation("Hello"), reasoning, _ => ()).toOption.get.adjustments == dropped)
+    assert(client.streamComplete(conversation("Hello"), reasoning)(_ => ()).toOption.get.adjustments == dropped)
     assert(client.complete(conversation("Hello"), CompletionOptions()).toOption.get.adjustments.isEmpty)
   }
 
@@ -387,7 +389,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), chunk => chunks += chunk)
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(chunk => chunks += chunk)
 
     assert(result.isRight)
     val completion = result.toOption.get
@@ -395,7 +397,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(completion.content.contains("world"))
   }
 
-  test("a stream that fails mid-read is a recoverable NetworkError, so streamCompleteWithRetry retries it") {
+  test("a stream that fails mid-read is a recoverable NetworkError, so a ReliableClient retries it") {
     // The connection resets after the 200 arrives, before the first chunk.
     val resetting = new java.io.InputStream {
       override def read(): Int = throw new java.io.IOException("Connection reset")
@@ -403,7 +405,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
 
-    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     result match {
       case Left(e: NetworkError) =>
@@ -418,7 +420,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(lines.getBytes(StandardCharsets.UTF_8)))))
-    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), chunks += _)
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(chunks += _)
   }
 
   test("a stream that ends before done: true is a NetworkError, the text delivered staying delivered (RFC 0009)") {
@@ -454,7 +456,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isRight)
     val usage = result.toOption.get.usage.get
@@ -476,14 +478,14 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isRight)
     assert(recorded.size == 1)
 
     val exchange = recorded.head
-    assert(exchange.provider == "ollama")
+    assert(exchange.provider.asString == "ollama")
     assert(exchange.model.contains("llama3.1"))
     assert(exchange.requestBody.contains("\"stream\":true"))
     assert(exchange.responseBody.exists(_.contains(""""done":true""")))
@@ -499,7 +501,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.AuthenticationError])
@@ -514,8 +516,8 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Left(failure))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result == Left(failure))
     assert(recorded.size == 1)
@@ -529,7 +531,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(429, body, Map("retry-after" -> Seq("9")))))
 
-    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ()) match {
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ()) match {
       case Left(err: RateLimitError) => assert(err.retryDelay.contains(9.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
@@ -562,7 +564,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, heldOpen)))
 
-    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     result match {
       case Left(_: ProcessingError) => ()
@@ -581,8 +583,8 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       new ByteArrayInputStream("{\"message\":{\"content\":\"a\"}}\nnot-json\n".getBytes(StandardCharsets.UTF_8))
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, body)))
 
-    val result = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
-      .streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
+      .streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     assert(recorded.head.responseBody.exists(_.contains("not-json")))
@@ -618,8 +620,8 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
   private def client: OllamaClient =
     new OllamaClient(
       OllamaConfig(
-        model = "llama3.1",
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        model = ModelName("llama3.1"),
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 4096,
         reserveCompletion = 512
       )
@@ -635,7 +637,7 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
   }
 
   test("streamComplete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
-    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ()) match {
+    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ()) match {
       case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
@@ -645,8 +647,8 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
     val port = scala.util.Using.resource(new java.net.ServerSocket(0))(_.getLocalPort)
     val unreachable = new OllamaClient(
       OllamaConfig(
-        model = "llama3.1",
-        baseUrl = s"http://localhost:$port",
+        model = ModelName("llama3.1"),
+        baseUrl = BaseUrl(s"http://localhost:$port"),
         contextWindow = 4096,
         reserveCompletion = 512
       )

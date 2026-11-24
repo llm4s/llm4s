@@ -33,7 +33,7 @@ object Part1FirstCall {
   // snippet: stream
   def askStreaming(client: LLMClient, question: String)(onText: String => Unit): Result[String] =
     client
-      .streamComplete(conversationFor(question), CompletionOptions(), chunk => chunk.content.foreach(onText))
+      .streamComplete(conversationFor(question), CompletionOptions())(chunk => chunk.content.foreach(onText))
       .map(_.content)
   // end snippet
 

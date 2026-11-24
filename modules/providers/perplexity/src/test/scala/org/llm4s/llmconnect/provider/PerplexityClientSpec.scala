@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
@@ -25,7 +26,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     http -> client(http).complete(conversation, options)
   }
 
-  private val weatherTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val weatherTool: ToolFunction[?] = ToolBuilder[String](
     "get_weather",
     "Weather for a city",
     Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("the city")))
@@ -43,8 +44,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       body("model").str shouldBe "perplexity/sonar"
       body("input") shouldBe ujson.Arr(ujson.Obj("type" -> "message", "role" -> "user", "content" -> "Hello"))
       body("tools") shouldBe ujson.Arr(ujson.Obj("type" -> "web_search"))
-      body("temperature").num shouldBe CompletionOptions().temperature
-      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "top_p", "reasoning", "instructions")
+      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "temperature", "top_p", "reasoning", "instructions")
     }
 
     "join a base URL that already ends in /v1, and send the section's headers without letting them replace the key" in {
@@ -68,13 +68,13 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     }
 
     "send system messages as instructions and the whole tool loop as input items" in {
-      val call = ToolCall("call_1", "get_weather", ujson.Obj("city" -> "Paris"))
+      val call = ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Paris"))
       val conversation = Conversation(
         Seq(
           SystemMessage("Be brief."),
           UserMessage("Weather?"),
           AssistantMessage("Checking.", Seq(call)),
-          ToolMessage("""{"temp":20}""", "call_1"),
+          ToolMessage("""{"temp":20}""", ToolCallId("call_1")),
           SystemMessage("Cite sources."),
           UserMessage(Vector(ContentPart.Text("one"), ContentPart.Text("two")))
         )
@@ -110,7 +110,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "send a tool result for an unknown call without a name, and drop an empty assistant turn" in {
       val conversation =
-        Conversation(Seq(UserMessage("q"), AssistantMessage(contentOpt = None), ToolMessage("r", "call_x")))
+        Conversation(Seq(UserMessage("q"), AssistantMessage(text = None), ToolMessage("r", ToolCallId("call_x"))))
       val (http, _) = completeWith(response(s"[${textMessage("ok")}]"), conversation)
       http.lastBody("input").arr.map(_("type").str) shouldBe Seq("message", "function_call_output")
       http.lastBody("input")(1).obj.keySet should not contain "name"
@@ -199,7 +199,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       completion.content shouldBe "Answer [web:1]"
       completion.message.content shouldBe "Answer [web:1]"
       completion.id shouldBe "resp_1"
-      completion.model shouldBe "perplexity/sonar"
+      completion.model shouldBe ModelName("perplexity/sonar")
       completion.created.getEpochSecond shouldBe 1779391454L
       completion.citations shouldBe List(
         Citation(url = "https://b.example/2", title = Some("B!"), startIndex = Some(3), endIndex = Some(9)),
@@ -255,7 +255,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
           """{"object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"x"}]}]}"""
         )
       val completion = result.fold(e => fail(e.message), identity)
-      completion.model shouldBe "perplexity/sonar"
+      completion.model shouldBe ModelName("perplexity/sonar")
       completion.id should not be empty
       completion.usage shouldBe None
       completion.citations shouldBe empty
@@ -274,8 +274,8 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       val (_, result) = completeWith(response(output))
       val completion  = result.fold(e => fail(e.message), identity)
       completion.toolCalls shouldBe List(
-        ToolCall("call_a", "get_weather", ujson.Obj("city" -> "Rome")),
-        ToolCall("call_b", "get_weather", ujson.Obj())
+        ToolCall(ToolCallId("call_a"), "get_weather", ujson.Obj("city" -> "Rome")),
+        ToolCall(ToolCallId("call_b"), "get_weather", ujson.Obj())
       )
       completion.message.toolCalls shouldBe completion.toolCalls
       completion.message.thinking shouldBe Seq(
@@ -287,7 +287,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     "send a kept thought signature back on its call to the same model, and not to another" in {
       val http  = answering(response(s"[${functionCall("call_a", "get_weather", "{}", Some("SIG"))}]"))
       val first = client(http).complete(hello, CompletionOptions()).fold(e => fail(e.message), identity)
-      val loop  = Conversation(Seq(UserMessage("Hello"), first.message, ToolMessage("sunny", "call_a")))
+      val loop  = Conversation(Seq(UserMessage("Hello"), first.message, ToolMessage("sunny", ToolCallId("call_a"))))
       client(http).complete(loop, CompletionOptions())
       http.lastBody("input")(1)("thought_signature").str shouldBe "SIG"
       client(http, config(model = "openai/gpt-5.6-sol")).complete(loop, CompletionOptions())
@@ -324,7 +324,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "report Other(\"\") for a reply with no status, since no reason was read" in {
       completeWith(s"""{"id":"r","output":[${textMessage("done")}]}""")._2.map(_.finishReason) shouldBe
-        Right(FinishReason.Other(""))
+        Right(FinishReason.Unknown)
     }
 
     "fail a failed response with Perplexity's code and message, and any other unfinished status" in {

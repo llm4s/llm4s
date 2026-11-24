@@ -27,7 +27,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
   private val ShortClaude = "anthropic.claude-sonnet-4-20250514-v1:0"
   private val Nova        = "amazon.nova-pro-v1:0"
 
-  private val tool = ToolBuilder[Map[String, Any], String](
+  private val tool = ToolBuilder[String](
     "get_weather",
     "Returns current weather for a location",
     Schema
@@ -174,7 +174,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
         val client = new BedrockClient(config(url, Claude))
         val chunks = ListBuffer.empty[StreamedChunk]
         client
-          .streamComplete(conv, cache(PromptCache.Ttl.Short, PromptCache.Scope.System), chunks += _)
+          .streamComplete(conv, cache(PromptCache.Ttl.Short, PromptCache.Scope.System))(chunks += _)
           .toOption
           .value
           .adjustments shouldBe List(nothingCached)
@@ -190,7 +190,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
       )
       withServer("/")(sendEventStream(_, frames)) { url =>
         val client     = new BedrockClient(config(url, Claude))
-        val completion = client.streamComplete(conv, cache(PromptCache.Ttl.Short, all*), _ => ()).toOption.value
+        val completion = client.streamComplete(conv, cache(PromptCache.Ttl.Short, all*))(_ => ()).toOption.value
         completion.usage.map(u => (u.promptTokens, u.cachedTokens)) shouldBe Some((1010, Some(1000)))
         completion.adjustments.filter(_.option == RequestOption.PromptCache) shouldBe empty
         client.close()

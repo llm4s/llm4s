@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
@@ -26,15 +27,11 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = answer,
-          model = "test-model",
-          message = AssistantMessage(answer),
-          toolCalls = List.empty
+          model = ModelName("test-model"),
+          message = AssistantMessage(answer)
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -44,9 +41,7 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def failingClient(error: LLMError): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(error)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(error)
     override def getContextWindow(): Int     = 4096

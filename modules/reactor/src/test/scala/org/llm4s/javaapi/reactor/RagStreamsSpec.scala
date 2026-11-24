@@ -78,7 +78,7 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
     val sent = new CopyOnWriteArrayList[Conversation]()
     val model = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { sent.add(c); Right(completion("x")) }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096
       def getReserveCompletion(): Int = 256

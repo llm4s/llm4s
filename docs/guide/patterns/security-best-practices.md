@@ -4,7 +4,7 @@ title: Security Best Practices
 description: "Secure LLM4S applications: API keys from files, Vault or AWS Secrets Manager, prompt injection and PII guardrails, encrypted checkpoints and the sandbox."
 search_title: "LLM application security: prompt injection, keys and PII"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 6
 ---
 
@@ -38,7 +38,7 @@ Keep keys out of code and out of checked-in files. In order of preference:
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # instead of apiKey
 }
 ```
@@ -55,6 +55,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // keys: for example, from llm4s-secrets-vault,
 //   VaultApiKeyProvider(VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey"))
@@ -62,7 +63,7 @@ import org.llm4s.types.Result
 def clientWithKeysFrom(keys: ApiKeyProvider): Result[LLMClient] = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 } yield client
 ```
@@ -73,9 +74,17 @@ AWS example are in [Production Deployment](../production-deployment#secrets-and-
 [Rotating keys](../../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider). A second account's
 section sets its own key; the config policy's `prod` preset flags one that does not.
 
+Creating a `Secret` registers its value process-wide, so that llm4s can remove it, by exact match, from the error
+messages and logs it builds. `Secret(value)` is a configured credential and is never evicted; `Secret.token(value)`
+is a short-lived one, and the oldest tokens are evicted once the registry holds more than 4096 values. A value under
+8 characters is not registered, and there is no public way to forget one. So use `Secret(...)` for the fixed set of
+long-lived credentials an application is configured with, and `Secret.token(...)` for a key you create per tenant
+or per request: created with `Secret(...)`, each distinct key stays registered until the process exits, and the
+registry grows without bound (llm4s logs one warning when it passes 4096).
+
 ## Untrusted input and output
 
-Guardrails are middleware on the agent (`GuardrailMiddleware(input, output)`); a block ends the turn
+Guardrails are set on the agent (`withInputGuardrails`, `withOutputGuardrails`); a block ends the turn
 `AgentStatus.Blocked` and stores nothing of it. The built-in ones that matter for security:
 
 | Concern | Guardrail |
@@ -88,19 +97,14 @@ Guardrails are middleware on the agent (`GuardrailMiddleware(input, output)`); a
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector, SecretLeakGuardrail }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
 
 def guardedAgent(client: LLMClient): Result[Agent] =
   Agent.builder("assistant", client)
-    .withMiddleware(
-      new GuardrailMiddleware(
-        input = Seq(new LengthCheck(1, 10000), PromptInjectionDetector(), PIIMasker()),
-        output = Seq(SecretLeakGuardrail(), PIIMasker())
-      )
-    )
+    .withInputGuardrails(LengthCheck(1, 10000), PromptInjectionDetector(), PIIMasker())
+    .withOutputGuardrails(SecretLeakGuardrail(), PIIMasker())
     .build()
 ```
 

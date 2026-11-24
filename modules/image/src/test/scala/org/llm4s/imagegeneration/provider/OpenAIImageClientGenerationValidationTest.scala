@@ -77,7 +77,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   it should "refuse a blank apiKey before any remote call, rather than send an empty bearer" in {
     for key <- Seq("", "  ") do
       val http = new StubHttpClient()
-      val c    = client(OpenAIConfig(apiKey = Secret(key), model = "gpt-image-1"), http)
+      val c    = client(OpenAIConfig(apiKey = Secret(key), model = "gpt-image-2.6-sunburst"), http)
       c.generateImages(prompt = "a test prompt", count = 1).left.toOption.get shouldBe a[ConfigurationError]
       c.health().left.toOption.get shouldBe a[ConfigurationError]
       http.lastPostBody shouldBe None
@@ -110,7 +110,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "reject unsupported generation response format before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"))
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -123,7 +123,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "reject an unsupported output format before any remote call" in {
     val stub = new StubHttpClient()
-    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"), stub)
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -136,7 +136,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "reject out-of-range output compression before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"))
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -149,7 +149,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "not send response_format when caller does not set it" in {
     val stub = new StubHttpClient()
-    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"), stub)
 
     c.generateImages(prompt = "prompt", count = 1) shouldBe a[Right[_, _]]
 
@@ -173,29 +173,89 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     sent("size").str shouldBe "1792x1024"
   }
 
-  it should "derive image format from requested output_format when response is url" in {
-    val stub = new StubHttpClient(postResponse = HttpResponse(200, """{"data":[{"url":"https://x/y.png"}]}"""))
-    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+  it should "read a legacy model's url response and its format from the url" in {
+    val stub = new StubHttpClient(postResponse = HttpResponse(200, """{"data":[{"url":"https://x/y.webp"}]}"""))
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3"), stub)
+
+    val result =
+      c.generateImages(prompt = "prompt", count = 1, options = ImageGenerationOptions(responseFormat = Some("url")))
+
+    result match {
+      case Right(images) =>
+        images.head.format shouldBe MediaType.WebP
+        images.head.url shouldBe Some("https://x/y.webp")
+      case Left(err) => fail(s"expected success, got $err")
+    }
+    ujson.read(stub.lastPostBody.getOrElse(fail("expected post body")))("response_format").str shouldBe "url"
+  }
+
+  it should "default to the current GPT Image model, not a DALL·E one (#2884)" in {
+    val stub = new StubHttpClient()
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key")), stub)
+
+    c.generateImages(prompt = "prompt", count = 1) shouldBe a[Right[_, _]]
+
+    ujson.read(stub.lastPostBody.getOrElse(fail("expected post body")))("model").str shouldBe "gpt-image-2.6-sunburst"
+  }
+
+  it should "never send response_format to a GPT Image model, which always returns base64" in {
+    val stub = new StubHttpClient()
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key")), stub)
+
+    c.generateImages(
+      prompt = "prompt",
+      count = 1,
+      options = ImageGenerationOptions(responseFormat = Some("b64_json"))
+    ) shouldBe a[
+      Right[_, _]
+    ]
+
+    ujson.read(stub.lastPostBody.getOrElse(fail("expected post body"))).obj.contains("response_format") shouldBe false
+  }
+
+  it should "refuse a url response or a style for a GPT Image model before any remote call" in {
+    val stub = new StubHttpClient()
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key")), stub)
+
+    c.generateImages("prompt", 1, ImageGenerationOptions(responseFormat = Some("url"))) shouldBe Left(
+      ImageValidationError(
+        "gpt-image-2.6-sunburst always returns base64 image data: response_format 'url' is only for the retired DALL·E models"
+      )
+    )
+    c.generateImages("prompt", 1, ImageGenerationOptions(style = Some("vivid"))) shouldBe Left(
+      ImageValidationError("style is not supported by gpt-image-2.6-sunburst: describe the style in the prompt")
+    )
+    stub.lastPostBody shouldBe None
+  }
+
+  it should "send the GPT Image output options and read the format the response reports" in {
+    val stub = new StubHttpClient(
+      postResponse = HttpResponse(200, """{"created":1,"output_format":"webp","data":[{"b64_json":"Zm9v"}]}""")
+    )
+    val c = client(OpenAIConfig(apiKey = Secret("test-key")), stub)
 
     val result = c.generateImages(
       prompt = "prompt",
       count = 1,
-      options = ImageGenerationOptions(outputFormat = Some("jpeg"), responseFormat = Some("url"))
+      options = ImageGenerationOptions(
+        size = ImageSize.Portrait1024x1536,
+        quality = Some("high"),
+        background = Some("opaque")
+      )
     )
 
-    result match {
-      case Right(images) =>
-        images.head.format shouldBe MediaType.Jpeg
-        images.head.url shouldBe Some("https://x/y.png")
-      case Left(err) => fail(s"expected success, got $err")
-    }
+    result.map(_.map(_.format)) shouldBe Right(Seq(MediaType.WebP))
+    val sent = ujson.read(stub.lastPostBody.getOrElse(fail("expected post body"))).obj
+    sent("size").str shouldBe "1024x1536"
+    sent("quality").str shouldBe "high"
+    sent("background").str shouldBe "opaque"
   }
 
   it should "surface api 400 error message from provider payload" in {
     val stub = new StubHttpClient(
       postResponse = HttpResponse(400, """{"error":{"message":"bad request details"}}""")
     )
-    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
@@ -206,7 +266,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     val stub = new StubHttpClient(
       postResponse = HttpResponse(503, """{"error":{"message":"overloaded"}}""")
     )
-    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
@@ -216,7 +276,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "map malformed response body to ImageUnknownError" in {
     val stub = new StubHttpClient(postResponse = HttpResponse(200, "not-json"))
-    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-2.6-sunburst"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 

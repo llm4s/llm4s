@@ -1,5 +1,8 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
@@ -63,7 +66,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       case Reply.Calls(calls*) =>
         val toolCalls = calls.map { c =>
           ujson.Obj(
-            "id"       -> c.id,
+            "id"       -> c.id.asString,
             "type"     -> "function",
             "function" -> ujson.Obj("name" -> c.name, "arguments" -> c.arguments.render())
           )
@@ -86,7 +89,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .render()
     }
     def client(baseUrl: String): LLMClient =
-      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).flatMap(OpenAIClient(_)) match {
+      OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).flatMap(OpenAIClient(_)) match {
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
       }
@@ -98,7 +101,9 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       case Reply.Says(text) => LocalProviderTestServer.anthropicMessage(text, model)
       case Reply.Calls(calls*) =>
         val uses =
-          calls.map(c => ujson.Obj("type" -> "tool_use", "id" -> c.id, "name" -> c.name, "input" -> c.arguments))
+          calls.map(c =>
+            ujson.Obj("type" -> "tool_use", "id" -> c.id.asString, "name" -> c.name, "input" -> c.arguments)
+          )
         ujson
           .Obj(
             "id"            -> "msg_calls",
@@ -116,8 +121,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       new AnthropicClient(
         AnthropicConfig(
           apiKey = Secret("test-key"),
-          model = model,
-          baseUrl = baseUrl,
+          model = ModelName(model),
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = 200000,
           reserveCompletion = 4096
         )
@@ -153,8 +158,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   /** The idempotency key each run of each call saw, in order. */
   final private class Keys {
-    private val seen                               = new ConcurrentLinkedQueue[(String, IdempotencyKey)]()
-    def record(context: ToolContext): Unit         = seen.add(context.toolCallId.value -> context.idempotencyKey): Unit
+    private val seen                       = new ConcurrentLinkedQueue[(String, IdempotencyKey)]()
+    def record(context: ToolContext): Unit = seen.add(context.toolCallId.asString -> context.idempotencyKey): Unit
     def of(callId: String): Vector[IdempotencyKey] = seen.asScala.toVector.collect { case (`callId`, k) => k }
     def all: Vector[IdempotencyKey]                = seen.asScala.toVector.map(_._2)
   }
@@ -167,7 +172,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   private def text(t: String): ujson.Value = ujson.Obj("text" -> t)
 
-  private def toolCall(id: String, name: String, args: ujson.Value = text("x")): ToolCall = ToolCall(id, name, args)
+  private def toolCall(id: String, name: String, args: ujson.Value = text("x")): ToolCall =
+    ToolCall(ToolCallId(id), name, args)
 
   /** The stored conversation itself keeps the rule. */
   private def wellFormed(result: AgentResult): Unit =
@@ -175,7 +181,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   /** Each tool call's stored result, as text. */
   private def results(result: AgentResult): Map[String, String] =
-    result.messages.collect { case t: ToolMessage => t.toolCallId -> ContentPart.text(t.parts) }.toMap
+    result.messages.collect { case t: ToolMessage => t.toolCallId.asString -> ContentPart.text(t.parts) }.toMap
 
   /**
    * Records which call-tool pending writes reached the store, and can stop storing anything, as a dying process: once
@@ -268,14 +274,14 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         ),
         Reply.Says("done")
       ) { (client, requests) =>
-        val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(ok, err, boom)))
+        val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(ok, err, boom)))
         val result = agent.run("go").value
         result.answer shouldBe Some("done")
         requests() shouldBe 2
         wellFormed(result)
         result.messages.collect { case t: ToolMessage => t.toolCallId } shouldBe Vector("c1", "c2", "c3", "c4", "c5")
       }
-      keys.all.foreach(_.value should fullyMatch regex "[0-9a-f]{64}")
+      keys.all.foreach(_.asString should fullyMatch regex "[0-9a-f]{64}")
       keys.all.distinct should have size 3
     }
 
@@ -300,7 +306,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         val agent = built(
           Agent
             .builder("assistant", client)
-            .withTools(SpecTools.set(deploy, danger))
+            .withToolSet(SpecTools.set(deploy, danger))
             .withMiddleware(denyDanger, new ApprovalMiddleware(r => Option.when(r.call.name == "deploy")("review")))
         )
         val parked = agent.run("ship it").value
@@ -308,11 +314,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           case AgentStatus.Suspended(suspension) => suspension.approvals.map((id, r) => r.call.id -> (id, r)).toMap
           case other                             => fail(s"expected Suspended, got $other")
         }
-        approvals.keySet shouldBe Set("a1", "r1", "e1")
+        approvals.keySet shouldBe Set(ToolCallId("a1"), "r1", "e1")
         approvals.values.map(_._2.idempotencyKey).toSet should have size 3
 
         // a partial resume runs the approved call, and the model is still not asked
-        val partial = agent.resume(parked.threadId, Map(parked.approve(approvals("a1")._1))).value
+        val partial = agent.resume(parked.threadId, Map(parked.approve(approvals(ToolCallId("a1"))._1))).value
         partial.status shouldBe a[AgentStatus.Suspended]
         requests() shouldBe 1
 
@@ -320,8 +326,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .resume(
             parked.threadId,
             Map(
-              partial.reject(approvals("r1")._1, "not today"),
-              partial.edit(approvals("e1")._1, text("edited"))
+              partial.reject(approvals(ToolCallId("r1"))._1, "not today"),
+              partial.edit(approvals(ToolCallId("e1"))._1, text("edited"))
             )
           )
           .value
@@ -330,8 +336,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         wellFormed(done)
         ran.asScala.toVector.sorted shouldBe Vector("alpha", "edited")
         // the approved and the edited call each ran with the key their approval request carried
-        keys.of("a1").distinct shouldBe Vector(approvals("a1")._2.idempotencyKey)
-        keys.of("e1").distinct shouldBe Vector(approvals("e1")._2.idempotencyKey)
+        keys.of("a1").distinct shouldBe Vector(approvals(ToolCallId("a1"))._2.idempotencyKey)
+        keys.of("e1").distinct shouldBe Vector(approvals(ToolCallId("e1"))._2.idempotencyKey)
       }
     }
 
@@ -350,7 +356,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val ok = tool("ok", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("fine"))))
       scripted(wire, Reply.Calls(toolCall("q1", "confirm"), toolCall("k1", "ok")), Reply.Says("confirmed")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker, ok)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(asker, ok)))
           val parked = agent.run("ask").value
           val (id, question) = parked.status match {
             case AgentStatus.Suspended(suspension) => suspension.questions.head
@@ -376,11 +382,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         Reply.Calls(toolCall("f1", "refund")),
         Reply.Says("refunded")
       ) { (client, requests) =>
-        val billing = Agent.builder("billing", client).withTools(SpecTools.set(refund))
+        val billing = Agent.builder("billing", client).withToolSet(SpecTools.set(refund))
         val agent = built(
           Agent
             .builder("assistant", client)
-            .withTools(SpecTools.set(lookup))
+            .withToolSet(SpecTools.set(lookup))
             .withHandoffs(Handoff.to("billing", billing, "refunds"))
         )
         val result = agent.run("refund me").value
@@ -403,7 +409,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         Reply.Calls(toolCall("call_0", "lookup", text("two"))),
         Reply.Says("second")
       ) { (client, requests) =>
-        val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+        val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
         val thread = ThreadId(s"reused-${wire.name}")
         agent.run(thread, "one").value.answer shouldBe Some("first")
         val second = agent.run(thread, "two").value
@@ -436,7 +442,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("recovered")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withTools(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -471,7 +480,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       }
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("all done")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)))
           val thread = ThreadId(s"fatal-${wire.name}")
           cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
           requests() shouldBe 1
@@ -510,7 +519,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
             built(
               Agent
                 .builder("assistant", client)
-                .withTools(SpecTools.set(done, crasher))
+                .withToolSet(SpecTools.set(done, crasher))
                 .withRuntime(new GraphRuntime(store))
             )
           val thread = ThreadId(s"crash-${wire.name}")
@@ -551,7 +560,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("moved on")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withTools(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"abandon-cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -583,7 +595,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val flaky = tool("flaky", keys)((_, _) => ToolOutcome.Fatal(ValidationError("flaky", "backend down")))
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("without flaky")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)))
           val thread = ThreadId(s"abandon-fatal-${wire.name}")
           cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
           requests() shouldBe 1
@@ -621,7 +633,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
             built(
               Agent
                 .builder("assistant", client)
-                .withTools(SpecTools.set(done, crasher))
+                .withToolSet(SpecTools.set(done, crasher))
                 .withRuntime(new GraphRuntime(store))
             )
           val thread = ThreadId(s"abandon-crash-${wire.name}")

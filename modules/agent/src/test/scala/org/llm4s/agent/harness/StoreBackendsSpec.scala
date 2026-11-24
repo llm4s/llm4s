@@ -1,17 +1,10 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.HarnessTestSupport.stateOf
-import org.llm4s.agent.graph.{
-  FencingToken,
-  GraphError,
-  IdempotencyKey,
-  ReplaySupport,
-  RunConfig,
-  StateUpdate,
-  TenantId,
-  ToolCallId
-}
+import org.llm4s.agent.graph.{ FencingToken, GraphError, ReplaySupport, RunConfig, StateUpdate, TenantId }
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues

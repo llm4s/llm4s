@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
@@ -54,8 +56,8 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     }
     val config = GeminiConfig(
       apiKey = Secret("test-key"),
-      model = model,
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+      model = ModelName(model),
+      baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
@@ -81,7 +83,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val config = VertexAIConfig(
       projectId = "my-gcp-project",
       location = "us-central1",
-      model = model,
+      model = ModelName(model),
       credentialFilePath = None,
       contextWindow = 1048576,
       reserveCompletion = 8192
@@ -166,7 +168,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       message.thinkingBinding shouldBe defined
       val blocks = blocksOf(message, provider)
       blocks should have size 1
-      blocks.head("call").str shouldBe message.toolCalls.head.id
+      blocks.head("call").str shouldBe message.toolCalls.head.id.asString
       blocks.head("sig").str shouldBe "SIG-CALL"
     }
 
@@ -351,7 +353,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
       val first = client.complete(firstTurn, CompletionOptions()).value.message
       first.toolCalls.map(_.id) should not be Seq("")
-      first.toolCalls.map(_.id.nonEmpty) shouldBe Seq(true)
+      first.toolCalls.map(_.id.asString.nonEmpty) shouldBe Seq(true)
 
       wire.body = response(text("Sunny."))
       client.complete(continuation(first), CompletionOptions()).value
@@ -385,7 +387,9 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
       wire.body = response(text("Sunny."))
       val handBuilt =
-        Conversation(Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", "")))
+        Conversation(
+          Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", ToolCallId("")))
+        )
       client.complete(handBuilt, CompletionOptions()).value
 
       val sent = modelPartsOf(wire.lastRequest).filter(_.obj.contains("functionCall"))
@@ -481,7 +485,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val (client, wire) = make("gemini-2.0-flash")
       wire.sse = sse(text("Let me check. "), call("get_weather", city, Some("SIG-STREAM")))
       val chunks     = ListBuffer.empty[StreamedChunk]
-      val completion = client.streamComplete(firstTurn, CompletionOptions(), chunks += _).value
+      val completion = client.streamComplete(firstTurn, CompletionOptions())(chunks += _).value
       val message    = completion.message
 
       completion.toolCalls should have size 1
@@ -489,7 +493,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       message.hasSealedThinking shouldBe true
       val blocks = blocksOf(message, provider)
       blocks should have size 1
-      blocks.head("call").str shouldBe completion.toolCalls.head.id
+      blocks.head("call").str shouldBe completion.toolCalls.head.id.asString
       blocks.head("sig").str shouldBe "SIG-STREAM"
 
       wire.body = response(text("Sunny."))
@@ -506,7 +510,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     it should "record where a signature on a later empty text chunk sits, and send it back after the text" in {
       val (client, wire) = make("gemini-2.0-flash")
       wire.sse = sse(text("Hel"), text("lo."), text("", Some("SIG-LAST")))
-      val message = client.streamComplete(firstTurn, CompletionOptions(), _ => ()).value.message
+      val message = client.streamComplete(firstTurn, CompletionOptions())(_ => ()).value.message
 
       message.content shouldBe "Hello."
       blocksOf(message, provider).map(b => (b("at").num.toInt, b("text").str, b("sig").str)) shouldBe Seq(
@@ -529,7 +533,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val rome           = ujson.Obj("city" -> "Rome")
       wire.sse = sse(call("get_weather", city, Some("SIG-FIRST")) + "," + call("get_weather", rome))
       val chunks     = ListBuffer.empty[StreamedChunk]
-      val completion = client.streamComplete(firstTurn, CompletionOptions(), chunks += _).value
+      val completion = client.streamComplete(firstTurn, CompletionOptions())(chunks += _).value
 
       completion.toolCalls.map(_.arguments("city").str) shouldBe Seq("Paris", "Rome")
       chunks.flatMap(_.toolCall).map(_.id).distinct should have size 2
@@ -587,7 +591,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   "GeminiThoughtSignatures.parts" should "send one unsigned part when the signed text no longer fits the content" in {
     val message = AssistantMessage(
-      contentOpt = Some("Something else entirely"),
+      text = Some("Something else entirely"),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "Hello", "sig" -> "S").render()))
     )
 
@@ -596,7 +600,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   it should "send one unsigned part when signed texts overlap" in {
     val message = AssistantMessage(
-      contentOpt = Some("abcdef"),
+      text = Some("abcdef"),
       thinking = Seq(
         ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "abcd", "sig" -> "S1").render()),
         ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 2, "text" -> "cdef", "sig" -> "S2").render())
@@ -608,7 +612,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   it should "keep a signed part in the middle of the text, with plain parts either side" in {
     val message = AssistantMessage(
-      contentOpt = Some("one two three"),
+      text = Some("one two three"),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 4, "text" -> "two ", "sig" -> "S").render()))
     )
 
@@ -620,8 +624,9 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   }
 
   it should "send a function call's signature but not the thought summary text kept beside it" in {
-    val call = ToolCall(id = "call-1", name = "f", arguments = ujson.Obj())
+    val call = ToolCall(id = ToolCallId("call-1"), name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
+      text = None,
       toolCalls = Seq(call),
       thinking = Seq(
         ThinkingBlock.Text("The model's own reasoning summary."),
@@ -635,8 +640,9 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   }
 
   it should "not attach a signature to a call it does not belong to" in {
-    val call = ToolCall(id = "real-id", name = "f", arguments = ujson.Obj())
+    val call = ToolCall(id = ToolCallId("real-id"), name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
+      text = None,
       toolCalls = Seq(call),
       thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("call" -> "other-id", "sig" -> "S").render()))
     )
@@ -650,7 +656,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val parsed = GeminiThoughtSignatures.Parsed(
       text = "hi",
       thought = "hmm",
-      calls = Seq(ToolCall("a", "f", ujson.Obj()), ToolCall("b", "g", ujson.Obj())),
+      calls = Seq(ToolCall(ToolCallId("a"), "f", ujson.Obj()), ToolCall(ToolCallId("b"), "g", ujson.Obj())),
       signatures = Seq.empty
     )
 

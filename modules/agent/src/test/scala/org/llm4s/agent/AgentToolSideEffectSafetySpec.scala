@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
@@ -64,14 +65,14 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(record))
+        .withToolSet(SpecTools.set(record))
         .withMiddleware(modelPositions(models))
         .withMiddleware(modelTasks)
     )
     agent.run(thread, "go").value.answer shouldBe Some("done")
 
     // the model task's key carries its lineage: the same work issues the same call under the same key (§4.24)
-    seen.asScala.toVector shouldBe Vector(IdempotencyKey.ofCall(thread, tasks.asScala.head, call("c1", "record")))
+    seen.asScala.toVector shouldBe Vector(IdempotencyKeys.ofCall(thread, tasks.asScala.head, call("c1", "record")))
   }
 
   /** A `record` tool that keeps every key it sees, and a model that calls it as `call_0` in two turns. */
@@ -87,7 +88,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
       calling(call("call_0", "record")),
       CompletionFixture.simple("second")
     )
-    (built(Agent.builder("assistant", client).withTools(SpecTools.set(record))), seen)
+    (built(Agent.builder("assistant", client).withToolSet(SpecTools.set(record))), seen)
   }
 
   "Calls of two turns reusing a provider call id" should "get different keys under runMultiTurn" in {
@@ -118,7 +119,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
       Right(calling(call("c1", "lookup"), call("c2", "lookup"))),
       Right(CompletionFixture.simple("done"))
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
 
     cause(agent.run(thread, "go").error) match {
       case e: ValidationError => e.message should include("tool call id 'c1' is used more than once")
@@ -136,7 +137,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model message with a blank tool call id" should "be refused before it is stored" in {
     val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call(" ", "lookup")))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
     cause(agent.run(thread, "go").error).message should include("a tool call has a blank id")
   }
 
@@ -151,7 +152,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("never"))
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)).withMiddleware(dropping))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)).withMiddleware(dropping))
 
     cause(agent.run(thread, "go").error).message should include("tool call 'c1' has no result straight after it")
     client.callCount shouldBe 1 // the first call had nothing to drop; the second was refused
@@ -161,7 +162,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val history = Vector(
       UserMessage("one"),
       AssistantMessage(None, Seq(call("call_0", "lookup"))),
-      ToolMessage("first", "call_0"),
+      ToolMessage("first", ToolCallId("call_0")),
       AssistantMessage("answer"),
       UserMessage("two"),
       AssistantMessage(None, Seq(call("call_0", "lookup")))
@@ -180,8 +181,8 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val messages = Seq(
       UserMessage("go"),
       AssistantMessage(None, Seq(call("a", "x"), call("b", "x"))),
-      ToolMessage("b", "b"),
-      ToolMessage("a", "a")
+      ToolMessage("b", ToolCallId("b")),
+      ToolMessage("a", ToolCallId("a"))
     )
     ToolResultRule.check(messages) shouldBe Right(())
   }
@@ -190,11 +191,11 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val messages = Seq(
       UserMessage("go"),
       AssistantMessage(None, Seq(call("a", "x"))),
-      ToolMessage("1", "a"),
-      ToolMessage("2", "a"),
-      ToolMessage("3", "q"),
+      ToolMessage("1", ToolCallId("a")),
+      ToolMessage("2", ToolCallId("a")),
+      ToolMessage("3", ToolCallId("q")),
       UserMessage("more"),
-      ToolMessage("4", "a")
+      ToolMessage("4", ToolCallId("a"))
     )
     ToolResultRule.violations(messages) shouldBe Vector(
       "message 1: tool call 'a' has 2 results",

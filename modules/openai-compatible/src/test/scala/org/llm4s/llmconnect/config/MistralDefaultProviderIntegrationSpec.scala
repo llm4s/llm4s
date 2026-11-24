@@ -36,7 +36,7 @@ class MistralDefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.defaultProvider" should {
     "load Mistral config from the configured default named provider" in {
       val props = Map(
-        "llm4s.providers.provider"              -> "mistral-main",
+        "llm4s.defaultProvider"                 -> "mistral-main",
         "llm4s.providers.mistral-main.provider" -> "mistral",
         "llm4s.providers.mistral-main.model"    -> "mistral-small-latest",
         "llm4s.providers.mistral-main.apiKey"   -> "sys-test-key"
@@ -46,9 +46,9 @@ class MistralDefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
         val prov = Llm4sConfig.defaultProvider().fold(err => fail(err.toString), identity)
         prov match {
           case mistral: MistralConfig =>
-            mistral.model shouldBe "mistral-small-latest"
+            mistral.model.asString shouldBe "mistral-small-latest"
             mistral.apiKey.reveal shouldBe "sys-test-key"
-            mistral.baseUrl should startWith("https://api.mistral.ai")
+            mistral.baseUrl.asUrl should startWith("https://api.mistral.ai")
           case other => fail(s"Expected MistralConfig, got $other")
         }
       }

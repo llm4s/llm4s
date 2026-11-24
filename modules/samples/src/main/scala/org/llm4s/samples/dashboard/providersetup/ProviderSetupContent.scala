@@ -18,12 +18,12 @@ private[providersetup] object ProviderSetupContent:
         "A named section under llm4s.providers.<name>; the samples ship one, ollama-local, as the default"
       ),
       optionalVars = List(
-        "LLM4S_PROVIDER=<name> - which section is the default (bound to llm4s.providers.provider in the samples' application.conf)",
+        "LLM4S_PROVIDER=<name> - which section is the default (bound to llm4s.defaultProvider in the samples' application.conf)",
         "OLLAMA_MODEL, OLLAMA_BASE_URL - the ollama-local section's model and baseUrl (bound in the samples' application.conf)",
         "A vendor key variable such as OPENAI_API_KEY - used by any section of that provider that sets no apiKey of its own",
-        "-Dllm4s.providers.provider=<name> - choose the default for one run"
+        "-Dllm4s.defaultProvider=<name> - choose the default for one run"
       ),
-      recommendedModels = List("ollama/llama3:latest", "openai/gpt-4o-mini"),
+      recommendedModels = List("ollama/llama3:latest", "openai/gpt-5.6-luna"),
       setupSteps = List(
         "Use the default provider tab for the fastest first pass, especially with a local model.",
         "Open Providers to browse the rest of the supported hosted and local connectors.",
@@ -39,9 +39,9 @@ private[providersetup] object ProviderSetupContent:
         "Use it to inspect the active default provider without browsing the full provider list.",
         "The exact required settings depend on that configured provider kind."
       ),
-      requiredVars = List("llm4s.providers.provider naming a section that loads"),
+      requiredVars = List("llm4s.defaultProvider naming a section that loads"),
       optionalVars = List(
-        "LLM4S_PROVIDER=<name> or -Dllm4s.providers.provider=<name> to change the default",
+        "LLM4S_PROVIDER=<name> or -Dllm4s.defaultProvider=<name> to change the default",
         "Any session-only overrides you want for this app run"
       ),
       recommendedModels = List("Uses the models discovered from the configured default provider"),
@@ -63,7 +63,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List("Provider-specific credentials and model selection"),
       optionalVars = List("Base URLs, org ids, and local endpoint overrides vary by provider"),
-      recommendedModels = List("openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"),
+      recommendedModels = List("openai/gpt-5.6-luna", "anthropic/claude-haiku-5-5"),
       setupSteps = List(
         "Move focus into the body, then use Left/Right to reach the provider list.",
         "Use Up/Down to browse providers.",
@@ -82,7 +82,7 @@ private[providersetup] object ProviderSetupContent:
       requiredVars = List("At least two configured named providers with working credentials"),
       optionalVars =
         List("Use another named provider if you want the same provider kind with a different default model"),
-      recommendedModels = List("openai/gpt-4o-mini", "ollama/qwen3:8b"),
+      recommendedModels = List("openai/gpt-5.6-luna", "ollama/qwen3:8b"),
       setupSteps = List(
         "Move focus into the body and highlight an available provider.",
         "Open that provider's discovered models and choose one to add it to the compare set.",
@@ -97,7 +97,7 @@ private[providersetup] object ProviderSetupContent:
       highlights = List(
         "Provider sections live in application.conf; this sample includes a git-ignored application.local.conf.",
         "Keep secrets in env vars and bind them in the section with ${?VAR}.",
-        "Java properties (-Dllm4s.providers.provider=...) are handy for scripted or IDE-driven launches."
+        "Java properties (-Dllm4s.defaultProvider=...) are handy for scripted or IDE-driven launches."
       ),
       requiredVars = List("Same logical keys regardless of config source"),
       optionalVars = List("Use local private files only if you intentionally want persistence"),
@@ -119,7 +119,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List("Depends on the chosen provider"),
       optionalVars = List("Additional provider-specific tuning settings"),
-      recommendedModels = List("ollama/llama3:latest", "openai/gpt-4o-mini"),
+      recommendedModels = List("ollama/llama3:latest", "openai/gpt-5.6-luna"),
       setupSteps = List(
         "Change config outside the app.",
         "Run `reload` here.",
@@ -169,7 +169,7 @@ private[providersetup] object ProviderSetupContent:
         "LLM4S_PROVIDER=openai-main - make it the default",
         "baseUrl, organization - section keys; bind them to variables of your own with ${?VAR} if you want"
       ),
-      recommendedModels = List("openai/gpt-4o-mini", "openai/gpt-4.1-mini"),
+      recommendedModels = List("openai/gpt-5.6-luna", "openai/gpt-5.6-terra"),
       setupSteps = List(
         "Add an `openai-main` section to application.local.conf: provider = \"openai\" and a model; no apiKey line needed.",
         "Create an API key in the OpenAI platform dashboard.",
@@ -196,7 +196,7 @@ private[providersetup] object ProviderSetupContent:
         "LLM4S_PROVIDER=azure-main - make it the default",
         "AZURE_API_VERSION - only if the section binds apiVersion = ${?AZURE_API_VERSION}"
       ),
-      recommendedModels = List("azure/gpt-4o-mini", "azure/gpt-4.1-mini"),
+      recommendedModels = List("azure/gpt-5.6-luna", "azure/gpt-5.6-terra"),
       setupSteps = List(
         "Add an `azure-main` section to application.local.conf: provider = \"azure\", a model, endpoint = ${?AZURE_API_BASE}.",
         "Create or reuse an Azure OpenAI resource.",
@@ -222,7 +222,7 @@ private[providersetup] object ProviderSetupContent:
         "LLM4S_PROVIDER=anthropic-main - make it the default",
         "baseUrl - section key overriding the endpoint"
       ),
-      recommendedModels = List("anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-7-sonnet-latest"),
+      recommendedModels = List("anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5"),
       setupSteps = List(
         "Add an `anthropic-main` section to application.local.conf: provider = \"anthropic\" and a model; no apiKey line needed.",
         "Create an Anthropic API key.",
@@ -248,7 +248,7 @@ private[providersetup] object ProviderSetupContent:
         "LLM4S_PROVIDER=gemini-main - make it the default",
         "baseUrl - section key overriding the endpoint"
       ),
-      recommendedModels = List("gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"),
+      recommendedModels = List("gemini/gemini-3.8-flash", "gemini/gemini-3.5-flash-lite"),
       setupSteps = List(
         "Add a `gemini-main` section to application.local.conf: provider = \"gemini\" and a model; no apiKey line needed.",
         "Create or retrieve a Gemini API key.",

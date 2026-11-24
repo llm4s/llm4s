@@ -3,8 +3,9 @@ layout: page
 title: Reliable LLM Calling
 description: "Wrap any LLM4S client in ReliableClient: retry policies, a circuit breaker, deadlines, local rate limiting and metrics for provider calls."
 search_title: "Retries and circuit breakers for LLM calls in Scala"
-parent: User Guide
-nav_order: 58
+parent: Core
+nav_order: 104
+grand_parent: User Guide
 ---
 
 # Reliable LLM Calling
@@ -110,16 +111,17 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
 
 ## Quick Start
 
-There is one way to make a client reliable: construct a `ReliableClient` around the
-`LLMClient` you already have.
+There is one way to make a client reliable: wrap the `LLMClient` you already have in a
+`ReliableClient`.
 
 ```scala
-new ReliableClient(
+ReliableClient(
   underlying: LLMClient,
   providerName: String,                         // label used in metrics
-  config: ReliabilityConfig,
-  collector: Option[MetricsCollector] = None
-)
+  config: ReliabilityConfig = ReliabilityConfig.default
+): ReliableClient
+
+reliableClient.withMetrics(collector: MetricsCollector): ReliableClient   // optional
 ```
 
 **From configuration (recommended)** - build the client for whichever named provider
@@ -131,14 +133,15 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val clientResult: Result[LLMClient] =
   for
-    providerConfig <- Llm4sConfig.defaultProvider()          // or Llm4sConfig.provider("openai-main")
+    providerConfig <- Llm4sConfig.defaultProvider()          // or Llm4sConfig.provider(ProviderName("openai-main"))
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-  yield new ReliableClient(client, providerConfig.providerId.asString, ReliabilityConfig.default)
+  yield ReliableClient(client, providerConfig.providerId.asString, ReliabilityConfig.default)
 
 clientResult.foreach { client =>
   // Use like any LLMClient
@@ -154,12 +157,11 @@ import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
 
-val reliableClient = new ReliableClient(
+val reliableClient = ReliableClient(
   underlying = baseClient,
   providerName = "openai",
-  config = ReliabilityConfig.default,
-  collector = Some(MetricsCollector.noop) // or your own collector: see Metrics Integration
-)
+  config = ReliabilityConfig.default
+).withMetrics(MetricsCollector.noop) // or your own collector: see Metrics Integration
 ```
 
 The provider name is not inferred: pass the provider id (`providerConfig.providerId.asString`)
@@ -179,7 +181,7 @@ ReliabilityConfig.default
 **Aggressive** - More retries, faster recovery:
 
 ```scala
-val client = new ReliableClient(baseClient, "anthropic", ReliabilityConfig.aggressive)
+val client = ReliableClient(baseClient, "anthropic", ReliabilityConfig.aggressive)
 // - 5 retry attempts (500ms base delay)
 // - Circuit breaker: 10 failures → open for 15s
 // - 3 min deadline
@@ -215,7 +217,7 @@ val customConfig = ReliabilityConfig(
   deadline = Some(2.minutes)
 )
 
-val client = new ReliableClient(baseClient, "openai", customConfig)
+val client = ReliableClient(baseClient, "openai", customConfig)
 ```
 
 `rateLimit` is off by default (`RateLimitConfig.disabled`). When enabled, `ReliableClient`
@@ -234,17 +236,16 @@ supplied by a module `llm4s-core` has never heard of. Each provider lives in its
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"        # key from OPENAI_API_KEY via llm4s.credentials.openai.apiKey
+      model    = "gpt-5.6-luna"        # key from OPENAI_API_KEY via llm4s.credentials.openai.apiKey
     }
 
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-5"
+      model    = "claude-sonnet-5-5"
     }
   }
 }
@@ -362,7 +363,7 @@ CircuitBreakerConfig(
 ### Monitoring
 
 ```scala
-val reliableClient = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
+val reliableClient = ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 
 // Check circuit breaker state
 reliableClient.currentCircuitState match {
@@ -402,7 +403,7 @@ class MyMetricsCollector extends MetricsCollector {
 }
 
 val metrics = new MyMetricsCollector
-val client  = new ReliableClient(baseClient, "openai", ReliabilityConfig.default, Some(metrics))
+val client  = ReliableClient(baseClient, "openai", ReliabilityConfig.default).withMetrics(metrics)
 ```
 
 `ReliableClient` records three counters, declared in `ReliabilityMetrics` and recorded through the collector's generic
@@ -412,7 +413,7 @@ further code: `PrometheusMetrics` as `llm4s_retries_total`, `llm4s_circuit_break
 `llm4s_reliability_errors_total`, `MicrometerMetrics` under the same names. `increment` defaults to a no-op;
 `observeRequest`, `addTokens` and `recordCost` must be implemented. To also get per-call
 latency and token metrics from the provider client, pass the same collector to
-`LLMConnect.getClient(providerConfig, metrics)`. Both layers then report a failed call: the
+`LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))`. Both layers then report a failed call: the
 provider client once per attempt (`observeRequest`) and `ReliableClient` once for the final failure
 (`ReliabilityMetrics.Errors`). Both backends keep the two apart (`llm4s_errors_total` and
 `llm4s_reliability_errors_total`), so neither counts a failure twice; a collector of your own should do the same.
@@ -438,8 +439,8 @@ Non-retryable errors (fail immediately):
 - ❌ `CancelledError` - the caller stopped the call
 
 **One rule.** Automatic retry is `LLMError.isRecoverable` minus the three exceptions above (a client-error response,
-an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
-retry all use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
+an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, which `ReliableClient` applies, and an agent graph node's default
+retry both use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
 again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
 enough. `RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, and
 `ServiceError.isRecoverableStatus` is the same status check, so a policy that customises only the delay retries
@@ -451,7 +452,7 @@ exactly what the other policies retry.
 
 ```scala
 // Start here (pass providerConfig.providerId.asString when you loaded the client from config)
-val client = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
+val client = ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 ```
 
 Only customize if you have specific requirements.
@@ -502,11 +503,10 @@ import org.llm4s.testkit.{ Reply, ScriptedLLMClient } // llm4s-testkit
 
 // In tests, disable reliability for faster failures
 val scripted = ScriptedLLMClient.sequence(Reply.text("Hello"))
-val testClient = new ReliableClient(
+val testClient = ReliableClient(
   underlying = scripted,
   providerName = "test",
-  config = ReliabilityConfig.disabled,
-  collector = None
+  config = ReliabilityConfig.disabled
 )
 ```
 
@@ -526,7 +526,7 @@ object ReliabilityProfiles {
 
 val appEnv = "staging" // from your application's own configuration
 val config = ReliabilityProfiles.forEnvironment(appEnv)
-val client = new ReliableClient(baseClient, "openai", config)
+val client = ReliableClient(baseClient, "openai", config)
 ```
 
 ### Pattern 2: Provider-Specific Configurations
@@ -551,11 +551,11 @@ def configForProvider(provider: String): ReliabilityConfig = provider match {
 ```scala
 // Long-running analysis
 val analysisConfig = ReliabilityConfig.default.withDeadline(10.minutes)
-val analysisClient = new ReliableClient(baseClient, "openai", analysisConfig)
+val analysisClient = ReliableClient(baseClient, "openai", analysisConfig)
 
 // Real-time chat
 val chatConfig = ReliabilityConfig.default.withDeadline(30.seconds)
-val chatClient = new ReliableClient(baseClient, "openai", chatConfig)
+val chatClient = ReliableClient(baseClient, "openai", chatConfig)
 ```
 
 ### Pattern 4: Graceful Degradation
@@ -567,6 +567,7 @@ import org.llm4s.llmconnect.model.{ Completion, Conversation }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.slf4j.LoggerFactory
 
 val logger = LoggerFactory.getLogger("fallback")
@@ -588,12 +589,12 @@ def callWithFallback(
 for
   registry        <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  openAIConfig    <- Llm4sConfig.provider("openai-main")
-  anthropicConfig <- Llm4sConfig.provider("claude")
+  openAIConfig    <- Llm4sConfig.provider(ProviderName("openai-main"))
+  anthropicConfig <- Llm4sConfig.provider(ProviderName("claude"))
   openAIBase      <- LLMConnect.getClient(openAIConfig)
   anthropicBase   <- LLMConnect.getClient(anthropicConfig)
-  openAI    = new ReliableClient(openAIBase, "openai", ReliabilityConfig.default)
-  anthropic = new ReliableClient(anthropicBase, "anthropic", ReliabilityConfig.default)
+  openAI    = ReliableClient(openAIBase, "openai", ReliabilityConfig.default)
+  anthropic = ReliableClient(anthropicBase, "anthropic", ReliabilityConfig.default)
   completion <- callWithFallback(openAI, anthropic, conversation)
 yield completion
 ```
@@ -722,7 +723,7 @@ To stay under the provider's quota in the first place, enable local rate limitin
 val config = ReliabilityConfig.default.withRateLimit(
   RateLimitConfig(enabled = true, requestsPerMinute = 60, burstCapacity = 10)
 )
-val client = new ReliableClient(baseClient, "openai", config)
+val client = ReliableClient(baseClient, "openai", config)
 ```
 
 A request rejected locally fails with a `RateLimitError` of origin
@@ -735,7 +736,7 @@ A request rejected locally fails with a `RateLimitError` of origin
 
 **Diagnosis**:
 ```scala
-val reliableClient = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
+val reliableClient = ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 reliableClient.currentCircuitState // Check state
 
 // For emergencies only (not for production automation)
@@ -768,7 +769,7 @@ val clientResult =
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-  yield new ReliableClient(client, providerConfig.providerId.asString, ReliabilityConfig.default)
+  yield ReliableClient(client, providerConfig.providerId.asString, ReliabilityConfig.default)
 ```
 
 `ReliableClient` is an `LLMClient`, so nothing that uses the client changes.
@@ -785,7 +786,7 @@ class MyServiceTest extends AnyFlatSpec {
   val scripted = ScriptedLLMClient.sequence(Reply.text("A scripted answer"))
 
   // No retries in tests for fast failures
-  val testClient = new ReliableClient(scripted, "test", ReliabilityConfig.disabled)
+  val testClient = ReliableClient(scripted, "test", ReliabilityConfig.disabled)
 
   "MyService" should "handle LLM responses" in {
     // Test logic
@@ -813,7 +814,7 @@ class ReliabilityIntegrationTest extends AnyFlatSpec with Matchers {
     )
     // A short fixed delay keeps the test fast
     val config         = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 10.millis))
-    val reliableClient = new ReliableClient(scripted, "test", config)
+    val reliableClient = ReliableClient(scripted, "test", config)
 
     val result = reliableClient.complete(Conversation(Seq(UserMessage("Hello"))))
 
@@ -874,7 +875,7 @@ All reliability features are **thread-safe**:
 
 ```scala
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliableClient, ReliabilityConfig, RetryPolicy }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage, CompletionOptions }
 import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
@@ -909,8 +910,8 @@ object ProductionExample {
       providerConfig <- Llm4sConfig.defaultProvider()
       registry       <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
-      baseClient     <- LLMConnect.getClient(providerConfig, metrics)
-    } yield new ReliableClient(baseClient, providerConfig.providerId.asString, reliabilityConfig, Some(metrics))
+      baseClient     <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))
+    } yield ReliableClient(baseClient, providerConfig.providerId.asString, reliabilityConfig).withMetrics(metrics)
 
     clientResult match {
       case Right(client) =>
@@ -1093,15 +1094,16 @@ turn it on with `withEnabled(true)` or `RateLimitConfig(enabled = true)`. Builde
 ### ReliableClient
 
 ```scala
-final class ReliableClient(
-  underlying: LLMClient,
-  providerName: String,
-  config: ReliabilityConfig,
-  collector: Option[MetricsCollector] = None,
-  clock: () => Instant = () => Instant.now(),                                // for tests: the time deadlines use
-  sleep: FiniteDuration => Unit = delay => Thread.sleep(delay.toMillis)     // for tests: how backoff waits
-) extends LLMClient
+object ReliableClient {
+  def apply(
+    underlying: LLMClient,
+    providerName: String,
+    config: ReliabilityConfig = ReliabilityConfig.default
+  ): ReliableClient
+}
 
+// final class ReliableClient extends LLMClient; its constructor is private
+def withMetrics(collector: MetricsCollector): ReliableClient   // a new client: call it where the client is built
 def currentCircuitState: CircuitState   // Closed | Open | HalfOpen
 def resetCircuitBreaker(): Unit         // testing / emergencies only
 ```

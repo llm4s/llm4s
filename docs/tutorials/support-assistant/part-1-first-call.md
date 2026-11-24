@@ -53,14 +53,14 @@ provider sends it, and still returns the whole completion at the end.
 ```scala
 def askStreaming(client: LLMClient, question: String)(onText: String => Unit): Result[String] =
   client
-    .streamComplete(conversationFor(question), CompletionOptions(), chunk => chunk.content.foreach(onText))
+    .streamComplete(conversationFor(question), CompletionOptions())(chunk => chunk.content.foreach(onText))
     .map(_.content)
 ```
 
 ## Build the client from configuration
 
 Only the application's entry point knows which provider it uses. `Llm4sConfig.defaultProvider()` reads the section
-that `llm4s.providers.provider` names in `application.conf`, and `LLMConnect.getClient` builds its client:
+that `llm4s.defaultProvider` names in `application.conf`, and `LLMConnect.getClient` builds its client:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
@@ -81,11 +81,11 @@ With `OPENAI_API_KEY` set, this section is all the configuration the assistant n
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentId, CompletionFixture, ScriptedLLMClient }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -138,7 +139,10 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       Right(
         AssistantMessage(
           None,
-          Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "r1")), ToolCall("c2", "echo", ujson.Obj("text" -> "r2")))
+          Seq(
+            ToolCall(ToolCallId("c1"), "echo", ujson.Obj("text" -> "r1")),
+            ToolCall(ToolCallId("c2"), "echo", ujson.Obj("text" -> "r2"))
+          )
         )
       )
     })
@@ -287,7 +291,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     val guard = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("guard")
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(answer))
+        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(answer))
     }
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("blocked")
@@ -333,7 +337,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     summaryOf(model.last).value shouldBe "the summary"
     val usage = state.get(LoopKeys.usage).value
     usage.byModel.keySet should contain("test-model")
-    usage.byModel("test-model").inputTokens shouldBe 100L
+    usage.byModel(ModelName("test-model")).inputTokens shouldBe 100L
     // it was sent the new messages, and asked for at most maxSummaryTokens
     val (conversation, options) = client.calls.head
     conversation.messages.last.content should (include("user: u1").and(include("assistant: a1")))
@@ -381,7 +385,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   "The digest compressor" should "digest with no model call, extend by appending, and stay within the bound" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("digest")
-    val counter                       = ConversationTokenCounter.openAI().value
+    val counter                       = ConversationTokenCounter.cl100k().value
     val model                         = new Model()
     val mw    = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.digest(counter))
     val state = turns(loopOf(model, Seq(mw)), "use id: ABC123", "then id: XYZ789", "and more")
@@ -403,7 +407,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "digest a block with media, naming each part, and never drop a message it was given" in {
-    val counter = ConversationTokenCounter.openAI().value
+    val counter = ConversationTokenCounter.cl100k().value
     val image =
       ContentPart.image(MediaSource.Url(java.net.URI.create("https://example.com/c.png")), MediaType.Png).value
     val context = new ModelContext(testRunContext(), ThreadState.empty(Map.empty), agentA)

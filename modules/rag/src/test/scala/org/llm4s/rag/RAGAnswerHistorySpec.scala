@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
@@ -35,14 +36,12 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
   private class RecordingClient extends LLMClient {
     val conversations: mutable.Buffer[Conversation] = mutable.Buffer.empty
     private val answer =
-      Completion(id = "a", created = Instant.EPOCH, content = "42", model = "m", message = AssistantMessage("42"))
+      Completion(id = "a", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("42"))
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
       Right(answer)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       conversations += conversation
@@ -93,7 +92,7 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
     val withIndex  = if (permissions) config.withSearchIndex(OneChunkIndex).vectorOnly else config
     val rag =
       RAG
-        .buildWithClient(withIndex.withLLM(client), new EmbeddingClient(embeddings))
+        .buildWithClient(withIndex.withLLM(client), EmbeddingClient(embeddings))
         .fold(e => fail(e.message), identity)
     if (!permissions) rag.ingestText("The blue widget costs 42.", "doc1").fold(e => fail(e.message), identity)
     embeddings.inputs.clear()

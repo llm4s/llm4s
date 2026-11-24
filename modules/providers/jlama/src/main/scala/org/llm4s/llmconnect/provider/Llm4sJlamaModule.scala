@@ -19,4 +19,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  */
 @Experimental
 final class Llm4sJlamaModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(JlamaProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(JlamaProvider)

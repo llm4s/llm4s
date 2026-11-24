@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory }
 import org.llm4s.llmconnect.LLMClient
@@ -22,13 +23,13 @@ class LlmBoot4HealthIndicatorSpec extends AnyFlatSpec with Matchers {
 
   private def client(reply: Result[Completion]): JLlmClient = JLlmClientTestFactory.create(new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       reply
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   })
 
-  private val ok     = Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
+  private val ok     = Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
   private val failed = Left(ServiceError(503, "openai", "rejected key sk-abcdefghijklmnop"))
 
   private def boot3(c: JLlmClient, probe: Boolean): (String, Map[String, AnyRef]) = {

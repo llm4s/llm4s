@@ -1,7 +1,8 @@
 package org.llm4s.rag.embed
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
@@ -30,7 +31,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   // ----------------- Test scaffolding -----------------
 
   /** Stub provider: never hits network. */
-  private val stubClient = new EmbeddingClient(new EmbeddingProvider {
+  private val stubClient = EmbeddingClient(new EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] =
       Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", "stub"))
   })
@@ -95,7 +96,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   test("Non-text: image/audio/video → 501 by default (stubs disabled)") {
     if (experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
 
-    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig(ModelName("dummy-text"), 128)
     val dummyChunking = TextChunkingConfig(false, 0, 0)
     val localModels =
       LocalEmbeddingModels(
@@ -150,9 +151,9 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     audRes.isLeft shouldBe true
     vidRes.isLeft shouldBe true
 
-    imgRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected imgRes Left(501)"))
-    audRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected LaudRes eft(501)"))
-    vidRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected vidRes Left(501)"))
+    imgRes.fold(_.code shouldBe None, _ => fail("Expected imgRes Left"))
+    audRes.fold(_.code shouldBe None, _ => fail("Expected audRes Left"))
+    vidRes.fold(_.code shouldBe None, _ => fail("Expected vidRes Left"))
 
     imgRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected imgRes Left(encoder)"))
     audRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected audRes Left(encoder)"))
@@ -163,7 +164,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   test("Experimental stubs: image/audio/video produce vectors and experimental=true") {
     if (!experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
 
-    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig(ModelName("dummy-text"), 128)
     val dummyChunking = TextChunkingConfig(false, 0, 0)
     val localModels =
       LocalEmbeddingModels(
@@ -227,25 +228,25 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     vid.head.meta.get("provider") shouldBe Some("local-experimental")
   }
 
-  test("Local model dimensions (Image/Audio/Video) match registry") {
+  test("Local model dimensions (Image/Audio/Video) match the local encoders' table") {
     val localModels =
       LocalEmbeddingModels(
         imageModel = "openclip-vit-b32",
         audioModel = "wav2vec2-base",
         videoModel = "timesformer-base"
       )
-    val imgModel = ModelSelector.selectModel(Image, localModels).fold(err => fail(err.formatted), identity)
-    val audModel = ModelSelector.selectModel(Audio, localModels).fold(err => fail(err.formatted), identity)
-    val vidModel = ModelSelector.selectModel(Video, localModels).fold(err => fail(err.formatted), identity)
+    val imgModel = ModelSelector.selectModel(Modality.Image, localModels).fold(err => fail(err.formatted), identity)
+    val audModel = ModelSelector.selectModel(Modality.Audio, localModels).fold(err => fail(err.formatted), identity)
+    val vidModel = ModelSelector.selectModel(Modality.Video, localModels).fold(err => fail(err.formatted), identity)
 
-    imgModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", imgModel.name)
+    imgModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(imgModel.name.asString)
       .fold(err => fail(err.formatted), identity)
-    audModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", audModel.name)
+    audModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(audModel.name.asString)
       .fold(err => fail(err.formatted), identity)
-    vidModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", vidModel.name)
+    vidModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(vidModel.name.asString)
       .fold(err => fail(err.formatted), identity)
   }
 }

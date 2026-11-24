@@ -4,6 +4,7 @@ import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }
 import org.llm4s.agent.graph.*
 import org.llm4s.annotation.Experimental
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
 
 import java.time.{ Duration as JDuration, Instant }
@@ -35,7 +36,9 @@ import scala.util.Try
  *  - '''commits''' ([[AgentMetrics.CommitDuration]]) timed around `commit`, by result;
  *  - '''runs''' from the durable events a commit wrote: `RunStarted`, `RunResumed` and `RunRecovered` begin a run
  *    ([[AgentMetrics.RunsStarted]]), and its terminal event ends it ([[AgentMetrics.RunsEnded]],
- *    [[AgentMetrics.RunDuration]]: from the first event's timestamp to the last's, both stamped by this process). A run
+ *    [[AgentMetrics.RunDuration]]: from the first event's timestamp to the last's, both stamped by this process), with
+ *    the status its trace reports: the terminal event's, refined by the outcome its closing checkpoint records, so a
+ *    guardrail block is `blocked` and a turn that hit its step limit `step_limit_reached`. A run
  *    is named by its graph's id, read from the commit's checkpoint and remembered from its start for a terminal commit
  *    that writes none (a cancel's). At most [[MeteredCheckpointer.InFlightLimit]] runs are remembered at once; a run
  *    past that, or one that began before this checkpointer did, ends without a duration;
@@ -115,11 +118,9 @@ final class MeteredCheckpointer private (val inner: Checkpointer, metrics: Metri
             .foreach(origin => metrics.increment(TasksStarted, Seq(origin.agent.value)))
         case RunEvent.RunResumed(_)   => began(r, graph, "resume")
         case RunEvent.RunRecovered(_) => began(r, graph, "recover")
-        case RunEvent.RunCompleted    => ended(r, graph, "completed")
-        case RunEvent.RunSuspended(_) => ended(r, graph, "suspended")
-        case RunEvent.RunFailed(_)    => ended(r, graph, "failed")
-        case RunEvent.RunCancelled(_) => ended(r, graph, "cancelled")
-        case RunEvent.RunTimedOut(_)  => ended(r, graph, "timed_out")
+        case terminal @ (RunEvent.RunCompleted | RunEvent.RunSuspended(_) | RunEvent.RunFailed(_) |
+            RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_)) =>
+          ended(r, graph, runStatus(terminal, commit.checkpoint.flatMap(_.outcome)).name)
         case RunEvent.Custom(name, _, payload) if name == SubagentEvents.TaskEnded.name =>
           Try(upickle.default.read[TaskEnded](payload)).foreach { task =>
             val labels = Seq(task.child.agent.value, taskStatus(task.status))
@@ -188,6 +189,29 @@ object MeteredCheckpointer:
   /** `inner`, recording the agent runtime's metrics into `metrics`. */
   def apply(inner: Checkpointer, metrics: MetricsCollector): MeteredCheckpointer =
     new MeteredCheckpointer(inner, metrics)
+
+  /**
+   * How a run ended, from its terminal event and the outcome its closing checkpoint records: the status the run's trace
+   * reports on `AgentRunEnded` (`AgentTracing.ending`), so the `status` label of [[AgentMetrics.RunsEnded]] and the
+   * trace agree. A guardrail block - which the runtime ends with `RunFailed` - is `Blocked`, and a completed turn that
+   * hit a limit or was cut off is that limit, not `Completed`. A terminal commit without an outcome (a graph that is
+   * not an agent turn, a cancel) is named by its event alone. The guardrail's name is never a label.
+   */
+  private[metrics] def runStatus(terminal: RunEvent, outcome: Option[RunOutcome]): TraceEvent.RunStatus =
+    terminal match
+      case RunEvent.RunSuspended(_) => TraceEvent.RunStatus.Suspended
+      case RunEvent.RunCancelled(_) => TraceEvent.RunStatus.Cancelled
+      case RunEvent.RunTimedOut(_)  => TraceEvent.RunStatus.TimedOut
+      case RunEvent.RunCompleted =>
+        outcome match
+          case Some(RunOutcome.StepLimitReached)  => TraceEvent.RunStatus.StepLimitReached
+          case Some(RunOutcome.TokenLimitReached) => TraceEvent.RunStatus.TokenLimitReached
+          case Some(RunOutcome.Truncated)         => TraceEvent.RunStatus.Truncated
+          case _                                  => TraceEvent.RunStatus.Completed
+      case _ =>
+        outcome match
+          case Some(_: RunOutcome.Blocked) => TraceEvent.RunStatus.Blocked
+          case _                           => TraceEvent.RunStatus.Failed
 
   /** A task's status as a label: `blocked:<guardrail>` is `blocked`, so a guardrail's name never becomes a series. */
   private[metrics] def taskStatus(status: String): String =

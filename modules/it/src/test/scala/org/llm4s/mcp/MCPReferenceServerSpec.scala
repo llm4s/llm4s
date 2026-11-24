@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.McpReference
@@ -74,14 +75,14 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private def toolNamed(client: MCPClient, name: String): ToolFunction[_, _] =
+  private def toolNamed(client: MCPClient, name: String): ToolFunction[_] =
     client
       .getTools()
       .fold(e => fail(s"getTools failed: ${e.formatted}"), identity)
       .find(_.name == name)
       .getOrElse(fail(s"the reference server did not advertise '$name'"))
 
-  private def parameters(tool: ToolFunction[_, _]): ujson.Value =
+  private def parameters(tool: ToolFunction[_]): ujson.Value =
     tool.toolDefinition(strict = false)("function")("parameters")
 
   private def failureText(result: Either[ToolCallError, ujson.Value]): String =
@@ -198,26 +199,22 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
-      val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
+      val toolCalls = if (calls == 1) Seq(ToolCall(ToolCallId("call-1"), toolName, args)) else Seq.empty
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(
           id = s"scripted-$calls",
           created = Instant.EPOCH,
-          content = message.content,
-          model = "scripted-model",
+          model = ModelName("scripted-model"),
           message = message,
-          toolCalls = toolCalls.toList,
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -241,7 +238,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
   "An Agent with tools from the MCP reference server" should "feed the server's result back into the conversation" in {
     val toolMessages = runAgent("echo", ujson.Obj("message" -> "hello from the agent"))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("Echo: hello from the agent")
   }
 
@@ -250,7 +247,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
     // as discovered - so the missing `b` is reported back to the model rather than summed.
     val toolMessages = runAgent("get-sum", ujson.Obj("a" -> 2))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     (toolMessages.head.content should not).include("The sum of")
     toolMessages.head.content should include("$.b: required property missing")
   }

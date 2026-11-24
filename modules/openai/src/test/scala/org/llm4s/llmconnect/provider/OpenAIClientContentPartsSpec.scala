@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -36,7 +38,9 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
       body.set(Some(ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))))
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("ok", "gpt-4o"))
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), s"$baseUrl/v1").value).value
+      val client = OpenAIClient(
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(s"$baseUrl/v1")).value
+      ).value
       val result = client.complete(conversation, CompletionOptions())
       client.close()
       out = Some(result.map(_ => body.get.getOrElse(fail("no request"))("messages")))
@@ -49,7 +53,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c1"), "t", ujson.Obj()))),
         result
       )
     )
@@ -74,10 +78,11 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "send a tool result's text parts as an array of text parts" in {
-    val messages = sent(toolResult(ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1"))).value
+    val messages =
+      sent(toolResult(ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1")))).value
     messages(2)("content") shouldBe
       ujson.Arr(ujson.Obj("type" -> "text", "text" -> "a"), ujson.Obj("type" -> "text", "text" -> "b"))
-    sent(toolResult(ToolMessage("r", "c1"))).value(2)("content") shouldBe ujson.Str("r")
+    sent(toolResult(ToolMessage("r", ToolCallId("c1")))).value(2)("content") shouldBe ujson.Str("r")
   }
 
   it should "refuse, without sending, a PDF by URL, another provider's file, a text document and media in a tool result" in {
@@ -88,7 +93,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
       sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
         UnsupportedContentPartError("openai", part.kind, "user")
     }
-    sent(toolResult(ToolMessage(Vector(imageInline), "c1"))).left.value shouldBe
+    sent(toolResult(ToolMessage(Vector(imageInline), ToolCallId("c1")))).left.value shouldBe
       UnsupportedContentPartError("openai", imageInline.kind, "tool")
   }
 

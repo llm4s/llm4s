@@ -1,18 +1,20 @@
 package org.llm4s.toolapi
 
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** A `ToolFunction` handler reads the call it runs as `SafeParameterExtractor.call` (#1740). */
 class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
 
-  private val call = ToolCallInfo(toolCallId = "call_1", idempotencyKey = "k" * 64)
+  private val call = ToolCallInfo(toolCallId = ToolCallId("call_1"), idempotencyKey = IdempotencyKey("k" * 64))
 
   /** A tool that answers with the call it saw, or "none". */
-  private def echo(required: Boolean): ToolFunction[Map[String, Any], String] = {
+  private def echo(required: Boolean): ToolFunction[String] = {
     val base   = Schema.`object`[Map[String, Any]]("args")
     val schema = if (required) base.withProperty(Schema.property("q", Schema.string("q"))) else base
-    ToolBuilder[Map[String, Any], String]("echo", "Echoes the call", schema)
+    ToolBuilder[String]("echo", "Echoes the call", schema)
       .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
       .buildSafe()
       .fold(e => fail(e.formatted), identity)
@@ -41,7 +43,7 @@ class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolCallInfo" should "change with its setters" in {
-    call.withToolCallId("call_2").toolCallId shouldBe "call_2"
-    call.withIdempotencyKey("other").idempotencyKey shouldBe "other"
+    call.withToolCallId(ToolCallId("call_2")).toolCallId shouldBe ToolCallId("call_2")
+    call.withIdempotencyKey(IdempotencyKey("other")).idempotencyKey shouldBe IdempotencyKey("other")
   }
 }

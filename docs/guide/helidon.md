@@ -3,8 +3,10 @@ layout: page
 title: Helidon
 description: "Call a model from a Helidon SE 4 app with LLM4S: JLlmClient built from application.yaml, blocking and streamed routes on virtual threads and a health check."
 search_title: "Use LLM4S with Helidon SE 4: blocking and streamed routes"
-parent: User Guide
-nav_order: 55
+parent: Java and Kotlin
+nav_order: 411
+grand_parent: User Guide
+cites_open_issues: [1463]
 ---
 
 # Using LLM4S with Helidon

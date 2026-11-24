@@ -72,7 +72,7 @@ import scala.util.matching.Regex
  *                           compile
  */
 @Stable
-class RegexValidator(
+final class RegexValidator private (
   compiledPattern: Pattern,
   patternDescription: String,
   errorMessage: Option[String] = None,
@@ -81,25 +81,12 @@ class RegexValidator(
     with OutputGuardrail {
 
   /**
-   * Build a validator from a Scala [[scala.util.matching.Regex]].
-   *
-   * The pattern is used as given, without the safety manager's pre-screen of its shape and length; matching is
-   * still bounded.
-   *
-   * @param pattern       the pattern to search for
-   * @param errorMessage  the detail to report on a plain mismatch
-   * @param fallbackError when set, `validate` fails every text with this detail
-   */
-  def this(pattern: Regex, errorMessage: Option[String], fallbackError: Option[String]) =
-    this(pattern.pattern, pattern.toString, errorMessage, fallbackError)
-
-  /**
    * Build a validator from a Scala [[scala.util.matching.Regex]] with a custom mismatch message.
    *
    * @param pattern      the pattern to search for
    * @param errorMessage the detail to report on a plain mismatch
    */
-  def this(pattern: Regex, errorMessage: Option[String]) =
+  private def this(pattern: Regex, errorMessage: Option[String]) =
     this(pattern.pattern, pattern.toString, errorMessage, None)
 
   /**
@@ -107,7 +94,7 @@ class RegexValidator(
    *
    * @param pattern the pattern to search for
    */
-  def this(pattern: Regex) =
+  private def this(pattern: Regex) =
     this(pattern.pattern, pattern.toString, None, None)
 
   /**
@@ -180,6 +167,17 @@ object RegexValidator {
    */
   def apply(pattern: Regex): RegexValidator =
     new RegexValidator(pattern)
+
+  /**
+   * Create a validator that searches for a [[scala.util.matching.Regex]], with a custom mismatch message. The pattern
+   * is used as given, as with the one-argument `Regex` factory.
+   *
+   * @param pattern      the pattern to search for
+   * @param errorMessage the detail to report when the pattern is not found
+   * @return the validator
+   */
+  def apply(pattern: Regex, errorMessage: String): RegexValidator =
+    new RegexValidator(pattern, Some(errorMessage))
 
   /**
    * Create a validator for a string pattern with a custom mismatch message.

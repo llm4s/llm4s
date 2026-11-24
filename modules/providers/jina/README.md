@@ -11,7 +11,6 @@ in this module.
 |---|---|---|
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | none (required) |
 | `JINA_EMBEDDING_BASE_URL` | `llm4s.embeddings.jina.baseUrl` | `https://api.jina.ai/v1` |
-| `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.model` | none |
 
 ```hocon
 llm4s.embeddings.model = "jina/jina-embeddings-v3"
@@ -34,9 +33,16 @@ Jina embeds queries and documents differently. The provider maps a request's `In
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.JinaEmbeddingProvider
+import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 
 val provider = JinaEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.jina.ai/v1", model = "jina-embeddings-v3", apiKey = sys.env("JINA_API_KEY"))
+  EmbeddingProviderConfig(
+    providerId = ProviderId("jina"),
+    baseUrl = BaseUrl("https://api.jina.ai/v1"),
+    model = ModelName("jina-embeddings-v3"),
+    apiKey = Some(Secret(sys.env("JINA_API_KEY")))
+  )
 )
 val model = EmbeddingModelConfig("jina-embeddings-v3", 1024)
 

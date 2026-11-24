@@ -77,12 +77,11 @@ class OptionsAndClientDslTest {
                 seen.set(conversation to options)
                 return Right(
                     Completion.apply(
-                        "id", Instant.EPOCH, "blue", "m",
+                        "id", Instant.EPOCH, "m",
                         AssistantMessage.apply(Option.apply("blue"), CollectionConverters.asScala(listOf<org.llm4s.llmconnect.model.ToolCall>()).toList(), AssistantMessage.`apply$default$3`()),
-                        CollectionConverters.asScala(listOf<org.llm4s.llmconnect.model.ToolCall>()).toList(),
                         Option.empty(), Option.empty(),
                         CollectionConverters.asScala(listOf<Citation>()).toList(),
-                        Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+                        Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
                     ),
                 )
             }
@@ -103,7 +102,7 @@ class OptionsAndClientDslTest {
         assertEquals("blue", reply)
         val (conversation, options) = seen.get()
         assertEquals("Name a colour", conversation.messages().last().content())
-        assertEquals(0.2, options.temperature())
+        assertEquals(0.2, options.temperature().get())
         assertEquals(20, options.maxTokens().get())
     }
 

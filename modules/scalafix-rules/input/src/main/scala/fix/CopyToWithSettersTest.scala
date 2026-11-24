@@ -15,7 +15,7 @@ object CopyToWithSettersTest {
   def reply(message: AssistantMessage, text: String): AssistantMessage =
     message.copy(contentOpt = Some(text))
 
-  def local(config: OllamaConfig): OllamaConfig = config.copy(baseUrl = "http://localhost:11434")
+  def local(config: OllamaConfig): OllamaConfig = config.copy(contextWindow = 8192)
 
   def claude(config: AnthropicConfig): AnthropicConfig =
     config

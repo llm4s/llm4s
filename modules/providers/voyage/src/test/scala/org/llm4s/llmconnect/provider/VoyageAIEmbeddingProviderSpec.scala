@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
@@ -25,11 +26,12 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
   }
 
   private val cfg = EmbeddingProviderConfig(
-    baseUrl = "http://voyage-test",
-    model = "voyage-3",
-    apiKey = Secret("test-key")
+    providerId = ProviderId("voyage"),
+    baseUrl = BaseUrl("http://voyage-test"),
+    model = ModelName("voyage-3"),
+    apiKey = Some(Secret("test-key"))
   )
-  private val modelCfg = EmbeddingModelConfig("voyage-3", 1024)
+  private val modelCfg = EmbeddingModelConfig(ModelName("voyage-3"), 1024)
   private val req      = EmbeddingRequest(Seq("hello", "world"), modelCfg)
 
   private def httpOk(body: String): HttpResponse               = HttpResponse(200, body, Map.empty)
@@ -55,7 +57,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk("""{"data":[{"embedding":[0.1]}]}""")))
 
-    val provider = VoyageAIEmbeddingProvider.forTest(cfg.withBaseUrl("https://api.voyageai.com/v1"), mockHttp)
+    val provider = VoyageAIEmbeddingProvider.forTest(cfg.withBaseUrl(BaseUrl("https://api.voyageai.com/v1")), mockHttp)
     provider.embed(req)
 
     (mockHttp.onPost _).verify("https://api.voyageai.com/v1/embeddings", *, *, *).once()

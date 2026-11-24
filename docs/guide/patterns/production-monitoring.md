@@ -4,7 +4,7 @@ title: Production Monitoring
 description: "Monitor LLM4S applications in production: Langfuse or OpenTelemetry tracing, Prometheus or Micrometer metrics, agent runtime metrics and cost tracking."
 search_title: "Monitor LLM applications in production: metrics and alerts"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 3
 ---
 
@@ -51,14 +51,15 @@ import org.llm4s.types.Result
 
 def tracedAgent(client: LLMClient): Result[Agent] = for {
   settings <- Llm4sConfig.tracing()   // llm4s.tracing.*, e.g. TRACING_MODE=langfuse with LANGFUSE_* set
+  tracing  <- Tracing.fromSettings(settings)
   agent <- Agent.builder("assistant", client)
-             .withTracing(Tracing.create(settings))
+             .withTracing(tracing)
              .build()
 } yield agent
 ```
 
-`Tracing.create` never fails: a backend that is missing or cannot start is logged and replaced by a no-op tracer, so
-tracing cannot stop the application. Use `Tracing.fromSettings` to see that error instead. What each mode records, and
+`Tracing.fromSettings` returns an error when the backend is missing or cannot start. If tracing must never stop the
+application, say so here: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`, logging the error first. What each mode records, and
 which settings keep message content out of traces, is in
 [Data Protection](../data-protection#logging-and-tracing-defaults).
 
@@ -66,7 +67,7 @@ which settings keep message content out of traces, is in
 
 Metrics are off until you ask for them. With `llm4s-observability-prometheus` on the classpath and
 `llm4s.metrics.enabled = true`, `MetricsConfigLoader.default()` returns the collector and starts the endpoint; pass the
-collector to `LLMConnect.getClient(providerConfig, metrics)` and every call is counted by provider and model. The
+collector to `LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))` and every call is counted by provider and model. The
 [metrics section](../observability/#metrics) has the configuration, the series and example alert queries (error
 share, p95 latency, rate-limit errors, spend per hour).
 

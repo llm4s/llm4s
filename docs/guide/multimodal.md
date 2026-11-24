@@ -3,8 +3,9 @@ layout: page
 title: Multimodal content
 description: "Send images and documents to a model in a user message or tool result with LLM4S, and check provider support before the request goes out."
 search_title: "Send images and documents to LLMs in Scala"
-parent: User Guide
-nav_order: 30
+parent: Core
+nav_order: 108
+grand_parent: User Guide
 ---
 
 # Multimodal content: images and documents
@@ -24,13 +25,16 @@ whether the provider can take them.
 
 ## Content parts
 
-A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`. A part is one of:
+A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`. A part is one of:
 
 - `ContentPart.Text(text)`;
 - an image, built with `ContentPart.image(source, mediaType)`, `mediaType` an `ImageMediaType` (`Png`, `Jpeg`, `Gif`,
   `WebP`, `Bmp`, `Tiff`);
 - a document, built with `ContentPart.document(source, mediaType)`, `mediaType` a `DocumentMediaType` (`Pdf`,
   `PlainText`, `Markdown`, `Html`, `Csv`).
+
+Those media types, and `MediaSource`, are `llm4s-media`'s shared vocabulary, which image generation and RAG
+extraction use too: [Media Types](media-types) describes it.
 
 The source, an `org.llm4s.media.MediaSource`, says where the bytes are:
 

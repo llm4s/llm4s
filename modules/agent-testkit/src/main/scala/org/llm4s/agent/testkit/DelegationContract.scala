@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildFailure, TaskRequest, TypedAgent }
 import org.llm4s.agent.graph.{ Checkpointer, CheckpointStatus, GraphRuntime, ThreadId }
@@ -67,7 +68,9 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
   /** The lead delegates once, then answers with the tool result it read. */
   private def leadRoute: PartialFunction[Vector[Message], Result[Completion]] = {
     case messages if isLead(messages) && results(messages).isEmpty =>
-      Right(calling(ToolCall("c1", "task", ujson.Obj("subagent_type" -> "worker", "description" -> "do it"))))
+      Right(
+        calling(ToolCall(ToolCallId("c1"), "task", ujson.Obj("subagent_type" -> "worker", "description" -> "do it")))
+      )
     case messages if isLead(messages) => Right(text(s"lead read: ${results(messages).mkString}"))
   }
 
@@ -91,7 +94,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     val client = Routing(leadRoute.orElse {
       case m if isWorker(m) =>
         workerCall.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("p1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ValidationError("provider", "the provider is down"))
           case _ => Right(text("recovered report"))
     })
@@ -129,7 +132,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
   "DelegationContract: a call whose child Failed" should "return the child's refusal with no child run" in {
     val store   = newCheckpointer()
     val client  = Routing(leadRoute.orElse { case m if isWorker(m) => Right(text("a report far too long")) })
-    val blocked = worker.withMiddleware(new GuardrailMiddleware(Seq.empty, Seq(new LengthCheck(0, 5))))
+    val blocked = worker.withMiddleware(new GuardrailMiddleware(Seq.empty, Seq(LengthCheck(0, 5))))
     val agent   = lead(client, store).withMiddleware(new CrashOnce).withSubagents(blocked).build().value
 
     agent.run(parent, "go").isLeft shouldBe true
@@ -145,7 +148,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     val store = newCheckpointer()
     val client = Routing(leadRoute.orElse {
       case m if isWorker(m) && results(m).isEmpty =>
-        Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("p1"), "probe", ujson.Obj("text" -> "x"))))
       case m if isWorker(m) => Right(text("probed"))
     })
     val probe = AgentTool(textSpec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("probed"))))
@@ -187,10 +190,8 @@ object DelegationContract:
     Completion(
       id = "delegation-contract",
       created = Instant.EPOCH,
-      content = message.content,
-      model = "contract-model",
+      model = ModelName("contract-model"),
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
@@ -222,9 +223,7 @@ object DelegationContract:
       recorded.add(messages)
       route.applyOrElse(messages, (_: Vector[Message]) => Left(ValidationError("routing", "no route for the call")))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

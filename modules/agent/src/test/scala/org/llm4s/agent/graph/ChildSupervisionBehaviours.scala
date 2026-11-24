@@ -74,7 +74,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   private def family(runtime: GraphRuntime, setup: Setup): (Agent, Agent) = {
     val childBuilder = setup.child(Agent.builder("worker", setup.childClient).withRuntime(runtime))
     val child = (if (setup.childTools.isEmpty) childBuilder
-                 else childBuilder.withTools(SpecTools.set(setup.childTools*)))
+                 else childBuilder.withToolSet(SpecTools.set(setup.childTools*)))
       .build()
       .ok
     val spec = setup.delegateTimeout.fold(SpecTools.spec("delegate"))(t => SpecTools.spec("delegate").withTimeout(t))
@@ -91,7 +91,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       Agent
         .builder("lead", setup.parentClient)
         .withRuntime(runtime)
-        .withTools(SpecTools.set(delegate))
+        .withToolSet(SpecTools.set(delegate))
         .withMiddleware(setup.parentMiddleware*)
         .build()
         .ok
@@ -244,11 +244,13 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         new Setup(
           delegating("a task far too long"),
           answers(),
-          child = _.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 3)), Seq.empty))
+          child = _.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Seq.empty))
         ),
       {
-        case ChildEnd.Ended(r, _) => r.status shouldBe a[AgentStatus.Blocked]
-        case other                => fail(s"unexpected $other")
+        // the first end is the live one: only it has the guardrail's reason, which is never stored (#2853)
+        case ChildEnd.Ended(r, _) =>
+          r.status should matchPattern { case AgentStatus.Blocked("LengthCheck", Some(_)) => }
+        case other => fail(s"unexpected $other")
       }
     ),
     (
@@ -279,6 +281,21 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     )
   )
 
+  /** `end` without a blocked turn's reason, which the live end has and one rebuilt from the child's thread has not. */
+  private def unreasoned(end: ChildEnd): ChildEnd = end match {
+    case ChildEnd.Ended(r, usage) =>
+      r.status match {
+        case AgentStatus.Blocked(guardrail, Some(_)) =>
+          val status = AgentStatus.Blocked(guardrail, None)
+          ChildEnd.Ended(
+            org.llm4s.agent.AgentResult(r.threadId, r.runId, r.activeAgent, status, r.messages, r.usage),
+            usage
+          )
+        case _ => end
+      }
+    case other => other
+  }
+
   outcomes.foreach { case (name, setupOf, check) =>
     behavior.of(s"A child that settled with $name")
     it should "give the same end after a restart, running nothing again" in {
@@ -292,7 +309,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val runtime = new GraphRuntime(open())
       family(runtime, setup)._1.recover(thread).ok.answer shouldBe Some("composed")
       setup.childClient.callCount shouldBe calls
-      setup.allEnds(1) shouldBe setup.allEnds(0)
+      setup.allEnds(1).map(unreasoned) shouldBe setup.allEnds(0).map(unreasoned)
+      unreasoned(setup.allEnds(1).ok) shouldBe setup.allEnds(1).ok
       check(setup.allEnds(0).ok)
       onlyChild(runtime, thread).status should (be(CheckpointStatus.Completed).or(be(CheckpointStatus.Failed)))
     }
@@ -793,7 +811,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child = Agent
       .builder("worker", childClient)
       .withRuntime(runtime)
-      .withTools(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
+      .withToolSet(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
       .build()
       .ok
     // asks first; its resume delegates, and times out
@@ -822,7 +840,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val parent = Agent
       .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(confirm))
+      .withToolSet(SpecTools.set(confirm))
       .withMiddleware(late)
       .build()
       .ok
@@ -883,7 +901,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child = Agent
       .builder("worker", ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(stubborn))
+      .withToolSet(SpecTools.set(stubborn))
       .build()
       .ok
     // The call's 300 ms timeout is wall time, and a slow runner may not admit the child and reach `stubborn` within it
@@ -917,7 +935,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val parent = Agent
       .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
       .withRuntime(runtime)
-      .withTools(SpecTools.set(delegate))
+      .withToolSet(SpecTools.set(delegate))
       .build()
       .ok
     val thread = ThreadId("timed-out-busy")

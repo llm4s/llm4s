@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
@@ -40,7 +41,7 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
       .fromValues(
         // api.z.ai's free flash model (listed in the model registry as `zai/glm-4.5-flash`).
         // `GLM-4-Flash` is a bigmodel.cn name that api.z.ai does not serve.
-        modelName = "glm-4.5-flash",
+        modelName = ModelName("glm-4.5-flash"),
         apiKey = Secret(key),
         baseUrl = ZaiConfig.DEFAULT_BASE_URL
       )
@@ -68,7 +69,7 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     val client = ZaiClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     // The first delta carries `content: ""`, so `isDefined` alone passes for a stream with no
     // payload; require real text or reasoning text, and that the text is what the call returned.
@@ -95,11 +96,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       underlying.complete(conversation, off(options))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
-    ): Result[Completion] = underlying.streamComplete(conversation, off(options), onChunk)
+    ): Result[Completion] = underlying.streamComplete(conversation, off(options))(onChunk)
     override def getContextWindow(): Int     = underlying.getContextWindow()
     override def getReserveCompletion(): Int = underlying.getReserveCompletion()
     override def close(): Unit               = underlying.close()
@@ -118,4 +117,10 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
   }
 
   registerCapabilityContract()
+
+  // ---- validate() (#2855) ----
+  override protected def validationUnsupported: Option[String] =
+    Some("Z.ai documents no model listing or other cheap authenticated request")
+
+  registerValidationContract()
 }

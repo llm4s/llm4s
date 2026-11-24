@@ -34,7 +34,7 @@ are set):
 ```hocon
 llm4s.providers.gemini-main {
   provider = "gemini"          # "google" is accepted too
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
 }
 ```
 
@@ -45,7 +45,7 @@ Default Credentials are used:
 ```hocon
 llm4s.providers.vertexai-main {
   provider = "vertexai"        # "vertex" is accepted too
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = "my-gcp-project"
   location = "us-central1"
 }
@@ -69,9 +69,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("gemini-main")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("gemini-main"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

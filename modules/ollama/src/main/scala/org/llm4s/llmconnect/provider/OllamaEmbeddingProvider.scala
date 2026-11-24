@@ -1,13 +1,16 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Obj, read }
@@ -38,11 +41,10 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
   val id: ProviderId = ProviderId("ollama")
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-    defaultBaseUrl = Some("http://localhost:11434"),
-    defaultModel = Some("nomic-embed-text"),
+    defaultBaseUrl = Some(BaseUrl("http://localhost:11434")),
+    defaultModel = Some(ModelName("nomic-embed-text")),
     // Ollama ignores the field when run locally, but the client still wants a string.
-    defaultApiKey = Some("not-required"),
-    modelEnv = Some("OLLAMA_EMBEDDING_MODEL")
+    defaultApiKey = Some("not-required")
   )
 
   /**
@@ -52,102 +54,110 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
    * is 384-dimensional, `:335m` is 1024 - so only `:latest`, which is what the
    * untagged name means, is folded onto these.
    */
-  override val modelDimensions: Map[String, Int] = Map(
-    "nomic-embed-text"  -> 768,
-    "mxbai-embed-large" -> 1024,
-    "all-minilm"        -> 384
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("nomic-embed-text")  -> 768,
+    ModelName("mxbai-embed-large") -> 1024,
+    ModelName("all-minilm")        -> 384
   )
 
-  override def dimensionsOf(model: String): Option[Int] =
-    modelDimensions.get(model.stripSuffix(":latest"))
+  override def dimensionsOf(model: ModelName): Option[Int] =
+    modelDimensions.get(ModelName(model.asString.stripSuffix(":latest")))
 
-  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  /**
+   * Builds the provider for the SPI; see [[fromConfig]] for the direct route. Requests go through the caller's
+   * HTTP client when `EmbeddingClientOptions` supplied one, else through one built from the config's proxy and
+   * TLS settings.
+   */
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(create(config, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
 
   /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
-  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create(HttpClientOptions(cfg.network))
-    private val logger     = LoggerFactory.getLogger(getClass)
+  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
+    create(cfg, Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
 
-    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-      CancelledError.attempt("ollama.embed") {
-        val model = request.model.name
-        val input = request.input
+  private def create(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
+    new EmbeddingProvider {
+      private val logger = LoggerFactory.getLogger(getClass)
 
-        // One request per text, stopping at the first failure: a cancelled call must not go on to
-        // send the rest of the batch.
-        input
-          .foldLeft[Result[Vector[Vector[Double]]]](Right(Vector.empty)) { (done, text) =>
-            done.flatMap(vectors => embedSingle(cfg, model, text).map(vectors :+ _))
-          }
-          .map { embeddings =>
-            val metadata = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
-            EmbeddingResponse(embeddings = embeddings, metadata = metadata)
-          }
-      }
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+        CancelledError.attempt("ollama.embed") {
+          val model = request.model.name.asString
+          val input = request.input
 
-    private def embedSingle(
-      cfg: EmbeddingProviderConfig,
-      model: String,
-      text: String
-    ): Result[Vector[Double]] = {
-      val payload = Obj(
-        "model"  -> model,
-        "prompt" -> text
-      )
-
-      val url = s"${cfg.baseUrl}/api/embeddings"
-
-      logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
-
-      // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
-      def headers(key: String): Map[String, String] = {
-        val auth =
-          if (key.nonEmpty && key != "not-required") Map("Authorization" -> s"Bearer $key")
-          else Map.empty
-        Map("Content-Type" -> "application/json") ++ auth
-      }
-
-      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
-      // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
-      // failure is an EmbeddingError.
-      val respEither: Result[org.llm4s.http.HttpResponse] =
-        cfg.currentApiKey().flatMap { key =>
-          httpClient
-            .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
-            .left
-            .map {
-              // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
-              case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
-              case e =>
-                EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
+          // One request per text, stopping at the first failure: a cancelled call must not go on to
+          // send the rest of the batch.
+          input
+            .foldLeft[Result[Vector[Vector[Double]]]](Right(Vector.empty)) { (done, text) =>
+              done.flatMap(vectors => embedSingle(cfg, model, text).map(vectors :+ _))
+            }
+            .map { embeddings =>
+              val metadata = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
+              EmbeddingResponse(embeddings = embeddings, metadata = metadata)
             }
         }
 
-      respEither.flatMap { response =>
-        response.statusCode match {
-          case 200 =>
-            Try {
-              val json   = read(response.body)
-              val vector = json("embedding").arr.map(_.num).toVector
-              vector
-            }.toEither.left
-              .map { ex =>
-                logger.error(s"[OllamaEmbeddingProvider] Parse error: ${ex.getMessage}")
-                EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
+      private def embedSingle(
+        cfg: EmbeddingProviderConfig,
+        model: String,
+        text: String
+      ): Result[Vector[Double]] = {
+        val payload = Obj(
+          "model"  -> model,
+          "prompt" -> text
+        )
+
+        val url = s"${cfg.baseUrl}/api/embeddings"
+
+        logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
+
+        // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+        def headers(key: String): Map[String, String] = {
+          val auth =
+            if (key.nonEmpty && key != "not-required") Map("Authorization" -> s"Bearer $key")
+            else Map.empty
+          Map("Content-Type" -> "application/json") ++ auth
+        }
+
+        // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
+        // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
+        // failure is an EmbeddingError.
+        val respEither: Result[org.llm4s.http.HttpResponse] =
+          cfg.currentApiKey().flatMap { key =>
+            httpClient
+              .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+              .left
+              .map {
+                // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+                case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
+                case e =>
+                  EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
               }
-          case status =>
-            val body = Redaction.safeBody(response.body)
-            logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
-            Left(
-              EmbeddingError(
-                code = Some(status.toString),
-                message = body,
-                provider = "ollama"
+          }
+
+        respEither.flatMap { response =>
+          response.statusCode match {
+            case 200 =>
+              Try {
+                val json   = read(response.body)
+                val vector = json("embedding").arr.map(_.num).toVector
+                vector
+              }.toEither.left
+                .map { ex =>
+                  logger.error(s"[OllamaEmbeddingProvider] Parse error: ${ex.getMessage}")
+                  EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
+                }
+            case status =>
+              val body = Redaction.safeBody(response.body)
+              logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
+              Left(
+                EmbeddingError(
+                  code = Some(status.toString),
+                  message = body,
+                  provider = "ollama"
+                )
               )
-            )
+          }
         }
       }
     }
-  }
 }

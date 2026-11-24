@@ -1,5 +1,6 @@
 package org.llm4s.samples.sidecar
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.{ Llm4sConfig, ReferenceConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -48,7 +49,7 @@ class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
     ReferenceConfig.withEnv(applicationConf, Map("user.home" -> sys.props.getOrElse("user.home", ".")))
 
   private def compatible(name: String): OpenAICompatibleConfig =
-    Llm4sConfig.provider(source, name) match {
+    Llm4sConfig.provider(source, ProviderName(name)) match {
       case Right(config: OpenAICompatibleConfig) => config
       case other                                 => fail(s"$name: expected an OpenAICompatibleConfig, got $other")
     }
@@ -62,8 +63,8 @@ class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
     expected.foreach { case (name, baseUrl, model, window) =>
       val config = compatible(name)
       withClue(s"$name: ") {
-        config.baseUrl shouldBe baseUrl
-        config.model shouldBe model
+        config.baseUrl.asUrl shouldBe baseUrl
+        config.model.asString shouldBe model
         config.contextWindow shouldBe window
         config.apiKey shouldBe None
         config.streamUsage shouldBe true
@@ -72,14 +73,14 @@ class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "make python-vllm the default" in {
-    source.at("llm4s.providers.provider").load[String] shouldBe Right("python-vllm")
+    source.at("llm4s.defaultProvider").load[String] shouldBe Right("python-vllm")
   }
 
   it should "build a client for each section, with the section's context window, without sending a request" in {
     Seq("python-vllm" -> 32768, "python-tgi" -> 8192, "python-llamacpp" -> 16384).foreach { case (name, window) =>
       val client =
         for {
-          config   <- Llm4sConfig.provider(source, name)
+          config   <- Llm4sConfig.provider(source, ProviderName(name))
           registry <- Llm4sConfig.modelRegistryService()
           given ModelRegistryService = registry
           client <- LLMConnect.getClient(config)

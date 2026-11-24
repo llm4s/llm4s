@@ -3,8 +3,10 @@ layout: page
 title: JSON Libraries
 description: "Use LLM4S with circe, play-json, zio-json or jsoniter-scala: pass your own types in and get them back without writing a second schema."
 search_title: "Use LLM4S with circe, play-json, zio-json and jsoniter-scala"
-parent: User Guide
-nav_order: 17
+parent: Core
+nav_order: 114
+grand_parent: User Guide
+cites_closed_issues: [1458, 1472, 1597, 2295]
 ---
 
 # Using LLM4S with circe, play-json, zio-json and jsoniter-scala
@@ -123,7 +125,7 @@ def orderViaCirce(client: LLMClient, conversation: Conversation): Result[Order] 
   client.completeStructured[Order](conversation, orderSchema)(using circeReader[Order])
 ```
 
-`Option` fields can be `null` or absent, and nested objects decode as circe decodes them. The schema you pass to `completeStructured` is still an LLM4S `ObjectSchema` (circe does not derive it; deriving one from a case class is tracked in [#1472](https://github.com/llm4s/llm4s/issues/1472)), and it reaches the provider exactly as with a uPickle `Reader`.
+`Option` fields can be `null` or absent, and nested objects decode as circe decodes them. The schema you pass to `completeStructured` is still an LLM4S `ObjectSchema` (circe does not derive it; to derive one from a case class, use `SchemaOf` from `llm4s-schema-derivation`, [Derived Schemas](derived-schemas), added in [#1472](https://github.com/llm4s/llm4s/issues/1472)), and it reaches the provider exactly as with a uPickle `Reader`.
 
 **When decoding fails.** The `Reader` throws `upickle.core.Abort` with the decoder's message. `completeStructured` catches anything thrown while reading and returns `Left(ValidationError("structured_output", "Response does not match expected schema: ..."))`, the same error the uPickle path gives, so your error handling does not change (see [Error Handling](error-handling)). A reply that is JSON `null` is refused and never comes back as `Right(null)`.
 
@@ -143,7 +145,7 @@ val addSchema = Schema
   .withRequiredField("a", Schema.integer("The first"))
   .withRequiredField("b", Schema.integer("The second"))
 
-val addTool = ToolBuilder[Map[String, Any], ujson.Value]("add", "Adds two integers", addSchema)
+val addTool = ToolBuilder[ujson.Value]("add", "Adds two integers", addSchema)
   .withHandler { extractor =>
     toCirce(extractor.params).as[AddArgs] match {
       case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
@@ -290,7 +292,7 @@ given JsonValueCodec[AddArgs]   = JsonCodecMaker.make
 given JsonValueCodec[AddResult] = JsonCodecMaker.make
 given ReadWriter[AddResult]     = jsoniterReadWriter[AddResult]
 
-val addToolViaJsoniter = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+val addToolViaJsoniter = ToolBuilder[AddResult]("add", "Adds two integers", addSchema)
   .withHandler { extractor =>
     Try(readJsoniter[AddArgs](extractor.params)).toEither
       .map(args => AddResult(args.a.toLong + args.b))
@@ -329,7 +331,7 @@ So if a model has to return or receive large identifiers (snowflake ids, databas
 ## What this page does not cover
 
 - **A bridge module.** No `llm4s-circe` or `llm4s-jsoniter` module is published. The conversion is two lines and the `Reader` is five, as shown above, so a module would add a dependency and a maintenance promise for little. Its main value would be one place for the error mapping, and only circe has a Scala 3 bridge, so a module could not treat the four libraries alike. If you would use one, say so on [#1458](https://github.com/llm4s/llm4s/issues/1458) (circe, play-json, zio-json) or [#2295](https://github.com/llm4s/llm4s/issues/2295) (jsoniter-scala).
-- **Deriving tool or response schemas** from your case classes. The schemas are still built with LLM4S's `Schema` (issue [#1472](https://github.com/llm4s/llm4s/issues/1472)).
+- **Deriving tool or response schemas** from your case classes: that is `llm4s-schema-derivation`, in [Derived Schemas](derived-schemas) (added in [#1472](https://github.com/llm4s/llm4s/issues/1472)).
 - **Streaming events.** The event fields that are `ujson.Value`s, such as the `arguments` of `ToolCallStarted`, convert the same way.
 
 ## How this page is checked

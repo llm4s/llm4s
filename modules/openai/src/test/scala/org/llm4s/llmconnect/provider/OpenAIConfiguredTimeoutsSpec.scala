@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
+
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{
@@ -49,7 +51,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
              |}
              |""".stripMargin
         ),
-        "main"
+        ProviderName("main")
       )
       .value
 
@@ -73,7 +75,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   // ---- the value reaches the call ----
 
   private def openAIConfig(baseUrl: String, timeouts: ProviderTimeouts): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value.withTimeouts(timeouts)
+    OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).value.withTimeouts(timeouts)
 
   "A configured request timeout" should "end a completion from a server that never answers" in {
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
@@ -107,7 +109,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
       val client = OpenAIClient(openAIConfig(baseUrl, ProviderTimeouts(stream = Some(500.millis)))).value
       try {
         val started = System.nanoTime()
-        val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
@@ -129,7 +131,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         openAIConfig(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
       ).value
       try {
-        val result = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result = client.streamComplete(hello, CompletionOptions())(_ => ())
         result.value.content shouldBe "hi"
       } finally client.close()
     }
@@ -146,14 +148,16 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
       val provider = OpenAIEmbeddingProvider.fromConfig(
         EmbeddingProviderConfig(
-          baseUrl = baseUrl,
-          model = "text-embedding-3-small",
-          apiKey = Secret("sk-test"),
+          providerId = ProviderId("openai"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("text-embedding-3-small"),
+          apiKey = Some(Secret("sk-test")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )
       val started = System.nanoTime()
-      val result  = provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
+      val result =
+        provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

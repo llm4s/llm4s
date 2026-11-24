@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
@@ -28,10 +29,8 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
 
   private object Answering extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("answer", Instant.EPOCH, "hi", "test-model", AssistantMessage("hi")))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+      Right(Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage("hi")))
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

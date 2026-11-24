@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -24,14 +25,14 @@ class GrowthSafeResponseTypesSpec extends AnyFlatSpec with Matchers {
     val response = EmbeddingResponse.empty
       .withEmbeddings(Seq(Seq(0.5, 0.25)))
       .withMetadata(Map("provider" -> "fixture"))
-      .withModality(Text)
+      .withModality(Modality.Text)
       .withDim(2)
       .withUsage(usage)
 
     response shouldBe EmbeddingResponse(
       Seq(Seq(0.5, 0.25)),
       Map("provider" -> "fixture"),
-      Some(Text),
+      Some(Modality.Text),
       Some(2),
       Some(usage)
     )
@@ -39,11 +40,21 @@ class GrowthSafeResponseTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "clear an Option field with None" in {
     val full =
-      EmbeddingResponse(Seq(Seq(1.0)), modality = Some(Text), dim = Some(1), usage = Some(EmbeddingUsage(1, 1)))
+      EmbeddingResponse(
+        Seq(Seq(1.0)),
+        modality = Some(Modality.Text),
+        dim = Some(1),
+        usage = Some(EmbeddingUsage(1, 1))
+      )
 
     full.withModality(None).withDim(None).withUsage(None) shouldBe EmbeddingResponse(Seq(Seq(1.0)))
-    full.withModality(Some(Audio)).withDim(Some(4)).withUsage(Some(EmbeddingUsage(2, 2))) shouldBe
-      EmbeddingResponse(Seq(Seq(1.0)), modality = Some(Audio), dim = Some(4), usage = Some(EmbeddingUsage(2, 2)))
+    full.withModality(Some(Modality.Audio)).withDim(Some(4)).withUsage(Some(EmbeddingUsage(2, 2))) shouldBe
+      EmbeddingResponse(
+        Seq(Seq(1.0)),
+        modality = Some(Modality.Audio),
+        dim = Some(4),
+        usage = Some(EmbeddingUsage(2, 2))
+      )
   }
 
   "EmbeddingUsage" should "change each field through its setter" in {
@@ -67,7 +78,7 @@ class GrowthSafeResponseTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "UsageSummary" should "change each field through its setter" in {
-    val byModel = Map("gpt-4o" -> ModelUsage(requestCount = 1L))
+    val byModel = Map(ModelName("gpt-4o") -> ModelUsage(requestCount = 1L))
     val summary = UsageSummary()
       .withRequestCount(1L)
       .withInputTokens(20L)

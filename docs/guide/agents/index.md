@@ -3,9 +3,10 @@ layout: page
 title: Agents
 description: "Build AI agents in Scala with LLM4S: tools, multi-turn conversations, guardrails, handoffs, memory, streaming and multi-agent coordination."
 search_title: "Build AI agents in Scala with LLM4S"
-nav_order: 12
+nav_order: 200
 parent: User Guide
 has_children: true
+cites_closed_issues: [1750]
 ---
 
 # Agent Framework
@@ -96,7 +97,7 @@ val weatherSchema = Schema
 
 // Give the agent its tools when you build it
 val result = for {
-  weatherTool <- ToolBuilder[Map[String, Any], String](
+  weatherTool <- ToolBuilder[String](
     "get_weather",
     "Get current weather for a location",
     weatherSchema
@@ -113,7 +114,7 @@ val result = for {
 } yield result
 ```
 
-`withTools` takes a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} (an `MCPToolRegistry` too) or a `ToolSet` of `AgentTool`s.
+`withTools` takes a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} (an `MCPToolRegistry` too), and `withToolSet` a `ToolSet` of `AgentTool`s.
 
 ### Multi-Turn Conversations
 
@@ -335,6 +336,121 @@ model <---------- tool results
 finish node (output guardrails) ---> Completed | Blocked (turn removed)
 ```
 
+### Typed Tools
+
+An agent's tools are `AgentTool`s (`org.llm4s.agent.graph.tool`). A core `ToolFunction` - one built with
+`ToolBuilder`, a [built-in tool](../builtin-tools), an MCP tool - becomes one through `AgentTool.fromToolFunction`,
+which is what `withTools(registry)` does for every tool of a `ToolRegistry`. Writing an `AgentTool` yourself gives
+the tool what a `ToolFunction` has no place for: arguments decoded to your own type, the run's `ToolContext`, and
+an outcome that can update thread state, ask for approval or ask the caller a question.
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.toolapi.{ Schema, SchemaDefinition }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+final case class Search(query: String) derives ReadWriter
+
+val searchSchema: SchemaDefinition[Search] =
+  Schema.`object`[Search]("Search").withRequiredField("query", Schema.string("The query"))
+
+val search: AgentTool[Search] =
+  AgentTool(AgentToolSpec[Search]("search", "Searches the catalogue", searchSchema)) { (args, _) =>
+    if args.query.isBlank then ToolOutcome.Error("the query is empty")
+    else ToolOutcome.success(ToolContent.Json(ujson.Arr(ujson.Str(s"a result for ${args.query}"))))
+  }
+
+def searchAgent(client: LLMClient): Result[Agent] =
+  for
+    tools <- ToolSet.of(search)
+    agent <- Agent.builder("assistant", client).withToolSet(tools).build()
+  yield agent
+```
+
+The pieces:
+
+- **`AgentToolSpec[A]`** is what the model and the loop are told: a `name` (it must match `[a-zA-Z0-9_-]{1,64}`), a
+  `description`, the argument `schema`, and a `ReadWriter[A]` that decodes the arguments. A call's arguments are
+  validated against the schema and decoded before the tool runs, so `execute` receives an `A`, never raw JSON.
+  `withValidation` adds a check on the decoded value, whose `Left` is an error the model sees; `withHints`,
+  `withTimeout`, `withResources` and `withLocks` are under
+  [Tool Permissions, Timeouts and Locks](#tool-permissions-timeouts-and-locks).
+- **`AgentTool(spec)(run)`** makes a tool from a spec and a function `(A, ToolContext) => ToolOutcome`. Its second
+  parameter list is preceded by an optional `writes`, the state keys the tool's updates may touch.
+- **`ToolContext`** is the call the tool is running in: `run` (the `RunContext`), `toolCallId`, `idempotencyKey`
+  (the same in every run of one call; see [Tool Side Effects](#tool-side-effects)), `state` (the thread's state)
+  and `approved`.
+- **`ToolSet.of(tools*)`** is the only way to build a `ToolSet`, and returns a `Result`: it refuses, in one
+  `ValidationError` listing every problem, an invalid or duplicate tool name, an argument schema whose root is not
+  an object, and a schema keyword the argument validator does not check. `withToolSet(tools)` takes the set.
+
+A tool answers with a `ToolOutcome`:
+
+| Outcome | What happens |
+|---|---|
+| `ToolOutcome.success(content, update)` | The call succeeded. `content` is a `ToolContent` for the model: `ToolContent.Json(value)`, or `ToolContent.Parts(parts)` for [images and documents](../multimodal). `update`, optional, is a `StateUpdate` to keys the tool declares in `writes` |
+| `ToolOutcome.Error(message)` | A tool-level failure: the model sees `message`, and the run continues |
+| `ToolOutcome.NeedsApproval(reason)` | The run suspends until the call is approved, rejected or edited ([Human Review](human-review)) |
+| `ToolOutcome.Ask(question)` | A question for the caller. Only a tool extending `AgentTool.Asking` asks one |
+| `ToolOutcome.Fatal(error)` | An infrastructure failure: the run fails with `GraphError.ToolFailed` |
+
+A tool that asks extends `AgentTool.Asking[A, Q, Ans]`, with a `ReadWriter` for the question type `Q` and the
+answer type `Ans`. It calls `ask(question)` from `execute`, the run ends `Suspended` with the question under
+`questions`, and when the caller replies the loop calls the tool's `resume(args, question, answer, context)`
+([Human Review](human-review#five-ways-a-turn-waits)):
+
+```scala
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.toolapi.{ Schema, SchemaDefinition }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+final case class Transfer(account: String, amount: Int) derives ReadWriter
+final case class Confirm(prompt: String) derives ReadWriter      // the question, Q
+final case class Decision(confirmed: Boolean) derives ReadWriter // the answer, Ans
+
+val transferSchema: SchemaDefinition[Transfer] =
+  Schema
+    .`object`[Transfer]("Transfer")
+    .withRequiredField("account", Schema.string("The destination account"))
+    .withRequiredField("amount", Schema.integer("The amount, in whole units"))
+
+final class TransferTool
+    extends AgentTool.Asking[Transfer, Confirm, Decision](
+      AgentToolSpec[Transfer]("transfer", "Transfers money to an account", transferSchema)
+    ):
+  def execute(args: Transfer, context: ToolContext): ToolOutcome =
+    if args.amount <= 100 then ToolOutcome.success(ToolContent.Json(ujson.Str("sent")))
+    else ask(Confirm(s"Send ${args.amount} to ${args.account}?"))
+
+  def resume(args: Transfer, question: Confirm, answer: Decision, context: ToolContext): ToolOutcome =
+    if answer.confirmed then ToolOutcome.success(ToolContent.Json(ujson.Str("sent")))
+    else ToolOutcome.Error("the user declined the transfer")
+
+def confirmAll(agent: Agent, result: AgentResult): Result[AgentResult] =
+  result.status match
+    case AgentStatus.Suspended(suspension) =>
+      val answers = suspension.questions.map((id, _) => result.reply(id, Decision(confirmed = true)))
+      agent.resume(result.threadId, answers.toMap)
+    case _ => Right(result)
+
+def transferAgent(client: org.llm4s.llmconnect.LLMClient): Result[Agent] =
+  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withToolSet(tools).build())
+```
+
+Each entry of `suspension.questions` is a `ToolQuestionRequest` carrying the tool call and the question as JSON,
+for showing it to a person. The question and answer types are part of the tool's contract with whoever answers it:
+an answer that does not decode as `Ans` is not refused by `resume` but becomes that call's error result, which the
+model sees. `resume` may itself `ask` again, or return any other outcome.
+
+Typed tools live in `llm4s-agent` because they need the agent loop: its thread state, approvals and questions.
+A tool that needs none of those, and that other code (an MCP server, a plain `complete` call) should be able to
+call too, is a core `ToolFunction` ([Build Your Own Tool](../custom-tools)); the agent adapts it.
+
 ### Parallel Tool Calls
 
 The tool calls of one model message run in parallel, bounded by `RunBudgets.maxConcurrency`,
@@ -424,7 +540,7 @@ system it calls, which then does the work once:
 import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
-  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
+  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.asString) match
     case Right(receipt) => ToolOutcome.success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
@@ -437,11 +553,11 @@ outside an agent, through `ToolRegistry.execute`, which has no call to describe:
 ```scala
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 
-val charge = ToolBuilder[Map[String, Any], String]("charge", "Charges a card", chargeSchema)
+val charge = ToolBuilder[String]("charge", "Charges a card", chargeSchema)
   .withHandler { params =>
     for
       amount  <- params.getDouble("amount")
-      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey))
+      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey.asString))
     yield receipt.id
   }
   .buildSafe()
@@ -590,7 +706,7 @@ HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-lock
   Using.resource(opened) { project => // closed when the block ends, whether it succeeds or fails
     for {
       tools  <- ToolSet.of(FileTools(project)*)
-      agent  <- Agent.builder("coder", client).withTools(tools).build()
+      agent  <- Agent.builder("coder", client).withToolSet(tools).build()
       result <- agent.run("Summarise README.md")
     } yield result
   }
@@ -611,7 +727,7 @@ import org.llm4s.agent.harness.{FileToolLimits, FileTools, StateFileBackend}
 
 for {
   tools <- ToolSet.of(FileTools(StateFileBackend(), FileToolLimits(maxResultChars = 20000))*)
-  agent <- Agent.builder("coder", client).withTools(tools).build()
+  agent <- Agent.builder("coder", client).withToolSet(tools).build()
 } yield agent
 ```
 
@@ -651,7 +767,7 @@ for
   files   <- WorkspaceFileBackend("ws1", workspace)             // a FileBackend for the file tools
   sandbox <- WorkspaceSandboxBackend("ws1", workspace)
   agent   <- Agent.builder("coder", client)
-               .withTools(ToolSet.of(ExecuteTool(sandbox)).toOption.get)
+               .withToolSet(ToolSet.of(ExecuteTool(sandbox)).toOption.get)
                .build()
 yield agent
 ```
@@ -901,23 +1017,19 @@ for {
 
 ### [Guardrails](guardrails)
 
-Validate inputs and outputs for safety. Guardrails are middleware on the agent:
+Validate inputs and outputs for safety. Guardrails are set on the agent:
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
 val agent = Agent.builder("assistant", client)
-  .withMiddleware(
-    new GuardrailMiddleware(
-      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-      output = Seq(new JSONValidator())
-    )
-  )
+  .withInputGuardrails(LengthCheck(1, 10000), ProfanityFilter())
+  .withOutputGuardrails(JSONValidator())
   .build()
 ```
 
-A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays usable.
+A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays
+usable. The reason is given to the caller of the run that was blocked and is never stored.
 
 [Learn more about guardrails →](guardrails)
 
@@ -1127,7 +1239,7 @@ for {
   files <- CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
   tools <- ToolSet.of(FileTools(files)*)
   agent <- Agent.builder("assistant", client)
-             .withTools(tools)
+             .withToolSet(tools)
              .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
              .build()
 } yield agent

@@ -35,13 +35,13 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c1", "good"), call("c2", "flaky")),
       CompletionFixture.simple("all done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)))
 
     val failed = agent.run(thread, "go")
     cause(failed.error) match {
       case GraphError.ToolFailed(tool, callId, _) =>
         tool shouldBe org.llm4s.agent.graph.ToolName("flaky")
-        callId shouldBe org.llm4s.agent.graph.ToolCallId("c2")
+        callId shouldBe org.llm4s.llmconnect.model.ToolCallId("c2")
       case other => fail(s"expected ToolFailed, got $other")
     }
 
@@ -65,7 +65,7 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ToolOutcome.success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
 
     val run = agent.start(thread, "go").fold(e => fail(e.message), identity)
     started.await(10, TimeUnit.SECONDS) shouldBe true
@@ -88,7 +88,7 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ToolOutcome.success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
 
     val first = agent.start(thread, "go").fold(e => fail(e.message), identity)
     entered.tryAcquire(10, TimeUnit.SECONDS) shouldBe true
@@ -111,7 +111,7 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ToolOutcome.success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("in time"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
 
     val timed = agent.run(thread, "go", RunConfig().withBudgets(RunBudgets(timeout = Some(50.millis))))
     cause(timed.error) shouldBe a[GraphError.DeadlineExceeded]
@@ -123,7 +123,7 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "StepLimitReached" should "be a completed turn: the next one runs normally" in {
     val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("next turn"))
-    val agent  = built(Agent.builder("assistant", client).withMaxSteps(1).withTools(SpecTools.set(echo)))
+    val agent  = built(Agent.builder("assistant", client).withMaxSteps(1).withToolSet(SpecTools.set(echo)))
 
     val limited = agent.run(thread, "go").value
     limited.status shouldBe AgentStatus.StepLimitReached

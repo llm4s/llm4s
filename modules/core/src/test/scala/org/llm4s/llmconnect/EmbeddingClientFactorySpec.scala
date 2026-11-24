@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -14,32 +16,56 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  "EmbeddingClient.from(provider,cfg)" should {
+  "EmbeddingClient.from(cfg)" should {
     "build client for a registered provider without throwing" in {
       val cfg = EmbeddingProviderConfig(
-        baseUrl = "https://embeddings.example.test",
-        model = "fixture-embed-small",
-        apiKey = Secret("vk-test")
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("https://embeddings.example.test"),
+        model = ModelName("fixture-embed-small"),
+        apiKey = Some(Secret("vk-test"))
       )
-      val res = EmbeddingClient.from("fixtureembedding", cfg)
+      val res = EmbeddingClient.from(cfg.withProviderId(ProviderId("fixtureembedding")))
       res.isRight shouldBe true
     }
 
     "reject unknown provider" in {
       val cfg = EmbeddingProviderConfig(
-        baseUrl = "http://localhost",
-        model = "m",
-        apiKey = Secret("k")
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("http://localhost"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("k"))
       )
-      val res = EmbeddingClient.from("unknown", cfg)
+      val res = EmbeddingClient.from(cfg.withProviderId(ProviderId("unknown")))
       res.isLeft shouldBe true
     }
 
+    "report an unknown provider as the registry's ConfigurationError, with no invented HTTP status" in {
+      val cfg = EmbeddingProviderConfig(
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("http://localhost"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("k"))
+      )
+      val error = EmbeddingClient
+        .from(cfg.withProviderId(ProviderId("unknown")))
+        .left
+        .toOption
+        .getOrElse(fail("expected an error"))
+
+      error shouldBe a[ConfigurationError]
+      error.code shouldBe None
+    }
+
     "name the registered embedding providers when one is unknown" in {
-      val cfg = EmbeddingProviderConfig(baseUrl = "http://localhost", model = "m", apiKey = Secret("k"))
+      val cfg = EmbeddingProviderConfig(
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("http://localhost"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("k"))
+      )
 
       val message = EmbeddingClient
-        .from("unknown", cfg)
+        .from(cfg.withProviderId(ProviderId("unknown")))
         .left
         .toOption
         .getOrElse(fail("expected an unknown-provider error"))
@@ -57,13 +83,18 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       // here without llm4s-core knowing it exists.
       given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings)
 
-      val cfg = EmbeddingProviderConfig(baseUrl = "http://fixture", model = "m", apiKey = Secret("k"))
+      val cfg = EmbeddingProviderConfig(
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("http://fixture"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("k"))
+      )
       val client = EmbeddingClient
-        .from("fixtureembed", cfg)
+        .from(cfg.withProviderId(ProviderId("fixtureembed")))
         .getOrElse(fail("expected the registered fixture provider to resolve"))
 
       val response = client
-        .embed(EmbeddingRequest(input = Seq("hello"), model = EmbeddingModelConfig("m", dimensions = 2)))
+        .embed(EmbeddingRequest(input = Seq("hello"), model = EmbeddingModelConfig(ModelName("m"), dimensions = 2)))
         .getOrElse(fail("expected the fixture provider to embed"))
 
       // The config reached the provider the descriptor built, not a stale one.
@@ -75,23 +106,25 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       // break if a partial `using` list were not allowed: Scala 3 infers the remainder, and
       // `ProviderRegistry`'s given lives in its own companion, so it is always in scope.
       val cfg = EmbeddingProviderConfig(
-        baseUrl = "https://embeddings.example.test",
-        model = "fixture-embed-small",
-        apiKey = Secret("vk-test")
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("https://embeddings.example.test"),
+        model = ModelName("fixture-embed-small"),
+        apiKey = Some(Secret("vk-test"))
       )
       val service = summon[ModelRegistryService]
 
-      EmbeddingClient.from("fixtureembedding", cfg)(using service).isRight shouldBe true
+      EmbeddingClient.from(cfg.withProviderId(ProviderId("fixtureembedding")))(using service).isRight shouldBe true
     }
 
     "fold an alias onto the provider that declares it" in {
       val cfg = EmbeddingProviderConfig(
-        baseUrl = "https://embeddings.example.test",
-        model = "fixture-embed-small",
-        apiKey = Secret("vk-test")
+        providerId = ProviderId("fixtureembedding"),
+        baseUrl = BaseUrl("https://embeddings.example.test"),
+        model = ModelName("fixture-embed-small"),
+        apiKey = Some(Secret("vk-test"))
       )
 
-      EmbeddingClient.from("fixture-embedding-ai", cfg).isRight shouldBe true
+      EmbeddingClient.from(cfg.withProviderId(ProviderId("fixture-embedding-ai"))).isRight shouldBe true
     }
   }
 }

@@ -5,7 +5,7 @@ parent: Build a Support Assistant
 grand_parent: Tutorials
 nav_order: 4
 description: "Support assistant tutorial, part 4: answer from the shop's help-centre articles with an LLM4S RAG pipeline that ingests, embeds, retrieves and cites its sources."
-search_title: "Support assistant tutorial 4: RAG over help-centre docs in Scala"
+search_title: "Support assistant tutorial 4: RAG over help-centre docs"
 ---
 
 # Part 4: answers from the help centre
@@ -66,7 +66,7 @@ def withHelpCentre[A](client: LLMClient)(use: RAG => Result[A]): Result[A] = {
     given ModelRegistryService = models
     config = RAG
       .builder()
-      .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+      .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model.asString, BagOfWordsEmbeddings.Dimensions)
       .withTopK(2)
       .withSystemPrompt(helpCentrePrompt)
       .withLLM(client)
@@ -135,7 +135,7 @@ case class HelpQuery(@description("The customer's question, in a few words") que
 
 case class HelpPassage(article: String, text: String) derives ReadWriter
 
-def helpTool(rag: RAG): Result[ToolFunction[HelpQuery, Seq[HelpPassage]]] =
+def helpTool(rag: RAG): Result[ToolFunction[Seq[HelpPassage]]] =
   Tool.of[HelpQuery, Seq[HelpPassage]]("search_help_centre", "Passages of Acme Shop's help-centre articles") {
     query =>
       rag

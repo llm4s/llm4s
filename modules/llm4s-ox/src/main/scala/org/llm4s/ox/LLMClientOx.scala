@@ -1,5 +1,6 @@
 package org.llm4s.ox
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import _root_.ox.{ parLimit, raceSuccess, EitherMode }
 import _root_.ox.channels.BufferCapacity
 import _root_.ox.flow.Flow
@@ -42,7 +43,7 @@ object LLMClientOx {
     def streamFlow(conversation: Conversation, options: CompletionOptions = CompletionOptions())(using
       BufferCapacity
     ): Flow[StreamedChunk] =
-      CallbackFlow[StreamedChunk]("ox.streamFlow")(onChunk => client.streamComplete(conversation, options, onChunk))
+      CallbackFlow[StreamedChunk]("ox.streamFlow")(onChunk => client.streamComplete(conversation, options)(onChunk))
 
     /**
      * Completes each conversation with `client`, at most `parallelism` at a time (a bound below 1 counts as 1), on
@@ -81,7 +82,7 @@ object LLMClientOx {
      * [[LLMException]] returns its `LLMError` as a `Left`; any other exception, an interrupt included, propagates.
      */
     def accumulate: Result[Completion] = {
-      val accumulator = StreamingAccumulator("")
+      val accumulator = StreamingAccumulator(ModelName(""))
       Try(flow.runForeach(accumulator.addChunk)) match {
         case Success(())              => accumulator.toCompletion
         case Failure(e: LLMException) => Left(e.error)

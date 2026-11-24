@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 
 /**
@@ -119,7 +120,7 @@ object ProviderConfigKey:
  *                             itself). Non-empty means the provider supports workload-identity
  *                             authentication, and a section with an `auth` block then needs no
  *                             `apiKey`; required and default keys are validated as for `extras`.
- * @param keylessWhen          a provider-specific key and the value of it that selects an authentication
+ * @param keylessWhen          the provider-specific key, and the values of it, that select an authentication
  *                             needing no API key - Azure OpenAI's `authentication = "entra-id"` (#2274).
  *                             A section that sets that value is validated without an `apiKey`, does not
  *                             take the vendor's shared key, and may not set one of its own. The key must be
@@ -136,26 +137,28 @@ object ProviderConfigKey:
 final case class ProviderConfigSpec private (
   requiresApiKey: Boolean,
   requiresBaseUrl: Boolean,
-  defaultBaseUrl: Option[String],
+  defaultBaseUrl: Option[BaseUrl],
   baseUrlExample: String,
   baseUrlEnv: Option[String],
   extras: Seq[ProviderConfigKey],
   apiKeyEnv: Seq[String],
   authExtras: Seq[ProviderConfigKey],
-  keylessWhen: Option[(String, String)]
+  keylessWhen: Option[KeylessSetting]
 ):
   def withRequiresApiKey(requiresApiKey: Boolean): ProviderConfigSpec   = copy(requiresApiKey = requiresApiKey)
   def withRequiresBaseUrl(requiresBaseUrl: Boolean): ProviderConfigSpec = copy(requiresBaseUrl = requiresBaseUrl)
-  def withDefaultBaseUrl(defaultBaseUrl: String): ProviderConfigSpec    = copy(defaultBaseUrl = Some(defaultBaseUrl))
-  def withDefaultBaseUrl(defaultBaseUrl: Option[String]): ProviderConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
-  def withBaseUrlExample(baseUrlExample: String): ProviderConfigSpec         = copy(baseUrlExample = baseUrlExample)
-  def withBaseUrlEnv(baseUrlEnv: String): ProviderConfigSpec                 = copy(baseUrlEnv = Some(baseUrlEnv))
-  def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec         = copy(baseUrlEnv = baseUrlEnv)
-  def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec         = copy(extras = extras)
-  def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec              = copy(apiKeyEnv = apiKeyEnv)
-  def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec = copy(authExtras = authExtras)
-  def withKeylessWhen(key: String, value: String): ProviderConfigSpec        = copy(keylessWhen = Some(key -> value))
-  def withKeylessWhen(keylessWhen: Option[(String, String)]): ProviderConfigSpec =
+  def withDefaultBaseUrl(defaultBaseUrl: BaseUrl): ProviderConfigSpec   = copy(defaultBaseUrl = Some(defaultBaseUrl))
+  def withDefaultBaseUrl(defaultBaseUrl: Option[BaseUrl]): ProviderConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
+  def withBaseUrlExample(baseUrlExample: String): ProviderConfigSpec          = copy(baseUrlExample = baseUrlExample)
+  def withBaseUrlEnv(baseUrlEnv: String): ProviderConfigSpec                  = copy(baseUrlEnv = Some(baseUrlEnv))
+  def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec          = copy(baseUrlEnv = baseUrlEnv)
+  def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec          = copy(extras = extras)
+  def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec               = copy(apiKeyEnv = apiKeyEnv)
+  def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec  = copy(authExtras = authExtras)
+  def withKeylessWhen(keylessWhen: KeylessSetting): ProviderConfigSpec        = copy(keylessWhen = Some(keylessWhen))
+  def withKeylessWhen(key: String, value: String, others: String*): ProviderConfigSpec =
+    copy(keylessWhen = Some(KeylessSetting(key, value, others*)))
+  def withKeylessWhen(keylessWhen: Option[KeylessSetting]): ProviderConfigSpec =
     copy(keylessWhen = keylessWhen)
 
   /** The declared provider-specific key called `name`, if any. */
@@ -169,7 +172,7 @@ final case class ProviderConfigSpec private (
    * [[keylessWhen]]; the key's value as the section wrote it, before defaults.
    */
   private[llm4s] def isKeyless(extras: Map[String, String]): Boolean =
-    keylessWhen.exists((key, value) => extras.get(key).exists(_.trim.equalsIgnoreCase(value.trim)))
+    keylessWhen.exists(_.selectedBy(extras))
 
 object ProviderConfigSpec:
 
@@ -177,13 +180,13 @@ object ProviderConfigSpec:
   def apply(
     requiresApiKey: Boolean = false,
     requiresBaseUrl: Boolean = false,
-    defaultBaseUrl: Option[String] = None,
+    defaultBaseUrl: Option[BaseUrl] = None,
     baseUrlExample: String = "e.g. https://api.example.com/",
     baseUrlEnv: Option[String] = None,
     extras: Seq[ProviderConfigKey] = Seq.empty,
     apiKeyEnv: Seq[String] = Seq.empty,
     authExtras: Seq[ProviderConfigKey] = Seq.empty,
-    keylessWhen: Option[(String, String)] = None
+    keylessWhen: Option[KeylessSetting] = None
   ): ProviderConfigSpec =
     new ProviderConfigSpec(
       requiresApiKey,
@@ -215,5 +218,29 @@ object ProviderConfigSpec:
    * @param apiKeyEnv the variables the module binds to `llm4s.credentials.<id>.apiKey`; see
    *                  [[ProviderConfigSpec.apiKeyEnv]].
    */
-  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: String, apiKeyEnv: Seq[String] = Seq.empty): ProviderConfigSpec =
+  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: BaseUrl, apiKeyEnv: Seq[String] = Seq.empty): ProviderConfigSpec =
     ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(defaultBaseUrl), apiKeyEnv = apiKeyEnv)
+
+/**
+ * The provider-specific setting that selects an authentication needing no API key (#2274): a key the provider
+ * declares in [[ProviderConfigSpec.extras]] and the values of it that do, such as Azure OpenAI's
+ * `authentication = "entra-id"`. A value is compared ignoring case and surrounding blanks.
+ *
+ * @param key    the declared key's name, e.g. `"authentication"`
+ * @param values the values of `key` that need no API key; never empty
+ */
+@Stable
+final case class KeylessSetting private (key: String, values: Seq[String]):
+
+  /** Whether a section whose provider-specific keys are `extras` sets one of [[values]]. */
+  private[llm4s] def selectedBy(extras: Map[String, String]): Boolean =
+    extras.get(key).exists(set => values.exists(_.trim.equalsIgnoreCase(set.trim)))
+
+  /** The setting as a section writes it, e.g. `authentication = "entra-id"`; several values are joined with "or". */
+  def describe: String = s"$key = ${values.map(value => s"\"$value\"").mkString(" or ")}"
+
+object KeylessSetting:
+
+  /** The setting `key`, keyless when it is `value` or one of `others`. */
+  def apply(key: String, value: String, others: String*): KeylessSetting =
+    new KeylessSetting(key, (value +: others).distinct)

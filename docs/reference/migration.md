@@ -4,6 +4,7 @@ title: Migration Guide
 description: "Per-change migration notes for LLM4S releases after 0.4.1, from Secret credentials to multimodal content parts and subagent changes."
 parent: Reference
 nav_order: 2
+cites_issues: all
 ---
 
 # Migration Guide
@@ -48,9 +49,11 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
 [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
+[`SQLiteVectorStore` escapes metadata and filters exactly](#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759),
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
+[the middleware SPI is consistent and testable](#the-middleware-spi-is-consistent-and-testable-2795),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
 [Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization),
@@ -58,6 +61,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
 [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
 [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
+[the Langfuse backend sends OpenTelemetry spans](#the-langfuse-backend-sends-opentelemetry-spans-2883),
 [`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
 [`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801),
 [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
@@ -75,7 +79,1207 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`Llm4sConfig.providerConfigs()` returns each section's `Result`](#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804),
 [`ToolRegistry` is a trait built with `ToolRegistry.of`](#toolregistry-is-a-trait-built-with-toolregistryof-2816),
 [`SchemaDefinition` gains a union and a raw JSON Schema case](#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814),
-and [a tool handler has one error type](#a-tool-handler-has-one-error-type-2815).
+[a tool handler has one error type](#a-tool-handler-has-one-error-type-2815),
+[a guardrail's reason is never stored](#a-guardrails-reason-is-never-stored-2853),
+[a turn's query is admitted before the turn is stored](#a-turns-query-is-admitted-before-the-turn-is-stored-2854),
+[an agent run's trace and metrics report one status](#an-agent-runs-trace-and-metrics-report-one-status-2829),
+[`TraceEvent` carries an error as it is, and `AgentInitialized` is removed](#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800),
+[one retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed](#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798),
+[the provider SPI's error mapping, published helpers and report types](#provider-spi-error-mapping-published-helpers-report-types-2811),
+[the provider SPI's descriptors, embedding sections and credential suppliers](#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811),
+[the Experimental context pipeline and token counters built over a tokenizer](#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818),
+[`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
+[opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
+[`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
+[tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
+[image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801),
+[the Hugging Face image client on Inference Providers](#the-hugging-face-image-client-calls-inference-providers-2832),
+[the config-policy `prod` preset's model generations](#the-config-policy-prod-preset-allows-model-generations-2885),
+[the OpenAI image client's default model](#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884),
+[which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
+[`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
+[`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
+[`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
+[`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)
+and [message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809).
+
+## Message parts, citations and adjustments are `Seq`s (#2809)
+
+The model's public signatures use `Seq` for a collection, as `AssistantMessage.toolCalls` already did. Stored JSON
+is unchanged: a message with one text part is still written as `content`, any other as `parts`, whatever `Seq`
+holds them.
+
+| Before | After |
+|---|---|
+| `UserMessage.parts`, `ToolMessage.parts`: `Vector[ContentPart]`; `apply(parts: Vector[...])`, `withParts(Vector[...])` | `Seq[ContentPart]`; a `List` or any other `Seq` is accepted |
+| `Completion.citations: List[Citation]`, `withCitations(List[...])` | `Seq[Citation]` |
+| `Completion.adjustments`, `TransformationResult.adjustments`: `List[RequestAdjustment]`; `RequestTransformer.transform` returns `(CompletionOptions, List[RequestAdjustment])` | `Seq[RequestAdjustment]` |
+| `OpenAICompatibleDialect.addReasoning(...)`: `List[RequestAdjustment]` | `Seq[RequestAdjustment]`: change the return type of an override |
+| `AgentEvents.ModelCallCompleted.adjustments: List[RequestAdjustment]` | `Seq[RequestAdjustment]` |
+
+Code that reads one of these as a `List` or `Vector` (`val parts: Vector[ContentPart] = message.parts`, a
+`case Vector(...)` or `::` pattern) calls `.toVector` / `.toList`, or uses `Seq` and `case Seq(...)`.
+
+## `withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost (#2835)
+
+MiMa skips an `@Experimental` method together with every overload of its name, so an Experimental overload of a
+Stable method would leave the Stable one unchecked once the baseline is set. The two such overloads in `llm4s-agent`
+are renamed:
+
+| Before | After |
+|---|---|
+| `Agent.builder(id, client).withTools(toolSet)`, given a `ToolSet` | `.withToolSet(toolSet)`; `withTools(registry)` still takes a `ToolRegistry` |
+| `override def validate(value: A, context: UsageAccounting)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` |
+| `guardrail.validate(value, context)` | `guardrail.validateIn(value, context)` |
+
+`validate(value)` is unchanged. `RAGGuardrail.validateWithContext(output, ragContext)` is unchanged too: it validates
+against a `RAGContext`, which is why the stage form is not called `validateWithContext`. `TypedAgent.withTools`,
+`LoopAgent.withTools` and `ModelRequest.withTools` take only a `ToolSet` and keep their names.
+
+The Java facade's `inputGuardrails` and `outputGuardrails` now sit where a Scala agent's `withInputGuardrails` and
+`withOutputGuardrails` put them: innermost in the agent's middleware, after the facade's context window. Before, the
+facade installed its own `GuardrailMiddleware` first. Input guardrails run at admission wherever they sit, so a blocked
+query was already never stored; innermost, an output guardrail also checks the answer before any other middleware's
+`afterAgent` sees it, the order the Scala builder chose so that a middleware such as semantic memory never records a
+blocked answer. What a Java agent answers or blocks is unchanged, but its graph version changes (the guardrail
+middleware's id is `agent-guardrails` now), so a Java agent's thread suspended or in flight before the upgrade is not
+resumed by the upgraded agent: finish or abandon it first.
+
+## `llm4s.providers.provider` is now `llm4s.defaultProvider` (#2806)
+
+The name of the default provider section used to be a key *inside* `llm4s.providers`, beside the sections it chose
+between. So `provider` meant "the default section" at `llm4s.providers.provider` and "which provider this section
+is" one level down at `llm4s.providers.<name>.provider`, and a section could not be called `provider`. It is now
+`llm4s.defaultProvider`, beside the block; every key of `llm4s.providers` is a section.
+
+**`application.conf`**: move the line out of the block and rename it.
+
+```hocon
+# before
+llm4s {
+  providers {
+    provider = "openai-main"
+    provider = ${?LLM4S_PROVIDER}        # if you bound it to a variable
+    openai-main { provider = "openai", model = "gpt-4o-mini" }
+  }
+}
+
+# after
+llm4s {
+  defaultProvider = "openai-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
+  providers {
+    openai-main { provider = "openai", model = "gpt-4o-mini" }
+  }
+}
+```
+
+| Where | Before | After |
+|---|---|---|
+| HOCON | `llm4s.providers.provider = "x"` | `llm4s.defaultProvider = "x"` |
+| JVM system property | `-Dllm4s.providers.provider=x` | `-Dllm4s.defaultProvider=x` |
+| Spring Boot `application.properties` / YAML | `llm4s.providers.provider=x` | `llm4s.default-provider=x` (`llm4s.defaultProvider` and `llm4s.default_provider` are read too) |
+| Quarkus `application.properties` | `llm4s.providers.provider=x` | `llm4s.default-provider=x` (or `llm4s.defaultProvider`) |
+| Environment | none: the library binds no variable to it | unchanged: bind your own, `llm4s.defaultProvider = ${?MY_VAR}` |
+
+The library never bound an environment variable to this key, so no variable is renamed. The *samples* bind
+`LLM4S_PROVIDER` in their own `application.conf`; that binding moved to `llm4s.defaultProvider` with the key.
+
+**If you do not change it**, `llm4s.providers.provider = "x"` no longer selects anything:
+`Llm4sConfig.defaultProvider()` and `defaultProviderName()` return
+`No default provider configured under llm4s.defaultProvider. llm4s.providers.provider ('x') no longer names the default section: move it out of the providers block, as llm4s.defaultProvider = "x"`.
+The string is also read as a section named `provider` that is not an object, so `providerConfigs()` holds a `Left`
+under `provider`; the other sections load as before, and `Llm4sConfig.provider(ProviderName("x"))` still works.
+
+No Scala method changed name: `Llm4sConfig.defaultProvider()` and `defaultProviderName()` read the new key.
+
+**Also in #2806.** `org.llm4s.config.ConfigKeys` is removed: it held one constant, `ConfigKeys.EMBEDDING_MODEL`;
+write `"EMBEDDING_MODEL"`. Each provider module's own `<Name>ConfigKeys` object is unchanged. The `llm4s.workspace`
+block (`WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`) is bound by `llm4s-workspace-client`'s `reference.conf`
+instead of core's: nothing changes for an application with the workspace client on its classpath, its only reader;
+one that read `llm4s.workspace.*` itself *without* that module binds the three variables in its own
+`application.conf`.
+
+## `Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone (#2804)
+
+Follows [`Llm4sConfig.providerConfigs()` returns each section's `Result`](#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804).
+The `ProviderConfigNewtypes` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites a literal or `String` argument of `provider` and `listModels`.
+
+```scala
+import org.llm4s.types.ProviderModelTypes.ProviderName
+
+// before
+Llm4sConfig.provider("openai-main")
+Llm4sConfig.listModels("openai-main")
+// after
+Llm4sConfig.provider(ProviderName("openai-main"))
+Llm4sConfig.listModels(ProviderName("openai-main"))
+```
+
+`defaultProviderName()` already returned a `ProviderName`, so `defaultProviderName().flatMap(Llm4sConfig.provider)`
+needs no conversion. The same holds for `Llm4sSettings`.
+
+**`embeddings()`** returned `Result[(String, EmbeddingProviderConfig)]`, the provider id beside its config. The id is
+now `EmbeddingProviderConfig.providerId`, so it returns `Result[EmbeddingProviderConfig]`, and
+`EmbeddingClient.from` takes the config with no provider name:
+
+```scala
+// before
+for {
+  pair <- Llm4sConfig.embeddings()
+  (provider, config) = pair
+  client <- EmbeddingClient.from(provider, config)
+} yield client
+
+// after
+for {
+  config <- Llm4sConfig.embeddings()          // config.providerId is the canonical provider id
+  client <- EmbeddingClient.from(config)
+} yield client
+```
+
+| Before | After |
+|---|---|
+| `Llm4sConfig.embeddings().map(_._2)` | `Llm4sConfig.embeddings()` |
+| `Llm4sConfig.embeddings().map(_._1)` | `Llm4sConfig.embeddings().map(_.providerId.asString)` |
+| `EmbeddingClient.from("voyage", config)` | `EmbeddingClient.from(config.withProviderId(ProviderId("voyage")))`, or build the config with that id |
+| `EmbeddingClient.from(provider, config, options)` | `EmbeddingClient.from(config, options)` |
+| `RAGASFactory.fromConfigs(providerCfg, (provider, embeddingCfg))`, `basicFromConfigs` (`llm4s-rag`) | `RAGASFactory.fromConfigs(providerCfg, embeddingCfg)` |
+| `ProviderTestConfig.loadEmbeddings(...)`: `Result[(String, EmbeddingProviderConfig)]` (`llm4s-provider-testkit`) | `Result[EmbeddingProviderConfig]` |
+
+**`textEmbeddingModel()`** returned `Llm4sConfig.TextEmbeddingModelSettings(provider, modelName, dimensions)`, a
+copy of `EmbeddingModelConfig` with a provider string. That type is removed; the method returns
+`Result[EmbeddingModelConfig]` (`name`, `dimensions`), which is what an `EmbeddingRequest` takes:
+
+```scala
+// before
+for {
+  settings <- Llm4sConfig.textEmbeddingModel()
+  model = EmbeddingModelConfig(settings.modelName, settings.dimensions)
+} yield model
+// after
+Llm4sConfig.textEmbeddingModel()
+// the provider, if you read settings.provider: Llm4sConfig.embeddings().map(_.providerId)
+```
+
+**`ProvidersConfigModel` is removed.** It was an object used as a namespace: it held `NamedProviderConfig` and
+re-exported every newtype of `org.llm4s.types.ProviderModelTypes`, so each had two import paths.
+
+| Before | After |
+|---|---|
+| `import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig` | `import org.llm4s.config.NamedProviderConfig` |
+| `import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProviderId, ModelName, BaseUrl, ApiKey }` | `import org.llm4s.types.ProviderModelTypes.{ ... }` |
+| `import org.llm4s.config.ProvidersConfigModel.*` | `import org.llm4s.config.NamedProviderConfig` and `import org.llm4s.types.ProviderModelTypes.*` |
+| `ProvidersConfigModel.NamedProviderConfig` in a signature | `NamedProviderConfig` |
+
+A provider module's descriptor is the usual place this appears (`buildConfig(section: NamedProviderConfig, ...)`).
+
+## `ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed (#2805)
+
+The `ProviderConfigNewtypes` Scalafix rule ([Scalafix](scalafix#migration-rules)) wraps a provider config's named `model = "..."` argument and
+`withModel("...")` in `ModelName(...)`; a model passed by position is left for the compiler to report.
+
+**`ProviderConfig`, for callers:**
+
+| Before | After |
+|---|---|
+| `config.model: String` | `config.model: ModelName`; `config.model.asString` for the string |
+| `config.withModel("gpt-4o")` | `config.withModel(ModelName("gpt-4o"))` |
+| `config.endpointUrl: Option[String]` | `Option[BaseUrl]`; `config.endpointUrl.map(_.asUrl)` |
+| `config.withApiKeyProvider(keys): ProviderConfig` | `Result[ProviderConfig]`: `Llm4sConfig.provider(name).flatMap(_.withApiKeyProvider(keys))` |
+| check `config.apiKeyProvider.isDefined` afterwards | not needed: a config that cannot take one returns a `ConfigurationError` |
+| `OpenAIConfig(apiKey, "gpt-4o")`, and every other provider config's `apply` | `OpenAIConfig(apiKey, ModelName("gpt-4o"))`; `fromValues(...)` still takes the model as a `String` |
+| `BedrockConfig(endpointUrl = Some("https://..."))` | `Some(BaseUrl("https://..."))`; `BedrockConfig.fromValues` still takes `Option[String]` |
+
+On a concrete config the total setter remains: `openAIConfig.withApiKeyProvider(Some(keys)): OpenAIConfig` (and
+`None` to go back to the key the config holds). Configs that authenticate without an API key (`OllamaConfig`,
+`VertexAIConfig`, `BedrockConfig`, `JlamaConfig`) return
+`Left(ConfigurationError("provider '<id>' takes no API key, so its config cannot take an ApiKeyProvider"))`;
+they used to return themselves unchanged.
+
+**`ProviderConfig`, for implementers** (a provider module, a test double): every member is now abstract. Add the six
+that had defaults:
+
+```scala
+final case class AcmeConfig(
+  apiKey: String,
+  model: ModelName,                                   // was String
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+  timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  network: HttpNetworkSettings = HttpNetworkSettings.default,
+  apiKeyProvider: Option[ApiKeyProvider] = None
+) extends ProviderConfig:
+  val providerId: ProviderId                                = ProviderId("acme")
+  def endpointUrl: Option[BaseUrl]                          = Some(BaseUrl(baseUrl))   // was Option[String]
+  def withModel(model: ModelName): AcmeConfig               = copy(model = model)      // was (String)
+  def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig  = copy(timeouts = timeouts)
+  def withNetwork(network: HttpNetworkSettings): AcmeConfig = copy(network = network)
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[AcmeConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
+```
+
+A config that cannot honour one says so rather than inheriting a no-op:
+
+- no API key, or a client that reads the key once: `def apiKeyProvider = None` and
+  `def withApiKeyProvider(p: ApiKeyProvider) = ProviderConfig.noApiKeyProvider(providerId)` (pass a second argument,
+  e.g. `"reads its key once"`, for the reason);
+- no request to time out and no connection to route (a model run in-process): `def timeouts = ProviderTimeouts.default`,
+  `def withTimeouts(t: ProviderTimeouts) = this`, and the same for `network`.
+
+**A section's setting its config does not take now fails the load** instead of being dropped:
+
+- `llm4s.providers.<name>.timeouts: provider '<id>' takes no timeouts, so the block would be ignored - remove it`
+- `llm4s.providers.<name>.http: provider '<id>' takes no proxy or TLS settings, so the block would be ignored - remove it`
+
+Of the providers in this repository only `jlama` is affected: remove `timeouts { ... }` and `http { ... }` from a
+`provider = "jlama"` section. The process-wide `llm4s.http` block (and so `HTTPS_PROXY`) is not an error for it.
+
+**`ContextWindowResolver`** is final, `resolve` returns `ContextLimits(contextWindow, reserveCompletion)` instead of
+`(Int, Int)`, `fallbackResolver` is `String => ContextLimits`, and the `logPrefix` parameter is gone:
+
+```scala
+// before
+val (window, reserve) = resolver.resolve(Seq("acme"), model, 128000, 4096, _ => (128000, 4096), logPrefix = "Acme ")
+// after
+val limits = resolver.resolve(Seq("acme"), model, 128000, 4096, _ => ContextLimits(128000, 4096))
+// limits.contextWindow, limits.reserveCompletion; or: val ContextLimits(window, reserve) = resolver.resolve(...)
+```
+
+**`EmbeddingProviderConfig`:**
+
+```scala
+// before
+EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = "voyage-3", apiKey = Secret(key))
+EmbeddingProviderConfig("http://localhost:11434", "nomic-embed-text", Secret(""))      // a keyless provider
+
+// after
+EmbeddingProviderConfig(ProviderId("voyage"), BaseUrl("https://api.voyageai.com/v1"), ModelName("voyage-3"), Some(Secret(key)))
+EmbeddingProviderConfig(ProviderId("ollama"), BaseUrl("http://localhost:11434"), ModelName("nomic-embed-text"))
+```
+
+| Before | After |
+|---|---|
+| `config.baseUrl: String`, `config.model: String` | `BaseUrl`, `ModelName`; `.asUrl`, `.asString` |
+| `config.apiKey: Secret` (`Secret("")` when there is none) | `Option[Secret]` (`None` when there is none) |
+| `config.withApiKey(secret)` | unchanged; `withApiKey(None)` clears it |
+| `config.currentApiKey(): Result[Secret]` | `Result[Option[Secret]]`; a provider that requires a key turns `None` into its own error |
+| `withBaseUrl(String)`, `withModel(String)` | `withBaseUrl(BaseUrl)`, `withModel(ModelName)` |
+| `EmbeddingConfigSpec.resolveModel` / `resolveBaseUrl` / `resolveApiKey`: `Result[String]` / `Result[String]` / `Result[Secret]` | `Result[ModelName]` / `Result[BaseUrl]` / `Result[Option[Secret]]` |
+
+An `EmbeddingProviderDescriptor` that overrides `buildConfig` passes its `id` as the config's `providerId`; the loader
+sets it to the descriptor's canonical id in any case.
+
+**Local encoders.** `LocalEmbeddingModels` keeps its package, `org.llm4s.llmconnect.config`, but ships in `llm4s-rag`
+(with `ModelSelector`, its only user): add `llm4s-rag` if you used it from core alone.
+`ModelDimensionRegistry.localDimension(model)` is `LocalEmbeddingModels.dimension(model)`;
+`ModelDimensionRegistry.LocalProvider` is removed, and `ModelDimensionRegistry.getDimension("local", model)` no
+longer answers from a built-in table: `local` is a provider id like any other, answered only by a registered
+embedding provider of that id.
+
+## `ReliableClient` has a private constructor (#2797)
+
+`ReliableClient`'s constructor is private, so that a setting can be added to it without breaking a caller. Build one
+with the companion's `apply` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `withMetrics`.
+The `clock` and `sleep` parameters were test seams and are no longer public.
+
+| Before | After |
+|---|---|
+| `new ReliableClient(client, "openai", config)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "openai", ReliabilityConfig.default)` | `ReliableClient(client, "openai")`, or as before without `new` |
+| `new ReliableClient(client, "openai", config, Some(metrics))` | `ReliableClient(client, "openai", config).withMetrics(metrics)` |
+| `new ReliableClient(client, "openai", config, None)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "p", config, sleep = _ => ())`, in a test that must not wait | give the config a short delay: `config.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))` |
+| `new ReliableClient(client, "p", config, clock = fake)`, in a test of the deadline or of circuit recovery | no public replacement: use a short `deadline` or `recoveryTimeout` and wait for real |
+
+`withMetrics` returns a new client with a circuit breaker and rate limit of its own, so call it where the client is
+built, not on a client that has already served requests. `providerName` is still a `String`: it is the `provider`
+label of the client's metrics, whatever name you choose, not a provider id.
+
+## A tracing backend declares its aliases, and `Tracing.create` is removed (#2799)
+
+**`Tracing.create` is removed.** It returned `NoOpTracing`, with the reason only in the log, when the configured
+backend was missing or could not start. `Tracing.fromSettings` returns that reason, and is the only factory:
+
+| Before | After |
+|---|---|
+| `Tracing.create(settings)` | `Tracing.fromSettings(settings)`, a `Result[Tracing]`; in a `for`, `tracer <- Tracing.fromSettings(settings)` |
+| `Llm4sConfig.tracing().map(Tracing.create)` | `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` |
+| the old fallback, kept on purpose | `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`, logging the error first if you want it logged |
+
+**The `otel` alias belongs to its backend.** Core's mode parser named a backend (`"otel"` meant
+`Named("opentelemetry")`). A `TracingBackend` now declares its own `aliases`, and `llm4s-observability-otel` declares
+`otel`. Nothing changes for an application that sets `TRACING_MODE=otel` and loads its settings with
+`Llm4sConfig.tracing()`: with `llm4s-observability-otel` on the classpath the settings still carry
+`TracingMode.Named("opentelemetry")` and the `llm4s.tracing.opentelemetry` block, because `Llm4sConfig.tracing()`
+replaces an alias by its backend's mode before it reads the block. What changes:
+
+- `TracingMode.fromString("otel")` returns `Named("otel")`. Code that compared it with `Named("opentelemetry")` should
+  compare the mode of the loaded `TracingSettings`, or use `"opentelemetry"`.
+- Without `llm4s-observability-otel` on the classpath, `Llm4sConfig.tracing()` with `TRACING_MODE=otel` gives
+  `Named("otel")` with empty extras, and `Tracing.fromSettings` fails naming the artifact to add, as before.
+- **A shaded jar that registers the backend explicitly must use the full name.** With no services files,
+  `Llm4sConfig.tracing()` cannot see the backend, so it cannot replace the alias, and
+  `Tracing.fromSettings(settings, TracingBackends.of(new OpenTelemetryTracingBackend))` would start the backend on its
+  defaults. Set `TRACING_MODE=opentelemetry` there.
+
+A backend of your own with more than one name overrides `aliases`:
+
+```scala
+final class DatadogTracingBackend extends TracingBackend:
+  val mode: TracingMode             = TracingMode.Named("datadog")
+  override val aliases: Set[String] = Set("dd")
+  def create(settings: TracingSettings): Result[Tracing] = ???
+```
+
+**`TracingBackends.find` returns `Result[Option[TracingBackend]]`.** `Right(None)` is "no backend answers to this
+name"; a `Left` is a `ConfigurationError` naming two that do. Explicit registration still replaces by mode
+(`withBackend`, a later argument of `TracingBackends.of`). Two *discovered* backends for one mode used to resolve to
+the later one on the classpath; they are now that error, from `find`, `Tracing.fromSettings` and
+`Llm4sConfig.tracing()`, as are two backends that share an alias or one whose alias is another's mode. Remove one
+from the classpath, or pass the one you want in a `TracingBackends.of(...)`.
+
+## Image metrics are `ImageMetrics` in `llm4s-image` (#2801)
+
+`MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed: image generation lives in
+`llm4s-image`, and its metrics are now declared there, as `ImageMetrics`, and recorded through the collector's
+generic `increment` and `observe`, the way `ReliabilityMetrics` are.
+
+**Nothing changes on a dashboard.** Every image series keeps its name, type, labels and buckets in both
+`llm4s-observability-prometheus` and `llm4s-observability-micrometer` (`llm4s_image_generations_total`,
+`llm4s_images_generated_total`, `llm4s_image_generation_duration_seconds`, `llm4s_image_generation_cost_usd_total`,
+`llm4s_image_generation_errors_total`), and a failed image generation still counts in `llm4s_errors_total`. Three
+things differ that are not a series' identity: the Micrometer duration meter's description gains " in seconds", the
+Prometheus duration `_sum` is exact to the nanosecond where it was to the millisecond, and the Micrometer collector no
+longer maps an unknown `operation` to `other` (the instrumented client only sends `generate` and `edit`).
+
+**A collector of your own** that overrode the two methods no longer compiles. Image generation reaches it through
+the generic methods; match on the metric:
+
+```scala
+import org.llm4s.imagegeneration.ImageMetrics
+
+override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit = metric match
+  case ImageMetrics.Generations     => () // labelValues: provider, model, operation, status
+  case ImageMetrics.ImagesGenerated => () // provider, model; amount is the number of images
+  case ImageMetrics.CostUsd         => () // provider, model; amount is the cost in USD
+  case ImageMetrics.Errors          => () // provider, model, operation, error_type
+  case _                            => ()
+
+override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+  if metric == ImageMetrics.Duration then () // provider, model, operation
+```
+
+A collector that implements the three generic methods for every `Metric`, as the two shipped backends do, needs no
+image code at all.
+
+| Before | After |
+|---|---|
+| `MicrometerMetrics.Names.ImageGenerations` | `ImageMetrics.Generations.name` |
+| `MicrometerMetrics.Names.ImagesGenerated` | `ImageMetrics.ImagesGenerated.name` |
+| `MicrometerMetrics.Names.ImageGenerationDuration` | `ImageMetrics.Duration.name` |
+| `MicrometerMetrics.Names.ImageGenerationCostUsd` | `ImageMetrics.CostUsd.name` |
+| `MicrometerMetrics.Names.ImageGenerationErrors` | `ImageMetrics.Errors.name` |
+
+`MetricsCollector.Errors` is new: the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so that a module
+of your own can add its failed operations to it with
+`metrics.increment(MetricsCollector.Errors, Seq(provider, errorType))`. A backend of your own that keeps that count in
+a meter of its own should record this metric into it.
+
+## The Hugging Face image client calls Inference Providers (#2832)
+
+Hugging Face retired the serverless Inference API at `api-inference.huggingface.co`, which `HuggingFaceClient` posted
+to; it now posts to Hugging Face's own `hf-inference` provider on the
+[Inference Providers router](https://huggingface.co/docs/inference-providers/tasks/text-to-image),
+`https://router.huggingface.co/hf-inference/models/<model>`, in the format that page documents.
+
+- **The default model** is `stabilityai/stable-diffusion-3-medium-diffusers` (was `stabilityai/stable-diffusion-xl-base-1.0`,
+  which `hf-inference` does not serve): the text-to-image model the Hub lists for `hf-inference`. A model only
+  third-party providers serve does not work with this client.
+- **The token** needs the "Make calls to Inference Providers" permission.
+- **`HuggingFaceConfig`** gains a last field, `baseUrl` (default `HuggingFaceConfig.DefaultBaseUrl`), for a proxy or a
+  test server; a pattern match on its three fields no longer compiles.
+- **`Parameters`** (the request body's `parameters`) names its steps field `num_inference_steps`, as the API does,
+  where it was `inferenceSteps`, which the API never read; it gains `width` and `height`, from
+  `ImageGenerationOptions.size` (none for `ImageSize.Auto`). An absent optional parameter is left out of the body.
+- **`health()`** asks the Hub whether `hf-inference` serves the model
+  (`GET https://huggingface.co/api/models/<model>?expand[]=inferenceProviderMapping`): `Healthy` when it does, live;
+  `Degraded` otherwise.
+
+| Before | After |
+|---|---|
+| `Parameters(guidance_scale, inferenceSteps, negative_prompt, seed)` | `Parameters(guidance_scale, num_inference_steps, negative_prompt, width, height, seed)` |
+| `HuggingFaceConfig(apiKey, model, timeout)` | `HuggingFaceConfig(apiKey, model, timeout, baseUrl)` |
+
+## The OpenAI image client defaults to `gpt-image-2.6-sunburst` (#2884)
+
+OpenAI shut down `dall-e-2`, the client's old default, on 2026-05-12, and `editImage` always sent `dall-e-2`.
+
+- **The default model** (`OpenAIConfig.DefaultModel`, also the default of `ImageGeneration.openAIClient` and
+  `generateWithOpenAI`) is `gpt-image-2.6-sunburst`. An explicit `model` is kept.
+- **`editImage` sends the configured model**, with `size = auto` when no size is given (a GPT Image model; a legacy
+  model still keeps the source image's size).
+- **For a GPT Image model** the client never sends `response_format`, and refuses `responseFormat = Some("url")` and
+  `style` with an `ImageValidationError` before any request: those models always return base64 and take no style.
+- **`OpenAIImageClient.deprecationWarningMessage` is removed**; `retirementWarning(model): Option[String]` covers every
+  image model OpenAI has shut down or is shutting down, with OpenAI's replacements.
+
+## The config-policy `prod` preset allows model generations (#2885)
+
+`ConfigPolicy.prodSafeDefaults` allowed only `openai/gpt-4o(-mini)`, `anthropic/claude-3-5-sonnet.*`,
+`gemini/gemini-2.x` and `deepseek/deepseek-chat`, all retired or retiring, and capped OpenAI at 128000 and Anthropic at
+200000 tokens, below today's 1M windows, so a production config on a current model failed it.
+
+- **Models**: each allowed provider is limited to its vendor's current generations, `ConfigPolicy.ModelFamilies`
+  (GPT-5 and GPT-6; Claude 5 and later, Opus and Sonnet from 4.6, Haiku 4.5; Gemini 3; `deepseek-chat` and
+  `deepseek-reasoner`; any Azure deployment). `bedrock` is allowed, for the same Claude families. A config on a
+  retired generation (`gpt-4o-mini`, `claude-3-5-sonnet-*`, `gemini-2.5-pro`) now fails with `[allowedModels]`:
+  move it to a current model, or allow the model in your own policy with
+  `withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "openai/gpt-4o-mini")*)`.
+- **Caps**: openai and azure 1050000, anthropic and bedrock 1000000, gemini 1048576, deepseek 163840: the largest
+  window among each provider's current models in the bundled metadata.
+- **`EnvCheckPolicies`' `staging-balanced` preset** allows the OpenAI, Anthropic and Gemini families above by pattern,
+  in place of four pinned names (`PolicyBuilder.allowedModelPatterns` is **added**).
+
+## `Secret` or `Secret.token`: which one stays registered (#2824)
+
+Nothing changed here; the contract is now written down, on `Secret` and in
+[Security best practices](../guide/patterns/security-best-practices#api-keys). Creating a `Secret` registers its value
+process-wide for exact-match scrubbing. `Secret(value)` is a configured credential and is never evicted;
+`Secret.token(value)` may be evicted once the registry holds more than 4096 values; a value under 8 characters is not
+registered; nothing can be forgotten on request.
+
+If your application creates a `Secret(...)` per tenant, per user or per request, change those to `Secret.token(...)`:
+each distinct `Secret(...)` is held, and matched against every scrubbed text, for the life of the process. llm4s logs
+one warning, naming this cause, when the registry passes 4096 values.
+
+## `CompletionOptions`' sampling parameters are optional, and unset ones are not sent (#2807)
+
+`temperature`, `topP`, `presencePenalty` and `frequencyPenalty` were `Double`s with defaults (`0.7`, `1.0`,
+`0.0`, `0.0`), so llm4s could not tell "unset" from "set to the default" and always sent its own temperature
+and top-p in place of the provider's. They are `Option[Double]`, `None` unless set.
+
+```scala
+// before
+val options = CompletionOptions(temperature = 0.2, topP = 0.9)
+val t: Double = options.temperature
+
+// after
+val options = CompletionOptions(temperature = Some(0.2), topP = Some(0.9))   // or .withTemperature(0.2).withTopP(0.9)
+val t: Option[Double] = options.temperature
+```
+
+- **Behaviour.** A call that sets no temperature is no longer sent `temperature: 0.7` and `top_p: 1.0`: the
+  provider's default applies, which for most models is a temperature of `1.0`. Set
+  `withTemperature(0.7)` to keep the old requests. Jlama, whose engine takes no "unset", still uses `0.7`.
+- **Reports.** A sampling option the caller left unset is neither sent nor reported. One the caller set that the
+  model cannot take is a `RequestAdjustment` whatever its value; before, an explicit value equal to the default
+  went unreported.
+- **Java.** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return
+  `OptionalDouble`.
+- **Tracing.** The OpenTelemetry `gen_ai.request.temperature`, `top_p` and penalty attributes are present only
+  for an option that was set.
+
+`SamplingOptionsOptional` (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps the named arguments in `Some`. A read of one of the four
+is left to you.
+
+## `Completion` reads `content` and `toolCalls` from its message (#2807)
+
+`Completion` stored `content` and `toolCalls` beside `message`, which has both, and three setters each updated
+one side. They are now read from the message: `completion.content` is `completion.message.content` and
+`completion.toolCalls` is `completion.message.toolCalls` (a `Seq`).
+
+```scala
+// before
+Completion(id = id, created = now, content = text, model = model, message = AssistantMessage(text, calls), toolCalls = calls.toList)
+completion.withContent("edited")
+completion.asText
+
+// after
+Completion(id = id, created = now, model = model, message = AssistantMessage(text, calls))
+completion.withMessage(completion.message.withContent("edited"))
+completion.content
+```
+
+- `Completion.apply` is `(id, created, model, message, usage, estimatedCost, citations, adjustments,
+  finishReason, servedTier)`. A positional construction or pattern loses its third and sixth places.
+- **Check each construction site:** the text and the tool calls must be on the `message` you pass. A site that
+  passed tool calls only as `toolCalls = ...` now has none.
+- `withContent`, `withToolCalls` and `asText` are removed. `AssistantMessage.withContent` unseals signed thinking,
+  as it always has.
+- A completion assembled from a stream (`StreamingAccumulator.toCompletion`) now reports its tool calls on
+  `toolCalls`; a client no longer copies them from the message.
+
+`CompletionFromMessage` drops the two arguments, rewrites `asText`, and reports `withContent`, `withToolCalls`
+and a pattern that binds either field.
+
+## A `Completion` without a finish reason is `FinishReason.Unknown` (#2807)
+
+`Completion.apply` defaulted `finishReason` to `Stop`, so a client that set none claimed a natural stop, while
+"none read" was the sentinel `FinishReason.Other("")`. `FinishReason.Unknown` says it, and is the default.
+
+```scala
+completion.finishReason match {
+  case FinishReason.Stop | FinishReason.ToolCalls => ...
+  case FinishReason.Length                        => ...
+  case FinishReason.Other(raw)                    => ...   // a provider value llm4s has no name for
+  case FinishReason.Unknown                       => ...   // the client read none
+}
+```
+
+- Replace `FinishReason.Other("")` with `FinishReason.Unknown`, in code and in patterns. `Unknown.name` is `""`,
+  as `Other("").name` was, so code that filters on `name.nonEmpty` is unaffected.
+- A test fake that builds a `Completion` without a reason and asserts `Stop` must set it:
+  `finishReason = FinishReason.Stop`.
+- JSON: `"Unknown"`. The other cases are written as before, and a stored `{"$type":"Other","raw":""}` reads as
+  `Unknown`. An older llm4s reading an event written by this one reads `Unknown` as `Other("Unknown")`.
+
+## `Completion.estimatedCost` is a `BigDecimal`; `UsageSummary` counts cache tokens (#2807)
+
+A cost was an `Option[Double]` that `UsageSummary` converted to `BigDecimal` after the precision was already
+lost. It is `Option[BigDecimal]` from `CostEstimator` on.
+
+```scala
+// before
+completion.withEstimatedCost(0.0125)
+val cost: Option[Double] = CostEstimator.estimate(model, usage)
+
+// after
+completion.withEstimatedCost(BigDecimal("0.0125"))
+val cost: Option[BigDecimal] = CostEstimator.estimate(model, usage)
+```
+
+- `UsageSummary.add`, `ModelUsage.add`, the agent's `ModelContext.recordUsage` and `AdmissionContext.recordUsage`
+  take `Option[BigDecimal]`. An `Option[Double]` you hold becomes `cost.map(BigDecimal.decimal)`.
+- What stays a `Double`: `MetricsCollector.recordCost` and `MetricsRecording.withMetrics`' `extractCost`, the
+  durable `ModelCallCompleted.estimatedCost`, `RAGQueryMetrics.costUsd` and the prices of `ModelPricing`.
+- `UsageSummary` and `ModelUsage` gain `cachedTokens` and `cacheCreationTokens` (with `with*` setters), parts of
+  `inputTokens`. A summary stored before them reads with both at zero. The Java facade exposes them on
+  `JUsageSummary` and `JModelUsage`.
+
+## `AssistantMessage.text`, and a flat stored assistant message (#2809)
+
+```scala
+// before
+message.contentOpt
+AssistantMessage(contentOpt = Some("Hello"), toolCalls = calls)
+AssistantMessage(toolCalls = calls)
+toolMessage.findToolCallName(history)            // "unknown-tool" when the call is not there
+
+// after
+message.text
+AssistantMessage(text = Some("Hello"), toolCalls = calls)
+AssistantMessage(None, calls)
+toolMessage.findToolCallName(history)            // None when the call is not there
+```
+
+- `AssistantMessage()` no longer compiles: it built a message that fails `validate`. `content`, the text or `""`,
+  and both `withContent` setters are unchanged.
+- **Stored JSON.** An assistant message is written flat, as the other roles are:
+
+  ```json
+  {"type":"assistant","content":"Hello","toolCalls":[]}
+  ```
+
+  where it was `{"type":"assistant","data":{"contentOpt":"Hello","toolCalls":[]}}`. `content` is left out when
+  the model produced only tool calls. The old shape is still read, so stored checkpoints, threads and
+  conversations load unchanged; a rewrite of one stores the new shape. Code of your own that reads the JSON
+  (a query over a store's rows, an export) must read both.
+- **Thinking bindings.** A binding of sealed thinking is a fingerprint of the conversation before it. The
+  fingerprint keeps its own encoding, so bindings made before this change still match and signed thinking is
+  still replayed.
+- `Message.validateConversation` and `Message.assistant` take a `Seq` (a `List` still passes).
+
+`MessageAndConversationShapes` renames `contentOpt` and adds the missing `None`.
+
+## One `Conversation.create`; `Conversation.empty` is a value (#2809)
+
+```scala
+// before
+Conversation.create(UserMessage("hi"))
+Conversation.create(SystemMessage("Be brief"), UserMessage("hi"))
+Conversation.empty()
+
+// after
+Conversation.create(Seq(UserMessage("hi")))
+Conversation.create(Seq(SystemMessage("Be brief"), UserMessage("hi")))
+Conversation.empty
+```
+
+`Conversation.fromPrompts`, `userOnly` and `systemOnly` are unchanged, and `Conversation(messages)` still builds
+one without validating. `MessageAndConversationShapes` rewrites both forms.
+
+## `ProviderExchange` and `ProviderExchangeRecorder` (#2809)
+
+For a sink of your own:
+
+- `exchange.provider` is a `ProviderId`: `exchange.provider.asString` for the text.
+- `exchange.duration` is still there, computed from `startedAt` and `completedAt`; `withDuration` is gone, and
+  `ProviderExchange.apply` takes no `duration`. Its required values come first and `model`, `requestId`,
+  `correlationId`, `responseBody` and `errorMessage` default to `None`.
+- `ProviderExchangeLogging.enabled(sink)` is `ProviderExchangeLogging.Enabled(sink)`.
+
+For a provider client:
+
+```scala
+// before
+ProviderExchangeRecorder.record(
+  exchangeLogging = options.exchangeLogging,
+  provider = providerName,
+  model = Some(config.model),
+  startedAt = startedAt,
+  requestBody = requestText,
+  responseBody = Some(responseText),
+  result = result
+)
+
+// after
+ProviderExchangeRecorder.record(
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider = ProviderId(providerName),
+    startedAt = startedAt,
+    requestBody = requestText,
+    model = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result
+)
+```
+
+The `clock` and `idGenerator` parameters were test seams and are no longer public. The JSONL file is unchanged.
+
+## `LLMConnect.getClient` is the one way to get a client (#2810)
+
+```scala
+// before
+LLMConnect.fromConfig(config)
+LLMConnect.getClient(config, metrics)
+LLMConnect.getClient(ProviderId("openai"), config)
+LLMConnect.fromProvider(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+
+// after
+LLMConnect.getClient(config)
+LLMConnect.getClient(config, LlmClientOptions(metrics = metrics))
+LLMConnect.getClient(ProviderId("openai"), config, LlmClientOptions.default)
+LLMConnect.getClient(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
+```
+
+`getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` remain. Only
+one overload may have a default, so the provider-explicit one takes its options. `ClientEntryPoints` rewrites
+all but the method value.
+
+## `LLMClient.streamComplete` takes its callback in a second parameter list (#2810)
+
+`streamComplete(conversation, options = CompletionOptions(), onChunk)` had a defaulted parameter before a
+required one, so the default was reachable only by naming `onChunk`.
+
+```scala
+// before
+client.streamComplete(conversation, options, chunk => chunk.content.foreach(print))
+client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
+
+// after
+client.streamComplete(conversation, options)(chunk => chunk.content.foreach(print))
+client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
+```
+
+An `LLMClient` of your own, a wrapper or a test fake, changes its definition the same way:
+
+```scala
+override def streamComplete(conversation: Conversation, options: CompletionOptions)(
+  onChunk: StreamedChunk => Unit
+): Result[Completion] = ...
+```
+
+Java and Kotlin are unaffected: the method's JVM signature is the same three parameters. `ClientEntryPoints`
+rewrites the calls and the overriding definitions. `MetricsRecording.withMetrics` lost its two defaults in the
+same change: pass `extractUsage` and `extractCost`.
+
+## Provider SPI: error mapping, published helpers, report types (#2811)
+
+**`HttpErrorMapper.toError`.** `mapHttpError` returned a `Result[Nothing]` that was always a `Left`; `toError`
+returns the error, and `headers` has no default.
+
+| Before | After |
+|---|---|
+| `HttpErrorMapper.mapHttpError(status, body, provider, headers)` | `Left(HttpErrorMapper.toError(status, body, provider, headers))` |
+| `HttpErrorMapper.mapHttpError(status, body, provider)` | `Left(HttpErrorMapper.toError(status, body, provider, Map.empty))` |
+
+**Helpers you can now call.** `ToolCallRules.checked`, `parseArguments` and `wholeCall`, `PartEncoding.check` and
+`encodeAll`, and `HttpErrorMapper.mapStreamError` are public. A provider outside `org.llm4s` no longer writes its
+own tool-call check: pass the parsed `Completion` through `ToolCallRules.checked`.
+
+| Before | After |
+|---|---|
+| `StreamingToolArgumentParser.parse(raw)` | `ToolCallRules.parseArguments(raw)` |
+| `CostEstimator.estimateFromMetadata(metadata, usage)` | `CostEstimator.estimate(model, usage)` |
+
+**`keylessWhen`.**
+
+| Before | After |
+|---|---|
+| `keylessWhen = Some("authentication" -> "entra-id")` | `keylessWhen = Some(KeylessSetting("authentication", "entra-id"))` |
+| `spec.keylessWhen.map(_._1)` | `spec.keylessWhen.map(_.key)` |
+
+`withKeylessWhen(key, value)` still works and now takes more values.
+
+**Registry report.** `ProviderRegistryReport`, `ProviderModuleReport`, `ProviderDiscoveryFailure` and
+`ProviderIdCollision` are read-only: no public `apply`, no `with*` setters.
+
+| Before | After |
+|---|---|
+| `collision.kind == "chat"` | `collision.kind == ProviderCollisionKind.Chat` |
+| `collision.kind.endsWith("alias")` | `collision.kind.isAlias` |
+| `module.providerIds.contains("openai")` | `module.providerIds.contains(ProviderId("openai"))` |
+| `collision.id` as a `String` | `collision.id.asString` |
+
+**Descriptors.** `EmbeddingProviderDescriptor.configSpec` is abstract: a descriptor that relied on the default adds
+`val configSpec = EmbeddingConfigSpec()`. `AccessTokenProvider.invalidate` has a no-op default: an implementation
+adds `override` and takes the rejected token as a `Secret` (see the next section), and a provider that caches
+nothing can be a lambda.
+
+`requireExtra` and `resolveBaseUrl` name the section in their hint (`llm4s.providers.my-section.region`), where
+they printed `llm4s.providers.<name>.region`.
+
+## Provider SPI: one shape for both descriptors, typed embedding sections, credential suppliers (#2811)
+
+**Both descriptors have `buildConfig(section, context)` and `build(config, context)`.** What was a `using`
+parameter, or a loose argument, is a field of the context.
+
+| Before | After |
+|---|---|
+| `def buildConfig(providerName: String, section: NamedProviderConfig)(using ContextWindowResolver)` | `def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext)` |
+| `providerName` | `context.providerName` |
+| the `ContextWindowResolver` in scope | `given ContextWindowResolver = context.contextWindows` as the method's first line |
+| `def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService)` | `def build(config: ProviderConfig, context: ProviderBuildContext)` |
+| `options.metrics`, `options.exchangeLogging`, `options.httpClient` | `context.metrics`, `context.exchangeLogging`, `context.httpClient` (`context.options` is the whole `LlmClientOptions`) |
+| the `ModelRegistryService` in scope | `given ModelRegistryService = context.modelRegistry` as the method's first line |
+| `override def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String])` | `override def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext)`, reading `context.modelOverride` |
+| `def build(config: EmbeddingProviderConfig)` | `def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext)` |
+
+A caller of a descriptor makes the context from what is in scope:
+
+| Before | After |
+|---|---|
+| `descriptor.buildConfig("main", section)` | `descriptor.buildConfig(section, ProviderConfigContext.of("main"))` |
+| `descriptor.buildConfig("main", section)(using resolver)` | `descriptor.buildConfig(section, ProviderConfigContext("main", resolver))` |
+| `descriptor.buildClient(config, options)` | `descriptor.build(config, ProviderBuildContext.of(options))` |
+| `descriptor.buildClient(config, LlmClientOptions.default)` | `descriptor.build(config, ProviderBuildContext.of())` |
+| `embeddings.buildConfig(section, Some("model"))` | `embeddings.buildConfig(section, EmbeddingConfigContext(Some("model")))` |
+| `embeddings.build(config)` | `embeddings.build(config, EmbeddingBuildContext())` |
+
+`ProviderModuleChecks.buildClient` and `assertBuildsClient` in `llm4s-provider-testkit` keep their names and
+arguments; `assertBuildsEmbeddingProvider` gains an optional `EmbeddingClientOptions`.
+
+**An embedding provider can use the caller's HTTP client.**
+`EmbeddingClient.from(provider, config, EmbeddingClientOptions().withHttpClient(client))` hands `client` to the
+provider as `context.httpClient`. A provider of your own should send through it and not close it:
+
+```scala
+def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+  Right(MyEmbeddings(config, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
+```
+
+`assertEmbeddingUsesSuppliedHttpClient(descriptor, config)` in the module spec proves it.
+
+**`Llm4sProviderModule.chatProviders` is `providers`.** An unprefixed name is the chat half everywhere in the SPI
+(`ProviderDescriptor`, `ProviderRegistry.find`, `ids`, `of`) and `embedding*` the embedding half.
+
+| Before | After |
+|---|---|
+| `override def chatProviders: Seq[ProviderDescriptor] = Seq(MyProvider)` | `override def providers: Seq[ProviderDescriptor] = Seq(MyProvider)` |
+| `module.chatProviders` | `module.providers` |
+
+**`EmbeddingProviderSection` is typed, and an embedding provider can declare keys of its own.**
+
+| Before | After |
+|---|---|
+| `EmbeddingProviderSection(baseUrl = Some("https://x"), model = Some("m"))` | `EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://x")), model = Some(ModelName("m")))` |
+| `section.withBaseUrl("https://x").withModel("m")` | `section.withBaseUrl(BaseUrl("https://x")).withModel(ModelName("m"))` |
+| `section.baseUrl` as a `String` | `section.baseUrl.map(_.asUrl)` |
+| `section.model` as a `String` | `section.model.map(_.asString)` |
+
+`EmbeddingConfigSpec(extras = Seq(ProviderConfigKey.required("region", "...")))` declares
+`llm4s.embeddings.<id>.region`. The loader applies defaults and fails the load naming a required key that is
+missing; the value is `section.extra("region")` in `buildConfig` and `config.extra("region")` in `build`. Keys you do
+not declare are still ignored. Nothing to change for a provider that declares none.
+
+**The three credential suppliers share one verb, and a token is a `Secret`.**
+
+| Before | After |
+|---|---|
+| `tokens.token()` giving a `Result[String]` | `tokens.current()` giving a `Result[Secret]`; `.map(_.reveal)` where the string is sent |
+| `def token(): Result[String] = Right(value)` | `def current(): Result[Secret] = Right(Secret.token(value))` |
+| `override def invalidate(rejected: String): Unit` | `override def invalidate(rejected: Secret): Unit` |
+| `AccessToken(value, expiresAt)` | `AccessToken(Secret.token(value), expiresAt)` |
+| `accessToken.value` as a `String` | `accessToken.value.reveal` |
+| `IdentityTokenSource` | `IdentityTokenProvider` |
+| `source.fetch()` | `provider.current()` |
+| `IdentityTokenSource.static("jwt")` | `IdentityTokenProvider.static(Secret("jwt"))` |
+| `IdentitySource.Literal("jwt")` | `IdentitySource.Literal(Secret("jwt"))` |
+
+`ApiKeyProvider.current()` is unchanged. `IdentitySource` keeps its name: it is the configured form, and
+`IdentityTokenProvider.from(source)` reads it.
+
+## The context pipeline is Experimental, and token counters are built over a tokenizer (#2818)
+
+In `org.llm4s.context` (`llm4s-core`).
+
+**Stability.** `ContextManager`, `ContextConfig`, `ContextStep`, `ManagedConversation`, `TokenWindow`,
+`ConversationWindow`, `TokenUsageInfo`, `DeterministicCompressor`, `CompressionRule`, `ToolOutputCompressor`,
+`ArtifactStore`, `LLMCompressor`, `HistoryCompressor`, `SemanticBlocks`, `SemanticBlock` and `SemanticBlockType` are
+`@Experimental`: they work as before, but are outside the 1.x compatibility promise. `ConversationTokenCounter`,
+`TokenBreakdown`, `MessageTokenInfo` and `org.llm4s.context.tokens` stay `@Stable`.
+
+**Token counters.** A counter is built over a tokenizer, never over a model name, because which vocabulary a model
+uses is its vendor's knowledge:
+
+| Before | After |
+|---|---|
+| `ConversationTokenCounter.forModel("gpt-4o")` | `OpenAITokenizers.counterFor("gpt-4o")` (`org.llm4s.llmconnect.provider`, in `llm4s-openai`) |
+| `ConversationTokenCounter.forModel("claude-...")`, or any model that is not OpenAI's | `ConversationTokenCounter.cl100k()`: the same `cl100k_base` approximation, now asked for by name |
+| `ConversationTokenCounter.openAI()` | `ConversationTokenCounter.cl100k()` |
+| `ConversationTokenCounter.openAI_o200k()` | `ConversationTokenCounter.o200k()` |
+| `ConversationTokenCounter(tokenizerId)` | `ConversationTokenCounter.create(tokenizerId)` |
+| `TokenizerMapping.getTokenizerId(model)` | `OpenAITokenizers.tokenizerFor(model)`, an `Option`: `None` for a model that is not OpenAI's |
+| `TokenizerMapping.getAccuracyInfo(model)`, `isExactMapping(model)`, `TokenizerAccuracy` | removed: a count is exact when `OpenAITokenizers.tokenizerFor(model)` is defined, an approximation otherwise |
+| `import org.llm4s.identity.TokenizerId` | `import org.llm4s.context.tokens.TokenizerId` (the scalafix rule `ResultSyntaxMoved` rewrites it) |
+
+`OpenAITokenizers.counterFor` returns a `Left(TokenizerError)` for a model it does not recognise, where `forModel`
+fell back to `cl100k_base` with a warning; write the fallback yourself where you want it:
+
+```scala
+val counter = OpenAITokenizers.counterFor(model).orElse(ConversationTokenCounter.cl100k())
+```
+
+`gpt-4.1`, `gpt-4.5`, `gpt-5`, `o3` and `o4-mini` now count with `o200k_base`; counts for those models change.
+
+To count with a tokenizer of your own, implement `StringTokenizer` and pass it to `ConversationTokenCounter.of`.
+Token counting calls the new `StringTokenizer.count(text)`, which defaults to `encode(text).length`; override it when
+counting is cheaper than building the list.
+
+**`ContextManager`.** The constructor is private and `withDefaults` is gone: `ContextManager.create(counter)` (its
+`config` now defaults to `ContextConfig.default`) is the one factory. It returns a `Left(ValidationError)` for a
+negative `maxSemanticBlocks` or a `summaryTokenTarget` that is not positive; it no longer checks the headroom, which
+cannot be invalid any more (see the `org.llm4s.types` section below).
+
+**Removed and retyped members.**
+
+- `ContextConfig.enableSubjectiveEdits` and `withEnableSubjectiveEdits` are removed. `ContextManager` never read
+  them. Delete the argument; to apply the subjective rules, call
+  `DeterministicCompressor.compressToCap(messages, counter, cap, enableSubjectiveEdits = true)`.
+- `ContextStep.name: String` is `ContextStep.stage: ContextStage` (`ToolDeterministicCompaction`,
+  `HistoryCompression`, `LLMHistorySqueeze`, `FinalTokenTrim`); `withName` is `withStage`. `step.stage.toString` is
+  the old name.
+- `MessageTokenInfo.role` is a `MessageRole`; `role.name` is the old string.
+- `TokenWindow.trimToBudget` and `fitsInBudget` take `headroom: HeadroomPercent` (default
+  `HeadroomPercent.Standard`) where they took `headroomPercent: Double`.
+- `StructuredInfo`, `HistoryDigest` and `PipelineStep` are private; they appeared in no public signature.
+- `Token` and `TokenizerId` are final.
+
+## `Modality` is an enum, multimodal embedding lives in `llm4s-rag`, and `EmbeddingClient` is final (#2808)
+
+**`Modality`.** The four cases are nested: write `Modality.Text`, `Modality.Image`, `Modality.Audio` and
+`Modality.Video`, or `import org.llm4s.llmconnect.model.Modality.*`. A wildcard import of
+`org.llm4s.llmconnect.model` no longer puts a bare `Text` and `Image` beside `ContentPart.Text` and
+`ContentPart.Image`.
+
+**The multimodal embedding types** keep their package (`org.llm4s.llmconnect.model`) and move from `llm4s-core` to
+`llm4s-rag`; add that dependency if you used them without it.
+
+- `EmbeddingVector.values` is a `Seq[Double]` (it was an `Array[Float]`), the element type of
+  `EmbeddingResponse.embeddings`. `dim` is the number of values: drop the `dim` argument of `EmbeddingVector(...)`,
+  and `withDim` is gone.
+- `RawMediaInput(bytes, mime)` copies the array; read it back as `data: IArray[Byte]`, and its size as `sizeBytes`
+  (was `bytesApprox`). Two inputs with the same bytes and MIME type are equal.
+- `MultimediaEmbeddingRequest.inputs` is a `Seq[RawMediaInput]`. `TextChunkInput`, `ImageInput`, `AudioInput`,
+  `VideoInput` and the `MMInput` trait are removed: nothing in llm4s built or read them. Send media as
+  `RawMediaInput`.
+
+**Multimodal embedding is its own capability.** `EmbeddingProvider.embedMultimodal`, whose default answered every
+provider's call with a `501`, is removed, with `EmbeddingClient.embedMultimodal` and
+`CachedEmbeddingClient.embedMultimodal`. Implement `org.llm4s.llmconnect.provider.MultimodalEmbeddingProvider`
+(`llm4s-rag`) instead, and hand it to `FileEmbedder`:
+
+```scala
+// before: an EmbeddingProvider that overrode embedMultimodal, wrapped in the EmbeddingClient
+FileEmbedder.encodeFromPath(path, client, config)
+
+// after
+val multimodal: MultimodalEmbeddingProvider = request => myEndpoint.embed(request)
+FileEmbedder.encodeFromPath(path, client, config, multimodal = Some(multimodal))
+```
+
+Without one, an image, audio or video file fails with an `EmbeddingError` (no code) that says to pass a provider or
+set `experimentalStubs`; it used to fail with code `501`.
+
+**`EmbeddingClient`** is a final class with a private constructor.
+
+| Before | After |
+|---|---|
+| `new EmbeddingClient(provider)` | `EmbeddingClient(provider)` |
+| `new EmbeddingClient(provider, Some(tracer), "query", Some(id))` | `EmbeddingClient(provider).withTracing(tracer).withOperation("query").withProviderId(id)` |
+| `class Fake extends EmbeddingClient(...)`, `mock[EmbeddingClient]` | implement or mock `EmbeddingProvider`, and wrap it: `EmbeddingClient(fake)` |
+
+`EmbeddingClient.from(provider, cfg)` returns the registry's `ConfigurationError` when no embedding provider has
+that name. It used to rewrite it to `EmbeddingError(code = Some("400"), provider = "config")`; match on
+`ConfigurationError` instead.
+
+**`EmbeddingError`** is `org.llm4s.error.EmbeddingError` (it was in `org.llm4s.llmconnect.model`). Its fields are
+unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
+
+## Newtypes in `org.llm4s.types` are opaque, and `HeadroomPercent` is always valid (#2822)
+
+- **`HeadroomPercent`** has no public constructor: use `HeadroomPercent.create(0.1)`, a `Result`, or a preset.
+  `HeadroomPercent.None` is `HeadroomPercent.Zero` (it shadowed `scala.None`); `isValid` is gone, since every value
+  is valid; read the ratio with `asRatio` (`value` is gone). It no longer prints as a percentage: format
+  `asRatio * 100` where you showed one.
+- **`TokenBudget`, `ContextWindowSize`, `ByteCount` and `ExternalizationThreshold`** were aliases of `Int` and
+  `Long` and checked nothing; write `Int` (`TokenBudget`, `ContextWindowSize`) or `Long`. `LLMClient.getContextBudget`
+  returns an `Int`, as it always did.
+- **`SemanticBlockId`, `ArtifactKey` and `ContentSize`** are opaque types. Build them as before
+  (`ArtifactKey("k")`, `ContentSize.fromString(text)`); read them with `id.asString`, `key.asString` and
+  `size.asBytes` where you wrote `.value` and `.bytes`. They have no `copy`, and they do not match as case-class
+  patterns.
+- **`ExternalizedContent`** is private to `ToolOutputCompressor`; it appeared in no public signature.
+- **`TraceId`** is `org.llm4s.trace.model.TraceId`, in `llm4s-observability`, which was its only user. The scalafix
+  rule `ResultSyntaxMoved` rewrites the import.
+
+## Model ids are `ModelName`, provider ids `ProviderId`, and provider configs' base URLs `BaseUrl` (#2822)
+
+Every public signature that takes or returns a model id takes or returns an
+`org.llm4s.types.ProviderModelTypes.ModelName`, where it was a `String`; a provider config's base URL is a `BaseUrl`.
+Wrap a literal with `ModelName("gpt-4o")` / `BaseUrl("https://...")`, and read one back with `.asString` / `.asUrl`.
+A `ModelName` no longer compares equal to a `String` at compile time: `completion.model == "gpt-4o"` does not
+compile; write `completion.model == ModelName("gpt-4o")` or `completion.model.asString == "gpt-4o"`.
+
+- **Completions and usage:** `Completion.model` and `withModel`; `UsageSummary.byModel` is a
+  `Map[ModelName, ModelUsage]` and `add` takes a `ModelName`; `CostTracker.byModel` likewise; the agent's
+  `ModelCallCompleted.model`, `ModelContext.recordUsage` and `AdmissionContext.recordUsage`.
+- **The model registry:** `ModelMetadata.modelId` (and `withModelId`, `fromJson`), `ModelRegistryService.lookup`,
+  `RequestTransformer` (every `modelId`, `adjusted`'s function, `withOverrides`' map), `TransformationResult.transform`,
+  `CostEstimator.estimate`, `ContextWindowResolver.resolve` (`fallbackResolver: ModelName => ContextLimits`) and
+  `strictContextWindow`.
+- **Embeddings:** `EmbeddingModelConfig.name`, `EmbeddingConfigContext.modelOverride`, `EmbeddingConfigSpec.defaultModel`
+  (and its `defaultBaseUrl`, a `BaseUrl`), `EmbeddingProviderDescriptor.modelDimensions` (`Map[ModelName, Int]`) and
+  `dimensionsOf`, `ModelDimensionRegistry.getDimension`, `CacheKeyGenerator.embeddingKey` and the key function of
+  `CachedEmbeddingClient` (`(String, ModelName, InputPurpose) => String`).
+- **Tracing and exchange logs:** the `model` (and `responseModel`) of `TraceEvent.CompletionReceived`, `ErrorOccurred`,
+  `TokenUsageRecorded`, `EmbeddingUsageRecorded`, `CostRecorded` and `ImageGenerationCompleted`, and the `Tracing`
+  helpers that build them; `ProviderExchange.model` and `ProviderExchangeCall.model`.
+- **Provider SPI:** `BaseLifecycleLLMClient.modelName`, `StreamingAccumulator(model)`,
+  `OpenAICompatibleClient.Settings` (`model: ModelName`, `baseUrl: BaseUrl`), `OpenAICompatibleDialect.validationUrl`
+  and `addReasoning`, `ProviderConfigSpec.defaultBaseUrl` and `apiKeyAndDefaultBaseUrl`,
+  `ProviderDescriptor.resolveBaseUrl` (a `Result[BaseUrl]`), `NamedProviderConfig.baseUrlOrDefault`.
+- **Provider configs:** every `fromValues` takes a `ModelName` and a `BaseUrl`; each config's `baseUrl` (Azure's
+  `endpoint`), `withBaseUrl` and `DEFAULT_BASE_URL` are `BaseUrl`, as are `OpenAIProvider`, `OpenRouterProvider` and
+  `RequestyProvider`'s `DEFAULT_BASE_URL`; `MistralConfig.apiBaseUrl` and `CohereConfig.compatibilityBaseUrl` return one.
+- **Capabilities:** `ModelRef.model` and `requireCapabilities(provider, model)`.
+
+```scala
+// Before
+val config = OpenAIConfig.fromValues("gpt-4o", apiKey, "https://api.openai.com/v1")
+val done   = Completion(id = "1", created = Instant.EPOCH, model = "gpt-4o", message = AssistantMessage("hi"))
+summary.byModel.get("gpt-4o")
+
+// After
+val config = OpenAIConfig.fromValues(ModelName("gpt-4o"), apiKey, BaseUrl("https://api.openai.com/v1"))
+val done   = Completion(id = "1", created = Instant.EPOCH, model = ModelName("gpt-4o"), message = AssistantMessage("hi"))
+summary.byModel.get(ModelName("gpt-4o"))
+```
+
+Nothing stored changes: a `ModelName` is written as the JSON string it wraps, so stored usage summaries, durable
+agent events, model-metadata JSON, trace events and the provider exchange log read and write byte for byte as before.
+The Java facade (`llm4s-java-api`) still presents model ids as `String`s.
+
+The scalafix rule `ModelIdNewtypes` (part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps the argument at the common call sites:
+`Completion`'s `model`, `ModelMetadata`'s `modelId`, `EmbeddingModelConfig`'s name, `lookup`, `estimate`,
+`UsageSummary.add`, `StreamingAccumulator`, `withModel`, and a provider config's `fromValues` and `withBaseUrl`. A
+`byModel` map key, a function typed `String => ...` and a model compared with a `String` are left for the compiler to
+report.
+
+### Provider ids are `ProviderId`
+
+Where a value is a provider's id (the registry's vendor, such as `openai` or `bedrock_converse`), it is a
+`ProviderId`, canonicalised to trimmed lowercase as `ProviderId("OpenAI") == ProviderId("openai")`:
+
+- `ModelMetadata.provider` and `withProvider`;
+- `ModelRegistryService.listProviders()` (a `List[ProviderId]`), `listByProvider(provider)` and
+  `lookup(provider, modelName)`;
+- `ContextWindowResolver.resolve`'s `lookupProviders` (a `Seq[ProviderId]`) and `strictContextWindow(provider, ...)`;
+- `ModelDimensionRegistry.getDimension(provider, model)`;
+- `ModelRef.provider` and `requireCapabilities(provider, model)` (`llm4s-capabilities`).
+
+```scala
+// Before
+registry.lookup("openai", "gpt-4o")
+ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small")
+
+// After
+registry.lookup(ProviderId("openai"), ModelName("gpt-4o"))
+ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
+```
+
+A `ProviderId` is written as its string. A stored provider that was not lowercase reads back lowercased; LiteLLM's
+model data, the model-metadata JSON llm4s writes and the agent's events only ever hold lowercase ids. `ModelIdNewtypes`
+wraps `lookup`, `listByProvider`, `getDimension`, `withProvider` and `ModelMetadata`'s `provider`.
+
+Left as `String` on purpose, being labels rather than ids: `MetricsCollector`'s `model` and `provider` (and
+`MetricsRecording.withMetrics` and `ReliableClient`'s `providerName`, which pass them through); the `provider` of the
+error types (`ServiceError`, `RateLimitError`, `AuthenticationError`, ...) and of `HttpErrorMapper`, `SdkErrorMapper`
+and `PartEncoding`, which name the client or the configured section for a message; `OpenAICompatibleClient.Settings`'
+`providerName`; and `ThinkingBlock.Opaque.provider`, part of a stored message. The model of the image, speech and RAG
+configs (`RAGConfig.embeddingModel`, the image generation configs) also stays a `String`: no provider config or the
+registry reads it.
+
+## One retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed (#2798)
+
+`ReliableClient` with a `RetryPolicy` is the library's one retry and circuit breaker.
+
+| Before | After |
+|---|---|
+| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
+| `LLMClientRetry.streamCompleteWithRetry(...)` | the same client's `streamComplete`; a stream that has delivered a chunk is still not retried |
+| `ErrorRecovery.recoverWithBackoff(() => client.complete(c), 3, 1.second)` | the `ReliableClient` above |
+| `new ErrorRecovery.CircuitBreaker[A](failureThreshold, recoveryTimeout)` | `ReliabilityConfig(circuitBreaker = CircuitBreakerConfig(failureThreshold, recoveryTimeout))` |
+| `ErrorRecovery.CircuitState` / `Open` / `Closed` / `HalfOpen` | `org.llm4s.reliability.CircuitState` |
+
+What changes in behaviour:
+
+- When the attempts run out you get the last attempt's error unchanged, not an `ExecutionError` wrapping it.
+- An open circuit refuses a call with a `CircuitOpenError`, which is not retried. `ErrorRecovery.CircuitBreaker`
+  returned a retryable `ServiceError` 503.
+- Waits come from the `RetryPolicy` (exponential by default). `LLMClientRetry`'s fixed 30 second cap is gone: set
+  `maxDelay`.
+- `ReliabilityConfig` has a deadline, five minutes by default; past it the result is a `TimeoutError`.
+
+`ReliableClient` retries model calls. To retry an operation of your own, use a `RetryPolicy` directly:
+`policy.isRetryable(error)` and `policy.delayFor(attemptNumber, error)`.
+
+## An agent run's trace and metrics report one status (#2829)
+
+`llm4s.agent.runs.ended` and `llm4s.agent.run.duration` took their `status` label from the runtime's terminal event, so a
+guardrail block counted as `failed` and a turn that hit a limit as `completed`, while the run's trace reported `blocked`,
+`step_limit_reached` and `token_limit_reached`. Both now report one status, a `TraceEvent.RunStatus`.
+
+| `status` label before | After |
+|---|---|
+| `failed`, for a guardrail block | `blocked` |
+| `completed`, for a turn that reached `withMaxSteps` | `step_limit_reached` |
+| `completed`, for a turn that reached `RunBudgets.maxTokens` | `token_limit_reached` |
+| `completed`, for an answer cut off at the output limit | `truncated` |
+
+- **Check alerts and dashboards on `status="failed"` and `status="completed"`.** A failure-rate alert no longer fires on
+  guardrail blocks; add `status="blocked"` if it should. A completion rate no longer counts limited or cut-off turns.
+- No label names the guardrail: that is the trace's `blocked_by`. A graph that is not an agent turn still ends
+  `completed`, `suspended`, `failed`, `cancelled` or `timed_out`.
+
+`TraceEvent.AgentRunEnded` changes with it:
+
+| Before | After |
+|---|---|
+| `status: String` (`"completed"`, ..., `"blocked:<guardrail>"`) | `status: TraceEvent.RunStatus`. `status.name` is the old string, except that a block is `"blocked"` and `blockedBy` is `Some(guardrail)` |
+| `Set("failed", "cancelled", "timed_out").contains(e.status)` | `e.status.isError` |
+| `TraceEvent.AgentRunEnded(thread, run, agent, "completed", messages, usage)` | `TraceEvent.AgentRunEnded(thread, run, agent, TraceEvent.RunStatus.Completed, messages, usage)` |
+| `agent`: the agent active when the run ended | `agent`: the run's root agent. `activeAgent`: the agent active when it ended |
+
+- The `invoke_agent <agent>` span (OpenTelemetry) and observation (Langfuse) of a run that handed off is named after the
+  agent the run was started on, with the agent active at the end as `active_agent`. A query that groups runs by span name
+  or `gen_ai.agent.name` now files such a run under its root agent.
+- In `toJson`, Langfuse's metadata, OpenTelemetry's `status` attribute and `TraceCollector`, a blocked run's `status` is
+  `blocked` and the guardrail is `blocked_by`. A filter on a `status` starting `blocked:` matches nothing from this
+  version on.
+- `AgentRunEnded` has fourteen fields: match `case e: TraceEvent.AgentRunEnded` and read its fields.
+- An agent's `chat <model>` span has the model call's duration, where it was a point at the call's end: a query on
+  span duration now sees model calls. The durable `AgentEvents.ModelCallCompleted` gains `duration: FiniteDuration`
+  (stored in milliseconds; zero for usage recorded without a call and in an event stored before), so a positional
+  pattern on it takes an eleventh binder, which the `PositionalPatternsGainFields` Scalafix rule adds: match
+  `case AgentEvents.ModelCallCompleted(m)` and read its fields.
+
+## `TraceEvent` carries an error as it is, and `AgentInitialized` is removed (#2800)
+
+`ErrorOccurred` held a `Throwable`, but an `LLMError` is not one, so the library wrapped each in
+`new RuntimeException(error.message)`: a backend reported `RuntimeException` as the type, with a stack trace of the
+tracing code. The event now holds the error's `message`, its `errorType` and an optional `cause`.
+
+| Before | After |
+|---|---|
+| `TraceEvent.ErrorOccurred(throwable, context)` | `TraceEvent.ErrorOccurred.of(throwable, context)` |
+| `TraceEvent.ErrorOccurred(new RuntimeException(error.message), context, errorType = Some(...))` | `TraceEvent.ErrorOccurred.of(error, context)` for an `LLMError` |
+| `tracing.traceError(new RuntimeException(error.formatted))` | `tracing.traceError(error, context)` |
+| `e.error.getMessage`, `e.error.getClass.getSimpleName` | `e.message`, `e.errorType` |
+| `e.error` | `e.cause`: `Some` for an error built from a `Throwable`, `None` for an `LLMError` |
+| `e.errorType: Option[String]` | `e.errorType: String` |
+| `e.withError(throwable)` | `e.withMessage(...)`, `withErrorType(...)`, `withCause(throwable)` |
+| `TraceEvent.AgentInitialized(query, tools)` | Removed: nothing in the library emitted it. Trace your own with `TraceEvent.CustomEvent(name, data)` |
+| `TraceEvent.ImageGenerationCompleted(model, provider, operation, ...)`, `provider: String` | `TraceEvent.ImageGenerationCompleted(model, operation, ..., provider = Some(ProviderId("openai")))`. `provider: Option[ProviderId]` is the last field |
+| `case TraceEvent.ToolExecuted(name, _, _, _, _, _)` | `case e: TraceEvent.ToolExecuted => e.name` |
+
+- **The recorded type of a library error changes.** The errors `TracingLLMClient`, `EmbeddingClient` and an agent run
+  trace are `LLMError`s: `error_type` (Langfuse metadata, `TraceCollector`, the console) and OpenTelemetry's
+  `error.type` on an `Error` span are now the error's own type, such as `RateLimitError` or `NodeFailed`, where they
+  were `RuntimeException`. They carry no stack trace: Langfuse's `stack_trace` is empty and OpenTelemetry records no
+  `exception` event for them. An error traced from a `Throwable` is recorded as before.
+- An exception without a message has the message `""`, where it was `null`.
+- `ErrorOccurred.of(throwable, context)` reads the exception's message when the event is built, so
+  `traceError(throwable)` reads it even into a `NoOpTracing`.
+- Langfuse no longer creates the `LLM4S Agent Run` trace `AgentInitialized` produced, and OpenTelemetry no longer the
+  span of that name; an agent run's trace comes from `AgentRunEnded`.
+- Events are growth-safe to build (`apply` and the `with*` setters) but a positional pattern names every field, so it
+  stops compiling when one is added: match by type. The scalafix rule `PositionalPatternsGainFields` no longer pads a
+  positional `ErrorOccurred` pattern, because its first field changed type.
+
+## A guardrail's reason is never stored (#2853)
+
+A guardrail's reason can quote the text it refused, so it is no longer written to the checkpoint store. It is on the
+result of the run that was blocked, and nowhere else.
+
+| Before | After |
+|---|---|
+| `case AgentStatus.Blocked(guardrail, reason)` with `reason: String` | `reason: Option[String]`: `Some` on the blocked run's result, `None` on a status rebuilt from the thread |
+| `RunOutcome.Blocked(guardrail, reason)` | `RunOutcome.Blocked(guardrail)` |
+| `TaskRefusal.Blocked(guardrail, reason: String)` | `reason: Option[String]`; `describe`, the parent model's tool error, names the guardrail only |
+| the reason read back from a thread later | keep it yourself when the run returns it |
+
+- **Checkpoint format 9.** A format-8 checkpoint loads, and the reason its `Blocked` outcome held is dropped as it is
+  read. Rows written before keep the reason in the store until they are pruned or their thread is deleted. A build
+  from before this change refuses a format-9 checkpoint. Neither SQL store's schema changes.
+- **`EncryptingCheckpointer` seals an outcome's error text**: a `RunOutcome.Failed`'s message and a
+  `RunOutcome.OutputInvalid`'s errors. Its case, a guardrail's name and a failure's kind stay readable. A store
+  encrypted before this change holds those texts in plain, which a read now refuses (`EncryptionError.NotEncrypted`)
+  unless `EncryptionSettings().withPlaintextReads(true)` is set while old rows remain. A failed run's message is still
+  in its `RunFailed` event in plain.
+- Java and Kotlin: `JAgentStatus.reason()` was already an `Optional`; it is empty on a status read back from a thread.
+
+## A turn's query is admitted before the turn is stored (#2854)
+
+A turn's first checkpoint holds its query, and every middleware hook ran after it was written. `AgentMiddleware.admit`
+is a new stage that runs first: it may rewrite the query, and only the rewrite is stored, or refuse it with
+`block(reason)`, and then nothing of the query is stored. Input guardrails run there.
+
+| Before | After |
+|---|---|
+| a `beforeAgent` hook that redacts, to keep text out of the store | override `admit(query, context: AdmissionContext): Result[String]`; `beforeAgent` still rewrites what joins the conversation, after the first checkpoint |
+| input guardrails ran after other middleware's `beforeAgent`, on what those returned | they run before every `beforeAgent`, on the query as submitted: a rewrite a guardrail depends on belongs in `admit` |
+| `GuardrailMiddleware(input, output).beforeAgent(text, context)` called directly | `.admit(text, context)` with an `AdmissionContext` (`MiddlewareTestKit.admissionContext()`) |
+| `override def validate(value: A, context: ModelContext)` in a guardrail | `override def validateIn(value: A, context: UsageAccounting)` ([renamed](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)), which a `ModelContext` and an `AdmissionContext` both are; match on `ModelContext` for thread state |
+| `GuardrailBlocked(guardrail, reason: String)` | `reason: Option[String]`; `block(reason)` builds it |
+| `submitter.submit(thread, agent.id, QueuedInput.query(text))`, the query in the queue as submitted | `agent.admit(thread, text).map(QueuedInput.admitted)` first, to keep refused or unrewritten text out of the queue |
+
+- `admit` cannot read or update thread state, emit an event, ask a question or call a tool; a middleware that asks
+  from it is refused. `GuardrailReviewMiddleware`, which asks, still runs in `beforeAgent`.
+- A refused query still starts a run, which holds the refusing guardrail's name and no query, so the
+  `agent.guardrail_blocked` event, the `RunFailed` and a queue entry's close are as before.
+- The reason is on the result of the call that admitted and ran the turn. A queued entry admitted by its submitter,
+  and a turn held at a breakpoint before its first step and resumed, end `AgentStatus.Blocked(guardrail, None)`.
+- Admission runs before the thread is claimed: a start the runtime then refuses (`ThreadBusy`, ...) has had its
+  guardrails run.
+- No checkpoint format or store schema change: an input stored before reads as not yet admitted, and its input step
+  admits it.
 
 ## A tool handler has one error type (#2815)
 
@@ -112,6 +1316,17 @@ A `Left("message")` still compiles and is still a `HandlerError`. A getter's err
 | `SafeParameterExtractor.enhanced(json)` | `SafeParameterExtractor(json)` |
 | `validateRequired("a" -> "string", "n" -> "integer")`: `Either[List[ToolParameterError], Unit]` | `validateRequired("a" -> ToolParameterType.String, "n" -> ToolParameterType.Integer)`: `Either[ToolParameterError, Unit]`, a `MultipleErrors` when several |
 | `ToolCallErrorJson.toJson(error)("error")` | `("message")`, or `error.formatted` for the old text |
+| `ToolBuilder[Map[String, Any], String](name, description, schema)` | `ToolBuilder[String](name, description, schema)` |
+| `ToolFunction[A, R]`, `Seq[ToolFunction[_, _]]`, `ToolFunction[?, ?]` | `ToolFunction[R]`, `Seq[ToolFunction[_]]`, `ToolFunction[?]` |
+| `tool.withSchema[U](schema)`: a `ToolFunction[U, R]` | `tool.withSchema(schema)`: the same `ToolFunction[R]` |
+
+`ToolFunction` and `ToolBuilder` had two type parameters, and the first, the arguments type, was a phantom: no member
+read it, every built-in tool set it to `Map[String, Any]`, and every consumer took `ToolFunction[_, _]`. It is gone:
+`ToolFunction[R]` and `ToolBuilder[R]` keep the handler's result type, and take any `SchemaDefinition[_]`. The typed
+tools of `llm4s-schema-derivation` (`Tool.of[A, R]`, `Tool.scoped`, `Tool.fromMethod`) keep their own type parameters
+and return a `ToolFunction[R]`. The Scalafix rule `ToolFunctionOneTypeParameter` drops the first type argument
+wherever both are written. A type parameter of your own that only named the arguments
+(`def tool[T, R](...): ToolFunction[T, R]`) is left declared and unused: delete it by hand.
 
 What changes without a compile error:
 
@@ -129,7 +1344,45 @@ What changes without a compile error:
 `ToolCallError` is not an `LLMError`: a tool call's failure is sent back to the model as a result. Where a program
 must stop on one, map it there: `result.left.map(e => ProcessingError("tool", e.formatted))`.
 
-No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs.
+No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs. The type
+arguments are rewritten by `ToolFunctionOneTypeParameter`.
+
+## A tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey` (#2815)
+
+`ToolCall.id`, `ToolMessage.toolCallId` and `ToolCallInfo.toolCallId` were `String`s, and `ToolCallInfo.idempotencyKey`
+a `String`, while the agent held its own `ToolCallId` and `IdempotencyKey`. There is one of each now, in core: opaque
+types over `String`, built with `apply` and read with `asString`. `ToolCallId` is in `org.llm4s.llmconnect.model`, beside
+`ToolCall`, and `IdempotencyKey` in `org.llm4s.toolapi`, beside `ToolCallInfo`. The agent's events (`ToolExecuted`,
+`ToolCallStarted`, `ToolCallResult`) and `MessageUpdate.EditToolCall` carry them too.
+
+```scala
+import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolCallId, ToolMessage }
+
+val call   = ToolCall(ToolCallId("call_1"), "weather", ujson.Obj("city" -> "Paris"))
+val turn   = AssistantMessage(None, Seq(call))
+val result = ToolMessage("sunny", call.id)
+```
+
+| Before | After |
+|---|---|
+| `ToolCall("c1", name, args)`, `call.withId("c1")` | `ToolCall(ToolCallId("c1"), name, args)`, `call.withId(ToolCallId("c1"))` |
+| `ToolMessage(text, "c1")`, `Message.tool(text, "c1")` | `ToolMessage(text, ToolCallId("c1"))`, `Message.tool(text, ToolCallId("c1"))` |
+| `ToolCallInfo("c1", "key")` | `ToolCallInfo(ToolCallId("c1"), IdempotencyKey("key"))` |
+| `call.id` or `info.idempotencyKey` where a `String` is needed (a header, a map key, `s"..."` is fine as it is) | `call.id.asString`, `info.idempotencyKey.asString` |
+| `import org.llm4s.agent.graph.{ IdempotencyKey, ToolCallId }` | `import org.llm4s.llmconnect.model.ToolCallId` and `import org.llm4s.toolapi.IdempotencyKey` |
+| `toolCallId.value`, `key.value` (the agent's types) | `toolCallId.asString`, `key.asString` |
+| `ToolCallId(request.call.id)` | `request.call.id`, or `request.toolCallId` |
+| `ToolExecuted(agent, "c1", ...)`, `.idempotencyKey: Option[String]` | `ToolExecuted(agent, ToolCallId("c1"), ...)`, `Option[IdempotencyKey]` |
+
+Stored conversations, checkpoints and events are unchanged: both types are written as the plain JSON strings they
+were. Java and Kotlin see a `String` (an opaque type erases to it), and the Java facade's `JToolCall.id()`,
+`JMessage.toolCallId()` and `JToolArgs` keep returning `String`s.
+
+A comparison with a `String` no longer compiles, `call.id == "c1"` and ScalaTest's `call.id shouldBe "c1"` alike:
+compare with `ToolCallId("c1")`, or read `call.id.asString`.
+
+The Scalafix rule `ToolCallIdTyped` (also in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps an id or key set from a `String`, adds
+`.asString` to every other read, and moves the agent's imports ([Scalafix](scalafix)).
 
 ## `SchemaDefinition` gains a union and a raw JSON Schema case (#2814)
 
@@ -212,8 +1465,8 @@ for {
 ## `Llm4sConfig.providerConfigs()` returns each section's `Result`; `providers()` and `ProvidersConfig` are internal (#2804)
 
 `Llm4sConfig` and `Llm4sSettings` (from `Llm4sConfig.from(config)`) are now one implementation: every `Llm4sConfig`
-method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`; `Llm4sConfig.from` itself
-stays `@Experimental`.
+method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`, and so is
+`Llm4sConfig.from`, the entry point at the application edge, although it takes a Typesafe `Config`.
 
 **`providerConfigs()`** returned `Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])]`. It
 returns `Result[Map[ProviderName, Result[ProviderConfig]]]`: each section's config, or the error loading it, under
@@ -439,15 +1692,16 @@ sends the provider one cheap request, and a client with no such request says so.
 
 | Before | After |
 |---|---|
-| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`) or a key lookup (`openrouter`) |
+| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`, `cohere`, `vertexai`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`, `azure`, `perplexity`), a key lookup (`openrouter`), the IAM token exchange (`watsonx`) or loading the model (`jlama`) (#2855) |
 | a wrong key or an unreachable endpoint passes | `Left(AuthenticationError)`, `Left(NetworkError)` and the like, as a completion would fail |
-| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
+| `bedrock`, `zai`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
 | your own `LLMClient` that does not override `validate()`: `Right(())` | `Left(ValidationUnsupportedError)`; override `validate()` to check, or to return `Right(())` in a test double whose code under test calls it |
 | `client.validate().isRight` in a startup check or readiness probe | match `Left(_: ValidationUnsupportedError)` as "cannot check", or the probe fails for the providers in the third row |
 
 `validate()` is now a network call with a timeout of ten seconds: do not call it on every readiness probe without
 caching its result. A provider author's own `OpenAICompatibleDialect` validates with `GET /models` unless it
-overrides `validationPath`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
+overrides `validationUrl(baseUrl, model)`, and one whose vendor refuses a key with a status other than 401 or 403
+overrides `refusesCredential`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
 `ProviderModuleChecks.assertValidates` / `assertValidationUnsupported` check them.
 
 ## A guardrail block's message names only the guardrail (#2793)
@@ -459,9 +1713,10 @@ events, a run queue entry's failure, logs and traces record.
 | Before | After |
 |---|---|
 | `error.message` of a `GuardrailBlocked`, for the reason | `error.reason` (`case blocked: GuardrailBlocked => blocked.reason`) |
-| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, reason)` from the run; the event names the guardrail only |
+| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, Some(reason))` from the run that was blocked; the event names the guardrail only |
 
-`AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked` are unchanged and still carry the reason. Events
+The reason is no longer stored at all, and `AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked`
+changed with that: see [a guardrail's reason is never stored](#a-guardrails-reason-is-never-stored-2853). Events
 already stored keep the message they were written with.
 
 ## Model registry sources, exact lookup and a sealed `RequestTransformer` (#2823)
@@ -706,8 +1961,33 @@ created `public: false`, and nothing is hard-coded as the user.
 - **`userId` is the run's.** The agent's tracing sets the new `TraceEvent.AgentRunEnded.userId` from
   `RunConfig.principal`, and Langfuse receives it as the trace's `userId`; a run without a principal sends none. A
   dashboard filtered on the user `llm4s-user` matches nothing from this version on.
-- `AgentRunEnded` has a twelfth field, so a positional pattern on it no longer compiles: match `case e:
-  TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
+- `AgentRunEnded` gains the field `userId` (it has fourteen fields in all), so a positional pattern on it no longer
+  compiles: match `case e: TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
+
+## The Langfuse backend sends OpenTelemetry spans (#2883)
+
+Langfuse removed its legacy batch ingestion API, `POST /api/public/ingestion`, from Langfuse Cloud on 2026-11-16, and a
+self-hosted Langfuse v4 in `events_only` mode rejects it. The `langfuse` tracing mode now sends OTLP/HTTP JSON to
+Langfuse's OpenTelemetry endpoint, `<url>/api/public/otel/v1/traces`, with `x-langfuse-ingestion-version: 4`; each
+trace, span, generation and event it sent is a span whose `langfuse.*` attributes carry the same fields. The mode,
+the `llm4s.tracing.langfuse.*` keys and the `LANGFUSE_*` variables are unchanged.
+
+- **`LANGFUSE_URL` is the host.** `LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`, was
+  `https://cloud.langfuse.com/api/public/ingestion`. A URL that still ends in `/api/public/ingestion` keeps working:
+  it is read as the host it is on. A self-hosted Langfuse must be v3.22 or later, which has the OTel endpoint.
+- **An unplaced run's trace id.** A run traced without a placement (a hand-built `AgentRunEnded`) was the trace whose
+  id is the run id; OTLP trace ids are 32 hex digits, so it is now the trace `TraceContext.rootFor(runId).traceId`.
+  The run id stays in the trace's `run_id` metadata. Any other event without a placement is a trace of its own, as
+  before. A run's trace now has a root span (`LLM4S Agent Run`) with its messages under it.
+- **`LangfuseBatchSender`** has `sendTraces(request: ujson.Obj, config)`, an OTLP `ExportTraceServiceRequest`, and
+  `sendScores(scores: Seq[ujson.Obj], config)`, posted to `/api/public/scores`; `sendBatch(events, config)` and
+  `DefaultLangfuseBatchSender.normalizeIngestionUrl` are removed. A `LangfuseTracing` subclass that overrode
+  `sendBatch(events: Seq[ujson.Obj])` overrides `sendBatch(request: ujson.Obj)`, the export.
+- **`RAGASLangfuseObserver.logEvaluation(result, traceId)`** scores the trace with that id. To add its
+  `Evaluation Details` span to the trace too, the id must be an OpenTelemetry trace id (32 hex digits), as every trace
+  llm4s sends now has; any other id gets the scores alone, with a warning.
+- Message spans no longer carry `tags` (Langfuse observations have none; the trace keeps `llm4s`, `agent`,
+  `conversation`), and a model call's `usage` no longer has `unit: TOKENS`.
 
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
@@ -797,9 +2077,20 @@ In HOCON, replace `llm4s.embeddings.provider = "openai"` with
 `llm4s.embeddings.provider` and no model fails to load with
 `llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
 one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
-`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
-`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
-model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`, so the per-provider
+model settings only the provider-only form read are removed too ([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+
+| Before | After |
+|---|---|
+| `llm4s.embeddings.<id>.model = "m"` | `llm4s.embeddings.model = "<id>/m"` (`EMBEDDING_MODEL=<id>/m`). A block that still sets `model` fails to load: ``llm4s.embeddings.openai.model ('m') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to openai/<model>, e.g. openai/m, and remove llm4s.embeddings.openai.model`` |
+| `OPENAI_EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VOYAGE_EMBEDDING_MODEL`, `JINA_EMBEDDING_MODEL`, `COHERE_EMBEDDING_MODEL` | not bound or read: put the model in `EMBEDDING_MODEL` |
+| `OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL` and the `*_EMBEDDING_MODEL` constants of `OllamaConfigKeys`, `VoyageConfigKeys`, `JinaConfigKeys` and `CohereEmbeddingConfigKeys` | removed |
+| `EmbeddingConfigSpec(modelEnv = Some("ACME_EMBEDDING_MODEL"))`, `withModelEnv` | removed: drop the argument, and the `model = ${?ACME_EMBEDDING_MODEL}` line from the module's `reference.conf` |
+| `EmbeddingProviderSection(model = ...)`, `section.model`, `withModel` | removed: a descriptor's model is `context.modelOverride`, else `configSpec.defaultModel` |
+| `EmbeddingConfigSpec.resolveModel(id, section, modelOverride, spec)` | `resolveModel(id, modelOverride, spec)` |
+
+`EmbeddingConfigSpec.defaultModel` stays: `llm4s-rag` uses it for a provider chosen without a model
+(`RAGConfig().withEmbeddings("ollama")`).
 
 ## Vertex AI no longer reads `endpoint` and `organization`
 
@@ -816,20 +2107,111 @@ vertex-main {
 }
 ```
 
-They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
-A section that sets `endpoint` and no `project` fails with
-`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
-one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+`endpoint` is now an unknown key: logged with a warning that names it and lists the keys Vertex AI accepts, and
+ignored. A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.
+One that sets `organization` and no `location` fails too, rather than run in `us-central1` unnoticed
+([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+``llm4s.providers.<name> sets `organization`, which Vertex AI no longer reads: the region is `location`. Replace `organization = "europe-west4"` with `location = "europe-west4"`.``
+Beside a `location`, a leftover `organization` is logged and ignored.
 
 For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
 `withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
 with a migration note ([compatibility policy](compatibility-policy)).
 
+## The middleware SPI is consistent and testable (#2795)
+
+`AgentMiddleware` and its types (`org.llm4s.agent.graph.middleware`, `@Experimental`) changed shape so that every hook
+returns state and failure the same way. Only code that writes middleware is affected. There is no shim.
+
+**Ordering constraints take a `MiddlewareRef`.** `runsBefore` and `runsAfter` name another middleware by id or by
+type, and a reference can be optional:
+
+```scala
+// before
+override def runsBefore: Set[MiddlewareId] = Set(MiddlewareId("guardrails"))
+// after: by id, as before
+override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("guardrails")))
+// or by type, whatever id it was given, and only if there is one
+override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef.ofType[GuardrailMiddleware].ifPresent)
+```
+
+A required reference that names nothing in the stack is still refused. `SemanticMemoryMiddleware` no longer takes a
+`runsBefore` argument: it runs outside the guardrail middleware of its stack by itself, wherever it was registered.
+Delete the argument.
+
+**The system prompt is `ModelRequest.systemPrompt`.** `ModelRequest.messages` is the history alone; the assembled
+system prompt is no longer its first message. A `wrapModelCall` that read or kept the `SystemMessage` reads
+`request.systemPrompt` and changes it with `request.withSystemPrompt(...)`; `request.sentMessages` is the list the
+model receives. A wrapper that split the messages by role to protect the prompt no longer needs to.
+
+**A hook adds to an update; nothing replaces one.**
+
+| Was | Now |
+|---|---|
+| `BoundaryResult(text).withUpdate(u)` | `BoundaryResult(text, u)`, or `result.addUpdate(u)` |
+| `success.withUpdate(success.update.combine(u))` | `success.addUpdate(u)` |
+| matching `ToolOutcome.Success` to add a wrapper's update | `outcome.addUpdate(u)` (other outcomes are returned as they are) |
+| `ModelResponse(completion).addUpdate(u)` | unchanged; `ModelResponse(completion, u)` also works |
+
+**`ToolCallRequest` is read-only.** `withSpec`, `withCall` and `withResources` are removed: `wrapToolCall`'s `next`
+takes no request, so a changed one never reached the tool. Build one in a test with `ToolCallRequest(spec, call)`.
+
+**Reserved ids.** A middleware given to `withMiddleware` whose id is `agent-guardrails`, `delegation`,
+`ancestor-permissions` or `response-format` (`MiddlewareId.reserved`) is refused by `build()`, whether or not the
+agent installs its own under that id. Give yours another id; a constraint may still name one.
+
+**Blocking a turn.** A boundary hook that ends a turn on purpose returns `block(reason)`: the turn ends
+`AgentStatus.Blocked(id, reason)` instead of `agent.run` returning a `Left`. A `Left` still blocks the turn and is
+returned as before. What each hook's `Left`, `ToolOutcome.Fatal` and throw do is in
+[Writing Middleware](../guide/agents/middleware#errors); none of it changed.
+
+**New.** `PromptSection.estimatedTokens` and `charsFor` are public. `MiddlewareTestKit` in `llm4s-agent-testkit`
+builds a `ModelContext` and a `ToolContext` for calling a hook directly, and returns the order a stack resolves to
+([Testing a middleware](../guide/agents/middleware#testing-a-middleware)).
+
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
 Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
-([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. A `@Stable`
-case class that may gain a field has a private constructor and `copy`, as core's do. There is no shim.
+([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. Only a small
+core is `@Stable` ([#2785](https://github.com/llm4s/llm4s/issues/2785)): `Agent`, `AgentBuilder`, `AgentResult`,
+`AgentStatus`, `AgentRun`, `Handoff`, `AgentId`; in `agent.graph`, `ThreadId`, `RunId`, `InterruptId`, `NodeId`,
+`TenantId`, `Principal`, `RunConfig`, `RunBudgets`, `RetentionPolicy`, `RunStatus`; `Guardrail`, `InputGuardrail`,
+`OutputGuardrail`, and `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`. Everything else - the
+graph runtime, checkpointers, events and streaming, middleware, tools and the tool loop, human review, delegation,
+the harness, `agent.service`, encryption, metrics, the other guardrails and `org.llm4s.assistant` - is
+`@Experimental`, and so are the members of the Stable types that name it (`withMiddleware`, `withRuntime`,
+`withStreaming`, `stream`, `resume`, the `AgentStatus.Suspended` case and the others listed in
+[Tiers in the Code](api-stability#tiers-in-the-code)). Nothing changes for code that uses them; they may change in a
+1.x minor release. Case classes that may gain a field have a private constructor and `copy`, as core's do. There is
+no shim.
+
+**Guardrails attach through the builder.** `withInputGuardrails` and `withOutputGuardrails` are the Stable way;
+`withMiddleware(new GuardrailMiddleware(...))` still works and is the Experimental form for choosing the position in
+the stack ([Guardrails](../guide/agents/guardrails)). The builder's guardrails run innermost, closest to the model.
+
+```scala
+// before
+Agent.builder("assistant", client)
+  .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 10000)), output = Seq(new JSONValidator())))
+// after
+Agent.builder("assistant", client)
+  .withInputGuardrails(LengthCheck(1, 10000))
+  .withOutputGuardrails(JSONValidator())
+```
+
+**The four validators are built through their companions.** `LengthCheck`, `ProfanityFilter`, `JSONValidator` and
+`RegexValidator` are final with private constructors:
+
+| Was | Now |
+|---|---|
+| `new LengthCheck(min, max)` | `LengthCheck(min, max)` (or `LengthCheck.maxOnly`, `minOnly`) |
+| `new ProfanityFilter()`, `new ProfanityFilter(customBadWords = ws)`, `..., caseSensitive = true)` | `ProfanityFilter()`, `ProfanityFilter.withCustomWords(ws)`, `ProfanityFilter.caseSensitive(ws)` |
+| `new JSONValidator()`, `new JSONValidator(Some(schema))` | `JSONValidator()`, `JSONValidator.withSchema(schema)` |
+| `new RegexValidator(regex)`, `new RegexValidator(regex, Some(message))` | `RegexValidator(regex)`, `RegexValidator(regex, message)` |
+
+**`ThreadId.child` is internal.** It named `IdempotencyKey`, an Experimental type; a child thread's id is the one
+`Agent.children` and the delegation events report.
 
 **Growth-safe types.** `X(...)` still builds each one; `new X(...)` and `.copy(...)` no longer compile.
 
@@ -912,16 +2294,10 @@ is unchanged.
 | `guardrails.rag.GroundingResult`, `ContextRelevanceResult`, `SourceAttributionResult`, `TopicBoundaryResult`, `guardrails.builtin.InjectionMatch` | internal: each guardrail's parsed verdict |
 | `org.llm4s.assistant.Command` | internal to `AssistantAgent` |
 
-**Tiers that moved.** Now `@Stable`, because a Stable signature names them: `ModelContext`, `ModelResponse`,
-`BoundaryResult`, `PromptSection`, `Placement` (the `AgentMiddleware` hooks); `ToolResource`, `Operation`, `LockKey`,
-`OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
-`ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
-`SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
-`DelegatedRequest` (`Suspension.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
-types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
-`InMemoryCheckpointer.runQueue`. The RAG
-guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
-through `RAGGuardrail.withTurnContext`, whose shape may still change.
+**Tiers that moved.** Core's `ToolHints` is now `@Stable` (the tool contract). `Agent.loop` is now an `@Experimental`
+`def` rather than a constructor `val`, so `agent.loop.graph` reads as before. The RAG guardrails
+(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only through
+`RAGGuardrail.withTurnContext`, whose shape may still change.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
@@ -978,6 +2354,23 @@ unless you use it.
   and a reclaimed thread's fence. They never remove an item.
 - **A custom `LongTermStore`** has a contract to pass: mix `LongTermStoreContract` (`llm4s-agent-testkit`) into a
   spec. `InMemoryLongTermStore`'s behaviour is unchanged.
+
+## `SQLiteVectorStore` escapes metadata and filters exactly (#2759)
+
+Metadata was written as JSON without escaping, so a key or value with a quote was cut short when read, and filters
+matched with `LIKE` on that text. No API changes; stored files and filter results do:
+
+- **Existing files need nothing.** Opening one changes no row. A row written from now on starts with a space and is
+  JSON; any other row is read, and filtered, as the unescaped text 0.6.0 and earlier wrote, and is replaced when you
+  upsert it.
+- **Some old text is ambiguous**, where a key or value held quotes in the arrangement of a separator: `","` or `":"`, a
+  key or value ending in `",`, a key ending in `":`. JSON stored as a value can be one. Such a row may read as other entries
+  than were written: upsert it again. So may a row another program wrote as JSON with backslash escapes.
+- **0.6.0 can open the file**, but does not unescape the new rows: a value is cut at its first quote and a backslash is
+  doubled.
+- **Filters compare exactly.** `Equals`, `Contains` and `In` are case-sensitive, `%` and `_` are ordinary characters,
+  and `Contains` and `HasKey` look only at the named key. `deleteByFilter` deletes fewer rows where it used to delete
+  look-alikes (`user_1` also deleted `userX1`). `In` works with more than one value, and matches nothing with none.
 
 ## `RAG.ingestChunks` takes `DocumentChunk`s (#2732)
 
@@ -1095,7 +2488,7 @@ val drop = keep.withTransform(_ => Seq.empty)
 ```
 
 A rule built positionally, `CompressionRule(name, f)`, is unchanged. The Scalafix rule `CompressionRuleTransform`
-(in `Llm4sMigrate_1_0`) makes these edits.
+(in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) makes these edits.
 
 ## A RAG with a `SearchIndex` ingests only with permissions (#2716)
 
@@ -1146,7 +2539,7 @@ open question 6).
   `ValidationError`. The partial text is `Truncated.partialAnswer`, and stays in the thread's messages, so the next
   turn (`continueConversation`, "go on") sees it; the turn is a completed one, like `StepLimitReached`.
 - **A `match` on `AgentStatus` without a catch-all** needs a `Truncated` case. Scala 3 warns that the match is not
-  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrate_1_0`) reports each one.
+  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) reports each one.
 - **Delegation**: a child that ends `Truncated` is refused `TaskRefusal.Truncated`, as a child at its step limit is,
   and `SubagentEvents.TaskEnded`'s status is `truncated`.
 - **Tracing**: `TraceEvent.AgentRunEnded.status` is `truncated`.
@@ -1186,7 +2579,7 @@ client.complete(conversation, options).map { c =>
   `case Completion(id, _, content, _, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix rule adds
   them to 0.6.0's ten-field pattern, and every field since 0.5.1 to its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
-  one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
+  one sets the reason it read; one it did not read is `FinishReason.Unknown` (#2807), which tracing leaves out.
 - Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
   and Bedrock's `stopReason`): a natural end or stop sequence is `Stop`, a tool call `ToolCalls` (Gemini's `STOP` after
   a function call too), a token or context-window limit `Length` (`max_tokens`, `MAX_TOKENS`,
@@ -1312,13 +2705,13 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
+The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
 source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
-on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#migration-rules)). These need a hand edit:
+on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)). These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
@@ -2355,7 +3748,7 @@ unchanged.
 private:
 
 - **Construction is unchanged**: `Schema.string(...)`, `Schema.property(...)`, `ToolBuilder` and `X(...)` with the same
-  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[T, R](...)`).
+  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[R](...)`).
 - **Replace `.copy` with a setter**:
 
   | Type | Setters |
@@ -3612,18 +5005,21 @@ val reliable = ReliableProviders.wrap(client, "openai", config)
 val other    = client.withReliability("openai")
 
 // after
-val reliable = new ReliableClient(client, "openai", config)
-val other    = new ReliableClient(client, "openai", ReliabilityConfig.default)
+val reliable = ReliableClient(client, "openai", config)
+val other    = ReliableClient(client, "openai", ReliabilityConfig.default)
 ```
+
+(The constructor has since become private: this is the companion's `apply`, see
+[`ReliableClient` has a private constructor](#reliableclient-has-a-private-constructor-2797).)
 
 `ReliableClient`'s companion factories (`ReliableClient(client)`, `ReliableClient(client, config)`,
 `ReliableClient(client, config, metrics)`, `ReliableClient.withProviderName`) go too: three of them
-guessed the provider name from the client's class name. Use the constructor. For a client built
+guessed the provider name from the client's class name. Use `ReliableClient(client, name, config)`. For a client built
 from config, the name is `providerConfig.providerId.asString`.
 
 Behaviour fix: **`ReliableClient` now applies `ReliabilityConfig.rateLimit` itself**, before every
 attempt, retries included. Before, only `ReliableProviders.wrap` honoured it, so a
-`new ReliableClient(...)` with rate limiting enabled was not rate limited.
+`ReliableClient` built directly with rate limiting enabled was not rate limited.
 
 ### OpenAI's model rules leave `RequestTransformer`
 
@@ -4239,7 +5635,11 @@ belongs in `traceEvent`'s `AgentStateUpdated` case.
 
 ### `Tracing.create` finds backends on the classpath
 
-`Tracing.create(settings)` keeps its signature. It builds `NoOp` and `Console` itself and hands
+`Tracing.create` has since been removed: `Tracing.fromSettings` is the only factory, see
+[A tracing backend declares its aliases, and `Tracing.create` is removed](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
+What follows describes it as it was in this slice.
+
+`Tracing.create(settings)` kept its signature. It built `NoOp` and `Console` itself and handed
 every other mode to an `org.llm4s.trace.spi.TracingBackend` registered in
 `META-INF/services/org.llm4s.trace.spi.TracingBackend`:
 
@@ -4660,7 +6060,7 @@ The three copies had drifted apart; the shared client does each thing one way:
    the missing id was defaulted to `""`, and `StreamingAccumulator` skips a chunk with no id. The
    shared client now maps each index to its call's id for the life of the stream, and a streamed
    `Completion` reports its tool calls in `toolCalls`, as a non-streaming one does.
-7. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
+7. **A reply's `message.text` (`contentOpt` until #2809) is `None` when the reply has no text** for all three (it was
    `Some("")` for DeepSeek and Z.ai); `Completion.content` is `""` either way.
 8. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
    defaults, a streamed event with no `choices` is skipped, and a malformed non-streaming reply is

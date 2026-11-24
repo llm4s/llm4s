@@ -1,9 +1,10 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolCallId }
 import org.llm4s.toolapi.Schema
 import upickle.default.ReadWriter
 
@@ -37,10 +38,10 @@ private[javaapi] object SuspensionFixtures {
       ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
   }
 
-  def call(id: String, name: String, text: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
+  def call(id: String, name: String, text: String): ToolCall = ToolCall(ToolCallId(id), name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion =
-    Completion("turn", Instant.EPOCH, "", "m", AssistantMessage(None, calls), calls.toList)
+    Completion("turn", Instant.EPOCH, ModelName("m"), AssistantMessage(None, calls))
 
   /** A model answering each call with the next of `replies`, then `done`. */
   def scripted(replies: Either[LLMError, Completion]*): Scripted = {
@@ -57,7 +58,7 @@ private[javaapi] object SuspensionFixtures {
     }
     val tools = ToolSet.of(deploy, confirm).fold(e => throw new AssertionError(e.message), identity)
     jAgentOf(client)(
-      _.withTools(tools).withMiddleware(
+      _.withToolSet(tools).withMiddleware(
         new ApprovalMiddleware(r => Option.when(r.spec.name == "deploy")(s"deploying ${r.call.arguments("text").str}"))
       )
     )

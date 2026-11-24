@@ -1,5 +1,6 @@
 package org.llm4s.workspace
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.agent.graph.{ ReplaySupport, RunContext }
 import org.llm4s.agent.harness.{ BackendRefused, FileContext, FileWritten, VPath }
 import org.llm4s.agent.harness.workspace.{ WorkspaceFileBackend, WorkspaceSandboxBackend }
@@ -74,10 +75,13 @@ private object LiveWorkspace {
       ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
     val client =
-      ScriptedLLMClient.sequence(Reply.toolCalls(ToolCall("c", "go", ujson.Obj("x" -> ""))), Reply.text("done"))
+      ScriptedLLMClient.sequence(
+        Reply.toolCalls(ToolCall(ToolCallId("c"), "go", ujson.Obj("x" -> ""))),
+        Reply.text("done")
+      )
     Agent
       .builder("it", client)
-      .withTools(ToolSet.of(tool).fold(e => throw new IllegalStateException(e.message), identity))
+      .withToolSet(ToolSet.of(tool).fold(e => throw new IllegalStateException(e.message), identity))
       .build()
       .flatMap(_.run("go"))
       .fold(e => throw new IllegalStateException(e.message), _ => out.get)

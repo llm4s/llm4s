@@ -1,7 +1,7 @@
 package org.llm4s.samples.actions
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.identity.TokenizerId.O200K_BASE
+import org.llm4s.context.tokens.TokenizerId.O200K_BASE
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model._
 import org.llm4s.context.tokens.Tokenizer

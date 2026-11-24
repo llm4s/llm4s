@@ -3,8 +3,9 @@ layout: page
 title: Jupyter Notebooks
 description: "Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks, configuration inside a notebook, and known limits."
 search_title: "Run LLM4S in Jupyter notebooks with the Almond Scala kernel"
-parent: User Guide
-nav_order: 57
+parent: Frameworks and Runtimes
+nav_order: 506
+grand_parent: User Guide
 ---
 
 # Jupyter Notebooks
@@ -80,7 +81,7 @@ System.setProperty("config.file", "/path/to/application.conf")
 - **individual settings**, which take precedence over `application.conf`:
 
 ```scala
-System.setProperty("llm4s.providers.provider", "ollama-local")
+System.setProperty("llm4s.defaultProvider", "ollama-local")
 System.setProperty("llm4s.providers.ollama-local.provider", "ollama")
 System.setProperty("llm4s.providers.ollama-local.model", "llama3.2")
 ```
@@ -89,7 +90,7 @@ A key is read from the vendor's environment variable through the provider module
 for `llm4s-openai`, and so on), so set it in the shell that starts Jupyter. Never read `sys.env` in the notebook.
 
 In the notebooks, set `useRealProvider = true` in the **Switch to a real provider** cell. The getting-started notebook
-then loads the section `llm4s.providers.provider` names; the RAG notebook also embeds with the model
+then loads the section `llm4s.defaultProvider` names; the RAG notebook also embeds with the model
 `llm4s.embeddings` configures. The `assert`s check only the scripted answers, so a real model's answers are printed,
 not checked.
 

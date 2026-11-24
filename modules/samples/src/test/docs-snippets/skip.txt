@@ -1,6 +1,7 @@
 # Scala blocks of the documentation that cannot compile as written. One per line: page | block hash | action | detail
 #   skip | reason   : the block is left out
-#   with | imports  : the block is compiled after these imports (separate with `;`)
+#   with | preamble : the block is compiled after these statements (separate with `;`): imports, or a typed
+#                     stand-in for a value an earlier block defines, e.g. `val store: MemoryStore = ???`
 # The hash is printed by `sbt docSnippetsReport`; editing a skipped block makes its entry stale and fails the build.
 getting-started/configuration.md | a87b6dca4f | skip | sbt build definition, not Scala source
 getting-started/configuration.md | 710572c7c5 | skip | sbt build definition, not Scala source
@@ -8,15 +9,15 @@ getting-started/ollama-quickstart.md | 546e0e227c | skip | sbt build definition,
 getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition, not Scala source
 getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not Scala source
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
-getting-started/configuration.md | 92f27ec027 | with | import org.llm4s.config.Llm4sConfig
-getting-started/configuration.md | 7b6f72222c | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | ca91a867d4 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.types.ProviderModelTypes.ProviderName
+getting-started/configuration.md | 9377ccc0b9 | with | import org.llm4s.llmconnect.model._
 getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
 getting-started/first-example.md | 5845843420 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 755ae2a95f | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 1e6757e734 | with | import org.llm4s.agent.Agent; import org.llm4s.toolapi.ToolRegistry
-getting-started/first-example.md | 14b2aad038 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 4637150377 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService
 getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
@@ -67,7 +68,6 @@ guide/providers.md | afa57b6d42 | skip | sbt build definition, not Scala source
 guide/providers.md | 5b738f4a9e | skip | sbt build definition, not Scala source
 guide/providers.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
 guide/providers.md | 212673b3ef | skip | sbt build definition, not Scala source
-guide/providers.md | 3aaf5d6233 | skip | uses ConfigPolicy from llm4s-config-policy, the unpublished config-check CLI module, which samples does not depend on
 guide/providers.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/basic-usage.md | 26fea8f0c8 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
 guide/basic-usage.md | 54302bfb43 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
@@ -99,27 +99,27 @@ guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.Metadat
 guide/vector-store.md | 7cfa35e8f5 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | 50faf924a4 | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
-guide/reliability.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block
-guide/reliability.md | 98d892e5ec | skip | API reference: the class's signature and members without their bodies
+guide/reliability.md | bf415fab7f | skip | the factory's signature, with parameter types in place of arguments; the call is in the next block
+guide/reliability.md | 920c90ecff | skip | API reference: the class's signature and members without their bodies
 guide/reliability.md | f4a41421d1 | with | import org.llm4s.reliability._
-guide/reliability.md | 3cb4356d69 | with | import org.llm4s.reliability._
+guide/reliability.md | 390cc3e0e3 | with | import org.llm4s.reliability._
 guide/reliability.md | fd2c3a178c | with | import org.llm4s.reliability._
 guide/reliability.md | a48b40ce3c | with | import org.llm4s.reliability._; import scala.concurrent.duration._; import org.llm4s.error._
 guide/reliability.md | b30e8f450e | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-guide/reliability.md | c7ecba27e8 | with | import org.llm4s.reliability._
-guide/reliability.md | 86288480cb | with | import org.llm4s.reliability._
+guide/reliability.md | 3e8d9ad0b6 | with | import org.llm4s.reliability._
+guide/reliability.md | e74c980066 | with | import org.llm4s.reliability._
 guide/reliability.md | 37f427ee8d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-guide/reliability.md | d58076267d | with | import org.llm4s.reliability._
-guide/reliability.md | 9d9432e21d | with | import org.llm4s.reliability._
+guide/reliability.md | 4b0a1df034 | with | import org.llm4s.reliability._
+guide/reliability.md | 3c08921f4e | with | import org.llm4s.reliability._
 guide/reliability.md | 2c0d6d235a | with | import org.llm4s.reliability._
-guide/reliability.md | c727d02cbc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 042b453ed9 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 guide/reliability.md | 73e2ef368d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 guide/reliability.md | 94a0e049b6 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 guide/reliability.md | f07b226a63 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-guide/reliability.md | fd762bb41c | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-guide/reliability.md | 72f66091ea | with | import org.llm4s.reliability._
+guide/reliability.md | fd7444ceaf | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | f80a144a85 | with | import org.llm4s.reliability._
 guide/reliability.md | 96df290f68 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
-guide/reliability.md | 7d18961271 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
+guide/reliability.md | 9747e5986b | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
 guide/reliability.md | f2ecd432aa | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 guide/reliability.md | 3693c9098a | with | import scala.concurrent.duration._
 guide/reliability.md | 04c0cd961c | with | import scala.concurrent.duration._
@@ -132,49 +132,50 @@ guide/agents/handoffs.md | c2851c9c8a | skip | mathAgent, codeAgent, legalAgent 
 guide/agents/handoffs.md | 11f44a1d8d | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 3d591c6823 | skip | queryDatabaseTool, generateChartTool, exportCSVTool and basicTools stand for the reader's own tools
 guide/agents/handoffs.md | a466d5b776 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
-guide/agents/handoffs.md | 423b68ea6c | skip | continues the customer support example above: billingAgent is the builder defined there
+guide/agents/handoffs.md | 9173bcb549 | skip | continues the customer support example above: billingAgent is the builder defined there
 guide/agents/handoffs.md | a7e216e203 | skip | mainAgent and query stand for an agent built as above and the user's question
 guide/agents/handoffs.md | 10d54e6bc1 | skip | specialist is the builder of the examples above; the comments sketch a conversation
 guide/agents/handoffs.md | 7fdebf1862 | with | import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 325a7ae427 | skip | agent stands for the specialist builder being described
 guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
 guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue
-guide/agents/guardrails.md | 0df3101aca | skip | the guardrail lists are elided as Seq(...): the examples below fill them
-guide/agents/guardrails.md | eb8470f1ea | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
-guide/agents/guardrails.md | 4ee06b2969 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
-guide/agents/guardrails.md | 08e4fe2099 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | fc33f402f3 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | e8538190fc | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | 939f90bd20 | with | import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 2155effbf1 | skip | the guardrail lists are elided as (...): the examples below fill them
+guide/agents/guardrails.md | 751bc216da | with | import org.llm4s.agent.Agent; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | dade69a057 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | ab0f6119e8 | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | 44b8cf78bd | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | df55ca4850 | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | a7d554daf6 | with | import org.llm4s.agent.guardrails.builtin._
 guide/agents/guardrails.md | 77f3561d4b | with | import org.llm4s.agent.guardrails.CompositeGuardrail; import org.llm4s.agent.guardrails.builtin._
-guide/agents/guardrails.md | 24520c02b0 | with | import org.llm4s.agent.guardrails.CompositeGuardrail; import org.llm4s.agent.guardrails.builtin._
-guide/agents/guardrails.md | 77af0c08bc | skip | continues the sequential composite above: sequentialValidation is defined there
-guide/agents/guardrails.md | d4507032db | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | 39226cc197 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | 7a8b5260c3 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-guide/agents/guardrails.md | f7bcfba7cd | with | import org.llm4s.agent.AgentStatus
-guide/agents/guardrails.md | 72d9e65543 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
-guide/agents/guardrails.md | 71e923b933 | with | import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 591325d69b | with | import org.llm4s.agent.guardrails.CompositeGuardrail; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 910bf055fb | skip | continues the sequential composite above: sequentialValidation is defined there
+guide/agents/guardrails.md | 8b33e88afe | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | 2bde24ac11 | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | b3393df8fd | with | import org.llm4s.agent.Agent
+guide/agents/guardrails.md | 98787c99d1 | with | import org.llm4s.agent.AgentStatus
+guide/agents/guardrails.md | 8f11dfd07b | with | import org.llm4s.agent.Agent; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | fcab15ce3f | with | import org.llm4s.agent.guardrails.builtin._
 guide/agents/human-review.md | 25590550c3 | skip | runtime, graph and input stand for the reader's own GraphRuntime, compiled graph and input
 guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala source
+guide/agents/middleware.md | 7316ca7315 | skip | sbt build definition, not Scala source
 guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
-guide/agents/index.md | 03517fa0d9 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
-guide/agents/index.md | d1fef074f9 | skip | chargeSchema and payments stand for the reader's own schema and payment client
+guide/agents/index.md | 82582ede43 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
+guide/agents/index.md | 851d4f4d00 | skip | chargeSchema and payments stand for the reader's own schema and payment client
 guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
-guide/agents/index.md | b76f20c767 | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
+guide/agents/index.md | 3f06adc79e | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
 guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace
-guide/agents/index.md | ce76667140 | with | import org.llm4s.agent.Agent
-guide/agents/index.md | 74711366e8 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | f15f77a51f | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 7f0b64b8a6 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 17c3af78c5 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 4a8092bb7b | with | import org.llm4s.agent.Agent
 guide/agents/index.md | c58e4d4ee0 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | d7fa46f052 | with | import org.llm4s.agent.Agent
-guide/agents/index.md | 337a71a9d6 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 9da16c5dd7 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 36fb50d046 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 4f67dff48d | with | import org.llm4s.agent.Agent
 guide/agents/index.md | b7deab0a7d | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 3a0a1f8daa | with | import org.llm4s.agent.Agent
-guide/agents/index.md | 53294b2a27 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | b24cd6b180 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | be4f20b575 | with | import org.llm4s.agent.Agent
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source
@@ -193,11 +194,11 @@ getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not 
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
 getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
-tutorials/support-assistant/part-1-first-call.md | f191562fc0 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
+tutorials/support-assistant/part-1-first-call.md | 072104ccef | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
 tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
 tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
 tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
-tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
+tutorials/support-assistant/part-3-tools.md | c74d0037c2 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
 tutorials/support-assistant/part-3-tools.md | e9be0f0903 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
 guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
 guide/rag-evaluation.md | 10931d5ebd | skip | API reference: the class's signature and members without their bodies
@@ -206,12 +207,175 @@ guide/rag-evaluation.md | 27d416bdf9 | skip | API reference: the case class as d
 guide/rag-evaluation.md | 965bf6f7ad | skip | API reference: the case classes' fields and members without their bodies
 guide/rag-evaluation.md | bf46734ded | skip | API reference: the class's signature and members without their bodies
 guide/rag-evaluation.md | f2b322db11 | skip | API reference: the object's members without their bodies
-tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
+tutorials/support-assistant/part-4-help-centre.md | 256a3f8dde | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
 tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
-tutorials/support-assistant/part-4-help-centre.md | 5dd3497e8c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
-tutorials/support-assistant/part-5-safety-memory.md | 02ae3a144b | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-4-help-centre.md | 2c732129e1 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-5-safety-memory.md | 8eaffdfd48 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }
 guide/agents/guardrails.md | 8ad9467374 | skip | continues the imports block above with `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
-guide/agents/guardrails.md | 223c61d8cf | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
-guide/agents/guardrails.md | f6ace44ef4 | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | a492bbe7ca | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | eb9f09daf4 | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
 guide/agents/guardrails.md | ed67fab4bd | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
+guide/speech.md | 03ac783315 | skip | stt, audioInput and options stand for the client, input and options of the examples above
+guide/multimodal.md | 7675739778 | skip | plotSpec and render stand for the tool's own spec and plotting code; the imports are the block above's
+guide/agents/streaming.md | 7292751e70 | skip | a sketch of the EventType API: context, value and listener stand for a task's context, its payload and an event listener
+guide/stt-domain-model.md | fc17aea067 | skip | Transcription(...) elides the fields; the blocks above show how a transcription is built
+guide/observability/enhanced-tracing-use-cases.md | af3385a2f9 | skip | an outline of a TraceStore implementation: the method bodies and the other members are elided with // ...
+guide/observability/enhanced-tracing-use-cases.md | 57c21cf8df | skip | one method of a ScalaTest suite mixing in BeforeAndAfterEach, shown on its own
+guide/zio.md | a98b1ebfe6 | skip | sbt build definition, not Scala source
+guide/zio.md | 1f7113dd23 | with | val existingClient: org.llm4s.llmconnect.LLMClient = client
+guide/zio.md | ba8e83d8cb | with | val client: org.llm4s.zio.LLMClientZ = ???
+guide/zio.md | 5e47087439 | with | import zio.ZIO; val client: org.llm4s.zio.LLMClientZ = ???
+guide/zio.md | f3f49461ef | with | val agentZ: org.llm4s.zio.AgentZ = ???
+guide/zio.md | 414efc1a84 | with | import zio.ZIO; val client: org.llm4s.zio.LLMClientZ = ???
+guide/cats-effect.md | 775e3038cc | skip | sbt build definition, not Scala source
+guide/cats-effect.md | eb8598eb20 | with | import cats.effect.IO; val existingClient: org.llm4s.llmconnect.LLMClient = client
+guide/cats-effect.md | ac527a036e | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
+guide/cats-effect.md | 2a722fa69e | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
+guide/cats-effect.md | 90dea943da | with | import cats.effect.IO; val agentIO: org.llm4s.effect.cats.AgentIO[IO] = ???
+guide/cats-effect.md | f822f63401 | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
+guide/cost-controls.md | c88d5c3f89 | with | import org.llm4s.llmconnect.model._
+guide/cost-controls.md | 4d55f2c2eb | with | import org.llm4s.llmconnect.model._; val questions: Seq[String] = ???; def withDocument(question: String): Conversation = ???
+guide/cost-controls.md | 556273ebc2 | with | import org.llm4s.llmconnect.model._
+guide/builtin-tools.md | 9494a7596d | with | import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }; import org.llm4s.toolapi.builtin.BuiltinTools; val myTool: ToolFunction[?] = ???
+guide/rag-query-transformers.md | 0976b6bdd7 | with | val llmClient: org.llm4s.llmconnect.LLMClient = client
+guide/rag-query-transformers.md | 5435420347 | with | import org.llm4s.types.Result
+guide/rag-query-transformers.md | 43a8822528 | skip | uses the AbbreviationExpander class of the block above, which is compiled there
+guide/rag-query-transformers.md | a005eab676 | with | import org.llm4s.rag.RAG; val expander: org.llm4s.rag.transform.QueryTransformer = ???
+guide/observability/provider-exchange-logging.md | cd9f4a77b3 | with | import org.llm4s.llmconnect.ProviderExchange
+guide/agents/multiple-machines.md | df8910b85c | with | val store: org.llm4s.agent.graph.spi.CheckpointStore = ???; val runtime: org.llm4s.agent.graph.GraphRuntime = ???; val queue: org.llm4s.agent.service.RunQueue = ???; val metrics: org.llm4s.metrics.MetricsCollector = ???; val tenant: org.llm4s.agent.graph.TenantId = ???; val submitter: org.llm4s.agent.service.RunSubmitter = ???
+guide/agents/multiple-machines.md | cd981b6c6e | with | val registry: io.prometheus.metrics.model.registry.PrometheusRegistry = ???; val store: org.llm4s.agent.graph.spi.CheckpointStore = ???
+guide/caching.md | e622c0c859 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 3b4e4ac09d | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 0912448d0c | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder; given org.llm4s.model.ModelRegistryService = ???
+guide/caching.md | 29a2d91f8f | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | b26c99f8bd | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
+guide/caching.md | fa7f6dfff8 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
+guide/jev.md | 975f60b158 | skip | sbt build definition, not Scala source
+guide/jev.md | f1e8f1ba15 | with | import org.llm4s.jev._; val config: JevConfig = ???
+guide/jev.md | 734f942306 | with | import org.llm4s.jev._
+guide/agents/delegation.md | 6f0e30e09c | with | val researchTools: org.llm4s.agent.graph.tool.ToolSet = ???
+guide/agents/delegation.md | d78c0ce418 | with | import org.llm4s.agent.graph.middleware.MiddlewareId; val researcher: org.llm4s.agent.delegation.TypedAgent[?, ?] = ???
+guide/agents/delegation.md | 9d73e8c490 | with | import org.llm4s.agent.delegation.DelegationConfig; import org.llm4s.llmconnect.model.CompletionOptions; val researcher: org.llm4s.agent.delegation.TypedAgent[?, ?] = ???; val critic: org.llm4s.agent.delegation.TypedAgent[?, ?] = ???; val smallClient: org.llm4s.llmconnect.LLMClient = client
+guide/agents/delegation.md | ba720f03e4 | with | import org.llm4s.agent.AgentStatus; import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }; final case class UnitChoice(unit: String) derives upickle.default.ReadWriter
+guide/agents/delegation.md | 755a79749e | with | import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }; import org.llm4s.agent.graph.tool.Operation
+guide/agents/delegation.md | 1be3d8ac64 | with | import org.llm4s.agent.graph.EventHandlers; import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
+guide/agents/streaming.md | 1c0436460d | with | import org.llm4s.agent.events.AgentEvents; import org.llm4s.agent.graph.ThreadId
+guide/agents/streaming.md | 9f6cf14716 | with | import org.llm4s.agent.events.AgentEvents; import org.llm4s.agent.graph.ThreadId
+guide/agents/streaming.md | 082eb76c98 | with | import org.llm4s.agent.graph.{ GraphRuntime, RunConfig, StreamEvent, TenantId }; val runtime: GraphRuntime = ???; val listener: StreamEvent => Unit = ???
+guide/agents/streaming.md | 1d6f4d33d7 | with | val store: org.llm4s.agent.graph.Checkpointer = ???
+guide/agents/streaming.md | 9438a59893 | skip | the ZIO and Pekko lines elide their cases as /* same cases */; the AgentStreamIOExample and AgentStreamZIOExample samples run the full forms
+guide/agents/streaming.md | e30bdc663e | with | import cats.effect.IO; import org.llm4s.agent.AgentRun; import org.llm4s.agent.events.AgentEvents; import org.llm4s.agent.graph.{ EventHandlers, EventType, StreamEvent }; final case class CheckedPath(path: String) derives upickle.default.ReadWriter; type Checked = CheckedPath; val Checked: EventType[CheckedPath] = ???; val run: AgentRun = ???; val agentIO: org.llm4s.effect.cats.AgentIO[IO] = ???; val agentZ: org.llm4s.zio.AgentZ = ???; val agentPekko: org.llm4s.pekko.AgentPekko = ???
+guide/agents/streaming.md | ef9d4210ac | with | import org.llm4s.agent.events.AgentEvents; import org.llm4s.agent.graph.{ EventHandlers, EventType, StreamEvent }; final case class CheckedPath(path: String) derives upickle.default.ReadWriter; type Checked = CheckedPath; val Checked: EventType[CheckedPath] = ???
+guide/agents/memory.md | 672aeff8d0 | skip | sbt build definition, not Scala source
+guide/agents/memory.md | 362b0b0114 | skip | sbt build definition, not Scala source
+guide/agents/memory.md | 8fecccb588 | with | import org.llm4s.agent.memory._
+guide/agents/memory.md | d665f6879c | with | import org.llm4s.agent.memory._
+guide/agents/memory.md | ec6f64418a | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 347b34da57 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | a731324c06 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | e471e69f43 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 88142f5eac | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 3e8ea51963 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 5938488922 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 24bb971ca2 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | c10c2f0163 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 8ac11db4f1 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | add87ac53f | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | cd19967538 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 019e14c8b7 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???
+guide/agents/memory.md | 2f07b19da6 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result
+guide/agents/memory.md | e7b259fab4 | with | import org.llm4s.agent.memory._; import org.llm4s.types.Result; val manager: MemoryManager = ???; val store: MemoryStore = ???; def consolidate(manager: MemoryManager): Result[MemoryManager] = ???; val thirtyDaysAgo: java.time.Instant = ???
+guide/context-window-pruning.md | 6a11297f00 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | d9727a377f | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 2d85af2441 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | c2431dc4a1 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 1ecb40525f | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | de2b4ffe0e | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | a4ab876ab4 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | cae4159092 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | b74b2e03b4 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 52b82f4fcd | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 9ec8eb4e05 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 41f70268ea | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | acf324b1c7 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | f4026860ea | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._
+guide/context-window-pruning.md | 07f32657ea | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._; def tokenCount: Int = ???; val limit: Int = ???
+guide/context-window-pruning.md | fabdf655b9 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._; def adaptiveFor(registry: org.llm4s.model.ModelRegistryService, model: String): org.llm4s.types.Result[PruningStrategy] = ???; val registry: org.llm4s.model.ModelRegistryService = ???; val providerConfig: org.llm4s.llmconnect.config.ProviderConfig = ???
+guide/context-window-pruning.md | fcbb9d62ae | with | val logger: org.slf4j.Logger = ???; val result: org.llm4s.agent.AgentResult = ???
+guide/context-window-pruning.md | 117737ff5a | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }; import org.llm4s.llmconnect.model._; import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.ContextWindowMiddleware; val config: ContextWindowConfig = ???
+guide/stt-domain-model.md | e17e5d574f | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | e5192ab2ba | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | 4fb333d9fb | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | f63a5fae02 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | 5f357d1a75 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | 684d68ed97 | with | import java.util.concurrent.TimeoutException; import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | c276106f81 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | e24beb51c1 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/stt-domain-model.md | 1bf307173b | with | import org.llm4s.speech.AudioMeta; import scala.concurrent.duration.FiniteDuration; import org.llm4s.speech.stt.WordTimestamp
+guide/stt-domain-model.md | e1a858020e | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???
+guide/stt-domain-model.md | 40369771d6 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???
+guide/stt-domain-model.md | 5ac096e277 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???
+guide/stt-domain-model.md | 1b89124785 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???; val options: STTOptions = ???
+guide/stt-domain-model.md | 6fe14e8067 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???; val options: STTOptions = ???
+guide/stt-domain-model.md | e87c5699a0 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val audio: AudioInput = ???; val options: STTOptions = ???
+guide/stt-domain-model.md | 659e9acdf3 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result; val provider: SpeechToText = ???; val input: AudioInput = ???; val userThreshold: Double = ???
+guide/stt-domain-model.md | 526d329716 | with | import org.llm4s.speech._; import org.llm4s.speech.stt._; import org.llm4s.types.Result
+guide/observability/enhanced-tracing-use-cases.md | 00dc862953 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant
+guide/observability/enhanced-tracing-use-cases.md | ce0c662272 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; import org.scalatest.Assertions.fail; import org.scalatest.matchers.should.Matchers._
+guide/observability/enhanced-tracing-use-cases.md | f02474eefd | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | 9c7a42d377 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | 31de8cd67d | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | ea003eb323 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | 5438afdaf3 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | 220ab95b53 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???
+guide/observability/enhanced-tracing-use-cases.md | 98f8c6e1f8 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???; val userId: String = ???
+guide/observability/enhanced-tracing-use-cases.md | f97feafcca | with | import org.llm4s.trace.model.TraceModelJson.SpanJson; import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val span: Span = ???
+guide/observability/enhanced-tracing-use-cases.md | 278d03aaa3 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val span: Span = ???
+guide/observability/enhanced-tracing-use-cases.md | e152fbd359 | with | import org.llm4s.agent.Agent; import org.llm4s.trace._; import org.llm4s.trace.model._; import org.llm4s.trace.store._; import org.llm4s.types.Result; import java.time.Instant; val store: InMemoryTraceStore = ???; val traceId: TraceId = ???; final case class EvalRecord(model: String, completionId: String, promptTokens: Long)
+examples/index.md | 02c4ed82ae | with | val result1: org.llm4s.agent.AgentResult = ???
+examples/index.md | d94b0d4970 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
+examples/index.md | 13eebd740c | with | import java.nio.file.{ Files, Path }; import org.llm4s.agent.graph.{ RunConfig, ThreadId }; import upickle.default.write; val path: Path = ???; val result: org.llm4s.agent.AgentResult = ???; val newThreadId: ThreadId = ???; val loaded: Seq[org.llm4s.llmconnect.model.Message] = ???
+examples/index.md | b2213a1fa7 | with | import org.llm4s.toolapi._; import org.llm4s.types.Result; final case class WeatherResult(temperature: Double) derives upickle.default.ReadWriter; val schema: SchemaDefinition[?] = ???; def weatherHandler(params: SafeParameterExtractor): Either[ToolHandlerError, WeatherResult] = ???
+examples/index.md | f027a5e18a | with | import org.llm4s.toolapi._; import org.llm4s.types.Result; val calculatorTool: ToolFunction[?] = ???; val searchTool: ToolFunction[?] = ???
+examples/index.md | 64b82b3d67 | skip | the body of validate is elided with a comment; the guardrails guide shows complete custom guardrails
+examples/index.md | 9e63a7a023 | with | import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail }; import org.llm4s.agent.guardrails.builtin._; val customGuardrail: InputGuardrail = ???
+examples/index.md | 12a2cbb536 | skip | a summary of the key lines of the RAG sample, out of their context (document, chunk, fileName and idx are the sample's loop variables)
+examples/index.md | d69b52e794 | with | val rag: org.llm4s.rag.RAG = ???
+guide/permission-based-rag.md | 4d777fc0b9 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val searchIndex: SearchIndex = ???
+guide/permission-based-rag.md | 9e2252d5de | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val searchIndex: SearchIndex = ???; val collections: CollectionStore = ???
+guide/permission-based-rag.md | 0091c8e45c | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val searchIndex: SearchIndex = ???
+guide/permission-based-rag.md | 32ca3679f6 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val collections: CollectionStore = ???
+guide/permission-based-rag.md | da8c9129fd | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val searchIndex: SearchIndex = ???; val userId: PrincipalId = ???; val employeesGroup: PrincipalId = ???
+guide/permission-based-rag.md | 659f4b33db | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???
+guide/permission-based-rag.md | df34dcf535 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???
+guide/permission-based-rag.md | 52c4d702a9 | with | import org.llm4s.rag.IndexedChunk; import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val text: String = ???
+guide/permission-based-rag.md | 44a76f120d | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val searchIndex: SearchIndex = ???
+guide/permission-based-rag.md | 04ef3b37c8 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; import org.llm4s.rag.RAG.RAGConfigOps; given org.llm4s.model.ModelRegistryService = ???; val searchIndex: SearchIndex = ???; val llmClient: org.llm4s.llmconnect.LLMClient = client; val userAuth: UserAuthorization = ???
+guide/permission-based-rag.md | 3b6bfc18f8 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val auth: UserAuthorization = ???
+guide/permission-based-rag.md | 5d0effaf80 | with | import org.llm4s.rag.permissions.pg.PgSearchIndex
+guide/permission-based-rag.md | d21703a8a2 | with | val jdbcUrl: String = ???; val user: String = ???; val password: String = ???
+guide/permission-based-rag.md | 52a94d38dc | skip | an outline of the SearchIndex trait's members, for reading; the trait itself is in llm4s-rag
+guide/permission-based-rag.md | 5b063eac4a | skip | an outline of RAG's permission methods, for reading: not a definition
+guide/permission-based-rag.md | 2f2e65f6fc | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val collections: CollectionStore = ???; val userAuth: UserAuthorization = ???; val path: CollectionPath = ???
+guide/agents/durable-checkpointers.md | 5d6b33bae4 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val b: GraphRuntime = ???
+guide/agents/durable-checkpointers.md | a21e1ab1b2 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val b: GraphRuntime = ???
+guide/agents/durable-checkpointers.md | 595757bc2e | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val store: Checkpointer = ???
+guide/agents/durable-checkpointers.md | 6ea01941b0 | skip | sbt build definition, not Scala source
+guide/agents/durable-checkpointers.md | 5c8e7dda9b | skip | sbt build definition, not Scala source
+guide/agents/durable-checkpointers.md | 8351e0e12e | with | val graph: org.llm4s.agent.graph.CompiledGraph[String, String] = ???; val input: String = ???
+guide/agents/durable-checkpointers.md | 27e08241fe | with | import org.llm4s.agent.graph.*; import org.llm4s.agent.graph.sqlite.SqliteCheckpointer; import java.nio.file.Path; val graph: CompiledGraph[String, String] = ???
+guide/agents/durable-checkpointers.md | 7007030808 | with | val user: String = ???; val password: org.llm4s.security.Secret = ???
+guide/agents/durable-checkpointers.md | 31402d0ca4 | with | val store: org.llm4s.agent.graph.postgres.PostgresCheckpointer = ???
+guide/agents/durable-checkpointers.md | ed464a0264 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val runtime: GraphRuntime = ???; val id: String = ???
+guide/agents/durable-checkpointers.md | 5e0d5a9a9b | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val runtime: GraphRuntime = ???; val checkpointId: String = ???
+guide/agents/durable-checkpointers.md | 65c6b702ec | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; import org.llm4s.error.ValidationError; val graph: CompiledGraph[String, String] = ???; val runtime: GraphRuntime = ???; val notes: StateKey[String, String] = ???; val writer: NodeRef[?] = ???; val answers: Map[InterruptId, ujson.Value] = ???
+guide/agents/durable-checkpointers.md | ae25d26da9 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val runtime: GraphRuntime = ???
+guide/agents/durable-checkpointers.md | 573db7f141 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; import org.llm4s.types.Result; val checkpointer: Checkpointer = ???
+guide/agents/durable-checkpointers.md | 27dadf49fb | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val runtime: GraphRuntime = ???; val input: String = ???; val store: Checkpointer = ???
+guide/agents/durable-checkpointers.md | aba1784b2e | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.GraphRuntime; import org.llm4s.agent.metrics.MeteredCheckpointer; import org.llm4s.agent.service.{ AgentWorker, QueuedAgent }; import org.llm4s.config.CheckpointerConfigLoader; val keyFromYourSecretStore: String = ???; val metrics: org.llm4s.metrics.MetricsCollector = ???
+guide/agents/durable-checkpointers.md | 29db10aa18 | with | import org.llm4s.agent.encryption.*; import org.llm4s.agent.graph.TenantId; val december: EncryptionKey = ???; val acmeKey: EncryptionKey = ???; val november: EncryptionKey = ???
+guide/agents/durable-checkpointers.md | 2caffa6a80 | with | import org.llm4s.agent.encryption.*; import org.llm4s.agent.harness.{ CompositeBackend, StateFileBackend, StoreFileBackend, StoreLimits, VPath }; val store: org.llm4s.agent.graph.postgres.PostgresCheckpointer = ???; val keys: EncryptionKeySource = ???
+guide/agents/durable-checkpointers.md | 9e0a57f1f9 | with | object MyCheckpointer { def open(database: String, clock: java.time.Clock): org.llm4s.agent.graph.Checkpointer = ??? }; def freshDatabase(): String = ???
+guide/agents/durable-checkpointers.md | 1d660b1437 | skip | continues the spec above with MyCheckpointer, the reader's own store class, which the page does not define
+guide/agents/contract-suites.md | 9e0a57f1f9 | with | object MyCheckpointer { def open(database: String, clock: java.time.Clock): org.llm4s.agent.graph.Checkpointer = ??? }; def freshDatabase(): String = ???

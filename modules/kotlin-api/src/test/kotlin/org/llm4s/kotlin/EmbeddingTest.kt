@@ -1,5 +1,6 @@
 package org.llm4s.kotlin
 
+import org.llm4s.error.EmbeddingError
 import org.llm4s.error.LLMError
 import org.llm4s.javaapi.JEmbeddingClient
 import org.llm4s.javaapi.JEmbeddingPurpose
@@ -7,7 +8,6 @@ import org.llm4s.javaapi.JEmbeddings
 import org.llm4s.javaapi.LlmErrorKind
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.llm4s.llmconnect.model.EmbeddingError
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.llmconnect.model.EmbeddingResponse
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -54,7 +54,7 @@ internal fun perText(request: EmbeddingRequest): Either<LLMError, EmbeddingRespo
 internal fun embedderOver(provider: EmbeddingProvider): JEmbeddingClient {
     val registry = org.llm4s.model.`ModelRegistryService$`.`MODULE$`.fromModels(asScala(listOf<ModelMetadata>()))
     return org.llm4s.javaapi.Llm4s.wrapEmbeddingClient(
-        EmbeddingClient(provider, Option.empty(), "embedding", Option.empty(), registry),
+        EmbeddingClient.apply(provider, registry),
         EmbeddingModelConfig.apply("embed-model", 1536),
     )
 }

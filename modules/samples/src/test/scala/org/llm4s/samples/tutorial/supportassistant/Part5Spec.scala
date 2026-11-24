@@ -1,7 +1,6 @@
 package org.llm4s.samples.tutorial.supportassistant
 
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.samples.tutorial.supportassistant.solutions.Part5Solution
@@ -75,7 +74,7 @@ class Part5Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
     built.validate("We GUARANTEE a refund by Friday.").isLeft shouldBe true
 
     val client = ScriptedLLMClient.sequence(Reply.text("I guarantee it arrives tomorrow."))
-    val agent  = Agent.builder("support", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(built))).build()
+    val agent  = Agent.builder("support", client).withOutputGuardrails(built).build()
     agent.flatMap(_.run("When will it arrive?")).map(_.status) should matchPattern {
       case Right(AgentStatus.Blocked("NoPromises", _)) =>
     }

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.MistralConfig
@@ -21,8 +23,8 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: MistralConfig = MistralConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
-    model = "mistral-small-latest",
-    baseUrl = "https://example.invalid",
+    model = ModelName("mistral-small-latest"),
+    baseUrl = BaseUrl("https://example.invalid"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )
@@ -56,9 +58,8 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
 
     val result = client.streamComplete(
       createTestConversation,
-      CompletionOptions(),
-      _ => chunksReceived += 1
-    )
+      CompletionOptions()
+    )(_ => chunksReceived += 1)
 
     result.fold(
       err => {
@@ -87,7 +88,7 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("mistral-large-latest")
+    val config = createTestConfig.withModel(ModelName("mistral-large-latest"))
     val client = new MistralClient(config)
 
     client.close()

@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, FinishReason, StreamedChunk, ThinkingBlock, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, FinishReason, StreamedChunk, ThinkingBlock, ToolCall, ToolCallId }
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
@@ -99,10 +99,11 @@ private[provider] object GeminiThoughtSignatures {
         val fc = part("functionCall")
         // Gemini may populate the optional functionCall.id, and a populated id must be echoed by the
         // matching functionResponse, so it becomes the tool call's own id; a UUID only when absent.
-        val id   = fc.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(newId())
-        val call = ToolCall(id = id, name = fc("name").str, arguments = fc.obj.getOrElse("args", ujson.Obj()))
+        val id = fc.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(newId())
+        val call =
+          ToolCall(id = ToolCallId(id), name = fc("name").str, arguments = fc.obj.getOrElse("args", ujson.Obj()))
         calls += call
-        signature.foreach(s => signatures += callBlock(provider, call.id, fc, s))
+        signature.foreach(s => signatures += callBlock(provider, call.id.asString, fc, s))
       } else if (isThought(part)) {
         obj.flatMap(_.get("text")).flatMap(_.strOpt).foreach(thought.append)
       } else {
@@ -123,10 +124,10 @@ private[provider] object GeminiThoughtSignatures {
    */
   def parts(provider: String, message: AssistantMessage): Seq[ujson.Value] = {
     val signed = Replay.from(provider, message.thinking)
-    val text   = message.contentOpt.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
+    val text   = message.text.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
     val calls = message.toolCalls.map { tc =>
       def rebuilt = ujson.Obj("functionCall" -> ujson.Obj("name" -> tc.name, "args" -> tc.arguments))
-      val part = signed.calls.get(tc.id) match {
+      val part = signed.calls.get(tc.id.asString) match {
         case Some(SignedCall(sig, Some(fc))) if matchesCall(fc, tc) =>
           // the signed part goes back exactly as returned: same id (or none), args present or absent
           val p = ujson.Obj("functionCall" -> fc)
@@ -196,7 +197,7 @@ private[provider] object GeminiThoughtSignatures {
   private def matchesCall(fc: ujson.Value, tc: ToolCall): Boolean =
     fc.objOpt.exists { o =>
       o.get("name").flatMap(_.strOpt).contains(tc.name) &&
-      o.get("id").flatMap(_.strOpt).filter(_.nonEmpty).forall(_ == tc.id) &&
+      o.get("id").flatMap(_.strOpt).filter(_.nonEmpty).forall(_ == tc.id.asString) &&
       o.get("args").fold(tc.arguments == (ujson.Obj(): ujson.Value))(_ == tc.arguments)
     }
 

@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ InterruptId, RunConfig, RunStatus, ThreadId }
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
@@ -18,8 +19,8 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
   final case class Echoed(text: String) derives ReadWriter
 
   /** A tool that echoes its `text` argument, as `{"text": ...}`. */
-  private def echoTool(name: String = "echo"): ToolFunction[Map[String, Any], Echoed] =
-    ToolBuilder[Map[String, Any], Echoed](
+  private def echoTool(name: String = "echo"): ToolFunction[Echoed] =
+    ToolBuilder[Echoed](
       name,
       "Echoes its text",
       Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("text", Schema.string("Text to echo"))
@@ -28,7 +29,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(s"tool did not build: $e"), identity)
 
   private def toolCalls(calls: (String, String, ujson.Value)*): Completion = {
-    val message = AssistantMessage(None, calls.map((id, name, args) => ToolCall(id, name, args)))
+    val message = AssistantMessage(None, calls.map((id, name, args) => ToolCall(ToolCallId(id), name, args)))
     CompletionFixture.withMessage(message)
   }
 
@@ -69,7 +70,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
 
     val options = client.calls.head._2
     options.tools.map(_.name) shouldBe Seq("echo")
-    options.temperature shouldBe 0.2
+    options.temperature shouldBe Some(0.2)
     options.maxTokens shouldBe Some(77)
   }
 
@@ -79,7 +80,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       CompletionFixture.simple("done")
     )
     val tools  = ToolSet.of(AgentTool.fromToolFunction(echoTool())).fold(e => fail(e.message), identity)
-    val result = built(Agent.builder("assistant", client).withTools(tools)).run("q").value
+    val result = built(Agent.builder("assistant", client).withToolSet(tools)).run("q").value
 
     result.messages.collect { case t: ToolMessage => t.content }.head should include("set")
   }
@@ -110,7 +111,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     result.usage.requestCount shouldBe 3
     result.usage.inputTokens shouldBe (10 + 10 + 100)
     result.usage.outputTokens shouldBe (20 + 20 + 7)
-    result.usage.byModel.keySet shouldBe Set("test-model")
+    result.usage.byModel.keySet shouldBe Set(ModelName("test-model"))
   }
 
   it should "send the system prompt first on every call, and never store it" in {
@@ -227,7 +228,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     // ToolRegistry.of refuses the pair itself (#2816); a registry of another kind may still hold one
     ToolRegistry.of(Seq(echoTool(), echoTool())).left.map(_.message).left.toOption.get should include("echo")
     val twice = new ToolRegistry {
-      def tools: Seq[org.llm4s.toolapi.ToolFunction[?, ?]] = Seq(echoTool(), echoTool())
+      def tools: Seq[org.llm4s.toolapi.ToolFunction[?]] = Seq(echoTool(), echoTool())
       def execute(request: org.llm4s.toolapi.ToolCallRequest): Either[org.llm4s.toolapi.ToolCallError, ujson.Value] =
         Left(org.llm4s.toolapi.ToolCallError.UnknownFunction(request.functionName))
     }

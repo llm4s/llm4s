@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.{ SpanKind, StatusCode }
 import io.opentelemetry.sdk.common.CompletableResultCode
@@ -62,16 +63,13 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       Completion(
         id = "chatcmpl-1",
         created = Instant.EPOCH,
-        content = Answer,
-        model = "gpt-4o-2024-08-06",
+        model = ModelName("gpt-4o-2024-08-06"),
         message = AssistantMessage(Answer),
         usage = Some(TokenUsage(12, 7, 19))
       )
     )
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = answer
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       onChunk(StreamedChunk("chatcmpl-1", Some(Answer)))
@@ -126,8 +124,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "record no prompt or completion text by default" in withTracing() { (tracing, spans) =>
       TracingLLMClient(new Stub("openai"), tracing).complete(conversation, options)
-      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
-      tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector("search")))
+      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options)(_ => ())
       tracing.traceEvent(
         TraceEvent.ToolExecuted("search", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true)
       )
@@ -143,7 +140,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "be one CLIENT span `chat <model>` with the stream's finish reason" in withTracing() { (tracing, spans) =>
       val chunks = Vector.newBuilder[StreamedChunk]
-      TracingLLMClient(new Stub("anthropic"), tracing).streamComplete(conversation, options, chunks += _)
+      TracingLLMClient(new Stub("anthropic"), tracing).streamComplete(conversation, options)(chunks += _)
 
       chunks.result() should have size 2
       val span = spans().loneElement
@@ -178,14 +175,15 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
   "An embedding call through EmbeddingClient" should {
 
-    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
     def provider(result: Result[EmbeddingResponse]): EmbeddingProvider = new EmbeddingProvider:
       def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = result
 
     "be one CLIENT span `embeddings <model>`" in withTracing() { (tracing, spans) =>
       val response = EmbeddingResponse(Seq(Seq(0.1, 0.2)), usage = Some(EmbeddingUsage(5, 5)))
-      new EmbeddingClient(provider(Right(response)), providerId = Some(ProviderId("openai")))
+      EmbeddingClient(provider(Right(response)))
+        .withProviderId(ProviderId("openai"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq(Prompt), model = model))
 
@@ -200,7 +198,8 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     }
 
     "be that span with error.type when it fails" in withTracing() { (tracing, spans) =>
-      new EmbeddingClient(provider(Left(RateLimitError("voyage"))), providerId = Some(ProviderId("voyage")))
+      EmbeddingClient(provider(Left(RateLimitError("voyage"))))
+        .withProviderId(ProviderId("voyage"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq(Prompt), model = model))
 
@@ -218,7 +217,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     "record the messages as gen_ai.input.messages and gen_ai.output.messages, secrets redacted" in withTracing(
       captureContent = true
     ) { (tracing, spans) =>
-      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
+      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options)(_ => ())
 
       val span   = spans().loneElement
       val input  = ujson.read(str(span, "gen_ai.input.messages"))
@@ -234,9 +233,9 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "record tool calls and tool results as their own message parts" in withTracing(captureContent = true) {
       (tracing, spans) =>
-        val call = ToolCall("call-1", "search", ujson.Obj("q" -> "france"))
+        val call = ToolCall(ToolCallId("call-1"), "search", ujson.Obj("q" -> "france"))
         val history = Conversation(
-          Seq(UserMessage("find it"), AssistantMessage(None, Seq(call)), ToolMessage("Paris", "call-1"))
+          Seq(UserMessage("find it"), AssistantMessage(None, Seq(call)), ToolMessage("Paris", ToolCallId("call-1")))
         )
         TracingLLMClient(new Stub("openai"), tracing).complete(history, options)
 
@@ -250,13 +249,11 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
         input(2)("parts")(0)("response").str shouldBe "Paris"
     }
 
-    "record an agent's query and tool input and output, redacted" in withTracing(captureContent = true) {
-      (tracing, spans) =>
-        tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector.empty))
-        tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
-        val texts = recorded(spans())
-        texts.exists(_.contains("capital of France")) shouldBe true
-        texts.filter(_.contains(Secret)) shouldBe empty
+    "record a tool's input and output, redacted" in withTracing(captureContent = true) { (tracing, spans) =>
+      tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
+      val texts = recorded(spans())
+      texts.exists(_.contains("capital of France")) shouldBe true
+      texts.filter(_.contains(Secret)) shouldBe empty
     }
   }
 
@@ -282,18 +279,24 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
           "thread-1",
           "run-1",
           "assistant",
-          "completed",
+          TraceEvent.RunStatus.Completed,
           Seq.empty,
           UsageSummary(),
           t0.plusSeconds(2),
           span = Some(TraceSpan(run, None, t0)),
-          provider = Some(ProviderId("bedrock"))
+          provider = Some(ProviderId("bedrock")),
+          blockedBy = Some("pii"),
+          activeAgent = Some("billing")
         )
       )
 
       val byName = spans().map(s => s.getName -> s).toMap
       str(byName("chat claude-sonnet-4-5"), "gen_ai.provider.name") shouldBe "anthropic"
       str(byName("invoke_agent assistant"), "gen_ai.provider.name") shouldBe "aws.bedrock"
+      // the span is the root agent's; the guardrail and the agent active at the end are attributes (#2829)
+      str(byName("invoke_agent assistant"), "gen_ai.agent.name") shouldBe "assistant"
+      str(byName("invoke_agent assistant"), "blocked_by") shouldBe "pii"
+      str(byName("invoke_agent assistant"), "active_agent") shouldBe "billing"
     }
   }
 

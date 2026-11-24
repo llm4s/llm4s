@@ -18,7 +18,7 @@ import scala.util.{ Failure, Success, Try }
  * `PrometheusMeterRegistry` of your own) and the LLM metrics should appear next to the rest:
  * {{{
  * val metrics = new MicrometerMetrics(registry)
- * val client  = LLMConnect.getClient(config, metrics)
+ * val client  = LLMConnect.getClient(config, LlmClientOptions(metrics = metrics))
  * }}}
  *
  * The meter names follow the series that `llm4s-observability-prometheus` exposes, so a dashboard built on
@@ -30,9 +30,9 @@ import scala.util.{ Failure, Success, Try }
  *  - No global state: the registry is the only state, and two collectors on two registries are independent.
  *  - Safe: like every [[MetricsCollector]], no method throws. A failure inside Micrometer (for example a
  *    `MeterFilter` that rejects a meter) is logged at WARN and dropped.
- *  - Bounded tag cardinality: tags are provider, model, a fixed outcome or error label, a fixed token type,
- *    and a fixed set of image operations and circuit-breaker states. Anything outside those sets is
- *    recorded as `other`, and a blank provider or model as `unknown`. Prompts, user ids, request ids and
+ *  - Bounded tag cardinality: tags are provider, model, a fixed outcome or error label and a fixed token type,
+ *    and a blank provider or model is recorded as `unknown`. A generic [[Metric]]'s labels are bounded as
+ *    [[MetricsCollector.increment]] describes. Prompts, user ids, request ids and
  *    other unbounded values are never tags. `provider` and `model` come from the caller, so they are capped
  *    too: after 64 distinct providers or 256 distinct models on one collector, further values are recorded
  *    as `other` (logged once at WARN), so arbitrary model strings cannot grow the registry without limit.
@@ -46,8 +46,11 @@ import scala.util.{ Failure, Success, Try }
  * go to their own meter, [[MicrometerMetrics.Names.ReliabilityErrors]], never to `llm4s.errors`: `ReliableClient`
  * reports each failed attempt through the provider client's `observeRequest` and then the final failure as that
  * metric, so sharing one counter would count the same failure twice when both report to this collector.
- * `llm4s.errors` therefore means exactly what `llm4s_errors_total` means in the Prometheus module: failed requests
- * and failed image generations.
+ * `llm4s.errors` therefore means exactly what `llm4s_errors_total` means in the Prometheus module: failed requests,
+ * and what a module adds through [[MetricsCollector.Errors]], as `llm4s-image` does for a failed image generation.
+ * The image metrics themselves are generic too (`ImageMetrics` in `llm4s-image`), under the names they always had:
+ * `llm4s.image.generations`, `llm4s.images.generated`, `llm4s.image.generation.duration`,
+ * `llm4s.image.generation.cost.usd` and `llm4s.image.generation.errors`.
  *
  * This module is Beta: the meter names are intended to be stable, but they are not covered by the 1.x
  * compatibility promise.
@@ -107,54 +110,6 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
           Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
         )
           .increment(costUsd)
-    }
-
-  override def observeImageGeneration(
-    provider: String,
-    model: String,
-    operation: String,
-    outcome: Outcome,
-    duration: FiniteDuration,
-    imageCount: Int
-  ): Unit =
-    safely("image generation") {
-      val p  = providerLabel(provider)
-      val m  = modelLabel(model)
-      val op = imageOperation(operation)
-      counter(
-        Names.ImageGenerations,
-        "Total number of image generation operations",
-        Tags.of(ProviderTag, p, ModelTag, m, OperationTag, op, StatusTag, status(outcome))
-      ).increment()
-      timer(
-        Names.ImageGenerationDuration,
-        "Image generation duration",
-        ImageBuckets,
-        Tags.of(ProviderTag, p, ModelTag, m, OperationTag, op)
-      ).record(duration.toNanos, TimeUnit.NANOSECONDS)
-      outcome match {
-        case Outcome.Success =>
-          if (imageCount > 0)
-            counter(Names.ImagesGenerated, "Total number of images generated", Tags.of(ProviderTag, p, ModelTag, m))
-              .increment(imageCount.toDouble)
-        case Outcome.Error(kind) =>
-          countError(p, kind)
-          counter(
-            Names.ImageGenerationErrors,
-            "Total number of image generation errors",
-            Tags.of(ProviderTag, p, ModelTag, m, OperationTag, op, ErrorTypeTag, errorLabel(kind))
-          ).increment()
-      }
-    }
-
-  override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
-    safely("image generation cost") {
-      if (isAmount(costUsd))
-        counter(
-          Names.ImageGenerationCostUsd,
-          "Total estimated image generation cost in USD",
-          Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
-        ).increment(costUsd)
     }
 
   // ---- generic metrics ----
@@ -258,11 +213,12 @@ object MicrometerMetrics {
     final val CostUsd = "llm4s.cost.usd"
 
     /**
-     * Counter of failed requests and failed image generations, as `llm4s_errors_total` in the Prometheus module.
+     * Counter of failed requests, and of what a module adds through [[MetricsCollector.Errors]] (a failed image
+     * generation), as `llm4s_errors_total` in the Prometheus module. It is that metric's name.
      * Tags: `provider`, `error_type` (see [[ErrorKind]], in snake case). `ReliableClient`'s own errors are not counted
      * here; see [[ReliabilityErrors]].
      */
-    final val Errors = "llm4s.errors"
+    val Errors: String = MetricsCollector.Errors.name
 
     /**
      * `ReliabilityMetrics.Errors`: errors `ReliableClient` reports outside a timed request - a call rejected by its
@@ -281,20 +237,6 @@ object MicrometerMetrics {
      */
     val CircuitBreakerTransitions: String = ReliabilityMetrics.CircuitBreakerTransitions.name
 
-    /** Counter. Tags: `provider`, `model`, `operation` (`generate`, `edit` or `other`), `status`. */
-    final val ImageGenerations = "llm4s.image.generations"
-
-    /** Counter of generated images. Tags: `provider`, `model`. */
-    final val ImagesGenerated = "llm4s.images.generated"
-
-    /** Timer. Tags: `provider`, `model`, `operation`. */
-    final val ImageGenerationDuration = "llm4s.image.generation.duration"
-
-    /** Counter of estimated image generation cost in USD. Tags: `provider`, `model`. */
-    final val ImageGenerationCostUsd = "llm4s.image.generation.cost.usd"
-
-    /** Counter. Tags: `provider`, `model`, `operation`, `error_type`. */
-    final val ImageGenerationErrors = "llm4s.image.generation.errors"
   }
 
   private val ProviderTag  = "provider"
@@ -302,7 +244,6 @@ object MicrometerMetrics {
   private val StatusTag    = "status"
   private val TypeTag      = "type"
   private val ErrorTypeTag = "error_type"
-  private val OperationTag = "operation"
 
   private val Unknown = "unknown"
   private val Other   = "other"
@@ -342,8 +283,6 @@ object MicrometerMetrics {
   // The classic buckets `PrometheusMetrics` uses, so `_bucket` series line up.
   private val RequestBuckets: Seq[Duration] =
     Seq(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0).map(seconds)
-  private val ImageBuckets: Seq[Duration] =
-    Seq(1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0).map(seconds)
 
   private def seconds(s: Double): Duration = Duration.ofMillis(Math.round(s * 1000.0))
 
@@ -370,15 +309,5 @@ object MicrometerMetrics {
     case ErrorKind.Unknown        => "unknown"
   }
 
-  private def imageOperation(operation: String): String =
-    if (operation == null) Other
-    else
-      operation.trim.toLowerCase(java.util.Locale.ROOT) match {
-        case "generate" => "generate"
-        case "edit"     => "edit"
-        case _          => Other
-      }
-
-  /** A counter may only grow: a negative, NaN or infinite amount is dropped. */
   private def isAmount(value: Double): Boolean = !value.isNaN && !value.isInfinite && value >= 0.0
 }

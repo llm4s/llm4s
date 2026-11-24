@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.testutil.SmallStack
 import org.llm4s.types.ProviderModelTypes.ModelName

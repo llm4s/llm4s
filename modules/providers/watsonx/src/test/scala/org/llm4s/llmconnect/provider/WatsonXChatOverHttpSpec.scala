@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, RateLimitError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -85,7 +85,7 @@ class WatsonXChatOverHttpSpec
       )
     )
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two integers",
     Schema
@@ -116,7 +116,7 @@ class WatsonXChatOverHttpSpec
       } { (client, server) =>
         val first = client.complete(askToAdd, withTools).value
         val call  = first.toolCalls.loneElement
-        call shouldBe ToolCall("call-1", "add", ujson.Obj("a" -> 12, "b" -> 34))
+        call shouldBe ToolCall(ToolCallId("call-1"), "add", ujson.Obj("a" -> 12, "b" -> 34))
 
         val followUp = Conversation(askToAdd.messages ++ Seq(first.message, ToolMessage("46", call.id)))
         client.complete(followUp, withTools).value.content shouldBe "46"
@@ -169,8 +169,8 @@ class WatsonXChatOverHttpSpec
       val body = events.map(data => s"id: 1\nevent: message\ndata: $data\n\n").mkString
       withWatsonX((_, exchange) => sendSseResponse(exchange, body)) { (client, server) =>
         val chunks     = ListBuffer.empty[StreamedChunk]
-        val completion = client.streamComplete(askToAdd, withTools, chunks += _).value
-        val expected   = ToolCall("call-7", "add", ujson.Obj("a" -> 12, "b" -> 34))
+        val completion = client.streamComplete(askToAdd, withTools)(chunks += _).value
+        val expected   = ToolCall(ToolCallId("call-7"), "add", ujson.Obj("a" -> 12, "b" -> 34))
         completion.toolCalls.loneElement shouldBe expected
         chunks.flatMap(_.toolCall).loneElement shouldBe expected
         chunks.flatMap(_.finishReason).last shouldBe FinishReason.ToolCalls
@@ -191,7 +191,7 @@ class WatsonXChatOverHttpSpec
           """{"errors":[{"code":"rate_limit_reached","message":"Too many requests"}],"status_code":429}"""
         )
       } { (client, _) =>
-        client.streamComplete(askToAdd, CompletionOptions(), _ => ()).left.value shouldBe a[RateLimitError]
+        client.streamComplete(askToAdd, CompletionOptions())(_ => ()).left.value shouldBe a[RateLimitError]
       }
     }
   }

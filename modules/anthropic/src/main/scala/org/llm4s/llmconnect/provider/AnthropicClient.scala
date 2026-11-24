@@ -1,4 +1,6 @@
 package org.llm4s.llmconnect.provider
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
@@ -167,7 +169,7 @@ class AnthropicClient(
 
   // Initialize Anthropic client
   private val client = {
-    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
+    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl.asUrl)
     config.workloadIdentity match {
       case None =>
         config.apiKeyProvider match {
@@ -188,7 +190,7 @@ class AnthropicClient(
         val profile = ProfileConfig
           .builder()
           .authentication(auth.build())
-          .baseUrl(config.baseUrl)
+          .baseUrl(config.baseUrl.asUrl)
           .organizationId(wi.organizationId)
         wi.workspaceId.foreach(profile.workspaceId)
         builder
@@ -197,7 +199,7 @@ class AnthropicClient(
           // the SDK has added its bearer, and registers it before it is sent.
           .addInterceptor(new AnthropicClient.RegisteringBearer)
     }
-    AnthropicClient.withNetwork(builder, config.network, config.baseUrl).build()
+    AnthropicClient.withNetwork(builder, config.network, config.baseUrl.asUrl).build()
   }
 
   // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
@@ -210,10 +212,10 @@ class AnthropicClient(
 
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -240,7 +242,7 @@ class AnthropicClient(
         // Create message parameters builder
         val paramsBuilder = MessageCreateParams
           .builder()
-          .model(config.model)
+          .model(config.model.asString)
 
         // Add max tokens if specified
         // max tokens is required by the api
@@ -248,7 +250,7 @@ class AnthropicClient(
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -256,7 +258,7 @@ class AnthropicClient(
         val adjustments =
           transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
             tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
           .control(transformed.options, PromptCache.Scope.Conversation)
@@ -317,9 +319,7 @@ curl https://api.anthropic.com/v1/messages \
     "messages": [{"role": "user", "content": "What is the weather like in San Francisco?"}]
 }'
    */
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -340,14 +340,14 @@ curl https://api.anthropic.com/v1/messages \
         // Build parameters
         val paramsBuilder = MessageCreateParams
           .builder()
-          .model(config.model)
+          .model(config.model.asString)
 
         // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -355,7 +355,7 @@ curl https://api.anthropic.com/v1/messages \
         val adjustments =
           transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
             tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
           .control(transformed.options, PromptCache.Scope.Conversation)
@@ -488,7 +488,8 @@ curl https://api.anthropic.com/v1/messages \
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
                         content = None,
-                        toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                        toolCall =
+                          Some(ToolCall(id = ToolCallId(toolCallId), name = "", arguments = ujson.Str(fragment))),
                         finishReason = None
                       )
                       accumulator.addChunk(chunk)
@@ -514,7 +515,8 @@ curl https://api.anthropic.com/v1/messages \
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
                     content = None,
-                    toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
+                    toolCall =
+                      Some(ToolCall(id = ToolCallId(toolUse.id()), name = toolUse.name(), arguments = ujson.Obj())),
                     finishReason = None
                   )
                   accumulator.addChunk(chunk)
@@ -535,7 +537,7 @@ curl https://api.anthropic.com/v1/messages \
                   id = currentMessageId.getOrElse(""),
                   content = None,
                   toolCall = None,
-                  finishReason = Some(stopReason.fold(FinishReason.Other(""))(AnthropicClient.finishReason))
+                  finishReason = Some(stopReason.fold(FinishReason.Unknown)(AnthropicClient.finishReason))
                 )
                 accumulator.addChunk(chunk)
                 onChunk(chunk)
@@ -555,7 +557,7 @@ curl https://api.anthropic.com/v1/messages \
         }.toEither.left
           .map(AnthropicClient.mapError(_))
           // an `error` event throws in the SDK, mapped above; a stream that ends with neither is cut off
-          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl))
+          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl.asUrl))
 
         // Return the accumulated completion; a refusal fails the stream, as it fails `complete`, the text already
         // delivered staying delivered
@@ -600,7 +602,7 @@ curl https://api.anthropic.com/v1/messages \
    * gets.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    Try(client.models().retrieve(config.model, AnthropicClient.ValidationOptions)).toEither.left
+    Try(client.models().retrieve(config.model.asString, AnthropicClient.ValidationOptions)).toEither.left
       .map(AnthropicClient.mapError(_))
       .map(_ => ())
   }
@@ -662,7 +664,7 @@ curl https://api.anthropic.com/v1/messages \
       case (um: UserMessage, _) =>
         flushResults()
         um.parts match {
-          case Vector(ContentPart.Text(text)) => paramsBuilder.addUserMessage(text)
+          case Seq(ContentPart.Text(text)) => paramsBuilder.addUserMessage(text)
           case parts =>
             paramsBuilder.addMessage(
               MessageParam
@@ -678,7 +680,7 @@ curl https://api.anthropic.com/v1/messages \
         // only the paired calls; dropping one unseals the thinking, which then stays out
         val am             = pairing.replayable(index, original)
         val calls          = am.toolCalls
-        val text           = am.contentOpt.filter(_.nonEmpty)
+        val text           = am.text.filter(_.nonEmpty)
         val sealedThinking = AnthropicClient.thinkingBlockParams(am.thinking)
         if (calls.isEmpty && text.isEmpty) {
           // nothing to send: every tool call went unanswered, and thinking cannot stand alone
@@ -695,9 +697,9 @@ curl https://api.anthropic.com/v1/messages \
         }
 
       case (tm: ToolMessage, index) if pairing.resultPaired(index) =>
-        val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId)
+        val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId.asString)
         tm.parts match {
-          case Vector(ContentPart.Text(text)) => result.content(text)
+          case Seq(ContentPart.Text(text)) => result.content(text)
           case parts =>
             result.contentOfBlocks(PartEncoding.withoutBlankText(parts).map(AnthropicClient.toolPart).asJava)
         }
@@ -751,7 +753,7 @@ curl https://api.anthropic.com/v1/messages \
   /** The after-the-call report of a prompt cache that cached nothing, logged once like the rest. */
   private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] = {
     val report = AnthropicPromptCache.answered(options, usage)
-    adjustmentLog.record(config.model, report)
+    adjustmentLog.record(config.model.asString, report)
     report
   }
 
@@ -770,7 +772,7 @@ curl https://api.anthropic.com/v1/messages \
    * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
    * to maintain compatibility with the Anthropic API.
    */
-  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
     // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
@@ -846,7 +848,7 @@ curl https://api.anthropic.com/v1/messages \
         else None
       }
 
-      val message = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
+      val message = AssistantMessage(text = textContent, toolCalls = toolCalls, thinking = thinking)
 
       // Extract token usage, including thinking tokens if available
       val usage = response.usage()
@@ -872,9 +874,7 @@ curl https://api.anthropic.com/v1/messages \
       // Create completion
       Completion(
         id = response.id(),
-        content = message.content,
-        model = response.model().asString(),
-        toolCalls = toolCalls.toList,
+        model = ModelName(response.model().asString()),
         created = Instant.now(),
         message = message,
         usage = Some(tokenUsage),
@@ -883,7 +883,7 @@ curl https://api.anthropic.com/v1/messages \
         servedTier = AnthropicServiceTier.served(usage),
         finishReason = AnthropicClient
           .rawStopReason(response.stopReason())
-          .fold(FinishReason.Other(""))(
+          .fold(FinishReason.Unknown)(
             AnthropicClient.finishReason
           )
       )
@@ -912,7 +912,7 @@ curl https://api.anthropic.com/v1/messages \
         calls.flatMap { taken =>
           BoundedJson.read(input) match {
             case Right(arguments: ujson.Obj) =>
-              Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
+              Right(taken :+ ToolCall(id = ToolCallId(toolUse.id()), name = toolUse.name(), arguments = arguments))
             // an input that is not an object is never passed on (RFC 0009, Part 3)
             case Right(_) => Left(malformedToolCall(s"'${toolUse.name()}': the input is not a JSON object"))
             case Left(BoundedJson.TooDeep()) =>
@@ -944,7 +944,7 @@ curl https://api.anthropic.com/v1/messages \
     thinks: Boolean
   ): Unit =
     if (modelSupportsTemperature && !thinks)
-      builder.temperature(options.temperature.doubleValue())
+      options.temperature.foreach(t => builder.temperature(t.doubleValue()))
 
   /**
    * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.
@@ -960,7 +960,7 @@ curl https://api.anthropic.com/v1/messages \
         .toOption
         .flatMap(_.capabilities.disallowedParams)
         .exists(_.contains("temperature"))
-    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model)
+    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model.asString)
   }
 
   override protected def releaseResources(): Unit =
@@ -979,13 +979,15 @@ curl https://api.anthropic.com/v1/messages \
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   /**
@@ -1038,6 +1040,7 @@ object AnthropicClient {
     case "end_turn" | "stop_sequence"                   => FinishReason.Stop
     case "tool_use"                                     => FinishReason.ToolCalls
     case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case ""                                             => FinishReason.Unknown
     case other                                          => FinishReason.Other(other)
   }
 
@@ -1290,9 +1293,10 @@ object AnthropicClient {
       case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
       case e: com.anthropic.errors.RateLimitException =>
-        HttpErrorMapper
-          .mapHttpError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
-          .left
+        Left(
+          HttpErrorMapper
+            .toError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
+        ).left
           .getOrElse(RateLimitError("anthropic"))
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
@@ -1444,7 +1448,7 @@ object AnthropicClient {
       case _              => ujson.Obj()
     }
     val input = ObjectMappers.jsonMapper().readValue(arguments.render(), classOf[ToolUseBlockParam.Input])
-    ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id).name(call.name).input(input).build())
+    ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id.asString).name(call.name).input(input).build())
   }
 
   /**

@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, AuthConfig }
 import org.llm4s.security.Secret
@@ -106,7 +106,7 @@ private[llm4s] object NamedProviderSectionValidator:
   private def specError(id: String, spec: ProviderConfigSpec): Option[ConfigurationError] =
     val clashing          = spec.extras.map(_.name).filter(ProviderConfigSpec.BuiltinKeys.contains)
     val reservedAuth      = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
-    val undeclaredKeyless = spec.keylessWhen.map(_._1).filterNot(key => spec.extra(key).isDefined)
+    val undeclaredKeyless = spec.keylessWhen.map(_.key).filterNot(key => spec.extra(key).isDefined)
     val problems =
       undeclaredKeyless.map(key =>
         s"names $key in keylessWhen but does not declare it in its ProviderConfigSpec.extras"
@@ -295,7 +295,12 @@ private[llm4s] object NamedProviderConfigValidator:
             // Read once now, so a missing or empty file fails the load; the client reads it again when it changes.
             case Some(file) => keyFromFile(sectionPath, file).map(Some(_))
             case None =>
-              credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+              credentials.resolve(
+                normalized.apiKey.map(_.asKey),
+                s"$sectionPath.apiKey",
+                normalized.provider,
+                apiKeyEnv = descriptor.configSpec.apiKeyEnv
+              )
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,
@@ -322,4 +327,4 @@ private[llm4s] object NamedProviderConfigValidator:
 
   /** The provider's keyless setting as a section writes it, e.g. `authentication = "entra-id"`. */
   private def keylessSetting(descriptor: ProviderDescriptor): String =
-    descriptor.configSpec.keylessWhen.fold("a keyless authentication")((key, value) => s"$key = \"$value\"")
+    descriptor.configSpec.keylessWhen.fold("a keyless authentication")(_.describe)

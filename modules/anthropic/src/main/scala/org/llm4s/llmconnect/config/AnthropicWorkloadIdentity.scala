@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.IdentityTokenSource
+import org.llm4s.llmconnect.auth.IdentityTokenProvider
 import org.llm4s.types.Result
 
 import java.nio.file.{ Files, Path }
@@ -72,8 +72,8 @@ object AnthropicWorkloadIdentity:
     else if !Try(Files.isRegularFile(path)).getOrElse(false) then refuse("is not a regular file")
     else
       Try(Files.size(path)).toOption match
-        case Some(size) if size > IdentityTokenSource.MaxTokenFileBytes =>
-          refuse(s"is larger than ${IdentityTokenSource.MaxTokenFileBytes} bytes, so not an identity token")
+        case Some(size) if size > IdentityTokenProvider.MaxTokenFileBytes =>
+          refuse(s"is larger than ${IdentityTokenProvider.MaxTokenFileBytes} bytes, so not an identity token")
         case Some(_) => Right(identity)
         case None    => refuse("cannot be read")
 

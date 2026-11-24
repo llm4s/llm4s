@@ -2,7 +2,7 @@ package org.llm4s.trace.store
 
 import cats.Id
 import org.llm4s.trace.model.{ Span, Trace }
-import org.llm4s.types.TraceId
+import org.llm4s.trace.model.TraceId
 
 /**
  * Thread-safe, in-process `TraceStore[Id]` backed by immutable maps.

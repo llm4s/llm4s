@@ -3,8 +3,9 @@ layout: page
 title: Speech (STT/TTS)
 description: "Speech-to-text and text-to-speech in Scala with the LLM4S speech module: Vosk, Whisper, OpenAI, Azure and ElevenLabs, with configuration."
 search_title: "Speech-to-text and text-to-speech in Scala with LLM4S"
-parent: User Guide
-nav_order: 9
+parent: Core
+nav_order: 117
+grand_parent: User Guide
 ---
 
 # LLM4S Speech Module
@@ -71,10 +72,12 @@ val audio = tts.synthesize("Hello, world!", TTSOptions(language = Some("en"), sp
 ### Audio Preprocessing
 
 ```scala
+import org.llm4s.speech.AudioMeta
 import org.llm4s.speech.processing.AudioPreprocessing
+import java.nio.file.{ Files, Paths }
 
-val audioBytes = // ... your audio data
-val audioMeta = AudioMeta(sampleRate = 44100, numChannels = 2, bitDepth = 16)
+val audioBytes = Files.readAllBytes(Paths.get("recording.pcm")) // raw 16-bit PCM samples
+val audioMeta  = AudioMeta(sampleRate = 44100, numChannels = 2, bitDepth = 16)
 
 // Convert to mono, resample to 16kHz for STT
 val processed = AudioPreprocessing.standardizeForSTT(

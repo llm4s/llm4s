@@ -122,16 +122,16 @@ class MillQuickstartSpec extends AnyFlatSpec with Matchers {
     val config = Llm4sConfig.providerFrom(withKey).fold(error => fail(error.formatted), identity)
 
     config.providerId.asString shouldBe "openai"
-    config.model shouldBe "gpt-4o-mini"
+    config.model.asString shouldBe "gpt-5.6-luna"
   }
 
   it should "load the Ollama section when LLM4S_PROVIDER names it, with no OpenAI key" in {
-    val ollama = ConfigSource.string("llm4s.providers.provider = \"ollama-local\"").withFallback(committedConfig)
+    val ollama = ConfigSource.string("llm4s.defaultProvider = \"ollama-local\"").withFallback(committedConfig)
 
     val config = Llm4sConfig.providerFrom(ollama).fold(error => fail(error.formatted), identity)
 
     config.providerId.asString shouldBe "ollama"
-    config.model shouldBe "llama3"
-    read(confFile) should include("provider = ${?LLM4S_PROVIDER}")
+    config.model.asString shouldBe "llama3"
+    read(confFile) should include("defaultProvider = ${?LLM4S_PROVIDER}")
   }
 }

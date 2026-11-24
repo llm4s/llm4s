@@ -1,13 +1,18 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  ProviderRegistry
+}
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -29,12 +34,12 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
     val built: mutable.Buffer[EmbeddingProviderConfig] = mutable.Buffer.empty
     val requests: mutable.Buffer[EmbeddingRequest]     = mutable.Buffer.empty
 
-    val id: ProviderId                             = ProviderId("fake")
-    override val aliases: Set[String]              = Set("phony")
-    override val configSpec                        = EmbeddingConfigSpec(defaultModel = Some("fake-default"))
-    override val modelDimensions: Map[String, Int] = Map("fake-default" -> 4, "fake-big" -> 6)
+    val id: ProviderId                = ProviderId("fake")
+    override val aliases: Set[String] = Set("phony")
+    override val configSpec           = EmbeddingConfigSpec(defaultModel = Some(ModelName("fake-default")))
+    override val modelDimensions: Map[ModelName, Int] = Map(ModelName("fake-default") -> 4, ModelName("fake-big") -> 6)
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       built += config
       Right(
         new EmbeddingProvider:
@@ -44,7 +49,15 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
       )
 
   private def resolver(model: String = ""): String => Result[EmbeddingProviderConfig] =
-    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = Secret("k")))
+    _ =>
+      Right(
+        EmbeddingProviderConfig(
+          providerId = ProviderId("fixture"),
+          baseUrl = BaseUrl("http://fake"),
+          model = ModelName(model),
+          apiKey = Some(Secret("k"))
+        )
+      )
 
   private def ingestOnce(rag: RAG): Unit =
     rag.ingestText("Some text worth embedding.", "doc-1").isRight shouldBe true
@@ -57,7 +70,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
 
     ingestOnce(rag)
     fake.built.map(_.model) shouldBe Seq("fake-big")
-    fake.requests.head.model.name shouldBe "fake-big"
+    fake.requests.head.model.name shouldBe ModelName("fake-big")
     fake.requests.head.model.dimensions shouldBe 6
   }
 
@@ -119,8 +132,9 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "fail naming the provider when no model can be found anywhere" in {
     given ProviderRegistry = ProviderRegistry.ofEmbeddings(new EmbeddingProviderDescriptor:
-      val id: ProviderId = ProviderId("modelless")
-      def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      val id: ProviderId                                           = ProviderId("modelless")
+      val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
         Left(ConfigurationError("unreachable"))
     )
     val error = RAG.build(RAGConfig().withEmbeddings("modelless"), resolver()).left.value

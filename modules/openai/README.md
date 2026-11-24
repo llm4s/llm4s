@@ -33,17 +33,16 @@ section's own `apiKey`, else the shared `llm4s.credentials.<id>.apiKey` this mod
 `reference.conf` binds to the variable above:
 
 ```hocon
+llm4s.defaultProvider = "openai-main"         # the default section
 llm4s.providers {
-  provider = "openai-main"         # the default section
-
   openai-main {
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 
   azure-main {
     provider   = "azure"
-    model      = "gpt-4o"
+    model      = "gpt-5.6-terra"
     endpoint   = ${?AZURE_API_BASE}
     apiVersion = ${?AZURE_API_VERSION}
   }
@@ -60,7 +59,6 @@ keep the `openai-java` SDK's own timeouts, which bound the whole call, retries i
 | Key | Environment variable |
 |---|---|
 | `llm4s.embeddings.openai.baseUrl` | `OPENAI_EMBEDDING_BASE_URL` |
-| `llm4s.embeddings.openai.model` | `OPENAI_EMBEDDING_MODEL` |
 
 The base URL defaults to `https://api.openai.com/v1`, the same root as the chat provider; requests go
 to `<baseUrl>/embeddings`, and a base URL without the `/v1` (a proxy root, say) gets
@@ -76,9 +74,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("openai-main")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("openai-main"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

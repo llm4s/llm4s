@@ -48,7 +48,7 @@ object PlatformTests {
       "org.llm4s.config.ProviderExchangeLoggingGuideCoreSpec",
       "org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec",
       "org.llm4s.config.ProviderAuthConfigSpec",
-      "org.llm4s.llmconnect.auth.IdentityTokenSourceSpec",
+      "org.llm4s.llmconnect.auth.IdentityTokenProviderSpec",
       "org.llm4s.llmconnect.auth.ApiKeyProviderSpec",
       "org.llm4s.config.ApiKeyFileConfigSpec",
       "org.llm4s.config.SharedApiKeyFileSpec",

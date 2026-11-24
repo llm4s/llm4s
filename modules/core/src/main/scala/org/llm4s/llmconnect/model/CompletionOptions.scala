@@ -6,9 +6,12 @@ import org.llm4s.toolapi.ToolFunction
 /**
  * Represents options for a completion request.
  *
- * @param temperature Controls the randomness of the output. Higher values make the output more random.
- *                    Note: Reasoning models (o1/o3) ignore this setting.
- * @param topP Controls the diversity of the output. Lower values make the output more focused.
+ * The four sampling parameters (`temperature`, `topP` and the two penalties) are `None` unless set: llm4s then sends
+ * none, and the provider's own default applies. A value is sent only when the caller set one.
+ *
+ * @param temperature Controls the randomness of the output. Higher values make the output more random. `None`
+ *                    sends none, so the provider's default applies. Note: Reasoning models (o1/o3) ignore this setting.
+ * @param topP Controls the diversity of the output. Lower values make the output more focused. `None` sends none.
  * @param maxTokens Optional maximum number of tokens to generate in the completion.
  * @param presencePenalty Penalizes new tokens based on whether they appear in the text so far, encouraging new topics.
  * @param frequencyPenalty Penalizes new tokens based on their existing frequency in the text so far, discouraging repetition.
@@ -47,12 +50,12 @@ import org.llm4s.toolapi.ToolFunction
  */
 @Stable
 final case class CompletionOptions private (
-  temperature: Double,
-  topP: Double,
+  temperature: Option[Double],
+  topP: Option[Double],
   maxTokens: Option[Int],
-  presencePenalty: Double,
-  frequencyPenalty: Double,
-  tools: Seq[ToolFunction[_, _]],
+  presencePenalty: Option[Double],
+  frequencyPenalty: Option[Double],
+  tools: Seq[ToolFunction[_]],
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
   responseFormat: Option[ResponseFormat],
@@ -64,18 +67,34 @@ final case class CompletionOptions private (
    * Sets the sampling temperature. Higher values make the output more random.
    * Reasoning models (o1/o3) ignore this setting.
    *
-   * @param temperature the sampling temperature (default 0.7)
+   * @param temperature the sampling temperature
+   * @return new CompletionOptions with temperature set to `Some(temperature)`
+   */
+  def withTemperature(temperature: Double): CompletionOptions = copy(temperature = Some(temperature))
+
+  /**
+   * Sets or clears the sampling temperature.
+   *
+   * @param temperature the sampling temperature; `None` sends none, so the provider's default applies (the default)
    * @return new CompletionOptions with temperature set
    */
-  def withTemperature(temperature: Double): CompletionOptions = copy(temperature = temperature)
+  def withTemperature(temperature: Option[Double]): CompletionOptions = copy(temperature = temperature)
 
   /**
    * Sets the nucleus sampling value. Lower values make the output more focused.
    *
-   * @param topP the top-p value (default 1.0)
+   * @param topP the top-p value
+   * @return new CompletionOptions with topP set to `Some(topP)`
+   */
+  def withTopP(topP: Double): CompletionOptions = copy(topP = Some(topP))
+
+  /**
+   * Sets or clears the nucleus sampling value.
+   *
+   * @param topP the top-p value; `None` sends none, so the provider's default applies (the default)
    * @return new CompletionOptions with topP set
    */
-  def withTopP(topP: Double): CompletionOptions = copy(topP = topP)
+  def withTopP(topP: Option[Double]): CompletionOptions = copy(topP = topP)
 
   /**
    * Limits the number of tokens generated in the completion.
@@ -97,19 +116,37 @@ final case class CompletionOptions private (
    * Sets the presence penalty, which penalizes new tokens based on whether they appear in the text so far,
    * encouraging new topics.
    *
-   * @param presencePenalty the presence penalty (default 0.0)
+   * @param presencePenalty the presence penalty
+   * @return new CompletionOptions with presencePenalty set to `Some(presencePenalty)`
+   */
+  def withPresencePenalty(presencePenalty: Double): CompletionOptions = copy(presencePenalty = Some(presencePenalty))
+
+  /**
+   * Sets or clears the presence penalty.
+   *
+   * @param presencePenalty the presence penalty; `None` sends none, so the provider's default applies (the default)
    * @return new CompletionOptions with presencePenalty set
    */
-  def withPresencePenalty(presencePenalty: Double): CompletionOptions = copy(presencePenalty = presencePenalty)
+  def withPresencePenalty(presencePenalty: Option[Double]): CompletionOptions = copy(presencePenalty = presencePenalty)
 
   /**
    * Sets the frequency penalty, which penalizes new tokens based on their existing frequency in the text so far,
    * discouraging repetition.
    *
-   * @param frequencyPenalty the frequency penalty (default 0.0)
+   * @param frequencyPenalty the frequency penalty
+   * @return new CompletionOptions with frequencyPenalty set to `Some(frequencyPenalty)`
+   */
+  def withFrequencyPenalty(frequencyPenalty: Double): CompletionOptions =
+    copy(frequencyPenalty = Some(frequencyPenalty))
+
+  /**
+   * Sets or clears the frequency penalty.
+   *
+   * @param frequencyPenalty the frequency penalty; `None` sends none, so the provider's default applies (the default)
    * @return new CompletionOptions with frequencyPenalty set
    */
-  def withFrequencyPenalty(frequencyPenalty: Double): CompletionOptions = copy(frequencyPenalty = frequencyPenalty)
+  def withFrequencyPenalty(frequencyPenalty: Option[Double]): CompletionOptions =
+    copy(frequencyPenalty = frequencyPenalty)
 
   /**
    * Sets the tool function definitions that the LLM can request during a completion.
@@ -118,7 +155,7 @@ final case class CompletionOptions private (
    * @param tools the tools to offer; an empty sequence offers none (the default)
    * @return new CompletionOptions with tools set
    */
-  def withTools(tools: Seq[ToolFunction[_, _]]): CompletionOptions = copy(tools = tools)
+  def withTools(tools: Seq[ToolFunction[_]]): CompletionOptions = copy(tools = tools)
 
   /**
    * Sets or clears the reasoning effort level for models that support extended thinking (o1/o3, Claude).
@@ -250,12 +287,12 @@ object CompletionOptions {
 
   /** Creates a [[CompletionOptions]]. Named arguments are the supported way to construct one. */
   def apply(
-    temperature: Double = 0.7,
-    topP: Double = 1.0,
+    temperature: Option[Double] = None,
+    topP: Option[Double] = None,
     maxTokens: Option[Int] = None,
-    presencePenalty: Double = 0.0,
-    frequencyPenalty: Double = 0.0,
-    tools: Seq[ToolFunction[_, _]] = Seq.empty,
+    presencePenalty: Option[Double] = None,
+    frequencyPenalty: Option[Double] = None,
+    tools: Seq[ToolFunction[_]] = Seq.empty,
     reasoning: Option[ReasoningEffort] = None,
     thinking: Option[Thinking] = None,
     responseFormat: Option[ResponseFormat] = None,

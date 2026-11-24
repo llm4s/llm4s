@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -32,16 +33,13 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "answer",
           created = Instant.EPOCH,
-          content = "42",
-          model = "mock",
+          model = ModelName("mock"),
           message = AssistantMessage("42"),
           usage = Some(TokenUsage(10, 2, 12))
         )
       )
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -76,18 +74,18 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
 
   private def rag(client: LLMClient, config: RAGConfig = RAGConfig.default): RAG = {
     val built =
-      RAG.buildWithClient(config.withLLM(client), new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+      RAG.buildWithClient(config.withLLM(client), EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     // A RAG with a SearchIndex refuses plain ingest (#2716): its one chunk comes from the index
     if (!built.hasPermissions)
       built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
     built
   }
 
-  private val warm = CompletionOptions(temperature = 0.7, maxTokens = Some(256))
+  private val warm = CompletionOptions(temperature = Some(0.7), maxTokens = Some(256))
 
   "RAGConfig" should "generate answers at temperature 0.0 by default, as before" in {
-    RAGConfig.default.completionOptions shouldBe CompletionOptions(temperature = 0.0)
-    RAGConfig.DefaultCompletionOptions.temperature shouldBe 0.0
+    RAGConfig.default.completionOptions shouldBe CompletionOptions(temperature = Some(0.0))
+    RAGConfig.DefaultCompletionOptions.temperature shouldBe Some(0.0)
     RAGConfig.default.withCompletionOptions(warm).completionOptions shouldBe warm
   }
 
@@ -125,7 +123,7 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
     try {
       val answered = r.queryWithPermissionsAndAnswer(UserAuthorization.Admin, CollectionPattern.All, "What is it?")
       answered.map(_.contexts.map(_.content)) shouldBe Right(Seq("The answer is 42."))
-      val cold = CompletionOptions(temperature = 0.0, maxTokens = Some(64))
+      val cold = CompletionOptions(temperature = Some(0.0), maxTokens = Some(64))
       r.queryWithPermissionsAndAnswer(UserAuthorization.Admin, CollectionPattern.All, "What is it?", options = cold)
         .isRight shouldBe true
       client.options.toList shouldBe List(warm, cold)

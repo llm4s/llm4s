@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -21,16 +22,13 @@ class TestDatasetGenerationSpec extends AnyFlatSpec with Matchers with EitherVal
         Completion(
           id = "test-completion",
           created = Instant.EPOCH,
-          content = response,
-          model = "test-model",
-          message = AssistantMessage(contentOpt = Some(response))
+          model = ModelName("test-model"),
+          message = AssistantMessage(text = Some(response))
         )
       }
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

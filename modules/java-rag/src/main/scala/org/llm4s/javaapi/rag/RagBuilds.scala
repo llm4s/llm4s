@@ -52,7 +52,7 @@ private[rag] object RagBuilds {
         )
         registry <- Llm4sConfig.modelRegistryService()
         provider = new JEmbeddingProvider(client)
-        rag <- RAG.buildWithEmbeddings(config, new EmbeddingClient(provider)(using registry), provider.model)
+        rag <- RAG.buildWithEmbeddings(config, EmbeddingClient(provider)(using registry), provider.model)
       } yield new JRag(RagFacadeToken.INSTANCE, rag)
     }
 

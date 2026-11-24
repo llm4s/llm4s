@@ -1,6 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.slf4j.LoggerFactory
 
 /**
@@ -39,7 +40,7 @@ object SerialNamedProviderModelListingExample:
               logger.error("Error: {}", err.formatted)
 
             case Right(config) =>
-              Llm4sConfig.listModels(providerName) match
+              Llm4sConfig.listModels(ProviderName(providerName)) match
                 case Left(err) =>
                   logger.error("Status: FAILED - model listing")
                   logger.error("Error: {}", err.formatted)

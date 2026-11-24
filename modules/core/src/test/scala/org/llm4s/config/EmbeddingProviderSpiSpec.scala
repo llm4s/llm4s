@@ -1,15 +1,18 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigContext,
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   EmbeddingProviderSection,
+  ProviderConfigKey,
   ProviderRegistry
 }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -37,12 +40,12 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
       requiresApiKey = true,
-      defaultBaseUrl = Some("https://fixture.example/v1"),
-      defaultModel = Some("fixture-default-model"),
+      defaultBaseUrl = Some(BaseUrl("https://fixture.example/v1")),
+      defaultModel = Some(ModelName("fixture-default-model")),
       apiKeyEnv = Seq("FIXTURE_API_KEY")
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
@@ -51,12 +54,12 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     val id: ProviderId = ProviderId("keylessfixture")
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-      defaultBaseUrl = Some("http://localhost:9999"),
-      defaultModel = Some("fixture-default"),
+      defaultBaseUrl = Some(BaseUrl("http://localhost:9999")),
+      defaultModel = Some(ModelName("fixture-default")),
       defaultApiKey = Some("fixture-not-required")
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
@@ -65,13 +68,13 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       .withEmbeddingProvider(FixtureEmbeddings)
       .withEmbeddingProvider(KeylessFixtureEmbeddings)
 
-  private def load(hocon: String): Result[(String, EmbeddingProviderConfig)] =
+  private def load(hocon: String): Result[EmbeddingProviderConfig] =
     EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
   "an embedding provider core knows nothing about" should {
 
     "be configurable through its own section" in {
-      val (provider, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/fixture-large"
@@ -80,18 +83,19 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      provider shouldBe "fixturecloud"
+      config.providerId.asString shouldBe "fixturecloud"
       config shouldBe EmbeddingProviderConfig(
-        baseUrl = "https://tenant.fixture.example/v1",
-        model = "fixture-large",
-        apiKey = Secret("fk-test")
+        providerId = ProviderId("fixturecloud"),
+        baseUrl = BaseUrl("https://tenant.fixture.example/v1"),
+        model = ModelName("fixture-large"),
+        apiKey = Some(Secret("fk-test"))
       )
     }
 
     "fall back to the defaults its descriptor declares" in {
       // The section carries only what the descriptor requires; the base URL is its own
       // default, which core has no way to know.
-      val (_, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/some-model"
@@ -100,24 +104,25 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      config.baseUrl shouldBe "https://fixture.example/v1"
+      config.baseUrl.asUrl shouldBe "https://fixture.example/v1"
     }
 
-    "prefer the unified EMBEDDING_MODEL over the section's model" in {
-      val (_, config) = load(
+    "refuse a section that still sets its own model, naming EMBEDDING_MODEL (#2835)" in {
+      val error = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/from-unified"
           |    fixturecloud { apiKey = "fk", model = "from-section" }
           |  }
           |}""".stripMargin
-      ).value
+      ).left.value
 
-      config.model shouldBe "from-unified"
+      error.message should include("llm4s.embeddings.fixturecloud.model ('from-section') is no longer read")
+      error.message should include("EMBEDDING_MODEL")
     }
 
     "be reachable by an alias it declares" in {
-      val (provider, _) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixture-cloud/m"
@@ -127,7 +132,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       ).value
 
       // Reported under the canonical id, not the alias the user typed.
-      provider shouldBe "fixturecloud"
+      config.providerId.asString shouldBe "fixturecloud"
     }
 
     "surface its own requirements as errors" in {
@@ -160,13 +165,17 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
       // the shared `llm4s.credentials.<id>.apiKey` fallback happens in the loader.
       val config = FixtureEmbeddings
-        .buildConfig(EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))), Some("m"))
+        .buildConfig(
+          EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))),
+          EmbeddingConfigContext(Some(ModelName("m")))
+        )
         .value
 
       config shouldBe EmbeddingProviderConfig(
-        baseUrl = "https://fixture.example/v1",
-        model = "m",
-        apiKey = Secret("fk-direct")
+        providerId = ProviderId("fixturecloud"),
+        baseUrl = BaseUrl("https://fixture.example/v1"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("fk-direct"))
       )
     }
   }
@@ -179,10 +188,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
       override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
         requiresApiKey = true,
-        defaultBaseUrl = Some("https://acme.example/v1")
+        defaultBaseUrl = Some(BaseUrl("https://acme.example/v1"))
       )
 
-      def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
         Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
     }
 
@@ -191,7 +200,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // path - and silently find nothing, replacing the section with defaults.
       given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(DottedEmbeddings)
 
-      val (provider, config) = EmbeddingsConfigLoader
+      val config = EmbeddingsConfigLoader
         .loadProvider(
           ConfigSource.string(
             """llm4s {
@@ -204,9 +213,9 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         )
         .value
 
-      provider shouldBe "acme.embeddings"
-      config.apiKey.reveal shouldBe "ak"
-      config.baseUrl shouldBe "https://tenant.acme.example/v1"
+      config.providerId.asString shouldBe "acme.embeddings"
+      config.apiKey.map(_.reveal) shouldBe Some("ak")
+      config.baseUrl.asUrl shouldBe "https://tenant.acme.example/v1"
     }
 
     "name a quoted path in its errors, so the reader can copy it" in {
@@ -235,10 +244,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     "apply with no section present at all" in {
       // An absent `llm4s.embeddings.<id>` must read as an empty section, not as a
       // config failure - a provider whose defaults cover everything needs no section.
-      val (provider, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
+      val config = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
-      provider shouldBe "keylessfixture"
-      config.model shouldBe "fixture-small"
+      config.providerId.asString shouldBe "keylessfixture"
+      config.model.asString shouldBe "fixture-small"
     }
 
     "come from the descriptor rather than reference.conf" in {
@@ -246,14 +255,14 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // `DefaultOllamaEmbeddingBaseUrl` in the loader - with nothing keeping them in step.
       // Ollama now lives in llm4s-ollama, which checks its own; this is the same property
       // for a provider with no reference.conf block at all.
-      val (_, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
+      val config = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
-      config.baseUrl shouldBe "http://localhost:9999"
-      config.apiKey.reveal shouldBe "fixture-not-required"
+      config.baseUrl.asUrl shouldBe "http://localhost:9999"
+      config.apiKey.map(_.reveal) shouldBe Some("fixture-not-required")
     }
 
     "still let a section override them" in {
-      val (_, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "keylessfixture/fixture-large"
@@ -262,8 +271,102 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      config.baseUrl shouldBe "http://gpu-box:9999"
-      config.model shouldBe "fixture-large"
+      config.baseUrl.asUrl shouldBe "http://gpu-box:9999"
+      config.model.asString shouldBe "fixture-large"
+    }
+  }
+
+  "an embedding provider's declared extras (#2811)" should {
+
+    /** A provider with a required key, one with a default, and a `buildConfig` of its own that reads them. */
+    object RegionalEmbeddings extends EmbeddingProviderDescriptor {
+      val id: ProviderId = ProviderId("regionalfixture")
+
+      val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+        defaultBaseUrl = Some(BaseUrl("https://regional.fixture.example/v1")),
+        defaultModel = Some(ModelName("regional-small")),
+        extras = Seq(
+          ProviderConfigKey.required("region", "the region serving the model").withEnv("REGIONAL_FIXTURE_REGION"),
+          ProviderConfigKey.optional("task", "what the vectors are for", default = Some("retrieval"))
+        )
+      )
+
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+        Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+    }
+
+    /** Declares a key every section already has. */
+    object ClashingEmbeddings extends EmbeddingProviderDescriptor {
+      val id: ProviderId = ProviderId("clashingfixture")
+      val configSpec: EmbeddingConfigSpec =
+        EmbeddingConfigSpec(extras = Seq(ProviderConfigKey.optional("baseUrl", "not its to declare")))
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+        Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+    }
+
+    given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegionalEmbeddings, ClashingEmbeddings)
+
+    def loaded(hocon: String): Result[EmbeddingProviderConfig] =
+      EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
+
+    "reach the config the descriptor builds, defaults applied and undeclared keys left out" in {
+      val config = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = " eu-west ", colour = "blue" }
+          |}""".stripMargin
+      ).value
+
+      config.extras shouldBe Map("region" -> "eu-west", "task" -> "retrieval")
+      config.extra("region") shouldBe Some("eu-west")
+      config.extra("colour") shouldBe None
+    }
+
+    "let the section override a default" in {
+      val config = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "us-east", task = "clustering" }
+          |}""".stripMargin
+      ).value
+
+      config.extra("task") shouldBe Some("clustering")
+    }
+
+    "name a required key that is missing, its path and the binding for its variable" in {
+      val message = loaded("""llm4s.embeddings.model = "regionalfixture/regional-large"""").left.value.message
+
+      message should include("Embedding provider 'regionalfixture' is missing required fields")
+      message should include("region: the region serving the model")
+      message should include("llm4s.embeddings.regionalfixture.region")
+      message should include("region = ${?REGIONAL_FIXTURE_REGION}")
+    }
+
+    "treat a blank value as unset" in {
+      loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "  " }
+          |}""".stripMargin
+      ).left.value.message should include("missing required fields")
+    }
+
+    "refuse a provider that declares a key every section has" in {
+      loaded("""llm4s.embeddings.model = "clashingfixture/m"""").left.value.message should include(
+        "declares baseUrl as provider-specific key(s)"
+      )
+    }
+
+    "keep extra values out of the config's toString" in {
+      val config = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "eu-west-secret" }
+          |}""".stripMargin
+      ).value
+
+      config.toString should include("region=***")
+      (config.toString should not).include("eu-west-secret")
     }
   }
 }

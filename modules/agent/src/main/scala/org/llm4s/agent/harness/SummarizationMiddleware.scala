@@ -118,7 +118,8 @@ final class SummarizationMiddleware(
     val after          = applied.fold(matched)(_._2)
     val effective      = system ++ summary.fold(Vector.empty[Message])(s => summarised(s.text)) ++ after.map(_._1)
     lazy val asIs      = Plan.AsIs(request.withMessages(effective))
-    if !fires(effective) then asIs
+    // the trigger counts the request as sent, its system prompt included
+    if !fires(request.withMessages(effective).sentMessages) then asIs
     else
       // the last `keepRecent` are kept; the cut moves earlier while it would split a tool batch, or leave the last
       // folded message without a stored id for `throughMessageId`. Only stored messages are folded: one an outer

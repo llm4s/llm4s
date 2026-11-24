@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.*
@@ -67,15 +69,15 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
     try {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = "claude-sonnet-4-6",
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        model = ModelName("claude-sonnet-4-6"),
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 200000,
         reserveCompletion = 4096
       )
       val client       = new AnthropicClient(config)
       val conversation = Conversation(Seq(UserMessage("Hi")))
       val completion =
-        if (stream) client.streamComplete(conversation, options, _ => ()) else client.complete(conversation, options)
+        if (stream) client.streamComplete(conversation, options)(_ => ()) else client.complete(conversation, options)
       (ujson.read(seen.get()), completion)
     } finally server.stop(0)
   }

@@ -2,8 +2,7 @@ package org.llm4s.llmconnect
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config._
-import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.metrics.MetricsCollector
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -36,123 +35,42 @@ import org.llm4s.types.Result
 @Stable
 object LLMConnect {
 
-  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService,
-    ProviderRegistry
-  ): Result[LLMClient] =
-    summon[ProviderRegistry].resolve(config.providerId).flatMap(_.buildClient(config, options))
-
-  def fromConfig(
-    config: ProviderConfig,
-    options: LlmClientOptions = LlmClientOptions.default
-  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    buildClient(config, options)
-
-  // ---- Config-driven construction -----------------------------------------
-
   /**
-   * Constructs an [[LLMClient]] for the provider `config` names, recording call
-   * statistics to `metrics`.
+   * Constructs an [[LLMClient]] for the provider `config` names.
    *
    * A config whose provider is not registered yields a
    * [[org.llm4s.error.ConfigurationError]] listing the providers that are; `Left`
    * is also returned if the underlying client constructor fails (for example, if
    * the HTTP client library throws during initialisation).
    *
-   * @param config  Provider configuration; its
-   *                `providerId` selects the client. For OpenRouter, supply an
-   *                `OpenAIConfig` whose `baseUrl` contains `"openrouter.ai"`.
-   * @param metrics Receives per-call latency and token-usage events.
-   *                Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
+   * @param config  Provider configuration; its `providerId` selects the client.
+   * @param options Runtime options for the client: the metrics collector that receives per-call latency, token
+   *                usage and cost (`LlmClientOptions(metrics = collector)`), raw provider exchange logging, and
+   *                the HTTP client. [[LlmClientOptions.default]] records no metrics and logs no exchange.
    */
   def getClient(
-    config: ProviderConfig,
-    metrics: MetricsCollector
-  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    fromConfig(config, LlmClientOptions(metrics = metrics))
-
-  /**
-   * Constructs an [[LLMClient]] using explicit runtime options.
-   *
-   * This is the preferred extension point for optional client behaviors such as
-   * metrics collection and provider exchange logging.
-   */
-  def getClient(
-    config: ProviderConfig,
-    options: LlmClientOptions
-  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    fromConfig(config, options)
-
-  /**
-   * Constructs an [[LLMClient]] without recording call statistics.
-   *
-   * Suitable for applications that do not integrate with a metrics backend.
-   * Switch to the two-argument overload when per-call latency or token-usage
-   * data is needed (e.g. for Prometheus or Micrometer).
-   *
-   * @param config Provider configuration; its `providerId` selects the client.
-   */
-  def getClient(config: ProviderConfig)(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    fromConfig(config)
-
-  // ---- Provider-explicit construction (validates provider/config pairing) -
-
-  /**
-   * Constructs an [[LLMClient]], verifying at runtime that `provider` and
-   * `config` are consistent with each other.
-   *
-   * Returns `Left` in two situations: the provider/config pair is mismatched
-   * (yields a [[org.llm4s.error.ConfigurationError]]), or the underlying client
-   * constructor fails during initialisation. Use this overload when the provider
-   * is resolved dynamically from user input or external config and you want an
-   * explicit error on mismatch rather than silent wrong routing.
-   *
-   * @param provider The provider to build; `config` must be the config type it expects.
-   * @param config   Provider configuration corresponding to `provider`.
-   * @param metrics  Receives per-call latency and token-usage events.
-   *                 Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
-   * @return the constructed client, or a [[org.llm4s.error.ConfigurationError]] when
-   *         `provider` and `config` describe different providers, or an
-   *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
-   */
-  def getClient(
-    provider: ProviderId,
-    config: ProviderConfig,
-    metrics: MetricsCollector
-  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    getClient(provider, config, LlmClientOptions(metrics = metrics))
-
-  /**
-   * Constructs an [[LLMClient]], verifying provider/config consistency, using
-   * explicit runtime options.
-   */
-  def getClient(
-    provider: ProviderId,
-    config: ProviderConfig,
-    options: LlmClientOptions
-  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    fromProvider(provider, config, options)
-
-  def fromProvider(
-    provider: ProviderId,
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
   )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    summon[ProviderRegistry].resolve(provider).flatMap(_.buildClient(config, options))
+    summon[ProviderRegistry].resolve(config.providerId).flatMap(_.build(config, ProviderBuildContext.of(options)))
 
   /**
-   * Constructs an [[LLMClient]], verifying provider/config consistency,
-   * without recording call statistics.
+   * Constructs an [[LLMClient]] by explicitly specifying the provider.
    *
-   * @param provider The provider to build; `config` must be the config type it expects.
-   * @param config   Provider configuration corresponding to `provider`.
-   * @return the constructed client, or a [[org.llm4s.error.ConfigurationError]] when
-   *         `provider` and `config` describe different providers, or an
-   *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
+   * Validates that `config` is the type `provider`'s descriptor accepts; a mismatch
+   * (for example, an OpenAI provider with an Anthropic config) is a
+   * [[org.llm4s.error.ConfigurationError]] rather than a runtime failure later.
+   * Prefer the overload without `provider` when a config is all you have.
+   *
+   * @param provider Selects which client implementation to construct.
+   * @param config   Provider configuration; must be the config type `provider` accepts.
+   * @param options  Runtime options for the client, as for the overload without `provider`. It has no default
+   *                 here, since Scala allows one overload to have defaults: pass [[LlmClientOptions.default]].
    */
   def getClient(
     provider: ProviderId,
-    config: ProviderConfig
+    config: ProviderConfig,
+    options: LlmClientOptions
   )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    getClient(provider, config, LlmClientOptions.default)
+    summon[ProviderRegistry].resolve(provider).flatMap(_.build(config, ProviderBuildContext.of(options)))
 }

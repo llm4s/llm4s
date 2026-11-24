@@ -54,12 +54,12 @@ class SqliteTextOnlyThreadSpec extends AnyFlatSpec with Matchers with EitherValu
       SystemMessage("You are a fixture."),
       UserMessage("What is the weather?"),
       AssistantMessage(None, Seq(call("c1", "lookup"))),
-      ToolMessage("sunny", "c1"),
+      ToolMessage("sunny", ToolCallId("c1")),
       AssistantMessage("It is sunny."),
       UserMessage("And tomorrow?"),
       AssistantMessage(None, Seq(call("c2", "good"), call("c3", "flaky"))),
-      ToolMessage("good result", "c2"),
-      ToolMessage("flaky result", "c3")
+      ToolMessage("good result", ToolCallId("c2")),
+      ToolMessage("flaky result", ToolCallId("c3"))
     )
 
     val next = agent.run(Thread, "Show me the forecast.").value

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -26,10 +28,12 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
   private val hello = Conversation(Seq(UserMessage("hello")))
 
   // A host that does not resolve: only the proxy can answer for it.
-  private val BaseUrl = "http://api.anthropic.test"
+  private val ApiBaseUrl = "http://api.anthropic.test"
 
   private def config(baseUrl: String, network: HttpNetworkSettings): AnthropicConfig =
-    AnthropicConfig(Secret("sk-ant-test"), "claude-sonnet-4-5").withBaseUrl(baseUrl).withNetwork(network)
+    AnthropicConfig(Secret("sk-ant-test"), ModelName("claude-sonnet-4-5"))
+      .withBaseUrl(BaseUrl(baseUrl))
+      .withNetwork(network)
 
   private def via(proxy: HttpProxy) = HttpNetworkSettings(proxy = Some(proxy.withNonProxyHosts(Nil)))
 
@@ -37,9 +41,9 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
 
   "AnthropicClient with a proxy" should "send the message through it" in {
     Using.resource(RecordingProxy.start(body = reply("proxied"))) { proxy =>
-      val client = AnthropicClient(config(BaseUrl, via(HttpProxy("127.0.0.1", proxy.port)))).value
+      val client = AnthropicClient(config(ApiBaseUrl, via(HttpProxy("127.0.0.1", proxy.port)))).value
       client.complete(hello, CompletionOptions()).value.content shouldBe "proxied"
-      proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", s"$BaseUrl/v1/messages"))
+      proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", s"$ApiBaseUrl/v1/messages"))
       proxy.requests.head.header("x-api-key") shouldBe Some("sk-ant-test")
       client.close()
     }
@@ -49,10 +53,10 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")), body = reply("authenticated"))) {
       proxy =>
         val settings = via(HttpProxy.fromUrl(s"http://alice:s3cret@127.0.0.1:${proxy.port}").value)
-        val client   = AnthropicClient(config(BaseUrl, settings)).value
+        val client   = AnthropicClient(config(ApiBaseUrl, settings)).value
         client.complete(hello, CompletionOptions()).value.content shouldBe "authenticated"
         proxy.requests.head.header("proxy-authorization") shouldBe None
-        proxy.authorized.map(_.target) shouldBe Vector(s"$BaseUrl/v1/messages")
+        proxy.authorized.map(_.target) shouldBe Vector(s"$ApiBaseUrl/v1/messages")
         client.close()
     }
   }
@@ -83,7 +87,7 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
 
   "AnthropicClient with a trust store it cannot read" should "refuse to build, never naming the password" in {
     val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some(Secret("never-printed"))))
-    val error  = AnthropicClient(config(BaseUrl, broken)).left.value
+    val error  = AnthropicClient(config(ApiBaseUrl, broken)).left.value
     error.message should (include("tls.trustStore").and(not).include("never-printed"))
   }
 }

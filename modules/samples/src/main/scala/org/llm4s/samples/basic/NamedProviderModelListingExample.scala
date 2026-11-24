@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.ConfigurationError
 import org.slf4j.LoggerFactory
 
@@ -39,7 +39,7 @@ object NamedProviderModelListingExample:
             ConfigurationError(s"Configured provider '${providerName.asName}' was not found")
           )
         )
-      models <- Llm4sConfig.listModels(providerName.asName)
+      models <- Llm4sConfig.listModels(providerName)
     yield (config, models)
 
     result.fold(

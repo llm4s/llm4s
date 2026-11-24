@@ -1,5 +1,6 @@
 package org.llm4s.samples.upgrade
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
 import org.llm4s.agent.memory.{ InMemoryStore, Memory, MemoryFilter }
 import org.llm4s.config.PgSearchIndexConfigLoader
@@ -60,7 +61,9 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     registry.report.failures shouldBe empty
 
     val found = registry.report.modules.map { module =>
-      module.moduleClass.split('.').last -> (module.providerIds.toSet, module.embeddingProviderIds.toSet)
+      module.moduleClass
+        .split('.')
+        .last -> (module.providerIds.map(_.asString).toSet, module.embeddingProviderIds.map(_.asString).toSet)
     }.toMap
 
     found shouldBe providerTable
@@ -94,14 +97,12 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     private def reply: Completion = {
       calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
-      Completion(id = "script", created = Instant.EPOCH, content = message.content, model = "script", message = message)
+      Completion(id = "script", created = Instant.EPOCH, model = ModelName("script"), message = message)
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(reply)
 
@@ -125,7 +126,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     run.messages.map(_.content) should contain("Say hello")
     // `result.usage` replaces `state.usageSummary`: one request, made against the scripted model.
     run.usage.requestCount shouldBe 1L
-    run.usage.byModel.keySet shouldBe Set("script")
+    run.usage.byModel.keySet shouldBe Set(ModelName("script"))
   }
 
   "An interrupted run" should "return CancelledError with the interrupt flag set, and start no turn" in {
@@ -158,8 +159,8 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       "org.llm4s.types.package$PlanId"
     )
     removed.filter(name => Try(Class.forName(name)).isSuccess) shouldBe empty
-    // The newtypes that stayed resolve under the same naming, so the check above is not vacuous.
-    Try(Class.forName("org.llm4s.types.package$TraceId")).isSuccess shouldBe true
+    // What stayed in the package object resolves under the same naming, so the check above is not vacuous.
+    Try(Class.forName("org.llm4s.types.package$Result$")).isSuccess shouldBe true
 
     AgentId.of("assistant").isRight shouldBe true
   }
@@ -217,9 +218,9 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "Growth-prone types" should "be changed with with* setters, not copy" in {
-    val options = CompletionOptions(temperature = 0.2).withMaxTokens(500)
+    val options = CompletionOptions(temperature = Some(0.2)).withMaxTokens(500)
 
-    options.temperature shouldBe 0.2
+    options.temperature shouldBe Some(0.2)
     options.maxTokens shouldBe Some(500)
   }
 }

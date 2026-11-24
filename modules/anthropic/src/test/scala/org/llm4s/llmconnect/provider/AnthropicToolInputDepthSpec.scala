@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
@@ -44,8 +46,8 @@ class AnthropicToolInputDepthSpec extends AnyFlatSpec with Matchers {
     val client = new AnthropicClient(
       AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = Model,
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        model = ModelName(Model),
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 200000,
         reserveCompletion = 4096
       )
@@ -69,7 +71,7 @@ class AnthropicToolInputDepthSpec extends AnyFlatSpec with Matchers {
   /** The request body of the turn that answers `completion`'s tool call, as Anthropic would receive it. */
   private def nextTurnBody(client: AnthropicClient, assistant: AssistantMessage): ujson.Value = {
     val builder = MessageCreateParams.builder().model(Model).maxTokens(1024)
-    val turn    = Conversation(Seq(UserMessage("weather?"), assistant, ToolMessage("Sunny", "toolu_1")))
+    val turn    = Conversation(Seq(UserMessage("weather?"), assistant, ToolMessage("Sunny", ToolCallId("toolu_1"))))
     client.addMessagesToParams(turn, builder, CompletionOptions())
     ujson.read(ObjectMappers.jsonMapper().writeValueAsString(builder.build()._body()))
   }
@@ -110,7 +112,7 @@ class AnthropicToolInputDepthSpec extends AnyFlatSpec with Matchers {
   it should "send an empty object for string arguments nested too deeply, never the parsed document" in {
     // Arguments that are a string are model text a stream left unparsed; one this deep is never parsed
     // into the request, because rendering the object it would build overflows the stack (#1562).
-    val deep = ToolCall("toolu_1", "get_weather", ujson.Str(nested(100000)))
+    val deep = ToolCall(ToolCallId("toolu_1"), "get_weather", ujson.Str(nested(100000)))
     withServer(toolUseReply("{}")) { client =>
       val outcome = SmallStack.run {
         val body  = nextTurnBody(client, AssistantMessage(None, Seq(deep)))

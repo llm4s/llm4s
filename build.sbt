@@ -133,13 +133,19 @@ addCommandAlias(
 // docs/ without the tag, or a module with tagged suites is missing here. `sbt test` runs them as before.
 lazy val DocsSpecTag = "org.llm4s.tags.DocsSpec"
 lazy val docsTestProjects = Seq(
+  "agentTools",
   "capabilities",
   "core",
   "examplesHttp",
   "javaApi",
   "javaRag",
+  "jev",
   "llm4sPekko",
+  "llm4sSttp",
+  "memory",
   "observabilityMicrometer",
+  "openaiCompatible",
+  "rag",
   "reactor",
   "samples",
   "schemaDerivation",
@@ -395,8 +401,14 @@ lazy val stabilityTierCheck = taskKey[Unit](
     "public constructor or copy"
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama", "agent")
-// Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
-val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r)
+// The Beta parts that live inside frozen modules (#2835): every top-level public type in a matching file must be
+// `@Experimental`, so `mimaExcludeAnnotations` (in `mimaFrozen`) leaves it out of the 0.7.0 baseline, nested types
+// and companions included. The Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
+// `org.llm4s.assistant` (`llm4s-agent`). An entry that matches no file fails `stabilityTierCheck`.
+val stabilityExperimentalFiles = Seq(
+  """/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r,
+  """/org/llm4s/assistant/[^/]+\.scala$""".r
+)
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
@@ -1250,9 +1262,16 @@ lazy val speech = (project in file("modules/speech"))
 
 lazy val image = (project in file("modules/image"))
   // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
-  // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
-  // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
-  .dependsOn(media, core % "compile->compile;test->test", observabilityPrometheus % Test, providerTestkit % Test)
+  // image metrics back out of a real `PrometheusMetrics` registry, and with `observabilityMicrometer % Test`
+  // for `ImageMetricsSeriesSpec`, which pins the series both backends export for `ImageMetrics` (#2801).
+  // Test scope only: the published `llm4s-image` depends on the `MetricsCollector` contract, not on a backend.
+  .dependsOn(
+    media,
+    core                    % "compile->compile;test->test",
+    observabilityPrometheus % Test,
+    observabilityMicrometer % Test,
+    providerTestkit         % Test
+  )
   .settings(
     name := "llm4s-image",
     commonSettings,
@@ -1266,8 +1285,9 @@ lazy val image = (project in file("modules/image"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.ujson,
-      Deps.scalatest % Test,
-      Deps.scalamock % Test
+      Deps.scalatest            % Test,
+      Deps.scalamock            % Test,
+      Deps.micrometerPrometheus % Test
     )
   )
 
@@ -2074,7 +2094,10 @@ lazy val samples = (project in file("modules//samples"))
     configPolicy    % Test,
     providerTestkit % Test,
     // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
-    repl % Test
+    repl % Test,
+    // Test scope: docs/guide/agents/durable-checkpointers.md's and multiple-machines.md's Postgres snippets are
+    // compiled (#2833).
+    agentCheckpointPostgres % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -2141,6 +2164,10 @@ lazy val samples = (project in file("modules//samples"))
     }.taskValue,
     // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
     Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    // BuiltinToolsGuideAgentSpec checks its copy of docs/guide/builtin-tools.md against the page with core's
+    // GuideMirror (#2833). samples does not depend on core's tests (their fixture providers would join its
+    // classpath), so it compiles that one helper file itself.
+    Test / unmanagedSources += (ThisBuild / baseDirectory).value / "modules/core/src/test/scala/org/llm4s/testutil/GuideMirror.scala",
     docSnippetsReport := println(
       DocSnippets.report(
         (ThisBuild / baseDirectory).value / "docs",
@@ -3246,9 +3273,9 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
-// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
+// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrateFrom_0_5`), whose
 // input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`.
-// `scalafixInput06` and `scalafixTests06` test the `Llm4sMigrate_1_0` rules for the breaks since 0.6.0 on code compiled
+// `scalafixInput06` and `scalafixTests06` test `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0 on code compiled
 // against the 0.6.0 artifacts, with the expected output under `fix/v06`. Neither input nor output is formatted
 // (.scalafmt.conf excludes them), because the rules' output is compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"

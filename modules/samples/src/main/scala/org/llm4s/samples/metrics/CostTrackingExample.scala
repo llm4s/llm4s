@@ -1,8 +1,10 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model.{ Conversation, TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.metrics.{ CostTracker, MetricsCollector }
@@ -59,7 +61,7 @@ object CostTrackingExample {
   private[samples] val ExampleOutputPerMillion: Double = 8.0
 
   /** One request's token usage and estimated cost; `cost` is `None` when the registry has no price for the model. */
-  final case class RequestCost(model: String, usage: Option[TokenUsage], cost: Option[Double])
+  final case class RequestCost(model: String, usage: Option[TokenUsage], cost: Option[BigDecimal])
 
   /** The custom-pricing demo: the rates registered, the request priced with them, and the demo's own tracker. */
   final case class CustomPricing(
@@ -117,8 +119,8 @@ object CostTrackingExample {
       // Demos 4 and 5: a second client, priced from a registry that carries the custom price.
       custom <- demonstrateCustomPricing(providerCfg, registry, session)
     } yield CostReport(
-      model = providerCfg.model,
-      priced = isPriced(registry, providerCfg.model),
+      model = providerCfg.model.asString,
+      priced = isPriced(registry, providerCfg.model.asString),
       perRequest = levels.perRequest,
       agent = levels.agent,
       session = levels.session,
@@ -132,7 +134,9 @@ object CostTrackingExample {
     use: LLMClient => Result[A]
   ): Result[A] = {
     given ModelRegistryService = registry
-    LLMConnect.getClient(providerCfg, metrics).flatMap(client => Using.resource(client)(use))
+    LLMConnect
+      .getClient(providerCfg, LlmClientOptions(metrics = metrics))
+      .flatMap(client => Using.resource(client)(use))
   }
 
   /** Demos 1 and 2 on `client`: the per-request cost, then an agent run, and the session tracker after both. */
@@ -148,9 +152,9 @@ object CostTrackingExample {
 
   private def requestCost(client: LLMClient): Result[RequestCost] =
     for {
-      conversation <- Conversation.create(UserMessage(RequestPrompt))
+      conversation <- Conversation.create(Seq(UserMessage(RequestPrompt)))
       completion   <- client.complete(conversation)
-    } yield RequestCost(completion.model, completion.usage, completion.estimatedCost)
+    } yield RequestCost(completion.model.asString, completion.usage, completion.estimatedCost)
 
   private def demonstrateCustomPricing(
     providerCfg: ProviderConfig,
@@ -160,7 +164,7 @@ object CostTrackingExample {
     for {
       priced <- withCustomPricing(
         registry,
-        providerCfg.model,
+        providerCfg.model.asString,
         providerCfg.providerId.asString,
         ExampleInputPerMillion,
         ExampleOutputPerMillion
@@ -169,7 +173,7 @@ object CostTrackingExample {
       // compose: the session tracker and the demo's own tracker both receive every event.
       request <- withClient(providerCfg, MetricsCollector.compose(session, demoTracker), priced)(requestCost)
     } yield CustomPricing(
-      providerCfg.model,
+      providerCfg.model.asString,
       ExampleInputPerMillion,
       ExampleOutputPerMillion,
       request,
@@ -199,8 +203,8 @@ object CostTrackingExample {
       }
     } yield {
       val custom = ModelMetadata(
-        modelId = modelId,
-        provider = provider,
+        modelId = ModelName(modelId),
+        provider = ProviderId(provider),
         mode = ModelMode.Chat,
         maxInputTokens = None,
         maxOutputTokens = None,
@@ -211,19 +215,19 @@ object CostTrackingExample {
         ),
         deprecationDate = None
       )
-      ModelRegistryService.fromModels(known.filterNot(_.modelId == modelId) :+ custom)
+      ModelRegistryService.fromModels(known.filterNot(_.modelId.asString == modelId) :+ custom)
     }
 
   /** Whether `registry` has an input price for `model`, which is what makes an estimated cost possible. */
   private[samples] def isPriced(registry: ModelRegistryService, model: String): Boolean =
-    registry.lookup(model).toOption.exists(_.pricing.inputCostPerToken.isDefined)
+    registry.lookup(ModelName(model)).toOption.exists(_.pricing.inputCostPerToken.isDefined)
 
   private def dollars(amount: BigDecimal): String = "$" + amount.setScale(6, BigDecimal.RoundingMode.HALF_UP)
 
   private def tokens(usage: UsageSummary): String = s"${usage.inputTokens} in, ${usage.outputTokens} out"
 
   private def costOrUnknown(request: RequestCost): String =
-    request.cost.fold(s"unknown (no price for '${request.model}' in the registry)")(c => dollars(BigDecimal.decimal(c)))
+    request.cost.fold(s"unknown (no price for '${request.model}' in the registry)")(dollars)
 
   /** The output, one line each; the cost lines say when a total of 0 means "no price" and not "free". */
   private[samples] def render(report: CostReport): Seq[String] = {

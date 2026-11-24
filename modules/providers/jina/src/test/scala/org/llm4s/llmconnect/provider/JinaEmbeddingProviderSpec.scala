@@ -1,10 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, MockHttpClient, StubbedHttpCalls }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingRequest, Image, MultimediaEmbeddingRequest }
+import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.Outcome
 import org.scalatest.flatspec.AnyFlatSpec
@@ -27,12 +28,13 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
   }
 
   private val cfg = EmbeddingProviderConfig(
-    baseUrl = "http://jina-test",
-    model = "jina-embeddings-v3",
-    apiKey = Secret("jina-test-key")
+    providerId = ProviderId("jina"),
+    baseUrl = BaseUrl("http://jina-test"),
+    model = ModelName("jina-embeddings-v3"),
+    apiKey = Some(Secret("jina-test-key"))
   )
 
-  private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
+  private val modelCfg = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
   private val req      = EmbeddingRequest(Seq("hello", "world"), modelCfg)
 
   private def httpOk(body: String): HttpResponse               = HttpResponse(200, body, Map.empty)
@@ -110,7 +112,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockHttp = new MockHttpClient(httpOk(embeddingBody(Seq(Seq(0.1)))))
 
     JinaEmbeddingProvider
-      .forTest(cfg.withBaseUrl("https://api.jina.ai/v1/"), mockHttp)
+      .forTest(cfg.withBaseUrl(BaseUrl("https://api.jina.ai/v1/")), mockHttp)
       .embed(EmbeddingRequest(Seq("test"), modelCfg))
 
     mockHttp.lastUrl.get shouldBe "https://api.jina.ai/v1/embeddings"
@@ -174,16 +176,6 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     (http.onPost _).when(*, *, *, *).returns(Left(refused))
 
     JinaEmbeddingProvider.forTest(cfg, http).embed(req) shouldBe Left(refused)
-  }
-
-  "multimodal embedding" should "be 501 Not Implemented, as Jina text embeddings are text only" in {
-    val mockHttp = new MockHttpClient(httpOk(embeddingBody(Seq(Seq(0.1)))))
-    val result = JinaEmbeddingProvider
-      .forTest(cfg, mockHttp)
-      .embedMultimodal(MultimediaEmbeddingRequest(inputs = Seq.empty, model = modelCfg, modality = Image))
-
-    result.left.toOption.get.code shouldBe Some("501")
-    mockHttp.postCallCount shouldBe 0
   }
 
   "errors" should "redact credentials echoed in the body of a 401, a 429 or any other failure (#1674)" in {

@@ -4,6 +4,7 @@ package org.llm4s.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.trace.TracingMode
+import org.llm4s.trace.spi.TracingBackends
 import org.llm4s.types.Result
 import com.typesafe.config.{ ConfigObject, ConfigRenderOptions, ConfigUtil, ConfigValue, ConfigValueType }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -18,7 +19,8 @@ import scala.jdk.CollectionConverters._
  * Reads `llm4s.tracing.mode` to select the tracing backend (`console` when unset,
  * `noop`/`none`, or the mode of any backend on the classpath, such as `langfuse` or
  * `opentelemetry`), and copies the selected mode's own block,
- * `llm4s.tracing.<mode>`, into `TracingSettings.extras`.
+ * `llm4s.tracing.<mode>`, into `TracingSettings.extras`. A value that is a backend's
+ * alias is replaced by that backend's mode first, so the block read is the backend's own.
  *
  * Core reads no backend's keys itself. Since slice 6 (#1133) the Langfuse and
  * OpenTelemetry blocks, their `reference.conf` bindings and their typed configs live
@@ -45,14 +47,22 @@ private[config] object TracingConfigLoader {
    * Reads `llm4s.tracing.mode`, defaulting to `console` when it is unset or blank, and
    * the selected mode's block into `extras`.
    *
+   * A mode core does not build itself is looked up in `backends`: when a backend answers to
+   * it, the settings carry that backend's own mode, so an alias (`otel`) reads the block of
+   * the mode it stands for (`llm4s.tracing.opentelemetry`). A mode no backend answers to is
+   * kept as written, for `Tracing.fromSettings` to report.
+   *
    * @param source PureConfig source to read from; use `ConfigSource.default`
    *               in production to read environment variables and
    *               `application.conf`.
+   * @param backends the backends whose modes and aliases are known; by default those on the
+   *                 classpath, scanned only when the mode is not one core builds itself
    * @return the tracing settings, or a [[org.llm4s.error.ConfigurationError]]
-   *         when the config tree cannot be parsed, or when the selected mode's block
-   *         `llm4s.tracing.<mode>` is present but is not an object or cannot be read.
+   *         when the config tree cannot be parsed, when the selected mode's block
+   *         `llm4s.tracing.<mode>` is present but is not an object or cannot be read, or
+   *         when more than one backend answers to the mode.
    */
-  def load(source: ConfigSource): Result[TracingSettings] =
+  def load(source: ConfigSource, backends: => TracingBackends = TracingBackends.discover()): Result[TracingSettings] =
     source
       .at("llm4s")
       .load[TracingRoot]
@@ -63,9 +73,17 @@ private[config] object TracingConfigLoader {
       }
       .flatMap { root =>
         val modeStr = root.tracing.flatMap(_.mode).map(_.trim).filter(_.nonEmpty).getOrElse("console")
-        val mode    = TracingMode.fromString(modeStr)
-        modeExtras(source, mode).map(TracingSettings(mode, _))
+        for {
+          mode   <- canonical(TracingMode.fromString(modeStr), backends)
+          extras <- modeExtras(source, mode)
+        } yield TracingSettings(mode, extras)
       }
+
+  // The mode of the backend that answers to `mode`, which differs from it when `mode` is an alias.
+  private def canonical(mode: TracingMode, backends: => TracingBackends): Result[TracingMode] = mode match {
+    case named: TracingMode.Named => backends.find(named).map(_.fold[TracingMode](named)(_.mode))
+    case builtIn                  => Right(builtIn)
+  }
 
   /**
    * The selected mode's own block, `llm4s.tracing.<mode>`, flattened to strings: what a

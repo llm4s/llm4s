@@ -18,7 +18,7 @@ import org.scalatest.matchers.should.Matchers
  */
 class AgentThinkingSpec extends AnyFlatSpec with Matchers {
 
-  private val weather = ToolBuilder[Map[String, Any], ujson.Value](
+  private val weather = ToolBuilder[ujson.Value](
     "weather",
     "Reports the weather",
     Schema.`object`[Map[String, Any]]("Weather parameters")
@@ -26,7 +26,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
     .buildSafe()
     .fold(e => fail(e.formatted), identity)
 
-  private val call = ToolCall("call-1", "weather", ujson.Obj())
+  private val call = ToolCall(ToolCallId("call-1"), "weather", ujson.Obj())
 
   private val thinking = Seq(
     ThinkingBlock.Text("The user wants the weather; call the tool.", Some("sig-1")),
@@ -47,7 +47,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
     val result = agent(client).run("Weather?").value
 
     result.status shouldBe AgentStatus.Completed("Sunny.")
-    client.sent(1) shouldBe Vector(UserMessage("Weather?"), toolTurn, ToolMessage("sunny", "call-1"))
+    client.sent(1) shouldBe Vector(UserMessage("Weather?"), toolTurn, ToolMessage("sunny", ToolCallId("call-1")))
     result.messages.collectFirst { case a: AssistantMessage if a.hasToolCalls => a.thinking } shouldBe Some(thinking)
   }
 
@@ -101,7 +101,8 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
 
   "A tool-call edit" should "unseal the edited turn's thinking" in {
     val history = Vector(StoredMessage("u", UserMessage("Weather?")), StoredMessage("a", toolTurn))
-    val edited  = Messages.key.applyUpdate(history, MessageUpdate.EditToolCall("a", "call-1", ujson.Obj("x" -> 1)))
+    val edited =
+      Messages.key.applyUpdate(history, MessageUpdate.EditToolCall("a", ToolCallId("call-1"), ujson.Obj("x" -> 1)))
     val turn = edited.toOption.flatMap(_.lift(1)).map(_.message) match {
       case Some(a: AssistantMessage) => a
       case other                     => fail(s"expected the edited assistant message, got $other")
@@ -118,7 +119,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
     ContextPruning.defaultTokenCounter(plain.withThinking(Seq(ThinkingBlock.Redacted("z" * 400)))) shouldBe
       ContextPruning.defaultTokenCounter(plain) + 100
     ContextPruning.defaultTokenCounter(
-      AssistantMessage(None, Seq(ToolCall("c", "t", ujson.Obj("q" -> words))))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("c"), "t", ujson.Obj("q" -> words))))
     ) should be >= 1300
   }
 

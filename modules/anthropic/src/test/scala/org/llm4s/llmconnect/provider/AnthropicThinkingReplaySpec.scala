@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
@@ -27,29 +29,29 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-sonnet-4-5",
-    baseUrl = "https://api.anthropic.com",
+    model = ModelName("claude-sonnet-4-5"),
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
 
-  private val call = ToolCall("toolu_1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("toolu_1"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   private val sealedThinking =
     Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted("opaque-pair"))
-  private val timeCall = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+  private val timeCall = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
 
   private def requestBody(messages: Message*): ujson.Value = requestBodyWith(CompletionOptions())(messages*)
 
   private def requestBodyWith(options: CompletionOptions)(messages: Message*): ujson.Value = {
-    val builder = MessageCreateParams.builder().model(testConfig.model).maxTokens(4096)
+    val builder = MessageCreateParams.builder().model(testConfig.model.asString).maxTokens(4096)
     new AnthropicClient(testConfig).addMessagesToParams(Conversation(messages), builder, options)
     ujson.read(ObjectMappers.jsonMapper().writeValueAsString(builder.build()._body()))
   }
 
   /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
-    ThinkingReplay.bind(ReplayOrigin("anthropic", testConfig.model), message, history, CompletionOptions())
+    ThinkingReplay.bind(ReplayOrigin("anthropic", testConfig.model.asString), message, history, CompletionOptions())
 
   /** A fake `/v1/messages`, answering each request with the next response and recording its body. */
   private def withServer(responses: (String, String)*)(test: (String, () => List[ujson.Value]) => Any): Unit = {
@@ -119,7 +121,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "a response" should "put its thinking blocks on the message, signatures and redacted data intact" in {
     withServer(thinkingToolUseReply) { (baseUrl, _) =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .complete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())
         .toOption
         .get
@@ -134,8 +136,8 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "a streamed response" should "assemble each thinking block with its signature, and redacted thinking, on the message" in {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions(), _ => ())
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
+        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())(_ => ())
         .toOption
         .get
       completion.message.thinking shouldBe Seq(
@@ -149,10 +151,10 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "the follow-up request" should "send the tool-call turn back with its thinking blocks first, then tool_result" in {
     withServer(thinkingToolUseReply, finalReply) { (baseUrl, seen) =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val ask    = UserMessage("Weather in Paris?")
       val first  = client.complete(Conversation(Seq(ask)), CompletionOptions()).toOption.get
-      val answer = ToolMessage("sunny", "toolu_1")
+      val answer = ToolMessage("sunny", ToolCallId("toolu_1"))
       client.complete(Conversation(Seq(ask, first.message, answer)), CompletionOptions()).isRight shouldBe true
 
       val messages = seen()(1)("messages").arr
@@ -202,7 +204,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "put the results of parallel tool calls in one user turn, in order" in {
-    val second = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+    val second = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
     val body = requestBody(
       UserMessage("Weather and time in Paris?"),
       AssistantMessage(None, Seq(call, second)),
@@ -232,7 +234,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "pair a result only with the turn straight before it" in {
-    val second = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+    val second = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
     val body = requestBody(
       UserMessage("Weather, then time?"),
       AssistantMessage(None, Seq(call)),
@@ -324,7 +326,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   it should "not go back after the tools changed" in {
     val tool = org.llm4s.toolapi
-      .ToolBuilder[Map[String, Any], String](
+      .ToolBuilder[String](
         "get_weather",
         "Weather for a city",
         org.llm4s.toolapi.Schema
@@ -349,7 +351,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val signed = AssistantMessage(None, Seq(call)).withThinking(sealedThinking)
     // a Bedrock signature, or one from another Claude model, is not this client's to replay
     val fromBedrock =
-      ThinkingReplay.bind(ReplayOrigin("bedrock", testConfig.model), signed, Seq(ask), CompletionOptions())
+      ThinkingReplay.bind(ReplayOrigin("bedrock", testConfig.model.asString), signed, Seq(ask), CompletionOptions())
     val fromOther =
       ThinkingReplay.bind(ReplayOrigin("anthropic", "claude-opus-4-1"), signed, Seq(ask), CompletionOptions())
     Seq(fromBedrock, fromOther).foreach { turn =>
@@ -386,11 +388,11 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "the client" should "bind returned sealed thinking, so a pruned follow-up request does not send it" in {
     withServer(thinkingToolUseReply, finalReply, finalReply) { (baseUrl, seen) =>
-      val client  = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client  = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
       val first   = client.complete(Conversation(history), CompletionOptions()).toOption.get
       first.message.thinkingBinding shouldBe defined
-      val answer = ToolMessage("sunny", "toolu_1")
+      val answer = ToolMessage("sunny", ToolCallId("toolu_1"))
       client.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
       client
         .complete(Conversation(history.drop(2) :+ first.message :+ answer), CompletionOptions())
@@ -405,13 +407,14 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   "a streamed response" should "bind its sealed thinking to the request" in {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
       val ask = UserMessage("Weather in Paris?")
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-        .streamComplete(Conversation(Seq(ask)), CompletionOptions(), _ => ())
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
+        .streamComplete(Conversation(Seq(ask)), CompletionOptions())(_ => ())
         .toOption
         .get
-      val body = requestBody(ask, completion.message, ToolMessage("sunny", "toolu_1"))
+      val body = requestBody(ask, completion.message, ToolMessage("sunny", ToolCallId("toolu_1")))
       body.render() should include("sig-streamed")
-      (requestBody(UserMessage("Other"), completion.message, ToolMessage("sunny", "toolu_1")).render() should not)
+      (requestBody(UserMessage("Other"), completion.message, ToolMessage("sunny", ToolCallId("toolu_1")))
+        .render() should not)
         .include("sig-streamed")
     }
   }

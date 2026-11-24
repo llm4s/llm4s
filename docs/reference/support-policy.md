@@ -23,10 +23,13 @@ see [SUPPORT.md](https://github.com/llm4s/llm4s/blob/main/SUPPORT.md).
 ## Current lines
 
 {% for l in site.data.support.lines %}
-{% if forloop.first %}| Version | Released | Status | Notes |
-|---|---|---|---|
-{% endif %}| {{ l.version }} | {{ l.released }} | {{ l.status }} | {{ l.note }} |
+{% if forloop.first %}| Line | Latest release | Released | Status | Security fixes until | Ended | Notes |
+|---|---|---|---|---|---|---|
+{% endif %}| {{ l.line }}.x | {{ l.version }} | {{ l.released }} | {{ l.status }} | {{ l.security_until | default: "-" }} | {{ l.ended_on | default: "-" }} | {{ l.note }} |
 {% endfor %}
+
+*Status*: `latest` gets every fix; `security-only` gets security fixes until the date shown; `superseded` (before 1.0)
+and `eol` get none, from the date in *Ended*.
 
 Every published `llm4s-*` module has the same version, so a line means the same version for every module. The list of
 published releases is on [GitHub](https://github.com/llm4s/llm4s/releases).
@@ -54,7 +57,7 @@ There is no long-term-support line before a 2.0 exists.
 
 ## Release cadence
 
-Releases are cut from a tag by CI ([Release Process](release)). There is no fixed schedule: releases happen when the
+Releases are cut from a tag by CI ([Release Process](../contribute/release)). There is no fixed schedule: releases happen when the
 maintainers have a set of changes ready, and the date of each is in the table above and on the GitHub Releases page.
 Minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one release a month, and
 a security patch takes that slot ahead of a planned release.
@@ -99,6 +102,6 @@ is raised only after a notice one minor release ahead ([Platform support](#platf
 ## Keeping this page current
 
 The table comes from `docs/_data/support.yml`, which a release updates by hand
-([Release Process](release#update-the-support-table)). `scripts/check-support-table.sh` checks it: CI fails a pull
+([Release Process](../contribute/release#update-the-support-table)). `scripts/check-support-table.sh` checks it: CI fails a pull
 request whose table lacks the newest release in the CHANGELOG, and the release workflow fails a release tag that is not
 the table's `latest` line before anything is published.

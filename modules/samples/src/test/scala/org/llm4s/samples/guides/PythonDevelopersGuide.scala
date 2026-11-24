@@ -48,7 +48,7 @@ object PythonDevelopersGuide {
     import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
     import org.llm4s.types.Result
 
-    def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
+    def searchDatabase: Result[ToolFunction[String]] = {
       val schema = Schema
         .`object`[Map[String, Any]]("A search of the customer database")
         .withRequiredField("query", Schema.string("What to search for"))
@@ -60,7 +60,7 @@ object PythonDevelopersGuide {
           limit <- params.getOptionalInt("limit")
         } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
-      ToolBuilder[Map[String, Any], String](
+      ToolBuilder[String](
         "search_database",
         "Search the customer database for records matching the query.",
         schema
@@ -78,9 +78,9 @@ object PythonDevelopersGuide {
 
     def describe(result: AgentResult): String =
       result.status match {
-        case AgentStatus.Completed(answer)  => answer
-        case AgentStatus.Blocked(_, reason) => s"Blocked: $reason"
-        case other                          => s"Stopped: $other"
+        case AgentStatus.Completed(answer)     => answer
+        case AgentStatus.Blocked(guardrail, _) => s"Blocked by $guardrail"
+        case other                             => s"Stopped: $other"
       }
 
     def twoTurns(client: LLMClient, tools: ToolRegistry): Result[Seq[String]] =
@@ -118,7 +118,7 @@ object PythonDevelopersGuide {
     def streamAnswer(client: LLMClient, question: String, onText: String => Unit): Result[String] =
       for {
         conversation <- Conversation.fromPrompts("You answer in one sentence.", question)
-        completion   <- client.streamComplete(conversation, CompletionOptions(), chunk => chunk.content.foreach(onText))
+        completion   <- client.streamComplete(conversation, CompletionOptions())(chunk => chunk.content.foreach(onText))
       } yield completion.content
     // end snippet
   }

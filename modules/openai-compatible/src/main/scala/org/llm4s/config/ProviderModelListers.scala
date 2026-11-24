@@ -1,12 +1,12 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.{ ApiKey, NamedProviderConfig, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.llmconnect.config.OpenAIConfig
-import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -44,7 +44,7 @@ object ProviderModelListers:
    */
   def openAICompatible(
     provider: ProviderId,
-    defaultBaseUrl: String,
+    defaultBaseUrl: BaseUrl,
     modelsPath: String = "/models",
     extraHeaders: Map[String, String] = Map.empty,
     apiKeyRequired: Boolean = true,

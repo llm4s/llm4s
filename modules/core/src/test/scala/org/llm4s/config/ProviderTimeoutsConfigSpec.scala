@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -212,22 +212,10 @@ class ProviderTimeoutsConfigSpec extends AnyWordSpec with Matchers:
           |  timeouts { request = 3m, stream = 15m }
           |}
           |""".stripMargin
-      org.llm4s.config.Llm4sConfig.provider(ConfigSource.string(hocon), "main") match
+      org.llm4s.config.Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("main")) match
         case Right(config: FixtureChatConfig) =>
           // FixtureChatProvider.buildConfig never mentions timeouts: the loader applied them.
           config.timeouts shouldBe ProviderTimeouts(Some(3.minutes), Some(15.minutes))
         case other => fail(s"expected a FixtureChatConfig, got $other")
-    }
-
-    "leave a config that does not carry timeouts as the descriptor built it" in {
-      val config = new org.llm4s.llmconnect.config.ProviderConfig:
-        def providerId               = org.llm4s.types.ProviderModelTypes.ProviderId("x")
-        def model                    = "m"
-        def contextWindow            = 1
-        def reserveCompletion        = 1
-        def endpointUrl              = None
-        def withModel(model: String) = this
-      config.withTimeouts(ProviderTimeouts(Some(1.second), None)) shouldBe config
-      config.timeouts shouldBe ProviderTimeouts.default
     }
   }

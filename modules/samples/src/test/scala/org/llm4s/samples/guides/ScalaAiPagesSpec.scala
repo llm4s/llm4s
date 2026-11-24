@@ -1,9 +1,9 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.ThreadId
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, ProfanityFilter }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
@@ -78,7 +78,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // snippet: agents/weather
   def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for {
-    forecast <- ToolBuilder[Map[String, Any], String](
+    forecast <- ToolBuilder[String](
       name = "get_forecast",
       description = "Returns today's forecast for a city",
       schema = Schema
@@ -90,7 +90,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
       .builder("weather", client)
       .withSystemPrompt("You answer questions about the weather.")
       .withTools(registry)
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 2000), new ProfanityFilter()), Nil))
+      .withInputGuardrails(LengthCheck(1, 2000), ProfanityFilter())
       .withStreaming()
       .build()
     run <- agent.stream(ThreadId("weather-1"), question) {
@@ -138,11 +138,10 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
   def docsPipeline(client: LLMClient): Result[RAG] = for {
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
-    selected <- Llm4sConfig.embeddings()
-    (provider, embeddingConfig) = selected
+    embeddingConfig <- Llm4sConfig.embeddings()
     rag <- RAG
       .builder()
-      .withEmbeddings(provider)
+      .withEmbeddings(embeddingConfig.providerId.asString)
       .withPgVector()
       .withLLM(client)
       .build(_ => Right(embeddingConfig))
@@ -174,7 +173,11 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
       models <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = models
       config = RAGConfig()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(
+          BagOfWordsEmbeddings.id.asString,
+          BagOfWordsEmbeddings.Model.asString,
+          BagOfWordsEmbeddings.Dimensions
+        )
         .withTopK(1)
         .withLLM(client)
       rag <- RAG.build(config, _ => Right(BagOfWordsEmbeddings.config))
@@ -209,7 +212,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // snippet: providers/client-for
   def clientFor(section: String): Result[LLMClient] = for {
-    providerConfig  <- Llm4sConfig.provider(section)
+    providerConfig  <- Llm4sConfig.provider(ProviderName(section))
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerConfig)

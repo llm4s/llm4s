@@ -62,7 +62,11 @@ object FolderQaRecipe extends RecipeApp {
       given ModelRegistryService = models
       config = RAG
         .builder()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(
+          BagOfWordsEmbeddings.id.asString,
+          BagOfWordsEmbeddings.Model.asString,
+          BagOfWordsEmbeddings.Dimensions
+        )
         .withTopK(2)
         .withLLM(client)
       rag <- RAG.build(config, _ => Right(BagOfWordsEmbeddings.config))
@@ -109,7 +113,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.FolderQaRecipe"          # scrip
 sbt "samples/runMain org.llm4s.samples.cookbook.FolderQaRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 
@@ -124,7 +128,7 @@ val config = RAG
   .builder()
   .withEmbeddings("openai", "text-embedding-3-small") // needs llm4s-openai and OPENAI_API_KEY
   .withLLM(client)
-RAG.build(config, _ => Llm4sConfig.embeddings().map(_._2))
+RAG.build(config, _ => Llm4sConfig.embeddings())
 ```
 
 See [Embeddings configuration](../../getting-started/configuration#embeddings-configuration) and the

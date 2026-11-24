@@ -1,10 +1,11 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage }
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.{ InMemoryTraceStore, TraceQuery }
-import org.llm4s.types.TraceId
+import org.llm4s.trace.model.TraceId
 import org.scalacheck.Gen
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -58,13 +59,6 @@ class TraceCollectorPropertySpec
     )
 
   // Generators for every TraceEvent subtype
-  val genAgentInitialized: Gen[TraceEvent] =
-    for {
-      query <- genNonEmptyString
-      tools <- Gen.listOf(genNonEmptyString)
-      ts    <- genInstant
-    } yield TraceEvent.AgentInitialized(query, tools.toVector, ts)
-
   val genCompletionReceived: Gen[TraceEvent] =
     for {
       id        <- genId
@@ -72,7 +66,7 @@ class TraceCollectorPropertySpec
       toolCalls <- Gen.choose(0, 10)
       content   <- Gen.alphaStr
       ts        <- genInstant
-    } yield TraceEvent.CompletionReceived(id, model, toolCalls, content, ts)
+    } yield TraceEvent.CompletionReceived(id, ModelName(model), toolCalls, content, ts)
 
   val genToolExecutedSuccess: Gen[TraceEvent] =
     for {
@@ -97,7 +91,7 @@ class TraceCollectorPropertySpec
       msg     <- genNonEmptyString
       context <- Gen.alphaStr
       ts      <- genInstant
-    } yield TraceEvent.ErrorOccurred(new RuntimeException(msg), context, ts)
+    } yield TraceEvent.ErrorOccurred.of(new RuntimeException(msg), context).withTimestamp(ts)
 
   val genTokenUsageRecorded: Gen[TraceEvent] =
     for {
@@ -105,11 +99,11 @@ class TraceCollectorPropertySpec
       model     <- genNonEmptyString
       operation <- genNonEmptyString
       ts        <- genInstant
-    } yield TraceEvent.TokenUsageRecorded(usage, model, operation, ts)
+    } yield TraceEvent.TokenUsageRecorded(usage, ModelName(model), operation, ts)
 
   val genAgentRunEnded: Gen[TraceEvent] =
     for {
-      status <- genNonEmptyString
+      status <- Gen.oneOf(TraceEvent.RunStatus.values.toSeq)
       msgs   <- Gen.choose(0, 10)
       ts     <- genInstant
     } yield TraceEvent.AgentRunEnded(
@@ -129,7 +123,7 @@ class TraceCollectorPropertySpec
       operation  <- genNonEmptyString
       inputCount <- Gen.choose(1, 100)
       ts         <- genInstant
-    } yield TraceEvent.EmbeddingUsageRecorded(usage, model, operation, inputCount, ts)
+    } yield TraceEvent.EmbeddingUsageRecorded(usage, ModelName(model), operation, inputCount, ts)
 
   val genCostRecorded: Gen[TraceEvent] =
     for {
@@ -139,7 +133,7 @@ class TraceCollectorPropertySpec
       tokenCount <- Gen.choose(0, 10000)
       costType   <- genNonEmptyString
       ts         <- genInstant
-    } yield TraceEvent.CostRecorded(cost, model, operation, tokenCount, costType, ts)
+    } yield TraceEvent.CostRecorded(cost, ModelName(model), operation, tokenCount, costType, ts)
 
   val genRAGOperationCompleted: Gen[TraceEvent] =
     for {
@@ -162,7 +156,6 @@ class TraceCollectorPropertySpec
     } yield TraceEvent.CacheMiss(reason, ts)
 
   val genAnyTraceEvent: Gen[TraceEvent] = Gen.oneOf(
-    genAgentInitialized,
     genCompletionReceived,
     genToolExecutedSuccess,
     genToolExecutedFailure,
@@ -206,16 +199,7 @@ class TraceCollectorPropertySpec
 
   // ---- SpanKind mapping per event type ----
 
-  "TraceCollectorTracing" should "emit AgentCall spans for AgentInitialized" in {
-    forAll(genAgentInitialized) { event =>
-      store.clear()
-      val tc = collector()
-      tc.traceEvent(event)
-      store.getSpans(tc.traceId).head.kind shouldBe SpanKind.AgentCall
-    }
-  }
-
-  it should "emit LlmCall spans for CompletionReceived" in {
+  "TraceCollectorTracing" should "emit LlmCall spans for CompletionReceived" in {
     forAll(genCompletionReceived) { event =>
       store.clear()
       val tc = collector()
@@ -295,7 +279,7 @@ class TraceCollectorPropertySpec
     forAll(genNonEmptyString, Gen.alphaStr, genInstant) { (msg, context, ts) =>
       store.clear()
       val tc = collector()
-      tc.traceEvent(TraceEvent.ErrorOccurred(new RuntimeException(msg), context, ts))
+      tc.traceEvent(TraceEvent.ErrorOccurred.of(new RuntimeException(msg), context).withTimestamp(ts))
       val span = store.getSpans(tc.traceId).head
       span.status match {
         case SpanStatus.Error(errorMsg) => errorMsg should include(msg)
@@ -351,11 +335,10 @@ class TraceCollectorPropertySpec
       val completion = org.llm4s.llmconnect.model.Completion(
         id = "cmp-1",
         created = Instant.EPOCH,
-        content = "",
-        model = model,
+        model = ModelName(model),
         message = org.llm4s.llmconnect.model.AssistantMessage("", List.empty)
       )
-      tc.traceCompletion(completion, model)
+      tc.traceCompletion(completion, ModelName(model))
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
       spans.head.kind shouldBe SpanKind.LlmCall
@@ -369,7 +352,7 @@ class TraceCollectorPropertySpec
     forAll(genTokenUsage, genNonEmptyString, genNonEmptyString) { (usage, model, operation) =>
       store.clear()
       val tc = collector()
-      tc.traceTokenUsage(usage, model, operation)
+      tc.traceTokenUsage(usage, ModelName(model), operation)
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
       spans.head.kind shouldBe SpanKind.Internal

@@ -52,9 +52,7 @@ class AgentAbandonQueuedSpec
       Right(answer(count.incrementAndGet()))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -84,7 +82,7 @@ class AgentAbandonQueuedSpec
       Agent
         .builder("assistant", client)
         .withRuntime(new GraphRuntime(store))
-        .withTools(SpecTools.set(slow))
+        .withToolSet(SpecTools.set(slow))
         .build()
         .value
     val on: ThreadId = ThreadId(s"abandon-q-${java.util.UUID.randomUUID().toString.take(8)}")
@@ -124,7 +122,7 @@ class AgentAbandonQueuedSpec
 
     /** The tool results the model was last sent. */
     def lastResults: Vector[(String, String)] =
-      client.sent.asScala.last.collect { case t: ToolMessage => t.toolCallId -> t.content }
+      client.sent.asScala.last.collect { case t: ToolMessage => t.toolCallId.asString -> t.content }
   }
 
   private val abandoned = EntryOutcome.Failed(FailureReason.Abandoned)

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.RateLimitError
@@ -24,11 +25,9 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val conversations: ArrayBuffer[Conversation] = ArrayBuffer.empty
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
-      failure.toLeft(Completion("id", Instant.EPOCH, reply, "fixed", AssistantMessage(reply)))
+      failure.toLeft(Completion("id", Instant.EPOCH, ModelName("fixed"), AssistantMessage(reply)))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -139,11 +138,11 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "carry an agent's tool calls and tool results through to the model" in {
-    val call = ToolCall("t1", "lookup", ujson.Obj("q" -> "cat"))
+    val call = ToolCall(ToolCallId("t1"), "lookup", ujson.Obj("q" -> "cat"))
     val history = java.util.List.of(
       JMessage.user("Find the cat."),
-      FacadeInternals.message(AssistantMessage(contentOpt = None, toolCalls = Seq(call))),
-      FacadeInternals.message(ToolMessage("""{"found":true}""", "t1")),
+      FacadeInternals.message(AssistantMessage(text = None, toolCalls = Seq(call))),
+      FacadeInternals.message(ToolMessage("""{"found":true}""", ToolCallId("t1"))),
       JMessage.assistant("Found it.")
     )
     val model = new EchoingLlm()
@@ -151,8 +150,8 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     try {
       rag.ask(Followup, history).isSuccess shouldBe true
       val sent = model.conversations.head.messages.slice(1, 5)
-      sent(1) shouldBe AssistantMessage(contentOpt = None, toolCalls = Seq(call))
-      sent(2) shouldBe ToolMessage("""{"found":true}""", "t1")
+      sent(1) shouldBe AssistantMessage(text = None, toolCalls = Seq(call))
+      sent(2) shouldBe ToolMessage("""{"found":true}""", ToolCallId("t1"))
     } finally rag.close()
   }
 

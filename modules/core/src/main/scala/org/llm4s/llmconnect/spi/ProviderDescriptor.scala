@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
-import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel, SharedCredentials }
+import org.llm4s.config.{ NamedProviderConfig, ProviderModelLister, SharedCredentials }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.AuthConfig
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -36,17 +36,14 @@ import scala.reflect.ClassTag
  *     )
  *   )
  *
- *   def buildConfig(providerName: String, section: NamedProviderConfig)(using
- *     ContextWindowResolver
- *   ): Result[ProviderConfig] =
+ *   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+ *     given ContextWindowResolver = context.contextWindows
  *     ProviderDescriptor
- *       .requireExtra(providerName, section, "region")
- *       .flatMap(region => BedrockConfig.fromValues(section.model.asString, region, section.extra("profile")))
+ *       .requireExtra(context.providerName, section, "region")
+ *       .flatMap(region => BedrockConfig.fromValues(section.model, region, section.extra("profile")))
  *
- *   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
- *     ModelRegistryService
- *   ): Result[LLMClient] =
- *     ProviderDescriptor.expectConfig[BedrockConfig](id, config).flatMap(BedrockClient(_, options.metrics))
+ *   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+ *     ProviderDescriptor.expectConfig[BedrockConfig](id, config).flatMap(BedrockClient(_, context.metrics))
  * }}}
  */
 @Stable
@@ -85,10 +82,16 @@ trait ProviderDescriptor:
    * aliases resolved). A `Left` here means something `configSpec` cannot
    * express (a malformed value, say).
    *
-   * @param providerName the user's instance name (`llm4s.providers.<name>`), for error messages.
+   * The embedding half has the same method, with the same shape:
+   * `EmbeddingProviderDescriptor.buildConfig`.
+   *
+   * @param section the validated `llm4s.providers.<name>` section
+   * @param context the section's name (`context.providerName`, for error messages) and the resolver of context
+   *                windows a config's `fromValues` needs
    */
-  def buildConfig(providerName: String, section: ProvidersConfigModel.NamedProviderConfig)(using
-    ContextWindowResolver
+  def buildConfig(
+    section: NamedProviderConfig,
+    context: ProviderConfigContext
   ): Result[ProviderConfig]
 
   /**
@@ -98,13 +101,17 @@ trait ProviderDescriptor:
    * type rather than cast — `ProviderDescriptor.expectConfig` does that and
    * produces the standard mismatch error.
    *
-   * A client that sends its own HTTP requests sends them through `options.httpClient` when it is set, and
+   * A client that sends its own HTTP requests sends them through `context.httpClient` when it is set, and
    * does not close that client, and declares so with `features.customHttpClient = true` (it defaults to
    * `false`, which a provider built on a vendor SDK keeps).
+   *
+   * The embedding half has the same method, with the same shape: `EmbeddingProviderDescriptor.build`.
+   *
+   * @param config  a config, normally one [[buildConfig]] returned
+   * @param context the caller's client options (`context.metrics`, `context.exchangeLogging`,
+   *                `context.httpClient`) and the model registry the client looks models up in
    */
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient]
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient]
 
 object ProviderDescriptor:
 
@@ -144,10 +151,10 @@ object ProviderDescriptor:
    */
   def requireExtra(
     providerName: String,
-    section: ProvidersConfigModel.NamedProviderConfig,
+    section: NamedProviderConfig,
     key: String
   ): Result[String] =
-    requireField(providerName, key, section.extra(key), s"llm4s.providers.<name>.$key")
+    requireField(providerName, key, section.extra(key), s"llm4s.providers.$providerName.$key")
 
   /**
    * Reads a key the provider declares in `ProviderConfigSpec.authExtras` as required, or gives a
@@ -168,7 +175,7 @@ object ProviderDescriptor:
    * `llm4s.credentials.<id>.apiKey` when the section set none, so this fails only for a
    * section that did not come through validation - one built in code.
    */
-  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[Secret] =
+  def requireApiKey(providerName: String, section: NamedProviderConfig): Result[Secret] =
     requireField(
       providerName,
       "api key",
@@ -184,12 +191,12 @@ object ProviderDescriptor:
    */
   def resolveBaseUrl(
     providerName: String,
-    section: ProvidersConfigModel.NamedProviderConfig,
+    section: NamedProviderConfig,
     spec: ProviderConfigSpec
-  ): Result[String] =
+  ): Result[BaseUrl] =
     requireField(
       providerName,
       "base URL",
-      section.baseUrl.map(_.asUrl).orElse(spec.defaultBaseUrl),
-      "llm4s.providers.<name>.baseUrl"
-    )
+      section.baseUrl.map(_.asUrl).orElse(spec.defaultBaseUrl.map(_.asUrl)),
+      s"llm4s.providers.$providerName.baseUrl"
+    ).map(BaseUrl(_))

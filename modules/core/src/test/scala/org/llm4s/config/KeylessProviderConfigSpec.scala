@@ -1,13 +1,20 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  KeylessSetting,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -22,26 +29,23 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
     val id: ProviderId = ProviderId("keylessfixture")
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec
-        .apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq("KEYLESSFIXTURE_API_KEY"))
+        .apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl), Seq("KEYLESSFIXTURE_API_KEY"))
         .withExtras(Seq(ProviderConfigKey.optional("authentication", "how to authenticate", Some("key"))))
         .withKeylessWhen("authentication", "token")
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       FixtureChatConfig.fromValues(section.model.asString, "unused", FixtureChatProvider.DefaultBaseUrl)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   /** Names a keyless key it does not declare: a descriptor bug. */
   private object UndeclaredKeyless extends ProviderDescriptor:
     val id: ProviderId = ProviderId("undeclaredkeyless")
     val configSpec: ProviderConfigSpec =
-      ProviderConfigSpec(requiresApiKey = true, keylessWhen = Some("authentication" -> "token"))
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = KeylessProvider.buildConfig(providerName, section)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+      ProviderConfigSpec(requiresApiKey = true, keylessWhen = Some(KeylessSetting("authentication", "token")))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+      KeylessProvider.buildConfig(section, context)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(KeylessProvider, UndeclaredKeyless, FixtureChatProvider)
 
@@ -97,7 +101,11 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
     "keep keylessWhen through its setters and the eight-argument apply" in {
       val spec = ProviderConfigSpec(true, false, None, "e.g.", None, Seq.empty, Seq.empty, Seq.empty)
       spec.keylessWhen shouldBe None
-      spec.withKeylessWhen("authentication", "token").keylessWhen shouldBe Some("authentication" -> "token")
+      val keyless = KeylessSetting("authentication", "token", "workload")
+      spec.withKeylessWhen(keyless).keylessWhen shouldBe Some(keyless)
+      // either value selects it, ignoring case and surrounding blanks
+      spec.withKeylessWhen(keyless).isKeyless(Map("authentication" -> " Workload ")) shouldBe true
+      spec.withKeylessWhen(keyless).isKeyless(Map("authentication" -> "api-key")) shouldBe false
       spec.withKeylessWhen(None).isKeyless(Map("authentication" -> "token")) shouldBe false
     }
   }

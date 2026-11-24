@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -40,7 +41,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
   private val testConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -269,7 +270,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val conv = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London"))))
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London"))))
       )
     )
 
@@ -286,8 +287,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val conv = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London")))),
-        ToolMessage("Sunny, 22 C", "tc-1")
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London")))),
+        ToolMessage("Sunny, 22 C", ToolCallId("tc-1"))
       )
     )
 
@@ -362,7 +363,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val client       = captureBodyClient(capturedBody = _)
     val schema       = Schema.`object`[Map[String, Any]]("In").withProperty(Schema.property("q", Schema.string("q")))
 
-    ToolBuilder[Map[String, Any], String]("search", "Search tool", schema)
+    ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe() match {
       case Right(tool) =>
@@ -511,9 +512,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     )
     val result = client.streamComplete(
       Conversation(Seq(UserMessage("What is the weather?"))),
-      CompletionOptions(),
-      chunk => chunks += chunk
-    )
+      CompletionOptions()
+    )(chunk => chunks += chunk)
 
     result.isRight shouldBe true
     chunks should have size 1
@@ -540,7 +540,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     result.toOption.get.content shouldBe "Hello"
@@ -564,7 +564,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
   }
@@ -620,7 +620,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ()) match {
+    client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ()) match {
       case Left(e: org.llm4s.error.NetworkError) => org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
       case other                                 => fail(s"expected a NetworkError, got $other")
     }
@@ -628,7 +628,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "VertexAIClient" should "send thinking as generationConfig.thinkingConfig, as the Gemini API client does" in {
     var capturedBody = ""
-    val client       = captureBodyClient(capturedBody = _, testConfig.withModel("gemini-2.5-pro"))
+    val client       = captureBodyClient(capturedBody = _, testConfig.withModel(ModelName("gemini-2.5-pro")))
     val result = client.complete(
       Conversation(Seq(UserMessage("Hi"))),
       CompletionOptions().withThinking(Thinking.Adaptive)

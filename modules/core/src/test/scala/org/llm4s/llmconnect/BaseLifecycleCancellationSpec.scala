@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ CancelledError, NetworkError }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
@@ -14,13 +16,11 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
   final private class Stub(behaviour: () => Result[Completion]) extends BaseLifecycleLLMClient {
     protected def clientDescription = "stub client"
     protected def providerName      = "stub"
-    protected def modelName         = "stub-model"
+    protected def modelName         = ModelName("stub-model")
     protected def metrics           = MetricsCollector.noop
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completeWithMetrics(behaviour())
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = completeWithMetrics(behaviour())
     def getContextWindow(): Int     = 1000
@@ -41,7 +41,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
       Thread.currentThread().interrupt()
       Left(NetworkError("socket closed", None, "x"))
     })
-    val result  = stub.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result  = stub.streamComplete(conversation, CompletionOptions())(_ => ())
     val flagged = Thread.interrupted()
     flagged shouldBe true
     result.left.toOption.get shouldBe a[CancelledError]
@@ -56,8 +56,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "id",
           created = Instant.EPOCH,
-          content = "answer",
-          model = "stub-model",
+          model = ModelName("stub-model"),
           message = AssistantMessage("answer")
         )
       )

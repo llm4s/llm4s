@@ -2,8 +2,9 @@
 layout: page
 title: Production Deployment
 description: "Deploying LLM4S applications to production: configuration, secrets, reliability, observability, scaling and container images, specific to LLM4S patterns."
-nav_order: 22
-parent: User Guide
+nav_order: 701
+parent: Operations
+grand_parent: User Guide
 redirect_from:
   - /PRODUCTION_DEPLOYMENT
 ---
@@ -53,7 +54,7 @@ ANTHROPIC_API_KEY=<your-anthropic-key>
 LLM4S reads configuration through PureConfig's default source, in this order (highest to lowest
 precedence):
 
-1. **System properties** (`-Dllm4s.providers.provider=claude`)
+1. **System properties** (`-Dllm4s.defaultProvider=claude`)
 2. **application.conf** (HOCON in `src/main/resources/`, or the file named by `-Dconfig.file` /
    `-Dconfig.resource`)
 3. **reference.conf** (the defaults shipped in each llm4s module)
@@ -70,19 +71,18 @@ own key explicitly, so which account a section bills is written down:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
+  defaultProvider = ${?LLM4S_PROVIDER}     # optional override from the environment (your binding)
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-    provider = ${?LLM4S_PROVIDER}     # optional override from the environment (your binding)
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
       apiKey   = ${?OPENAI_API_KEY}      # explicit: this section bills the OPENAI_API_KEY account
     }
 
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
       apiKey   = ${?ANTHROPIC_API_KEY}
     }
   }
@@ -99,7 +99,7 @@ Each provider comes from its own module (`llm4s-openai`, `llm4s-anthropic`, ...)
 sections name. On 0.4.1 and earlier they all ship inside `llm4s-core`.
 
 Only the section you load is validated. `Llm4sConfig.defaultProvider()` checks the default section
-and `Llm4sConfig.provider("claude")` checks `claude`; a section with no key available, or
+and `Llm4sConfig.provider(ProviderName("claude"))` checks `claude`; a section with no key available, or
 whose provider module is not on the classpath, fails only when it is the one asked for. The file
 above can therefore be deployed with just `OPENAI_API_KEY` set while `openai-main` is the default.
 (Up to 0.4.1 every section was validated on every load, so it needed both keys.)
@@ -126,14 +126,12 @@ own.
 
 Pick the provider per environment without changing code:
 
-- **Override the default** with a system property: `-Dllm4s.providers.provider=claude`.
+- **Override the default** with a system property: `-Dllm4s.defaultProvider=claude`.
 - **Bind the default yourself** to a variable of your choosing:
 
   ```hocon
-  llm4s.providers {
-    provider = "openai-main"
-    provider = ${?LLM4S_PROVIDER}     # your binding; any name works
-  }
+  llm4s.defaultProvider = "openai-main"
+  llm4s.defaultProvider = ${?LLM4S_PROVIDER}     # your binding; any name works
   ```
 
 - **Ship one file per environment** and select it at startup, if you prefer each environment's
@@ -144,7 +142,7 @@ Pick the provider per environment without changing code:
   java -Dconfig.file=/etc/myapp/app.conf -jar app.jar  # a file outside the jar
   ```
 
-- **Load a section by name** where one application uses several: `Llm4sConfig.provider("claude")`.
+- **Load a section by name** where one application uses several: `Llm4sConfig.provider(ProviderName("claude"))`.
 
 ### Configuration Boundary Pattern
 
@@ -179,7 +177,7 @@ the ones your sections bind (`apiKey = ${?OPENAI_API_KEY}`) - or, for a section 
 `apiKey`, the vendor's variable its provider module binds; `TRACING_MODE` is bound by
 llm4s-core's `reference.conf` and `LANGFUSE_*` by llm4s-observability's. Supply the key of each section the
 deployment loads: with the file above and `openai-main` as the default, `OPENAI_API_KEY`, plus
-`ANTHROPIC_API_KEY` if it also calls `Llm4sConfig.provider("claude")`.
+`ANTHROPIC_API_KEY` if it also calls `Llm4sConfig.provider(ProviderName("claude"))`.
 
 ```yaml
 apiVersion: v1
@@ -229,7 +227,7 @@ full rules are in [Rotating keys](../getting-started/configuration#rotating-keys
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   apiKeyFile = "/vault/secrets/openai-api-key"   # instead of apiKey
 }
 ```
@@ -309,6 +307,7 @@ missing secret, `ConfigurationError` for a missing or blank field) never hold th
 ```scala
 import org.llm4s.llmconnect.auth.vault.{ VaultApiKeyProvider, VaultSettings }
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import scala.concurrent.duration.*
 
 for
@@ -317,7 +316,7 @@ for
               .withNamespace("admin")              // Vault Enterprise / HCP only
               .withRefreshInterval(1.minute)
           )
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 yield client
 ```
@@ -335,6 +334,7 @@ hold the key or the credentials.
 ```scala
 import org.llm4s.llmconnect.auth.aws.{ AwsCredentials, AwsSecretsManagerApiKeyProvider, AwsSecretsManagerSettings }
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import scala.concurrent.duration.*
 
 for
@@ -343,7 +343,7 @@ for
               .withField("apiKey")                 // a key/value secret; omit for a plain SecretString
               .withRefreshInterval(1.minute)
           )
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 yield client
 ```
@@ -582,9 +582,9 @@ LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
 LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted
 ```
 
-Both keys are required: with either unset, `Tracing.create` logs a `ConfigurationError` naming it
-(`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)`) and falls back to no tracing, so check
-startup logs, or build the tracer with `Tracing.fromSettings` to fail fast.
+Both keys are required: with either unset, `Tracing.fromSettings` returns a `ConfigurationError` naming it
+(`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)`), so a misconfigured deployment fails at startup
+rather than running untraced.
 
 What gets traced:
 
@@ -600,7 +600,7 @@ Trace: "RAG Query Processing"
 ├── Span: "Document Retrieval" (200ms)
 │   └── Event: "Retrieved 5 documents"
 ├── Generation: "RAG Response" (1200ms)
-│   ├── Model: gpt-4o
+│   ├── Model: gpt-5.6-terra
 │   ├── Input tokens: 1,234
 │   └── Output tokens: 456
 └── Event: "Final Response"
@@ -666,8 +666,8 @@ Suitable for experiments, small teams, or low-traffic applications:
 
 ```hocon
 # application.conf
+llm4s.defaultProvider = "ollama-local"
 llm4s.providers {
-  provider = "ollama-local"
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"

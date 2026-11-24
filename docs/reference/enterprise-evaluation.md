@@ -45,7 +45,7 @@ linked to its open issue.
 | How are versions numbered? | Semantic versioning, with `versionScheme := early-semver` in the published POMs. Before the compatibility baseline (0.7.0) any release may break compatibility, each break listed in the CHANGELOG with a migration note. See the [Compatibility and Deprecation Policy](compatibility-policy#versions). |
 | Which APIs are stable? | Each module is Frozen, Beta or Experimental: [1.0 Scope](v1-scope), with the promise per tier in the [Compatibility and Deprecation Policy](compatibility-policy). Every top-level public type of a Frozen module carries `@Stable` or `@Experimental`: [Tiers in the Code](api-stability#tiers-in-the-code). |
 | Is binary compatibility checked? | MiMa runs in the build, against a baseline that is not set yet, so it checks nothing until then: [API Stability](api-stability#the-baseline) and [Known gaps](#known-gaps). |
-| How are releases made, and where are the notes? | From a tag, by CI, to Maven Central: [Release Process](release). Notes are the [GitHub Releases](https://github.com/llm4s/llm4s/releases) and the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md); upgrades are in the [Migration Guide](migration). |
+| How are releases made, and where are the notes? | From a tag, by CI, to Maven Central: [Release Process](../contribute/release). Notes are the [GitHub Releases](https://github.com/llm4s/llm4s/releases) and the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md); upgrades are in the [Migration Guide](migration). |
 | Which versions get fixes, and for how long? | Before 1.0, fixes ship in the latest release only. From 1.0, the latest 1.x minor gets bug and security fixes and the previous minor security fixes for three months after its successor; 0.7.x gets critical security fixes for three months after 1.0. No LTS line before 2.0; minor releases at most about quarterly. See the [Support Policy](support-policy) and [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions). |
 
 ## Security
@@ -64,7 +64,7 @@ linked to its open issue.
 |---|---|
 | Is there an SBOM? | Yes: a CycloneDX SBOM per published module on each GitHub Release, also built and validated on every pull request. See [Software Bill of Materials](sbom). |
 | Are dependencies scanned? | OSV-Scanner scans the SBOMs weekly and on pull requests that change dependencies; a pull request that adds a HIGH or CRITICAL advisory fails. See [Vulnerability scanning](sbom#vulnerability-scanning). |
-| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`); the key's fingerprint and the commands to check a signature are in [Verifying Releases](verifying-releases). From the first release after 0.6.0 the workflow also attests SLSA build provenance for the jars and POMs, the SBOMs on the GitHub Release and the container image; no release has shipped one yet: see [Known gaps](#known-gaps). |
+| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`); the key's fingerprint and the commands to check a signature are in [Verifying Releases](../contribute/verifying-releases). From the first release after 0.6.0 the workflow also attests SLSA build provenance for the jars and POMs, the SBOMs on the GitHub Release and the container image; no release has shipped one yet: see [Known gaps](#known-gaps). |
 | OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet; the evidence for each passing criterion is in [OpenSSF Best Practices](best-practices), and see [Known gaps](#known-gaps). |
 
 ## Data protection
@@ -145,9 +145,9 @@ Security: SECURITY.md; reports handled by the Security Committee and maintainers
   No published advisories. GitHub private vulnerability reporting
   enabled (https://github.com/llm4s/llm4s/issues/1465).
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
-  dependency changes. Maven Central artifacts PGP-signed (https://llm4s.org/reference/verifying-releases).
+  dependency changes. Maven Central artifacts PGP-signed (https://llm4s.org/contribute/verifying-releases).
   OpenSSF Scorecard on every push to main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). SLSA build
-  provenance attested for every release (https://llm4s.org/reference/verifying-releases); no Best Practices badge
+  provenance attested for every release (https://llm4s.org/contribute/verifying-releases); no Best Practices badge
   (https://github.com/llm4s/llm4s/issues/2307).
 Data protection: no telemetry; data goes only to the providers and stores you configure;
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).

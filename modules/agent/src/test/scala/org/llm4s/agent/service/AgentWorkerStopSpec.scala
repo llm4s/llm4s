@@ -67,9 +67,7 @@ class AgentWorkerStopSpec
       answer(count.incrementAndGet(), conversation)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -98,7 +96,7 @@ class AgentWorkerStopSpec
 
   private def agentOver(store: Checkpointer, client: LLMClient, tools: AgentTool[?]*): Agent = {
     val builder = Agent.builder("assistant", client).withRuntime(new GraphRuntime(store))
-    (if (tools.isEmpty) builder else builder.withTools(SpecTools.set(tools*))).build().value
+    (if (tools.isEmpty) builder else builder.withToolSet(SpecTools.set(tools*))).build().value
   }
 
   private def workerOf(store: InMemoryCheckpointer, agent: Agent, queueSettings: RunQueueSettings = shortLease) = {
@@ -576,7 +574,7 @@ class AgentWorkerStopSpec
       Agent
         .builder("assistant", client)
         .withRuntime(new GraphRuntime(store))
-        .withTools(SpecTools.set(echo))
+        .withToolSet(SpecTools.set(echo))
         .withMiddleware(new ApprovalMiddleware(_ => Some("reviewed")))
         .build()
         .value

@@ -3,8 +3,9 @@ layout: page
 title: Permission-Based RAG
 description: "Add access control to RAG in LLM4S: organise documents in collections, grant principals access, and retrieve only what a user may read."
 search_title: "Permission-based RAG with access control in Scala"
-parent: User Guide
-nav_order: 4
+parent: RAG and Data
+nav_order: 306
+grand_parent: User Guide
 ---
 
 # Permission-Based RAG
@@ -694,6 +695,7 @@ import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
+import org.llm4s.security.Secret
 
 object MultiTenantRAGExample extends App {
 
@@ -702,7 +704,7 @@ object MultiTenantRAGExample extends App {
   // 1. Setup
   val searchIndex = PgSearchIndex.fromJdbcUrl(
     "jdbc:postgresql://localhost:5432/postgres",
-    "postgres", "postgres", "vectors"
+    "postgres", Secret("postgres"), "vectors"
   ).getOrElse(throw new RuntimeException("Failed to create SearchIndex"))
 
   searchIndex.initializeSchema()

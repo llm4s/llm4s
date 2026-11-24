@@ -51,10 +51,10 @@ object BenchmarkRunnerCli {
       given org.llm4s.model.ModelRegistryService = registryService
       llmClient       <- LLMConnect.getClient(providerCfg)
       embeddingResult <- Llm4sConfig.embeddings()
-      (providerName, providerConfig) = embeddingResult
-      embeddingClient <- EmbeddingClient.from(providerName, providerConfig)
+      providerConfig = embeddingResult
+      embeddingClient <- EmbeddingClient.from(providerConfig)
       resolveEmbedding = (name: String) =>
-        if (name.equalsIgnoreCase(providerName)) Right(providerConfig)
+        if (name.equalsIgnoreCase(providerConfig.providerId.asString)) Right(providerConfig)
         else Left(ConfigurationError(s"No embedding credentials for provider '$name'"))
     } yield BenchmarkRunner(llmClient, embeddingClient, resolveEmbedding)
 

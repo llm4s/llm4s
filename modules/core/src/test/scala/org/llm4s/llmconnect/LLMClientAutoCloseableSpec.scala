@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -17,8 +18,7 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
   private val stubCompletion = Completion(
     id = "test-1",
     created = Instant.EPOCH,
-    content = "ok",
-    model = "test",
+    model = ModelName("test"),
     message = AssistantMessage("ok")
   )
 
@@ -31,9 +31,7 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions
     ): Result[Completion] = Right(stubCompletion)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(stubCompletion)
 

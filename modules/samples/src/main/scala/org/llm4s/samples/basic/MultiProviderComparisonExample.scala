@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -25,9 +26,9 @@ import scala.util.Using
  * {{{
  * llm4s {
  *   providers {
- *     openai-main    { provider = "openai",    model = "gpt-4o-mini" }
- *     anthropic-main { provider = "anthropic", model = "claude-haiku-4-5-latest" }
- *     gemini-main    { provider = "gemini",    model = "gemini-2.0-flash" }
+ *     openai-main    { provider = "openai",    model = "gpt-5.6-luna" }
+ *     anthropic-main { provider = "anthropic", model = "claude-haiku-5-5" }
+ *     gemini-main    { provider = "gemini",    model = "gemini-3.8-flash" }
  *   }
  * }
  * }}}
@@ -69,7 +70,8 @@ object MultiProviderComparisonExample {
       case Right(registry) =>
         given ModelRegistryService = registry
         val names                  = if (args.nonEmpty) args.toSeq else DefaultProviders
-        render(compare(names, DefaultPrompt)(name => Llm4sConfig.provider(name)), DefaultPrompt).foreach(logger.info(_))
+        render(compare(names, DefaultPrompt)(name => Llm4sConfig.provider(ProviderName(name))), DefaultPrompt)
+          .foreach(logger.info(_))
     }
 
   /**
@@ -92,7 +94,7 @@ object MultiProviderComparisonExample {
       Using.resource(client) { c =>
         val start = nanoTime()
         c.complete(Conversation(Seq(UserMessage(prompt)))).map { completion =>
-          Reply(completion.asText.trim, completion.usage.map(_.totalTokens), (nanoTime() - start).nanos)
+          Reply(completion.content.trim, completion.usage.map(_.totalTokens), (nanoTime() - start).nanos)
         }
       }
     }

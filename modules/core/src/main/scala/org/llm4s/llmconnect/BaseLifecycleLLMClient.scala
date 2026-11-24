@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, ConfigurationError }
 import org.llm4s.llmconnect.model.Completion
@@ -33,7 +34,7 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
   protected def providerName: String
 
   /** The model identifier forwarded to the metrics collector. */
-  protected def modelName: String
+  protected def modelName: ModelName
 
   /**
    * Hook for releasing provider-specific resources.
@@ -73,11 +74,12 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
   protected def completeWithMetrics(operation: => Result[Completion]): Result[Completion] =
     withMetrics(
       provider = providerName,
-      model = modelName,
+      model = modelName.asString,
       operation =
         if (Thread.currentThread().isInterrupted) Left(CancelledError(s"$providerName.complete"))
         else CancelledError.attempt(s"$providerName.complete")(validateNotClosed.flatMap(_ => operation)),
       extractUsage = (c: Completion) => c.usage,
-      extractCost = (c: Completion) => c.estimatedCost
+      // the metrics contract counts cost as a Double
+      extractCost = (c: Completion) => c.estimatedCost.map(_.toDouble)
     )
 }

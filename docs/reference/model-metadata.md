@@ -79,6 +79,12 @@ thinking budget ([RFC 0008](../rfcs/0008-generation-controls)):
 }
 ```
 
+The overrides also carry whole entries for current models the snapshot predates, copied from LiteLLM's upstream file
+and checked against the vendor's pricing page: on 2026-11-24, `claude-sonnet-5-5`, `claude-haiku-5-5`,
+`anthropic.claude-sonnet-5-5` and `us.anthropic.claude-sonnet-5-5` (Bedrock), `gpt-5.6-luna`, `gpt-5.6-terra`,
+`gemini-3.8-flash` and `gemini/gemini-3.8-flash`, the ids the guides' examples use. The next refresh of the snapshot
+makes them redundant; delete them then.
+
 ## Looking a model up
 
 `lookup(modelId)` and `lookup(provider, modelName)` return a `Result[ModelMetadata]`. An id that is not an exact key
@@ -86,9 +92,10 @@ is matched without case, then without a `provider/` prefix; an unknown model is 
 
 ```scala
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 def describe(registry: ModelRegistryService): Unit =
-  registry.lookup("gpt-4o") match {
+  registry.lookup(ModelName("gpt-5.6-terra")) match {
     case Right(metadata) =>
       println(s"Context window: ${metadata.contextWindow.getOrElse("unknown")}")
       println(s"Output limit: ${metadata.reserveCompletion.getOrElse("unknown")}")
@@ -121,9 +128,10 @@ streaming, which counts as `true`; any other name is `false`.
 
 ```scala
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 def estimate(registry: ModelRegistryService): Option[Double] =
-  registry.lookup("gpt-4o").toOption.flatMap(_.pricing.estimateCost(inputTokens = 10000, outputTokens = 2000))
+  registry.lookup(ModelName("gpt-5.6-terra")).toOption.flatMap(_.pricing.estimateCost(inputTokens = 10000, outputTokens = 2000))
 ```
 
 `estimateCost` multiplies by `pricing.inputCostPerToken` and `pricing.outputCostPerToken`, and is `None` when either
@@ -134,10 +142,11 @@ price and the audio and image prices the metadata gives.
 
 ```scala
 import org.llm4s.model.{ ModelMode, ModelRegistryService }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 def survey(registry: ModelRegistryService): Unit = {
   registry.findByCapability("vision").foreach(models => println(s"${models.size} vision models"))
-  registry.listByProvider("openai").foreach(models => models.take(5).foreach(m => println(m.modelId)))
+  registry.listByProvider(ProviderId("openai")).foreach(models => models.take(5).foreach(m => println(m.modelId)))
   registry.listByMode(ModelMode.Embedding).foreach(models => println(s"${models.size} embedding models"))
   println(registry.listProviders().mkString(", "))
   registry.search("sonnet").foreach(m => println(m.modelId))
@@ -161,11 +170,12 @@ In code:
 ```scala
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, ModelRegistryService }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 
 // a closed set of models, for example in tests
 val inHouse = ModelMetadata(
-  modelId = "my-custom-llm",
-  provider = "custom",
+  modelId = ModelName("my-custom-llm"),
+  provider = ProviderId("custom"),
   mode = ModelMode.Chat,
   maxInputTokens = Some(32000),
   maxOutputTokens = Some(8000),
@@ -225,12 +235,12 @@ Exactly one source is used; set one key, or none for the bundled catalogue.
 
 | `ModelRegistryService` | Description |
 |---|---|
-| `lookup(modelId: String): Result[ModelMetadata]` | A model by id |
-| `lookup(provider: String, modelName: String): Result[ModelMetadata]` | A model by provider and name |
-| `listByProvider(provider: String): Result[List[ModelMetadata]]` | Every model of a provider |
+| `lookup(modelId: ModelName): Result[ModelMetadata]` | A model by id |
+| `lookup(provider: ProviderId, modelName: ModelName): Result[ModelMetadata]` | A model by provider and name |
+| `listByProvider(provider: ProviderId): Result[List[ModelMetadata]]` | Every model of a provider |
 | `listByMode(mode: ModelMode): Result[List[ModelMetadata]]` | Every model of a mode |
 | `findByCapability(capability: String): Result[List[ModelMetadata]]` | Every model with a capability |
-| `listProviders(): List[String]` | The providers present |
+| `listProviders(): List[ProviderId]` | The providers present |
 | `search(query: String): List[ModelMetadata]` | Every model whose id contains `query` |
 
 | `ModelRegistryService` companion | Description |

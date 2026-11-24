@@ -242,17 +242,18 @@ triageAgent.flatMap(_.run("I can't log into my account and my payment failed"))
 
 ## Guardrails and Middleware Across Handoffs
 
-The root agent's run-boundary middleware guards the whole family. Its `beforeAgent` hooks - input
-guardrails among them - run on every turn's query, even when a specialist is active, before the
-specialist's own; its `afterAgent` hooks - output guardrails - run on every final answer, after the
-answering specialist's own. So guardrails given to the root keep applying after a handoff:
+The root agent's run-boundary middleware guards the whole family. Its `admit` stages - input
+guardrails among them - and its `beforeAgent` hooks run on every turn's query, even when a specialist is
+active, before the specialist's own; its `afterAgent` hooks - output guardrails - run on every final answer,
+after the answering specialist's own. A turn is admitted by the root and by the agent the thread is with
+before it is stored. So guardrails given to the root keep applying after a handoff:
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ PIIMasker, ProfanityFilter }
 
 val triage = Agent.builder("triage", client)
-  .withMiddleware(GuardrailMiddleware(input = Seq(new ProfanityFilter()), output = Seq(new PIIMasker())))
+  .withInputGuardrails(ProfanityFilter())
+  .withOutputGuardrails(new PIIMasker())
   .withHandoffs(Handoff.to("billing", billingAgent, "Billing questions"))
   .build()
 // a query to billing two turns later still passes ProfanityFilter; billing's answers still pass PIIMasker

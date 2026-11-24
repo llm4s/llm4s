@@ -3,6 +3,7 @@ package org.llm4s.javaapi;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.OptionalInt;
 
 import org.llm4s.llmconnect.model.Conversation;
@@ -59,19 +60,19 @@ final class CompletionOptionsCheck {
   /** What the accessors read back, with Java types only. */
   static List<String> readBack(JCompletionOptions options) {
     List<String> log = new ArrayList<>();
-    double temperature = options.temperature();
-    double topP = options.topP();
+    OptionalDouble temperature = options.temperature();
+    OptionalDouble topP = options.topP();
     OptionalInt maxTokens = options.maxTokens();
-    double presencePenalty = options.presencePenalty();
-    double frequencyPenalty = options.frequencyPenalty();
+    OptionalDouble presencePenalty = options.presencePenalty();
+    OptionalDouble frequencyPenalty = options.frequencyPenalty();
     Optional<JReasoningEffort> reasoning = options.reasoning();
     Optional<JThinking> thinking = options.thinking();
     Optional<JServiceTier> serviceTier = options.serviceTier();
-    log.add("temperature:" + temperature);
-    log.add("topP:" + topP);
+    log.add("temperature:" + (temperature.isPresent() ? String.valueOf(temperature.getAsDouble()) : "none"));
+    log.add("topP:" + (topP.isPresent() ? String.valueOf(topP.getAsDouble()) : "none"));
     log.add("maxTokens:" + (maxTokens.isPresent() ? String.valueOf(maxTokens.getAsInt()) : "none"));
-    log.add("presencePenalty:" + presencePenalty);
-    log.add("frequencyPenalty:" + frequencyPenalty);
+    log.add("presencePenalty:" + (presencePenalty.isPresent() ? String.valueOf(presencePenalty.getAsDouble()) : "none"));
+    log.add("frequencyPenalty:" + (frequencyPenalty.isPresent() ? String.valueOf(frequencyPenalty.getAsDouble()) : "none"));
     log.add("reasoning:" + reasoning.map(CompletionOptionsCheck::describe).orElse("none"));
     log.add("thinking:" + thinking.map(JThinking::toString).orElse("none"));
     log.add("serviceTier:" + serviceTier.map(JServiceTier::name).orElse("none"));

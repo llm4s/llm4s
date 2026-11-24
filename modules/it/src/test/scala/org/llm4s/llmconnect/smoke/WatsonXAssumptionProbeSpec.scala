@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
@@ -61,7 +63,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val apiKey    = env("WATSONX_API_KEY")
   private val projectId = env("WATSONX_PROJECT_ID")
   private val spaceId   = env("WATSONX_SPACE_ID").filter(_ => projectId.isEmpty)
-  private val baseUrl   = env("WATSONX_BASE_URL").getOrElse(WatsonXConfig.DEFAULT_BASE_URL)
+  private val baseUrl   = env("WATSONX_BASE_URL").map(BaseUrl(_)).getOrElse(WatsonXConfig.DEFAULT_BASE_URL)
   // The model IBM's own tool-calling example uses (watsonx-ai-node-sdk, examples/src/sdk/example_chat_tools.ts).
   private val model = env("WATSONX_MODEL").getOrElse("ibm/granite-4-h-small")
   // The `version` query parameter; the client's default unless a run pins another to compare.
@@ -136,7 +138,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private def config(key: String, modelName: String = model): WatsonXConfig =
     WatsonXConfig
       .fromValues(
-        modelName = modelName,
+        modelName = ModelName(modelName),
         apiKey = Secret(key),
         projectId = projectId,
         spaceId = spaceId,
@@ -153,7 +155,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def say(text: String): Conversation = Conversation(Seq(UserMessage(text)))
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two integers",
     Schema
@@ -183,11 +185,11 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
     private def headers(accept: String): Map[String, String] =
       Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token", "Accept" -> accept)
 
-    private def url(path: String): String = s"${cfg.baseUrl}$path?version=${cfg.apiVersion}"
+    private def url(path: String): String = s"${cfg.baseUrl.asUrl}$path?version=${cfg.apiVersion}"
 
     /** The body every request starts from; `extra` adds or overrides fields. */
     def body(messages: ujson.Value, extra: (String, ujson.Value)*): ujson.Obj = {
-      val b = ujson.Obj("model_id" -> cfg.model, "messages" -> messages)
+      val b = ujson.Obj("model_id" -> cfg.model.asString, "messages" -> messages)
       cfg.spaceId match {
         case Some(space) => b("space_id") = space
         case None        => b("project_id") = cfg.projectId
@@ -385,7 +387,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       requireAccount()
       val text = scala.collection.mutable.ListBuffer.empty[String]
       val result = withClient()(
-        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20), _.content.foreach(text += _))
+        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20))(_.content.foreach(text += _))
       )
       val completion = result.value
       text.mkString should not be empty
@@ -442,7 +444,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
         .withPresencePenalty(0.5)
         .withFrequencyPenalty(0.5)
         .withResponseFormat(ResponseFormat.Json)
-      jsonReply(withClient()(_.streamComplete(askForJson, options, _ => ())).value)
+      jsonReply(withClient()(_.streamComplete(askForJson, options)(_ => ())).value)
     }
   }
 
@@ -463,7 +465,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       val options  = CompletionOptions().withMaxTokens(400).withReasoning(ReasoningEffort.Low)
       val completion =
         withReasoningClient(
-          _.streamComplete(say("What is 3^3?"), options, _.thinkingDelta.foreach(thinking += _))
+          _.streamComplete(say("What is 3^3?"), options)(_.thinkingDelta.foreach(thinking += _))
         ).value
       completion.content should not be empty
       withClue(s"no streamed reasoning from $reasoningModel\n")(thinking.mkString should not be empty)

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.ChatCompletionCreateParams
@@ -42,10 +44,12 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       |"completion_tokens_details":{"reasoning_tokens":32}}}""".stripMargin
 
   private def openAI(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl("https://example.invalid/v1")).value
 
   private def azure(deployment: String, apiVersion: String = AzureConfig.DEFAULT_API_VERSION): AzureConfig =
-    AzureConfig.fromValues(deployment, Secret("azure-key"), "https://r.openai.azure.com", apiVersion).value
+    AzureConfig
+      .fromValues(ModelName(deployment), Secret("azure-key"), BaseUrl("https://r.openai.azure.com"), apiVersion)
+      .value
 
   /** The request body `complete` sends for `config` and `options`, as the SDK would serialise it. */
   private def sentBody(config: ProviderConfig, model: String, options: CompletionOptions): Body = {
@@ -109,7 +113,10 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   it should "never send reasoning_effort to a model the registry knows does not reason" in {
     Seq("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-3.5-turbo").foreach { model =>
       withClue(model) {
-        val sent = body(model, CompletionOptions(maxTokens = Some(64)).withReasoning(ReasoningEffort.High))
+        val sent = body(
+          model,
+          CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)).withReasoning(ReasoningEffort.High)
+        )
         sent.contains("reasoning_effort") shouldBe false
         // Nothing else changes for it either.
         sent("temperature").num shouldBe 0.7
@@ -132,10 +139,10 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
     val sent = body(
       "gpt-5-mini",
       CompletionOptions(
-        temperature = 0.2,
-        topP = 0.9,
-        presencePenalty = 0.5,
-        frequencyPenalty = 0.5,
+        temperature = Some(0.2),
+        topP = Some(0.9),
+        presencePenalty = Some(0.5),
+        frequencyPenalty = Some(0.5),
         maxTokens = Some(99)
       )
     )
@@ -145,13 +152,14 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   }
 
   it should "keep sending sampling parameters to a non-reasoning model" in {
-    val sent = body("gpt-4o", CompletionOptions(temperature = 0.2, topP = 0.9))
+    val sent = body("gpt-4o", CompletionOptions(temperature = Some(0.2), topP = Some(0.9)))
     sent("temperature").num shouldBe 0.2
     sent("top_p").num shouldBe 0.9
   }
 
   it should "send reasoning_effort but keep sampling parameters for an open-weight gpt-oss model" in {
-    val sent = body("openai/gpt-oss-120b", CompletionOptions(temperature = 0.3).withReasoning(ReasoningEffort.Medium))
+    val sent =
+      body("openai/gpt-oss-120b", CompletionOptions(temperature = Some(0.3)).withReasoning(ReasoningEffort.Medium))
     sent("reasoning_effort").str shouldBe "medium"
     sent("temperature").num shouldBe 0.3
   }
@@ -201,7 +209,7 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   }
 
   it should "leave an unrecognised deployment's request unchanged when no reasoning is asked for" in {
-    val sent = azureBody("prod-chat", CompletionOptions(maxTokens = Some(64)))
+    val sent = azureBody("prod-chat", CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)))
     sent.contains("reasoning_effort") shouldBe false
     sent("temperature").num shouldBe 0.7
     sent("max_tokens").num shouldBe 64
@@ -220,7 +228,7 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   }
 
   it should "not read Azure's gpt-35-turbo naming as a gpt-5-or-later model" in {
-    val sent = azureBody("gpt-35-turbo", CompletionOptions(maxTokens = Some(64)))
+    val sent = azureBody("gpt-35-turbo", CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)))
     sent("max_tokens").num shouldBe 64
     sent("temperature").num shouldBe 0.7
   }
@@ -287,7 +295,7 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   it should "leave a fine-tuned gpt-4o's request as it was" in {
     val sent = body(
       "ft:gpt-4o-mini-2024-07-18:acme:support-bot:9AbC",
-      CompletionOptions(maxTokens = Some(64)).withReasoning(ReasoningEffort.High)
+      CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)).withReasoning(ReasoningEffort.High)
     )
     sent.contains("reasoning_effort") shouldBe false
     sent("temperature").num shouldBe 0.7

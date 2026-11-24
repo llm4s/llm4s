@@ -1,7 +1,8 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
-import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, ToolCallId, UsageSummary, UserMessage }
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
 import org.llm4s.trace.store.InMemoryTraceStore
 import org.scalatest.{ BeforeAndAfterEach, LoneElement }
@@ -33,7 +34,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         end,
@@ -42,7 +43,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     ) shouldBe Right(())
 
     store.getSpans(collector.traceId) shouldBe empty
-    val spans = store.getSpans(org.llm4s.types.TraceId(trace.traceId)).map(s => s.spanId.value -> s).toMap
+    val spans = store.getSpans(org.llm4s.trace.model.TraceId(trace.traceId)).map(s => s.spanId.value -> s).toMap
     spans.keySet shouldBe Set(run.spanId, placed.context.spanId)
     val tool = spans(placed.context.spanId)
     tool.parentSpanId.map(_.value) shouldBe Some(run.spanId)
@@ -51,7 +52,8 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     spans(run.spanId).parentSpanId shouldBe None
 
     // the placed trace is registered, with the root run as its root span, so it can be found and deleted
-    val registered = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+    val registered =
+      store.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
     registered.rootSpanId.map(_.value) shouldBe Some(run.spanId)
     registered.startTime shouldBe start
     store.getTrace(collector.traceId) should not be empty
@@ -63,7 +65,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val t0    = java.time.Instant.parse("2026-10-21T10:00:00Z")
     def event(key: String, start: java.time.Instant) =
       TraceEvent.CustomEvent(key, ujson.Obj(), start, Some(TraceSpan(run.spanFor(key), Some(run), start)))
-    def stored = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+    def stored = store.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
 
     collector.traceEvent(event("late", t0.plusSeconds(5))) shouldBe Right(())
     stored.startTime shouldBe t0.plusSeconds(5)
@@ -77,7 +79,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         t0.plusSeconds(10),
@@ -95,12 +97,12 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val flaky = new org.llm4s.trace.store.TraceStore[Try] {
       private def guarded[A](a: => A): Try[A] = if (down) Failure(new RuntimeException("down")) else Success(a)
       def saveTrace(trace: org.llm4s.trace.model.Trace)        = guarded(inner.saveTrace(trace))
-      def getTrace(id: org.llm4s.types.TraceId)                = guarded(inner.getTrace(id))
+      def getTrace(id: org.llm4s.trace.model.TraceId)          = guarded(inner.getTrace(id))
       def saveSpan(span: org.llm4s.trace.model.Span)           = Success(inner.saveSpan(span))
-      def getSpans(id: org.llm4s.types.TraceId)                = Success(inner.getSpans(id))
+      def getSpans(id: org.llm4s.trace.model.TraceId)          = Success(inner.getSpans(id))
       def queryTraces(query: org.llm4s.trace.store.TraceQuery) = Success(inner.queryTraces(query))
       def searchByMetadata(key: String, value: String)         = Success(inner.searchByMetadata(key, value))
-      def deleteTrace(id: org.llm4s.types.TraceId)             = Success(inner.deleteTrace(id))
+      def deleteTrace(id: org.llm4s.trace.model.TraceId)       = Success(inner.deleteTrace(id))
       def clear()                                              = Success(inner.clear())
     }
     val tracing = TraceCollectorTracing(flaky).getOrElse(fail("could not create the collector"))
@@ -113,11 +115,11 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     tracing.traceEvent(placed("a")).isLeft shouldBe true
     down = false
     tracing.traceEvent(placed("b")) shouldBe Right(())
-    inner.getTrace(org.llm4s.types.TraceId(trace.traceId)) should not be empty
+    inner.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)) should not be empty
   }
 
   it should "convert ToolExecuted event to ToolCall span" in {
-    val event = TraceEvent.ToolExecuted("test-tool", "input", "output", 100.millis, true)
+    val event = TraceEvent.ToolExecuted("test-tool", ToolCallId("input").asString, "output", 100.millis, true)
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -134,7 +136,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "convert ErrorOccurred event to Error status span" in {
     val error = new RuntimeException("test error")
-    val event = TraceEvent.ErrorOccurred(error, "test-context")
+    val event = TraceEvent.ErrorOccurred.of(error, "test-context")
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -150,7 +152,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "put a failed call's billed usage on its error span (#2676)" in {
     val event =
-      TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+      TraceEvent.ErrorOccurred("filtered", "ContentFilteredError", "chat", usage = Some(TokenUsage(7, 4, 11)))
     collector.traceEvent(event) shouldBe Right(())
 
     val span = store.getSpans(collector.traceId).loneElement
@@ -163,7 +165,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "convert TokenUsageRecorded event to span with token attributes" in {
     import org.llm4s.llmconnect.model.TokenUsage
     val usage = TokenUsage(10, 20, 30)
-    val event = TraceEvent.TokenUsageRecorded(usage, "gpt-4", "completion")
+    val event = TraceEvent.TokenUsageRecorded(usage, ModelName("gpt-4"), "completion")
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -179,7 +181,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "convert EmbeddingUsageRecorded to Embedding span" in {
     import org.llm4s.llmconnect.model.EmbeddingUsage
     val usage = EmbeddingUsage(100, 100)
-    val event = TraceEvent.EmbeddingUsageRecorded(usage, "text-embedding-3-small", "indexing", 5)
+    val event = TraceEvent.EmbeddingUsageRecorded(usage, ModelName("text-embedding-3-small"), "indexing", 5)
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -194,8 +196,8 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "record a token usage's thinking and its output as billed beside the raw completion count" in {
     import org.llm4s.llmconnect.model.TokenUsage
     val usage = TokenUsage(81, 18, 145, thinkingTokens = Some(46))
-    collector.traceEvent(TraceEvent.TokenUsageRecorded(usage, "o3", "completion")) shouldBe Right(())
-    collector.traceTokenUsage(usage, "o3", "direct") shouldBe Right(())
+    collector.traceEvent(TraceEvent.TokenUsageRecorded(usage, ModelName("o3"), "completion")) shouldBe Right(())
+    collector.traceTokenUsage(usage, ModelName("o3"), "direct") shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
     spans should have size 2
@@ -250,24 +252,22 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("hit").asBoolean shouldBe Some(false)
   }
 
-  it should "convert AgentInitialized and AgentRunEnded to AgentCall spans" in {
-    val initEvent = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"))
-    val endEvent  = TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary())
-    collector.traceEvent(initEvent) shouldBe Right(())
+  it should "convert AgentRunEnded to an AgentCall span" in {
+    val endEvent = TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
     collector.traceEvent(endEvent) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
-    spans should have size 2
+    spans should have size 1
     spans.foreach(_.kind shouldBe SpanKind.AgentCall)
   }
 
   it should "name the agent run span after its event type and carry the run summary" in {
-    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+    val usage = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
     val event = TraceEvent.AgentRunEnded(
       "thread-1",
       "run-1",
       "assistant",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(UserMessage("hi"), AssistantMessage("hello")),
       usage
     )
@@ -287,7 +287,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "convert CustomEvent and CostRecorded to Internal spans" in {
     val customEvent = TraceEvent.CustomEvent("my-event", ujson.Obj("key" -> "value"))
-    val costEvent   = TraceEvent.CostRecorded(0.05, "gpt-4", "completion", 1000, "total")
+    val costEvent   = TraceEvent.CostRecorded(0.05, ModelName("gpt-4"), "completion", 1000, "total")
     collector.traceEvent(customEvent) shouldBe Right(())
     collector.traceEvent(costEvent) shouldBe Right(())
 
@@ -310,7 +310,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val console  = new ConsoleTracing()
     val combined = TracingComposer.combine(collector, console)
 
-    val event = TraceEvent.ToolExecuted("composite-tool", "in", "out", 50.millis, true)
+    val event = TraceEvent.ToolExecuted("composite-tool", ToolCallId("in").asString, "out", 50.millis, true)
     combined.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -321,8 +321,8 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "be composable with filtered tracing" in {
     val filteredCollector = TracingComposer.filter(collector)(_.eventType == "tool_executed")
 
-    val toolEvent  = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
-    val otherEvent = TraceEvent.AgentInitialized("query", Vector.empty)
+    val toolEvent  = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
+    val otherEvent = TraceEvent.CacheHit(0.9, 0.8)
 
     filteredCollector.traceEvent(toolEvent) shouldBe Right(())
     filteredCollector.traceEvent(otherEvent) shouldBe Right(())
@@ -333,11 +333,11 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "use custom traceId when provided" in {
-    val customTraceId = org.llm4s.types.TraceId("custom-trace-123")
+    val customTraceId = org.llm4s.trace.model.TraceId("custom-trace-123")
     val customCollector =
       TraceCollectorTracing(store, customTraceId).getOrElse(fail("could not create custom collector"))
 
-    val event = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
+    val event = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
     customCollector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(customTraceId)
@@ -347,7 +347,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "produce a span with the given spanId, deterministically for the same event" in {
     import org.llm4s.trace.model.SpanId
 
-    val event  = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
+    val event  = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
     val spanId = SpanId.generate()
 
     val span1 = collector.eventToSpan(event, spanId)
@@ -360,13 +360,13 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "keep a completion's served tier as its span's service_tier (#2750)" in {
     import org.llm4s.llmconnect.model.{ Completion, ServiceTier }
     import org.llm4s.trace.model.SpanValue
-    val completion = Completion("c-1", java.time.Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    val completion = Completion("c-1", java.time.Instant.EPOCH, ModelName("m"), AssistantMessage("hi"))
     collector.traceEvent(
-      TraceEvent.CompletionReceived("c-1", "m", 0, "hi", servedTier = Some(ServiceTier.Flex))
+      TraceEvent.CompletionReceived("c-1", ModelName("m"), 0, "hi", servedTier = Some(ServiceTier.Flex))
     ) shouldBe Right(())
-    collector.traceEvent(TraceEvent.CompletionReceived("c-2", "m", 0, "hi")) shouldBe Right(())
-    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m") shouldBe Right(())
-    collector.traceCompletion(completion, "m") shouldBe Right(())
+    collector.traceEvent(TraceEvent.CompletionReceived("c-2", ModelName("m"), 0, "hi")) shouldBe Right(())
+    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), ModelName("m")) shouldBe Right(())
+    collector.traceCompletion(completion, ModelName("m")) shouldBe Right(())
     store.getSpans(collector.traceId).map(_.attributes.get("service_tier")) should contain theSameElementsAs Seq(
       Some(SpanValue.StringValue("flex")),
       None,

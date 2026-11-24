@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.CancelledError
@@ -32,8 +34,8 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
       apiKey = Secret("k"),
       projectId = "p",
       spaceId = None,
-      model = "m",
-      baseUrl = baseUrl,
+      model = ModelName("m"),
+      baseUrl = BaseUrl(baseUrl),
       apiVersion = "2026-09-25",
       iamUrl = s"$baseUrl/iam",
       contextWindow = 4096,
@@ -70,9 +72,8 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
       val worker = Thread.ofVirtual().start { () =>
         val r = client.streamComplete(
           Conversation(Seq(UserMessage("Hi"))),
-          CompletionOptions(),
-          _ => firstChunk.countDown()
-        )
+          CompletionOptions()
+        )(_ => firstChunk.countDown())
         flagKept.set(Thread.currentThread().isInterrupted)
         result.set(Some(r))
       }

@@ -3,8 +3,9 @@ layout: page
 title: Derived Schemas
 description: "Derive the JSON schema for structured output and typed tools from a Scala case class with llm4s-schema-derivation (experimental)."
 search_title: "Derive JSON schemas from Scala case classes for LLMs"
-parent: User Guide
-nav_order: 28
+parent: Core
+nav_order: 107
+grand_parent: User Guide
 ---
 
 # Derived Schemas
@@ -133,8 +134,8 @@ enum TemperatureUnit derives SchemaOf, ReadWriter {
   case Celsius, Fahrenheit
 }
 
-val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
-  ToolBuilder[WeatherQuery, String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
+val weatherTool: Result[ToolFunction[String]] =
+  ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
     .withHandler { args =>
       Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
     }
@@ -163,7 +164,7 @@ case class ForecastQuery(
 
 case class Forecast(city: String, days: Int, summary: String) derives ReadWriter
 
-val forecastTool: Result[ToolFunction[ForecastQuery, Forecast]] =
+val forecastTool: Result[ToolFunction[Forecast]] =
   Tool.of[ForecastQuery, Forecast]("get_forecast", "Weather forecast for a city") { query =>
     if (query.days < 1 || query.days > 7) Left("days must be between 1 and 7")
     else Right(Forecast(query.city, query.days, "Sunny"))
@@ -210,7 +211,7 @@ case class Customer(id: String, blocked: Boolean)
 trait Customers { def find(id: String): Result[Customer] }
 trait Payments { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
 
-def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Receipt]] =
   Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
     ensure(c.amountCents > 0, "amountCents must be positive")
     ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
@@ -263,7 +264,7 @@ trait CustomerService {
 def supportTools(service: CustomerService): Result[ToolRegistry] =
   Tools.derive[CustomerService](service).flatMap(ToolRegistry.of)
 
-def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
+def cancelTool(service: CustomerService): Result[ToolFunction[Cancellation]] =
   Tool.fromMethod(service.cancelOrder)
 ```
 
@@ -359,7 +360,7 @@ def review(client: LLMClient, conversation: Conversation): Result[String] =
     .completeStructuredOf[(sentiment: Sentiment, confidence: Double, quote: Option[String])](conversation)
     .map(r => s"${r.sentiment} (${r.confidence})")
 
-val lookup: Result[ToolFunction[(city: String, days: Int), (high: Double, low: Double)]] =
+val lookup: Result[ToolFunction[(high: Double, low: Double)]] =
   Tool.of[(city: String, days: Int), (high: Double, low: Double)]("forecast", "Daily forecast") { query =>
     Right((high = 20.0 + query.days, low = 12.5))
   }
@@ -489,7 +490,7 @@ case class Booking(
   @description("Nights to stay") nights: Int :| Interval.Closed[1, 14]
 ) derives SchemaOf, ReadWriter
 
-val book: Result[ToolFunction[Booking, String]] =
+val book: Result[ToolFunction[String]] =
   Tool.of[Booking, String]("book_stay", "Books a stay")(b => Right(s"Booked ${b.nights} nights for ${b.guest}"))
 ```
 

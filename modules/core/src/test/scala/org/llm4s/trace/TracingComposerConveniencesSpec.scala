@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, TokenUsage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,13 +20,29 @@ import scala.concurrent.duration.*
 class TracingComposerConveniencesSpec extends AnyFlatSpec with Matchers {
 
   private val completion =
-    Completion("c-1", Instant.EPOCH, "the answer", "test-model", AssistantMessage("the answer"), usage = None)
+    Completion("c-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage("the answer"), usage = None)
   private val usage = TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30)
+
+  "Tracing.traceError" should "record an LLMError as it is: its message and type, with no exception (#2800)" in {
+    val seen = scala.collection.mutable.Buffer.empty[TraceEvent]
+    val tracing = new Tracing {
+      def traceEvent(event: TraceEvent): org.llm4s.types.Result[Unit] = { seen += event; Right(()) }
+    }
+    val error = org.llm4s.error.ProcessingError("store", "store down")
+    tracing.traceError(error, "commit") shouldBe Right(())
+    tracing.traceError(new IllegalStateException("boom"), "a step") shouldBe Right(())
+
+    val errors = seen.collect { case e: TraceEvent.ErrorOccurred => e }.toSeq
+    errors.map(e => (e.message, e.errorType, e.context, e.cause.isDefined)) shouldBe Seq(
+      (error.message, "ProcessingError", "commit", false),
+      ("boom", "IllegalStateException", "a step", true)
+    )
+  }
 
   private def traceAll(tracing: Tracing): Unit = {
     tracing.traceError(new IllegalStateException("boom"), "a step") shouldBe Right(())
-    tracing.traceCompletion(completion, "test-model") shouldBe Right(())
-    tracing.traceTokenUsage(usage, "test-model", "completion") shouldBe Right(())
+    tracing.traceCompletion(completion, ModelName("test-model")) shouldBe Right(())
+    tracing.traceTokenUsage(usage, ModelName("test-model"), "completion") shouldBe Right(())
   }
 
   "TracingComposer.transform" should "be given the events of traceError, traceCompletion and traceTokenUsage" in {

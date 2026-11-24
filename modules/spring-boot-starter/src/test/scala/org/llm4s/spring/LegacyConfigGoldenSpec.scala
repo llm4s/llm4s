@@ -1,5 +1,7 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig, ProviderConfig }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -64,9 +66,9 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
       )
     ) shouldBe OpenAIConfig(
       apiKey = Secret("sk-x"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = Some("org-1"),
-      baseUrl = "https://example.invalid/v1",
+      baseUrl = BaseUrl("https://example.invalid/v1"),
       contextWindow = 32000,
       reserveCompletion = 2000
     )
@@ -75,9 +77,9 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
   it should "default the base URL, the organisation and the context sizes" in {
     parsed(props("openai", "gpt-4o", "sk-x")) shouldBe OpenAIConfig(
       apiKey = Secret("sk-x"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -86,9 +88,9 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
   it should "trim every value and read the provider id in any case" in {
     parsed(props("  OpenAI ", " gpt-4o ", " sk-x ", " https://example.invalid/v1 ", " org-1 ")) shouldBe OpenAIConfig(
       apiKey = Secret("sk-x"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = Some("org-1"),
-      baseUrl = "https://example.invalid/v1",
+      baseUrl = BaseUrl("https://example.invalid/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -100,15 +102,15 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
     ) shouldBe
       AnthropicConfig(
         apiKey = Secret("sk-ant"),
-        model = "claude-x",
-        baseUrl = "https://proxy.invalid",
+        model = ModelName("claude-x"),
+        baseUrl = BaseUrl("https://proxy.invalid"),
         contextWindow = 64000,
         reserveCompletion = 1000
       )
     parsed(props("anthropic", "claude-x", "sk-ant")) shouldBe AnthropicConfig(
       apiKey = Secret("sk-ant"),
-      model = "claude-x",
-      baseUrl = "https://api.anthropic.com",
+      model = ModelName("claude-x"),
+      baseUrl = BaseUrl("https://api.anthropic.com"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -119,15 +121,15 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
       props("ollama", "llama3", baseUrl = "http://gpu.invalid:11434", contextWindow = 8192, reserveCompletion = 512)
     ) shouldBe
       OllamaConfig(
-        model = "llama3",
-        baseUrl = "http://gpu.invalid:11434",
+        model = ModelName("llama3"),
+        baseUrl = BaseUrl("http://gpu.invalid:11434"),
         contextWindow = 8192,
         reserveCompletion = 512
       )
     parsed(props("ollama", "llama3")) shouldBe
       OllamaConfig(
-        model = "llama3",
-        baseUrl = "http://localhost:11434",
+        model = ModelName("llama3"),
+        baseUrl = BaseUrl("http://localhost:11434"),
         contextWindow = 128000,
         reserveCompletion = 4096
       )

@@ -1,7 +1,7 @@
 package org.llm4s.prompt
 
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.prompt.Fixtures.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -41,8 +41,10 @@ class PromptSpec extends AnyFlatSpec with Matchers {
       UserMessage("Ticket T-42\n\nIs it urgent?")
     )
     p.toConversation shouldBe Conversation.create(
-      SystemMessage("You triage tickets.\n\nAnswer in one sentence."),
-      UserMessage("Ticket T-42\n\nIs it urgent?")
+      Seq(
+        SystemMessage("You triage tickets.\n\nAnswer in one sentence."),
+        UserMessage("Ticket T-42\n\nIs it urgent?")
+      )
     )
     p.text shouldBe "You triage tickets.\n\nAnswer in one sentence.\n\nTicket T-42\n\nIs it urgent?"
     p.toString shouldBe p.text
@@ -90,7 +92,7 @@ class PromptSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fence a tool's result" in {
-    val result = Untrusted.toolResult(ToolMessage("""{"weather":"<sunny>"}""", "call-1"))
+    val result = Untrusted.toolResult(ToolMessage("""{"weather":"<sunny>"}""", ToolCallId("call-1")))
     prompt"Tool said: $result".text shouldBe
       "Tool said: <untrusted id=\"u1\">\n{\"weather\":\"&lt;sunny&gt;\"}\n</untrusted>\n\n" + Prompt.UntrustedNotice
   }
@@ -133,7 +135,7 @@ class PromptSpec extends AnyFlatSpec with Matchers {
     (Prompt.empty ++ prompt"a") shouldBe prompt"a"
     (prompt"a" ++ Prompt.empty) shouldBe prompt"a"
     Prompt.empty.messages shouldBe empty
-    Prompt.empty.toConversation shouldBe Right(Conversation.empty())
+    Prompt.empty.toConversation shouldBe Right(Conversation.empty)
   }
 
   "Prompt.text" should "not show roles" in {

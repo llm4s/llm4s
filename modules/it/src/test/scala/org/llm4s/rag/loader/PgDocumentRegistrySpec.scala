@@ -158,7 +158,7 @@ class PgDocumentRegistrySpec extends AnyFlatSpec with Matchers with BeforeAndAft
       val rag = RAG
         .buildWithClient(
           RAGConfig.default.withDocumentRegistry(reg),
-          new EmbeddingClient(provider),
+          EmbeddingClient(provider),
           hybridSearcher = Some(searcher)
         )
         .fold(e => fail(e.formatted), identity)

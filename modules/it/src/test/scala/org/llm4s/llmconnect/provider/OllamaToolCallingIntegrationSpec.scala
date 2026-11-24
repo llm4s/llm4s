@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -28,7 +30,12 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
   private val testModel = "qwen2.5:0.5b"
   private val baseUrl   = "http://localhost:11434"
   private val config =
-    OllamaConfig(model = testModel, baseUrl = baseUrl, contextWindow = 8192, reserveCompletion = 4096)
+    OllamaConfig(
+      model = ModelName(testModel),
+      baseUrl = BaseUrl(baseUrl),
+      contextWindow = 8192,
+      reserveCompletion = 4096
+    )
 
   private lazy val ollamaAvailable: Boolean =
     Try {
@@ -70,7 +77,7 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
       val calls = result.toOption.get.toolCalls
       assumeToolCalled(calls)
       calls.foreach { call =>
-        call.id should not be empty
+        call.id.asString should not be empty
         call.name shouldBe "get_weather"
         call.arguments shouldBe a[ujson.Obj]
       }
@@ -81,12 +88,12 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
     withClient { client =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(question, options, chunks += _)
+      val result = client.streamComplete(question, options)(chunks += _)
       withClue(s"streamComplete failed: ${result.swap.toOption}")(result.isRight shouldBe true)
       val calls = result.toOption.get.toolCalls
       assumeToolCalled(calls)
       calls.foreach { call =>
-        call.id should not be empty
+        call.id.asString should not be empty
         call.name shouldBe "get_weather"
       }
     }
@@ -109,8 +116,8 @@ private object OllamaToolCallingIntegrationSpec {
   final case class Weather(forecast: String)
   implicit private val weatherRW: ReadWriter[Weather] = macroRW
 
-  val weatherTool: ToolFunction[Map[String, Any], Weather] =
-    ToolBuilder[Map[String, Any], Weather](
+  val weatherTool: ToolFunction[Weather] =
+    ToolBuilder[Weather](
       "get_weather",
       "Get the current weather in a location",
       Schema

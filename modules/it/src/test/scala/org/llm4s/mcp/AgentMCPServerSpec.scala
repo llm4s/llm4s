@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.it.tags.Local
 import org.llm4s.llmconnect.LLMClient
@@ -32,7 +33,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       .`object`[Map[String, Any]]("Add parameters")
       .withProperty(Schema.property("a", Schema.integer("First operand")))
       .withProperty(Schema.property("b", Schema.integer("Second operand")))
-    val add = ToolBuilder[Map[String, Any], String]("add", "Returns the sum of two integers", schema)
+    val add = ToolBuilder[String]("add", "Returns the sum of two integers", schema)
       .withHandler(p =>
         for {
           a <- p.getInt("a")
@@ -42,7 +43,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       .buildSafe()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
-    val explode = ToolBuilder[Map[String, Any], String](
+    val explode = ToolBuilder[String](
       "explode",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
@@ -64,26 +65,22 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
-      val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
+      val toolCalls = if (calls == 1) Seq(ToolCall(ToolCallId("call-1"), toolName, args)) else Seq.empty
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(
           id = s"mock-$calls",
           created = Instant.EPOCH,
-          content = message.content,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = message,
-          toolCalls = toolCalls.toList,
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -106,7 +103,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
   "An Agent with MCP-served tools" should "feed the server-computed result back into the conversation" in {
     val toolMessages = runAgent("add", ujson.Obj("a" -> 19, "b" -> 23))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("42")
   }
 
@@ -120,7 +117,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
   it should "keep the run alive and record the handler message when the MCP tool itself fails" in {
     val toolMessages = runAgent("explode", ujson.Obj())
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("kaboom-from-handler")
   }
 

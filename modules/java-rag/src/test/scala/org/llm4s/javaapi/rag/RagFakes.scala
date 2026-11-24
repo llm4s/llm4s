@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.LLMError
 import org.llm4s.javaapi.{ JEmbeddingClient, JLlmClient, Llm4s }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -37,10 +38,10 @@ object RagFakes {
     }
   }
 
-  val Model: EmbeddingModelConfig = EmbeddingModelConfig("word-count", Vocabulary.size)
+  val Model: EmbeddingModelConfig = EmbeddingModelConfig(ModelName("word-count"), Vocabulary.size)
 
   def embeddings(provider: EmbeddingProvider): JEmbeddingClient =
-    Llm4s.wrapEmbeddingClient(new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)), Model)
+    Llm4s.wrapEmbeddingClient(EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)), Model)
 
   def embeddings(): JEmbeddingClient = embeddings(new WordEmbeddings())
 
@@ -69,13 +70,11 @@ object RagFakes {
         val answer = prompt.linesIterator
           .collectFirst { case l if l.startsWith("[1] ") => l.stripPrefix("[1] ") }
           .getOrElse(NoContext)
-        Completion("id", Instant.EPOCH, answer, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
+        Completion("id", Instant.EPOCH, ModelName("echo"), AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
       }
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -95,7 +94,7 @@ object RagFakes {
     RAG
       .buildWithEmbeddings(
         RAGConfig.default.withSearchIndex(NoIndex).withLLM(model),
-        new EmbeddingClient(new WordEmbeddings())(using ModelRegistryService.fromModels(Nil)),
+        EmbeddingClient(new WordEmbeddings())(using ModelRegistryService.fromModels(Nil)),
         Model
       )
       .fold(e => throw new AssertionError(e.message), new JRag(RagFacadeToken.INSTANCE, _))

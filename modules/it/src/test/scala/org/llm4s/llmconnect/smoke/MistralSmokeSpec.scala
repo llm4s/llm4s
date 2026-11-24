@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
@@ -12,6 +13,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -49,7 +51,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   private def config(key: String, model: String = "mistral-small-latest"): MistralConfig =
     MistralConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
         baseUrl = MistralConfig.DEFAULT_BASE_URL
       )
@@ -61,11 +63,11 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   private val NineCharacterId = "[A-Za-z0-9]{9}"
 
-  private def secretCodeTool: ToolFunction[_, _] = {
+  private def secretCodeTool: ToolFunction[_] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Secret code parameters")
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
-    ToolBuilder[Map[String, Any], String]("get_secret_code", "Looks up the secret code for a topic", schema)
+    ToolBuilder[String]("get_secret_code", "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => "ZX-4417"))
       .buildSafe()
       .value
@@ -87,7 +89,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     // The first delta carries `content: ""` (the role chunk), so `isDefined` alone would pass for a
     // stream with no text at all; require real text, and that it is what the call returned.
@@ -110,13 +112,13 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val completion = client
       .complete(
         Conversation(Seq(UserMessage("Use the get_secret_code tool with the topic 'vault'."))),
-        CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+        CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
       )
       .value
     client.close()
 
     completion.toolCalls should not be empty
-    completion.toolCalls.foreach(_.id should fullyMatch regex NineCharacterId)
+    completion.toolCalls.foreach(_.id.asString should fullyMatch regex NineCharacterId)
   }
 
   it should "accept a history whose tool-call id is not nine characters (from another provider)" in {
@@ -128,15 +130,18 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val history = Conversation(
       Seq(
         UserMessage("Use the get_secret_code tool with the topic 'vault', then tell me the code."),
-        AssistantMessage(toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
-        ToolMessage("ZX-4417", foreignId)
+        AssistantMessage(
+          None,
+          toolCalls = Seq(ToolCall(ToolCallId(foreignId), "get_secret_code", ujson.Obj("topic" -> "vault")))
+        ),
+        ToolMessage("ZX-4417", ToolCallId(foreignId))
       )
     )
 
     val client = MistralClient(config(apiKey.get)).value
     val result = client.complete(
       history,
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
     )
     client.close()
 
@@ -150,7 +155,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     // Mistral rejects an assistant message with neither content nor tool calls; the dialect leaves it out.
     val history = Conversation(
-      Seq(UserMessage("Hello"), AssistantMessage(contentOpt = None), UserMessage("Say hi in one word"))
+      Seq(UserMessage("Hello"), AssistantMessage(text = None), UserMessage("Say hi in one word"))
     )
 
     val client = MistralClient(config(apiKey.get)).value
@@ -168,7 +173,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get, ReasoningModel)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)))(c => chunks += c)
     client.close()
 
     withClue(s"Streaming from $ReasoningModel failed: ${result.swap.toOption}") {
@@ -193,4 +198,10 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(MistralClient(config("invalid-key-for-testing")))
+
+  registerValidationContract()
 }

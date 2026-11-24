@@ -1,8 +1,9 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.agent.graph._
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder, ToolFunction, ToolHints }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, SchemaDefinition, ToolBuilder, ToolFunction, ToolHints }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -70,7 +71,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "toolDefinition" should "have the shape of ToolFunction.toolDefinition(strict = true)" in {
-    val function = ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
+    val function = ToolFunction[String]("search", "Searches", searchSchema, _ => Right("ok"))
     spec("search").toolDefinition shouldBe function.toolDefinition(strict = true)
   }
 
@@ -80,7 +81,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     definition("function")("parameters").obj.remove("additionalProperties")
     definition("function")("parameters")("properties").obj.remove("query")
     s.argumentSchema shouldBe searchSchema.toJsonSchema(false)
-    s.toolDefinition shouldBe ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
+    s.toolDefinition shouldBe ToolFunction[String]("search", "Searches", searchSchema, _ => Right("ok"))
       .toolDefinition(strict = true)
   }
 
@@ -156,7 +157,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "AgentTool.fromToolFunction" should "use the function's name, description and schema" in {
     val schema = Schema.`object`[Map[String, Any]]("Echo").withRequiredField("message", Schema.string("Message"))
-    val function = ToolBuilder[Map[String, Any], Search]("echo", "Echoes", schema)
+    val function = ToolBuilder[Search]("echo", "Echoes", schema)
       .withHandler(extractor => extractor.getString("message").map(Search(_)))
       .buildSafe()
       .value
@@ -176,7 +177,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "not throw for a function whose name is invalid, leaving ToolSet.of to refuse it" in {
-    val function = ToolFunction[Map[String, Any], String]("bad name", "d", Schema.`object`("o"), _ => Right("x"))
+    val function = ToolFunction[String]("bad name", "d", Schema.`object`("o"), _ => Right("x"))
     AgentTool.fromToolFunction(function).spec.name shouldBe "bad name"
   }
 
@@ -205,12 +206,12 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "be the default for a tool adapted from a ToolFunction" in {
-    val function = ToolFunction[Map[String, Any], String]("f", "d", Schema.`object`("o"), _ => Right("x"))
+    val function = ToolFunction[String]("f", "d", Schema.`object`("o"), _ => Right("x"))
     AgentTool.fromToolFunction(function).spec.hints shouldBe ToolHints.default
   }
 
   it should "be the hints given for a tool adapted from a ToolFunction with them (an MCP tool's annotations)" in {
-    val function = ToolFunction[Map[String, Any], String]("f", "d", Schema.`object`("o"), _ => Right("x"))
+    val function = ToolFunction[String]("f", "d", Schema.`object`("o"), _ => Right("x"))
     val hints    = ToolHints(readOnly = true, openWorld = false)
 
     val tool = AgentTool.fromToolFunction(function, hints)

@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -21,21 +22,20 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     TracingMode.fromString("OPENTELEMETRY") shouldBe TracingMode.Named("opentelemetry")
   }
 
-  it should "keep otel as an alias for opentelemetry" in {
-    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
-    TracingMode.fromString("OTEL") shouldBe TracingMode.Named("opentelemetry")
+  it should "parse otel as Named too: the alias is the backend's to declare, not core's" in {
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
+    TracingMode.fromString("OTEL") shouldBe TracingMode.Named("otel")
   }
 
   // =========================================================================
-  // Tracing.create - OpenTelemetry falls back to NoOp when class not found
+  // Tracing.fromSettings - OpenTelemetry is an error when its module is not on the classpath
   // =========================================================================
 
-  "Tracing.create" should "fall back to NoOpTracing for OpenTelemetry when module not on classpath" in {
+  "Tracing.fromSettings" should "fail for OpenTelemetry when its module is not on the classpath" in {
     val settings = TracingSettings(mode = TracingMode.Named("opentelemetry"))
 
-    val tracing = Tracing.create(settings)
-    // OpenTelemetryTracing class is not on the classpath in core tests, so it falls back
-    tracing shouldBe a[NoOpTracing]
+    // The backend is not on the classpath in core tests
+    Tracing.fromSettings(settings).isLeft shouldBe true
   }
 
   // =========================================================================
@@ -126,7 +126,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    combined.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    combined.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
@@ -138,7 +138,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    combined.traceTokenUsage(TokenUsage(10, 5, 15), "gpt-4", "test") shouldBe Right(())
+    combined.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("gpt-4"), "test") shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
@@ -176,7 +176,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer   = new RecordingTracing(events)
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    filtered.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
     events should have size 1
   }
 
@@ -185,7 +185,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer   = new RecordingTracing(events)
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.traceTokenUsage(TokenUsage(10, 5, 15), "m", "o") shouldBe Right(())
+    filtered.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("m"), "o") shouldBe Right(())
     events should have size 1
   }
 
@@ -244,7 +244,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer      = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.traceCompletion(createCompletion(), "gpt-4") shouldBe Right(())
+    transformed.traceCompletion(createCompletion(), ModelName("gpt-4")) shouldBe Right(())
     events should have size 1
   }
 
@@ -253,7 +253,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer      = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.traceTokenUsage(TokenUsage(10, 5, 15), "m", "o") shouldBe Right(())
+    transformed.traceTokenUsage(TokenUsage(10, 5, 15), ModelName("m"), "o") shouldBe Right(())
     events should have size 1
   }
 
@@ -315,14 +315,20 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
    * specs are about the composers, and the agent runtime is in `llm4s-agent` (#1242).
    */
   private def agentStateEvent(): TraceEvent.AgentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      Seq(UserMessage("Hello")),
+      UsageSummary()
+    )
 
   private def createCompletion(): Completion =
     Completion(
       id = "comp-1",
       created = Instant.EPOCH,
-      content = "Hello",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Hello"), Seq.empty)
     )
 

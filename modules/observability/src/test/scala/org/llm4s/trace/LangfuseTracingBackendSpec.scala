@@ -27,7 +27,7 @@ class LangfuseTracingBackendSpec extends AnyWordSpec with Matchers with EitherVa
     "be discovered for the langfuse mode" in {
       val backends = TracingBackends.discover(getClass.getClassLoader)
 
-      backends.find(TracingMode.Named("langfuse")).map(_.getClass) shouldBe Some(classOf[LangfuseTracingBackend])
+      backends.find(TracingMode.Named("langfuse")).value.map(_.getClass) shouldBe Some(classOf[LangfuseTracingBackend])
       backends.failures shouldBe empty
     }
 
@@ -45,11 +45,10 @@ class LangfuseTracingBackendSpec extends AnyWordSpec with Matchers with EitherVa
     }
   }
 
-  "Tracing.fromSettings and Tracing.create" should {
+  "Tracing.fromSettings" should {
 
     "build LangfuseTracing for TRACING_MODE=langfuse, whatever its case" in {
       Tracing.fromSettings(settings(keys)).value shouldBe a[LangfuseTracing]
-      Tracing.create(settings(keys)) shouldBe a[LangfuseTracing]
       Tracing
         .fromSettings(TracingSettings(TracingMode.Named("LangFuse"), keys))
         .value shouldBe a[LangfuseTracing]
@@ -71,7 +70,10 @@ class LangfuseTracingBackendSpec extends AnyWordSpec with Matchers with EitherVa
         "Langfuse tracing is selected but llm4s.tracing.langfuse.secretKey (LANGFUSE_SECRET_KEY) is not set."
     }
 
-    "fall back to NoOp in Tracing.create when a key is missing" in {
-      Tracing.create(settings(Map("publicKey" -> "pk-lf-test"))) shouldBe a[NoOpTracing]
+    "leave the fallback to the caller when a key is missing" in {
+      val result = Tracing.fromSettings(settings(Map("publicKey" -> "pk-lf-test")))
+
+      result.isLeft shouldBe true
+      result.getOrElse(new NoOpTracing()) shouldBe a[NoOpTracing]
     }
   }

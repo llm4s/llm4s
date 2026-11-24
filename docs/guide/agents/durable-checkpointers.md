@@ -6,6 +6,7 @@ search_title: "Durable agent checkpointers in Scala: recover and fork runs"
 nav_order: 6
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1739, 1919]
 ---
 
 # Durable Checkpointers
@@ -15,6 +16,9 @@ Share one checkpoint store between runtimes and processes, recover a run whose p
 correct a thread's checkpoint history, prune it, and test a store of your own against the contract every store
 must meet.
 {: .fs-6 .fw-300 }
+
+{: .note }
+> **Experimental at 1.0.** The persistence API on this page (`GraphRuntime`, `withRuntime`, the `Checkpointer` contract and the checkpointer modules) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -92,7 +96,7 @@ b.recover(threadId, graph) match
 ```
 
 A refusal up front accepts and discards nothing, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
-code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHolder`:
+code (`RetryPolicy`) does too. `holder` is a `GraphError.BusyHolder`:
 
 - `Run(runId)`, the holding run, when it is of the caller's tenant: a run of the same runtime with the caller's
   tenant, or a claim the store recorded for the caller's tenant - each claim records its run's
@@ -643,6 +647,7 @@ llm4s.agent {
 ```
 
 ```scala
+import org.llm4s.agent.Agent
 import org.llm4s.agent.service.RunSubmitter
 import org.llm4s.config.{ CheckpointerConfigLoader, RunQueueConfigLoader, RuntimeConfigLoader }
 
@@ -839,13 +844,14 @@ val config = RunConfig().withTenantId(TenantId("acme")).withMetadata(Map("custom
 runtime.start(threadId, graph, input, config)
 runtime.updateMetadata(threadId, ThreadMetadata("customer" -> "c-42", "channel" -> "email"), config)
 
-val page = store.threads(
+store.threads(
   ThreadQuery(Some(TenantId("acme")))
     .withStatus(ThreadStatus.Suspended)
     .withMetadata(ThreadMetadata("customer" -> "c-42"))
-)
-page.threads.foreach(t => println(s"${t.threadId.value} ${t.status} ${t.updatedAt}"))
-val next = page.next.map(cursor => store.threads(ThreadQuery(Some(TenantId("acme"))).withAfter(cursor)))
+).foreach { page =>
+  page.threads.foreach(t => println(s"${t.threadId.value} ${t.status} ${t.updatedAt}"))
+  val next = page.next.map(cursor => store.threads(ThreadQuery(Some(TenantId("acme"))).withAfter(cursor)))
+}
 ```
 
 - **Tenant-scoped.** Every query names one tenant (`None` finds only threads of no tenant) and never sees another's.
@@ -889,7 +895,9 @@ for
 yield worker
 ```
 
-Wrap **both**: the queue is a separate SPI, and a queued query is the user's input. Every runtime, worker and
+Wrap **both**: the queue is a separate SPI, and a queued query is the user's input (encryption protects what is
+stored; to keep text out of the stores altogether, refuse or rewrite it in the turn's
+[admission](middleware#admission), where input guardrails run). Every runtime, worker and
 submitter of the service must use the wrappers with the same keys. Put `MeteredCheckpointer` outside, as above: it then
 times commits with their encryption and still counts child tasks, whose events it reads before they are sealed.
 
@@ -898,16 +906,19 @@ items an agent keeps across threads are stored in plain until you wrap it too
 ([below](#encrypting-the-long-term-store)).
 
 - **Encrypted**: a checkpoint's state values, pending task inputs and parked questions; a pending write's updates,
-  route payloads and question; a custom event's payload; an effect record's outcome; a queue entry's `Start` input
+  route payloads and question; a custom event's payload; an effect record's outcome; the error text of a settled
+  run's outcome (a failure's message, an invalid typed answer's schema errors); a queue entry's `Start` input
   and `Resume` answers.
 - **Still plain**, because the store orders, fences, lists and prunes by them: every id (thread, run, checkpoint,
-  task, node, interrupt, entry, tenant) and submission key; statuses, outcomes, timestamps, tokens and sequence
-  numbers; the graph's id, version and shape, and the names of state keys; thread metadata (keep content out of it);
+  task, node, interrupt, entry, tenant) and submission key; statuses, timestamps, tokens and sequence
+  numbers; which way a run settled (its outcome's case, a blocking guardrail's name, a failure's kind); the graph's
+  id, version and shape, and the names of state keys; thread metadata (keep content out of it);
   trace contexts; the built-in events, with a failed run's error message, and a queue entry's failure message or
   cancel note; and the digests kept beside values, which let someone who can guess a value exactly confirm the guess.
-  The size of each value shows too. Disk or database encryption still has a job. An outcome is text when a run was
-  refused or failed: a blocked run's holds its guardrail's reason, an invalid typed answer's the schema errors and a
-  failure's the error message, so a guardrail whose reason quotes its input puts that input here in plain.
+  The size of each value shows too. Disk or database encryption still has a job. A guardrail's reason is in none of
+  this: it is not stored at all, encrypted or not (see [Guardrails](guardrails)). A failed run's error message is
+  sealed in its outcome and plain in its `graph.run_failed` event, so an error that quotes content still reaches the
+  log.
 - **Bound to its place.** Each value opens only on its thread and in its place (for a checkpoint: its tenant,
   checkpoint and state key), so one copied elsewhere in the database fails to open. Two things are not bound, because
   the store numbers them itself: a custom event to its sequence number, and a queued input to its entry id.

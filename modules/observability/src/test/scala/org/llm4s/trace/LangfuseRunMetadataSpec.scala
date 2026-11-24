@@ -12,7 +12,7 @@ class LangfuseRunMetadataSpec extends AnyFlatSpec with Matchers {
       "thread-1",
       "run-1",
       "researcher",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq.empty,
       UsageSummary(),
       parentThreadId = parentThread,
@@ -30,6 +30,19 @@ class LangfuseRunMetadataSpec extends AnyFlatSpec with Matchers {
     val metadata = LangfuseTracing.runMetadata(run(None, None))
     metadata.obj.contains("parent_thread_id") shouldBe false
     metadata.obj.contains("parent_run_id") shouldBe false
+  }
+
+  it should "name a blocked run's guardrail beside its status, and the agent active at the end (#2829)" in {
+    val blocked = run(None, None)
+      .withStatus(TraceEvent.RunStatus.Blocked)
+      .withBlockedBy("pii")
+      .withActiveAgent("billing")
+    val metadata = LangfuseTracing.runMetadata(blocked)
+    metadata("status").str shouldBe "blocked"
+    metadata("blocked_by").str shouldBe "pii"
+    metadata("agent").str shouldBe "researcher"
+    metadata("active_agent").str shouldBe "billing"
+    LangfuseTracing.runMetadata(run(None, None)).obj.keySet should contain noneOf ("blocked_by", "active_agent")
   }
 
   "AgentRunEnded.toJson" should "name the parent only for a child run" in {

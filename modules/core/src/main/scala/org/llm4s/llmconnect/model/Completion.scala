@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import java.time.Instant
@@ -12,13 +13,13 @@ import java.time.Instant
  * @param created When the completion was created. Providers that report a creation time (the
  *                OpenAI-format `created` field, epoch seconds) are converted at the wire boundary;
  *                providers that report none stamp the time the response was received.
- * @param content The main content of the response.
  * @param model The model that generated this completion.
- * @param message The assistant's message in response to the user's input.
- * @param toolCalls List of tool calls made by the assistant.
+ * @param message The assistant's message in response to the user's input: its text is [[content]] and its tool
+ *                calls are [[toolCalls]]. They are read from the message, never stored beside it, so they cannot
+ *                disagree with it; change them with `withMessage(message.withContent(...))`.
  * @param usage Optional token usage statistics for the completion.
- * @param estimatedCost Optional estimated cost of this completion in USD.
- *                      Computed from token usage and model pricing when available.
+ * @param estimatedCost Optional estimated cost of this completion in USD, a `BigDecimal` so that it is exact and
+ *                      sums without drift. Computed from token usage and model pricing when available.
  * @param citations The sources the model cited in its answer, when the provider reports them
  *                  (see [[Citation]]); empty for a model that does not search or does not cite,
  *                  and for a completion assembled from streamed chunks, which carry none.
@@ -28,9 +29,9 @@ import java.time.Instant
  *                    chunks has none, since chunks carry none. Coverage is growing under RFC 0008, so an
  *                    empty list means nothing was reported, not that every option was sent: see
  *                    [[RequestAdjustment]] for what is reported today.
- * @param finishReason Why the model's turn ended (RFC 0009). `Stop` unless the client sets it; a client that read no
- *                     reason sets `FinishReason.Other("")`. A completion assembled from streamed chunks carries the
- *                     last reason a chunk had that was not empty.
+ * @param finishReason Why the model's turn ended (RFC 0009). [[FinishReason.Unknown]] unless the client sets it: a
+ *                     client that read no reason leaves it so, and never reports a `Stop` the provider did not send.
+ *                     A completion assembled from streamed chunks carries the last reason a chunk had.
  * @param servedTier The [[ServiceTier]] the provider reports it served the request at, which may differ from the
  *                   [[CompletionOptions.serviceTier]] asked for (#2746). A tier the provider names that the enum does
  *                   not is [[ServiceTier.Other]], as written. `None` when the provider reported none: one without
@@ -40,37 +41,34 @@ import java.time.Instant
 final case class Completion private (
   id: String,
   created: Instant,
-  content: String,
-  model: String,
+  model: ModelName,
   message: AssistantMessage,
-  toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
-  estimatedCost: Option[Double],
-  citations: List[Citation],
-  adjustments: List[RequestAdjustment],
+  estimatedCost: Option[BigDecimal],
+  citations: Seq[Citation],
+  adjustments: Seq[RequestAdjustment],
   finishReason: FinishReason,
   servedTier: Option[ServiceTier]
 ) {
-  def withId(id: String): Completion                                    = copy(id = id)
-  def withCreated(created: Instant): Completion                         = copy(created = created)
-  def withContent(content: String): Completion                          = copy(content = content)
-  def withModel(model: String): Completion                              = copy(model = model)
-  def withMessage(message: AssistantMessage): Completion                = copy(message = message)
-  def withToolCalls(toolCalls: List[ToolCall]): Completion              = copy(toolCalls = toolCalls)
-  def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
-  def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
-  def withEstimatedCost(estimatedCost: Double): Completion              = copy(estimatedCost = Some(estimatedCost))
-  def withEstimatedCost(estimatedCost: Option[Double]): Completion      = copy(estimatedCost = estimatedCost)
-  def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
-  def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
-  def withFinishReason(finishReason: FinishReason): Completion          = copy(finishReason = finishReason)
-  def withServedTier(servedTier: ServiceTier): Completion               = copy(servedTier = Some(servedTier))
-  def withServedTier(servedTier: Option[ServiceTier]): Completion       = copy(servedTier = servedTier)
+  def withId(id: String): Completion                                   = copy(id = id)
+  def withCreated(created: Instant): Completion                        = copy(created = created)
+  def withModel(model: ModelName): Completion                          = copy(model = model)
+  def withMessage(message: AssistantMessage): Completion               = copy(message = message)
+  def withUsage(usage: TokenUsage): Completion                         = copy(usage = Some(usage))
+  def withUsage(usage: Option[TokenUsage]): Completion                 = copy(usage = usage)
+  def withEstimatedCost(estimatedCost: BigDecimal): Completion         = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[BigDecimal]): Completion = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: Seq[Citation]): Completion              = copy(citations = citations)
+  def withAdjustments(adjustments: Seq[RequestAdjustment]): Completion = copy(adjustments = adjustments)
+  def withFinishReason(finishReason: FinishReason): Completion         = copy(finishReason = finishReason)
+  def withServedTier(servedTier: ServiceTier): Completion              = copy(servedTier = Some(servedTier))
+  def withServedTier(servedTier: Option[ServiceTier]): Completion      = copy(servedTier = servedTier)
 
-  /**
-   * Extract content as text (for compatibility)
-   */
-  def asText: String = content
+  /** The text of the reply: [[message]]'s content, `""` when the model produced only tool calls. */
+  def content: String = message.content
+
+  /** The tool calls the model asked for: [[message]]'s tool calls. */
+  def toolCalls: Seq[ToolCall] = message.toolCalls
 
   /**
    * Check if completion contains tool calls
@@ -113,24 +111,20 @@ object Completion {
   def apply(
     id: String,
     created: Instant,
-    content: String,
-    model: String,
+    model: ModelName,
     message: AssistantMessage,
-    toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
-    estimatedCost: Option[Double] = None,
-    citations: List[Citation] = List.empty,
-    adjustments: List[RequestAdjustment] = List.empty,
-    finishReason: FinishReason = FinishReason.Stop,
+    estimatedCost: Option[BigDecimal] = None,
+    citations: Seq[Citation] = Seq.empty,
+    adjustments: Seq[RequestAdjustment] = Seq.empty,
+    finishReason: FinishReason = FinishReason.Unknown,
     servedTier: Option[ServiceTier] = None
   ): Completion =
     new Completion(
       id,
       created,
-      content,
       model,
       message,
-      toolCalls,
       usage,
       estimatedCost,
       citations,

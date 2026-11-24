@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.ValidationError
@@ -26,9 +27,9 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val received: ArrayBuffer[CompletionOptions] = ArrayBuffer.empty
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       received += o
-      Right(Completion("id", Instant.EPOCH, "4", "m", AssistantMessage("4")))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("4")))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -46,22 +47,22 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
   "options built from Java with every setting" should "reach the client as the matching CompletionOptions" in {
     val received = sent(CompletionOptionsCheck.everySetting())
 
-    received.temperature shouldBe 0.2
-    received.topP shouldBe 0.9
+    received.temperature shouldBe Some(0.2)
+    received.topP shouldBe Some(0.9)
     received.maxTokens shouldBe Some(512)
-    received.presencePenalty shouldBe 0.5
-    received.frequencyPenalty shouldBe -0.5
+    received.presencePenalty shouldBe Some(0.5)
+    received.frequencyPenalty shouldBe Some(-0.5)
     received.reasoning shouldBe Some(ReasoningEffort.High)
     received.thinking shouldBe Some(Thinking.budget(4096).toOption.get)
     received.serviceTier shouldBe Some(ServiceTier.Flex)
     received.tools shouldBe empty
     received.responseFormat shouldBe None
     received shouldBe CompletionOptions(
-      temperature = 0.2,
-      topP = 0.9,
+      temperature = Some(0.2),
+      topP = Some(0.9),
       maxTokens = Some(512),
-      presencePenalty = 0.5,
-      frequencyPenalty = -0.5,
+      presencePenalty = Some(0.5),
+      frequencyPenalty = Some(-0.5),
       reasoning = Some(ReasoningEffort.High),
       thinking = Thinking.budget(4096).toOption,
       serviceTier = Some(ServiceTier.Flex)
@@ -85,11 +86,11 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val defaults = JCompletionOptions.builder().build()
     sent(defaults) shouldBe CompletionOptions()
     CompletionOptionsCheck.readBack(defaults).asScala.toList shouldBe List(
-      "temperature:0.7",
-      "topP:1.0",
+      "temperature:none",
+      "topP:none",
       "maxTokens:none",
-      "presencePenalty:0.0",
-      "frequencyPenalty:0.0",
+      "presencePenalty:none",
+      "frequencyPenalty:none",
       "reasoning:none",
       "thinking:none",
       "serviceTier:none"
@@ -106,7 +107,12 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     )
     sent(CompletionOptionsCheck.cleared(set)) shouldBe CompletionOptions()
     sent(CompletionOptionsCheck.cleared(CompletionOptionsCheck.everySetting())) shouldBe
-      CompletionOptions(temperature = 0.2, topP = 0.9, presencePenalty = 0.5, frequencyPenalty = -0.5)
+      CompletionOptions(
+        temperature = Some(0.2),
+        topP = Some(0.9),
+        presencePenalty = Some(0.5),
+        frequencyPenalty = Some(-0.5)
+      )
   }
 
   "every reasoning level" should "map to core's level of the same name, and back" in {
@@ -129,9 +135,9 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
 
   "a builder" should "be immutable, so one base can be extended two ways" in {
     CompletionOptionsCheck.forked().asScala.toList.map(_.underlying) shouldBe List(
-      CompletionOptions(temperature = 0.1),
-      CompletionOptions(temperature = 0.1, maxTokens = Some(16)),
-      CompletionOptions(temperature = 0.1, reasoning = Some(ReasoningEffort.Medium))
+      CompletionOptions(temperature = Some(0.1)),
+      CompletionOptions(temperature = Some(0.1), maxTokens = Some(16)),
+      CompletionOptions(temperature = Some(0.1), reasoning = Some(ReasoningEffort.Medium))
     )
   }
 
@@ -152,14 +158,15 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       .frequencyPenalty(2.0)
       .build()
     edges.underlying shouldBe CompletionOptions(
-      temperature = 0.0,
-      topP = 0.0,
+      temperature = Some(0.0),
+      topP = Some(0.0),
       maxTokens = Some(1),
       thinking = Thinking.budget(1).toOption,
-      presencePenalty = -2.0,
-      frequencyPenalty = 2.0
+      presencePenalty = Some(-2.0),
+      frequencyPenalty = Some(2.0)
     )
-    JCompletionOptions.builder().topP(1.0).build().topP shouldBe 1.0
+    JCompletionOptions.builder().topP(1.0).build().topP shouldBe java.util.OptionalDouble.of(1.0)
+    JCompletionOptions.builder().build().topP shouldBe java.util.OptionalDouble.empty()
   }
 
   it should "reject a value no provider accepts with IllegalArgumentException, naming the setting" in {
@@ -205,7 +212,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       "JCompletionOptions(temperature=0.2, topP=0.9, maxTokens=512, presencePenalty=0.5, frequencyPenalty=-0.5, " +
       "reasoning=HIGH, thinking=JThinking.budget(4096), serviceTier=FLEX)"
     JCompletionOptions.builder().build().toString shouldBe
-      "JCompletionOptions(temperature=0.7, topP=1.0, maxTokens=unset, presencePenalty=0.0, frequencyPenalty=0.0, " +
+      "JCompletionOptions(temperature=unset, topP=unset, maxTokens=unset, presencePenalty=unset, frequencyPenalty=unset, " +
       "reasoning=unset, thinking=unset, serviceTier=unset)"
     JCompletionOptions.builder().thinking(JThinking.off()).build().toString should include("thinking=JThinking.off(),")
   }

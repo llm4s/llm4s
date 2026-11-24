@@ -1,17 +1,17 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ GraphTestSupport, IdempotencyKey, ThreadState, ToolCallId }
+import org.llm4s.agent.graph.{ GraphTestSupport, ThreadState }
 import org.llm4s.agent.graph.tool.*
 import org.llm4s.agent.graph.tool.Operation.*
-import org.llm4s.llmconnect.model.ToolCall
-import org.llm4s.toolapi.Schema
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class PermissionMiddlewareSpec extends AnyFlatSpec with Matchers {
 
   private val spec = AgentToolSpec[ujson.Value]("files", "Files", Schema.`object`[ujson.Value]("files"))
-  private val call = ToolCall("c1", "files", ujson.Obj())
+  private val call = ToolCall(ToolCallId("c1"), "files", ujson.Obj())
 
   private def context(approved: Boolean) =
     ToolContext(

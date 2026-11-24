@@ -14,6 +14,9 @@ grand_parent: User Guide
 Hand a bounded task to another agent and get back only its typed report.
 {: .fs-6 .fw-300 }
 
+{: .note }
+> **Experimental at 1.0.** The delegation API on this page (`withSubagents`, `withDelegation`, `TypedAgent`, `children`, `subscribeChild` and the task events) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
+
 ## Table of contents
 {: .no_toc .text-delta }
 
@@ -37,7 +40,9 @@ The API is `@Experimental` (design [§4.44](https://github.com/llm4s/llm4s/blob/
 ```scala
 import org.llm4s.agent.Agent
 import org.llm4s.agent.delegation.{ DelegationConfig, TypedAgent }
+import org.llm4s.agent.graph.ThreadId
 import org.llm4s.schema.SchemaOf
+import upickle.default.ReadWriter
 
 final case class ResearchQuestion(topic: String) derives ReadWriter, SchemaOf
 final case class Findings(summary: String, sources: Vector[String]) derives ReadWriter, SchemaOf

@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.{ HttpErrorMapper, PartEncoding }
@@ -43,8 +44,8 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
           .POST(HttpRequest.BodyPublishers.ofString(ujson.Arr.from(messages).render()))
           .build()
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()): Unit
-        Completion(id = "x", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage("ok"))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        Completion(id = "x", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("ok"))
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100
@@ -111,7 +112,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
       val request  = HttpRequest.newBuilder(URI.create(baseUrl)).POST(HttpRequest.BodyPublishers.ofString("{}")).build()
       val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
       Left(map(response.statusCode(), response.body()))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100
@@ -125,7 +126,10 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
 
   "assertProviderRejectionIsTyped" should "pass a client that maps a 400 and a 413 with the provider's message" in {
     assertProviderRejectionIsTyped(openAIError) { url =>
-      new Rejected(url, (status, body) => HttpErrorMapper.mapHttpError(status, body, "reference").left.toOption.get)
+      new Rejected(
+        url,
+        (status, body) => Left(HttpErrorMapper.toError(status, body, "reference", Map.empty)).left.toOption.get
+      )
     }
   }
 

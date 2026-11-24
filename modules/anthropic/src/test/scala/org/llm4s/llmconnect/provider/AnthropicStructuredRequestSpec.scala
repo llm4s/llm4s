@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
@@ -20,8 +22,8 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   private lazy val client = new AnthropicClient(
     AnthropicConfig(
       apiKey = Secret("sk-ant-dummy"),
-      model = "claude-3-5-sonnet-20241022",
-      baseUrl = "https://api.anthropic.com",
+      model = ModelName("claude-3-5-sonnet-20241022"),
+      baseUrl = BaseUrl("https://api.anthropic.com"),
       contextWindow = 200000,
       reserveCompletion = 4096
     )
@@ -115,8 +117,8 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
         SystemMessage("S"),
         UserMessage("q1"),
         AssistantMessage(Some("a1"), Seq.empty),
-        AssistantMessage(None, Seq(ToolCall("call_1", "lookup", ujson.Obj("x" -> 1)))),
-        ToolMessage("result-text", "call_1"),
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("call_1"), "lookup", ujson.Obj("x" -> 1)))),
+        ToolMessage("result-text", ToolCallId("call_1")),
         UserMessage("q2")
       )
     )

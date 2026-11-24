@@ -7,7 +7,7 @@ import org.llm4s.annotation.Stable
  *
  * These were `ConfigKeys.OLLAMA_*` in `llm4s-core` until the provider moved to
  * its own module ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]): a key
- * belongs with the code that reads it, so that `ConfigKeys` does not name
+ * belongs with the code that reads it, so that `llm4s-core` does not name
  * variables for a provider that may not be on the classpath.
  */
 @Stable
@@ -24,7 +24,4 @@ object OllamaConfigKeys {
 
   /** Overrides the Ollama embedding base URL; bound to `llm4s.embeddings.ollama.baseUrl`. */
   val OLLAMA_EMBEDDING_BASE_URL = "OLLAMA_EMBEDDING_BASE_URL"
-
-  /** Selects the Ollama embedding model; bound to `llm4s.embeddings.ollama.model`. */
-  val OLLAMA_EMBEDDING_MODEL = "OLLAMA_EMBEDDING_MODEL"
 }

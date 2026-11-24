@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -29,16 +30,13 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = response,
-          model = "test",
+          model = ModelName("test"),
           message = AssistantMessage(response)
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -50,9 +48,7 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(EvaluationError("LLM call failed"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -65,9 +61,9 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
       Right(EmbeddingResponse(embeddings = request.input.map(_ => Seq(1.0, 0.0, 0.0))))
   }
 
-  private val embeddingConfig = EmbeddingModelConfig("test-model", 3)
+  private val embeddingConfig = EmbeddingModelConfig(ModelName("test-model"), 3)
 
-  private def createEmbeddingClient() = new EmbeddingClient(new MockEmbeddingProvider())
+  private def createEmbeddingClient() = EmbeddingClient(new MockEmbeddingProvider())
 
   // ==========================================================================
   // evaluateMetric tests

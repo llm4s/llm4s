@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentResult, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId }
@@ -11,7 +13,7 @@ import org.llm4s.agent.graph.toolloop.{
 }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -52,20 +54,26 @@ private[llm4s] object FacadeInternals {
    * none. Its dimensions are the ones the provider module declares for the model, and empty for a model it does not
    * list: the embed call itself needs none, and a reply's vectors say how long they are (#1781).
    */
-  def embeddingClient(loaded: Result[(String, EmbeddingProviderConfig)]): Result[JEmbeddingClient] =
+  def embeddingClient(loaded: Result[EmbeddingProviderConfig]): Result[JEmbeddingClient] =
     for {
-      selected <- loaded
-      (provider, config) = selected
+      config   <- loaded
       registry <- Llm4sConfig.modelRegistryService()
-      client   <- EmbeddingClient.from(provider, config)(using registry)
-    } yield new JEmbeddingClient(FacadeToken.INSTANCE, client, config.model, declaredDimensions(provider, config.model))
+      client   <- EmbeddingClient.from(config)(using registry)
+    } yield new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      client,
+      config.model.asString,
+      declaredDimensions(config.providerId.asString, config.model.asString)
+    )
 
   /**
    * The dimensions `provider`'s module declares for `model`. The provider is the one the config loaded, so the only
    * refusal left is an unlisted model, which is not a failure here.
    */
   private def declaredDimensions(provider: String, model: String): OptionalInt =
-    ModelDimensionRegistry.getDimension(provider, model).fold(_ => OptionalInt.empty(), OptionalInt.of)
+    ModelDimensionRegistry
+      .getDimension(ProviderId(provider), ModelName(model))
+      .fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**
    * What both public `Llm4s.createClient` overloads do: the client for `config`, reporting every call to `metrics` (a
@@ -76,7 +84,10 @@ private[llm4s] object FacadeInternals {
     else
       result(for {
         registry <- Llm4sConfig.modelRegistryService()
-        client   <- LLMConnect.getClient(config, Option(metrics).getOrElse(MetricsCollector.noop))(using registry)
+        client <- LLMConnect.getClient(
+          config,
+          LlmClientOptions(metrics = Option(metrics).getOrElse(MetricsCollector.noop))
+        )(using registry)
       } yield Llm4s.wrapClient(client))
 
   /** `agentResult` as Java and Kotlin callers read it. */
@@ -116,7 +127,8 @@ private[llm4s] object FacadeInternals {
         Optional.empty,
         Optional.empty,
         Optional.ofNullable(guardrail),
-        Optional.ofNullable(reason),
+        // present on the result of the run that was blocked; a reason is never stored (#2853)
+        Optional.ofNullable(reason.orNull),
         none
       )
     case AgentStatus.StepLimitReached =>
@@ -240,7 +252,7 @@ private[llm4s] object FacadeInternals {
         JMessageRole.TOOL,
         text(tool.content),
         java.util.List.of(),
-        Optional.ofNullable(tool.toolCallId),
+        Optional.ofNullable(tool.toolCallId.asString),
         Optional.empty
       )
   }
@@ -252,19 +264,21 @@ private[llm4s] object FacadeInternals {
   private def text(content: String): String = Option(content).getOrElse("")
 
   /** `call` as Java and Kotlin callers read it. */
-  def toolCall(call: ToolCall): JToolCall = new JToolCall(call.id, call.name, call.arguments.render())
+  def toolCall(call: ToolCall): JToolCall = new JToolCall(call.id.asString, call.name, call.arguments.render())
 
   /** `usage` as Java and Kotlin callers read it. */
   def usageSummary(usage: UsageSummary): JUsageSummary = {
     val byModel =
-      new java.util.TreeMap[String, JModelUsage](usage.byModel.map((m, u) => m -> modelUsage(u)).asJava)
+      new java.util.TreeMap[String, JModelUsage](usage.byModel.map((m, u) => m.asString -> modelUsage(u)).asJava)
     new JUsageSummary(
       usage.requestCount,
       usage.inputTokens,
       usage.outputTokens,
       usage.thinkingTokens,
       usage.totalCost.bigDecimal,
-      java.util.Collections.unmodifiableMap(byModel)
+      java.util.Collections.unmodifiableMap(byModel),
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
   }
 
@@ -275,7 +289,9 @@ private[llm4s] object FacadeInternals {
       usage.inputTokens,
       usage.outputTokens,
       usage.thinkingTokens,
-      usage.totalCost.bigDecimal
+      usage.totalCost.bigDecimal,
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
 
   /** `completion` as Java and Kotlin callers read it. */
@@ -283,12 +299,10 @@ private[llm4s] object FacadeInternals {
     new JCompletion(
       completion.id,
       Option(completion.content).getOrElse(""),
-      completion.model,
+      completion.model.asString,
       java.util.List.copyOf(completion.toolCalls.map(toolCall).asJava),
       completion.usage.map(tokenUsage).toJava,
-      // as core's `ModelUsage.add` converts it, so a reply's cost and an agent turn's total agree; a cost that is not a
-      // number has no decimal value and reads as unknown
-      completion.estimatedCost.filter(_.isFinite).map(BigDecimal.decimal(_).bigDecimal).toJava,
+      completion.estimatedCost.map(_.bigDecimal).toJava,
       completion.thinking.toJava,
       completion.servedTier.map(tierName).toJava
     )

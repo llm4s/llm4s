@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -27,8 +26,8 @@ object MultiTurnToneValidationExample extends App {
 
   // Define guardrails to use across all turns
   val inputGuardrails = Seq(
-    new LengthCheck(min = 1, max = 5000),
-    new ProfanityFilter()
+    LengthCheck(min = 1, max = 5000),
+    ProfanityFilter()
   )
 
   val outputGuardrails = Seq(
@@ -42,7 +41,8 @@ object MultiTurnToneValidationExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("multi-turn-tone-validation", client)
-      .withMiddleware(GuardrailMiddleware(inputGuardrails, outputGuardrails))
+      .withInputGuardrails(inputGuardrails*)
+      .withOutputGuardrails(outputGuardrails*)
       .build()
 
     // Turn 1: Ask about Scala

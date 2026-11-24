@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, SystemMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 import org.scalatest.EitherValues
@@ -25,7 +26,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   }
 
   def transformer(service: ModelRegistryService): RequestTransformer =
-    RequestTransformer.adjusted(service)((id, caps) => if (isConstrained(id)) constrained else caps)
+    RequestTransformer.adjusted(service)((id, caps) => if (isConstrained(id.asString)) constrained else caps)
 
   // ============================================
   // Temperature constraint tests
@@ -36,9 +37,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7)
+        val options = CompletionOptions(temperature = Some(0.7))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("Temperature")
@@ -51,12 +52,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7)
+        val options = CompletionOptions(temperature = Some(0.7))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.temperature shouldBe 1.0
+        result.toOption.get.temperature shouldBe Some(1.0)
   }
 
   test("O-series models should allow temperature=1.0") {
@@ -64,12 +65,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0)
+        val options = CompletionOptions(temperature = Some(1.0))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isRight shouldBe true
-        result.toOption.get.temperature shouldBe 1.0
+        result.toOption.get.temperature shouldBe Some(1.0)
 
   }
 
@@ -82,9 +83,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(1.0), topP = Some(0.9))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("top_p")
@@ -95,12 +96,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(1.0), topP = Some(0.9))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.topP shouldBe 1.0
+        result.toOption.get.topP shouldBe None
   }
 
   test("O-series models should reject presence_penalty when dropUnsupported=false") {
@@ -108,9 +109,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, presencePenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), presencePenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("presence_penalty")
@@ -121,12 +122,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, presencePenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), presencePenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.presencePenalty shouldBe 0.0
+        result.toOption.get.presencePenalty shouldBe None
   }
 
   test("O-series models should reject frequency_penalty when dropUnsupported=false") {
@@ -134,9 +135,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, frequencyPenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), frequencyPenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("frequency_penalty")
@@ -147,12 +148,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, frequencyPenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), frequencyPenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.frequencyPenalty shouldBe 0.0
+        result.toOption.get.frequencyPenalty shouldBe None
   }
 
   // ============================================
@@ -165,13 +166,13 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val options = CompletionOptions(
-          temperature = 0.7,
-          topP = 0.9,
-          presencePenalty = 0.5,
-          frequencyPenalty = 0.5
+          temperature = Some(0.7),
+          topP = Some(0.9),
+          presencePenalty = Some(0.5),
+          frequencyPenalty = Some(0.5)
         )
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         val message = result.left.value.message
@@ -187,20 +188,20 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val options = CompletionOptions(
-          temperature = 0.7,
-          topP = 0.9,
-          presencePenalty = 0.5,
-          frequencyPenalty = 0.5
+          temperature = Some(0.7),
+          topP = Some(0.9),
+          presencePenalty = Some(0.5),
+          frequencyPenalty = Some(0.5)
         )
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
         val transformed = result.toOption.get
-        transformed.temperature shouldBe 1.0
-        transformed.topP shouldBe 1.0
-        transformed.presencePenalty shouldBe 0.0
-        transformed.frequencyPenalty shouldBe 0.0
+        transformed.temperature shouldBe Some(1.0)
+        transformed.topP shouldBe None
+        transformed.presencePenalty shouldBe None
+        transformed.frequencyPenalty shouldBe None
   }
 
   // ============================================
@@ -217,7 +218,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
           UserMessage("Hello!")
         )
 
-        val result = transformer(service).transformMessages("o1", messages)
+        val result = transformer(service).transformMessages(ModelName("o1"), messages)
 
         result.length shouldBe 2
         result.head shouldBe a[UserMessage]
@@ -235,7 +236,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
           UserMessage("Hello!")
         )
 
-        val result = transformer(service).transformMessages("gpt-4o", messages)
+        val result = transformer(service).transformMessages(ModelName("gpt-4o"), messages)
 
         result.length shouldBe 2
         result.head shouldBe a[SystemMessage]
@@ -251,9 +252,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("o1") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-preview") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-mini") shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-preview")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-mini")) shouldBe true
   }
 
   test("Standard models should not require fake streaming") {
@@ -261,8 +262,8 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("gpt-4o") shouldBe false
-        transformer(service).requiresFakeStreaming("gpt-4-turbo") shouldBe false
+        transformer(service).requiresFakeStreaming(ModelName("gpt-4o")) shouldBe false
+        transformer(service).requiresFakeStreaming(ModelName("gpt-4-turbo")) shouldBe false
   }
 
   // ============================================
@@ -274,12 +275,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("o1") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-preview") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-mini") shouldBe true
-        transformer(service).requiresFakeStreaming("o3") shouldBe true
-        transformer(service).requiresFakeStreaming("o3-mini") shouldBe true
-        transformer(service).requiresFakeStreaming("openai/o1") shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-preview")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-mini")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o3")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o3-mini")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("openai/o1")) shouldBe true
   }
 
   // ============================================
@@ -291,7 +292,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   // ============================================
 
   private def withPingTool: Either[String, CompletionOptions] =
-    ToolBuilder[Map[String, Any], String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
+    ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right("pong"))
       .buildSafe()
       .left
@@ -300,7 +301,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
 
   private def noFunctionCalling(service: ModelRegistryService): RequestTransformer =
     RequestTransformer.withOverrides(
-      Map("test-model" -> ModelCapabilities(supportsFunctionCalling = Some(false))),
+      Map(ModelName("test-model") -> ModelCapabilities(supportsFunctionCalling = Some(false))),
       service
     )
 
@@ -308,7 +309,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
     val result = for {
       service <- ModelRegistryTestSupport.defaultServiceResult().left.map(_.message)
       options <- withPingTool
-    } yield noFunctionCalling(service).transformOptions("test-model", options, dropUnsupported = false)
+    } yield noFunctionCalling(service).transformOptions(ModelName("test-model"), options, dropUnsupported = false)
 
     result.value.left.value.message should include("Function calling not supported for test-model")
   }
@@ -317,7 +318,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
     val result = for {
       service <- ModelRegistryTestSupport.defaultServiceResult().left.map(_.message)
       options <- withPingTool
-    } yield noFunctionCalling(service).transformOptions("test-model", options, dropUnsupported = true)
+    } yield noFunctionCalling(service).transformOptions(ModelName("test-model"), options, dropUnsupported = true)
 
     result.value.value.tools shouldBe empty
   }
@@ -328,9 +329,9 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("test-model") -> customCaps), service)
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-        val result            = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
+        val result = customTransformer.transformOptions(ModelName("test-model"), options, dropUnsupported = true)
         result.isRight shouldBe true
         result.toOption.get.responseFormat shouldBe None
   }
@@ -341,10 +342,10 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("test-model") -> customCaps), service)
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
 
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+        val result = customTransformer.transformOptions(ModelName("test-model"), options, dropUnsupported = false)
 
         result.isRight shouldBe true
         result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
@@ -358,11 +359,11 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("test-model") -> customCaps), service)
         val schema            = ujson.Obj("type" -> "object")
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
 
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+        val result = customTransformer.transformOptions(ModelName("test-model"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("Structured output")
@@ -375,11 +376,11 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("test-model") -> customCaps), service)
         val schema            = ujson.Obj("type" -> "object")
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
 
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
+        val result = customTransformer.transformOptions(ModelName("test-model"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
         result.toOption.get.responseFormat shouldBe None
@@ -391,10 +392,10 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = Some(true))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("test-model") -> customCaps), service)
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
 
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+        val result = customTransformer.transformOptions(ModelName("test-model"), options, dropUnsupported = false)
 
         result.isRight shouldBe true
         result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
@@ -406,10 +407,10 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         fail(error.message)
       case Right(service) =>
         val customCaps        = ModelCapabilities(supportsResponseSchema = None)
-        val customTransformer = RequestTransformer.withOverrides(Map("unknown-model" -> customCaps), service)
+        val customTransformer = RequestTransformer.withOverrides(Map(ModelName("unknown-model") -> customCaps), service)
         val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
 
-        val result = customTransformer.transformOptions("unknown-model", options, dropUnsupported = false)
+        val result = customTransformer.transformOptions(ModelName("unknown-model"), options, dropUnsupported = false)
 
         result.isRight shouldBe true
         result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
@@ -429,10 +430,11 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
           disallowedParams = Some(Set("max_tokens"))
         )
 
-        val customTransformer = RequestTransformer.withOverrides(Map("my-custom-model" -> customCaps), service)
-        val options           = CompletionOptions(temperature = 0.7)
+        val customTransformer =
+          RequestTransformer.withOverrides(Map(ModelName("my-custom-model") -> customCaps), service)
+        val options = CompletionOptions(temperature = Some(0.7))
 
-        val result = customTransformer.transformOptions("my-custom-model", options, dropUnsupported = false)
+        val result = customTransformer.transformOptions(ModelName("my-custom-model"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("Temperature")
@@ -448,14 +450,14 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
         val messages = Seq(
           SystemMessage("Be helpful"),
           UserMessage("Hello")
         )
 
         val result = TransformationResult.transform(
-          "o1",
+          ModelName("o1"),
           options,
           messages,
           transformer(service),
@@ -465,8 +467,8 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         result.isRight shouldBe true
         val tr = result.toOption.get
 
-        tr.options.temperature shouldBe 1.0
-        tr.options.topP shouldBe 1.0
+        tr.options.temperature shouldBe Some(1.0)
+        tr.options.topP shouldBe None
         tr.messages.head shouldBe a[UserMessage]
         tr.messages.head.content should include("[System]:")
         tr.requiresFakeStreaming shouldBe true
@@ -477,11 +479,11 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options  = CompletionOptions(temperature = 0.7)
+        val options  = CompletionOptions(temperature = Some(0.7))
         val messages = Seq(UserMessage("Hello"))
 
         val result = TransformationResult.transform(
-          "o1",
+          ModelName("o1"),
           options,
           messages,
           transformer(service),
@@ -500,12 +502,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val withOverride = RequestTransformer.withOverrides(Map("o1" -> ModelCapabilities()), service)
-        val options      = CompletionOptions(temperature = 0.7, topP = 0.9)
+        val withOverride = RequestTransformer.withOverrides(Map(ModelName("o1") -> ModelCapabilities()), service)
+        val options      = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
 
-        withOverride.transformOptions("o1", options, dropUnsupported = false) shouldBe Right(options)
-        withOverride.requiresFakeStreaming("o1") shouldBe false
-        withOverride.transformMessages("o1", Seq(SystemMessage("s"))) shouldBe Seq(SystemMessage("s"))
+        withOverride.transformOptions(ModelName("o1"), options, dropUnsupported = false) shouldBe Right(options)
+        withOverride.requiresFakeStreaming(ModelName("o1")) shouldBe false
+        withOverride.transformMessages(ModelName("o1"), Seq(SystemMessage("s"))) shouldBe Seq(SystemMessage("s"))
   }
 
   test("adjusted should receive the model id and the capabilities found for it") {
@@ -513,12 +515,12 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        var seen: Option[(String, ModelCapabilities)] = None
+        var seen: Option[(ModelName, ModelCapabilities)] = None
         val t = RequestTransformer.adjusted(service) { (id, caps) =>
           seen = Some(id -> caps)
           caps
         }
-        t.requiresFakeStreaming("some-model")
-        seen.map(_._1) shouldBe Some("some-model")
+        t.requiresFakeStreaming(ModelName("some-model"))
+        seen.map(_._1) shouldBe Some(ModelName("some-model"))
   }
 }

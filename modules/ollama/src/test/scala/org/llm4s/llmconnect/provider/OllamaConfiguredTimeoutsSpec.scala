@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
+
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, OllamaConfig, ProviderTimeouts }
@@ -28,7 +30,12 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   private def hello: Conversation = Conversation(Seq(UserMessage("hello")))
 
   private def config(baseUrl: String, timeouts: ProviderTimeouts): OllamaConfig =
-    OllamaConfig(model = "llama3.1", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl(baseUrl),
+      contextWindow = 4096,
+      reserveCompletion = 512
+    )
       .withTimeouts(timeouts)
 
   // ---- HOCON -> descriptor -> config ----
@@ -45,7 +52,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
              |}
              |""".stripMargin
         ),
-        "main"
+        ProviderName("main")
       )
       .value
 
@@ -100,7 +107,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
       val client = new OllamaClient(config(baseUrl, ProviderTimeouts(stream = Some(300.millis))))
       try {
         val started = System.nanoTime()
-        val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
@@ -113,14 +120,16 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
       val provider = OllamaEmbeddingProvider.fromConfig(
         EmbeddingProviderConfig(
-          baseUrl = baseUrl,
-          model = "nomic-embed-text",
-          apiKey = Secret("ollama"),
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("nomic-embed-text"),
+          apiKey = Some(Secret("ollama")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )
       val started = System.nanoTime()
-      val result  = provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("nomic-embed-text", 768)))
+      val result =
+        provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("nomic-embed-text"), 768)))
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

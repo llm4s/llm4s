@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -36,14 +37,7 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{
-  ContentFilteredError,
-  LLMError,
-  NetworkError,
-  ServiceError,
-  UnknownError,
-  ValidationUnsupportedError
-}
+import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.syntax.toLLMError
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -52,7 +46,7 @@ import org.llm4s.llmconnect.auth.{
   AccessTokenProvider,
   ApiKeyProvider,
   CachingAccessTokenProvider,
-  IdentityTokenSource
+  IdentityTokenProvider
 }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
@@ -67,7 +61,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
-import org.llm4s.security.{ KnownSecrets, TokenGenerations }
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.toolapi.OpenAIToolHelper
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -161,7 +155,7 @@ class OpenAIClient private[provider] (
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
-  protected def modelName: String         = model
+  protected def modelName: ModelName      = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -174,14 +168,14 @@ class OpenAIClient private[provider] (
    * @param metrics metrics collector (default: noop)
    */
   def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
+    this(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
 
   def this(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging)
+    this(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging)
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -191,7 +185,7 @@ class OpenAIClient private[provider] (
    */
   def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
     this(
-      config.model,
+      config.model.asString,
       OpenAIClientTransport.azure(config),
       config,
       metrics,
@@ -204,7 +198,14 @@ class OpenAIClient private[provider] (
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging, config.providerId)
+    this(
+      config.model.asString,
+      OpenAIClientTransport.azure(config),
+      config,
+      metrics,
+      exchangeLogging,
+      config.providerId
+    )
 
   override def complete(
     conversation: Conversation,
@@ -214,12 +215,13 @@ class OpenAIClient private[provider] (
     // Transform options and messages for model-specific constraints
     val result = for {
       transformed <- TransformationResult.transform(
-        model,
+        modelName,
         options,
         conversation.messages,
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      _ <- OpenAIModelRules.checkTools(model, transformed.options)
       adjustments             = openAIAdjustments(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
@@ -243,9 +245,7 @@ class OpenAIClient private[provider] (
     result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -254,12 +254,13 @@ class OpenAIClient private[provider] (
     // already record their own exchange on both success and failure.
     TransformationResult
       .transform(
-        model,
+        modelName,
         options,
         conversation.messages,
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      .flatMap(transformed => OpenAIModelRules.checkTools(model, transformed.options).map(_ => transformed))
       .flatMap { transformed =>
         val adjustments             = openAIAdjustments(options, transformed)
         val transformedConversation = conversation.withMessages(transformed.messages)
@@ -310,7 +311,7 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
-    adjustments: List[RequestAdjustment],
+    adjustments: Seq[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     call("fake streaming")(transport.createChatCompletion(params)) match {
@@ -333,10 +334,10 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
-    adjustments: List[RequestAdjustment],
+    adjustments: Seq[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator = StreamingAccumulator(model)
+    val accumulator = StreamingAccumulator(modelName)
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
     val state       = new StreamState
@@ -355,16 +356,18 @@ class OpenAIClient private[provider] (
       attempt
         .flatMap(_ => state.filtered.map(_.withUsage(state.usage)).toLeft(()))
         // checked here, not left to the SDK, which ends the stream quietly at the end of the body (RFC 0009, rule 1)
-        .filterOrElse(_ => state.finished, OpenAIClient.unfinished(config.endpointUrl.getOrElse(displayName)))
+        .filterOrElse(
+          _ => state.finished,
+          OpenAIClient.unfinished(config.endpointUrl.map(_.asUrl).getOrElse(displayName))
+        )
         .flatMap(_ =>
           // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
           // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
           // The accumulator holds the service's own usage report, with its reasoning and cached-token
           // breakdown and its total (`StreamingAccumulator.updateUsage`).
           accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(modelName, u))
             c
-              .withToolCalls(c.message.toolCalls.toList)
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)
               .withServedTier(state.servedTier)
@@ -474,7 +477,7 @@ class OpenAIClient private[provider] (
         id = known(call._id()).filter(_.nonEmpty),
         name = function.flatMap(f => known(f._name())).filter(_.nonEmpty)
       )
-      ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
+      ToolCall(ToolCallId(id), name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
     }
 
   /**
@@ -533,15 +536,15 @@ class OpenAIClient private[provider] (
    *    an unknown model is the `ServiceError` 404 a completion gets.
    *  - '''Requesty''': `GET /models`, the router's listing. `Right(())` means the endpoint answered and took the
    *    key; the model is not looked for.
-   *  - '''Azure OpenAI''': `Left(ValidationUnsupportedError)`. `model` is a deployment name, and the deployment
-   *    listing is a management-plane request this client's key does not authorise.
+   *  - '''Azure OpenAI''': the resource's model listing, `GET <endpoint>/openai/models?api-version=...` (the data
+   *    plane's "Models - List"), or `GET <endpoint>/openai/v1/models` for a v1 endpoint, with the `api-key` or
+   *    Entra ID token a completion carries. `Right(())` means the resource answered and took the credential. The
+   *    deployment is not looked for: `model` is a deployment name, the listing holds the resource's base models,
+   *    and the deployment listing is a management-plane request this credential does not authorise.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    config match {
-      case _: AzureConfig                     => Left(ValidationUnsupportedError(clientDescription))
-      case _ if provider == OpenAIProvider.id => call("model lookup")(transport.retrieveModel(model))
-      case _                                  => call("model listing")(transport.listModels())
-    }
+    if (provider == OpenAIProvider.id) call("model lookup")(transport.retrieveModel(model))
+    else call("model listing")(transport.listModels())
   }
 
   /**
@@ -567,7 +570,10 @@ class OpenAIClient private[provider] (
 
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
-    OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+    OpenAIModelRules.forcedToolEffort(model, options) match {
+      case Some((effort, adjustments)) => OpenAIReasoning.EffortPlan(Some(effort), adjustments)
+      case None                        => OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+    }
 
   /**
    * Everything reported for a request: the sampling a reasoning model leaves out, what `reasoning` and `thinking`
@@ -576,14 +582,14 @@ class OpenAIClient private[provider] (
   private def openAIAdjustments(
     requested: CompletionOptions,
     transformed: TransformationResult
-  ): List[RequestAdjustment] =
+  ): Seq[RequestAdjustment] =
     withUnsentSampling(requested, transformed) ++ effortPlan(transformed.options).adjustments ++
       UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options) ++ serviceTierPlan(transformed.options)._2
 
   /** The `service_tier` to send for `options`, and what was not sent as asked (see [[OpenAIServiceTier]]). */
   private def serviceTierPlan(
     options: CompletionOptions
-  ): (Option[ChatCompletionCreateParams.ServiceTier], List[RequestAdjustment]) =
+  ): (Option[ChatCompletionCreateParams.ServiceTier], Seq[RequestAdjustment]) =
     OpenAIServiceTier.plan(providerName, displayName, options)
 
   /** The `reasoning_effort` to send for `options`, if any. */
@@ -600,13 +606,12 @@ class OpenAIClient private[provider] (
 
   /**
    * `transformed`'s adjustments with the sampling options a reasoning-model request leaves out
-   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it
-   * away from its `CompletionOptions` default. `requested` is what the caller asked for, before the
-   * transformer moved anything, such as the o-series temperature it adjusts to 1.0.
+   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it,
+   * whatever its value. `requested` is what the caller asked for, before the transformer moved anything, such
+   * as the o-series temperature it adjusts to 1.0.
    *
-   * A default is not reported, so a default call reports nothing and logs no warning: a caller that treats
-   * any `Dropped` as a failure can still use these models without setting anything. The cost is that an
-   * explicit value equal to the default goes unreported too, since `CompletionOptions` cannot tell the two apart.
+   * An option the caller left unset is not reported, so a default call reports nothing and logs no warning: a
+   * caller that treats any `Dropped` as a failure can still use these models without setting anything.
    *
    * Any report the transformer made for one of these options is replaced, because in the end nothing is sent
    * for it.
@@ -614,16 +619,15 @@ class OpenAIClient private[provider] (
   private def withUnsentSampling(
     requested: CompletionOptions,
     transformed: TransformationResult
-  ): List[RequestAdjustment] =
+  ): Seq[RequestAdjustment] =
     if (!omitsSampling(transformed.options)) transformed.adjustments
     else {
-      val reason   = s"$model is a reasoning model, which takes no sampling parameters"
-      val defaults = CompletionOptions()
+      val reason = s"$model is a reasoning model, which takes no sampling parameters"
       val sampling = List(
-        RequestOption.Temperature      -> (requested.temperature != defaults.temperature),
-        RequestOption.TopP             -> (requested.topP != defaults.topP),
-        RequestOption.PresencePenalty  -> (requested.presencePenalty != defaults.presencePenalty),
-        RequestOption.FrequencyPenalty -> (requested.frequencyPenalty != defaults.frequencyPenalty)
+        RequestOption.Temperature      -> requested.temperature.isDefined,
+        RequestOption.TopP             -> requested.topP.isDefined,
+        RequestOption.PresencePenalty  -> requested.presencePenalty.isDefined,
+        RequestOption.FrequencyPenalty -> requested.frequencyPenalty.isDefined
       )
       val unsent = sampling.collect { case (option, true) => option }
       transformed.adjustments.filterNot(a => sampling.exists(_._1 == a.option)) ++
@@ -672,12 +676,13 @@ class OpenAIClient private[provider] (
       // reported on the Completion by withUnsentSampling
       if (omitsSampling(options))
         logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
-      else
-        builder
-          .temperature(options.temperature.doubleValue())
-          .presencePenalty(options.presencePenalty.doubleValue())
-          .frequencyPenalty(options.frequencyPenalty.doubleValue())
-          .topP(options.topP.doubleValue())
+      else {
+        // only what the caller set is sent: unset, OpenAI's own defaults apply
+        options.temperature.foreach(t => builder.temperature(t))
+        options.presencePenalty.foreach(p => builder.presencePenalty(p))
+        options.frequencyPenalty.foreach(p => builder.frequencyPenalty(p))
+        options.topP.foreach(p => builder.topP(p))
+      }
 
       effort.foreach(e => builder.reasoningEffort(e))
       serviceTierPlan(options)._1.foreach(t => builder.serviceTier(t))
@@ -760,9 +765,9 @@ class OpenAIClient private[provider] (
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
   // one text part goes as a plain string, as every message did before content parts
-  private def singleText(parts: Vector[ContentPart]): Boolean = parts match {
-    case Vector(ContentPart.Text(_)) => true
-    case _                           => false
+  private def singleText(parts: Seq[ContentPart]): Boolean = parts match {
+    case Seq(ContentPart.Text(_)) => true
+    case _                        => false
   }
 
   private def toOpenAIMessage(message: Message): ChatCompletionMessageParam =
@@ -784,7 +789,7 @@ class OpenAIClient private[provider] (
           msg.addToolCall(
             ChatCompletionMessageFunctionToolCall
               .builder()
-              .id(tc.id)
+              .id(tc.id.asString)
               .function(
                 ChatCompletionMessageFunctionToolCall.Function
                   .builder()
@@ -799,7 +804,7 @@ class OpenAIClient private[provider] (
 
       case tm: ToolMessage if singleText(tm.parts) =>
         ChatCompletionMessageParam.ofTool(
-          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId).build()
+          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId.asString).build()
         )
 
       case tm: ToolMessage =>
@@ -809,7 +814,7 @@ class OpenAIClient private[provider] (
           ChatCompletionToolMessageParam
             .builder()
             .contentOfArrayOfContentParts(texts.asJava)
-            .toolCallId(tm.toolCallId)
+            .toolCallId(tm.toolCallId.asString)
             .build()
         )
     }
@@ -837,7 +842,7 @@ class OpenAIClient private[provider] (
       .map(_.asString())
       .filter(_.nonEmpty)
       .map(ChatCompletionsFinishReason(_))
-      .getOrElse(FinishReason.Other(""))
+      .getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     message
       .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
@@ -855,22 +860,20 @@ class OpenAIClient private[provider] (
   ): Completion = {
     val content = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
-      AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
+      AssistantMessage(text = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
     val usage = known(response._usage()).map(toTokenUsage)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
+    val cost = usage.flatMap(u => CostEstimator.estimate(modelName, u))
 
     Completion(
       id = known(response._id()).getOrElse(""),
       created = known(response._created())
         .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content,
-      model = known(response._model()).getOrElse(model),
+      model = known(response._model()).map(ModelName(_)).getOrElse(modelName),
       message = assistantMessage,
-      toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),
@@ -942,7 +945,7 @@ class OpenAIClient private[provider] (
           calls     <- done
           _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
           arguments <- ToolCallRules.parseArguments(name, raw)
-        } yield calls :+ ToolCall(id = known(ftc._id()).getOrElse(""), name = name, arguments = arguments)
+        } yield calls :+ ToolCall(id = ToolCallId(known(ftc._id()).getOrElse("")), name = name, arguments = arguments)
       }
 
   private def recordExchange(
@@ -952,13 +955,15 @@ class OpenAIClient private[provider] (
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(model),
-      startedAt = startedAt,
-      requestBody = requestBody.getOrElse(""),
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody.getOrElse(""),
+        model = Some(modelName),
+        responseBody = responseBody
+      ),
+      result
     )
 
   private def known[T](field: JsonField[T]): Option[T] = field.asKnown().toScala
@@ -1013,7 +1018,14 @@ object OpenAIClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenAIClient] =
     Try(
-      new OpenAIClient(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging, provider)
+      new OpenAIClient(
+        config.model.asString,
+        OpenAIClientTransport.openAI(config),
+        config,
+        metrics,
+        exchangeLogging,
+        provider
+      )
     ).toResult
 
   /** How log lines and the "already closed" error name the provider. */
@@ -1045,16 +1057,17 @@ object OpenAIClient {
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
       ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
-      HttpErrorMapper
-        .mapHttpError(
-          service.statusCode(),
-          // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
-          // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
-          Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
-          provider,
-          Try(headerMap(service.headers())).getOrElse(Map.empty)
-        )
-        .left
+      Left(
+        HttpErrorMapper
+          .toError(
+            service.statusCode(),
+            // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
+            // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
+            Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
+            provider,
+            Try(headerMap(service.headers())).getOrElse(Map.empty)
+          )
+      ).left
         .getOrElse(redactMessage(SdkErrorMapper(service, provider), service))
     case io: OpenAIIoException if io.getCause != null =>
       redactMessage(SdkErrorMapper(io.getCause, provider), io.getCause)
@@ -1239,14 +1252,14 @@ private[provider] object OpenAIClientTransport {
       case None =>
         val builder = OpenAIOkHttpClient
           .builder()
-          .baseUrl(config.baseUrl)
+          .baseUrl(config.baseUrl.asUrl)
           .organization(config.organization.orNull)
         config.apiKeyProvider match {
           case None => builder.apiKey(config.apiKey.reveal)
           // The SDK asks the credential for its token on each request (#2313).
           case Some(keys) => builder.credential(BearerTokenCredential.create(new RotatingKey(keys)))
         }
-        sdk(withNetwork(builder, config.network, config.baseUrl).build(), config.timeouts)
+        sdk(withNetwork(builder, config.network, config.baseUrl.asUrl).build(), config.timeouts)
     }
   }
 
@@ -1263,7 +1276,7 @@ private[provider] object OpenAIClientTransport {
    */
   private def workloadIdentityClient(config: OpenAIConfig, wi: OpenAIWorkloadIdentity): SdkClient = {
     val http = OkHttpClient.builder().timeout(Timeout.default())
-    applyNetwork(config.network, config.baseUrl)(
+    applyNetwork(config.network, config.baseUrl.asUrl)(
       http.proxy(_),
       http.proxyAuthenticator(_),
       (factory, trust) => http.sslSocketFactory(factory).trustManager(trust)
@@ -1281,7 +1294,7 @@ private[provider] object OpenAIClientTransport {
       ClientOptions
         .builder()
         .httpClient(new RegisteringBearer(base))
-        .baseUrl(config.baseUrl)
+        .baseUrl(config.baseUrl.asUrl)
         .organization(config.organization.orNull)
         .workloadIdentity(sdkWorkloadIdentity(wi))
         .build()
@@ -1393,7 +1406,7 @@ private[provider] object OpenAIClientTransport {
 
   /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
   private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
-    val source = IdentityTokenSource.from(wi.identityToken)
+    val source = IdentityTokenProvider.from(wi.identityToken)
     // Each subject token is registered before the SDK sends it, so an exchange error quoting it is scrubbed.
     val subjects = new TokenGenerations
     val subject = new SubjectTokenProvider {
@@ -1403,12 +1416,12 @@ private[provider] object OpenAIClientTransport {
       // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
       override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
         source
-          .fetch()
+          .current()
           .fold(
             error => throw new IdentityTokenException(error),
             token => {
-              subjects.rotate(token)
-              token
+              subjects.rotate(token.reveal)
+              token.reveal
             }
           )
 
@@ -1440,16 +1453,16 @@ private[provider] object OpenAIClientTransport {
    * is sent only when `apiVersion` was set to something other than the default.
    */
   def azure(config: AzureConfig): OpenAIClientTransport = {
-    val pathMode = azureUrlPathMode(config.endpoint)
+    val pathMode = azureUrlPathMode(config.endpoint.asUrl)
     val builder = OpenAIOkHttpClient
       .builder()
-      .baseUrl(config.endpoint)
+      .baseUrl(config.endpoint.asUrl)
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.
     def transport(): OpenAIClientTransport =
-      sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
+      sdk(withNetwork(builder, config.network, config.endpoint.asUrl).build(), config.timeouts)
     (config.tokenProvider, config.apiKeyProvider) match {
       case (None, None) =>
         builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))
@@ -1525,7 +1538,7 @@ private[provider] object OpenAIClientTransport {
     private val generations = new TokenGenerations
 
     override def get(): String = {
-      val token = tokens.token().fold(error => throw new IdentityTokenException(error), identity)
+      val token = tokens.current().fold(error => throw new IdentityTokenException(error), _.reveal)
       generations.rotate(token)
       lastIssued.set(token)
       token
@@ -1535,7 +1548,7 @@ private[provider] object OpenAIClientTransport {
       Try(call).fold(
         {
           case unauthorized: UnauthorizedException =>
-            Option(lastIssued.get()).foreach(tokens.invalidate)
+            Option(lastIssued.get()).foreach(issued => tokens.invalidate(Secret.unregistered(issued)))
             throw unauthorized
           case other => throw other
         },

@@ -20,7 +20,7 @@ class OpenAIToolHelperSpec extends AnyFlatSpec with Matchers {
   implicit val sumRW: ReadWriter[Sum] = macroRW
 
   private val addTool =
-    ToolBuilder[Map[String, Any], Sum](
+    ToolBuilder[Sum](
       "add",
       "Adds two numbers",
       Schema

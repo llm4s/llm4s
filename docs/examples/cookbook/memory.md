@@ -6,6 +6,7 @@ search_title: "Give an LLM memory between turns in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 12
+cites_closed_issues: [1594]
 ---
 
 # Remember facts between turns
@@ -91,7 +92,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.MemoryRecipe"          # scripte
 sbt "samples/runMain org.llm4s.samples.cookbook.MemoryRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 

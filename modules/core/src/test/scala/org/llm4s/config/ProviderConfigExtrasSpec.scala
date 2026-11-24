@@ -3,13 +3,19 @@ package org.llm4s.config
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -42,12 +48,10 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       )
     )
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       for
-        apiKey <- ProviderDescriptor.requireApiKey(providerName, section)
-        region <- ProviderDescriptor.requireExtra(providerName, section, "region")
+        apiKey <- ProviderDescriptor.requireApiKey(context.providerName, section)
+        region <- ProviderDescriptor.requireExtra(context.providerName, section, "region")
         config <- FixtureChatConfig.fromValues(
           section.model.asString,
           apiKey.reveal,
@@ -55,9 +59,9 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
         )
       yield config
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-      ModelRegistryService
-    ): Result[LLMClient] = Left(ConfigurationError("not needed for this test"))
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] = Left(
+      ConfigurationError("not needed for this test")
+    )
 
   /** A provider whose only difference from the fixture is an environment variable it reads. */
   object EnvBoundProvider extends ProviderDescriptor:
@@ -70,13 +74,13 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       extras = Seq(ProviderConfigKey("space", "the deployment space id", required = true, env = Some("ENVBOUND_SPACE")))
     )
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = Left(ConfigurationError("not needed for this test"))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] = Left(
+      ConfigurationError("not needed for this test")
+    )
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-      ModelRegistryService
-    ): Result[LLMClient] = Left(ConfigurationError("not needed for this test"))
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] = Left(
+      ConfigurationError("not needed for this test")
+    )
 
   private given ProviderRegistry = ProviderRegistry.of(RegionalProvider, EnvBoundProvider, FixtureChatProvider)
 
@@ -195,12 +199,10 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     object Clashing extends ProviderDescriptor:
       val id: ProviderId                 = ProviderId("clashing")
       val configSpec: ProviderConfigSpec = ProviderConfigSpec(extras = Seq(ProviderConfigKey.optional("baseUrl", "x")))
-      def buildConfig(providerName: String, section: NamedProviderConfig)(using
-        ContextWindowResolver
-      ): Result[ProviderConfig] = Left(ConfigurationError("unused"))
-      def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-        ModelRegistryService
-      ): Result[LLMClient] = Left(ConfigurationError("unused"))
+      def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+        Left(ConfigurationError("unused"))
+      def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+        Left(ConfigurationError("unused"))
 
     error(validated(section(provider = "clashing"), Clashing)) should include(
       "Provider 'clashing' declares provider-specific key(s) baseUrl, which are built-in named-provider fields"
@@ -226,12 +228,10 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     object NoEnv extends ProviderDescriptor:
       val id: ProviderId                 = ProviderId("noenv")
       val configSpec: ProviderConfigSpec = ProviderConfigSpec(requiresBaseUrl = true)
-      def buildConfig(providerName: String, section: NamedProviderConfig)(using
-        ContextWindowResolver
-      ): Result[ProviderConfig] = Left(ConfigurationError("unused"))
-      def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-        ModelRegistryService
-      ): Result[LLMClient] = Left(ConfigurationError("unused"))
+      def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+        Left(ConfigurationError("unused"))
+      def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+        Left(ConfigurationError("unused"))
 
     val message = error(validated(section(provider = "noenv"), NoEnv, "my-noenv"))
 
@@ -272,7 +272,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     val providers = ProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(e => fail(e.message), identity)
     providers.namedProviders(ProviderName("my-regional")).extras shouldBe Map("region" -> "eu-west-1", "tier" -> "2")
 
-    Llm4sConfig.provider(ConfigSource.string(hocon), "my-regional") match
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("my-regional")) match
       case Right(config: FixtureChatConfig) => config.baseUrl shouldBe "https://eu-west-1.regional.invalid"
       case other                            => fail(s"Expected FixtureChatConfig, got $other")
   }
@@ -283,7 +283,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
         |llm4s.providers.my-regional { provider = "regional", model = "m", apiKey = "k" }
         |""".stripMargin
 
-    error(Llm4sConfig.provider(ConfigSource.string(hocon), "my-regional")) should include(
+    error(Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("my-regional"))) should include(
       "- region: the cloud region hosting the model"
     )
   }
@@ -318,8 +318,8 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
   // providers block, each validating it and logging its warnings, so every warning printed twice.
   private def warningHocon: String =
     """
+      |llm4s.defaultProvider = "my-regional"
       |llm4s.providers {
-      |  provider = "my-regional"
       |  my-regional {
       |    provider     = "regional"
       |    model        = "m"

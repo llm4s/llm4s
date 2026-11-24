@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
+
 // scalafix:off DisableSyntax.NoConfigFactory
 import org.llm4s.security.Secret
 import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
@@ -59,13 +61,13 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "openai"
-        cfg.baseUrl shouldBe "https://example.com/v1"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.apiKey.reveal shouldBe "sk-test"
+        cfg.providerId.asString shouldBe "openai"
+        cfg.baseUrl.asUrl shouldBe "https://example.com/v1"
+        cfg.model.asString shouldBe "text-embedding-3-small"
+        cfg.apiKey.map(_.reveal) shouldBe Some("sk-test")
       }
     }
 
@@ -76,13 +78,13 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.openai.apiKey" -> "sk-test"
       )
       withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "openai"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.baseUrl shouldBe "https://api.openai.com/v1" // Default base URL
-        cfg.apiKey.reveal shouldBe "sk-test"
+        cfg.providerId.asString shouldBe "openai"
+        cfg.model.asString shouldBe "text-embedding-3-small"
+        cfg.baseUrl.asUrl shouldBe "https://api.openai.com/v1" // Default base URL
+        cfg.apiKey.map(_.reveal) shouldBe Some("sk-test")
       }
     }
 
@@ -93,12 +95,12 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "openai"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.baseUrl shouldBe "https://custom.openai.com/v1" // Custom base URL
+        cfg.providerId.asString shouldBe "openai"
+        cfg.model.asString shouldBe "text-embedding-3-small"
+        cfg.baseUrl.asUrl shouldBe "https://custom.openai.com/v1" // Custom base URL
       }
     }
 
@@ -109,12 +111,12 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
-        val (provider, cfg) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "openai"
-        cfg.baseUrl shouldBe "https://example.com/v1"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.apiKey.reveal shouldBe "sk-test"
+        cfg.providerId.asString shouldBe "openai"
+        cfg.baseUrl.asUrl shouldBe "https://example.com/v1"
+        cfg.model.asString shouldBe "text-embedding-3-small"
+        cfg.apiKey.map(_.reveal) shouldBe Some("sk-test")
       }
     }
   }
@@ -131,12 +133,13 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       withProps(props) {
         val pure = Llm4sConfig.textEmbeddingModel().fold(err => fail(err.toString), identity)
 
-        pure.provider shouldBe "openai"
-        pure.modelName shouldBe "text-embedding-3-small"
+        pure.name shouldBe ModelName("text-embedding-3-small")
 
         // And explicitly via the registry as an extra safety check
         val expectedDims =
-          ModelDimensionRegistry.getDimension("openai", pure.modelName).fold(err => fail(err.formatted), identity)
+          ModelDimensionRegistry
+            .getDimension(ProviderId("openai"), pure.name)
+            .fold(err => fail(err.formatted), identity)
         pure.dimensions shouldBe expectedDims
       }
     }
@@ -161,11 +164,11 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "come from OPENAI_API_KEY through llm4s.credentials.openai.apiKey, with nothing in application.conf" in {
       // This module's reference.conf binds OPENAI_API_KEY to OpenAI's shared key, which the
       // embeddings block falls back to when it sets no apiKey of its own.
-      val (provider, config) =
+      val config =
         EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
 
-      provider shouldBe "openai"
-      config.apiKey.reveal shouldBe "sk-from-env"
+      config.providerId.asString shouldBe "openai"
+      config.apiKey.map(_.reveal) shouldBe Some("sk-from-env")
     }
 
     "come from the block's own apiKey over OPENAI_API_KEY" in {
@@ -173,9 +176,8 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       EmbeddingsConfigLoader
         .loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env")))
         .value
-        ._2
         .apiKey
-        .reveal shouldBe "sk-embeddings"
+        .map(_.reveal) shouldBe Some("sk-embeddings")
     }
 
     "not fall back to llm4s.openai.apiKey, which nothing else reads (#1132)" in {
@@ -200,15 +202,16 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     }
   }
 
-  "EmbeddingClient.from(provider,cfg)" should {
+  "EmbeddingClient.from(cfg)" should {
 
     "build client for openai without throwing" in {
       val cfg = EmbeddingProviderConfig(
-        baseUrl = "https://api.openai.com/v1",
-        model = "text-embedding-3-small",
-        apiKey = Secret("sk-test")
+        providerId = ProviderId("openai"),
+        baseUrl = BaseUrl("https://api.openai.com/v1"),
+        model = ModelName("text-embedding-3-small"),
+        apiKey = Some(Secret("sk-test"))
       )
-      val res = EmbeddingClient.from("openai", cfg)
+      val res = EmbeddingClient.from(cfg.withProviderId(ProviderId("openai")))
       res.isRight shouldBe true
     }
   }
@@ -218,16 +221,20 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "declare the documented model dimensions" in {
       given ProviderRegistry = ProviderRegistry.default
 
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small").value shouldBe 1536
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-large").value shouldBe 3072
-      ModelDimensionRegistry.getDimension("OpenAI", "text-embedding-3-small").value shouldBe 1536
+      ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small")).value shouldBe 1536
+      ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-large")).value shouldBe 3072
+      ModelDimensionRegistry.getDimension(ProviderId("OpenAI"), ModelName("text-embedding-3-small")).value shouldBe 1536
       OpenAIEmbeddingProvider.modelDimensions should not be empty
     }
 
     "name the model when asked for one it does not declare" in {
       given ProviderRegistry = ProviderRegistry.default
 
-      ModelDimensionRegistry.getDimension("openai", "gpt-4o").left.value.formatted should include(
+      ModelDimensionRegistry
+        .getDimension(ProviderId("openai"), ModelName("gpt-4o"))
+        .left
+        .value
+        .formatted should include(
         "Unknown model 'gpt-4o' for provider 'openai'"
       )
     }

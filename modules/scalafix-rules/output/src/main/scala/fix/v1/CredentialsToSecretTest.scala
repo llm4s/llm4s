@@ -2,13 +2,14 @@ package fix.v1
 
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAICompatibleConfig, OpenAIConfig }
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 object CredentialsToSecretTest {
   val openai = OpenAIConfig(
     apiKey = Secret("sk-..."),
-    model = "gpt-4o",
+    model = ModelName("gpt-4o"),
     organization = None,
-    baseUrl = "https://api.openai.com/v1",
+    baseUrl = BaseUrl("https://api.openai.com/v1"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )

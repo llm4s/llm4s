@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
@@ -161,7 +163,7 @@ class WatsonXClient(
 
   protected def clientDescription: String = s"watsonx client for model ${config.model}"
   protected def providerName: String      = "watsonx"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
@@ -225,6 +227,20 @@ class WatsonXClient(
       }
     )
 
+  /**
+   * Exchanges the API key for an IAM token, the request every completion depends on, and asks IAM afresh on each
+   * call: a cached token would hide a key revoked since. `Right(())` means IAM answered and took the key; a key it
+   * refuses is an `AuthenticationError`. The token it returns is kept for the next completion.
+   *
+   * It does not show that the watsonx endpoint answers, nor check the project or the model: IBM's examples of the
+   * model listing, `GET /ml/v1/foundation_model_specs`, send no credentials
+   * (https://www.ibm.com/docs/en/watsonx/saas?topic=solutions-get-model-information, read 2026-11-24), so it would
+   * pass a wrong key. Never run against the live service.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    currentApiKey().flatMap(fetchToken).map(_ => ())
+  }
+
   /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
   private def invalidate(token: String): Unit =
     tokenCache.updateAndGet(cached => cached.filterNot(_.value == token)): Unit
@@ -274,8 +290,11 @@ class WatsonXClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      WatsonXClient.reasoningAdjustments(config.model, options) ++ UnmappedOptions.serviceTier("watsonx", options)
-    adjustmentLog.record(config.model, adjustments)
+      WatsonXClient.reasoningAdjustments(config.model.asString, options) ++ UnmappedOptions.serviceTier(
+        "watsonx",
+        options
+      )
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -296,11 +315,13 @@ class WatsonXClient(
                 if (response.statusCode >= 200 && response.statusCode < 300)
                   parseCompletion(response.body).flatMap(ToolCallRules.checked)
                 else
-                  HttpErrorMapper.mapHttpError(
-                    response.statusCode,
-                    Redaction.scrubRemote(response.body),
-                    providerName,
-                    response.headers
+                  Left(
+                    HttpErrorMapper.toError(
+                      response.statusCode,
+                      Redaction.scrubRemote(response.body),
+                      providerName,
+                      response.headers
+                    )
                   )
               recordExchange(startedAt, requestText, response.body, result)
               result
@@ -309,9 +330,7 @@ class WatsonXClient(
         .map(_.withAdjustments(unsent(options)))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     createRequestBody(conversation, options)
@@ -331,8 +350,10 @@ class WatsonXClient(
               val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
               raw.append(err)
               noteStatus(response.statusCode, token)
-              HttpErrorMapper
-                .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              Left(
+                HttpErrorMapper
+                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              )
             }
           }
         recordExchange(startedAt, requestText, raw.result(), result)
@@ -457,7 +478,6 @@ class WatsonXClient(
       .map { c =>
         // the accumulator reports streamed calls on the message only
         c
-          .withToolCalls(c.message.toolCalls.toList)
           .withEstimatedCost(c.usage.flatMap(estimateCost))
       }
   }
@@ -488,9 +508,10 @@ class WatsonXClient(
     status.foreach(noteStatus(_, token))
     status match {
       case Some(s) =>
-        HttpErrorMapper
-          .mapHttpError(s, ujson.Obj("message" -> safe).render(), providerName)
-          .left
+        Left(
+          HttpErrorMapper
+            .toError(s, ujson.Obj("message" -> safe).render(), providerName, Map.empty)
+        ).left
           .getOrElse(ServiceError(s, providerName, safe))
       case None => ServiceError(502, providerName, safe)
     }
@@ -515,7 +536,7 @@ class WatsonXClient(
       Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
-  private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
+  private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
@@ -524,10 +545,11 @@ class WatsonXClient(
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
-      "model_id"    -> config.model,
-      "messages"    -> encodeMessages(conversation),
-      "temperature" -> options.temperature
+      "model_id" -> config.model.asString,
+      "messages" -> encodeMessages(conversation)
     )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
     config.spaceId match {
       case Some(space) => body("space_id") = space
       case None        => body("project_id") = config.projectId
@@ -536,15 +558,14 @@ class WatsonXClient(
     // deprecated in favour of `max_completion_tokens`, which a later change may adopt (NODE vml_v1.ts:2812-2813,
     // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
     options.maxTokens.foreach(max => body("max_tokens") = max)
-    if (options.topP != 1.0) body("top_p") = options.topP
-    // SDK-evidenced (see the class Scaladoc): sent only when set away from their 0.0 default
-    if (options.presencePenalty != 0.0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
+    options.topP.foreach(p => body("top_p") = p)
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
     val off = options.thinking.contains(Thinking.Off)
     // what this leaves out is reported on the Completion (reasoningAdjustments), and logged once per model
-    if (takesReasoningEffort(config.model)) {
+    if (takesReasoningEffort(config.model.asString)) {
       if (off) body("reasoning_effort") = "low"
       else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
@@ -564,8 +585,8 @@ class WatsonXClient(
       case um: UserMessage        =>
         // checked by createRequestBody: every part is text or an inline image
         val content = um.parts match {
-          case Vector(ContentPart.Text(text)) => ujson.Str(text)
-          case parts                          => ujson.Arr.from(parts.map(WatsonXClient.userPart))
+          case Seq(ContentPart.Text(text)) => ujson.Str(text)
+          case parts                       => ujson.Arr.from(parts.map(WatsonXClient.userPart))
         }
         Some(ujson.Obj("role" -> "user", "content" -> content))
       case am: AssistantMessage =>
@@ -579,7 +600,7 @@ class WatsonXClient(
           if (am.toolCalls.nonEmpty)
             message("tool_calls") = ujson.Arr.from(am.toolCalls.map { call =>
               ujson.Obj(
-                "id"       -> call.id,
+                "id"       -> call.id.asString,
                 "type"     -> "function",
                 "function" -> ujson.Obj("name" -> call.name, "arguments" -> requestArguments(call.arguments))
               )
@@ -587,7 +608,7 @@ class WatsonXClient(
           Some(message)
         }
       case tm: ToolMessage =>
-        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> tm.toolCallId, "content" -> tm.content))
+        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> tm.toolCallId.asString, "content" -> tm.content))
     })
 
   private def parseCompletion(body: String): Result[Completion] =
@@ -608,8 +629,6 @@ class WatsonXClient(
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = Instant.ofEpochSecond(nowSeconds()),
-              content = text,
-              toolCalls = toolCalls,
               usage = usage,
               model = config.model,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
@@ -627,13 +646,15 @@ class WatsonXClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   override def getContextWindow(): Int     = config.contextWindow
@@ -673,12 +694,13 @@ object WatsonXClient {
 
   /**
    * A normalised `finish_reason` as a [[FinishReason]] (RFC 0009): `stop`, `tool_calls` and `length` mapped, anything
-   * else kept as `Other`, and none (`""`) as `Other("")`.
+   * else kept as `Other`, and none (`""`) as `Unknown`.
    */
   private[provider] def toFinishReason(normalized: String): FinishReason = normalized match {
     case "stop"                         => FinishReason.Stop
     case "tool_calls" | "function_call" => FinishReason.ToolCalls
     case "length"                       => FinishReason.Length
+    case ""                             => FinishReason.Unknown
     case other                          => FinishReason.Other(other)
   }
 
@@ -826,7 +848,7 @@ object WatsonXClient {
       name     <- function.get("name").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("an entry has no name"))
       args     <- normalizeArguments(function.get("arguments"))
     } yield ToolCall(
-      fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(syntheticId(idPrefix, index)),
+      ToolCallId(fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(syntheticId(idPrefix, index))),
       name,
       args
     )
@@ -849,7 +871,11 @@ object WatsonXClient {
         if (partial.name.isEmpty) Left(malformed("a streamed call has no name"))
         else
           normalizeArguments(Some(ujson.Str(partial.arguments.result()))).map { args =>
-            calls :+ ToolCall(if (partial.id.nonEmpty) partial.id else syntheticId(idPrefix, index), partial.name, args)
+            calls :+ ToolCall(
+              if (partial.id.nonEmpty) ToolCallId(partial.id) else ToolCallId(syntheticId(idPrefix, index)),
+              partial.name,
+              args
+            )
           }
       }
     }

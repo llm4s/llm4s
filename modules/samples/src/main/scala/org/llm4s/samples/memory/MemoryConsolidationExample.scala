@@ -41,7 +41,7 @@ object MemoryConsolidationExample {
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       client <- LLMConnect.getClient(providerConfig)
-    } yield runExample(client, providerConfig.model)
+    } yield runExample(client, providerConfig.model.asString)
 
     result match {
       case Right(success) =>

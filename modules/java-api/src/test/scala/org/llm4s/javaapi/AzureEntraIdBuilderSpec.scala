@@ -2,6 +2,7 @@ package org.llm4s.javaapi
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.auth.AccessTokenProvider
+import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -14,8 +15,8 @@ import scala.jdk.CollectionConverters.*
 class AzureEntraIdBuilderSpec extends AnyFlatSpec with Matchers {
 
   private val tokens = new AccessTokenProvider {
-    def token(): Result[String]            = Right("entra-token")
-    def invalidate(rejected: String): Unit = ()
+    def current(): Result[Secret]                   = Right(Secret.unregistered("entra-token"))
+    override def invalidate(rejected: Secret): Unit = ()
   }
 
   "AzureOpenAiClientBuilder.tokenProvider" should "authenticate with the provider's bearer token and no API key" in {

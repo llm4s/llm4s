@@ -2,12 +2,18 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.OpenAICompatibleConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ MistralModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -35,25 +41,23 @@ object MistralProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(MistralModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      config  <- MistralConfig.fromValues(section.model, apiKey, baseUrl)
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[MistralConfig](id, config)
       .flatMap(
         MistralClient(
           _,
-          options.metrics,
-          options.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+          context.metrics,
+          context.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
         )
       )

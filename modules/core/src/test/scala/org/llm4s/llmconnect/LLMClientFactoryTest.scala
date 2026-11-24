@@ -32,7 +32,7 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
 
   test("LLMConnect.getClient returns the client of the default named provider") {
     val props = Map(
-      "llm4s.providers.provider"                  -> "fixturechat-main",
+      "llm4s.defaultProvider"                     -> "fixturechat-main",
       "llm4s.providers.fixturechat-main.provider" -> "fixturechat",
       "llm4s.providers.fixturechat-main.model"    -> "fixture-model",
       "llm4s.providers.fixturechat-main.apiKey"   -> "sk",
@@ -41,7 +41,7 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
 
     withProps(props) {
       given ModelRegistryService = registryService
-      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
       res match {
         case Right(client) => client.getClass.getSimpleName shouldBe "FixtureChatClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")

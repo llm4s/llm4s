@@ -39,14 +39,13 @@ libraryDependencies ++= Seq(
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.ThreadId
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, ProfanityFilter }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 
 def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for {
-  forecast <- ToolBuilder[Map[String, Any], String](
+  forecast <- ToolBuilder[String](
     name = "get_forecast",
     description = "Returns today's forecast for a city",
     schema = Schema
@@ -58,7 +57,7 @@ def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for
     .builder("weather", client)
     .withSystemPrompt("You answer questions about the weather.")
     .withTools(registry)
-    .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 2000), new ProfanityFilter()), Nil))
+    .withInputGuardrails(LengthCheck(1, 2000), ProfanityFilter())
     .withStreaming()
     .build()
   run <- agent.stream(ThreadId("weather-1"), question) {
@@ -76,7 +75,7 @@ What each part does:
   handler reads its arguments as `Either` values, so a missing argument is a value, not an exception. The
   [tools guide](../guide/custom-tools) goes further, and [typed tools](../guide/derived-schemas#typed-tools) derive
   the schema from a case class.
-- **The guardrails.** `GuardrailMiddleware` checks the input before the model sees it. A question outside the length
+- **The guardrails.** `withInputGuardrails` checks the input before the model sees it. A question outside the length
   limit ends the run as `AgentStatus.Blocked`, an outcome you match on rather than an error, and the model is never
   called. Output guardrails, LLM-as-judge checks and your own are in the [guardrails guide](../guide/agents/guardrails).
 - **Streaming.** `withStreaming()` streams the model's answer, and `agent.stream` hands every event of the turn to your

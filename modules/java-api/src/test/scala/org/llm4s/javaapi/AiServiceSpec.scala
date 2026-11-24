@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.services.AiServiceFixtures.*
 import org.llm4s.javaapi.services.{ ChatMemoryStore, ChatTurn }
 import org.llm4s.llmconnect.LLMClient
@@ -26,12 +27,10 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val n       = sent.synchronized { sent += conversation; sent.size - 1 }
       val message = script(n)
-      Right(Completion(s"r$n", Instant.EPOCH, message.content, "recording", message))
+      Right(Completion(s"r$n", Instant.EPOCH, ModelName("recording"), message))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -42,7 +41,7 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
   private def replying(replies: String*): Recording = new Recording(n => AssistantMessage(replies(n)))
 
   private def toolCall(id: String): AssistantMessage =
-    AssistantMessage(toolCalls = Seq(ToolCall(s"call-$id", "orderStatus", ujson.Obj("id" -> id))))
+    AssistantMessage(None, toolCalls = Seq(ToolCall(ToolCallId(s"call-$id"), "orderStatus", ujson.Obj("id" -> id))))
 
   private def support(client: JLlmClient): Support = Llm4s.aiService(classOf[Support]).client(client).build()
 

@@ -1,9 +1,10 @@
 name: Docs Cited Issues
 
 # Fails when a docs page cites an llm4s issue as open and it has closed, or as done and it is open (#2290):
-# docs/guide/comparison.md described six closed issues as missing features before this existed. Each page declares
-# how it cites each issue in its front matter (cites_open_issues, cites_closed_issues); see
-# scripts/check-cited-issues.sh. An issue can close at any time, so this runs weekly as well as on docs changes.
+# docs/guide/comparison.md described six closed issues as missing features before this existed. Every page that links
+# an issue declares how it cites each one in its front matter (cites_open_issues, cites_closed_issues, cites_issues),
+# and every page the site serves is checked (#2833); see scripts/check-cited-issues.sh. Quick Checks checks the
+# declarations offline; an issue can close at any time, so the states are checked weekly as well as on docs changes.
 
 on:
   schedule:
@@ -28,14 +29,14 @@ jobs:
   cited-issues:
     name: Cited issues are in their stated state
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Test the check
         run: scripts/test-check-cited-issues.sh
 
-      - name: Check the issues the comparison and enterprise evaluation pages cite
+      - name: Check the issues every docs page cites
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/check-cited-issues.sh docs/guide/comparison.md docs/guide/java-migration.md docs/reference/enterprise-evaluation.md docs/reference/best-practices.md
+        run: scripts/check-cited-issues.sh

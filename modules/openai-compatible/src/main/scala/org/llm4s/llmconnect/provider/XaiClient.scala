@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -89,10 +90,17 @@ object XaiClient {
  *    standard behaviour of dropping it.
  *  - '''Reasoning effort''' - see [[addReasoning]].
  *  - '''Penalties.''' xAI rejects `presence_penalty`, `frequency_penalty` and `stop` on reasoning
- *    models. llm4s never sends `stop`, and sends the penalties only when they are non-zero; on a
+ *    models. llm4s never sends `stop`, and sends the penalties only when the caller set them; on a
  *    reasoning model they are left out (see [[addReasoning]]) rather than failing the request.
  */
 private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
+
+  /**
+   * xAI answers a wrong key with a 400, `{"code":"invalid-argument","error":"Incorrect API key provided. ..."}`
+   * (api.x.ai, 2026-11-24), where the other vendors send a 401.
+   */
+  override def refusesCredential(statusCode: Int, body: String): Boolean =
+    statusCode == 400 && body.toLowerCase(java.util.Locale.ROOT).contains("incorrect api key")
 
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content").filter(_.nonEmpty)
@@ -118,12 +126,12 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
    * `Thinking.Adaptive` is `NotNeeded` (the effort is all xAI takes) and `Thinking.Budget` is
    * `Dropped`. With neither set nothing is sent for them.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    val family = XaiDialect.family(model)
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
+    val family = XaiDialect.family(model.asString)
     val levels: Option[Seq[ReasoningEffort]] = family match {
       case XaiDialect.Family.Effort =>
         val base = Seq(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
-        Some(if (XaiDialect.takesXHigh(model)) base :+ ReasoningEffort.XHigh else base)
+        Some(if (XaiDialect.takesXHigh(model.asString)) base :+ ReasoningEffort.XHigh else base)
       case XaiDialect.Family.LowHigh => Some(Seq(ReasoningEffort.Low, ReasoningEffort.High))
       case XaiDialect.Family.Other   => None
     }
@@ -145,7 +153,7 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
                   else "low"
                 else EffortMapping.nearest(effort, accepted.toSet).name
               body("reasoning_effort") = sent
-              EffortMapping.level(model, effort, sent)
+              EffortMapping.level(model.asString, effort, sent)
             }
         }
     }
@@ -161,7 +169,8 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
     val penalties =
       Seq("presence_penalty" -> RequestOption.PresencePenalty, "frequency_penalty" -> RequestOption.FrequencyPenalty)
     val unsent =
-      if (XaiDialect.isReasoningModel(model)) penalties.filter((field, _) => body.value.contains(field)) else Nil
+      if (XaiDialect.isReasoningModel(model.asString)) penalties.filter((field, _) => body.value.contains(field))
+      else Nil
     unsent.foreach((field, _) => body.value.remove(field))
     reasoningReport ++ thinkingReport ++ unsent.toList.map((field, option) =>
       RequestAdjustment.Dropped(option, s"$model is a reasoning model, which rejects $field")

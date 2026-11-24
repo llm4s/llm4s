@@ -1,11 +1,12 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.delegation.{ ChildInterrupt, ChildRef, DelegatedRequest }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.middleware.MiddlewareId
 import org.llm4s.agent.graph.tool.{ ToolContent, ToolOutcome, ToolSuccess }
 import org.llm4s.agent.graph.toolloop._
-import org.llm4s.llmconnect.model.{ ToolCall, UsageSummary }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, UsageSummary }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -29,7 +30,7 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     base.breakpoints shouldBe empty
     base.delegated shouldBe empty
 
-    val call     = ToolCall("call-1", "deploy", ujson.Obj())
+    val call     = ToolCall(ToolCallId("call-1"), "deploy", ujson.Obj())
     val key      = IdempotencyKey("call-1")
     val approval = InterruptId("a") -> ApprovalRequest("m1", call, "risky", ApprovalSource.Tool, key)
     val question = InterruptId("q") -> ToolQuestionRequest("m1", call, ujson.Str("which?"), key)
@@ -161,14 +162,14 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     changed.version shouldBe 1
   }
 
-  "ToolSuccess" should "set each field through its own setter" in {
+  "ToolSuccess" should "set its content and add to its update" in {
     val key    = StateKey.replace[Int]("enum-case-payloads-count", 0)
     val update = StateUpdate.update(key, 7)
     val base   = ToolSuccess(ToolContent.Json(ujson.Num(1)))
     base.update shouldBe StateUpdate.empty
     base.withContent(ToolContent.Json(ujson.Num(2))).content shouldBe ToolContent.Json(ujson.Num(2))
-    base.withUpdate(update).update shouldBe update
-    base.withUpdate(update).content shouldBe base.content
+    base.addUpdate(update).update.isEmpty shouldBe false
+    base.addUpdate(update).content shouldBe base.content
     base.withContent(ToolContent.Json(ujson.Num(2))).update shouldBe StateUpdate.empty
   }
 
@@ -178,6 +179,6 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     ToolOutcome.success(ToolContent.Json(ujson.Num(1))) shouldBe
       ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1)), StateUpdate.empty))
     ToolOutcome.success(ToolContent.Json(ujson.Num(1)), update) shouldBe
-      ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1))).withUpdate(update))
+      ToolOutcome.Success(ToolSuccess(ToolContent.Json(ujson.Num(1)), update))
   }
 }

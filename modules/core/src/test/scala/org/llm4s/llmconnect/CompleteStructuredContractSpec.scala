@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
@@ -33,8 +34,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "id",
       created = Instant.EPOCH,
-      content = content,
-      model = "m",
+      model = ModelName("m"),
       message = AssistantMessage(Some(content))
     )
 
@@ -46,9 +46,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
       calls.add((conversation, options))
       reply(conversation, options)
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(ValidationError("test", "streamComplete must not be used by completeStructured"))
     def getContextWindow(): Int     = 4096
@@ -70,11 +68,11 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
 
   it should "preserve every caller option except responseFormat" in {
     val callerOpts = CompletionOptions(
-      temperature = 0.3,
-      topP = 0.8,
+      temperature = Some(0.3),
+      topP = Some(0.8),
       maxTokens = Some(777),
-      presencePenalty = 0.1,
-      frequencyPenalty = 0.2,
+      presencePenalty = Some(0.1),
+      frequencyPenalty = Some(0.2),
       reasoning = Some(ReasoningEffort.High),
       thinking = Thinking.budget(2048).toOption
     )
@@ -86,11 +84,11 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not mutate or reuse the caller's options value" in {
-    val callerOpts = CompletionOptions(temperature = 0.9)
+    val callerOpts = CompletionOptions(temperature = Some(0.9))
     val c          = okClient
     c.completeStructured[Person](conv, personSchema, callerOpts)
     callerOpts.responseFormat shouldBe None
-    callerOpts shouldBe CompletionOptions(temperature = 0.9)
+    callerOpts shouldBe CompletionOptions(temperature = Some(0.9))
   }
 
   it should "override a caller-supplied ResponseFormat.Json with the JSON schema format" in {

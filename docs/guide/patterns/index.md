@@ -3,8 +3,9 @@ layout: page
 title: Real-World Application Patterns
 description: "Production patterns for LLM applications in Scala: multi-agent orchestration, enterprise RAG, monitoring, scaling, error recovery and security."
 search_title: "Production LLM application patterns in Scala"
-parent: User Guide
-nav_order: 61
+parent: Operations
+nav_order: 706
+grand_parent: User Guide
 has_children: true
 ---
 

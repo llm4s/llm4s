@@ -1,11 +1,12 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.*
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderConfigContext, ProviderRegistry }
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
 import org.slf4j.LoggerFactory
 
 /**
@@ -22,22 +23,24 @@ private[config] object NamedProviderLoader:
    * Builds the `ProviderConfig` for a single named provider from an already-read providers block,
    * validating that section and no other.
    *
-   *  @param sections     the providers block, as read
-   *  @param providerName the name of the provider entry to look up
+   *  @param sections the providers block, as read
+   *  @param name     the name of the provider entry to look up
    *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def select(sections: ProviderSections, providerName: String)(using
+  def select(sections: ProviderSections, name: ProviderName)(using
     ContextWindowResolver,
     ProviderRegistry
   ): Result[ProviderConfig] =
-    val trimmed = providerName.trim
-    if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
+    val trimmed = ProviderName(name.asName.trim)
+    if trimmed.asName.isEmpty then
+      Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
       for
-        normalized <- sections.validated(ProviderName(trimmed))
-        network    <- sections.network(ProviderName(trimmed))
+        normalized <- sections.validated(trimmed)
+        network    <- sections.network(trimmed)
         config     <- buildConfigFromNamedConfig(trimmed, normalized)
-      yield config.withNetwork(network)
+        routed     <- withNetwork(trimmed, normalized, sections.hasOwnHttp(trimmed), network, config)
+      yield routed
 
   /**
    * The provider config of every section of an already-read providers block, each built on its own.
@@ -52,13 +55,7 @@ private[config] object NamedProviderLoader:
     ContextWindowResolver,
     ProviderRegistry
   ): Map[ProviderName, Result[ProviderConfig]] =
-    sections.sections.keys.map { name =>
-      name -> (for
-        normalized <- sections.validated(name)
-        network    <- sections.network(name)
-        config     <- buildConfigFromNamedConfig(name.asName, normalized)
-      yield config.withNetwork(network))
-    }.toMap
+    sections.sections.keys.map(name => name -> select(sections, name)).toMap
 
   /**
    * The provider config of one validated section, without any network settings: the caller applies them.
@@ -70,22 +67,66 @@ private[config] object NamedProviderLoader:
     ContextWindowResolver,
     ProviderRegistry
   ): Result[ProviderConfig] =
-    buildConfigFromNamedConfig(name.asName, section)
+    buildConfigFromNamedConfig(name, section)
 
   private def buildConfigFromNamedConfig(
-    providerName: String,
+    name: ProviderName,
     section: NamedProviderConfig
   )(using ContextWindowResolver, ProviderRegistry): Result[ProviderConfig] =
     // The whole dispatch: find the provider that claims this id and let it build its own config.
     // This used to be a twelve-branch `match` over hard-coded provider names (#1131).
     summon[ProviderRegistry]
-      .resolve(section.provider, Some(s"llm4s.providers.$providerName.provider"))
+      .resolve(section.provider, Some(s"llm4s.providers.${name.asName}.provider"))
       .flatMap(descriptor =>
         descriptor
-          .buildConfig(providerName, section)
+          .buildConfig(section, ProviderConfigContext.of(name.asName))
           // The timeouts block is read once, for every provider; a config that carries it takes it here.
-          .map(_.withTimeouts(section.timeouts))
-          .flatMap(withKeyFile(providerName, section, descriptor.configSpec.requiresApiKey, _))
+          .flatMap(withTimeouts(name, section, _))
+          .flatMap(withKeyFile(name, section, descriptor.configSpec.requiresApiKey, _))
+      )
+
+  /**
+   * `config` with the section's `timeouts`. A config that does not take them - its provider makes no timed
+   * call - is fine while the section sets none, and an error when it does: they would otherwise be dropped
+   * without a word (#2805).
+   */
+  private def withTimeouts(
+    name: ProviderName,
+    section: NamedProviderConfig,
+    config: ProviderConfig
+  ): Result[ProviderConfig] =
+    val timed = config.withTimeouts(section.timeouts)
+    if timed.timeouts == section.timeouts then Right(timed)
+    else
+      Left(
+        ConfigurationError(
+          s"llm4s.providers.${name.asName}.timeouts: provider '${section.provider.asString}' takes no timeouts, " +
+            "so the block would be ignored - remove it",
+          List("timeouts")
+        )
+      )
+
+  /**
+   * `config` routed by `network`: `llm4s.http` with the section's own `http` block over it. A config that does
+   * not take the settings - its provider makes no HTTP call - is an error only for a section with an `http`
+   * block of its own; the process-wide block has nothing to route there (#2805).
+   */
+  private def withNetwork(
+    name: ProviderName,
+    section: NamedProviderConfig,
+    hasOwnHttp: Boolean,
+    network: HttpNetworkSettings,
+    config: ProviderConfig
+  ): Result[ProviderConfig] =
+    val routed = config.withNetwork(network)
+    if routed.network == network || !hasOwnHttp then Right(routed)
+    else
+      Left(
+        ConfigurationError(
+          s"llm4s.providers.${name.asName}.http: provider '${section.provider.asString}' takes no proxy or TLS " +
+            "settings, so the block would be ignored - remove it",
+          List("http")
+        )
       )
 
   /**
@@ -96,7 +137,7 @@ private[config] object NamedProviderLoader:
    * (Ollama, Bedrock, Vertex AI) is refused rather than left to ignore the file.
    */
   private def withKeyFile(
-    providerName: String,
+    name: ProviderName,
     section: NamedProviderConfig,
     takesApiKey: Boolean,
     config: ProviderConfig
@@ -104,19 +145,19 @@ private[config] object NamedProviderLoader:
     section.apiKeyFile match
       case None => Right(config)
       case Some(file) =>
-        val withFile = config.withApiKeyProvider(ApiKeyProvider.file(file))
-        if withFile.apiKeyProvider.isDefined then Right(withFile)
-        else if takesApiKey then
-          logger.info(
-            s"llm4s.providers.$providerName: provider '${section.provider.asString}' reads the key from $file once, " +
-              "when the section is loaded; a rotated key is used after the section is loaded again"
-          )
-          Right(config)
-        else
-          Left(
-            ConfigurationError(
-              s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' takes no API key, " +
-                "so it cannot read one from apiKeyFile - remove it",
-              List("apiKeyFile")
+        config.withApiKeyProvider(ApiKeyProvider.file(file)) match
+          case Right(withFile) => Right(withFile)
+          case Left(_) if takesApiKey =>
+            logger.info(
+              s"llm4s.providers.${name.asName}: provider '${section.provider.asString}' reads the key from $file " +
+                "once, when the section is loaded; a rotated key is used after the section is loaded again"
             )
-          )
+            Right(config)
+          case Left(_) =>
+            Left(
+              ConfigurationError(
+                s"llm4s.providers.${name.asName}.apiKeyFile: provider '${section.provider.asString}' takes no API " +
+                  "key, so it cannot read one from apiKeyFile - remove it",
+                List("apiKeyFile")
+              )
+            )

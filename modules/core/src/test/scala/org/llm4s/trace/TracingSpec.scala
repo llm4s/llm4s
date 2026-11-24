@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.types.Result
@@ -81,16 +82,21 @@ class TracingSpec extends AnyFlatSpec with Matchers {
       success = true
     ) shouldBe Right(())
     tracing.traceError(new RuntimeException("test")) shouldBe Right(())
-    tracing.traceCompletion(createTestCompletion(), "gpt-4") shouldBe Right(())
-    tracing.traceTokenUsage(TokenUsage(100, 50, 150), "gpt-4", "completion") shouldBe Right(())
+    tracing.traceCompletion(createTestCompletion(), ModelName("gpt-4")) shouldBe Right(())
+    tracing.traceTokenUsage(TokenUsage(100, 50, 150), ModelName("gpt-4"), "completion") shouldBe Right(())
   }
 
   it should "support convenience methods" in {
     val tracing = new NoOpTracing()
 
     tracing.traceEvent("custom event string") shouldBe Right(())
-    tracing.traceEmbeddingUsage(EmbeddingUsage(500, 500), "text-embedding-3-small", "indexing", 10) shouldBe Right(())
-    tracing.traceCost(0.005, "gpt-4", "completion", 1000, "total") shouldBe Right(())
+    tracing.traceEmbeddingUsage(
+      EmbeddingUsage(500, 500),
+      ModelName("text-embedding-3-small"),
+      "indexing",
+      10
+    ) shouldBe Right(())
+    tracing.traceCost(0.005, ModelName("gpt-4"), "completion", 1000, "total") shouldBe Right(())
     tracing.traceRAGOperation("search", 150.millis) shouldBe Right(())
   }
 
@@ -116,58 +122,55 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracing    = new ConsoleTracing()
     val completion = createTestCompletion()
 
-    tracing.traceCompletion(completion, "gpt-4").isRight shouldBe true
+    tracing.traceCompletion(completion, ModelName("gpt-4")).isRight shouldBe true
   }
 
   it should "handle token usage tracing" in {
     val tracing = new ConsoleTracing()
     val usage   = TokenUsage(100, 50, 150)
 
-    tracing.traceTokenUsage(usage, "gpt-4", "completion").isRight shouldBe true
+    tracing.traceTokenUsage(usage, ModelName("gpt-4"), "completion").isRight shouldBe true
   }
 
   it should "trace all event types without error" in {
     val tracing = new ConsoleTracing()
 
     // Test each event type
-    tracing.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1"))).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.CompletionReceived("id", "model", 0, "content")).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.CompletionReceived("id", ModelName("model"), 0, "content")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.ErrorOccurred(new Exception("e"), "ctx")).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "o")).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.ErrorOccurred.of(new Exception("e"), "ctx")).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), ModelName("m"), "o")).isRight shouldBe true
     tracing
-      .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary()))
+      .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()))
       .isRight shouldBe true
-    tracing.traceEvent(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "m", "o", 5)).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.CostRecorded(0.001, "m", "o", 100, "t")).isRight shouldBe true
+    tracing
+      .traceEvent(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), ModelName("m"), "o", 5))
+      .isRight shouldBe true
+    tracing.traceEvent(TraceEvent.CostRecorded(0.001, ModelName("m"), "o", 100, "t")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.RAGOperationCompleted("search", 150.millis)).isRight shouldBe true
   }
 
-  // ============ Tracing.create ============
+  // ============ Tracing.fromSettings ============
 
-  "Tracing.create" should "create NoOp tracing for NoOp mode" in {
+  "Tracing.fromSettings" should "create NoOp tracing for NoOp mode" in {
     val settings = TracingSettings(mode = TracingMode.NoOp)
 
-    val tracing = Tracing.create(settings)
-
-    tracing shouldBe a[NoOpTracing]
+    Tracing.fromSettings(settings).fold(e => fail(e.message), identity) shouldBe a[NoOpTracing]
   }
 
   it should "create Console tracing for Console mode" in {
     val settings = TracingSettings(mode = TracingMode.Console)
 
-    val tracing = Tracing.create(settings)
-
-    tracing shouldBe a[ConsoleTracing]
+    Tracing.fromSettings(settings).fold(e => fail(e.message), identity) shouldBe a[ConsoleTracing]
   }
 
-  it should "fall back to NoOp for langfuse, whose backend is in llm4s-observability, not core (#1133)" in {
+  it should "fail for langfuse, whose backend is in llm4s-observability, not core (#1133)" in {
     val settings = TracingSettings(
       mode = TracingMode.fromString("langfuse"),
       extras = Map("publicKey" -> "pk-test", "secretKey" -> "sk-test")
     )
 
-    Tracing.create(settings) shouldBe a[NoOpTracing]
+    Tracing.fromSettings(settings).isLeft shouldBe true
   }
 
   // ============ TracingComposer ============
@@ -214,7 +217,10 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val events   = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new TestTracing(events), new FailingTracing())
 
-    combined.traceCompletion(createTestCompletion().withServedTier(ServiceTier.Flex), "gpt-4") shouldBe Right(())
+    combined.traceCompletion(
+      createTestCompletion().withServedTier(ServiceTier.Flex),
+      ModelName("gpt-4")
+    ) shouldBe Right(())
     events.collect { case e: TraceEvent.CompletionReceived => e.servedTier } shouldBe Seq(Some(ServiceTier.Flex))
   }
 
@@ -224,7 +230,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val filtered = TracingComposer.filter(tracer)(_.eventType == "custom_event")
 
     val customEvent = TraceEvent.CustomEvent("test", ujson.Obj())
-    val agentEvent  = TraceEvent.AgentInitialized("query", Vector.empty)
+    val agentEvent  = TraceEvent.CacheHit(0.9, 0.8)
 
     filtered.traceEvent(customEvent) shouldBe Right(())
     filtered.traceEvent(agentEvent) shouldBe Right(())
@@ -268,13 +274,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracer = new TestTracing(events)
     val usage  = EmbeddingUsage(500, 500)
 
-    tracer.traceEmbeddingUsage(usage, "text-embedding-3-small", "indexing", 10) shouldBe Right(())
+    tracer.traceEmbeddingUsage(usage, ModelName("text-embedding-3-small"), "indexing", 10) shouldBe Right(())
 
     events should have size 1
     events.head match {
       case recorded: TraceEvent.EmbeddingUsageRecorded =>
         recorded.usage shouldBe usage
-        recorded.model shouldBe "text-embedding-3-small"
+        recorded.model shouldBe ModelName("text-embedding-3-small")
         recorded.operation shouldBe "indexing"
         recorded.inputCount shouldBe 10
       case other => fail(s"Expected EmbeddingUsageRecorded, got: $other")
@@ -285,13 +291,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new TestTracing(events)
 
-    tracer.traceCost(0.005, "gpt-4", "completion", 1000, "total") shouldBe Right(())
+    tracer.traceCost(0.005, ModelName("gpt-4"), "completion", 1000, "total") shouldBe Right(())
 
     events should have size 1
     events.head match {
       case recorded: TraceEvent.CostRecorded =>
         recorded.costUsd shouldBe 0.005
-        recorded.model shouldBe "gpt-4"
+        recorded.model shouldBe ModelName("gpt-4")
         recorded.tokenCount shouldBe 1000
       case other => fail(s"Expected CostRecorded, got: $other")
     }
@@ -323,14 +329,20 @@ class TracingSpec extends AnyFlatSpec with Matchers {
    * agent runtime is in `llm4s-agent`, whose specs cover building it.
    */
   private def agentStateEvent(): TraceEvent.AgentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      Seq(UserMessage("Hello")),
+      UsageSummary()
+    )
 
   private def createTestCompletion(): Completion =
     Completion(
       id = "comp-123",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Hello"), Seq.empty),
       usage = Some(TokenUsage(100, 50, 150))
     )

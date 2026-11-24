@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.LLMClient
@@ -34,7 +35,7 @@ import scala.util.Try
 final class TracingLLMClient private (
   underlying: LLMClient,
   tracing: Tracing,
-  requestModel: Option[String],
+  requestModel: Option[ModelName],
   serverAddress: Option[String]
 ) extends LLMClient {
 
@@ -44,21 +45,18 @@ final class TracingLLMClient private (
     traced(conversation, options, result, elapsed(startedAt), streamed = false, finishReason = None)
   }
 
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val finishReason = new AtomicReference[Option[FinishReason]](None)
     val startedAt    = System.nanoTime()
     val result = underlying.streamComplete(
       conversation,
-      options,
-      chunk => {
-        Option(chunk).flatMap(_.finishReason).filter(_.name.nonEmpty).foreach(r => finishReason.set(Some(r)))
-        onChunk(chunk)
-      }
-    )
+      options
+    ) { chunk =>
+      Option(chunk).flatMap(_.finishReason).filter(_.name.nonEmpty).foreach(r => finishReason.set(Some(r)))
+      onChunk(chunk)
+    }
     traced(conversation, options, result, elapsed(startedAt), streamed = true, finishReason.get)
   }
 
@@ -92,7 +90,7 @@ final class TracingLLMClient private (
           serverAddress = serverAddress,
           streamed = streamed,
           duration = Some(duration),
-          responseModel = Option(completion.model).filter(_.nonEmpty),
+          responseModel = Option(completion.model).filter(_.asString.nonEmpty),
           // a stream's last chunk reason, else the Completion's; an empty Other (none read) is left out
           finishReasons = finishReason.orElse(Option(completion.finishReason)).map(_.name).filter(_.nonEmpty).toSeq,
           usage = completion.usage,
@@ -102,13 +100,13 @@ final class TracingLLMClient private (
         )
       case Left(error) =>
         TraceEvent.ErrorOccurred(
-          new RuntimeException(error.message),
+          error.message,
+          error.getClass.getSimpleName,
           TraceAttributeNames.Chat,
           timestamp = at,
           operation = Some(TraceAttributeNames.Chat),
           model = requestModel,
           provider = providerId,
-          errorType = Some(error.getClass.getSimpleName),
           duration = Some(duration),
           // a filtered reply is billed: its tokens reach the trace, as a success's do (#2676)
           usage = error match {
@@ -134,7 +132,12 @@ object TracingLLMClient {
    * it has one, as the server address.
    */
   def apply(client: LLMClient, tracing: Tracing, config: ProviderConfig): TracingLLMClient =
-    new TracingLLMClient(client, tracing, Option(config.model).filter(_.nonEmpty), config.endpointUrl.flatMap(host))
+    new TracingLLMClient(
+      client,
+      tracing,
+      Option(config.model).filter(_.asString.nonEmpty),
+      config.endpointUrl.map(_.asUrl).flatMap(host)
+    )
 
   private def host(url: String): Option[String] =
     Try(Option(URI.create(url).getHost)).toOption.flatten.filter(_.nonEmpty)

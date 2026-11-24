@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -52,7 +54,14 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
   private val conv = Conversation(Seq(UserMessage("hi")))
 
   private def mkClient(baseUrl: String = "http://localhost:11434"): OllamaClient =
-    new OllamaClient(OllamaConfig(model = "llama3.1", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512))
+    new OllamaClient(
+      OllamaConfig(
+        model = ModelName("llama3.1"),
+        baseUrl = BaseUrl(baseUrl),
+        contextWindow = 4096,
+        reserveCompletion = 512
+      )
+    )
 
   private def body(rf: Option[ResponseFormat], stream: Boolean, opts: CompletionOptions = CompletionOptions()) =
     mkClient()
@@ -82,7 +91,7 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("createRequestBody: keep the rest of the body intact when a format is set") {
-    val opts = CompletionOptions(temperature = 0.3, topP = 0.8, maxTokens = Some(77))
+    val opts = CompletionOptions(temperature = Some(0.3), topP = Some(0.8), maxTokens = Some(77))
     val b    = body(Some(ResponseFormat.JsonSchema(complexSchema)), stream = true, opts)
     b("model").str shouldBe "llama3.1"
     b("stream").bool shouldBe true
@@ -158,9 +167,8 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
     stub.reply = """{"message":{"content":"{\"name\":\"Ada\",\"age\":36}"},"done":true}""" + "\n"
     val res = serverClient.streamComplete(
       conv,
-      CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(complexSchema)),
-      _ => ()
-    )
+      CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(complexSchema))
+    )(_ => ())
     res.isRight shouldBe true
     val sent = ujson.read(received.asScala.toList.head)
     sent("stream").bool shouldBe true

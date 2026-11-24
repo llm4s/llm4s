@@ -1,6 +1,5 @@
 package org.llm4s.context.tokens
 
-import org.llm4s.identity.TokenizerId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

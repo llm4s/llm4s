@@ -75,23 +75,17 @@ object Conversation {
   implicit val rw: RW[Conversation] = macroRW
 
   /**
-   * Create conversation from single message - FIXED MISSING METHOD
+   * Creates a [[Conversation]] of `messages` after validating them with [[Message.validateConversation]]: each
+   * message's own rules, the order of roles, and the pairing of tool calls with their results. An empty sequence is
+   * valid.
+   *
+   * @return the conversation, or a `ValidationError` listing every violation
    */
-  def create(message: Message): Result[Conversation] =
-    Message.validateConversation(List(message)).map(_ => Conversation(messages = List(message)))
+  def create(messages: Seq[Message]): Result[Conversation] =
+    Message.validateConversation(messages).map(_ => Conversation(messages))
 
-  /**
-   * Create conversation from multiple messages - FIXED MISSING METHOD
-   */
-  def create(messages: Message*): Result[Conversation] = create(messages.toList)
-
-  def create(messages: List[Message]): Result[Conversation] =
-    Message.validateConversation(messages).map(_ => Conversation(messages = messages))
-
-  /**
-   * Create empty conversation
-   */
-  def empty(): Conversation = Conversation(messages = List.empty)
+  /** The conversation with no messages. */
+  val empty: Conversation = Conversation(Seq.empty)
 
   /**
    * Create a conversation from system and user prompts (most common pattern).
@@ -111,7 +105,7 @@ object Conversation {
    * @return Result containing the validated conversation or validation error
    */
   def fromPrompts(systemPrompt: String, userPrompt: String): Result[Conversation] =
-    create(List(SystemMessage(systemPrompt), UserMessage(userPrompt)))
+    create(Seq(SystemMessage(systemPrompt), UserMessage(userPrompt)))
 
   /**
    * Create a single-user-message conversation (for simple queries).
@@ -127,7 +121,7 @@ object Conversation {
    * @return Result containing the validated conversation or validation error
    */
   def userOnly(prompt: String): Result[Conversation] =
-    create(UserMessage(prompt))
+    create(Seq(UserMessage(prompt)))
 
   /**
    * Create a system-only conversation (for system prompts).
@@ -145,5 +139,5 @@ object Conversation {
    * @return Result containing the validated conversation or validation error
    */
   def systemOnly(prompt: String): Result[Conversation] =
-    create(SystemMessage(prompt))
+    create(Seq(SystemMessage(prompt)))
 }

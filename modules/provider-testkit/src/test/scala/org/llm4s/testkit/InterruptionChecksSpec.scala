@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, SimpleError }
 import org.llm4s.http.Llm4sHttpClient
@@ -30,7 +31,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
           SimpleError("swallowed")
         }
 
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       http
         .postStream(url, Map.empty, "{}", 30.seconds)
         .flatMap { response =>
@@ -75,7 +76,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
       afterInterrupt()
 
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = waitThen()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       waitThen()
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100
@@ -84,7 +85,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     intercept[TestFailedException](check).getMessage
 
   private def completion =
-    Completion("c", Instant.EPOCH, "late", "m", AssistantMessage("late"))
+    Completion("c", Instant.EPOCH, ModelName("m"), AssistantMessage("late"))
 
   "assertCancelsWhenInterrupted" should "say so when a client clears the interrupt flag" in {
     failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Left(CancelledError("stub"))))) should include(

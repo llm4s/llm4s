@@ -1,7 +1,6 @@
 package org.llm4s.samples.util
 
 import org.llm4s.agent.{ AgentResult, AgentStatus }
-import org.llm4s.toolapi.ToolFunction
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
 import scala.concurrent.duration.*
@@ -27,15 +26,6 @@ object TracingUtil {
       )
     )
 
-  /** Trace agent initialization */
-  def traceAgentInitialization(tracing: Tracing, query: String, tools: Seq[ToolFunction[_, _]]): Unit =
-    tracing.traceEvent(
-      TraceEvent.AgentInitialized(
-        query = query,
-        tools = tools.map(_.name).toVector
-      )
-    )
-
   /** Trace the state an agent run ended in */
   def traceAgentStateUpdate(tracing: Tracing, result: AgentResult): Unit =
     tracing.traceEvent(
@@ -44,15 +34,19 @@ object TracingUtil {
         runId = result.runId.value,
         agent = result.activeAgent.value,
         status = result.status match {
-          case AgentStatus.Completed(_)      => "completed"
-          case AgentStatus.Truncated(_)      => "truncated"
-          case AgentStatus.Blocked(g, _)     => s"blocked:$g"
-          case AgentStatus.StepLimitReached  => "step_limit_reached"
-          case AgentStatus.TokenLimitReached => "token_limit_reached"
-          case _: AgentStatus.Suspended      => "suspended"
+          case AgentStatus.Completed(_)      => TraceEvent.RunStatus.Completed
+          case AgentStatus.Truncated(_)      => TraceEvent.RunStatus.Truncated
+          case AgentStatus.Blocked(_, _)     => TraceEvent.RunStatus.Blocked
+          case AgentStatus.StepLimitReached  => TraceEvent.RunStatus.StepLimitReached
+          case AgentStatus.TokenLimitReached => TraceEvent.RunStatus.TokenLimitReached
+          case _: AgentStatus.Suspended      => TraceEvent.RunStatus.Suspended
         },
         messages = result.messages,
-        usage = result.usage
+        usage = result.usage,
+        blockedBy = result.status match {
+          case AgentStatus.Blocked(guardrail, _) => Some(guardrail)
+          case _                                 => None
+        }
       )
     )
 

@@ -1,12 +1,11 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingProviderConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.fixtures.{ FixtureEmbeddings, FixtureProvider }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.FixtureChatProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -14,6 +13,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.net.URLClassLoader
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderBuildContext, ProviderConfigContext }
 
 /** Lookups honour aliases, an id beats an alias, alias collisions are reported, and discovery is guarded (#2812). */
 class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
@@ -22,21 +22,24 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
     val id: ProviderId                 = ProviderId(name)
     val configSpec: ProviderConfigSpec = ProviderConfigSpec()
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = Left(ConfigurationError(s"stub $name"))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] = Left(
+      ConfigurationError(s"stub $name")
+    )
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-      ModelRegistryService
-    ): Result[LLMClient] = Left(ConfigurationError(s"stub $name"))
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] = Left(
+      ConfigurationError(s"stub $name")
+    )
 
   final private class EmbeddingStub(name: String, override val aliases: Set[String] = Set.empty)
       extends EmbeddingProviderDescriptor:
-    val id: ProviderId = ProviderId(name)
+    val id: ProviderId                                           = ProviderId(name)
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Left(ConfigurationError(s"stub $name"))
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] = Left(
+      ConfigurationError(s"stub $name")
+    )
 
-  private def aliasCollisions(registry: ProviderRegistry) = registry.report.collisions.filter(_.kind.endsWith("alias"))
+  private def aliasCollisions(registry: ProviderRegistry) = registry.report.collisions.filter(_.kind.isAlias)
 
   "find and resolve" should {
     "find a provider by an alias it declares, in any spelling" in {
@@ -68,7 +71,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
       ProviderRegistry.of(acme, beta).resolve(ProviderId("beta")) shouldBe Right(beta)
 
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("chat alias", "beta", "provider 'beta'", Some("provider 'acme'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.ChatAlias,
+          ProviderId("beta"),
+          "provider 'beta'",
+          Some("provider 'acme'")
+        )
       )
       registry.report.describe should include(
         "chat alias 'beta' registered by both provider 'acme' and provider 'beta'"
@@ -89,7 +97,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
 
       registry.resolve(ProviderId("shared")) shouldBe Right(second)
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("chat alias", "shared", "provider 'second'", Some("provider 'first'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.ChatAlias,
+          ProviderId("shared"),
+          "provider 'second'",
+          Some("provider 'first'")
+        )
       )
     }
 
@@ -99,7 +112,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
         new EmbeddingStub("two", aliases = Set("shared"))
       )
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("embedding alias", "shared", "provider 'two'", Some("provider 'one'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.EmbeddingAlias,
+          ProviderId("shared"),
+          "provider 'two'",
+          Some("provider 'one'")
+        )
       )
     }
 
@@ -143,8 +161,8 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
       val module = registry.report.modules
         .find(_.moduleClass.endsWith("SkewedProviderModule"))
         .getOrElse(fail(registry.report.describe))
-      module.providerIds shouldBe Seq("fixturecloud")
-      module.embeddingProviderIds shouldBe Seq("fixtureembed")
+      module.providerIds.map(_.asString) shouldBe Seq("fixturecloud")
+      module.embeddingProviderIds.map(_.asString) shouldBe Seq("fixtureembed")
     }
 
     "scan core's own loader as well when the context loader finds no module" in {

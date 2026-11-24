@@ -1,10 +1,11 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import pureconfig.ConfigSource
@@ -19,29 +20,29 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
 
   private val anthropic: ProviderConfig = AnthropicConfig(
     apiKey = Secret("key"),
-    model = "claude-3-sonnet",
-    baseUrl = "https://api.anthropic.com",
+    model = ModelName("claude-3-sonnet"),
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
 
   test("Anthropic provider with AnthropicConfig returns AnthropicClient") {
-    LLMConnect.getClient(ProviderId("anthropic"), anthropic) match {
+    LLMConnect.getClient(ProviderId("anthropic"), anthropic, LlmClientOptions.default) match {
       case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }
 
   test("an AnthropicConfig routed to another provider is refused") {
-    LLMConnect.getClient(ProviderId("openai"), anthropic).isLeft shouldBe true
+    LLMConnect.getClient(ProviderId("openai"), anthropic, LlmClientOptions.default).isLeft shouldBe true
   }
 
   test("LLMConnect.getClient returns AnthropicClient for the default named Anthropic provider") {
     val hocon =
       """
         |llm4s {
+        |  defaultProvider = "anthropic-main"
         |  providers {
-        |    provider = "anthropic-main"
         |    anthropic-main {
         |      provider = "anthropic"
         |      model = "claude-3-sonnet"
@@ -52,7 +53,7 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
         |}
         |""".stripMargin
 
-    Llm4sConfig.providerFrom(ConfigSource.string(hocon)).flatMap(LLMConnect.getClient) match {
+    Llm4sConfig.providerFrom(ConfigSource.string(hocon)).flatMap(LLMConnect.getClient(_)) match {
       case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }

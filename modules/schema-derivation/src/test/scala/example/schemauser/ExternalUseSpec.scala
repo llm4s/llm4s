@@ -1,5 +1,6 @@
 package example.schemauser
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.schema.*
@@ -34,11 +35,9 @@ class ExternalUseSpec extends AnyFlatSpec with Matchers {
     var sent: Option[CompletionOptions] = None
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       sent = Some(options)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

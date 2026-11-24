@@ -5,6 +5,9 @@ description: "How LLM4S checks binary compatibility with MiMa: stability tiers i
 search_title: "LLM4S API stability and binary compatibility (MiMa)"
 parent: Reference
 nav_order: 12
+cites_open_issues: [1281]
+cites_closed_issues: [1266, 1818, 2357, 2369, 2778, 2781, 2785]
+cites_issues: [2835]
 ---
 
 # API Stability
@@ -49,9 +52,10 @@ none. A type in a module 1.0 does not freeze (anything Beta or Experimental in t
 [Package Map](v1-scope#package-map)) carries neither.
 
 `sbt stabilityTierCheck` (a CI quick check) fails the build for a top-level public type of a frozen
-module that has neither annotation or both, and for a Beta dialect that lives inside a frozen module
-and is not `@Experimental`: today the Mistral, Cohere and xAI dialects of `llm4s-openai-compatible`, listed in
-`build.sbt`. It also fails for a public member of a `@Stable` type whose signature names an
+module that has neither annotation or both, and for a type of a Beta part that lives inside a frozen module
+and is not `@Experimental`: the Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
+`org.llm4s.assistant` in `llm4s-agent`, listed in `build.sbt` (`stabilityExperimentalFiles`; an entry that matches no
+file fails the check too). It also fails for a public member of a `@Stable` type whose signature names an
 `@Experimental` type - a `def`, `val`, enum `case`, nested type or constructor parameter, unless it is `private`,
 `protected` or itself `@Experimental` - because renaming or reshaping the Experimental type would then break the
 Stable signature ([#1818](https://github.com/llm4s/llm4s/issues/1818)). Promote the type, or keep the member out of
@@ -59,10 +63,26 @@ the Stable surface. It runs its own fixtures first (`StabilityTiers.selfTest`), 
 such a leak fails the build. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
 bytecode member. It covers every module in 1.0 Scope's Frozen-at-1.0 tier (`stabilityTierModules` in `build.sbt`):
 `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama` and
-`llm4s-agent` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). In `llm4s-agent` the agent, graph, event,
-middleware and guardrail APIs are `@Stable`; the harness, the run queue and worker (`agent.service`), encryption,
-subagent definition (`agent.delegation`), permissions, the checkpointer SPI and settings, the RAG guardrails and
-`org.llm4s.assistant` are `@Experimental`.
+`llm4s-agent` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). `llm4s-agent` has a small Stable core
+([#2785](https://github.com/llm4s/llm4s/issues/2785)), so that the runtime underneath can keep improving in 1.x:
+
+| Package | `@Stable` |
+|---|---|
+| `org.llm4s.agent` | `Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, `AgentId` |
+| `org.llm4s.agent.graph` | `ThreadId`, `RunId`, `InterruptId`, `NodeId`, `TenantId`, `Principal`, `RunConfig`, `RunBudgets`, `RetentionPolicy`, `RunStatus` |
+| `org.llm4s.agent.guardrails` | `Guardrail`, `InputGuardrail`, `OutputGuardrail` |
+| `org.llm4s.agent.guardrails.builtin` | `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator` |
+
+Everything else in the module is `@Experimental`: the graph runtime, checkpoints and the `Checkpointer` contract,
+events and streaming, middleware (`GuardrailMiddleware` included), the tool and tool-loop APIs, delegation, the
+harness, the run queue and worker (`agent.service`), encryption, metrics, the other guardrails and
+`org.llm4s.assistant`. So are the members of the Stable types that name them: on `AgentBuilder`, `withToolSet`,
+`withMiddleware`, `withHarness`, `withSubagents`, `withDelegation`, `withMaxPromptSectionTokens`, `withRuntime`,
+`withStreaming` and `withInterruptBefore`/`After`; on `Agent`, `loop`, `delegation`, `children`, `subscribeChild`,
+`abandon`, `resume`, `startResume`, `stream`, `streamResume` and `streamRecover`; on `AgentResult`, `approve`,
+`reject`, `edit`, `reply` and `proceed`; `AgentRun.subscribe`; on `RunConfig`, `withInterruptBefore`/`After` and
+`withChildRetention`; `Guardrail.validateIn(value, context)`; and the `AgentStatus.Suspended` case. Streaming, human
+review and durable persistence are usable at 1.0, but not promised.
 
 The same check enforces [RFC 0004](../rfcs/#index): a public member of a `@Stable` type must not expose a
 third-party type, because freezing the signature would freeze the library behind it
@@ -110,17 +130,19 @@ a case that may grow holds one growth-safe class, and is read by name through it
 ```scala
 @Stable
 enum AgentStatus:
-  case Completed(answer: String)         // closed: exactly the answer, listed in GrowthExempted
-  case Suspended(suspension: Suspension) // may grow: Suspension is a `final case class Suspension private (...)`
+  case Completed(answer: String)                       // closed: exactly the answer, listed in GrowthExempted
+  @Experimental case Suspended(suspension: Suspension) // may grow: `final case class Suspension private (...)`
 
 status match
   case AgentStatus.Suspended(suspension) => suspension.approvals
 ```
 
-Every case with fields is on the allow-list with its reason: the wrapper as "holding only its growth-safe
-`Suspension`", a closed case (a single value, an error or outcome case whose fields are what it is, a stored form
-whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
-`@Experimental` itself, is not checked.
+Every case with fields of a `@Stable` enum is on the allow-list with its reason: a wrapper as "holding only its
+growth-safe" payload, a closed case (a single value, an error or outcome case whose fields are what it is, a stored
+form whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
+`@Experimental` itself, is not checked and has no entry: `AgentStatus.Suspended` is one
+([#2785](https://github.com/llm4s/llm4s/issues/2785)), and holds a `Suspension` all the same, so that it can be
+promoted without changing shape.
 
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
@@ -130,7 +152,7 @@ comparisons, and mark a Package Map row `tier-drift: ignore` to opt it out.
 MiMa skips a type annotated `@Experimental` inside a frozen module: `mimaFrozen` in `build.sbt` adds
 `mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`, so such a type needs no `ProblemFilters.exclude`
 entry (a `@Stable` type is still checked). `scripts/mima-dry-run.sh` proves both on every run; see
-[Release readiness](release#release-readiness-a-mima-dry-run).
+[Release readiness](../contribute/release#release-readiness-a-mima-dry-run).
 
 ---
 
@@ -157,6 +179,17 @@ no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Expe
 [Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
 Experimental needs a `ProblemFilters.exclude` entry that says why. There are none yet because no baseline is
 set (see [The Baseline](#the-baseline)).
+
+An `@Experimental` *member* of a Stable type is skipped only partly, because MiMa 1.1 reads a Scala 3 member's
+annotations from TASTy, for methods alone, and by name ([#2785](https://github.com/llm4s/llm4s/issues/2785)):
+
+- an `@Experimental def` is skipped, and so is **every overload of the same name**, Stable or not, so an
+  Experimental method never shares its name with a Stable one: `AgentBuilder.withToolSet` beside the Stable
+  `withTools(registry)`, `Guardrail.validateIn(value, context)` beside the Stable `validate(value)`
+  ([#2835](https://github.com/llm4s/llm4s/issues/2835));
+- an `@Experimental val` is still checked: write it as a `def`;
+- an `@Experimental` enum `case` (`AgentStatus.Suspended`) may change shape freely, but removing it is reported once,
+  as the companion's field (`MissingFieldProblem`), which needs a filter.
 
 If you find yourself importing from a Beta or Experimental package, please open an issue: it likely
 means the stable API is missing something.
@@ -216,10 +249,13 @@ the file; they cannot be changed with `set`:
    silently hide a real break in the same class. Then re-run the check and re-add only what the new baseline needs.
 5. Update this page and the CHANGELOG entry if the covered module list changes.
 
-Before the first run against the baseline, review the Beta parts that ship inside frozen modules, because
-[1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral, Cohere
-and xAI dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
-decide that they are frozen too. A module that must miss the shared baseline is held back with
+The Beta parts that ship inside frozen modules are left out of the 0.7.0 baseline, because [1.0 Scope](v1-scope)
+does not freeze them ([#2835](https://github.com/llm4s/llm4s/issues/2835)): `org.llm4s.assistant.*` (`llm4s-agent`)
+and the Mistral, Cohere and xAI dialects (`llm4s-openai-compatible`). No filter lists them. Every one of their
+top-level types is `@Experimental`, which `stabilityTierCheck` enforces for the files `stabilityExperimentalFiles` in
+`build.sbt` names, and MiMa skips an `@Experimental` class together with its companion and every class nested in it
+(`mimaExcludeAnnotations` reads the annotation along the class's chain of enclosing classes). A Beta part added to a
+frozen module later joins that list. A module that must miss the shared baseline is held back with
 `"<module>" -> None` in `mimaBaselineOverrides` and given `Some("X.Y.Z")` later; it stays a frozen module
 meanwhile, so the stability, dependency and tier checks keep covering it. No module is planned to: `llm4s-agent`
 takes the shared baseline ([RFC 0001](../rfcs/0001-agent-baseline), rejected).
@@ -264,4 +300,4 @@ baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) a
 With a baseline set, success means the frozen API is compatible, and failure lists each problem with
 the `ProblemFilters.exclude` line that would silence it. To check one module, run
 `sbt agent/mimaReportBinaryIssues`. Until a baseline is set, `scripts/mima-dry-run.sh` checks that this wiring
-works (see [Release readiness](release#release-readiness-a-mima-dry-run)).
+works (see [Release readiness](../contribute/release#release-readiness-a-mima-dry-run)).

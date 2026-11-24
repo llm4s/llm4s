@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -37,9 +39,9 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   private def config(key: String, model: String = "deepseek-chat"): DeepSeekConfig =
     DeepSeekConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
-        baseUrl = "https://api.deepseek.com"
+        baseUrl = BaseUrl("https://api.deepseek.com")
       )
       .value
 
@@ -67,7 +69,7 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     val client = DeepSeekClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -98,4 +100,10 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(DeepSeekClient(config("sk-invalid-key-for-testing")))
+
+  registerValidationContract()
 }

@@ -2,7 +2,8 @@ package org.llm4s.doctor
 
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.config.{ Llm4sConfig, SharedCredentials }
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName, RawNamedProviderSection }
+import org.llm4s.config.{ NamedProviderConfig, RawNamedProviderSection }
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.LLMConnect
@@ -72,7 +73,7 @@ private[doctor] object DoctorPorts {
       conversation <- Conversation.userOnly("Reply with the single word: ok")
       client       <- LLMConnect.getClient(config)(using service, registry)
       completion   <- Using.resource(client)(_.complete(conversation, CompletionOptions().withMaxTokens(8)))
-    } yield completion.model
+    } yield completion.model.asString
 }
 
 /**
@@ -226,7 +227,7 @@ object Doctor {
         DoctorCheck
           .fail(ConfigStep, "readable, but there is no section under llm4s.providers")
           .withFix(
-            """add one to application.conf: llm4s.providers { provider = "main", main { provider = "ollama", model = "llama3" } }"""
+            """add one to application.conf: llm4s.defaultProvider = "main", llm4s.providers { main { provider = "ollama", model = "llama3" } }"""
           ) :: skipped("needs a provider section", AfterConfig)
       case (None, Right((selected, sections))) =>
         val names = sections.keys.map(_.asName).toList.sorted
@@ -249,18 +250,18 @@ object Doctor {
     selected match {
       case None =>
         DoctorCheck
-          .fail(Default, s"llm4s.providers.provider is not set (sections: ${names.mkString(", ")})")
+          .fail(Default, s"llm4s.defaultProvider is not set (sections: ${names.mkString(", ")})")
           .withFix(
-            s"""set llm4s.providers.provider = "${names.head}" in application.conf, or name another section"""
+            s"""set llm4s.defaultProvider = "${names.head}" in application.conf, or name another section"""
           ) ::
           skipped("needs a default provider", AfterDefault)
       case Some(name) =>
         sections.get(name) match {
           case None =>
             DoctorCheck
-              .fail(Default, s"llm4s.providers.provider names '${name.asName}', but there is no such section")
+              .fail(Default, s"llm4s.defaultProvider names '${name.asName}', but there is no such section")
               .withFix(
-                s"""set llm4s.providers.provider to one of: ${names.mkString(
+                s"""set llm4s.defaultProvider to one of: ${names.mkString(
                     ", "
                   )} (or add a section called '${name.asName}')"""
               ) :: skipped("needs a default provider", AfterDefault)
@@ -307,7 +308,7 @@ object Doctor {
 
   /** The module that supplied `id` and where it was loaded from, when the registry was discovered. */
   private def moduleFound(id: ProviderId, options: DoctorOptions)(using registry: ProviderRegistry): DoctorCheck = {
-    val supplier = registry.report.modules.reverse.find(_.providerIds.contains(id.asString)).map { module =>
+    val supplier = registry.report.modules.reverse.find(_.providerIds.contains(id)).map { module =>
       val where = module.source.map { location =>
         val trimmed = location.stripSuffix("/")
         if (trimmed.endsWith(".jar")) trimmed.substring(trimmed.lastIndexOf('/') + 1) else location
@@ -330,7 +331,9 @@ object Doctor {
     if (key.status == CheckStatus.Fail) {
       key :: skipped("needs the API key", List(Section, LocalModel, Live))
     } else {
-      val built = Llm4sConfig.providerSection(source, name).flatMap(s => Llm4sConfig.providerFrom(source).map(s -> _))
+      val built = Llm4sConfig
+        .providerSection(source, ProviderName(name))
+        .flatMap(s => Llm4sConfig.providerFrom(source).map(s -> _))
       val sectionC = sectionCheck(name, built)
       val rest = built match {
         case Left(_) => skipped("needs a valid provider config", List(LocalModel, Live))
@@ -350,7 +353,7 @@ object Doctor {
     if (!descriptor.configSpec.requiresApiKey) {
       DoctorCheck.pass(Key, s"'${descriptor.id.asString}' needs no API key")
     } else if (descriptor.configSpec.isKeyless(section.extras)) {
-      val setting = descriptor.configSpec.keylessWhen.fold("")((key, value) => s"$key = $value")
+      val setting = descriptor.configSpec.keylessWhen.fold("")(_.describe)
       DoctorCheck.pass(Key, s"section '$name' authenticates with $setting and needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
@@ -401,7 +404,7 @@ object Doctor {
     options: DoctorOptions,
     ports: DoctorPorts
   ): DoctorCheck = {
-    val base = section.baseUrl.map(_.asUrl).orElse(descriptor.configSpec.defaultBaseUrl)
+    val base = section.baseUrl.orElse(descriptor.configSpec.defaultBaseUrl).map(_.asUrl)
     base match {
       case Some(raw) if isLoopback(raw) =>
         val url = DoctorUrls.display(raw)
@@ -514,7 +517,8 @@ object Doctor {
     val others = names.filterNot(name => selected.exists(_.asName == name))
     if (others.isEmpty) DoctorCheck.skipped(Others, "there is no section besides the default")
     else {
-      val problems = others.flatMap(name => Llm4sConfig.provider(source, name).left.toOption.map(name -> _.message))
+      val problems =
+        others.flatMap(name => Llm4sConfig.provider(source, ProviderName(name)).left.toOption.map(name -> _.message))
       if (problems.isEmpty) DoctorCheck.pass(Others, s"${others.size} more section(s) load: ${others.mkString(", ")}")
       else
         DoctorCheck

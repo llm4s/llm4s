@@ -55,9 +55,9 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     metrics.addTokens("anthropic", "claude", 7L, 3L)
     metrics.recordCost("openai", "gpt-4o", 0.5)
     metrics.recordCost("openai", "gpt-4o", 0.25)
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 4.seconds, 2)
-    metrics.observeImageGeneration("openai", "dall-e-3", "edit", Outcome.Error(ErrorKind.Network), 500.millis, 1)
-    metrics.recordImageGenerationCost("openai", "dall-e-3", 0.5, 2)
+    // a failed operation a module above core adds to llm4s_errors_total, as llm4s-image does. The image series
+    // themselves are compared, for both collectors, by llm4s-image's ImageMetricsSeriesSpec (#2801)
+    metrics.increment(MetricsCollector.Errors, Seq("openai", "network"))
     // what ReliableClient records: generic metrics core declares, which both collectors export (#2801)
     metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
     metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
@@ -113,13 +113,13 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "use the Prometheus module's bucket boundaries for both durations" in {
+  it should "use the Prometheus module's bucket boundaries for the request duration and for a generic timer" in {
     def bounds(samples: Seq[Sample], name: String): Set[Double] =
       samples.filter(_.name == name).flatMap(_.labels.get("le")).map(_.replace("+Inf", "Infinity").toDouble).toSet
 
     val micrometer = micrometerSamples()
     val prometheus = prometheusSamples()
-    Seq("llm4s_request_duration_seconds_bucket", "llm4s_image_generation_duration_seconds_bucket").foreach { name =>
+    Seq("llm4s_request_duration_seconds_bucket", "llm4s_test_wait_seconds_bucket").foreach { name =>
       withClue(s"$name: ")(bounds(micrometer, name) shouldBe bounds(prometheus, name))
     }
     (bounds(micrometer, "llm4s_request_duration_seconds_bucket") should contain).allOf(

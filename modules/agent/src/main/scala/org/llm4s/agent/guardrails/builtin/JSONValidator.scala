@@ -29,7 +29,7 @@ import scala.util.Try
  * @param schema Optional JSON schema to validate against (minimal subset)
  */
 @Stable
-class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail {
+final class JSONValidator private (schema: Option[ujson.Value]) extends OutputGuardrail {
 
   override def validate(value: String): Result[String] =
     // 1) Parse JSON. The output is model text: nested more than 512 levels deep it is refused
@@ -167,7 +167,7 @@ object JSONValidator {
   /**
    * Create a JSON validator without schema validation.
    */
-  def apply(): JSONValidator = new JSONValidator()
+  def apply(): JSONValidator = new JSONValidator(None)
 
   /**
    * Create a JSON validator with schema validation.

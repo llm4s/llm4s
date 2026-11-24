@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
@@ -22,7 +22,7 @@ enum RunStatus:
  * Its thread was claimed before the handle was returned, and the run executes on a virtual thread
  * owned by the runtime, named `llm4s-run-<threadId>`, which holds the thread until it exits.
  */
-@Stable
+@Experimental
 trait RunHandle[O]:
   def threadId: ThreadId
   def runId: RunId

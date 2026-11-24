@@ -323,8 +323,8 @@ private[graphrag] object GraphRAG {
   def hasSummaries(hierarchy: GraphCommunityHierarchy): Boolean =
     hierarchy.allCommunities.forall(_.summary.exists(_.trim.nonEmpty))
 
-  private val SummaryModelTemp       = CompletionOptions(temperature = 0.0, maxTokens = Some(512))
-  private val AnswerModelTemp        = CompletionOptions(temperature = 0.0, maxTokens = Some(1024))
+  private val SummaryModelTemp       = CompletionOptions(temperature = Some(0.0), maxTokens = Some(512))
+  private val AnswerModelTemp        = CompletionOptions(temperature = Some(0.0), maxTokens = Some(1024))
   private val NamePropertyKeys       = Seq("name", "title", "entity", "id")
   private val ProvenancePropertyKeys = Seq("source", "docId", "documentId", "path")
 

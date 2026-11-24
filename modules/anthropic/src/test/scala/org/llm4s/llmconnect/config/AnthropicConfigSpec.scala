@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -23,29 +24,30 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val anthropic = AnthropicConfig(Secret("k"), "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+  private val anthropic =
+    AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"), BaseUrl("https://api.anthropic.com"), 200000, 4096)
 
   // ---- fromValues (from ProviderConfigSpec) ----
 
   test("AnthropicConfig.fromValues creates config with correct model") {
     val config = AnthropicConfig
       .fromValues(
-        modelName = "claude-3-sonnet-20240229",
+        modelName = ModelName("claude-3-sonnet-20240229"),
         apiKey = Secret("test-key"),
-        baseUrl = "https://api.anthropic.com"
+        baseUrl = BaseUrl("https://api.anthropic.com")
       )
       .value
 
-    config.model shouldBe "claude-3-sonnet-20240229"
+    config.model.asString shouldBe "claude-3-sonnet-20240229"
     config.apiKey.reveal shouldBe "test-key"
   }
 
   test("AnthropicConfig.fromValues sets large context window for claude-3") {
     val config = AnthropicConfig
       .fromValues(
-        modelName = "claude-3-opus-20240229",
+        modelName = ModelName("claude-3-opus-20240229"),
         apiKey = Secret("test-key"),
-        baseUrl = "https://api.anthropic.com"
+        baseUrl = BaseUrl("https://api.anthropic.com")
       )
       .value
 
@@ -54,10 +56,10 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("AnthropicConfig.fromValues keeps DEFAULT_BASE_URL as given") {
     AnthropicConfig
-      .fromValues("claude-3-sonnet", Secret(apiKey), AnthropicConfig.DEFAULT_BASE_URL)
+      .fromValues(ModelName("claude-3-sonnet"), Secret(apiKey), AnthropicConfig.DEFAULT_BASE_URL)
       .value
       .baseUrl shouldBe
-      "https://api.anthropic.com"
+      BaseUrl("https://api.anthropic.com")
   }
 
   // ---- blank fields (from ProviderConfigSpec and ProviderConfigLoaderTest) ----
@@ -65,9 +67,9 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test("AnthropicConfig.fromValues fails for empty apiKey") {
     AnthropicConfig
       .fromValues(
-        modelName = "claude-3-sonnet",
+        modelName = ModelName("claude-3-sonnet"),
         apiKey = Secret(""),
-        baseUrl = "https://api.anthropic.com"
+        baseUrl = BaseUrl("https://api.anthropic.com")
       )
       .left
       .value shouldBe a[ConfigurationError]
@@ -75,14 +77,14 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("AnthropicConfig.fromValues reports the first blank field when several are blank") {
     AnthropicConfig
-      .fromValues("claude-3", Secret(""), "")
+      .fromValues(ModelName("claude-3"), Secret(""), BaseUrl(""))
       .left
       .value
       .message shouldBe "Anthropic apiKey must be non-empty"
   }
 
   test("AnthropicConfig.fromValues returns a Left for a blank baseUrl") {
-    AnthropicConfig.fromValues("claude-3", Secret("key"), " ").left.value.message shouldBe
+    AnthropicConfig.fromValues(ModelName("claude-3"), Secret("key"), BaseUrl(" ")).left.value.message shouldBe
       "Anthropic baseUrl must be non-empty"
   }
 
@@ -90,25 +92,26 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // Model names use a "patch-cov-" prefix so the registry misses and the fallback runs.
 
   test("AnthropicConfig fallback returns 200000 for claude-3-like model") {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-3", Secret(apiKey), baseUrl).value
+    val cfg = AnthropicConfig.fromValues(ModelName("patch-cov-claude-3"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 200000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AnthropicConfig fallback returns 200000 for claude-3.5-like model") {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-3.5-sonnet", Secret(apiKey), baseUrl).value
+    val cfg =
+      AnthropicConfig.fromValues(ModelName("patch-cov-claude-3.5-sonnet"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 200000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AnthropicConfig fallback returns 100000 for claude-instant-like model") {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-instant", Secret(apiKey), baseUrl).value
+    val cfg = AnthropicConfig.fromValues(ModelName("patch-cov-claude-instant"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 100000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AnthropicConfig fallback returns 200000 for unknown model") {
-    val cfg = AnthropicConfig.fromValues("patch-cov-unknown", Secret(apiKey), baseUrl).value
+    val cfg = AnthropicConfig.fromValues(ModelName("patch-cov-unknown"), Secret(apiKey), BaseUrl(baseUrl)).value
     cfg.contextWindow shouldBe 200000
     cfg.reserveCompletion shouldBe 4096
   }
@@ -119,9 +122,9 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val secret = "sk-ant-super-secret-value-123456"
     val config = AnthropicConfig
       .fromValues(
-        modelName = "claude-3-5-sonnet-20241022",
+        modelName = ModelName("claude-3-5-sonnet-20241022"),
         apiKey = Secret(secret),
-        baseUrl = "https://example.invalid"
+        baseUrl = BaseUrl("https://example.invalid")
       )
       .value
 
@@ -137,9 +140,9 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("AnthropicConfig.withModel changes only the model") {
-    val renamed = anthropic.withModel("some-other-model")
+    val renamed = anthropic.withModel(ModelName("some-other-model"))
 
-    renamed.model shouldBe "some-other-model"
+    renamed.model.asString shouldBe "some-other-model"
     renamed.providerId shouldBe anthropic.providerId
     renamed.getClass shouldBe anthropic.getClass
     renamed.endpointUrl shouldBe anthropic.endpointUrl
@@ -151,19 +154,31 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // ---- growth-prone construction (#1388) ----
 
   test("AnthropicConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
-    val config = AnthropicConfig(Secret("k"), "claude-sonnet-4-5")
+    val config = AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"))
 
-    config shouldBe AnthropicConfig(Secret("k"), "claude-sonnet-4-5", AnthropicConfig.DEFAULT_BASE_URL, 200000, 4096)
-    AnthropicConfig(Secret("k"), "claude-instant-1").contextWindow shouldBe 100000
+    config shouldBe AnthropicConfig(
+      Secret("k"),
+      ModelName("claude-sonnet-4-5"),
+      AnthropicConfig.DEFAULT_BASE_URL,
+      200000,
+      4096
+    )
+    AnthropicConfig(Secret("k"), ModelName("claude-instant-1")).contextWindow shouldBe 100000
   }
 
   test("AnthropicConfig's setters each change one field") {
     val adjusted = anthropic
       .withApiKey(Secret("k2"))
-      .withBaseUrl("https://proxy.example.com")
+      .withBaseUrl(BaseUrl("https://proxy.example.com"))
       .withContextWindow(100000)
       .withReserveCompletion(2048)
 
-    adjusted shouldBe AnthropicConfig(Secret("k2"), "claude-sonnet-4-5", "https://proxy.example.com", 100000, 2048)
+    adjusted shouldBe AnthropicConfig(
+      Secret("k2"),
+      ModelName("claude-sonnet-4-5"),
+      BaseUrl("https://proxy.example.com"),
+      100000,
+      2048
+    )
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Agent, AgentStatus, CompletionFixture, ScriptedLLMClient }
@@ -27,11 +28,11 @@ import scala.concurrent.duration.*
 class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private def call(name: String, args: ujson.Obj, id: String = "c1"): Completion =
-    CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall(id, name, args))))
+    CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall(ToolCallId(id), name, args))))
 
   private def calls(cs: (String, ujson.Obj)*): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, cs.zipWithIndex.map { case ((name, args), i) => ToolCall(s"c$i", name, args) })
+      AssistantMessage(None, cs.zipWithIndex.map { case ((name, args), i) => ToolCall(ToolCallId(s"c$i"), name, args) })
     )
 
   /** The text of `path` in `state`, read through `backend`; `None` when it does not exist. */
@@ -277,9 +278,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
           Right(call("read_file", ujson.Obj("path" -> path, "offset" -> 1499, "limit" -> 1), "c2"))
         } else Right(CompletionFixture.simple("read"))
       }
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 128000
@@ -288,7 +287,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     val agent = built(
       Agent
         .builder("researcher", client)
-        .withTools(ToolSet.of(fetch).value)
+        .withToolSet(ToolSet.of(fetch).value)
         .withHarness(HarnessProfile().withOffload(OffloadConfig(thresholdTokens = 1000)))
     )
     val results = agent.run("research").value.messages.collect { case t: ToolMessage => t.content }
@@ -329,7 +328,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
       Agent
         .builder("writer", client)
         .withHarness(HarnessProfile(backend = backend).withTodos(TodoConfig()))
-        .withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(1, 5))))
+        .withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(1, 5))))
         .withRuntime(GraphRuntime(store))
     )
     agent.run(ThreadId("blocked"), "write").value.status shouldBe a[AgentStatus.Blocked]

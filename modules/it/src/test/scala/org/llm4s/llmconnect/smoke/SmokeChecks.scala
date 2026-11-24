@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.llmconnect.model.{
@@ -116,7 +117,7 @@ object SmokeChecks {
    */
   val StructuredPrompt = "Report the colour blue and the count 3."
 
-  private def small: CompletionOptions = CompletionOptions(temperature = 0.0, maxTokens = Some(24))
+  private def small: CompletionOptions = CompletionOptions(temperature = Some(0.0), maxTokens = Some(24))
 
   private def fail(capability: Capability, detail: String): Outcome =
     Outcome.Failed(s"[${capability.label}] $detail")
@@ -181,7 +182,7 @@ object SmokeChecks {
     val conversation = Conversation(
       Seq(
         UserMessage("Pick a four-digit favourite number for me and tell me what it is."),
-        AssistantMessage(contentOpt = Some(s"Your favourite number is $FavouriteNumber.")),
+        AssistantMessage(text = Some(s"Your favourite number is $FavouriteNumber.")),
         UserMessage("What is my favourite number? Reply with the number only.")
       )
     )
@@ -201,11 +202,11 @@ object SmokeChecks {
   /** The properties the contract's tool declares; its object schema allows no others (`additionalProperties`). */
   private val ToolProperties = Set("topic")
 
-  private def secretCodeTool: Either[String, ToolFunction[_, _]] = {
+  private def secretCodeTool: Either[String, ToolFunction[_]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Secret code parameters")
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
-    ToolBuilder[Map[String, Any], String](ToolName, "Looks up the secret code for a topic", schema)
+    ToolBuilder[String](ToolName, "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => SecretCode))
       .buildSafe()
       .left
@@ -218,13 +219,17 @@ object SmokeChecks {
    * validate the schema, and the handler would ignore an extra one), which the handler then accepts. Returns the
    * call and what the tool returns for it.
    */
-  private def calledTool(tool: ToolFunction[_, _], completion: Completion): Either[String, (ToolCall, String)] =
+  private def calledTool(tool: ToolFunction[_], completion: Completion): Either[String, (ToolCall, String)] =
     for {
       call <- completion.toolCalls.headOption.toRight(
         s"the model did not call the tool; it said ${snippet(completion.content)}"
       )
-      _      <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
-      _      <- Either.cond(call.id.nonEmpty, (), "the tool call has an empty id, so its result cannot be sent back")
+      _ <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
+      _ <- Either.cond(
+        call.id.asString.nonEmpty,
+        (),
+        "the tool call has an empty id, so its result cannot be sent back"
+      )
       fields <- call.arguments.objOpt.toRight(s"the call's arguments are not a JSON object: ${call.arguments}")
       undeclared = fields.keySet.diff(ToolProperties)
       _ <- Either.cond(
@@ -239,8 +244,8 @@ object SmokeChecks {
       result <- value.strOpt.toRight(s"the tool returned something other than a string: $value")
     } yield (call, result)
 
-  private def toolOptions(tool: ToolFunction[_, _]): CompletionOptions =
-    CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(tool))
+  private def toolOptions(tool: ToolFunction[_]): CompletionOptions =
+    CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(tool))
 
   /**
    * A tool call round trip: the model calls the tool, the result goes back as a `ToolMessage`, and the model's
@@ -257,7 +262,7 @@ object SmokeChecks {
         called <- calledTool(tool, first)
         withResult = Conversation(
           ask.messages ++ Seq(
-            AssistantMessage(contentOpt = first.message.contentOpt, toolCalls = first.toolCalls),
+            AssistantMessage(text = first.message.text, toolCalls = first.toolCalls),
             ToolMessage(content = called._2, toolCallId = called._1.id)
           )
         )
@@ -290,13 +295,14 @@ object SmokeChecks {
         completion <- client
           .streamComplete(
             Conversation(Seq(UserMessage(ToolPrompt))),
-            toolOptions(tool),
-            chunk => { chunks += chunk; () }
-          )
+            toolOptions(tool)
+          ) { chunk =>
+            chunks += chunk; ()
+          }
           .left
           .map(e => s"the streamed request carrying a tool failed: ${e.message}")
         _ <- calledTool(tool, completion)
-        idless = chunks.flatMap(_.toolCall).filter(_.id.isEmpty)
+        idless = chunks.flatMap(_.toolCall).filter(_.id.asString.isEmpty)
         _ <- Either.cond(
           idless.isEmpty,
           (),
@@ -309,11 +315,9 @@ object SmokeChecks {
 
   /** The completion a consumer of `onChunk` would rebuild from `chunks`. */
   private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
-    val accumulator = StreamingAccumulator("")
+    val accumulator = StreamingAccumulator(ModelName(""))
     chunks.foreach(accumulator.addChunk)
-    accumulator.toCompletion
-      .map(c => c.withToolCalls(c.message.toolCalls.toList))
-      .left
+    accumulator.toCompletion.left
       .map(e => s"the streamed chunks did not reassemble: ${e.message}")
   }
 
@@ -352,7 +356,7 @@ object SmokeChecks {
     val jsonSchema = schema.toJsonSchema(strict = true)
     val declared   = jsonSchema.obj.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty)
     val options =
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64))
         .withResponseFormat(ResponseFormat.JsonSchema(jsonSchema))
     outcome(
       Capability.StructuredOutput,
@@ -424,7 +428,7 @@ object SmokeChecks {
       Capability.StreamedUsage,
       for {
         completion <- client
-          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small, _ => ())
+          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small)(_ => ())
           .left
           .map(e => s"the streamed call failed: ${e.message}")
         _ <- usageProblem(completion.usage).toLeft(())

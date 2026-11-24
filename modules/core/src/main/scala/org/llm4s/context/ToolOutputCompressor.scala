@@ -1,9 +1,9 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.ContextError
 import org.llm4s.llmconnect.model.{ ContentPart, Message, ToolMessage }
-import org.llm4s.types.{ ArtifactKey, ContentSize, ExternalizationThreshold, ExternalizedContent, Result }
+import org.llm4s.types.{ ArtifactKey, ContentSize, Result }
 import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 import ujson._
@@ -46,12 +46,12 @@ import ujson._
  * @see [[ArtifactStore]] for content storage interface
  * @see [[DeterministicCompressor]] which uses this for the tool compaction phase
  */
-@Stable
+@Experimental
 object ToolOutputCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Content larger than this is externalized to artifact storage (default: 8KB) */
-  private val DefaultExternalizationThreshold: ExternalizationThreshold = 8192L
+  private val DefaultExternalizationThreshold: Long = 8192L
 
   /** Content larger than this but under externalization threshold gets inline compression (2KB) */
   private val MaxInlineToolOutput = 2048L
@@ -71,7 +71,7 @@ object ToolOutputCompressor {
   def compressToolOutputs(
     messages: Seq[Message],
     artifactStore: ArtifactStore,
-    threshold: ExternalizationThreshold = DefaultExternalizationThreshold
+    threshold: Long = DefaultExternalizationThreshold
   ): Result[Seq[Message]] =
     compress(messages, Some(artifactStore), threshold)
 
@@ -83,7 +83,7 @@ object ToolOutputCompressor {
   private[context] def compress(
     messages: Seq[Message],
     artifactStore: Option[ArtifactStore],
-    threshold: ExternalizationThreshold = DefaultExternalizationThreshold
+    threshold: Long = DefaultExternalizationThreshold
   ): Result[Seq[Message]] = {
     val processed = messages.map {
       case tool: ToolMessage => compressToolMessage(tool, artifactStore, threshold)
@@ -114,10 +114,10 @@ object ToolOutputCompressor {
   private def compressToolMessage(
     message: ToolMessage,
     store: Option[ArtifactStore],
-    threshold: ExternalizationThreshold
+    threshold: Long
   ): Result[Message] = {
     val texts                        = message.parts.collect { case ContentPart.Text(t) => t }
-    def bytes(ts: Seq[String]): Long = ts.map(t => ContentSize.fromString(t).bytes).sum
+    def bytes(ts: Seq[String]): Long = ts.map(t => ContentSize.fromString(t).asBytes).sum
     val total                        = bytes(texts)
 
     def rewriteEach(f: String => Result[String]): Result[Vector[ContentPart]] =
@@ -138,7 +138,7 @@ object ToolOutputCompressor {
         message.parts.zipWithIndex.collect {
           case (_: ContentPart.Text, `first`)           => ContentPart.Text(pointer)
           case (media, _) if ContentPart.isMedia(media) => media
-        }
+        }.toVector
       }
     }
 
@@ -178,15 +178,14 @@ object ToolOutputCompressor {
     artifactStore: ArtifactStore,
     contentType: String
   ): Result[String] = {
-    val key         = ArtifactKey.fromContent(content)
-    val contentSize = ContentSize.fromString(content)
-    val summary     = generateContentSummary(content, contentType)
+    val key     = ArtifactKey.fromContent(content)
+    val summary = generateContentSummary(content, contentType)
 
     for {
       _ <- artifactStore.store(key, content).left.map { error =>
-        ContextError.artifactStoreFailed("store", key.value, error.message)
+        ContextError.artifactStoreFailed("store", key.asString, error.message)
       }
-      externalizedInfo = ExternalizedContent(key, contentSize.bytes, contentType, summary)
+      externalizedInfo = ExternalizedContent(key, contentType, summary)
     } yield createContentPointer(externalizedInfo)
   }
 
@@ -410,7 +409,7 @@ object ToolOutputCompressor {
  * Use [[ArtifactStore.inMemory]] for testing and short-lived sessions.
  * For production, implement with persistent storage (database, S3, etc.).
  */
-@Stable
+@Experimental
 trait ArtifactStore {
 
   /** Store content under the given key. */
@@ -426,6 +425,7 @@ trait ArtifactStore {
 /**
  * Factory methods for [[ArtifactStore]] implementations.
  */
+@Experimental
 object ArtifactStore {
 
   /** Create an in-memory artifact store (suitable for testing). */
@@ -454,3 +454,6 @@ private class InMemoryArtifactStore extends ArtifactStore {
   def exists(key: ArtifactKey): Boolean =
     storage.containsKey(key)
 }
+
+/** What stands in a conversation for content moved to an [[ArtifactStore]]. */
+final private case class ExternalizedContent(key: ArtifactKey, contentType: String, summary: String)

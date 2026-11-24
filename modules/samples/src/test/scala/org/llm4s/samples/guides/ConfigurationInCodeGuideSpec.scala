@@ -1,5 +1,7 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.syntax.all.*
@@ -25,14 +27,14 @@ import zio.config.*
  */
 class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
-  private val model = "gpt-4o-mini"
+  private val model = "gpt-5.6-luna"
 
   /** The plain-values recipe that the ciris and zio-config ones end in. */
   private def openAiClient(model: String, apiKey: String, baseUrl: String): Result[LLMClient] =
     for {
       registry <- ModelRegistryService.default()
       given ModelRegistryService = registry
-      config <- OpenAIConfig.fromValues(model, Secret(apiKey), baseUrl)
+      config <- OpenAIConfig.fromValues(ModelName(model), Secret(apiKey), BaseUrl(baseUrl))
       client <- LLMConnect.getClient(config)
     } yield client
 
@@ -43,7 +45,7 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
   }
 
   private val expectedWindow: Int =
-    contextWindowOf(openAiClient(model, "sk-test", OpenAIConfig.DEFAULT_BASE_URL).value)
+    contextWindowOf(openAiClient(model, "sk-test", OpenAIConfig.DEFAULT_BASE_URL.asUrl).value)
 
   "the configuration-in-code guide" should {
 
@@ -53,8 +55,8 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
 
     "build the same client from an explicit Config" in {
       val appConfig = ConfigFactory.parseString(
-        s"""llm4s.providers {
-           |  provider = "openai-main"
+        s"""llm4s.defaultProvider = "openai-main"
+           |llm4s.providers {
            |  openai-main { provider = "openai", model = "$model", apiKey = "sk-tenant-a" }
            |}""".stripMargin
       )
@@ -76,7 +78,7 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
       val settings: ConfigValue[Effect, LlmSettings] = (
         default(model),
         default("sk-test").secret,
-        default(OpenAIConfig.DEFAULT_BASE_URL)
+        default(OpenAIConfig.DEFAULT_BASE_URL.asUrl)
       ).parMapN(LlmSettings.apply)
 
       val client = settings
@@ -97,7 +99,7 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
       val descriptor: Config[LlmSettings] =
         (Config.string("model").withDefault(model) ++
           Config.secret("api_key") ++
-          Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL))
+          Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL.asUrl))
           .nested("openai")
           .map { case (model, apiKey, baseUrl) => LlmSettings(model, apiKey, baseUrl) }
 

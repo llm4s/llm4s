@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.*
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -34,7 +35,7 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
 
   private def viaStream(status: Int, headers: Map[String, Seq[String]], body: String) =
     new WatsonXClient(config, httpClient = streaming(_ => Right(StreamingHttpResponse(status, bytes(body), headers))))
-      .streamComplete(hi, CompletionOptions(), _ => ())
+      .streamComplete(hi, CompletionOptions())(_ => ())
 
   private type Check = LLMError => Boolean
 
@@ -169,8 +170,8 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
   test("the api key is absent from WatsonXConfig's toString, copy and the client's toString") {
     (config.toString should not).include(ApiKey)
     config.toString should include("***")
-    (config.copy(model = "x").toString should not).include(ApiKey)
-    (config.withModel("y").toString should not).include(ApiKey)
+    (config.copy(model = ModelName("x")).toString should not).include(ApiKey)
+    (config.withModel(ModelName("y")).toString should not).include(ApiKey)
     (new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply))).toString should not)
       .include(ApiKey)
   }
@@ -183,9 +184,9 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
       _ => Right(HttpResponse(200, s"""{"access_token":"$BearerToken","expires_in":3600}""")),
       _ => Right(chatReply)
     )
-    val c = new WatsonXClient(config, exchangeLogging = ProviderExchangeLogging.enabled(sink), httpClient = http)
+    val c = new WatsonXClient(config, exchangeLogging = ProviderExchangeLogging.Enabled(sink), httpClient = http)
     c.complete(hi, CompletionOptions()).isRight shouldBe true
-    c.streamComplete(hi, CompletionOptions(), _ => ()).isLeft shouldBe true // no stream scripted: still no secrets
+    c.streamComplete(hi, CompletionOptions())(_ => ()).isLeft shouldBe true // no stream scripted: still no secrets
     val all = seen.asScala.toSeq
     all should not be empty
     all.foreach { e =>

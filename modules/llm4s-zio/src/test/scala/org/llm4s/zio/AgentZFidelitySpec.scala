@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -24,7 +25,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
   final case class EchoResult(value: String)
   object EchoResult { implicit val rw: ReadWriter[EchoResult] = macroRW }
 
-  private val echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private val echoTool = ToolBuilder[EchoResult](
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))
@@ -46,25 +47,18 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       options.add(o)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
-    val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      content = "",
-      model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+    val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = ujson.Obj("v" -> "x")))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   private def z(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =
@@ -83,7 +77,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             assertTrue(client.calls.get() == 1) &&
             assertTrue(sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS"))) &&
             assertTrue(sent.collect { case m: UserMessage => m.content } == Seq("q")) &&
-            assertTrue(client.options.get(0).temperature == 0.123) &&
+            assertTrue(client.options.get(0).temperature == Some(0.123)) &&
             assertTrue(client.options.get(0).maxTokens == Some(77)) &&
             assertTrue(client.options.get(0).tools.map(_.name) == Seq("echo"))
           }
@@ -106,7 +100,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("run applies input guardrails before any model call and reports the turn Blocked") {
         val client = new Recording(_ => text("done"))
-        z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)))
           .run("this query is far too long")
           .map(result =>
             assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 0)
@@ -114,7 +108,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("run applies output guardrails to the answer") {
         val client = new Recording(_ => text("ok"))
-        z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
           .run("q")
           .map(result =>
             assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 1)
@@ -124,9 +118,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         val failure = new IllegalStateException("provider exploded")
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             throw failure
@@ -153,7 +145,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("continueConversation applies input guardrails to the new message and does not call the model") {
         val client = new Recording(_ => text("first"))
-        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 20)), Nil)))
         for {
           first  <- agent.run("q1")
           result <- agent.continueConversation(first, "far too long a follow up for the guardrail")
@@ -161,7 +153,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("continueConversation applies output guardrails to the new answer") {
         val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
-        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
         for {
           first <- agent.run("q1")
           next  <- agent.continueConversation(first, "q2")
@@ -175,9 +167,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
             if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 1
@@ -211,9 +201,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
               case 1 => Left(SimpleError("provider down"))
               case _ => Right(text("recovered"))
             }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 8192
@@ -235,9 +223,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
               case 0 => Right(toolCall(0))
               case _ => Left(SimpleError("provider down"))
             }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 8192

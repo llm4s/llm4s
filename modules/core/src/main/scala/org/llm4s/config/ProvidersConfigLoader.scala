@@ -5,7 +5,7 @@ import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import pureconfig.ConfigSource
 
 /**
@@ -16,17 +16,20 @@ import pureconfig.ConfigSource
  * provider whose module is not on the classpath - failed every lookup, so a config holding
  * `openai-main` and `anthropic-main` could not load either with only `OPENAI_API_KEY` set.
  *
- *  @param defaultProvider the default section's name (`llm4s.providers.provider`), if set
+ *  @param defaultProvider the default section's name (`llm4s.defaultProvider`), if set
  *  @param sections         each section as read, or the error reading it
  *  @param credentials      the `llm4s.credentials` block, which a section without an `apiKey`
  *                          of its own falls back to
  *  @param http             the `llm4s.http` block, which a section's own `http` block overrides
+ *  @param movedDefault     the value of a string `llm4s.providers.provider`, the key the default section's name
+ *                          moved from; it only improves the no-default error
  */
 final private[config] case class ProviderSections(
   defaultProvider: Option[ProviderName],
   sections: Map[ProviderName, Result[RawNamedProviderSection]],
   credentials: SharedCredentials = SharedCredentials.empty,
-  http: Option[com.typesafe.config.ConfigObject] = None
+  http: Option[com.typesafe.config.ConfigObject] = None,
+  movedDefault: Option[String] = None
 ):
 
   /**
@@ -40,6 +43,10 @@ final private[config] case class ProviderSections(
       name.asName
     )
 
+  /** Whether section `name` has an `http` block of its own, over `llm4s.http`. */
+  def hasOwnHttp(name: ProviderName): Boolean =
+    sections.get(name).flatMap(_.toOption).exists(_.http.isDefined)
+
   /**
    * The default section's name, if one is set and a section of that name exists.
    *
@@ -48,7 +55,9 @@ final private[config] case class ProviderSections(
   def defaultProviderName: Result[ProviderName] =
     defaultProvider match
       case None =>
-        Left(ConfigurationError(ProviderSections.noDefaultMessage))
+        Left(
+          ConfigurationError(movedDefault.fold(ProviderSections.noDefaultMessage)(ProviderSections.movedDefaultMessage))
+        )
       case Some(name) if !sections.contains(name) =>
         Left(ConfigurationError(ProviderSections.notFoundMessage(name)))
       case Some(name) => Right(name)
@@ -88,7 +97,7 @@ final private[config] case class ProviderSections(
             ApiKeySource.WorkloadIdentity(s"llm4s.providers.${name.asName}.auth")
           else if descriptor.configSpec.isKeyless(raw.extras) then
             ApiKeySource.WorkloadIdentity(
-              s"llm4s.providers.${name.asName}.${descriptor.configSpec.keylessWhen.fold("")(_._1)}"
+              s"llm4s.providers.${name.asName}.${descriptor.configSpec.keylessWhen.fold("")(_.key)}"
             )
           else if raw.apiKeyFile.exists(_.trim.nonEmpty) then
             ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKeyFile")
@@ -101,10 +110,22 @@ final private[config] case class ProviderSections(
 /** The messages of the default-provider errors, each linking its troubleshooting entry (#2285). */
 private[config] object ProviderSections:
 
-  /** No `llm4s.providers.provider` is set. */
+  /** No `llm4s.defaultProvider` is set. */
   val noDefaultMessage: String =
     TroubleshootingLinks.configuration(
-      "No default provider configured under llm4s.providers.provider",
+      "No default provider configured under llm4s.defaultProvider",
+      TroubleshootingLinks.Entry.NoDefaultProvider
+    )
+
+  /**
+   * No `llm4s.defaultProvider` is set, but `llm4s.providers.provider` holds a string: the configuration predates
+   * the key's move (#2806). The message says where it went; the old key selects nothing.
+   */
+  def movedDefaultMessage(value: String): String =
+    TroubleshootingLinks.configuration(
+      "No default provider configured under llm4s.defaultProvider. llm4s.providers.provider " +
+        s"('$value') no longer names the default section: move it out of the providers block, as " +
+        s"llm4s.defaultProvider = \"$value\"",
       TroubleshootingLinks.Entry.NoDefaultProvider
     )
 

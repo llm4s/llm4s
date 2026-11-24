@@ -3,8 +3,9 @@ layout: page
 title: Mill Quick Start
 description: "Use LLM4S in a Mill 1.x project: a complete build.mill, a program that asks a model one question, its configuration and a unit test without an API key."
 search_title: "Call an LLM from Mill with LLM4S in Scala 3"
-parent: Getting Started
-nav_order: 13
+parent: Build Tools and Playgrounds
+nav_order: 4
+grand_parent: Getting Started
 ---
 
 # Mill Quick Start
@@ -130,7 +131,7 @@ object Hello {
 }
 ```
 
-1. `Llm4sConfig.defaultProvider()` reads the section of `application.conf` that `llm4s.providers.provider` names.
+1. `Llm4sConfig.defaultProvider()` reads the section of `application.conf` that `llm4s.defaultProvider` names.
    This is the one place configuration is read.
 2. `LLMConnect.getClient` builds the client for that provider.
 3. `client.complete` sends the conversation. Every step returns a `Result`, so the `for` stops at the first error
@@ -139,18 +140,17 @@ object Hello {
 ### app/resources/application.conf
 
 Mill puts `app/resources` on the classpath, which is where the configuration library looks for `application.conf`.
-`provider` names the section the program uses; the [Configuration guide](configuration#named-provider-sections)
+`defaultProvider` names the section the program uses; the [Configuration guide](configuration#named-provider-sections)
 covers the other providers:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
   providers {
-    provider = "openai-main"
-    provider = ${?LLM4S_PROVIDER}
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
 
     ollama-local {
@@ -163,9 +163,9 @@ llm4s {
 }
 ```
 
-The OpenAI section needs no `apiKey` line: `llm4s-openai` reads `OPENAI_API_KEY` itself. The second `provider` line
-lets the environment pick the other section (`LLM4S_PROVIDER=ollama-local`). Only the section being loaded is
-checked, so the Ollama run does not need an OpenAI key.
+The OpenAI section needs no `apiKey` line: `llm4s-openai` reads `OPENAI_API_KEY` itself. The second
+`defaultProvider` line lets the environment pick the other section (`LLM4S_PROVIDER=ollama-local`). Only the section
+being loaded is checked, so the Ollama run does not need an OpenAI key.
 
 ### app/resources/logback.xml
 

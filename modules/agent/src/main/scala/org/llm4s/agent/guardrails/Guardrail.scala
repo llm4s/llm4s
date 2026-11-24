@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
-import org.llm4s.agent.graph.middleware.ModelContext
+import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.agent.graph.middleware.UsageAccounting
 import org.llm4s.types.Result
 
 import scala.annotation.unused
@@ -30,12 +30,18 @@ trait Guardrail[A] {
   def validate(value: A): Result[A]
 
   /**
-   * Validates `value` inside an agent's hook, as `validate(value)` does, with the hook's `context`. A guardrail that
-   * calls a model overrides this to call through `context.accounted`, so the call is counted in the thread's usage
-   * and on the run's terminal event even when the task fails (design §4.22); one that combines guardrails passes
-   * `context` on to each. `GuardrailMiddleware` and `GuardrailReviewMiddleware` call this form.
+   * Validates `value` inside an agent, as `validate(value)` does, with the `context` of the stage that runs it: an
+   * input guardrail's is the turn's admission (`AdmissionContext`), an output guardrail's the `afterAgent` hook's
+   * `ModelContext`. A guardrail that calls a model overrides this to call through `context.accounted`, so the call is
+   * counted in the thread's usage and on the run's terminal event even when the task fails (design §4.22); one that
+   * combines guardrails passes `context` on to each. `GuardrailMiddleware` and `GuardrailReviewMiddleware` call this
+   * form. A guardrail that needs more than accounting matches on the context it was given.
+   *
+   * Named apart from the Stable `validate(value)` so that MiMa, which skips an `@Experimental` method with every
+   * overload of its name, still checks that one (#2835).
    */
-  def validate(value: A, @unused context: ModelContext): Result[A] = validate(value)
+  @Experimental
+  def validateIn(value: A, @unused context: UsageAccounting): Result[A] = validate(value)
 
   /**
    * Name of this guardrail for logging and error messages.
@@ -84,18 +90,20 @@ object InputGuardrail {
 
   /**
    * `guardrail` as an input guardrail, for `GuardrailMiddleware`: a [[CompositeGuardrail]] or any other
-   * `Guardrail[String]` (a cast throws a `ClassCastException`). Both `validate` forms delegate, so a guardrail that
-   * calls a model through the hook's `context` keeps doing so, and the name and description are the guardrail's.
+   * `Guardrail[String]` (a cast throws a `ClassCastException`). `validate` and `validateIn` both delegate, so a
+   * guardrail that calls a model through the hook's `context` keeps doing so, and the name and description are the
+   * guardrail's.
    * One that already is an [[InputGuardrail]] is returned unchanged.
    */
   def from(guardrail: Guardrail[String]): InputGuardrail = guardrail match {
     case input: InputGuardrail => input
     case other =>
       new InputGuardrail {
-        def validate(value: String): Result[String]                                 = other.validate(value)
-        override def validate(value: String, context: ModelContext): Result[String] = other.validate(value, context)
-        val name: String                                                            = other.name
-        override def description: Option[String]                                    = other.description
+        def validate(value: String): Result[String] = other.validate(value)
+        override def validateIn(value: String, context: UsageAccounting): Result[String] =
+          other.validateIn(value, context)
+        val name: String                         = other.name
+        override def description: Option[String] = other.description
       }
   }
 }
@@ -131,10 +139,11 @@ object OutputGuardrail {
     case output: OutputGuardrail => output
     case other =>
       new OutputGuardrail {
-        def validate(value: String): Result[String]                                 = other.validate(value)
-        override def validate(value: String, context: ModelContext): Result[String] = other.validate(value, context)
-        val name: String                                                            = other.name
-        override def description: Option[String]                                    = other.description
+        def validate(value: String): Result[String] = other.validate(value)
+        override def validateIn(value: String, context: UsageAccounting): Result[String] =
+          other.validateIn(value, context)
+        val name: String                         = other.name
+        override def description: Option[String] = other.description
       }
   }
 }

@@ -3,8 +3,9 @@ layout: page
 title: Playground (Codespaces)
 description: "Try LLM4S in the browser with no install and no API key: a GitHub Codespace with JDK 21, sbt, Scala CLI, Metals and a small local Ollama model."
 search_title: "Try LLM4S in the browser with GitHub Codespaces"
-parent: Getting Started
-nav_order: 15
+parent: Build Tools and Playgrounds
+nav_order: 7
+grand_parent: Getting Started
 ---
 
 # Playground: try LLM4S in a Codespace

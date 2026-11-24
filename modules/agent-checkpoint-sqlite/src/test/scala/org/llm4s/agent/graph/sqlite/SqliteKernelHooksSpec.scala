@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.*
@@ -55,12 +56,12 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
       next: ModelRequest => Result[ModelResponse]
     ): Result[ModelResponse] = next(request).map(_.addUpdate(StateUpdate.update(notes, "model")))
     override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-      if answer.contains("secret") then Left(GuardrailBlocked("secrets", "no"))
+      if answer.contains("secret") then Left(GuardrailBlocked("secrets", Some("no")))
       else Right(BoundaryResult(answer, StateUpdate.update(notes, "after")))
   }
 
   private def completion(message: AssistantMessage): Completion =
-    Completion("c", Instant.EPOCH, message.content, "m", message, message.toolCalls.toList, Some(TokenUsage(10, 5, 15)))
+    Completion("c", Instant.EPOCH, ModelName("m"), message, Some(TokenUsage(10, 5, 15)))
 
   /** Plays `turns`; the call numbered `failOn` fails while `failing` is set. */
   final private class Model(failing: AtomicBoolean, failOn: Int, turns: AssistantMessage*) extends ModelStep {
@@ -85,7 +86,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("hooks-recover")
     val failing = new AtomicBoolean(true)
-    val calling = AssistantMessage(None, Seq(ToolCall("c1", "write", ujson.Obj("text" -> "one"))))
+    val calling = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "write", ujson.Obj("text" -> "one"))))
     // the second model call, after the tool batch, fails once
     val loop  = loopOf(new Model(failing, 1, calling, AssistantMessage("done"), AssistantMessage("done")))
     val first = SqliteFiles.opened(db, Clock.systemUTC())
@@ -113,7 +114,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("hooks-block")
     val failing = new AtomicBoolean(true)
-    val calling = AssistantMessage(None, Seq(ToolCall("c1", "write", ujson.Obj("text" -> "two"))))
+    val calling = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "write", ujson.Obj("text" -> "two"))))
     val loop    = loopOf(new Model(failing, 1, calling, AssistantMessage("a secret"), AssistantMessage("a secret")))
     val first   = SqliteFiles.opened(db, Clock.systemUTC())
     result(GraphRuntime(first).start(thread, loop.graph, AgentInput("go"))) shouldBe a[RunResult.Failed]

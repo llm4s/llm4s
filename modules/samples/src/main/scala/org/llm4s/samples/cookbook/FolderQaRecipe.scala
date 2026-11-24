@@ -32,7 +32,11 @@ object FolderQaRecipe extends RecipeApp {
       given ModelRegistryService = models
       config = RAG
         .builder()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(
+          BagOfWordsEmbeddings.id.asString,
+          BagOfWordsEmbeddings.Model.asString,
+          BagOfWordsEmbeddings.Dimensions
+        )
         .withTopK(2)
         .withLLM(client)
       rag <- RAG.build(config, _ => Right(BagOfWordsEmbeddings.config))

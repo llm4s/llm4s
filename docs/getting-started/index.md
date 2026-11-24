@@ -17,7 +17,8 @@ Nothing to install: the [playground](playground) runs the samples in your browse
 No API key and nothing to install? **[First answer, no key, no server](local-jlama)** runs a small model inside your
 JVM with `llm4s-jlama`: one file, one command.
 
-This section will guide you through:
+This section will guide you through the pages below. The sidebar keeps the Scala CLI, Maven, Gradle, Mill and JBang
+quick starts, the REPL and the playground together under [Build Tools and Playgrounds](build-tools).
 
 1. **[Installation](installation)** - Set up LLM4S in your project
 2. **[First Example](first-example)** - Write your first LLM-powered program

@@ -16,12 +16,10 @@ final private[repl] class RecordingClient(underlying: LLMClient, session: Sessio
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     timed(underlying.complete(conversation, options))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    timed(underlying.streamComplete(conversation, options, onChunk))
+    timed(underlying.streamComplete(conversation, options)(onChunk))
 
   override def getContextWindow(): Int = underlying.getContextWindow()
 
@@ -38,7 +36,7 @@ final private[repl] class RecordingClient(underlying: LLMClient, session: Sessio
     val result = call
     val took   = math.max(0L, session.nanoTime() - start).nanos
     result.foreach(completion =>
-      session.record(new CallStats(completion.model, completion.usage, took, completion.estimatedCost))
+      session.record(new CallStats(completion.model.asString, completion.usage, took, completion.estimatedCost))
     )
     result
   }

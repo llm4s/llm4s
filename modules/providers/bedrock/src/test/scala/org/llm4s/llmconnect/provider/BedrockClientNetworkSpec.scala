@@ -72,7 +72,7 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
       val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword(Secret("s3cret")))
       Using.resource(client(Endpoint, settings)) { bedrock =>
         // The proxy answers with JSON, not an event stream, so the stream fails; the request reached the proxy.
-        bedrock.streamComplete(hello, CompletionOptions(), _ => ()): Unit
+        bedrock.streamComplete(hello, CompletionOptions())(_ => ()): Unit
         proxy.requests.map(_.target).exists(_.contains("bedrock.aws.test")) shouldBe true
       }
     }

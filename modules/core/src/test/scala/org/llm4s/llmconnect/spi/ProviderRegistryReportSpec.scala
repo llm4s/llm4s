@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -10,7 +11,7 @@ import org.scalatest.wordspec.AnyWordSpec
 class ProviderRegistryReportSpec extends AnyWordSpec with Matchers:
 
   private def module(name: String, source: Option[String] = None): ProviderModuleReport =
-    ProviderModuleReport(name, Seq("acme"), source)
+    ProviderModuleReport(name, Seq(ProviderId("acme")), source)
 
   "ProviderRegistryReport.explicit" should {
     "not be discovered, have an empty summary and say so in describe" in {
@@ -52,8 +53,8 @@ class ProviderRegistryReportSpec extends AnyWordSpec with Matchers:
       val report = ProviderRegistryReport(
         discovered = true,
         collisions = Seq(
-          ProviderIdCollision("chat", "acme", "b.B", Some("a.A")),
-          ProviderIdCollision("embedding", "acme", "b.B", Some("a.A"))
+          ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "b.B", Some("a.A")),
+          ProviderIdCollision(ProviderCollisionKind.Embedding, ProviderId("acme"), "b.B", Some("a.A"))
         )
       )
       report.summary should include("2 id collision(s)")
@@ -77,7 +78,10 @@ class ProviderRegistryReportSpec extends AnyWordSpec with Matchers:
       failing.hasCollisions shouldBe false
 
       val colliding =
-        ProviderRegistryReport(discovered = true, collisions = Seq(ProviderIdCollision("chat", "acme", "b.B", None)))
+        ProviderRegistryReport(
+          discovered = true,
+          collisions = Seq(ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "b.B", None))
+        )
       colliding.hasFailures shouldBe false
       colliding.hasCollisions shouldBe true
     }
@@ -89,15 +93,25 @@ class ProviderRegistryReportSpec extends AnyWordSpec with Matchers:
     }
 
     "list chat ids separated by commas" in {
-      ProviderModuleReport("a.A", Seq("one", "two"), None).contribution shouldBe "one, two"
+      ProviderModuleReport("a.A", Seq(ProviderId("one"), ProviderId("two")), None).contribution shouldBe "one, two"
     }
 
     "prefix embedding ids with 'embeddings:'" in {
-      ProviderModuleReport("a.A", Nil, None, Seq("emb1", "emb2")).contribution shouldBe "embeddings: emb1, emb2"
+      ProviderModuleReport(
+        "a.A",
+        Nil,
+        None,
+        Seq(ProviderId("emb1"), ProviderId("emb2"))
+      ).contribution shouldBe "embeddings: emb1, emb2"
     }
 
     "separate chat and embedding ids with a semicolon" in {
-      ProviderModuleReport("a.A", Seq("one"), None, Seq("emb1")).contribution shouldBe "one; embeddings: emb1"
+      ProviderModuleReport(
+        "a.A",
+        Seq(ProviderId("one")),
+        None,
+        Seq(ProviderId("emb1"))
+      ).contribution shouldBe "one; embeddings: emb1"
     }
   }
 
@@ -122,7 +136,7 @@ class ProviderRegistryReportSpec extends AnyWordSpec with Matchers:
     "describe a collision with no dropped module as an earlier registration" in {
       val report = ProviderRegistryReport(
         discovered = true,
-        collisions = Seq(ProviderIdCollision("chat", "acme", "b.B", None))
+        collisions = Seq(ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "b.B", None))
       )
       val line = report.describe.split("\n").toList.last
       line should include("chat id 'acme'")

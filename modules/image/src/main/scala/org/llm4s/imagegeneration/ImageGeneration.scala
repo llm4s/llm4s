@@ -155,9 +155,9 @@ case class ImageGenerationOptions(
   negativePrompt: Option[String] = None,
   samplerName: Option[String] = None, // Optional sampler name
   // New options for GPT Image models
-  quality: Option[String] = None,        // "standard" or "hd"
-  style: Option[String] = None,          // "vivid" or "natural"
-  responseFormat: Option[String] = None, // "url" or "b64_json"
+  quality: Option[String] = None,        // GPT Image: "low", "medium", "high", "auto"; DALL·E: "standard", "hd"
+  style: Option[String] = None,          // DALL·E only: "vivid" or "natural"
+  responseFormat: Option[String] = None, // DALL·E only: "url" or "b64_json" (GPT Image always returns base64)
   outputFormat: Option[String] = None,   // "png", "jpeg", "webp"
   background: Option[String] = None,     // "transparent", "opaque", "auto"
   outputCompression: Option[Int] = None, // 0-100
@@ -275,36 +275,55 @@ case class StableDiffusionConfig(
 }
 
 /**
- * Configuration for the HuggingFace Inference API.
+ * Configuration for Hugging Face Inference Providers, through Hugging Face's own `hf-inference` provider.
  *
- * @param apiKey Your HuggingFace API token. This is required for authentication.
- * @param model The identifier of the model to use on the HuggingFace Hub, e.g., "runwayml/stable-diffusion-v1-5".
+ * Requests go to `<baseUrl>/models/<model>` on the Inference Providers router
+ * ([[https://huggingface.co/docs/inference-providers/tasks/text-to-image text-to-image task]]); the token needs the
+ * "Make calls to Inference Providers" permission. The model must be one `hf-inference` serves for text-to-image.
+ *
+ * @param apiKey Your Hugging Face access token. This is required for authentication.
+ * @param model The identifier of the model on the Hugging Face Hub, e.g. "stabilityai/stable-diffusion-3-medium-diffusers".
  * @param timeout Request timeout. Defaults to a higher value suitable for cloud APIs.
+ * @param baseUrl The `hf-inference` route on the Inference Providers router; override it for a proxy or a test server.
  */
 case class HuggingFaceConfig(
-  /** HuggingFace API token */
+  /** Hugging Face access token */
   apiKey: Secret,
-  /** Model to use (default: stable-diffusion-xl-base-1.0) */
-  model: String = "stabilityai/stable-diffusion-xl-base-1.0",
+  /** Model to use (default: stable-diffusion-3-medium-diffusers) */
+  model: String = HuggingFaceConfig.DefaultModel,
   /** Request timeout */
-  override val timeout: FiniteDuration = 2.minutes
+  override val timeout: FiniteDuration = 2.minutes,
+  /** The hf-inference route on the router */
+  baseUrl: String = HuggingFaceConfig.DefaultBaseUrl
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
-  override def toString: String         = s"HuggingFaceConfig(apiKey=$apiKey, model=$model, timeout=$timeout)"
+  override def toString: String =
+    s"HuggingFaceConfig(apiKey=$apiKey, model=$model, timeout=$timeout, baseUrl=$baseUrl)"
+}
+
+/** Defaults for [[HuggingFaceConfig]]. */
+object HuggingFaceConfig {
+
+  /** The `hf-inference` provider's route on the Inference Providers router. */
+  val DefaultBaseUrl: String = "https://router.huggingface.co/hf-inference"
+
+  /** The text-to-image model Hugging Face's own `hf-inference` provider serves (checked 2026-11-24). */
+  val DefaultModel: String = "stabilityai/stable-diffusion-3-medium-diffusers"
 }
 
 /**
- * Configuration for OpenAI DALL-E API.
+ * Configuration for the OpenAI Images API.
  *
  * @param apiKey Your OpenAI API key. This is required for authentication.
- * @param model The DALL-E model version to use (dall-e-2 or dall-e-3).
+ * @param model The image model, for both generation and editing: a GPT Image model (any id starting `gpt-image`);
+ *              defaults to [[OpenAIConfig.DefaultModel]].
  * @param timeout Request timeout.
  */
 case class OpenAIConfig(
   /** OpenAI API key */
   apiKey: Secret,
-  /** Model to use (dall-e-2, dall-e-3, or gpt-image-1) */
-  model: String = "dall-e-2",
+  /** Image model, used for generation and editing */
+  model: String = OpenAIConfig.DefaultModel,
   /** Base URL for OpenAI API */
   baseUrl: String = "https://api.openai.com/v1",
   /** Request timeout */
@@ -312,6 +331,15 @@ case class OpenAIConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String = s"OpenAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+}
+
+object OpenAIConfig {
+
+  /**
+   * The default image model: the default of OpenAI's image edits endpoint, and the replacement its deprecations page
+   * names for the GPT Image models it is shutting down (checked 2026-11-24).
+   */
+  val DefaultModel: String = "gpt-image-2.6-sunburst"
 }
 
 /**
@@ -500,16 +528,16 @@ object ImageGeneration {
   /**
    * Get a HuggingFace client with the required API key.
    *
-   * This is a convenience method for creating a client that connects to the
-   * HuggingFace Inference API for image generation.
+   * This is a convenience method for creating a client that connects to Hugging Face
+   * Inference Providers (`hf-inference`) for image generation.
    *
    * @param apiKey Your HuggingFace API token (required).
-   * @param model The specific model to use for generation. Defaults to a standard Stable Diffusion model.
+   * @param model The specific model to use for generation. Defaults to [[HuggingFaceConfig.DefaultModel]].
    * @return Either an error or an `ImageGenerationClient` instance configured for HuggingFace.
    */
   def huggingFaceClient(
     apiKey: String,
-    model: String = "stabilityai/stable-diffusion-xl-base-1.0"
+    model: String = HuggingFaceConfig.DefaultModel
   ): Either[LLMError, ImageGenerationClient] = {
     val config = HuggingFaceConfig(apiKey = Secret(apiKey), model = model)
     client(config)
@@ -522,12 +550,12 @@ object ImageGeneration {
    * OpenAI API for image generation.
    *
    * @param apiKey Your OpenAI API key (required).
-   * @param model The model version to use. Defaults to gpt-image-1.
+   * @param model The image model to use. Defaults to [[OpenAIConfig.DefaultModel]].
    * @return Either an error or an `ImageGenerationClient` instance configured for OpenAI.
    */
   def openAIClient(
     apiKey: String,
-    model: String = "dall-e-2"
+    model: String = OpenAIConfig.DefaultModel
   ): Either[LLMError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     client(config)
@@ -548,7 +576,7 @@ object ImageGeneration {
     prompt: String,
     apiKey: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
-    model: String = "dall-e-2"
+    model: String = OpenAIConfig.DefaultModel
   ): Either[LLMError, GeneratedImage] = {
     val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     generateImage(prompt, config, options)

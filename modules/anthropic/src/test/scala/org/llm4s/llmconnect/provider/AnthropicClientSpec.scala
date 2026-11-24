@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.scalatest.funsuite.AnyFunSuite
@@ -20,8 +22,8 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-3-5-sonnet-latest",
-    baseUrl = "https://api.anthropic.com",
+    model = ModelName("claude-3-5-sonnet-latest"),
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -100,7 +102,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -108,7 +110,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
       assert(result.isRight)
       exchanges should have size 1
-      exchanges.head.provider shouldBe "anthropic"
+      exchanges.head.provider.asString shouldBe "anthropic"
       exchanges.head.model shouldBe Some("claude-3-5-sonnet-latest")
       exchanges.head.requestBody should include("hello")
       exchanges.head.responseBody.value should include("Logged response")
@@ -131,7 +133,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -156,10 +158,10 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
         os.write(bytes)
         os.close()
       } { baseUrl =>
-        val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+        val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         val errors = Seq(
           client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions()),
-          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
         ).map(_.left.toOption.value)
         errors.foreach { e =>
           withClue(s"$status ${e.getClass.getSimpleName}: ") {
@@ -180,11 +182,11 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
     // Nothing is listening on this port, so the SDK call fails before any bytes are read.
     val client = new AnthropicClient(
-      testConfig.withBaseUrl("http://localhost:1"),
+      testConfig.withBaseUrl(BaseUrl("http://localhost:1")),
       exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     exchanges should have size 1
@@ -226,16 +228,15 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val chunks = ListBuffer.empty[String]
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.content.foreach(chunks += _)
-      )
+        CompletionOptions()
+      )(chunk => chunk.content.foreach(chunks += _))
 
       assert(result.isRight)
       chunks.mkString shouldBe "Hello"
@@ -244,10 +245,10 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("anthropic client request body does not send top_p by default") {
+  test("anthropic client request body sends no sampling parameter the caller left unset") {
     withServer { exchange =>
       val requestBody = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
-      requestBody should include("temperature")
+      (requestBody should not).include("\"temperature\"")
       (requestBody should not).include("\"top_p\"")
 
       val body =
@@ -277,7 +278,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       os.write(bytes)
       os.close()
     } { baseUrl =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
 
       result.isRight shouldBe true
@@ -308,7 +309,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       os.write(bytes)
       os.close()
     } { baseUrl =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val options =
         CompletionOptions(maxTokens = Some(2048)).withReasoning(ReasoningEffort.Low)
       val result = client.complete(Conversation(Seq(UserMessage("hello"))), options)

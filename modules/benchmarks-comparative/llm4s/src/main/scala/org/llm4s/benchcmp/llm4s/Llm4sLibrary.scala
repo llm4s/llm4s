@@ -21,7 +21,7 @@ final class Llm4sLibrary(baseUrl: String) extends ChatLibrary:
 
   private val agent: Agent = Llm4sLibrary.orThrow(
     for
-      lookup <- ToolBuilder[Map[String, Any], String](
+      lookup <- ToolBuilder[String](
         "lookup",
         "Looks up the value stored under a key",
         Schema
@@ -39,7 +39,7 @@ final class Llm4sLibrary(baseUrl: String) extends ChatLibrary:
   override def stream(prompt: String): Int =
     var chunks                         = 0
     val onChunk: StreamedChunk => Unit = chunk => if chunk.content.exists(_.nonEmpty) then chunks += 1
-    Llm4sLibrary.orThrow(client.streamComplete(Conversation(Seq(UserMessage(prompt))), CompletionOptions(), onChunk))
+    Llm4sLibrary.orThrow(client.streamComplete(Conversation(Seq(UserMessage(prompt))), CompletionOptions())(onChunk))
     chunks
 
   override def toolAgent(prompt: String): String =

@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.prometheus.metrics.expositionformats.PrometheusTextFormatWriter
 import org.llm4s.error.TimeoutError
 import org.llm4s.llmconnect.LLMClient
@@ -28,7 +29,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
   }
 
   private val completion =
-    Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
+    Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(content = "ok", toolCalls = List.empty))
 
   /** Fails its first `failures` calls with a retryable timeout, then answers. */
   private def client(failures: Int): LLMClient = new LLMClient {
@@ -37,9 +38,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       calls += 1
       if (calls <= failures) Left(TimeoutError("timeout", 1.second, "test")) else Right(completion)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -59,7 +58,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    new ReliableClient(client(failures = 2), "acme", config, Some(metrics)).complete(conversation) shouldBe
+    ReliableClient(client(failures = 2), "acme", config).withMetrics(metrics).complete(conversation) shouldBe
       Right(completion)
 
     scrape(metrics) should contain("llm4s_retries_total{provider=\"acme\"} 2.0")
@@ -74,7 +73,10 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    new ReliableClient(client(failures = 2), "acme", config, Some(metrics)).complete(conversation).isLeft shouldBe true
+    ReliableClient(client(failures = 2), "acme", config)
+      .withMetrics(metrics)
+      .complete(conversation)
+      .isLeft shouldBe true
 
     val lines = scrape(metrics)
     lines should contain("llm4s_circuit_breaker_transitions_total{provider=\"acme\",state=\"open\"} 1.0")

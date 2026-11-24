@@ -1,7 +1,8 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
-import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId, UsageSummary, UserMessage }
 import org.llm4s.trace.spi.TracingBackends
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -25,28 +26,34 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "be discovered for the opentelemetry mode through its services entry" in {
       val backends = TracingBackends.discover(getClass.getClassLoader)
 
-      backends.find(TracingMode.Named("opentelemetry")).map(_.getClass) shouldBe Some(
+      backends.find(TracingMode.Named("opentelemetry")).value.map(_.getClass) shouldBe Some(
         classOf[OpenTelemetryTracingBackend]
       )
       backends.failures shouldBe empty
       new OpenTelemetryTracingBackend().mode shouldBe OpenTelemetryConfig.Mode
     }
 
-    "be selected by the otel alias too" in {
-      TracingBackends
-        .discover(getClass.getClassLoader)
-        .find(TracingMode.fromString("otel"))
-        .map(_.getClass) shouldBe Some(classOf[OpenTelemetryTracingBackend])
+    "declare the otel alias itself, which core no longer knows" in {
+      new OpenTelemetryTracingBackend().aliases shouldBe Set("otel")
+      TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
     }
 
-    "be what Tracing.fromSettings and Tracing.create build for opentelemetry" in {
-      val checked = Tracing.fromSettings(settings).value
-      checked shouldBe an[OpenTelemetryTracing]
-      checked.close()
+    "be selected by the otel alias too, whatever its case" in {
+      val backends = TracingBackends.discover(getClass.getClassLoader)
 
-      val created = Tracing.create(settings)
-      created shouldBe an[OpenTelemetryTracing]
-      created.close()
+      Seq("otel", "OTEL").foreach { name =>
+        backends.find(TracingMode.fromString(name)).value.map(_.getClass) shouldBe Some(
+          classOf[OpenTelemetryTracingBackend]
+        )
+      }
+    }
+
+    "be what Tracing.fromSettings builds for opentelemetry and for otel" in {
+      Seq(settings, settings.withMode(TracingMode.fromString("otel"))).foreach { selected =>
+        val checked = Tracing.fromSettings(selected).value
+        checked shouldBe an[OpenTelemetryTracing]
+        checked.close()
+      }
     }
 
     "be registrable explicitly, for a shaded jar whose services files did not survive" in {
@@ -60,8 +67,15 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
 
     "map an ended agent run to an invoke_agent span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
-      val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
-      val event = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
+      val usage   = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
+      val event = TraceEvent.AgentRunEnded(
+        "thread-1",
+        "run-1",
+        "assistant",
+        TraceEvent.RunStatus.Completed,
+        Seq(UserMessage("hi")),
+        usage
+      )
 
       tracing.getSpanKind(event) shouldBe io.opentelemetry.api.trace.SpanKind.INTERNAL
       val (name, attributes) = tracing.mapEventToAttributes(event)
@@ -89,7 +103,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
         "parent/~task/researcher/abc",
         "child-run",
         "researcher",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Seq.empty,
         UsageSummary(),
         parentThreadId = Some("parent"),
@@ -106,7 +120,13 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "map a tool execution to an execute_tool span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
       val (name, attributes) = tracing.mapEventToAttributes(
-        TraceEvent.ToolExecuted("search", "{}", "[]", scala.concurrent.duration.Duration(3, "ms"), success = true)
+        TraceEvent.ToolExecuted(
+          "search",
+          ToolCallId("{}").asString,
+          "[]",
+          scala.concurrent.duration.Duration(3, "ms"),
+          success = true
+        )
       )
       name shouldBe "execute_tool search"
       attributes.get(key("gen_ai.operation.name")) shouldBe "execute_tool"

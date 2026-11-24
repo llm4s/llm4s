@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.UsageSummary
@@ -19,7 +19,7 @@ import java.time.Instant
  * `TaskSuspended`, `CheckpointCommitted` and `RunSuspended` are closed, each exactly its one value, and so is
  * `Custom`, whose `payload` is where a node's own event grows.
  */
-@Stable
+@Experimental
 enum RunEvent:
   case RunStarted(details: RunStartedDetails)
 
@@ -66,13 +66,14 @@ enum RunEvent:
 /**
  * What [[RunEvent.RunStarted]] records: the run's `tenantId` and `principal`, as supplied in its [[RunConfig]].
  */
-@Stable
+@Experimental
 final case class RunStartedDetails private (tenantId: Option[String], principal: Option[String]):
   def withTenantId(value: String): RunStartedDetails          = copy(tenantId = Some(value))
   def withTenantId(value: Option[String]): RunStartedDetails  = copy(tenantId = value)
   def withPrincipal(value: String): RunStartedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): RunStartedDetails = copy(principal = value)
 
+@Experimental
 object RunStartedDetails:
   def apply(tenantId: Option[String] = None, principal: Option[String] = None): RunStartedDetails =
     new RunStartedDetails(tenantId, principal)
@@ -86,7 +87,7 @@ object RunStartedDetails:
  * it never names another tenant's run ([[RunClaim.takenOverFrom]]). A log written before the field existed reads as
  * `None`.
  */
-@Stable
+@Experimental
 final case class RunRecoveredDetails private (
   fromCheckpoint: String,
   tenantId: Option[String],
@@ -101,6 +102,7 @@ final case class RunRecoveredDetails private (
   def withTakenOverFrom(value: String): RunRecoveredDetails         = copy(takenOverFrom = Some(value))
   def withTakenOverFrom(value: Option[String]): RunRecoveredDetails = copy(takenOverFrom = value)
 
+@Experimental
 object RunRecoveredDetails:
   def apply(
     fromCheckpoint: String,
@@ -111,7 +113,7 @@ object RunRecoveredDetails:
     new RunRecoveredDetails(fromCheckpoint, tenantId, principal, takenOverFrom)
 
 /** What [[RunEvent.RunResumed]] records: the interrupts the run began by answering, and the run's identity. */
-@Stable
+@Experimental
 final case class RunResumedDetails private (
   answered: Vector[String],
   tenantId: Option[String],
@@ -123,6 +125,7 @@ final case class RunResumedDetails private (
   def withPrincipal(value: String): RunResumedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): RunResumedDetails = copy(principal = value)
 
+@Experimental
 object RunResumedDetails:
   def apply(
     answered: Vector[String],
@@ -138,13 +141,14 @@ object RunResumedDetails:
  * step - its own model call, not a middleware's - which a recovered child counts against its step grant (design
  * 4.45).
  */
-@Stable
+@Experimental
 final case class RunFailedDetails private (message: String, usage: Option[UsageSummary], steps: Long):
   def withMessage(value: String): RunFailedDetails             = copy(message = value)
   def withUsage(value: UsageSummary): RunFailedDetails         = copy(usage = Some(value))
   def withUsage(value: Option[UsageSummary]): RunFailedDetails = copy(usage = value)
   def withSteps(value: Long): RunFailedDetails                 = copy(steps = value)
 
+@Experimental
 object RunFailedDetails:
   def apply(message: String, usage: Option[UsageSummary] = None, steps: Long = 0L): RunFailedDetails =
     new RunFailedDetails(message, usage, steps)
@@ -153,12 +157,13 @@ object RunFailedDetails:
  * What [[RunEvent.RunCancelled]] and [[RunEvent.RunTimedOut]] record: `usage` is the model usage of the attempts the
  * stop cut short, and `steps` their agent model steps, as on [[RunFailedDetails]].
  */
-@Stable
+@Experimental
 final case class RunStoppedDetails private (usage: Option[UsageSummary], steps: Long):
   def withUsage(value: UsageSummary): RunStoppedDetails         = copy(usage = Some(value))
   def withUsage(value: Option[UsageSummary]): RunStoppedDetails = copy(usage = value)
   def withSteps(value: Long): RunStoppedDetails                 = copy(steps = value)
 
+@Experimental
 object RunStoppedDetails:
   def apply(usage: Option[UsageSummary] = None, steps: Long = 0L): RunStoppedDetails =
     new RunStoppedDetails(usage, steps)
@@ -170,7 +175,7 @@ object RunStoppedDetails:
  * What [[RunEvent.StateUpdated]] records: [[GraphRuntime.updateState]] committed a new checkpoint over
  * `fromCheckpoint`, with a state update applied as `asNode` (the event's `nodeId` too) when one was named.
  */
-@Stable
+@Experimental
 final case class StateUpdatedDetails private (
   fromCheckpoint: String,
   asNode: Option[String],
@@ -185,6 +190,7 @@ final case class StateUpdatedDetails private (
   def withPrincipal(value: String): StateUpdatedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): StateUpdatedDetails = copy(principal = value)
 
+@Experimental
 object StateUpdatedDetails:
   def apply(
     fromCheckpoint: String,
@@ -198,7 +204,7 @@ object StateUpdatedDetails:
  * What [[RunEvent.ThreadForked]] records: [[GraphRuntime.fork]] created this thread from checkpoint `fromCheckpoint`
  * of thread `fromThread`.
  */
-@Stable
+@Experimental
 final case class ThreadForkedDetails private (
   fromThread: String,
   fromCheckpoint: String,
@@ -212,6 +218,7 @@ final case class ThreadForkedDetails private (
   def withPrincipal(value: String): ThreadForkedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): ThreadForkedDetails = copy(principal = value)
 
+@Experimental
 object ThreadForkedDetails:
   def apply(
     fromThread: String,
@@ -222,7 +229,7 @@ object ThreadForkedDetails:
     new ThreadForkedDetails(fromThread, fromCheckpoint, tenantId, principal)
 
 /** A durable event before its commit assigns it a sequence number. */
-@Stable
+@Experimental
 final case class EventDraft private (
   runId: String,
   checkpointId: Option[String],
@@ -241,6 +248,7 @@ final case class EventDraft private (
   def withTimestamp(value: Instant): EventDraft           = copy(timestamp = value)
   def withEvent(value: RunEvent): EventDraft              = copy(event = value)
 
+@Experimental
 object EventDraft:
   def apply(
     runId: String,
@@ -262,7 +270,7 @@ object EventDraft:
  * store issues each claim a token above every earlier one. A record written before tokens were
  * recorded reads as `FencingToken(0)`, which no store issues.
  */
-@Stable
+@Experimental
 final case class EventRecord private (
   threadId: String,
   seq: Long,
@@ -287,6 +295,7 @@ final case class EventRecord private (
   def withTimestamp(value: Instant): EventRecord           = copy(timestamp = value)
   def withEvent(value: RunEvent): EventRecord              = copy(event = value)
 
+@Experimental
 object EventRecord:
 
   def apply(
@@ -359,7 +368,7 @@ object EventRecord:
  * `Live` holds a [[LiveEvent]] and `Durable` an [[EventRecord]], both of which can gain a field. `LiveGap`, `Nested`
  * and `Disconnected` are closed: each is exactly the fields it has.
  */
-@Stable
+@Experimental
 enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)
@@ -399,7 +408,7 @@ enum StreamEvent:
  * [[EventRecord]]s: a node of a run that lost its claim and ignores the interrupt may still send progress after a
  * later run of the same `RunId` has claimed the thread, and only the token tells the two apart.
  */
-@Stable
+@Experimental
 final case class LiveEvent private (
   threadId: String,
   runId: String,
@@ -419,6 +428,7 @@ final case class LiveEvent private (
   def withVersion(value: Int): LiveEvent         = copy(version = value)
   def withPayload(value: ujson.Value): LiveEvent = copy(payload = value)
 
+@Experimental
 object LiveEvent:
   def apply(
     threadId: String,
@@ -433,7 +443,7 @@ object LiveEvent:
     new LiveEvent(threadId, runId, token, taskId, nodeId, name, version, payload)
 
 /** Why a subscription ended with [[StreamEvent.Disconnected]]. */
-@Stable
+@Experimental
 enum DisconnectReason:
   /** A durable event did not fit in the subscriber's queue: the listener fell too far behind. */
   case Lagging
@@ -477,7 +487,7 @@ enum DisconnectReason:
  * latter it reads from the store as they land ([[WatchPolicy]]). Live progress events reach it only
  * from runs of its own runtime, because they are never stored.
  */
-@Stable
+@Experimental
 trait Subscription:
   /**
    * Stops the subscription's dispatcher. A listener call already running is interrupted and
@@ -489,6 +499,7 @@ trait Subscription:
    */
   def cancel(): Unit
 
+@Experimental
 object RunEvent:
 
   /**

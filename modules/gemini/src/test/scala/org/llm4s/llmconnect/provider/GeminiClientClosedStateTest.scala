@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,8 +23,8 @@ class GeminiClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: GeminiConfig = GeminiConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
-    model = "gemini-2.0-flash",
-    baseUrl = "https://example.invalid/v1beta",
+    model = ModelName("gemini-2.0-flash"),
+    baseUrl = BaseUrl("https://example.invalid/v1beta"),
     contextWindow = 1048576,
     reserveCompletion = 8192
   )
@@ -55,9 +57,8 @@ class GeminiClientClosedStateTest extends AnyFlatSpec with Matchers {
     // Attempt to call streamComplete()
     val result = client.streamComplete(
       createTestConversation,
-      CompletionOptions(),
-      _ => chunksReceived += 1
-    )
+      CompletionOptions()
+    )(_ => chunksReceived += 1)
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ConfigurationError]
@@ -82,7 +83,7 @@ class GeminiClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("gemini-1.5-pro")
+    val config = createTestConfig.withModel(ModelName("gemini-1.5-pro"))
     val client = new GeminiClient(config)
 
     client.close()

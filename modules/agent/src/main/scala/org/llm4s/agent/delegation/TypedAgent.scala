@@ -207,7 +207,7 @@ final class TypedAgent[I, O] private (
           )
         )
       prompted = systemPrompt.fold(traced)(traced.withSystemPrompt)
-      tooled   = tools.fold(prompted)(prompted.withTools)
+      tooled   = tools.fold(prompted)(prompted.withToolSet)
       // a harness's subagents only when the child delegates, then under the tree's bounds
       harnessed = harness.fold(tooled)(h =>
         tooled.withHarness(

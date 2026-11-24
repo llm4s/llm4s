@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
@@ -42,7 +43,7 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   private val model: String = env("BEDROCK_MODEL_ID").getOrElse("us.amazon.nova-micro-v1:0")
 
   private def client(region: String, credentials: Option[BedrockCredentials] = None): BedrockClient =
-    BedrockClient(BedrockConfig.fromValues(model, region, credentials).value).value
+    BedrockClient(BedrockConfig.fromValues(ModelName(model), region, credentials).value).value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
@@ -65,7 +66,7 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result =
-      client(region.get).streamComplete(conversation, CompletionOptions(maxTokens = Some(64)), c => chunks += c)
+      client(region.get).streamComplete(conversation, CompletionOptions(maxTokens = Some(64)))(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -90,10 +91,16 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   override protected def apiKeyEnvVar: String        = "AWS_REGION and AWS credentials"
   override protected def contractKey: Option[String] = region.filter(_ => hasCredentials)
   override protected def contractClient(region: String): Result[LLMClient] =
-    BedrockConfig.fromValues(model, region, None).flatMap(config => BedrockClient(config))
+    BedrockConfig.fromValues(ModelName(model), region, None).flatMap(config => BedrockClient(config))
   override protected def notApplicable: Map[Capability, String] = Map(
     Capability.StructuredOutput -> "BedrockClient does not send CompletionOptions.responseFormat"
   )
 
   registerCapabilityContract()
+
+  // ---- validate() (#2855) ----
+  override protected def validationUnsupported: Option[String] =
+    Some("the runtime API has no cheap request that the permission a completion needs authorises")
+
+  registerValidationContract()
 }

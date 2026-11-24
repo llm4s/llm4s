@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
@@ -28,7 +30,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-4o-mini", "http://localhost:1/v1", None)),
+    OpenAICompatibleClient.settings(
+      OpenAICompatibleConfig(ModelName("gpt-4o-mini"), BaseUrl("http://localhost:1/v1"), None)
+    ),
     OpenAICompatibleDialect.Standard
   )
 
@@ -55,7 +59,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
     completion.content shouldBe "Hello"
     completion.usage shouldBe Some(TokenUsage(10, 5, 15))
-    completion.estimatedCost shouldBe CostEstimator.estimate("gpt-4o-mini", TokenUsage(10, 5, 15))
+    completion.estimatedCost shouldBe CostEstimator.estimate(ModelName("gpt-4o-mini"), TokenUsage(10, 5, 15))
   }
 
   it should "report usage sent on an event of its own, with no choices" in {
@@ -103,7 +107,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
   it should "carry the dialect's reasoning tokens" in {
     val deepSeek =
-      new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-reasoner", "http://localhost:1", 128000, 8192))
+      new DeepSeekClient(
+        DeepSeekConfig(Secret("k"), ModelName("deepseek-reasoner"), BaseUrl("http://localhost:1"), 128000, 8192)
+      )
     val usage =
       ""","usage":{"prompt_tokens":4,"completion_tokens":9,"total_tokens":13,""" +
         """"completion_tokens_details":{"reasoning_tokens":6}}"""
@@ -121,10 +127,10 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
     withServer("/chat/completions")(exchange => sendSseResponse(exchange, openAISseBody(Seq("a", "b")))) { baseUrl =>
       val c = OpenAICompatibleClient(
-        OpenAICompatibleConfig("m", baseUrl, None),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None),
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       ).value
-      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value.usage shouldBe Some(
+      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value.usage shouldBe Some(
         TokenUsage(10, 5, 15)
       )
     }
@@ -144,10 +150,10 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
       sendSseResponse(exchange, sse)
     } { baseUrl =>
       val c = new OpenAICompatibleClient(
-        OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-4o-mini", baseUrl, None)),
+        OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("gpt-4o-mini"), BaseUrl(baseUrl), None)),
         dialect
       )
-      completion = Some(c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value)
+      completion = Some(c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value)
     }
     (sent, completion.get)
   }
@@ -178,7 +184,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
   "a non-streaming request" should "never carry stream_options" in {
     val c = new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None)),
       OpenAICompatibleDialect.Standard
     )
     c.createRequestBody(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
@@ -203,7 +209,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
   }
 
   it should "follow the generic provider's streamUsage setting, on by default" in {
-    OpenAICompatibleConfig.fromValues("m", "http://localhost:1/v1").value.streamUsage shouldBe true
+    OpenAICompatibleConfig.fromValues(ModelName("m"), BaseUrl("http://localhost:1/v1")).value.streamUsage shouldBe true
     OpenAICompatibleDialect.standard(streamUsage = false).streamUsageOption shouldBe false
 
     var sent: ujson.Value = ujson.Null
@@ -211,9 +217,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
       sent = ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       sendSseResponse(exchange, openAISseBody(Seq("a")))
     } { baseUrl =>
-      val config = OpenAICompatibleConfig.fromValues("m", baseUrl, streamUsage = false).value
+      val config = OpenAICompatibleConfig.fromValues(ModelName("m"), BaseUrl(baseUrl), streamUsage = false).value
       OpenAICompatibleClient(config).value
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
         .value
     }
     sent.obj.contains("stream_options") shouldBe false

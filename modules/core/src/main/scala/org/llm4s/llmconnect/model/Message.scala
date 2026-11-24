@@ -51,14 +51,20 @@ sealed trait Message {
  */
 object Message {
 
+  // An assistant message is written flat, as the other roles are: `content` (left out when the model
+  // produced only tool calls), `toolCalls`, and `thinking` and `thinkingBinding` when present. Until
+  // #2809 it was nested under `data` with its text under `contentOpt`; that shape is still read, so a
+  // stored checkpoint or conversation loads. ThinkingReplay's fingerprint has its own encoding, so the
+  // bindings made before the change stay valid.
+  //
   // A user or tool message whose parts are one Text is written as `content`, the shape it had before
   // parts (#1913), and any other as `parts`; both are read. So JSON written before parts reads, and
   // a text-only conversation serialises as it did - which keeps every ThinkingReplay binding, a
   // digest of this JSON, made before the change valid.
-  private[model] def partsJson(parts: Vector[ContentPart], obj: ujson.Obj): ujson.Obj = {
+  private[model] def partsJson(parts: Seq[ContentPart], obj: ujson.Obj): ujson.Obj = {
     parts match {
-      case Vector(ContentPart.Text(text)) => obj("content") = text
-      case _                              => obj("parts") = ujson.read(write(parts))
+      case Seq(ContentPart.Text(text)) => obj("content") = text
+      case _                           => obj("parts") = ujson.read(write(parts))
     }
     obj
   }
@@ -71,19 +77,23 @@ object Message {
 
   implicit val rw: RW[Message] = readwriter[ujson.Value].bimap[Message](
     {
-      case um: UserMessage      => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
-      case sm: SystemMessage    => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
-      case am: AssistantMessage => ujson.Obj("type" -> ujson.Str("assistant"), "data" -> ujson.read(write(am)))
+      case um: UserMessage   => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
+      case sm: SystemMessage => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
+      case am: AssistantMessage =>
+        val obj = ujson.Obj("type" -> ujson.Str("assistant"))
+        AssistantMessage.fields(am).value.foreach { case (key, value) => obj(key) = value }
+        obj
       case tm: ToolMessage =>
-        partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId)))
+        partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId.asString)))
     },
     json => {
       val obj = json.obj
       obj("type").str match {
-        case "user"      => UserMessage(readParts(obj))
-        case "system"    => SystemMessage(obj("content").str)
-        case "assistant" => read[AssistantMessage](obj("data"))
-        case "tool"      => ToolMessage(readParts(obj), obj("toolCallId").str)
+        case "user"   => UserMessage(readParts(obj))
+        case "system" => SystemMessage(obj("content").str)
+        // nested under "data" until #2809, flat since: both are read
+        case "assistant" => read[AssistantMessage](obj.getOrElse("data", json))
+        case "tool"      => ToolMessage(readParts(obj), ToolCallId(obj("toolCallId").str))
       }
     }
   )
@@ -91,7 +101,7 @@ object Message {
   /** Whether any of `messages` carries an image or a document. */
   def hasMedia(messages: Seq[Message]): Boolean = {
     // a null part (or parts) is not plain text either: such a conversation goes to a client whose checks refuse it
-    def media(parts: Vector[ContentPart]) = parts == null || parts.exists(p => p == null || ContentPart.isMedia(p))
+    def media(parts: Seq[ContentPart]) = parts == null || parts.exists(p => p == null || ContentPart.isMedia(p))
     messages.exists {
       case um: UserMessage => media(um.parts)
       case tm: ToolMessage => media(tm.parts)
@@ -111,7 +121,7 @@ object Message {
   }
 
   /** A message's content with each media part named by its kind, for `toString`. */
-  private[model] def describe(parts: Vector[ContentPart]): String =
+  private[model] def describe(parts: Seq[ContentPart]): String =
     if (parts == null) "[null parts]"
     else
       parts
@@ -123,7 +133,7 @@ object Message {
         .mkString(" ")
 
   /** Whether `parts` has content: at least one part that is media or non-blank text, and no null part. */
-  private[llm4s] def hasContent(parts: Vector[ContentPart]): Boolean =
+  private[llm4s] def hasContent(parts: Seq[ContentPart]): Boolean =
     parts != null && !parts.contains(null) && parts.exists {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true
@@ -147,7 +157,7 @@ object Message {
    * @return `Right(())` when all checks pass; `Left(ValidationError)` with all
    *         violations listed in `error.violations` when any check fails.
    */
-  def validateConversation(messages: List[Message]): Result[Unit] = {
+  def validateConversation(messages: Seq[Message]): Result[Unit] = {
     if (messages.isEmpty) {
       return Right(())
     }
@@ -180,7 +190,7 @@ object Message {
   /**
    * Validates conversation flow rules
    */
-  private def validateConversationFlow(messages: List[Message]): List[String] = {
+  private def validateConversationFlow(messages: Seq[Message]): List[String] = {
     val errors = scala.collection.mutable.ListBuffer[String]()
 
     messages.zipWithIndex.foreach { case (message, index) =>
@@ -228,12 +238,12 @@ object Message {
   /**
    * Validates tool call consistency
    */
-  private def validateToolCallConsistency(messages: List[Message]): List[String] = {
+  private def validateToolCallConsistency(messages: Seq[Message]): List[String] = {
     val errors = scala.collection.mutable.ListBuffer[String]()
 
     // Collect all tool calls and their responses
-    val toolCalls     = scala.collection.mutable.Map[String, (AssistantMessage, Int)]()
-    val toolResponses = scala.collection.mutable.Map[String, (ToolMessage, Int)]()
+    val toolCalls     = scala.collection.mutable.Map[ToolCallId, (AssistantMessage, Int)]()
+    val toolResponses = scala.collection.mutable.Map[ToolCallId, (ToolMessage, Int)]()
 
     messages.zipWithIndex.foreach { case (message, index) =>
       message match {
@@ -279,19 +289,19 @@ object Message {
       Right(UserMessage(content = content))
     }
 
-  def assistant(content: String, toolCalls: List[ToolCall] = List.empty): Result[AssistantMessage] =
+  def assistant(content: String, toolCalls: Seq[ToolCall] = Seq.empty): Result[AssistantMessage] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
       Left(
         ValidationError("content", "Assistant message must have either content or tool calls")
       )
     } else {
-      Right(AssistantMessage(content = content, toolCalls = toolCalls))
+      Right(AssistantMessage(content, toolCalls))
     }
 
-  def tool(content: String, toolCallId: String): Result[ToolMessage] =
+  def tool(content: String, toolCallId: ToolCallId): Result[ToolMessage] =
     if (content.trim.isEmpty) {
       Left(ValidationError("content", "Tool message content cannot be empty"))
-    } else if (toolCallId.trim.isEmpty) {
+    } else if (toolCallId.asString.trim.isEmpty) {
       Left(ValidationError("toolCallId", "Tool call ID cannot be empty"))
     } else {
       Right(ToolMessage(content = content, toolCallId = toolCallId))
@@ -304,18 +314,21 @@ object Message {
  * Maps directly to the `role` field in provider API payloads.
  * The string representation returned by `toString` is the lowercase name
  * forwarded verbatim to the provider (e.g. `"user"`, `"assistant"`).
+ *
+ * A Scala 3 `enum`, as the sum types of this package are when every case is a plain value or plain data
+ * ([[FinishReason]], [[ServiceTier]], [[ThinkingBlock]], [[RequestAdjustment]]). The ones that stay a `sealed trait`
+ * need what an `enum` case cannot have: [[Thinking.Budget]] a constructor only its validating factory may call,
+ * [[ResponseFormat.JsonSchema]] the private `copy` and setters of a growth-safe type, and [[ReasoningEffort]] its own
+ * ordered `values: Seq`, where an `enum`'s is an `Array`.
  */
 @Stable
-sealed trait MessageRole {
-  def name: String
-  override def toString: String = name
-}
+enum MessageRole(val name: String) {
+  case System    extends MessageRole("system")
+  case User      extends MessageRole("user")
+  case Assistant extends MessageRole("assistant")
+  case Tool      extends MessageRole("tool")
 
-object MessageRole {
-  case object System    extends MessageRole { val name = "system"    }
-  case object User      extends MessageRole { val name = "user"      }
-  case object Assistant extends MessageRole { val name = "assistant" }
-  case object Tool      extends MessageRole { val name = "tool"      }
+  override def toString: String = name
 }
 
 /**
@@ -333,11 +346,11 @@ object MessageRole {
  * @param parts the message's content, in order.
  */
 @Stable
-final class UserMessage(val parts: Vector[ContentPart]) extends Message with Serializable {
+final class UserMessage(val parts: Seq[ContentPart]) extends Message with Serializable {
   val role: MessageRole = MessageRole.User
 
   /** This message with `parts` instead. */
-  def withParts(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
+  def withParts(parts: Seq[ContentPart]): UserMessage = new UserMessage(parts)
 
   override def equals(other: Any): Boolean = other match {
     case that: UserMessage => parts == that.parts
@@ -359,7 +372,7 @@ final class UserMessage(val parts: Vector[ContentPart]) extends Message with Ser
 object UserMessage {
 
   /** A user message of `parts`. */
-  def apply(parts: Vector[ContentPart]): UserMessage = new UserMessage(parts)
+  def apply(parts: Seq[ContentPart]): UserMessage = new UserMessage(parts)
 
   /** A user message of one text part. */
   def apply(content: String): UserMessage = new UserMessage(Vector(ContentPart.Text(content)))
@@ -400,13 +413,12 @@ object SystemMessage {
  * A response from the LLM, optionally containing text, tool-call requests, or both, and the
  * reasoning the model produced before them.
  *
- * `content` always returns a non-null `String`; it returns `""` when the LLM
- * response contains only tool calls and no accompanying text (`contentOpt` is
- * `None`). Code that displays assistant output should check for an empty string
- * rather than null-guarding.
+ * `text` is the text of the response, `None` when the model produced only tool calls. `content`
+ * is the same text as a non-null `String`, `""` for `None`, as every [[Message]] has one. Code that
+ * displays assistant output should check for an empty string rather than null-guarding.
  *
  * A well-formed `AssistantMessage` must satisfy at least one of:
- *  - `contentOpt.exists(_.trim.nonEmpty)` — the LLM produced text.
+ *  - `text.exists(_.trim.nonEmpty)` — the LLM produced text.
  *  - `toolCalls.nonEmpty` — the LLM requested one or more tool invocations.
  *
  * Thinking alone does not make a message well-formed.
@@ -440,7 +452,7 @@ object SystemMessage {
  * one. To keep signed thinking, leave the message and everything before it as they are; to replace
  * it deliberately, use `withThinking`.
  *
- * @param contentOpt Text portion of the response; `None` when the model produced
+ * @param text      Text portion of the response; `None` when the model produced
  *                   only tool calls.
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
  *                   that must be matched by a subsequent [[ToolMessage]].
@@ -455,21 +467,22 @@ object SystemMessage {
  */
 @Stable
 final case class AssistantMessage private (
-  contentOpt: Option[String],
+  text: Option[String],
   toolCalls: Seq[ToolCall],
   thinking: Seq[ThinkingBlock],
   thinkingBinding: Option[String]
 ) extends Message {
   val role: MessageRole = MessageRole.Assistant
 
-  def content: String = contentOpt.getOrElse("")
+  /** [[text]], or `""` when the model produced only tool calls. */
+  def content: String = text.getOrElse("")
 
   /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
   def withContent(content: String): AssistantMessage = withContent(Some(content))
 
   /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
   def withContent(content: Option[String]): AssistantMessage =
-    if (content == contentOpt) this else unsealed.copy(contentOpt = content)
+    if (content == text) this else unsealed.copy(text = content)
 
   /** Sets the tool calls; changed tool calls unseal the thinking (see "Sealed thinking" above). */
   def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage =
@@ -542,38 +555,43 @@ final case class AssistantMessage private (
 
 object AssistantMessage {
 
-  /** Creates an [[AssistantMessage]]. Named arguments are the supported way to construct one. */
+  /**
+   * Creates an [[AssistantMessage]]. `text` has no default: a message with neither text nor tool calls fails
+   * [[Message.validate]], so "no text" is said, `AssistantMessage(None, toolCalls)`, never left out.
+   */
   def apply(
-    contentOpt: Option[String] = None,
+    text: Option[String],
     toolCalls: Seq[ToolCall] = Seq.empty,
     thinking: Seq[ThinkingBlock] = Seq.empty
   ): AssistantMessage =
-    new AssistantMessage(contentOpt, toolCalls, thinking, None)
+    new AssistantMessage(text, toolCalls, thinking, None)
 
   def apply(content: String): AssistantMessage =
     new AssistantMessage(Some(content), Seq.empty, Seq.empty, None)
   def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
     new AssistantMessage(Some(content), toolCalls, Seq.empty, None)
 
-  // Manual ReadWriter: `thinking` and `thinkingBinding` are written only when present and read as
-  // empty when absent, so JSON written before they existed still reads
+  /**
+   * The message's JSON fields, without a `type`: `content` when there is text, `toolCalls`, and `thinking` and
+   * `thinkingBinding` when present.
+   */
+  private[model] def fields(msg: AssistantMessage): ujson.Obj = {
+    val obj = ujson.Obj()
+    msg.text.foreach(text => obj("content") = text)
+    obj("toolCalls") = ujson.read(write(msg.toolCalls))
+    if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
+    msg.thinkingBinding.foreach(b => obj("thinkingBinding") = b)
+    obj
+  }
+
+  // Manual ReadWriter: `content`, `thinking` and `thinkingBinding` are written only when present and read as
+  // empty when absent. The text is read from `content`, or from `contentOpt`, its key until #2809, so JSON
+  // written before still reads.
   implicit val rw: RW[AssistantMessage] = readwriter[ujson.Value].bimap[AssistantMessage](
-    msg => {
-      val obj = ujson.Obj(
-        "contentOpt" -> (msg.contentOpt match {
-          case None          => ujson.Null
-          case Some(content) => ujson.Str(content)
-        }),
-        "toolCalls" -> ujson.read(write(msg.toolCalls))
-      )
-      if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
-      msg.thinkingBinding.foreach(b => obj("thinkingBinding") = b)
-      obj
-    },
+    fields,
     json => {
       val obj = json.obj
-      val contentOpt = obj.get("contentOpt") match {
-        case Some(ujson.Null)         => None
+      val text = obj.get("content").orElse(obj.get("contentOpt")) match {
         case Some(ujson.Str(content)) => Some(content)
         case _                        => None
       }
@@ -586,7 +604,7 @@ object AssistantMessage {
         case Some(thinkingJson)      => read[Seq[ThinkingBlock]](thinkingJson)
       }
       val binding = obj.get("thinkingBinding").flatMap(_.strOpt)
-      new AssistantMessage(contentOpt, toolCalls, thinking, binding)
+      new AssistantMessage(text, toolCalls, thinking, binding)
     }
   )
 }
@@ -605,14 +623,14 @@ object AssistantMessage {
  */
 @Stable
 final class ToolMessage(
-  val parts: Vector[ContentPart],
-  val toolCallId: String
+  val parts: Seq[ContentPart],
+  val toolCallId: ToolCallId
 ) extends Message
     with Serializable {
   val role: MessageRole = MessageRole.Tool
 
   /** This result with `parts` instead. */
-  def withParts(parts: Vector[ContentPart]): ToolMessage = new ToolMessage(parts, toolCallId)
+  def withParts(parts: Seq[ContentPart]): ToolMessage = new ToolMessage(parts, toolCallId)
 
   override def equals(other: Any): Boolean = other match {
     case that: ToolMessage => parts == that.parts && toolCallId == that.toolCallId
@@ -630,25 +648,24 @@ final class ToolMessage(
    * Resolves the tool name for this response by scanning `contextMessages` for
    * the [[ToolCall]] whose `id` matches [[toolCallId]].
    *
-   * Returns `"unknown-tool"` when no matching tool call is found, which can
-   * happen if `contextMessages` does not include the assistant message that
-   * issued the request (e.g. after context pruning).
+   * `None` when no matching tool call is found, which can happen if
+   * `contextMessages` does not include the assistant message that issued the
+   * request (e.g. after context pruning).
    *
    * @param contextMessages The conversation history to search; all
    *                        [[AssistantMessage]] entries are scanned.
    */
-  def findToolCallName(contextMessages: Seq[Message]): String =
+  def findToolCallName(contextMessages: Seq[Message]): Option[String] =
     contextMessages
       .collect { case am: AssistantMessage => am.toolCalls }
       .flatten
       .find(_.id == toolCallId)
       .map(_.name)
-      .getOrElse("unknown-tool")
 
   override def validate: Result[Message] = {
     val validations = List(
       if (!Message.hasContent(parts)) Some("Tool message content cannot be empty") else None,
-      if (toolCallId.trim.isEmpty) Some("Tool call ID cannot be empty") else None
+      if (toolCallId.asString.trim.isEmpty) Some("Tool call ID cannot be empty") else None
     ).flatten
 
     if (validations.nonEmpty) {
@@ -664,15 +681,15 @@ final class ToolMessage(
 object ToolMessage {
 
   /** A tool result of `parts`. */
-  def apply(parts: Vector[ContentPart], toolCallId: String): ToolMessage = new ToolMessage(parts, toolCallId)
+  def apply(parts: Seq[ContentPart], toolCallId: ToolCallId): ToolMessage = new ToolMessage(parts, toolCallId)
 
   /** A tool result of one text part. */
-  def apply(content: String, toolCallId: String): ToolMessage =
+  def apply(content: String, toolCallId: ToolCallId): ToolMessage =
     new ToolMessage(Vector(ContentPart.Text(content)), toolCallId)
 
   implicit val rw: RW[ToolMessage] = readwriter[ujson.Value].bimap[ToolMessage](
-    tm => Message.partsJson(tm.parts, ujson.Obj("toolCallId" -> ujson.Str(tm.toolCallId))),
-    json => ToolMessage(Message.readParts(json.obj), json("toolCallId").str)
+    tm => Message.partsJson(tm.parts, ujson.Obj("toolCallId" -> ujson.Str(tm.toolCallId.asString))),
+    json => ToolMessage(Message.readParts(json.obj), ToolCallId(json("toolCallId").str))
   )
 }
 
@@ -694,14 +711,14 @@ object ToolMessage {
  */
 @Stable
 final case class ToolCall private (
-  id: String,
+  id: ToolCallId,
   name: String,
   arguments: ujson.Value
 ) {
   override def toString: String = s"ToolCall($id, $name, $arguments)"
 
   /** Sets the identifier. */
-  def withId(id: String): ToolCall = copy(id = id)
+  def withId(id: ToolCallId): ToolCall = copy(id = id)
 
   /** Sets the tool name. */
   def withName(name: String): ToolCall = copy(name = name)
@@ -713,7 +730,7 @@ final case class ToolCall private (
 object ToolCall {
 
   /** Creates a [[ToolCall]] of tool `name` with `arguments`, correlated by `id`. */
-  def apply(id: String, name: String, arguments: ujson.Value): ToolCall = new ToolCall(id, name, arguments)
+  def apply(id: ToolCallId, name: String, arguments: ujson.Value): ToolCall = new ToolCall(id, name, arguments)
 
   implicit val rw: RW[ToolCall] = macroRW
 }

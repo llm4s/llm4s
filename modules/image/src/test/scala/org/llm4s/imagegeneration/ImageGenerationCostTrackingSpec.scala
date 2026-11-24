@@ -1,8 +1,10 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.metrics._
 import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.scalatest.flatspec.AnyFlatSpec
@@ -79,8 +81,8 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent.ImageGenerationCompleted" should "serialize to JSON correctly" in {
     val event = TraceEvent.ImageGenerationCompleted(
-      model = "dall-e-3",
-      provider = "openai",
+      model = ModelName("dall-e-3"),
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 2,
       size = "1024x1024",
@@ -106,8 +108,8 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
   it should "omit optional fields when None" in {
     val event = TraceEvent.ImageGenerationCompleted(
-      model = "dall-e-3",
-      provider = "openai",
+      model = ModelName("dall-e-3"),
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 1,
       size = "1024x1024",
@@ -122,8 +124,8 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
   it should "include error message on failure" in {
     val event = TraceEvent.ImageGenerationCompleted(
-      model = "dall-e-3",
-      provider = "openai",
+      model = ModelName("dall-e-3"),
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 0,
       size = "1024x1024",
@@ -311,8 +313,8 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
     imageEvents should have size 1
 
     val event = imageEvents.head
-    event.model shouldBe "dall-e-3"
-    event.provider shouldBe "openai"
+    event.model shouldBe ModelName("dall-e-3")
+    event.provider shouldBe Some(ProviderId("openai"))
     event.operation shouldBe "generate"
     event.imageCount shouldBe 1
     event.success shouldBe true
@@ -344,13 +346,14 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   // MetricsCollector.noop compatibility
   // ─────────────────────────────────────────────────────────────
 
-  "MetricsCollector.noop" should "not throw on image generation methods" in {
+  "MetricsCollector.noop" should "not throw when the image metrics are recorded" in {
     val metrics = MetricsCollector.noop
 
     noException should be thrownBy {
-      metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-      metrics.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-      metrics.observeImageGeneration(
+      ImageMetrics.observed(metrics, "openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
+      ImageMetrics.cost(metrics, "openai", "dall-e-3", 0.04)
+      ImageMetrics.observed(
+        metrics,
         "openai",
         "dall-e-3",
         "generate",

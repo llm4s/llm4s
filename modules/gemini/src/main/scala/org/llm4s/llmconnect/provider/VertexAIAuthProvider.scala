@@ -267,7 +267,7 @@ class VertexAIAuthProvider(
         Left(noCredentialsError)
       case Left(e) =>
         // Host resolved but the request failed transiently (timeout, connection refused).
-        // The HTTP client reports it as a recoverable error, so LLMClientRetry can retry
+        // The HTTP client reports it as a recoverable error, so a ReliableClient can retry
         // through a momentary metadata-server outage on GCE/GKE.
         logger.debug(s"[VertexAI] Metadata server request failed transiently: ${e.message}")
         Left(e)

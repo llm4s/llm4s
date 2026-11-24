@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -10,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   ResponseFormat,
   StreamedChunk,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -31,9 +34,9 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
   private val testConfig = OpenAIConfig(
     apiKey = Secret("test-key"),
-    model = "anthropic/claude-3.5-sonnet",
+    model = ModelName("anthropic/claude-3.5-sonnet"),
     organization = None,
-    baseUrl = "https://openrouter.ai/api/v1",
+    baseUrl = BaseUrl("https://openrouter.ai/api/v1"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -41,9 +44,9 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   private def localConfig(baseUrl: String): OpenAIConfig =
     OpenAIConfig(
       apiKey = Secret("test-key"),
-      model = "anthropic/claude-3.5-sonnet",
+      model = ModelName("anthropic/claude-3.5-sonnet"),
       organization = None,
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 200000,
       reserveCompletion = 4096
     )
@@ -104,7 +107,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize tool message with correct fields" in {
     val client      = new OpenRouterClientTestHelper(testConfig)
-    val conv        = Conversation(Seq(ToolMessage("tool-output", "call-42")))
+    val conv        = Conversation(Seq(ToolMessage("tool-output", ToolCallId("call-42"))))
     val requestBody = client.exposedCreateRequestBody(conv, CompletionOptions())
     val toolMsg     = requestBody("messages")(0)
 
@@ -160,7 +163,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
     val result = client.complete(conversation, CompletionOptions())
@@ -169,7 +172,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     recorded should have size 1
 
     val exchange = recorded.head
-    exchange.provider shouldBe "openrouter"
+    exchange.provider.asString shouldBe "openrouter"
     exchange.model shouldBe Some("anthropic/claude-3.5-sonnet")
     exchange.requestBody should include("\"messages\"")
     exchange.requestBody should include("hello")
@@ -222,7 +225,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 401, """{"error":"Invalid API key"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
@@ -232,7 +235,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[RateLimitError]
@@ -242,7 +245,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 500, """{"error":"Internal server error"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[ServiceError]
@@ -252,7 +255,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     sendResponse(exchange, 503, """{"error":"Service unavailable"}""")
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     val err = result.swap.toOption.get
@@ -265,7 +268,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   } { baseUrl =>
     val client     = new OpenRouterClient(localConfig(baseUrl))
     var chunkCount = 0
-    val result     = client.streamComplete(conversation, CompletionOptions(), _ => chunkCount += 1)
+    val result     = client.streamComplete(conversation, CompletionOptions())(_ => chunkCount += 1)
 
     result.isLeft shouldBe true
     chunkCount shouldBe 0
@@ -281,14 +284,14 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openrouter"
+    recorded.head.provider.asString shouldBe "openrouter"
     recorded.head.requestBody should include("\"stream\":true")
     recorded.head.responseBody.value should include("data:")
     recorded.head.responseBody.value should include("Hello")
@@ -311,7 +314,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   } { baseUrl =>
     val client = new OpenRouterClient(localConfig(baseUrl))
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     result.isRight shouldBe true
     val completion = result.toOption.get

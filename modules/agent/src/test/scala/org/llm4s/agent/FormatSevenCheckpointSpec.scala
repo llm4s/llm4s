@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{
   Checkpoint,
@@ -8,7 +9,6 @@ import org.llm4s.agent.graph.{
   EventDraft,
   EventRecord,
   GraphRuntime,
-  IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
   PendingWrite,
@@ -117,7 +117,7 @@ class FormatSevenCheckpointSpec extends AnyFlatSpec with Matchers with EitherVal
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(deploy))
+        .withToolSet(SpecTools.set(deploy))
         .withMiddleware(new ApprovalMiddleware(request => Some(s"review ${request.call.id}")))
         .withRuntime(GraphRuntime(store))
     )

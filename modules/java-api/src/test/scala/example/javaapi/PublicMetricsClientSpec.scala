@@ -1,5 +1,7 @@
 package example.javaapi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.{ JLlmClient, Llm4s, LlmResult }
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.metrics.MetricsCollector
@@ -15,7 +17,7 @@ class PublicMetricsClientSpec extends AnyFlatSpec with Matchers {
 
   "Llm4s.createClient(config, metrics)" should "be callable from an application's own package" in {
     val result: LlmResult[JLlmClient] =
-      Llm4s.createClient(OllamaConfig("llama3.2", "http://127.0.0.1:1"), MetricsCollector.noop)
+      Llm4s.createClient(OllamaConfig(ModelName("llama3.2"), BaseUrl("http://127.0.0.1:1")), MetricsCollector.noop)
     result.isSuccess shouldBe true
   }
 

@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ ConversationBuilder, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -15,7 +16,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def stubClient(response: Result[Completion]): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = response
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       response
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -23,7 +24,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def successTemplate(text: String) = StarterTestSupport.template(
     JLlmClientTestFactory.create(
-      stubClient(Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text))))
+      stubClient(Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text))))
     )
   )
 
@@ -53,7 +54,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   "complete(Conversation, CompletionOptions)" should "forward options to the client" in {
     val conv    = ConversationBuilder.create().user("q").build()
-    val options = CompletionOptions(temperature = 0.5)
+    val options = CompletionOptions(temperature = Some(0.5))
     successTemplate("result").complete(conv, options) shouldBe "result"
   }
 

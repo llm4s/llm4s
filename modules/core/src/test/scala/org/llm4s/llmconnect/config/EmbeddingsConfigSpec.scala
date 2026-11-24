@@ -34,12 +34,12 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {
-        val (provider, cfg) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "fixtureembedding"
-        cfg.baseUrl shouldBe "https://embeddings.example.test"
-        cfg.model shouldBe "fixture-embed-large"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.providerId.asString shouldBe "fixtureembedding"
+        cfg.baseUrl.asUrl shouldBe "https://embeddings.example.test"
+        cfg.model.asString shouldBe "fixture-embed-large"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
   }

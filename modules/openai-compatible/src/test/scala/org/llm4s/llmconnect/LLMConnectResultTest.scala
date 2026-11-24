@@ -32,7 +32,7 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
 
   test("getClient returns OpenRouterClient for the default named OpenRouter provider") {
     val props = Map(
-      "llm4s.providers.provider"                 -> "openrouter-main",
+      "llm4s.defaultProvider"                    -> "openrouter-main",
       "llm4s.providers.openrouter-main.provider" -> "openrouter",
       "llm4s.providers.openrouter-main.model"    -> "gpt-4o",
       "llm4s.providers.openrouter-main.apiKey"   -> "sk",
@@ -41,7 +41,7 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
 
     val res = withProps(props) {
       given ModelRegistryService = registryService
-      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
     }
     res.isRight shouldBe true
     res.toOption.get.getClass.getSimpleName shouldBe "OpenRouterClient"

@@ -1,17 +1,22 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.TroubleshootingLinks
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider, FixtureEmbeddingProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -37,19 +42,20 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     val PrimaryEnv                    = "KEYED_API_KEY"
     val SecondaryEnv                  = "KEYED_ALT_API_KEY"
     val configSpec: ProviderConfigSpec =
-      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq(PrimaryEnv, SecondaryEnv))
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+        BaseUrl(FixtureChatProvider.DefaultBaseUrl),
+        Seq(PrimaryEnv, SecondaryEnv)
+      )
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       ProviderDescriptor
-        .requireApiKey(providerName, section)
+        .requireApiKey(context.providerName, section)
         .flatMap(key =>
           FixtureChatConfig.fromValues(section.model.asString, key.reveal, FixtureChatProvider.DefaultBaseUrl)
         )
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(KeyedProvider, FixtureChatProvider)
 
@@ -62,7 +68,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     s"llm4s.providers.$name { $body }\n"
 
   private def apiKeyOf(source: ConfigSource, name: String): Result[String] =
-    Llm4sConfig.provider(source, name).map {
+    Llm4sConfig.provider(source, ProviderName(name)).map {
       case fixture: FixtureChatConfig => fixture.apiKey
       case other                      => fail(s"Expected a FixtureChatConfig, got $other")
     }
@@ -238,7 +244,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
 
     "take the vendor's shared key" in {
       val source = ReferenceConfig.withEnv(select + binding, Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared"))
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-shared"
+      EmbeddingsConfigLoader.loadProvider(source).value.apiKey.map(_.reveal) shouldBe Some("sk-shared")
     }
 
     "take its own key over the shared one" in {
@@ -246,7 +252,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
         select + binding + "llm4s.embeddings.fixtureembedding.apiKey = \"sk-own\"\n",
         Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared")
       )
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-own"
+      EmbeddingsConfigLoader.loadProvider(source).value.apiKey.map(_.reveal) shouldBe Some("sk-own")
     }
 
     "take the canonical id's key when selected by an alias" in {
@@ -254,7 +260,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
         s"llm4s.embeddings.model = \"${FixtureEmbeddingProvider.Alias}/fixture-embed-small\"\n" + binding,
         Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared")
       )
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-shared"
+      EmbeddingsConfigLoader.loadProvider(source).value.apiKey.map(_.reveal) shouldBe Some("sk-shared")
     }
 
     "fail naming the variable and the block when neither is set" in {

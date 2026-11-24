@@ -1,10 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.OpenAICompatibleConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.ContextWindowResolver
-import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{
   holdOpen,
@@ -55,7 +54,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     NamedProviderConfig(
       provider = descriptor.id,
       model = ModelName("test-model"),
-      baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some("http://localhost:8000/v1")).map(BaseUrl(_)),
+      baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some(BaseUrl("http://localhost:8000/v1"))),
       apiKey = Some(ApiKey("test-key")),
     )
 
@@ -67,7 +66,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
     "contribute exactly the expected providers, and no embedding providers" in {
       val module = new Llm4sOpenAICompatibleModule
-      module.chatProviders should contain theSameElementsAs expectations.map(_._1)
+      module.providers should contain theSameElementsAs expectations.map(_._1)
       module.embeddingProviders shouldBe empty
     }
   }
@@ -76,7 +75,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
     "build their own config from a config section" in {
       expectations.foreach { (descriptor, configClass, _) =>
-        descriptor.buildConfig("test-instance", section(descriptor)) match
+        descriptor.buildConfig(section(descriptor), ProviderConfigContext.of("test-instance")) match
           case Right(config) => config.getClass.getSimpleName shouldBe configClass
           case Left(error)   => fail(s"${descriptor.id.asString} failed to build a config: ${error.message}")
       }
@@ -146,8 +145,12 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         withClue(s"${descriptor.id.asString}: ") {
           assertHonoursApiKeyProvider(sendJsonResponse(_, 200, openAICompletion("done"))) { (baseUrl, keys) =>
             descriptor
-              .buildConfig("rotation", section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
-              .flatMap(config => descriptor.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+              .buildConfig(
+                section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
+                ProviderConfigContext.of("rotation")
+              )
+              .flatMap(_.withApiKeyProvider(keys))
+              .flatMap(descriptor.build(_, ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }
@@ -218,7 +221,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       MistralProvider          -> Some("/models"),
       OpenRouterProvider       -> Some("/key"), // its /models answers without a key
       ZaiProvider              -> None,
-      CohereProvider           -> None
+      // Cohere's native Models API, beside the Compatibility API the completions go to: it looks the model up
+      CohereProvider -> Some("/models/test-model")
     )
 
     "check the endpoint and the key with one request, or say that it cannot (#2830)" in {
@@ -259,6 +263,45 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
           }
           seen.toArray.toSeq shouldBe Seq(("GET", s"/v1$path", "Bearer test-key"))
         }
+      }
+    }
+
+    "report a key xAI refuses with a 400 as an AuthenticationError, from validate() and from a completion (#2855)" in {
+      import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+      // xAI's reply to a wrong key, as api.x.ai sent it on 2026-11-24
+      val refused = ujson
+        .Obj(
+          "code"  -> "invalid-argument",
+          "error" -> "Incorrect API key provided. You can obtain an API key from https://console.x.ai."
+        )
+        .render()
+      withServer("/")(sendJsonResponse(_, 400, refused)) { baseUrl =>
+        val client = assertBuildsClient(XaiProvider, section(XaiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
+        client.validate() should matchPattern { case Left(_: org.llm4s.error.AuthenticationError) => }
+        client.complete(Conversation(Seq(UserMessage("hi")))) should matchPattern {
+          case Left(_: org.llm4s.error.AuthenticationError) =>
+        }
+        client.streamComplete(Conversation(Seq(UserMessage("hi"))))(_ => ()) should matchPattern {
+          case Left(_: org.llm4s.error.AuthenticationError) =>
+        }
+        client.close()
+      }
+      // any other 400 is still the request's fault
+      val other = """{"code":"invalid-argument","error":"Unknown parameter"}"""
+      withServer("/")(sendJsonResponse(_, 400, other)) { baseUrl =>
+        val client = assertBuildsClient(XaiProvider, section(XaiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
+        client.validate() should matchPattern { case Left(_: org.llm4s.error.ValidationError) => }
+        client.close()
+      }
+    }
+
+    "report a model Cohere does not have as the ServiceError 404 its Models API answers with (#2855)" in {
+      withServer("/")(sendJsonResponse(_, 404, """{"message":"model 'test-model' not found"}""")) { baseUrl =>
+        val client = assertBuildsClient(CohereProvider, section(CohereProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
+        client.validate() should matchPattern {
+          case Left(error: org.llm4s.error.ServiceError) if error.httpStatus == 404 =>
+        }
+        client.close()
       }
     }
   }

@@ -1,14 +1,14 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,15 +24,12 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = "[]",
-          model = "test",
+          model = ModelName("test"),
           message = AssistantMessage("[]")
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -46,8 +43,8 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   }
 
   private val mockLLM             = new MockLLMClient
-  private val mockEmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
-  private val embeddingConfig     = EmbeddingModelConfig("test-model", 3)
+  private val mockEmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
+  private val embeddingConfig     = EmbeddingModelConfig(ModelName("test-model"), 3)
 
   "RAGASFactory.create" should "create evaluator with all four default metrics" in {
     val evaluator = RAGASFactory.create(mockLLM, mockEmbeddingClient, embeddingConfig)
@@ -151,11 +148,12 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   // which included every Ollama model - nomic-embed-text is 768. Dimensions now come from the
   // embedding provider's descriptor, so a fixture provider stands in for any of them.
   private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("fixture")
+    val id: ProviderId                                           = ProviderId("fixture")
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
-    override val modelDimensions: Map[String, Int] = Map("fixture-768" -> 768)
+    override val modelDimensions: Map[ModelName, Int] = Map(ModelName("fixture-768") -> 768)
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Right(new MockEmbeddingProvider)
   }
 
@@ -165,7 +163,12 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
     FixtureChatConfig("k", "fixture-model")
 
   private def embeddings(model: String) =
-    "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, Secret("key"))
+    EmbeddingProviderConfig(
+      ProviderId("fixture"),
+      BaseUrl("http://localhost:9999"),
+      ModelName(model),
+      Some(Secret("key"))
+    )
 
   "RAGASFactory.fromConfigs" should "resolve the embedding model's dimensions through its provider" in {
     given ProviderRegistry = withFixture

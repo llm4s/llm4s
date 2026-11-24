@@ -50,11 +50,11 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   "An input block" should "end the turn Blocked, store nothing, change no usage, and never call the model" in {
     val client = answers("never sent")
-    val result = guarded(client, input = Seq(new LengthCheck(min = 10, max = 100))).run("Short").value
+    val result = guarded(client, input = Seq(LengthCheck(min = 10, max = 100))).run("Short").value
 
     result.status shouldBe a[AgentStatus.Blocked]
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "LengthCheck"
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too short")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too short")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 0
@@ -63,7 +63,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "leave the thread usable, so the next turn works and the blocked query is not in its history" in {
     val client = answers("first answer", "second answer")
-    val agent  = guarded(client, input = Seq(new LengthCheck(min = 10, max = 100)))
+    val agent  = guarded(client, input = Seq(LengthCheck(min = 10, max = 100)))
 
     val first   = agent.run("A long enough first query").value
     val blocked = agent.continueConversation(first, "Short").value
@@ -82,7 +82,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "come from the first failing guardrail of several" in {
     val result = guarded(
       answers("never sent"),
-      input = Seq(new LengthCheck(min = 1, max = 100), new ProfanityFilter())
+      input = Seq(LengthCheck(min = 1, max = 100), ProfanityFilter())
     ).run("This contains badword").value
 
     result.status shouldBe a[AgentStatus.Blocked]
@@ -91,11 +91,11 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "stop the turn before the output guardrails or the model" in {
     val client = answers("""{"result": "success"}""")
-    val result = guarded(client, input = Seq(new LengthCheck(1, 5)), output = Seq(new JSONValidator()))
+    val result = guarded(client, input = Seq(LengthCheck(1, 5)), output = Seq(JSONValidator()))
       .run("This query is too long")
       .value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too long")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too long")
     client.callCount shouldBe 0
   }
 
@@ -117,11 +117,11 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   "An output block" should "remove the blocked turn and end it Blocked, keeping the turn's usage" in {
     val client = answers("not json")
-    val result = guarded(client, output = Seq(new JSONValidator())).run("Generate JSON").value
+    val result = guarded(client, output = Seq(JSONValidator())).run("Generate JSON").value
 
     val blocked = result.status.asInstanceOf[AgentStatus.Blocked]
     blocked.guardrail shouldBe "JSONValidator"
-    blocked.reason should include("not valid JSON")
+    blocked.reason.getOrElse("") should include("not valid JSON")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 1
@@ -149,7 +149,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(min = 3, max = 100)), Seq(secretFree)))
+        .withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(min = 3, max = 100)), Seq(secretFree)))
         .withRuntime(runtime)
     )
     val first   = agent.run("Hello").value
@@ -173,13 +173,15 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val result = guarded(client, output = Seq(secretFree)).run("q").value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("response must not contain secrets")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include(
+      "response must not contain secrets"
+    )
     client.callCount shouldBe 2
   }
 
   it should "check each turn's answer on a continued conversation" in {
     val client = answers("""{"turn": 1}""", "not json")
-    val agent  = guarded(client, output = Seq(new JSONValidator()))
+    val agent  = guarded(client, output = Seq(JSONValidator()))
 
     val first  = agent.run("First query").value
     val second = agent.continueConversation(first, "Generate JSON please").value
@@ -192,8 +194,8 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val client = answers("""{"response": "ok"}""", """{"response": "ok"}""", """{"response": "ok"}""")
     val agent = guarded(
       client,
-      input = Seq(new LengthCheck(1, 100), new ProfanityFilter()),
-      output = Seq(new JSONValidator(), new LengthCheck(1, 1000))
+      input = Seq(LengthCheck(1, 100), ProfanityFilter()),
+      output = Seq(JSONValidator(), LengthCheck(1, 1000))
     )
 
     val result = agent.runMultiTurn("First query", Seq("Second query", "Third query")).value
@@ -239,7 +241,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def wrapModelCall(request: ModelRequest, context: ModelContext)(
       next: ModelRequest => Result[ModelResponse]
     ): Result[ModelResponse] =
-      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", "not now")) else next(request)
+      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", Some("not now"))) else next(request)
   }
 
   "A GuardrailBlocked from a model wrapper" should "fail the run as Left, leaving the thread for recover" in {
@@ -249,7 +251,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val thread  = org.llm4s.agent.graph.ThreadId("wrapper-guardrail")
 
     val error = agent.run(thread, "q").error
-    cause(error) shouldBe GuardrailBlocked("ModelGuard", "not now")
+    cause(error) shouldBe GuardrailBlocked("ModelGuard", Some("not now"))
     // not a Block: the thread is Running, so a new turn is refused and recover continues it
     agent.run(thread, "another").error shouldBe a[GraphError.IncompleteRun]
     val recovered = agent.recover(thread).value
@@ -261,7 +263,10 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def handoffTo(target: String): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, Seq(ToolCall("call_h", s"handoff_to_$target", ujson.Obj("reason" -> "specialist"))))
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("call_h"), s"handoff_to_$target", ujson.Obj("reason" -> "specialist")))
+      )
     )
 
   private def rejectNo: InputGuardrail = new InputGuardrail {

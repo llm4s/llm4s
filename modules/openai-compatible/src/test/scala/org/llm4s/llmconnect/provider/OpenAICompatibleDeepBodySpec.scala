@@ -1,7 +1,9 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.ProviderModelListers
-import org.llm4s.config.ProvidersConfigModel.{ ApiKey, NamedProviderConfig, ProviderId }
+import org.llm4s.config.NamedProviderConfig
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
 import org.llm4s.error.{ ServiceError, ValidationError }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -9,7 +11,6 @@ import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
 import org.llm4s.testutil.SmallStack
-import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -38,7 +39,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
 
   private def client(baseUrl: String) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None)),
       OpenAICompatibleDialect.Standard
     )
 
@@ -46,7 +47,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
     val provider = ProviderId("deepseek")
     val config   = NamedProviderConfig(provider, ModelName("m"), baseUrl = None, apiKey = Some(ApiKey("k")))
     ProviderModelListers
-      .openAICompatible(provider, "https://api.example.test")
+      .openAICompatible(provider, BaseUrl("https://api.example.test"))
       .listModels(config, MockHttpClient(HttpResponse(200, body, Map.empty)))
   }
 
@@ -83,7 +84,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
   "OpenAICompatibleClient.streamComplete" should "return a Left for a 400 or 500 whose body is a 100,000-deep array" in {
     Seq(400, 500).foreach { status =>
       respondingWith(status, deepArray) { baseUrl =>
-        val result = onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions(), _ => ()))
+        val result = onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions())(_ => ()))
         result.isLeft shouldBe true
         result.left.toOption.get.message should include(s"(HTTP $status)")
       }
@@ -92,7 +93,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
 
   it should "return a Left for a stream event whose data is a 100,000-deep array" in {
     respondingWith(200, s"data: $deepArray\n\ndata: [DONE]\n\n", contentType = "text/event-stream") { baseUrl =>
-      onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions(), _ => ())).isLeft shouldBe true
+      onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions())(_ => ())).isLeft shouldBe true
     }
   }
 

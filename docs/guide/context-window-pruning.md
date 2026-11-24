@@ -3,8 +3,9 @@ layout: page
 title: Context Window Pruning
 description: "Keep a long conversation inside the model's context window with LLM4S pruning strategies: oldest first, middle out, recent turns and adaptive."
 search_title: "Context window pruning for LLM conversations in Scala"
-nav_order: 11
-parent: User Guide
+nav_order: 211
+parent: Agents
+grand_parent: User Guide
 ---
 
 # Context Window Pruning Strategies
@@ -45,7 +46,7 @@ val agent = Agent.builder("assistant", client)
   .withMiddleware(new ContextWindowMiddleware(contextConfig))
   .build()
 
-agent.flatMap(_.runMultiTurn("...", Seq(...)))
+agent.flatMap(_.runMultiTurn("What is a monad?", Seq("And a functor?", "How do the two relate?")))
 ```
 
 Two rules hold under every strategy:
@@ -273,7 +274,7 @@ budget, then prunes oldest first to fit it. You pass the numbers; the
 import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
 
 val strategy = PruningStrategy.AdaptiveWindowing(
-  contextWindowSize = 128_000,           // gpt-4o context
+  contextWindowSize = 922_000,           // gpt-5.6-terra's input limit
   inputCostPerToken = Some(0.000005),    // $5 per 1M input tokens
   outputCostPerToken = Some(0.000015),   // $15 per 1M output tokens
   costSensitivity = 0.5                  // the default
@@ -294,9 +295,10 @@ The same numbers from the model registry, for whichever model a section configur
 import org.llm4s.agent.PruningStrategy
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 def adaptiveFor(registry: ModelRegistryService, model: String): Result[PruningStrategy] =
-  registry.lookup(model).map { metadata =>
+  registry.lookup(ModelName(model)).map { metadata =>
     PruningStrategy.AdaptiveWindowing(
       contextWindowSize = metadata.contextWindow.getOrElse(8192),
       inputCostPerToken = metadata.pricing.inputCostPerToken,
@@ -402,7 +404,7 @@ Derive the budget from the configured model's metadata (`adaptiveFor` from
 changes the budget with it:
 
 ```scala
-val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
+val config = adaptiveFor(registry, providerConfig.model.asString).map { strategy =>
   ContextWindowConfig(pruningStrategy = strategy)
 }
 ```
@@ -416,14 +418,17 @@ val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
 ```scala
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.llmconnect.model.Conversation
+import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ModelName
 
-// the input cost of sending `conversation` once, at the registry's price for the model
+// the input cost of sending `conversation` once, at the registry's price for the model:
+// exact for an OpenAI model (llm4s-openai), the cl100k_base approximation for any other
 def inputCost(registry: ModelRegistryService, model: String, conversation: Conversation): Result[Option[Double]] =
   for {
-    counter  <- ConversationTokenCounter.forModel(model)
-    metadata <- registry.lookup(model)
+    counter  <- OpenAITokenizers.counterFor(model).orElse(ConversationTokenCounter.cl100k())
+    metadata <- registry.lookup(ModelName(model))
   } yield {
     val tokens = counter.countConversation(conversation)
     metadata.pricing.inputCostPerToken.map(_ * tokens)
@@ -483,10 +488,11 @@ def inputCost(registry: ModelRegistryService, model: String, conversation: Conve
    ```
 
 3. **Treat the default count as exact for every model** - The default counter is `cl100k_base`, an approximation
-   for non-OpenAI models; pass your model's counter for an exact one
+   for non-OpenAI models; pass your model's counter for an exact one (`OpenAITokenizers.counterFor` in
+   `llm4s-openai`, or `ConversationTokenCounter.of` over your own `StringTokenizer`)
    ```scala
    val middleware: Result[ContextWindowMiddleware] =
-     ConversationTokenCounter.forModel("gpt-4o").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
+     OpenAITokenizers.counterFor("gpt-5.6-terra").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
    ```
 
 4. **Hard-code window sizes** - Derive them from the model's metadata instead
@@ -506,11 +512,21 @@ The thread's `AgentResult.messages` is the full history; to see what was sent, w
 with a small middleware of your own, placed after the context window middleware with `runsAfter`:
 
 ```scala
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ContextWindowMiddleware,
+  MiddlewareId,
+  MiddlewareRef,
+  ModelContext,
+  ModelRequest,
+  ModelResponse
+}
+import org.llm4s.types.Result
+import org.slf4j.Logger
 
 class LogSentMessages(logger: Logger) extends AgentMiddleware {
   val id = MiddlewareId("log-sent-messages")
-  override def runsAfter = Set(MiddlewareId("context-window"))
+  override def runsAfter = Set(MiddlewareRef.ofType[ContextWindowMiddleware])
 
   override def wrapModelCall(request: ModelRequest, context: ModelContext)(
     next: ModelRequest => Result[ModelResponse]

@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.{
@@ -81,12 +81,12 @@ private[javaapi] object ClientBuilds {
   def openAiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
       apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
-      model    <- required("model", s.model)
+      model    <- required("model", s.model).map(ModelName(_))
       resolver <- resolver
       config <- OpenAIConfig.fromValues(
         model,
         apiKey,
-        present(s.baseUrl).getOrElse(OpenAIConfig.DEFAULT_BASE_URL),
+        present(s.baseUrl).map(BaseUrl(_)).getOrElse(OpenAIConfig.DEFAULT_BASE_URL),
         present(s.organization)
       )(using resolver)
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
@@ -96,10 +96,12 @@ private[javaapi] object ClientBuilds {
   def anthropicConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
       apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
-      model    <- required("model", s.model)
+      model    <- required("model", s.model).map(ModelName(_))
       resolver <- resolver
       config <- AnthropicConfig
-        .fromValues(model, apiKey, present(s.baseUrl).getOrElse(AnthropicConfig.DEFAULT_BASE_URL))(using resolver)
+        .fromValues(model, apiKey, present(s.baseUrl).map(BaseUrl(_)).getOrElse(AnthropicConfig.DEFAULT_BASE_URL))(using
+          resolver
+        )
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
     } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
@@ -107,10 +109,14 @@ private[javaapi] object ClientBuilds {
   def geminiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
       apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
-      model    <- required("model", s.model)
+      model    <- required("model", s.model).map(ModelName(_))
       resolver <- resolver
-      config <- GeminiConfig.fromValues(model, apiKey, present(s.baseUrl).getOrElse(GeminiConfig.DEFAULT_BASE_URL))(
-        using resolver
+      config <- GeminiConfig.fromValues(
+        model,
+        apiKey,
+        present(s.baseUrl).map(BaseUrl(_)).getOrElse(GeminiConfig.DEFAULT_BASE_URL)
+      )(using
+        resolver
       )
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
@@ -118,9 +124,12 @@ private[javaapi] object ClientBuilds {
 
   def ollamaConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
-      model    <- required("model", s.model)
+      model    <- required("model", s.model).map(ModelName(_))
       resolver <- resolver
-      config   <- OllamaConfig.fromValues(model, present(s.baseUrl).getOrElse(OllamaDefaultBaseUrl))(using resolver)
+      config <- OllamaConfig.fromValues(
+        model,
+        present(s.baseUrl).map(BaseUrl(_)).getOrElse(BaseUrl(OllamaDefaultBaseUrl))
+      )(using resolver)
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
     } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
@@ -151,8 +160,8 @@ private[javaapi] object ClientBuilds {
 
   def azureOpenAiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
-      endpoint <- required("endpoint", s.endpoint)
-      model    <- required("model", s.model)
+      endpoint <- required("endpoint", s.endpoint).map(BaseUrl(_))
+      model    <- required("model", s.model).map(ModelName(_))
       resolver <- resolver
       apiVersion = present(s.apiVersion).getOrElse(AzureConfig.DEFAULT_API_VERSION)
       config <- azureCredential(s) match {

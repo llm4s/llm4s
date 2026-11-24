@@ -100,12 +100,12 @@ object ParallelToolExecutionExample {
   /**
    * Creates a weather tool that simulates API latency.
    */
-  private def createWeatherTool(): org.llm4s.types.Result[ToolFunction[Map[String, Any], WeatherResult]] = {
+  private def createWeatherTool(): org.llm4s.types.Result[ToolFunction[WeatherResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Weather query parameters")
       .withProperty(Schema.property("city", Schema.string("City name to get weather for")))
 
-    ToolBuilder[Map[String, Any], WeatherResult](
+    ToolBuilder[WeatherResult](
       "get_weather",
       "Get current weather for a city (simulates 200ms API call)",
       schema

@@ -73,7 +73,7 @@ final class ToolOutputOffload(
         text.filter(_.length.toLong > thresholdChars) match
           case None => unchanged
           case Some(large) =>
-            val segment = segmentOf(context.idempotencyKey.value)
+            val segment = segmentOf(context.idempotencyKey.asString)
             val tool    = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
             // the key and the tool name take at most MetadataBytes, so the entry always fits the bound on its own
             val (stored, isCut) = Text.cutEncoded(large, maxResultBytes)
@@ -81,7 +81,7 @@ final class ToolOutputOffload(
             ToolOutcome.Success(
               success
                 .withContent(shown(success.content, preview(result, large)))
-                .withUpdate(success.update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes))))
+                .addUpdate(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
             )
       // an error over the threshold is cut before it is stored: it is the model's to read, not to page through
       case ToolOutcome.Error(message) if message.length.toLong > thresholdChars =>

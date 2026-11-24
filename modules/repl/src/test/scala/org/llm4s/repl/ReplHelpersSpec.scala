@@ -1,5 +1,6 @@
 package org.llm4s.repl
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -33,7 +34,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   private val weather =
-    ToolBuilder[Map[String, Any], ujson.Value](
+    ToolBuilder[ujson.Value](
       "get_weather",
       "The weather in a city",
       Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))
@@ -132,9 +133,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
 
   it should "end a half-streamed answer's line before printing the failure" in {
     val client = new FixedClient(completion("unused")) {
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("1", Some("partial")))
@@ -355,14 +354,12 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   private def completion(text: String): Completion =
-    Completion("c1", Instant.EPOCH, text, "test-model", AssistantMessage(text))
+    Completion("c1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text))
 
   private class FixedClient(answer: Completion) extends LLMClient {
     @volatile var closed                                                                              = false
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(answer)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(answer)
     override def getContextWindow(): Int     = 1000

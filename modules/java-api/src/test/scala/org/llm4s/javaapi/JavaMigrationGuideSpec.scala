@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.TestTimeLimit
@@ -56,7 +57,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
   private class OrderModel extends LLMClient {
     val calls                     = new AtomicInteger(0)
     val sent: ArrayBuffer[String] = ArrayBuffer.empty
-    private val call              = ToolCall("c1", "orderStatus", ujson.Obj("orderId" -> "42"))
+    private val call              = ToolCall(ToolCallId("c1"), "orderStatus", ujson.Obj("orderId" -> "42"))
 
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.synchronized(sent += o.tools.map(_.name).mkString(","))
@@ -65,18 +66,16 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
           Completion(
             "1",
             Instant.EPOCH,
-            "",
-            "m",
-            AssistantMessage(contentOpt = None, toolCalls = List(call)),
-            toolCalls = List(call)
+            ModelName("m"),
+            AssistantMessage(text = None, toolCalls = List(call))
           )
         )
       else {
         val toolOutput = c.messages.collect { case m: ToolMessage => m.content }.mkString
-        Right(Completion("2", Instant.EPOCH, toolOutput, "m", AssistantMessage(toolOutput)))
+        Right(Completion("2", Instant.EPOCH, ModelName("m"), AssistantMessage(toolOutput)))
       }
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -165,9 +164,9 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
       val model = new LLMClient {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
           seen.synchronized(seen += c.messages.collect { case m: UserMessage => m.content }.toSeq)
-          Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
+          Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
         }
-        override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) =
+        override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) =
           complete(c, o)
         override def getContextWindow(): Int     = 4096
         override def getReserveCompletion(): Int = 512

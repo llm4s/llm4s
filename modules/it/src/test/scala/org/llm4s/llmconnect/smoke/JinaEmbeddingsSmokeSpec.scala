@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -28,12 +29,17 @@ class JinaEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String, task: JinaTask = JinaTask.default): EmbeddingProvider =
     JinaEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(baseUrl = "https://api.jina.ai/v1", model = Model, apiKey = Secret(apiKey)),
+      EmbeddingProviderConfig(
+        providerId = ProviderId("jina"),
+        baseUrl = BaseUrl("https://api.jina.ai/v1"),
+        model = ModelName(Model),
+        apiKey = Some(Secret(apiKey))
+      ),
       task
     )
 
   private def request(texts: String*): EmbeddingRequest =
-    EmbeddingRequest(texts, EmbeddingModelConfig(Model, ExpectedDimensions))
+    EmbeddingRequest(texts, EmbeddingModelConfig(ModelName(Model), ExpectedDimensions))
 
   "Jina AI embeddings" should "embed 3 sentences with jina-embeddings-v3" in {
     Tier.require(jinaApiKey.isDefined, "JINA_API_KEY not set")

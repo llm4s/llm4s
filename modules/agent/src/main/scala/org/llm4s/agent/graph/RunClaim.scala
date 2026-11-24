@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -30,7 +30,7 @@ import scala.concurrent.duration.*
  * can expire the claim early, and another run can take the thread over while this one still runs: it
  * then stops at its next refused renewal or commit, and fencing keeps every write safe.
  */
-@Stable
+@Experimental
 final case class RunClaim private (
   threadId: ThreadId,
   holder: RunId,
@@ -48,6 +48,7 @@ final case class RunClaim private (
   def withTakenOverFrom(from: RunId): RunClaim         = copy(takenOverFrom = Some(from))
   def withTakenOverFrom(from: Option[RunId]): RunClaim = copy(takenOverFrom = from)
 
+@Experimental
 object RunClaim:
   def apply(
     threadId: ThreadId,
@@ -68,13 +69,14 @@ object RunClaim:
  * `IllegalArgumentException` for a non-positive `ttl`; [[ClaimRequest.of]] returns it as a
  * `ValidationError`.
  */
-@Stable
+@Experimental
 final case class ClaimRequest private (holder: RunId, tenantId: Option[TenantId], ttl: FiniteDuration):
   def withHolder(h: RunId): ClaimRequest              = ClaimRequest(h, tenantId, ttl)
   def withTenantId(t: TenantId): ClaimRequest         = ClaimRequest(holder, Some(t), ttl)
   def withTenantId(t: Option[TenantId]): ClaimRequest = ClaimRequest(holder, t, ttl)
   def withTtl(t: FiniteDuration): ClaimRequest        = ClaimRequest(holder, tenantId, t)
 
+@Experimental
 object ClaimRequest:
   private def problems(ttl: FiniteDuration): List[String] =
     Option.when(ttl.length <= 0)(s"ttl must be positive, was $ttl").toList
@@ -117,13 +119,14 @@ object ClaimRequest:
  * `apply` and the `with*` setters throw `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]]
  * returns a `ValidationError`.
  */
-@Stable
+@Experimental
 final case class ClaimPolicy private (ttl: FiniteDuration, renewEvery: FiniteDuration, label: Option[String]):
   def withTtl(t: FiniteDuration): ClaimPolicy        = ClaimPolicy(t, renewEvery, label)
   def withRenewEvery(r: FiniteDuration): ClaimPolicy = ClaimPolicy(ttl, r, label)
   def withLabel(l: String): ClaimPolicy              = ClaimPolicy(ttl, renewEvery, Some(l))
   def withLabel(l: Option[String]): ClaimPolicy      = ClaimPolicy(ttl, renewEvery, l)
 
+@Experimental
 object ClaimPolicy:
   private def problems(ttl: FiniteDuration, renewEvery: FiniteDuration, label: Option[String]): List[String] =
     List(

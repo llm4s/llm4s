@@ -105,7 +105,7 @@ final class BedrockConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
       val chunks = ListBuffer.empty[StreamedChunk]
       try {
         val started = System.nanoTime()
-        val result  = client.streamComplete(hello, CompletionOptions(), chunks += _)
+        val result  = client.streamComplete(hello, CompletionOptions())(chunks += _)
         val elapsed = (System.nanoTime() - started).nanos
 
         result match {

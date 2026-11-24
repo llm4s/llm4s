@@ -113,7 +113,7 @@ object TicketPipeline {
     send: Send,
     settings: Settings
   ): Pipe[IO, CommittableConsumerRecord[IO, String, String], Unit] = {
-    val reliable = new ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
+    val reliable = ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
     records =>
       records
         // At most `concurrency` calls at once; results come out in input order.

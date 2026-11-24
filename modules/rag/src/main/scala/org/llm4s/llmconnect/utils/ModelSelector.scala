@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.utils
 
-import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels, ModelDimensionRegistry }
-import org.llm4s.llmconnect.model.{ Audio, Image, Modality, Text, Video }
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
+import org.llm4s.llmconnect.model.Modality
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -24,7 +25,7 @@ object ModelSelector {
    *
    * Text modality returns an error since text model selection is configuration-driven.
    * Image, audio, and video modalities resolve against the supplied local-model configuration
-   * and look up dimensions from the [[org.llm4s.llmconnect.config.ModelDimensionRegistry ModelDimensionRegistry]].
+   * and look up dimensions with `LocalEmbeddingModels.dimension`.
    *
    * @param modality the input modality to select a model for
    * @param localModels local model configuration containing model names per modality
@@ -32,29 +33,29 @@ object ModelSelector {
    */
   def selectModel(modality: Modality, localModels: LocalEmbeddingModels): Result[EmbeddingModelConfig] =
     modality match {
-      case Text =>
+      case Modality.Text =>
         Left(
           ConfigurationError(
             "Text model selection is configuration-driven; load a text embedding model via your config layer and pass an EmbeddingModelConfig explicitly."
           )
         )
-      case Image =>
+      case Modality.Image =>
         val name = localModels.imageModel
-        ModelDimensionRegistry.localDimension(name).map { dim =>
+        LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
-      case Audio =>
+      case Modality.Audio =>
         val name = localModels.audioModel
-        ModelDimensionRegistry.localDimension(name).map { dim =>
+        LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
-      case Video =>
+      case Modality.Video =>
         val name = localModels.videoModel
-        ModelDimensionRegistry.localDimension(name).map { dim =>
+        LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Video model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
     }
 }

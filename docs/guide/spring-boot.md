@@ -3,8 +3,9 @@ layout: page
 title: Spring Boot
 description: "Use LLM4S with Spring Boot: add llm4s-spring-boot-starter, configure it in application.properties and inject an LLM4STemplate with a health indicator."
 search_title: "Use LLM4S with Spring Boot: LLM client starter"
-parent: User Guide
-nav_order: 7
+parent: Java and Kotlin
+nav_order: 407
+grand_parent: User Guide
 ---
 
 # Using LLM4S with Spring Boot
@@ -96,7 +97,7 @@ The starter reads Spring properties under the `llm4s` prefix. It does **not** re
 
 ```properties
 llm4s.provider=openai
-llm4s.model=gpt-4o
+llm4s.model=gpt-5.6-terra
 llm4s.api-key=${OPENAI_API_KEY}
 ```
 
@@ -105,7 +106,7 @@ The same in YAML:
 ```yaml
 llm4s:
   provider: openai
-  model: gpt-4o
+  model: gpt-5.6-terra
   api-key: ${OPENAI_API_KEY}
 ```
 
@@ -159,20 +160,20 @@ and ollama; configure any other provider under llm4s.providers.<name>`, followed
 
 Every other provider (Gemini, Azure OpenAI, Mistral, OpenRouter, a self-hosted OpenAI-compatible server, or a provider
 module you add) is configured under `llm4s.providers`. These properties mirror the `llm4s.providers` block of llm4s's own
-HOCON configuration, so any provider on the classpath works, with the extra keys it declares. `llm4s.providers.provider`
+HOCON configuration, so any provider on the classpath works, with the extra keys it declares. `llm4s.default-provider`
 names the section the starter uses:
 
 ```properties
-llm4s.providers.provider=gemini-main
+llm4s.default-provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
-llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.model=gemini-3.8-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
 ```
 
 Azure OpenAI takes its resource endpoint and API version as keys of the section:
 
 ```properties
-llm4s.providers.provider=azure-main
+llm4s.default-provider=azure-main
 llm4s.providers.azure-main.provider=azure
 llm4s.providers.azure-main.model=my-deployment
 llm4s.providers.azure-main.api-key=${AZURE_OPENAI_API_KEY}
@@ -184,7 +185,7 @@ A server that speaks the OpenAI chat-completions format needs only its URL and m
 provider also reads `context-window`, `reserve-completion` and `headers.*`:
 
 ```properties
-llm4s.providers.provider=local
+llm4s.default-provider=local
 llm4s.providers.local.provider=openai-compatible
 llm4s.providers.local.model=my-model
 llm4s.providers.local.base-url=http://localhost:8000/v1

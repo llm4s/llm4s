@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
@@ -26,8 +26,8 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
     ConfigSource.string(
       s"""
          |llm4s {
+         |  defaultProvider = "$selected"
          |  providers {
-         |    provider = "$selected"
          |    good-one {
          |      provider = "fixturechat"
          |      model = "fixture-model"
@@ -69,7 +69,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
     ).foreach { case (label, badSection) =>
       label should {
         "not stop provider(name) resolving the good section" in {
-          expectGood(Llm4sConfig.provider(config(badSection), "good-one"))
+          expectGood(Llm4sConfig.provider(config(badSection), ProviderName("good-one")))
         }
 
         "not stop defaultProvider() resolving the good section" in {
@@ -82,12 +82,14 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
 
         "not stop listModels(name) for the good section" in {
           val http = new MockHttpClient(HttpResponse(200, """{"data":[{"id":"fixture-model"}]}""", Map.empty))
-          Llm4sConfig.listModels("good-one", config(badSection), http).map(_.map(_.name.asString)) shouldBe
+          Llm4sConfig
+            .listModels(ProviderName("good-one"), config(badSection), http)
+            .map(_.map(_.name.asString)) shouldBe
             Right(List("fixture-model"))
         }
 
         "still fail provider(name) for the bad section, naming it" in {
-          Llm4sConfig.provider(config(badSection), "bad-one") match
+          Llm4sConfig.provider(config(badSection), ProviderName("bad-one")) match
             case Left(err)  => err.message should include("bad-one")
             case Right(cfg) => fail(s"Expected the bad section to fail, got $cfg")
         }
@@ -114,7 +116,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
 
   "The specific error for the bad section" should {
     "name the unset apiKey and how to bind it" in {
-      Llm4sConfig.provider(config(unsetApiKey), "bad-one") match
+      Llm4sConfig.provider(config(unsetApiKey), ProviderName("bad-one")) match
         case Left(err) =>
           err.message should include("Provider 'bad-one' (provider = fixturechat) is missing required fields")
           err.message should include(
@@ -124,7 +126,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
     }
 
     "name the unregistered provider and the config path that asked for it" in {
-      Llm4sConfig.provider(config(missingModule), "bad-one") match
+      Llm4sConfig.provider(config(missingModule), ProviderName("bad-one")) match
         case Left(err) =>
           err.message should include("no-such-provider")
           err.message should include("llm4s.providers.bad-one.provider")
@@ -132,7 +134,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
     }
 
     "name the key that could not be read" in {
-      Llm4sConfig.provider(config(unreadable), "bad-one") match
+      Llm4sConfig.provider(config(unreadable), ProviderName("bad-one")) match
         case Left(err) =>
           err.message should include("llm4s.providers.bad-one")
           err.message should include("headers")
@@ -155,7 +157,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
 
     "still fail when the providers block itself is not an object" in {
       val source = ConfigSource.string("""llm4s { providers = "openai" }""")
-      Llm4sConfig.provider(source, "good-one").isLeft shouldBe true
+      Llm4sConfig.provider(source, ProviderName("good-one")).isLeft shouldBe true
       Llm4sConfig.defaultProvider(source).isLeft shouldBe true
     }
   }

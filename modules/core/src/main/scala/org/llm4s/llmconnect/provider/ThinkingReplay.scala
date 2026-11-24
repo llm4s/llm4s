@@ -157,7 +157,23 @@ private[llm4s] object ThinkingReplay {
     digest
   }
 
-  private def feed(digest: MessageDigest, message: Message): Unit = update(digest, write(message))
+  private def feed(digest: MessageDigest, message: Message): Unit = update(digest, encoded(message))
+
+  // What the fingerprint is taken over. It is the stored JSON of the message, except that an assistant message
+  // keeps the shape it was stored in until #2809 (nested under `data`, its text under `contentOpt`): a
+  // fingerprint is compared with one made earlier, so its encoding must never change, or every binding made
+  // before would stop matching and its sealed thinking would be sent unsealed.
+  private[provider] def encoded(message: Message): String = message match {
+    case am: AssistantMessage =>
+      val data = ujson.Obj(
+        "contentOpt" -> am.text.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
+        "toolCalls"  -> ujson.read(write(am.toolCalls))
+      )
+      if (am.thinking.nonEmpty) data("thinking") = ujson.read(write(am.thinking))
+      am.thinkingBinding.foreach(b => data("thinkingBinding") = b)
+      ujson.write(ujson.Obj("type" -> ujson.Str("assistant"), "data" -> data))
+    case other => write(other)
+  }
 
   // each part length-prefixed, so no two different sequences of parts hash alike
   private def update(digest: MessageDigest, part: String): Unit = {

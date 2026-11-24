@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.SmallStack
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
@@ -24,8 +25,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "test-id",
       created = Instant.EPOCH,
-      content = content,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = AssistantMessage(Some(content))
     )
 
@@ -36,9 +36,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       lastOptions = options
       stubResponse
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): org.llm4s.types.Result[Completion] =
       stubResponse
@@ -104,10 +102,10 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
   it should "forward caller-supplied temperature alongside the response format" in {
     val json = """{"vendor":"X","amount":0.0}"""
-    val opts = CompletionOptions(temperature = 0.2)
+    val opts = CompletionOptions(temperature = Some(0.2))
     val stub = new StubClient(Right(makeCompletion(json)))
     stub.completeStructured[Invoice](conversation, invoiceSchema, opts)
-    stub.lastOptions.temperature shouldBe 0.2
+    stub.lastOptions.temperature shouldBe Some(0.2)
   }
 
   it should "return ValidationError when the response is not valid JSON" in {

@@ -185,8 +185,9 @@ class OpenTelemetryTracing private[trace] (
   private def annotate(span: Span, spanName: String, event: TraceEvent): Unit = {
     event match {
       case e: TraceEvent.ErrorOccurred if e.operation.isDefined =>
-        span.setStatus(StatusCode.ERROR, Redaction.redact(Option(e.error.getMessage).getOrElse(""))): Unit
-      case e: TraceEvent.ErrorOccurred if spanName == "Error" => span.recordException(e.error): Unit
+        span.setStatus(StatusCode.ERROR, Redaction.redact(e.message)): Unit
+      // an LLMError is no exception: only an error that has one records it
+      case e: TraceEvent.ErrorOccurred if spanName == "Error" => e.cause.foreach(span.recordException)
       case _                                                  =>
     }
     if (failed(event)) span.setStatus(StatusCode.ERROR): Unit
@@ -194,7 +195,7 @@ class OpenTelemetryTracing private[trace] (
 
   /** A run that did not end well, and a tool call that errored: their spans' status is `ERROR`. */
   private def failed(event: TraceEvent): Boolean = event match {
-    case e: TraceEvent.AgentRunEnded => Set("failed", "cancelled", "timed_out").contains(e.status)
+    case e: TraceEvent.AgentRunEnded => e.status.isError
     case e: TraceEvent.CustomEvent if e.name == TraceAttributes.AgentToolExecuted =>
       TraceAttributes.payload(e).flatMap(_.get("outcome")).exists(_.toString.contains("Errored"))
     case _ => false
@@ -210,24 +211,16 @@ class OpenTelemetryTracing private[trace] (
 
   private[trace] def mapEventToAttributes(event: TraceEvent): (String, Attributes) = {
     event match {
-      case e: TraceEvent.AgentInitialized =>
-        val builder = Attributes
-          .builder()
-          .put(TraceAttributes.EventType, "trace-create")
-          .put("tools", e.tools.mkString(", "))
-        if (captureContent) builder.put("input", content(e.query))
-        ("LLM4S Agent Run", builder.build())
-
       case e: TraceEvent.CompletionReceived =>
         val builder = Attributes
           .builder()
           .put(TraceAttributes.EventType, "generation-create")
           .put(TraceAttributes.OperationName, TraceAttributes.Chat)
-          .put(TraceAttributes.RequestModel, e.model)
+          .put(TraceAttributes.RequestModel, e.model.asString)
           .put(TraceAttributes.ToolCalls, e.toolCalls.toLong)
         if (e.id.nonEmpty) builder.put(TraceAttributes.ResponseId, e.id)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
-        e.responseModel.foreach(m => builder.put(TraceAttributes.ResponseModel, m))
+        e.responseModel.foreach(m => builder.put(TraceAttributes.ResponseModel, m.asString))
         if (e.finishReasons.nonEmpty) builder.put(TraceAttributes.FinishReasons, e.finishReasons.asJava)
         e.usage.foreach { u =>
           builder.put(TraceAttributes.InputTokens, u.promptTokens.toLong)
@@ -241,7 +234,7 @@ class OpenTelemetryTracing private[trace] (
           if (e.input.nonEmpty) builder.put(TraceAttributes.InputMessages, inputMessages(e.input))
           builder.put(TraceAttributes.OutputMessages, outputMessage(e.content, e.finishReasons.headOption))
         }
-        (TraceAttributes.spanName(TraceAttributes.Chat, e.model), builder.build())
+        (TraceAttributes.spanName(TraceAttributes.Chat, e.model.asString), builder.build())
 
       case e: TraceEvent.ToolExecuted =>
         val builder = Attributes
@@ -260,12 +253,12 @@ class OpenTelemetryTracing private[trace] (
 
       case e: TraceEvent.ErrorOccurred if e.operation.isDefined =>
         val operation = e.operation.getOrElse(TraceAttributes.Chat)
-        val model     = e.model.getOrElse("")
+        val model     = e.model.fold("")(_.asString)
         val builder = Attributes
           .builder()
           .put(TraceAttributes.EventType, "event-create")
           .put(TraceAttributes.OperationName, operation)
-          .put(TraceAttributes.ErrorType, e.errorType.getOrElse(e.error.getClass.getName))
+          .put(TraceAttributes.ErrorType, e.errorType)
         if (model.nonEmpty) builder.put(TraceAttributes.RequestModel, model)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         // a content-filtered reply is billed: its tokens are the span's usage, as a success's are (#2676)
@@ -281,8 +274,8 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "event-create")
-            .put("error.message", e.error.getMessage)
-            .put("error.type", e.error.getClass.getSimpleName)
+            .put("error.message", e.message)
+            .put("error.type", e.errorType)
             .put("context", e.context)
             .build()
         )
@@ -293,7 +286,7 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "event-create")
-            .put("gen_ai.request.model", e.model)
+            .put("gen_ai.request.model", e.model.asString)
             .put("operation", e.operation)
             .put("gen_ai.usage.input_tokens", e.usage.promptTokens.toLong)
             .put("gen_ai.usage.output_tokens", e.usage.totalOutputTokens.toLong)
@@ -350,7 +343,7 @@ class OpenTelemetryTracing private[trace] (
           .flatMap(_.get("provider"))
           .flatMap(_.strOpt)
           .foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
-        // the call's finish reason (RFC 0009), by name as on a client's chat span; one not read, Other(""), is left out
+        // the call's finish reason (RFC 0009), by name as on a client's chat span; one not read, Unknown, is left out
         payload
           .flatMap(_.get("finishReason"))
           .flatMap(r => Try(upickle.default.read[FinishReason](r)).toOption)
@@ -379,12 +372,14 @@ class OpenTelemetryTracing private[trace] (
           .put("thread_id", e.threadId)
           .put("run_id", e.runId)
           .put("agent", e.agent)
-          .put("status", e.status)
+          .put("status", e.status.name)
           .put("message_count", e.messages.size.toLong)
           .put("gen_ai.usage.input_tokens", e.usage.inputTokens)
           .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
         e.parentThreadId.foreach(id => attributes.put(TraceAttributes.ParentThreadId, id))
         e.parentRunId.foreach(id => attributes.put(TraceAttributes.ParentRunId, id))
+        e.blockedBy.foreach(guardrail => attributes.put("blocked_by", guardrail))
+        e.activeAgent.foreach(agent => attributes.put("active_agent", agent))
         e.provider.foreach(p => attributes.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         (s"${TraceAttributes.InvokeAgent} ${e.agent}", attributes.build())
 
@@ -393,13 +388,13 @@ class OpenTelemetryTracing private[trace] (
           .builder()
           .put(TraceAttributes.EventType, "embedding-usage")
           .put(TraceAttributes.OperationName, TraceAttributes.Embeddings)
-          .put(TraceAttributes.RequestModel, e.model)
+          .put(TraceAttributes.RequestModel, e.model.asString)
           .put("operation", e.operation)
           .put("input_count", e.inputCount.toLong)
           .put(TraceAttributes.InputTokens, e.usage.promptTokens.toLong)
           .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
-        (TraceAttributes.spanName(TraceAttributes.Embeddings, e.model), builder.build())
+        (TraceAttributes.spanName(TraceAttributes.Embeddings, e.model.asString), builder.build())
 
       case e: TraceEvent.CostRecorded =>
         (
@@ -407,7 +402,7 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "cost")
-            .put("gen_ai.request.model", e.model)
+            .put("gen_ai.request.model", e.model.asString)
             .put("operation", e.operation)
             .put("token_count", e.tokenCount.toLong)
             .put("cost.usd", e.costUsd)
@@ -455,14 +450,14 @@ class OpenTelemetryTracing private[trace] (
         val builder = Attributes
           .builder()
           .put(TraceAttributes.EventType, "image-generation")
-          .put("gen_ai.request.model", e.model)
-          .put("provider", e.provider)
+          .put("gen_ai.request.model", e.model.asString)
           .put("operation", e.operation)
           .put("image_count", e.imageCount.toLong)
           .put("size", e.size)
           .put("quality", e.quality)
           .put("duration_ms", e.duration.toMillis)
           .put("success", e.success)
+        e.provider.foreach(p => builder.put("provider", p.asString))
         e.costUsd.foreach(c => builder.put("cost.usd", c))
         e.errorMessage.foreach(m => builder.put("error.message", m))
         (
@@ -478,11 +473,12 @@ class OpenTelemetryTracing private[trace] (
 
   /** The request parameters the GenAI conventions name, from the options a call was sent with. */
   private def requestParameters(builder: io.opentelemetry.api.common.AttributesBuilder, o: CompletionOptions): Unit = {
-    builder.put(TraceAttributes.Temperature, o.temperature)
-    builder.put(TraceAttributes.TopP, o.topP)
+    // a sampling option the caller left unset was not sent, so it has no attribute
+    o.temperature.foreach(t => builder.put(TraceAttributes.Temperature, t))
+    o.topP.foreach(p => builder.put(TraceAttributes.TopP, p))
     o.maxTokens.foreach(n => builder.put(TraceAttributes.MaxTokens, n.toLong))
-    builder.put(TraceAttributes.PresencePenalty, o.presencePenalty)
-    builder.put(TraceAttributes.FrequencyPenalty, o.frequencyPenalty): Unit
+    o.presencePenalty.foreach(p => builder.put(TraceAttributes.PresencePenalty, p))
+    o.frequencyPenalty.foreach(p => builder.put(TraceAttributes.FrequencyPenalty, p))
   }
 
   /**
@@ -511,13 +507,15 @@ class OpenTelemetryTracing private[trace] (
             text ++ a.toolCalls.map(c =>
               ujson.Obj(
                 "type"      -> "tool_call",
-                "id"        -> c.id,
+                "id"        -> c.id.asString,
                 "name"      -> c.name,
                 "arguments" -> content(c.arguments.render())
               )
             )
           case t: ToolMessage =>
-            Seq(ujson.Obj("type" -> "tool_call_response", "id" -> t.toolCallId, "response" -> content(t.content)))
+            Seq(
+              ujson.Obj("type" -> "tool_call_response", "id" -> t.toolCallId.asString, "response" -> content(t.content))
+            )
           case other => Seq(textPart(other.content))
         }
         ujson.Obj("role" -> m.role.name, "parts" -> ujson.Arr(parts*))

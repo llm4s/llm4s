@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
 import scala.concurrent.duration.FiniteDuration
@@ -9,10 +10,16 @@ import scala.concurrent.duration.FiniteDuration
  * Errors raised while building, running or restoring a typed graph. Every case is a
  * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
+ *
+ * The marker says what should happen without anyone deciding: a `RecoverableError` may be tried again as it is (an
+ * `AgentWorker` gives such an entry back for a later attempt), a `NonRecoverableError` is reported. It does not say
+ * whether the thread can go on. A run that ended [[GraphError.NodeFailed]], [[GraphError.Cancelled]] or
+ * [[GraphError.SuperstepLimitExceeded]] leaves its checkpoint `Running`, and an explicit `recover` continues it.
  */
-@Stable
+@Experimental
 sealed trait GraphError extends LLMError
 
+@Experimental
 object GraphError:
 
   /** The builder found one or more structural problems; every problem is listed. */
@@ -53,8 +60,8 @@ object GraphError:
   final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
       extends GraphError
       with NonRecoverableError:
-    override val message: String          = s"Tool '${tool.value}' (call ${toolCallId.value}) failed: ${cause.message}"
-    def withTool(t: ToolName): ToolFailed = copy(tool = t)
+    override val message: String = s"Tool '${tool.value}' (call ${toolCallId.asString}) failed: ${cause.message}"
+    def withTool(t: ToolName): ToolFailed          = copy(tool = t)
     def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
     def withCause(c: LLMError): ToolFailed         = copy(cause = c)
 
@@ -63,8 +70,10 @@ object GraphError:
       new ToolFailed(tool, toolCallId, cause)
 
   /**
-   * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs
-   * only that task. `middleware` is the middleware's id.
+   * A middleware hook threw; `middleware` is the middleware's id. It is that hook's failure, and does what any
+   * failure of the hook does (#2795): from `promptSections`, `wrapModelCall` or `wrapToolCall` the run fails, the
+   * checkpoint stays `Running`, and `recover` re-runs only that task; from `beforeAgent` or `afterAgent` the turn is
+   * blocked, the thread stays usable and there is nothing to recover.
    */
   final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
@@ -112,7 +121,13 @@ object GraphError:
     override val message: String =
       s"Run on thread '$threadId' exceeded its deadline${lastCheckpoint.fold("")(c => s"; recover from $c")}"
 
-  /** The run reached its superstep limit with work still scheduled. */
+  /**
+   * The run reached its superstep limit (`RunBudgets.maxSupersteps`) with work still scheduled. The checkpoint stays
+   * `Running`, and `recover` continues the run with a fresh allowance: the limit counts one run's supersteps. It is
+   * a [[org.llm4s.error.NonRecoverableError NonRecoverableError]] all the same, deliberately: the limit guards
+   * against a graph that does not stop, so nothing retries past it automatically - a retry would only multiply the
+   * limit by the attempts - and continuing is the caller's decision.
+   */
   final case class SuperstepLimitExceeded(limit: Int) extends GraphError with NonRecoverableError:
     override val message: String = s"Graph exceeded its limit of $limit supersteps"
 

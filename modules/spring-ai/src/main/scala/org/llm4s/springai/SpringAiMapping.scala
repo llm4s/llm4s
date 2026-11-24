@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.LlmException
 import org.llm4s.llmconnect.model.{
@@ -12,6 +13,7 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -65,14 +67,14 @@ private[springai] object SpringAiMapping {
    * client did not map (`Other`, until RFC 0009 PR 2) is `TOOL_CALLS`, as Spring AI's own models report one. Any other
    * raw reason passes through, and none read is `STOP`.
    */
-  // An empty `Other("")` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
+  // `Unknown` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
   // RFC 0009 PR 2); Spring AI has no "unknown", so with no tool call it is reported as STOP, as it was before #2613.
   def finishOf(completion: Completion): String = completion.finishReason match {
-    case FinishReason.ToolCalls                                 => ToolCallsFinish
-    case FinishReason.Length                                    => LengthFinish
-    case FinishReason.Other(_) if completion.toolCalls.nonEmpty => ToolCallsFinish
-    case FinishReason.Other(raw) if raw.nonEmpty                => raw
-    case _                                                      => StopFinish
+    case FinishReason.ToolCalls                                                        => ToolCallsFinish
+    case FinishReason.Length                                                           => LengthFinish
+    case FinishReason.Other(_) | FinishReason.Unknown if completion.toolCalls.nonEmpty => ToolCallsFinish
+    case FinishReason.Other(raw) if raw.nonEmpty                                       => raw
+    case _                                                                             => StopFinish
   }
 
   // ---- Spring AI -> llm4s -------------------------------------------------------------------------------------------
@@ -90,7 +92,7 @@ private[springai] object SpringAiMapping {
     case MessageType.ASSISTANT =>
       val assistant = message.asInstanceOf[SpringAssistantMessage]
       toolCalls(assistant).map(calls =>
-        Seq(AssistantMessage(contentOpt = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
+        Seq(AssistantMessage(text = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
       )
     case MessageType.TOOL =>
       Right(
@@ -99,7 +101,7 @@ private[springai] object SpringAiMapping {
           .getResponses
           .asScala
           .toSeq
-          .map(response => ToolMessage(Option(response.responseData).getOrElse(""), response.id))
+          .map(response => ToolMessage(Option(response.responseData).getOrElse(""), ToolCallId(response.id)))
       )
   }
 
@@ -107,7 +109,7 @@ private[springai] object SpringAiMapping {
   def toolCalls(message: SpringAssistantMessage): Result[Vector[ToolCall]] =
     message.getToolCalls.asScala.toList.foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (acc, call) =>
       acc.flatMap(calls =>
-        arguments(call.name, call.arguments).map(args => calls :+ ToolCall(call.id, call.name, args))
+        arguments(call.name, call.arguments).map(args => calls :+ ToolCall(ToolCallId(call.id), call.name, args))
       )
     }
 
@@ -146,7 +148,7 @@ private[springai] object SpringAiMapping {
             case tools: ToolCallingChatOptions =>
               val callbacks = Option(tools.getToolCallbacks).map(_.asScala.toSeq).getOrElse(Nil)
               callbacks
-                .foldLeft[Result[Vector[ToolFunction[?, ?]]]](Right(Vector.empty)) { (acc, cb) =>
+                .foldLeft[Result[Vector[ToolFunction[?]]]](Right(Vector.empty)) { (acc, cb) =>
                   acc.flatMap(fs => toolFunction(cb).map(fs :+ _))
                 }
                 .map(fs => if (fs.isEmpty) freq else freq.withTools(fs))
@@ -156,12 +158,12 @@ private[springai] object SpringAiMapping {
     }
 
   /** A Spring AI tool as an llm4s tool definition: its name, description and input schema; calling it calls the tool. */
-  private def toolFunction(callback: ToolCallback): Result[ToolFunction[ujson.Value, String]] = {
+  private def toolFunction(callback: ToolCallback): Result[ToolFunction[String]] = {
     val definition = callback.getToolDefinition
     Try(ujson.read(definition.inputSchema)).toResult.left
       .map(_ => ValidationError("inputSchema", s"the input schema of tool '${definition.name}' is not JSON"))
       .map { schema =>
-        ToolFunction[ujson.Value, String](
+        ToolFunction[String](
           name = definition.name,
           description = Option(definition.description).getOrElse(""),
           schema = objectSchema(definition.name, schema),
@@ -206,7 +208,7 @@ private[springai] object SpringAiMapping {
       text = completion.content,
       toolCalls = completion.toolCalls,
       id = completion.id,
-      model = completion.model,
+      model = completion.model.asString,
       usage = completion.usage,
       finish = Some(finishOf(completion))
     )
@@ -221,7 +223,7 @@ private[springai] object SpringAiMapping {
       text = "",
       toolCalls = completion.toolCalls,
       id = completion.id,
-      model = completion.model,
+      model = completion.model.asString,
       usage = completion.usage,
       finish = Some(finishOf(completion))
     )
@@ -249,7 +251,9 @@ private[springai] object SpringAiMapping {
     val builder = SpringAssistantMessage.builder()
     val _       = builder.content(text)
     val _ = builder.toolCalls(
-      toolCalls.map(c => new SpringAssistantMessage.ToolCall(c.id, "function", c.name, c.arguments.render())).asJava
+      toolCalls
+        .map(c => new SpringAssistantMessage.ToolCall(c.id.asString, "function", c.name, c.arguments.render()))
+        .asJava
     )
     builder.build()
   }
@@ -297,7 +301,7 @@ private[springai] object SpringAiMapping {
           case a: AssistantMessage => out :+ assistant(a.content, a.toolCalls)
           case t: ToolMessage =>
             val response =
-              new ToolResponseMessage.ToolResponse(t.toolCallId, names.getOrElse(t.toolCallId, ""), t.content)
+              new ToolResponseMessage.ToolResponse(t.toolCallId.asString, names.getOrElse(t.toolCallId, ""), t.content)
             // The answers to one assistant message's calls are one Spring AI message, as its models expect.
             out.lastOption match {
               case Some(previous: ToolResponseMessage) =>
@@ -320,17 +324,18 @@ private[springai] object SpringAiMapping {
       case _                                            => ToolCallingChatOptions.builder()
     }
     // One statement per setter, as in `assistant`.
-    val _ = builder.temperature(java.lang.Double.valueOf(options.temperature))
-    val _ = builder.topP(java.lang.Double.valueOf(options.topP))
-    val _ = builder.presencePenalty(java.lang.Double.valueOf(options.presencePenalty))
-    val _ = builder.frequencyPenalty(java.lang.Double.valueOf(options.frequencyPenalty))
+    // only what the caller set: an unset sampling option keeps the model's own default
+    options.temperature.foreach(t => builder.temperature(java.lang.Double.valueOf(t)))
+    options.topP.foreach(p => builder.topP(java.lang.Double.valueOf(p)))
+    options.presencePenalty.foreach(p => builder.presencePenalty(java.lang.Double.valueOf(p)))
+    options.frequencyPenalty.foreach(p => builder.frequencyPenalty(java.lang.Double.valueOf(p)))
     val _ = builder.toolCallbacks(callbacks.asJava)
     options.maxTokens.foreach(m => builder.maxTokens(Integer.valueOf(m)))
     builder.build()
   }
 
   /** An llm4s tool as a Spring AI tool: its definition, and a call that runs it. */
-  private def springTool(tool: ToolFunction[?, ?]): ToolCallback = new ToolCallback {
+  private def springTool(tool: ToolFunction[?]): ToolCallback = new ToolCallback {
     private val definition = ToolDefinition
       .builder()
       .name(tool.name)
@@ -361,15 +366,14 @@ private[springai] object SpringAiMapping {
             Completion(
               id = meta.flatMap(m => Option(m.getId)).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString),
               created = Instant.now(),
-              content = text,
-              model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
-              message = AssistantMessage(contentOpt = Option(text).filter(_.nonEmpty), toolCalls = calls),
-              toolCalls = calls.toList,
+              model = ModelName(meta.flatMap(m => Option(m.getModel)).getOrElse("")),
+              message = AssistantMessage(text = Option(text).filter(_.nonEmpty), toolCalls = calls),
               usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
               // Spring AI's reason as the model reported it: it has no common vocabulary to map
-              finishReason = FinishReason.Other(
-                Option(generation.getMetadata).flatMap(m => Option(m.getFinishReason)).getOrElse("")
-              )
+              finishReason = Option(generation.getMetadata)
+                .flatMap(m => Option(m.getFinishReason))
+                .filter(_.nonEmpty)
+                .fold(FinishReason.Unknown)(FinishReason.Other(_))
             )
           }
     }

@@ -10,7 +10,6 @@ import org.llm4s.error.{
   ValidationError
 }
 import org.llm4s.http.HttpHeaders
-import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
 import java.time.Clock
@@ -49,52 +48,52 @@ object HttpErrorMapper {
    * @param statusCode the HTTP status code (must be outside 2xx range)
    * @param body       the raw response body (may be JSON or plain text)
    * @param provider   short provider label used in error messages (e.g. `"gemini"`)
-   * @param headers    the response headers, as carried by `org.llm4s.http.HttpResponse`;
-   *                   pass them whenever the response is available
-   * @return `Left` containing the appropriate `LLMError` subtype
+   * @param headers    the response headers, as carried by `org.llm4s.http.HttpResponse`; `Map.empty` only when
+   *                   there is no response to take them from
+   * @return the appropriate `LLMError` subtype; a client returns it as a `Left`
    */
-  def mapHttpError(
-    statusCode: Int,
-    body: String,
-    provider: String,
-    headers: Map[String, Seq[String]] = Map.empty
-  ): Result[Nothing] =
-    mapHttpError(statusCode, body, provider, headers, Clock.systemUTC())
+  def toError(statusCode: Int, body: String, provider: String, headers: Map[String, Seq[String]]): LLMError =
+    toErrorAt(statusCode, body, provider, headers, Clock.systemUTC())
 
-  /** As the public overload, with the clock an HTTP-date `Retry-After` is measured against. */
-  private[provider] def mapHttpError(
+  /** As [[toError]], with the clock an HTTP-date `Retry-After` is measured against. */
+  private[provider] def toErrorAt(
     statusCode: Int,
     body: String,
     provider: String,
     headers: Map[String, Seq[String]],
     clock: Clock
-  ): Result[Nothing] = {
+  ): LLMError = {
     val details = extractErrorDetails(body, statusCode, provider)
-    val mapped: Result[Nothing] = statusCode match {
-      case 401 | 403 => Left(AuthenticationError(provider, details, statusCode.toString))
+    val mapped: LLMError = statusCode match {
+      case 401 | 403 => AuthenticationError(provider, details, statusCode.toString)
       case 429 =>
         retryAfter(headers, clock) match {
-          case Some(delay) => Left(RateLimitError(provider, delay))
-          case None        => Left(RateLimitError(provider))
+          case Some(delay) => RateLimitError(provider, delay)
+          case None        => RateLimitError(provider)
         }
-      case 400 => Left(ValidationError("request", details))
+      case 400 => ValidationError("request", details)
       case s =>
         val error = ServiceError(s, provider, details)
-        Left(retryAfter(headers, clock).fold(error)(error.withRetryAfter))
+        retryAfter(headers, clock).fold(error)(error.withRetryAfter)
     }
     // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
-    mapped.left.map(TroubleshootingLinks.annotate)
+    TroubleshootingLinks.annotate(mapped)
   }
 
   /**
    * The error a provider reported inside a stream, after the 200 status (RFC 0009, rule 2): mapped as a response with
    * `status` would be, keeping `message` (redacted) in every error type, a `RateLimitError` included, so the caller
    * sees the provider's explanation.
+   *
+   * @param status   the HTTP status the event stands for: the one it states, or the one its kind maps to (502 for a
+   *                 failure that states none)
+   * @param message  the provider's explanation, as the event carried it
+   * @param provider short provider label used in error messages
    */
-  private[llm4s] def mapStreamError(status: Int, message: String, provider: String): LLMError = {
+  def mapStreamError(status: Int, message: String, provider: String): LLMError = {
     val safe = org.llm4s.util.Redaction.remoteBody(message)
     val body = ujson.Obj("error" -> ujson.Obj("message" -> safe)).render()
-    mapHttpError(status, body, provider).swap.getOrElse(ServiceError(status, provider, safe)) match {
+    toError(status, body, provider, Map.empty) match {
       case limited: RateLimitError => limited.withDetail(extractErrorDetails(body, status, provider))
       case other                   => other
     }

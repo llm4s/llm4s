@@ -5,7 +5,7 @@ import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange }
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -41,8 +41,8 @@ import org.llm4s.types.Result
 @Stable
 final case class AnthropicConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   workloadIdentity: Option[AnthropicWorkloadIdentity],
@@ -51,16 +51,18 @@ final case class AnthropicConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                        = ProviderId("anthropic")
-  override def endpointUrl: Option[String]                                   = Some(baseUrl)
-  override def withModel(model: String): AnthropicConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): AnthropicConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                     = ProviderId("anthropic")
+  override def endpointUrl: Option[BaseUrl]                               = Some(baseUrl)
+  override def withModel(model: ModelName): AnthropicConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AnthropicConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): AnthropicConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): AnthropicConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): AnthropicConfig = copy(reserveCompletion = reserveCompletion)
   def withWorkloadIdentity(workloadIdentity: AnthropicWorkloadIdentity): AnthropicConfig =
@@ -81,7 +83,7 @@ object AnthropicConfig {
    * This was `DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-anthropic` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://api.anthropic.com"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.anthropic.com")
 
   private val standardReserve = 4096
 
@@ -92,8 +94,8 @@ object AnthropicConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     contextWindow: Int,
     reserveCompletion: Int,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
@@ -118,17 +120,17 @@ object AnthropicConfig {
    * Claude models); set them, and the rest, with the `with*` setters, or use [[fromValues]] to
    * consult the bundled model catalogue.
    */
-  def apply(apiKey: Secret, model: String): AnthropicConfig = {
-    val (cw, rc) = anthropicFallback(model)
+  def apply(apiKey: Secret, model: ModelName): AnthropicConfig = {
+    val ContextLimits(cw, rc) = anthropicFallback(model)
     apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
   }
 
-  private def anthropicFallback(modelName: String): (Int, Int) =
-    modelName match {
-      case name if name.contains("claude-3")       => (200000, standardReserve)
-      case name if name.contains("claude-3.5")     => (200000, standardReserve)
-      case name if name.contains("claude-instant") => (100000, standardReserve)
-      case _                                       => (200000, standardReserve)
+  private def anthropicFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
+      case name if name.contains("claude-3")       => ContextLimits(200000, standardReserve)
+      case name if name.contains("claude-3.5")     => ContextLimits(200000, standardReserve)
+      case name if name.contains("claude-instant") => ContextLimits(100000, standardReserve)
+      case _                                       => ContextLimits(200000, standardReserve)
     }
 
   /**
@@ -176,7 +178,7 @@ object AnthropicConfig {
               List("apiKey", "workloadIdentity")
             )
           )
-          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "Anthropic", WorkloadIdentityHosts)
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl.asUrl, "baseUrl", "Anthropic", WorkloadIdentityHosts)
         yield config
 
   /**
@@ -191,17 +193,17 @@ object AnthropicConfig {
    * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String,
+    baseUrl: BaseUrl,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[AnthropicConfig] =
     (for {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("anthropic"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("anthropic")),
         modelName = modelName,
         defaultContextWindow = 200000,
         defaultReserve = standardReserve,

@@ -82,8 +82,8 @@ object WriteFileTool {
    *
    * @param config Write configuration with required allowedPaths
    */
-  def createSafe(config: WriteConfig): Result[ToolFunction[Map[String, Any], WriteFileResult]] =
-    ToolBuilder[Map[String, Any], WriteFileResult](
+  def createSafe(config: WriteConfig): Result[ToolFunction[WriteFileResult]] =
+    ToolBuilder[WriteFileResult](
       name = "write_file",
       description = s"Write content to a file. " +
         s"Allowed paths: ${config.allowedPaths.mkString(", ")}. " +

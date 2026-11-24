@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, ProcessingError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.*
@@ -40,7 +41,7 @@ final class JlamaClient private[provider] (
 
   protected def clientDescription: String = s"Jlama client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   private val lock                        = new ReentrantLock()
   private var engine: Option[JlamaEngine] = None // guarded by lock
@@ -52,17 +53,15 @@ final class JlamaClient private[provider] (
   private lazy val adjustmentLog = new AdjustmentLog(ProviderName)
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments = unsentOptions(config.model, options)
-    adjustmentLog.record(config.model, adjustments)
+    val adjustments = unsentOptions(config.model.asString, options)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics(run(conversation, options, _ => ()).map(_._1.withAdjustments(unsent(options))))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     completeWithMetrics {
@@ -86,7 +85,7 @@ final class JlamaClient private[provider] (
           Try(
             loaded.generate(
               turns,
-              options.temperature.toFloat,
+              options.temperature.getOrElse(JlamaClient.DefaultTemperature).toFloat,
               options.maxTokens.getOrElse(config.reserveCompletion),
               stopWhenInterrupted(onToken)
             )
@@ -97,6 +96,21 @@ final class JlamaClient private[provider] (
       }
       completion <- toCompletion(generation)
     yield (completion, generation.finish)
+
+  /**
+   * Loads the model, as the first completion would, and generates nothing: there is no endpoint and no key to
+   * check, so what can fail is the load. `Right(())` means the model is in memory and stays there for the calls that
+   * follow; a model that cannot be downloaded or loaded is the `ProcessingError` a completion gets.
+   *
+   * Not cheap the first time: a model not yet in `config.modelDir` is downloaded, and loading takes as long as it
+   * takes. Once the model is loaded it returns at once.
+   */
+  override def validate(): Result[Unit] =
+    if Thread.currentThread().isInterrupted then Left(CancelledError(s"$ProviderName.validate"))
+    else
+      CancelledError.attempt(s"$ProviderName.validate")(
+        validateNotClosed.flatMap(_ => locked(currentEngine)).map(_ => ())
+      )
 
   /** The loaded model, loading it on first use. A failed load is not kept: the next call tries again. */
   private def currentEngine: Result[JlamaEngine] =
@@ -122,7 +136,6 @@ final class JlamaClient private[provider] (
           Completion(
             id = UUID.randomUUID().toString,
             created = Instant.now(),
-            content = generation.text,
             model = config.model,
             message = AssistantMessage(generation.text),
             usage = Some(
@@ -146,13 +159,16 @@ final class JlamaClient private[provider] (
 @Experimental
 object JlamaClient:
 
+  /** The temperature the engine is given when the caller set none: it has no default of its own. */
+  private[provider] val DefaultTemperature: Double = 0.7
+
   /** What `options` sets that the engine is not given, each `Dropped` (RFC 0008): it takes a temperature and a limit. */
   private[provider] def unsentOptions(model: String, options: CompletionOptions): List[RequestAdjustment] =
     def dropped(set: Boolean, option: RequestOption) =
       Option.when(set)(RequestAdjustment.Dropped(option, s"Jlama is not given $option")).toList
-    dropped(options.topP != 1.0, RequestOption.TopP) ++
-      dropped(options.presencePenalty != 0.0, RequestOption.PresencePenalty) ++
-      dropped(options.frequencyPenalty != 0.0, RequestOption.FrequencyPenalty) ++
+    dropped(options.topP.isDefined, RequestOption.TopP) ++
+      dropped(options.presencePenalty.isDefined, RequestOption.PresencePenalty) ++
+      dropped(options.frequencyPenalty.isDefined, RequestOption.FrequencyPenalty) ++
       dropped(options.responseFormat.isDefined, RequestOption.ResponseFormat) ++
       UnmappedOptions.reasoningAndThinking(model, options) ++
       UnmappedOptions.serviceTier("Jlama", options)

@@ -48,10 +48,13 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
           UserMessage("Weather and time?"),
           AssistantMessage(
             Some("Checking."),
-            Seq(ToolCall("tc-1", "get_weather", args), ToolCall("tc-2", "get_time", ujson.Obj()))
+            Seq(
+              ToolCall(ToolCallId("tc-1"), "get_weather", args),
+              ToolCall(ToolCallId("tc-2"), "get_time", ujson.Obj())
+            )
           ),
-          ToolMessage(toolCallId = "tc-1", content = """{"temp":22}"""),
-          ToolMessage(toolCallId = "tc-2", content = "noon"),
+          ToolMessage(toolCallId = ToolCallId("tc-1"), content = """{"temp":22}"""),
+          ToolMessage(toolCallId = ToolCallId("tc-2"), content = "noon"),
           UserMessage("Thanks!")
         )
       )
@@ -111,7 +114,8 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
     "send top-p when it is set, and omit it at the default" in {
       val conv = Conversation(Seq(UserMessage("hi")))
 
-      val tuned = requestBody(conv, CompletionOptions(temperature = 0.25, topP = 0.5, maxTokens = Some(321)))
+      val tuned =
+        requestBody(conv, CompletionOptions(temperature = Some(0.25), topP = Some(0.5), maxTokens = Some(321)))
       tuned("inferenceConfig")("maxTokens").num shouldBe 321.0
       tuned("inferenceConfig")("temperature").num shouldBe 0.25
       tuned("inferenceConfig")("topP").num shouldBe 0.5
@@ -134,7 +138,7 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
       withServer("/")(sendEventStream(_, frames)) { url =>
         val client = new BedrockClient(config(url))
         val chunks = ListBuffer.empty[StreamedChunk]
-        val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), chunks += _)
+        val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(chunks += _)
         client.close()
         chunks.flatMap(_.content).toList shouldBe List("trunc")
         result.left.toOption.value.message should include("messageStop")
@@ -152,7 +156,7 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
         val client = new BedrockClient(config(url).copy(credentials = None, profile = Some("llm4s-no-such-profile")))
         val conv   = Conversation(Seq(UserMessage("Hello")))
         val sync   = client.complete(conv, CompletionOptions()).left.toOption.value
-        val stream = client.streamComplete(conv, CompletionOptions(), _ => ()).left.toOption.value
+        val stream = client.streamComplete(conv, CompletionOptions())(_ => ()).left.toOption.value
         client.close()
         sync shouldBe a[org.llm4s.error.AuthenticationError]
         stream shouldBe a[org.llm4s.error.AuthenticationError]

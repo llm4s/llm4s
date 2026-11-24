@@ -24,8 +24,8 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
   private val Passage = "Refunds are accepted within 30 days of purchase."
 
   /** A retrieval tool: whatever the query, it returns [[Passage]]. */
-  private def searchTool(name: String = "search"): ToolFunction[Map[String, Any], Found] =
-    ToolBuilder[Map[String, Any], Found](
+  private def searchTool(name: String = "search"): ToolFunction[Found] =
+    ToolBuilder[Found](
       name,
       "Searches the documents",
       Schema.`object`[Map[String, Any]]("Search parameters").withRequiredField("query", Schema.string("The query"))
@@ -97,7 +97,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("What is the refund window?").value
 
     result.status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "GroundingGuardrail"
         reason should include("not sufficiently grounded")
       case other => fail(s"expected Blocked, got $other")
@@ -151,8 +151,8 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
       RAGGuardrail.withTurnContext(GroundingGuardrail(judge()))(fromSearch)
     )
     blocking.run("What is the refund window?").value.status match {
-      case AgentStatus.Blocked(_, reason) => reason should include("no retrieved chunks")
-      case other                          => fail(s"expected Blocked, got $other")
+      case AgentStatus.Blocked(_, Some(reason)) => reason should include("no retrieved chunks")
+      case other                                => fail(s"expected Blocked, got $other")
     }
 
     val warning = agentWith(
@@ -200,7 +200,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
   it should "fail the check in a graph whose state has no message history" in {
     val wrapped = RAGGuardrail.withTurnContext(GroundingGuardrail(judge()))(fromSearch)
 
-    wrapped.validate("anything", testModelContext()) shouldBe a[Left[GraphError.UnknownStateKey, ?]]
+    wrapped.validateIn("anything", testModelContext()) shouldBe a[Left[GraphError.UnknownStateKey, ?]]
   }
 
   "RAGContext.fromToolResults" should "take the query from the user message and one chunk per named tool's result" in {
@@ -209,14 +209,14 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(
         None,
         Seq(
-          ToolCall("c1", "search", ujson.Obj()),
-          ToolCall("c2", "calculator", ujson.Obj()),
-          ToolCall("c3", "lookup", ujson.Obj())
+          ToolCall(ToolCallId("c1"), "search", ujson.Obj()),
+          ToolCall(ToolCallId("c2"), "calculator", ujson.Obj()),
+          ToolCall(ToolCallId("c3"), "lookup", ujson.Obj())
         )
       ),
-      ToolMessage("first", "c1"),
-      ToolMessage("42", "c2"),
-      ToolMessage("second", "c3"),
+      ToolMessage("first", ToolCallId("c1")),
+      ToolMessage("42", ToolCallId("c2")),
+      ToolMessage("second", ToolCallId("c3")),
       AssistantMessage("answer")
     )
 

@@ -39,7 +39,7 @@ object Llm4s {
 
     /**
      * Creates an [LLMClientKt] from the default provider section of `application.conf`
-     * (the one `llm4s.providers.provider` names).
+     * (the one `llm4s.defaultProvider` names).
      * Throws [LLMException] if the provider cannot be configured.
      */
     fun createDefaultClient(): LLMClientKt {
@@ -64,7 +64,7 @@ object Llm4s {
      * ```kotlin
      * val client = Llm4s.openAi {
      *     apiKey = key
-     *     model = "gpt-4o-mini"
+     *     model = "gpt-5.6-luna"
      *     requestTimeout = 30.seconds
      * }
      * ```

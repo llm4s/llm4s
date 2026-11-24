@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model._
@@ -37,10 +39,15 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
   /** The result of streaming `body`, and the chunks `onChunk` saw. */
   private def streaming[A](body: String)(check: (Result[Completion], List[StreamedChunk]) => A): Unit =
     withServer("/chat/completions")(sendSseResponse(_, body)) { baseUrl =>
-      val config = OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = Some(Secret(clientKey)))
+      val config =
+        OpenAICompatibleConfig(
+          model = ModelName("local-model"),
+          baseUrl = BaseUrl(baseUrl),
+          apiKey = Some(Secret(clientKey))
+        )
       val client = OpenAICompatibleClient(config).value
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunks += _)
+      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunks += _)
       check(result, chunks.toList)
     }
 
@@ -122,10 +129,15 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
       streamThenHold(exchange, """data: {"error":{"message":"overloaded"}}""" + "\n\n")
     } { baseUrl =>
       // Waiting for another line ends in this timeout's NetworkError instead of the event's ServiceError.
-      val config = OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = Some(Secret(clientKey)))
-        .withTimeouts(ProviderTimeouts.default.withStream(3.seconds))
+      val config =
+        OpenAICompatibleConfig(
+          model = ModelName("local-model"),
+          baseUrl = BaseUrl(baseUrl),
+          apiKey = Some(Secret(clientKey))
+        )
+          .withTimeouts(ProviderTimeouts.default.withStream(3.seconds))
       val result = OpenAICompatibleClient(config).value
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       result.left.value shouldBe a[ServiceError]
       result.left.value.message should include("overloaded")
     }

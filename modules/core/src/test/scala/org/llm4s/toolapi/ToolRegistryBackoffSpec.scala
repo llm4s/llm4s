@@ -24,8 +24,8 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   implicit val okRW: ReadWriter[Ok] = macroRW
 
   /** A tool whose handler body runs on every call; a throw becomes an ExecutionError (retryable when it is an IO error). */
-  private def toolOf(name: String)(body: => Either[String, Ok]): ToolFunction[Map[String, Any], Ok] =
-    ToolBuilder[Map[String, Any], Ok](name, s"test tool $name", Schema.`object`[Map[String, Any]]("p"))
+  private def toolOf(name: String)(body: => Either[String, Ok]): ToolFunction[Ok] =
+    ToolBuilder[Ok](name, s"test tool $name", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => body)
       .buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
@@ -36,7 +36,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
     failures: Int,
     attempts: AtomicInteger,
     firstAttempt: CountDownLatch = new CountDownLatch(1)
-  ): ToolFunction[Map[String, Any], Ok] =
+  ): ToolFunction[Ok] =
     toolOf(name) {
       val n = attempts.getAndIncrement()
       firstAttempt.countDown()

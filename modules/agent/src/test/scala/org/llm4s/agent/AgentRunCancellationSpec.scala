@@ -64,9 +64,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
         }
       } else Right(CompletionFixture.simple("done"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -94,9 +92,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
         Right(CompletionFixture.simple("late"))
       } else Right(CompletionFixture.simple("done"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -322,10 +318,10 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
     interruptedCall(client.entered)(agent.run(thread, "q"))._1.left.toOption.get shouldBe a[CancelledError]
 
     // no waiting: the turn's tracing delivered its AgentRunEnded and detached before run returned
-    tracing.ended.map(_.status) shouldBe Vector("cancelled")
+    tracing.ended.map(_.status.name) shouldBe Vector("cancelled")
     agent.recover(thread).value.answer shouldBe Some("done")
     // the recovery is traced once, by its own run's tracing: nothing of the cancelled turn's is still attached
-    tracing.ended.map(_.status) shouldBe Vector("cancelled", "completed")
+    tracing.ended.map(_.status.name) shouldBe Vector("cancelled", "completed")
   }
 
   "Agent.run interrupted while its turn commits" should "return the turn's real outcome, with the interrupt flag still set" in {
@@ -370,9 +366,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         if (down.getAndIncrement() == 0) Left(ValidationError("model", "down"))
         else Right(CompletionFixture.simple("ok"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192
@@ -394,9 +388,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(ValidationError("model", "down"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192
@@ -441,9 +433,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         if (calls.incrementAndGet() == 2) Left(ValidationError("model", "down"))
         else Right(CompletionFixture.simple("ok"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192

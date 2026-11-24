@@ -1,6 +1,5 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.testutil.FixtureChatProvider
@@ -91,15 +90,16 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
         extras = Seq(ProviderConfigKey.required("endpoint", "the provider endpoint"))
       )
 
-      def buildConfig(providerName: String, section: NamedProviderConfig)(using
-        org.llm4s.llmconnect.config.ContextWindowResolver
+      def buildConfig(
+        section: NamedProviderConfig,
+        context: org.llm4s.llmconnect.spi.ProviderConfigContext
       ): org.llm4s.types.Result[org.llm4s.llmconnect.config.ProviderConfig] =
         Left(ConfigurationError("not needed for this test"))
 
-      def buildClient(
+      def build(
         config: org.llm4s.llmconnect.config.ProviderConfig,
-        options: org.llm4s.llmconnect.LlmClientOptions
-      )(using org.llm4s.model.ModelRegistryService): org.llm4s.types.Result[org.llm4s.llmconnect.LLMClient] =
+        context: org.llm4s.llmconnect.spi.ProviderBuildContext
+      ): org.llm4s.types.Result[org.llm4s.llmconnect.LLMClient] =
         Left(ConfigurationError("not needed for this test"))
 
     val message = errorFrom(validate("my-custom", CustomProvider, section("customcloud", "v1")))

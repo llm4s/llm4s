@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -28,8 +30,8 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
   private def localConfig(baseUrl: String): ZaiConfig =
     ZaiConfig(
       apiKey = Secret("test-key"),
-      model = "GLM-4.7",
-      baseUrl = baseUrl,
+      model = ModelName("GLM-4.7"),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -70,7 +72,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
         result.isRight shouldBe true
         val completion = result.toOption.get
         completion.content shouldBe "Hello from Z.ai!"
-        completion.model shouldBe "GLM-4.7"
+        completion.model shouldBe ModelName("GLM-4.7")
         completion.id shouldBe "chatcmpl-zai-test"
         completion.usage shouldBe defined
         completion.usage.get.promptTokens shouldBe 8
@@ -129,7 +131,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
 
         result.isRight shouldBe true
         exchanges should have size 1
-        exchanges.head.provider shouldBe "zai"
+        exchanges.head.provider.asString shouldBe "zai"
         exchanges.head.model shouldBe Some("GLM-4.7")
         exchanges.head.requestBody should include("hello")
         exchanges.head.responseBody.value should include("Logged response")
@@ -145,7 +147,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       val client = new ZaiClient(localConfig(baseUrl))
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+      val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
       result.isRight shouldBe true
       val completion = result.toOption.get
@@ -164,13 +166,13 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new ZaiClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
-      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
       result.isRight shouldBe true
       exchanges should have size 1
-      exchanges.head.provider shouldBe "zai"
+      exchanges.head.provider.asString shouldBe "zai"
       exchanges.head.requestBody should include("\"stream\":true")
       exchanges.head.responseBody.value should include("data:")
       exchanges.head.responseBody.value should include("Hello")
@@ -182,7 +184,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
     withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 429, """{"error":"Rate limited"}""")) {
       baseUrl =>
         val client = new ZaiClient(localConfig(baseUrl))
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+        val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
         result.isLeft shouldBe true
         result.swap.toOption.get shouldBe a[RateLimitError]
@@ -224,7 +226,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 200, zaiCompletion("ok"))
     } { baseUrl =>
       val client   = new ZaiClient(localConfig(baseUrl))
-      val toolConv = Conversation(Seq(ToolMessage("result", "call-42")))
+      val toolConv = Conversation(Seq(ToolMessage("result", ToolCallId("call-42"))))
       client.complete(toolConv, CompletionOptions())
     }
 }

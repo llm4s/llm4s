@@ -49,7 +49,9 @@ class TodoMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues wit
     _ =>
       AssistantMessage(
         None,
-        lists.zipWithIndex.map((items, i) => ToolCall(s"w$i", "write_todos", ujson.Obj("todos" -> ujson.Arr(items*))))
+        lists.zipWithIndex.map((items, i) =>
+          ToolCall(ToolCallId(s"w$i"), "write_todos", ujson.Obj("todos" -> ujson.Arr(items*)))
+        )
       )
 
   private def loopOf(model: ModelStep, stack: Seq[AgentMiddleware]): ToolLoop =
@@ -234,7 +236,7 @@ class TodoMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues wit
     val guard = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("guard")
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(answer))
+        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(answer))
     }
     val store  = new InMemoryCheckpointer
     val thread = ThreadId("blocked")

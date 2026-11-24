@@ -5,7 +5,8 @@ parent: Build a Support Assistant
 grand_parent: Tutorials
 nav_order: 5
 description: "Support assistant tutorial, part 5: LLM4S guardrails that mask personal data and refuse prompt injection, and a conversation that remembers the turn before."
-search_title: "Support assistant tutorial 5: guardrails, PII masking and memory in Scala"
+search_title: "Support assistant tutorial 5: guardrails and memory"
+cites_closed_issues: [2292]
 ---
 
 # Part 5: safety and memory
@@ -22,22 +23,19 @@ The code is
 ## Guardrails
 
 A guardrail checks text, or rewrites it, at the edge of a run. Input guardrails run on the customer's message before
-the model sees it; output guardrails run on the final answer before the customer does. They are middleware, set once
-on the agent:
+the model sees it; output guardrails run on the final answer before the customer does. They are set once on the
+agent, with the builder:
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 
-val guardrails: GuardrailMiddleware =
-  new GuardrailMiddleware(
-    input = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker()),
-    output = Seq(PIIMasker())
-  )
+val inputGuardrails: Seq[InputGuardrail]   = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker())
+val outputGuardrails: Seq[OutputGuardrail] = Seq(PIIMasker())
 
 def safeAgent(client: LLMClient): Result[Agent] =
   for {
@@ -48,7 +46,8 @@ def safeAgent(client: LLMClient): Result[Agent] =
       .builder("support", client)
       .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
       .withTools(registry)
-      .withMiddleware(guardrails)
+      .withInputGuardrails(inputGuardrails*)
+      .withOutputGuardrails(outputGuardrails*)
       .build()
   } yield agent
 ```
@@ -130,5 +129,6 @@ add it to the output guardrails of `safeAgent`. The solution is `Part5Solution` 
 [`solutions`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/tutorial/supportassistant/solutions/Solutions.scala)
 package.
 
-Previous: [Part 4, help-centre answers](part-4-help-centre). The next parts (testing with `llm4s-testkit` and a
-judge, serving and observing) are tracked in [#2292](https://github.com/llm4s/llm4s/issues/2292).
+Previous: [Part 4, help-centre answers](part-4-help-centre). The series planned in
+[#2292](https://github.com/llm4s/llm4s/issues/2292) goes on to testing with `llm4s-testkit` and a judge, then serving and observing; those parts are not
+written yet.

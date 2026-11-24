@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAIConfig, ZaiConfig }
@@ -37,7 +39,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
   )(call: (String, ProviderExchangeLogging) => A): (A, Int, Seq[ProviderExchange]) = {
     val hits     = new AtomicInteger
     val recorded = ListBuffer.empty[ProviderExchange]
-    val logging = ProviderExchangeLogging.enabled(
+    val logging = ProviderExchangeLogging.Enabled(
       new ProviderExchangeSink:
         override def record(exchange: ProviderExchange): Unit = recorded += exchange
     )
@@ -51,7 +53,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
 
   private def mistral(baseUrl: String, logging: ProviderExchangeLogging): LLMClient =
     new MistralClient(
-      MistralConfig(Secret("k"), "mistral-small-latest", baseUrl, 128000, 4096),
+      MistralConfig(Secret("k"), ModelName("mistral-small-latest"), BaseUrl(baseUrl), 128000, 4096),
       exchangeLogging = logging
     )
 
@@ -72,7 +74,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     var chunks = 0
     val (result, hits, recorded) =
       against("/v1/chat/completions", sendSseResponse(_, openAISseBody(Seq("never")))) { (url, logging) =>
-        mistral(url, logging).streamComplete(onlyEmptyAssistantTurns, CompletionOptions(), _ => chunks += 1)
+        mistral(url, logging).streamComplete(onlyEmptyAssistantTurns, CompletionOptions())(_ => chunks += 1)
       }
 
     result.left.value shouldBe a[ValidationError]
@@ -100,14 +102,20 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     // provider send such a turn (as {"role":"assistant"}), so the conversation is not empty.
     val clients: Seq[(String, (String, ProviderExchangeLogging) => LLMClient)] = Seq(
       "deepseek" -> ((url, logging) =>
-        new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
+        new DeepSeekClient(
+          DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), BaseUrl(url), 128000, 8192),
+          exchangeLogging = logging
+        )
       ),
       "zai" -> ((url, logging) =>
-        new ZaiClient(ZaiConfig(Secret("k"), "GLM-4.7", url, 128000, 4096), exchangeLogging = logging)
+        new ZaiClient(
+          ZaiConfig(Secret("k"), ModelName("GLM-4.7"), BaseUrl(url), 128000, 4096),
+          exchangeLogging = logging
+        )
       ),
       "openrouter" -> ((url, logging) =>
         new OpenRouterClient(
-          OpenAIConfig(Secret("k"), "openai/gpt-4o-mini", None, url, 128000, 4096),
+          OpenAIConfig(Secret("k"), ModelName("openai/gpt-4o-mini"), None, BaseUrl(url), 128000, 4096),
           exchangeLogging = logging
         )
       )
@@ -128,10 +136,13 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     val (results, hits, _) =
       against("/chat/completions", sendJsonResponse(_, 200, openAICompletion("never"))) { (url, logging) =>
         val c =
-          new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
+          new DeepSeekClient(
+            DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), BaseUrl(url), 128000, 8192),
+            exchangeLogging = logging
+          )
         (
           c.complete(Conversation(Seq.empty), CompletionOptions()),
-          c.streamComplete(Conversation(Seq.empty), CompletionOptions(), _ => ())
+          c.streamComplete(Conversation(Seq.empty), CompletionOptions())(_ => ())
         )
       }
 

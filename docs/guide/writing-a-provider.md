@@ -3,8 +3,10 @@ layout: page
 title: Writing a Provider
 description: "Publish your own LLM4S provider module, a chat client or embedding provider, against llm4s-core without changing LLM4S itself."
 search_title: "Write a custom LLM provider module for LLM4S"
-parent: User Guide
-nav_order: 13
+parent: Core
+nav_order: 115
+grand_parent: User Guide
+cites_closed_issues: [1493, 1818]
 ---
 
 # Writing a Provider
@@ -77,9 +79,13 @@ my-llm4s-acme/
         └── Llm4sAcmeModuleSpec.scala
 ```
 
-Use your own package. The in-repo modules keep `org.llm4s.*` for source compatibility with
-earlier releases; a third-party module has no reason to, and anything `private[llm4s]` stays
-out of reach either way (see [Stability](#stability)).
+Use your own package. The in-repo modules, the template `modules/providers/voyage` included, are
+declared in `org.llm4s.*` because they are llm4s: their class names are part of earlier releases.
+That is not something to copy. Being inside `org.llm4s` lets them reach `private[llm4s]` helpers
+your module cannot, and the template uses one: `org.llm4s.util.Redaction.safeBody`, for the body of
+an error message. Everything else it calls is the public SPI this guide describes; build your error
+from the response with `HttpErrorMapper.toError`, which redacts and truncates the body itself (see
+[Stability](#stability)).
 
 ## Registration
 
@@ -90,9 +96,14 @@ whatever it supplies. Both members default to `Nil`.
 
 ```scala
 trait Llm4sProviderModule:
-  def chatProviders: Seq[ProviderDescriptor] = Nil
+  def providers: Seq[ProviderDescriptor] = Nil
   def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Nil
 ```
+
+One naming rule holds across the SPI: **an unprefixed name is the chat half, and `embedding*` the embedding
+half**. So `ProviderDescriptor` and `EmbeddingProviderDescriptor`, `providers` and `embeddingProviders` here, and
+on `ProviderRegistry` `descriptors` / `embeddingDescriptors`, `find` / `findEmbedding`, `resolve` /
+`resolveEmbedding`, `ids` / `embeddingIds`, `of` / `ofEmbeddings` and `withProvider` / `withEmbeddingProvider`.
 
 Implement it as a **`class` with a public no-arg constructor, not an `object`** -
 `java.util.ServiceLoader` instantiates the class it is given, and an `object` has no such
@@ -104,7 +115,7 @@ package com.acme.llm4s
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 final class Llm4sAcmeModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(AcmeProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(AcmeProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(AcmeEmbeddings)
 ```
 
@@ -148,7 +159,6 @@ llm4s {
   embeddings {
     acme {
       baseUrl = ${?ACME_EMBEDDING_BASE_URL}
-      model   = ${?ACME_EMBEDDING_MODEL}
     }
   }
 }
@@ -168,23 +178,36 @@ trait ProviderDescriptor:
   def configSpec: ProviderConfigSpec
   def features: ProviderFeatures = ProviderFeatures.default
   def modelLister: Option[ProviderModelLister] = None
-  def buildConfig(providerName: String, section: ProvidersConfigModel.NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig]
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient]
+  def buildConfig(section: org.llm4s.config.NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig]
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient]
 ```
+
+The embedding descriptor has the same two methods with the same shape: `buildConfig(section, context)` and
+`build(config, context)`. Each takes one context value in place of a list of parameters, so what a later
+provider needs is a new field of the context and not a new signature for every descriptor:
+
+| Context | Carries |
+|---|---|
+| `ProviderConfigContext` | `providerName` (the user's section name, for error messages), `contextWindows` (the `ContextWindowResolver` a config's `fromValues` takes) |
+| `ProviderBuildContext` | `options` (the caller's `LlmClientOptions`; `metrics`, `exchangeLogging` and `httpClient` read it), `modelRegistry` |
+| `EmbeddingConfigContext` | `modelOverride` (the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`) |
+| `EmbeddingBuildContext` | `options` (the caller's `EmbeddingClientOptions`; `httpClient` reads it) |
 
 `buildConfig` receives a section that has **already been validated** against `configSpec`:
 required fields are present, the API key has fallen back to `llm4s.credentials.<id>.apiKey`, and
-`section.extras` holds exactly your declared extra keys, defaults applied. `buildClient` must
+`section.extras` holds exactly your declared extra keys, defaults applied. `build` must
 check the config's type rather than cast - `ProviderDescriptor.expectConfig` does that.
+
+To call a descriptor yourself, in a test say, make the context from what is in scope:
+`descriptor.buildConfig(section, ProviderConfigContext.of("my-section"))` takes the `ContextWindowResolver` in
+scope (with a `ModelRegistryService` in scope, the one over it), and
+`descriptor.build(config, ProviderBuildContext.of(options))` the `ModelRegistryService`.
 
 `aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
 alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
 two providers declaring one alias the later registered keeps it; both cases appear in
-`ProviderRegistry.report.collisions` (kind `chat alias` or `embedding alias`) and in the discovery log.
+`ProviderRegistry.report.collisions` (kind `ProviderCollisionKind.ChatAlias` or `EmbeddingAlias`) and in the
+discovery log. The report is the registry's to build and yours to read: its ids are `ProviderId`s.
 
 ### Workload identity
 
@@ -200,9 +223,16 @@ its own federation takes the identity token's file path instead (see `AnthropicP
 The configuration side is `@Stable` ([#1818](https://github.com/llm4s/llm4s/issues/1818)): `AuthConfig`,
 `IdentitySource`, `TokenExchangeConfig`, `AccessToken` and the `AccessTokenProvider` trait, which a Stable
 `NamedProviderConfig`, `ProviderDescriptor.requireAuthExtra` and `OpenAICompatibleClient.Credential` carry. The
-machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` - is still
+machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenProvider` - is still
 `@Experimental`, so keep it out of your own Stable signatures. An `AccessTokenProvider` should return a failure as a
 `Left`; `OpenAICompatibleClient` and `CachingAccessTokenProvider` turn one that throws into an `AuthenticationError`.
+
+The three suppliers of a credential are siblings with one method, `current()`: `ApiKeyProvider.current()` gives an
+`ApiKey`, and `AccessTokenProvider.current()` and `IdentityTokenProvider.current()` a `Secret`, so a token prints
+as `***` and is read with `.reveal` only where it is sent. `AccessTokenProvider.invalidate(rejected: Secret)` has a
+no-op default, so a provider that caches nothing is a lambda: `() => readToken().map(Secret.token)`. An
+`IdentitySource` is the configured form (`File(path)` or `Literal(token: Secret)`), and
+`IdentityTokenProvider.from(source)` the provider that reads it.
 
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 
@@ -235,19 +265,19 @@ reported as unknown and not passed on. Values are strings; parse numbers or bool
 `buildConfig` and return a `ConfigurationError` for a malformed one.
 
 Read the values with `section.extra("region")` (an `Option[String]`) or
-`ProviderDescriptor.requireExtra(providerName, section, "region")` (a `Result[String]`).
+`ProviderDescriptor.requireExtra(context.providerName, section, "region")` (a `Result[String]`).
 
 ### The descriptor
 
 ```scala
 package com.acme.llm4s
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.config.NamedProviderConfig
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.*
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.Result
 
 object AcmeProvider extends ProviderDescriptor:
@@ -256,7 +286,7 @@ object AcmeProvider extends ProviderDescriptor:
 
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.acme.example/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.acme.example/v1")),
     apiKeyEnv      = Seq("ACME_API_KEY"), // what reference.conf binds
     extras         = Seq(
       ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west"))
@@ -266,44 +296,55 @@ object AcmeProvider extends ProviderDescriptor:
   // Say so if the client cannot stream or call tools; the default claims both.
   override val features: ProviderFeatures = ProviderFeatures(streaming = true, toolCalling = false)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows // AcmeConfig.fromValues takes it
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      region  <- ProviderDescriptor.requireExtra(providerName, section, "region")
-      config  <- AcmeConfig.fromValues(apiKey, section.model.asString, baseUrl, region)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      region  <- ProviderDescriptor.requireExtra(context.providerName, section, "region")
+      config  <- AcmeConfig.fromValues(apiKey, section.model, baseUrl, region)
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
-    ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(new AcmeClient(_, options))
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry // AcmeClient's constructor takes it
+    ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(new AcmeClient(_, context.options))
 ```
 
 ### Your `ProviderConfig`
 
-`org.llm4s.llmconnect.config.ProviderConfig` is an open trait: `providerId`, `model`,
-`contextWindow`, `reserveCompletion`, `endpointUrl` and `withModel`. Resolve the window from the
-model registry with `ContextWindowResolver` (the `using` parameter `buildConfig` receives), and
-keep the key out of `toString`:
+`org.llm4s.llmconnect.config.ProviderConfig` is an open trait, and every member is abstract: `providerId`,
+`model`, `contextWindow`, `reserveCompletion`, `endpointUrl` and `withModel`, then the three settings the
+loader applies to whatever your descriptor builds - `timeouts`/`withTimeouts`, `network`/`withNetwork` and
+`apiKeyProvider`/`withApiKeyProvider`. None has a default, so a config cannot ignore a configured proxy by
+omission. Resolve the window from the model registry with `ContextWindowResolver` (`context.contextWindows`
+in `buildConfig`), and keep the key out of `toString`:
 
 ```scala
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.llmconnect.config.{ ContextLimits, ProviderTimeouts }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 
 final case class AcmeConfig(
   apiKey: String,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   region: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  network: HttpNetworkSettings = HttpNetworkSettings.default,
+  apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
-  val providerId: ProviderId                    = ProviderId("acme")
-  def endpointUrl: Option[String]               = Some(baseUrl)
-  def withModel(model: String): AcmeConfig      = copy(model = model)
-  override def toString: String                 = s"AcmeConfig(***, $model, $baseUrl, $region)"
+  val providerId: ProviderId                                     = ProviderId("acme")
+  def endpointUrl: Option[BaseUrl]                               = Some(BaseUrl(baseUrl))
+  def withModel(model: ModelName): AcmeConfig                    = copy(model = model)
+  def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig       = copy(timeouts = timeouts)
+  def withNetwork(network: HttpNetworkSettings): AcmeConfig      = copy(network = network)
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[AcmeConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
+  override def toString: String = s"AcmeConfig(***, ${model.asString}, $baseUrl, $region)"
 
 object AcmeConfig:
   def fromValues(apiKey: String, model: String, baseUrl: String, region: String)(using
@@ -311,14 +352,14 @@ object AcmeConfig:
   ): Result[AcmeConfig] =
     if apiKey.trim.isEmpty then Left(ConfigurationError("Acme apiKey must be non-empty", List("apiKey")))
     else
-      val (window, reserve) = resolver.resolve(
+      val limits = resolver.resolve(
         lookupProviders      = Seq("acme"),
         modelName            = model,
         defaultContextWindow = 128000,
         defaultReserve       = 4096,
-        fallbackResolver     = _ => (128000, 4096) // when the registry does not know the model
+        fallbackResolver     = _ => ContextLimits(128000, 4096) // when the registry does not know the model
       )
-      Right(AcmeConfig(apiKey, model, baseUrl, region, window, reserve))
+      Right(AcmeConfig(apiKey, ModelName(model), baseUrl, region, limits.contextWindow, limits.reserveCompletion))
 ```
 
 ## What the user writes
@@ -328,9 +369,8 @@ and `model`; extras sit beside the built-in fields:
 
 ```hocon
 llm4s {
+  defaultProvider = "acme-main"
   providers {
-    provider = "acme-main"
-
     acme-main {
       provider = "acme"
       model    = "acme-large"
@@ -368,7 +408,7 @@ an idempotent `close()`, a closed-state check, and metrics around each call. You
 protected def metrics: MetricsCollector       // from MetricsRecording; use options.metrics
 protected def clientDescription: String        // "Acme client for model x", for the closed error
 protected def providerName: String             // metrics label, e.g. "acme"
-protected def modelName: String
+protected def modelName: ModelName
 protected def releaseResources(): Unit = ()    // called once, from close()
 ```
 
@@ -386,13 +426,15 @@ once per request:
 
 ```scala
 ProviderExchangeRecorder.record(
-  exchangeLogging = options.exchangeLogging,
-  provider        = providerName,
-  model           = Some(config.model),
-  startedAt       = startedAt,           // java.time.Instant taken before the call
-  requestBody     = requestText,
-  responseBody    = Some(responseText),
-  result          = result               // the Result you are about to return
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider     = ProviderId(providerName),
+    startedAt    = startedAt,            // java.time.Instant taken before the call
+    requestBody  = requestText,
+    model        = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result                                 // the Result you are about to return
 )
 ```
 
@@ -445,27 +487,23 @@ run for any length of time while one that stalls fails its read with a `SocketTi
 
 Every provider section, and every embedding section, may carry `timeouts { request = ..., stream = ... }`.
 You do not read the block: the loader parses it into `NamedProviderConfig.timeouts` (checked to be positive
-and finite) and applies it to the config your descriptor builds, by calling `ProviderConfig.withTimeouts`.
-To honour it, carry a `ProviderTimeouts` in your config type and pass it on when you call the HTTP client:
+and finite) and applies it to the config your descriptor builds, by calling `ProviderConfig.withTimeouts`;
+it applies the proxy and TLS settings of `llm4s.http` and the section's own `http` block the same way, with
+`withNetwork`. `AcmeConfig` above carries both, so all that is left is to pass them on when you call the
+HTTP client:
 
 ```scala
-final case class AcmeConfig(
-  apiKey: String,
-  model: String,
-  baseUrl: String,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
-) extends ProviderConfig:
-  // ... providerId, contextWindow and the rest ...
-  override def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig = copy(timeouts = timeouts)
-
 // in the client: your own default stays when the section sets none
 httpClient.post(url, headers, body, timeout = config.timeouts.requestOr(2.minutes))
 httpClient.postStream(url, headers, body, timeout = config.timeouts.streamOr(10.minutes))
 ```
 
-A config that does not override `withTimeouts` ignores the block, since the default returns `this`; a
-provider with no timeouts to offer needs to do nothing. An embedding provider reads
-`EmbeddingProviderConfig.timeouts.requestOr(...)`, and only `request` has a meaning there.
+Both setters are abstract, so a config says what it does with them. A provider with no request to time out
+and no connection to route - a model run in-process, as `llm4s-jlama` does - returns `this` from each and
+keeps `timeouts` and `network` at their defaults; the loader then refuses a section that sets `timeouts` or
+an `http` block of its own (`llm4s.providers.<name>.timeouts: provider '<id>' takes no timeouts`) rather than
+dropping it. The process-wide `llm4s.http` block is not an error for such a provider. An embedding provider
+reads `EmbeddingProviderConfig.timeouts.requestOr(...)`, and only `request` has a meaning there.
 
 Methods added to the trait after 1.0 will have default implementations, so a test double that
 implements it keeps compiling.
@@ -474,40 +512,35 @@ implements it keeps compiling.
 
 A section may name its key with `apiKeyFile` instead of `apiKey` (#2313). Validation reads the file once into
 `NamedProviderConfig.apiKey`, so your descriptor builds its config as usual; the loader then calls
-`ProviderConfig.withApiKeyProvider(ApiKeyProvider.file(path))` on it. To support rotation, carry the provider
-and ask it for the key on every request, not once when the client is built:
+`ProviderConfig.withApiKeyProvider(ApiKeyProvider.file(path))` on it. To support rotation, carry the provider,
+as `AcmeConfig` above does, and ask it for the key on every request, not once when the client is built:
 
 ```scala
-final case class AcmeConfig(
-  apiKey: String,
-  model: String,
-  baseUrl: String,
-  override val apiKeyProvider: Option[ApiKeyProvider] = None
-) extends ProviderConfig:
-  // ... providerId, contextWindow and the rest ...
-  override def withApiKeyProvider(provider: ApiKeyProvider): AcmeConfig = copy(apiKeyProvider = Some(provider))
-
 // in the client, per request
 val key: Result[String] = config.apiKeyProvider.fold[Result[String]](Right(config.apiKey))(_.current().map(_.asKey))
 ```
 
-A config that does not override `withApiKeyProvider` keeps returning `this`: its client gets the key the file
-held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
-an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
+`withApiKeyProvider` returns a `Result`, because not every config can take one. A config whose client reads the
+key once returns `ProviderConfig.noApiKeyProvider(providerId, "reads its key once")` and `None` from
+`apiKeyProvider`: a section's `apiKeyFile` then gives its client the key the file held when the section was
+loaded, and a rotated key only after a reload (the loader logs that). A provider that takes no API key returns
+`ProviderConfig.noApiKeyProvider(providerId)`, and its section refuses `apiKeyFile`. Either way a caller who
+sets a provider in code gets a `ConfigurationError` instead of a config that silently ignored it. Prove support
+with `assertHonoursApiKeyProvider`.
 
 An embedding provider gets the same from its block's `apiKeyFile` (or the vendor's shared one) through
 `EmbeddingProviderConfig.apiKeyProvider`: read the key per request with `cfg.currentApiKey()`, which falls back
-to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
+to `cfg.apiKey`, rather than `cfg.apiKey` itself; it is `None` for a provider that takes no key. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
 
 ### `HttpErrorMapper`
 
 ```scala
-HttpErrorMapper.mapHttpError(
+HttpErrorMapper.toError(
   statusCode: Int,
   body: String,
   provider: String,
-  headers: Map[String, Seq[String]] = Map.empty
-): Result[Nothing]
+  headers: Map[String, Seq[String]]
+): LLMError
 ```
 
 Maps a non-2xx response to the standard error types - 401/403 `AuthenticationError`, 429
@@ -516,7 +549,11 @@ common JSON error shapes, redacted and truncated. Retry and fallback logic keys 
 so use it rather than inventing your own. Pass the response's `headers`: a `Retry-After`
 (delta-seconds or an HTTP-date) becomes the error's `retryAfter`, a `FiniteDuration` - on a 429's
 `RateLimitError`, or a 503's (any other status's) `ServiceError` - so retries wait as long as the
-provider asked rather than a guessed backoff.
+provider asked rather than a guessed backoff. It returns the error itself: your client wraps it in a `Left`.
+
+`HttpErrorMapper.mapStreamError(status, message, provider)` is the same mapping for a failure a provider
+reports inside a stream, after the 200 status: give it the status the event states, or 502 when it states
+none, and the provider's message, which every error type it returns keeps.
 
 ### `CostEstimator`
 
@@ -587,7 +624,6 @@ The transform never logs. llm4s's own clients log each adjustment at WARN once p
 ```scala
 trait EmbeddingProvider:
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse]
-  def embedMultimodal(request: MultimediaEmbeddingRequest): Result[EmbeddingResponse] // defaults to a 501 error
 ```
 
 What an `EmbeddingProviderDescriptor.build` returns. Report failures as `EmbeddingError(code,
@@ -602,7 +638,7 @@ provider, if it has one, win over it, because that is a deliberate choice and ca
 can. If your models embed both alike, ignore it and do not send a field for it. Test the exact wire field
 for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 
-### Streaming: `SSEParser`, `StreamingAccumulator`, `StreamingToolArgumentParser`
+### Streaming: `SSEParser`, `StreamingAccumulator`, `ToolCallRules`
 
 - `SSEParser.createStreamingParser()` returns an incremental parser: `addChunk(text)`, then drain
   `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Feed it the body as it arrives, in
@@ -618,7 +654,7 @@ for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 - Pass each streamed argument fragment to the accumulator as-is, as `ujson.Str(raw)` (`ujson.Obj()`
   for an empty one): the accumulator joins the fragments and parses the whole. Do not parse a
   fragment on its own - a fragment that happens to be valid JSON (`":"`, `"Paris"`, `1`) would lose
-  its quotes or be dropped. `StreamingToolArgumentParser.parse(raw: String): Result[ujson.Value]` is
+  its quotes or be dropped. `ToolCallRules.parseArguments(raw: String): Result[ujson.Value]` is
   for a reassembled argument string: `{}` for empty or blank, the object when it is a complete JSON
   object, and otherwise a `Left`, the malformed-tool-call `ProcessingError` (cut or invalid JSON,
   JSON that is not an object, or JSON nested more than 512 levels deep, which is never parsed).
@@ -660,7 +696,7 @@ final class AcmeClient(
   protected val metrics: MetricsCollector  = clientOptions.metrics
   protected def clientDescription: String = s"Acme client for model ${config.model}"
   protected def providerName: String      = "acme"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   private val transformer = RequestTransformer.default(registry)
   private val headers     = Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json")
@@ -676,9 +712,7 @@ final class AcmeClient(
 
   def streamComplete(
     conversation: Conversation,
-    options: CompletionOptions,
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
+    options: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
     completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
   def getContextWindow(): Int     = config.contextWindow
@@ -689,11 +723,18 @@ final class AcmeClient(
     val response  = http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120.seconds)
     val result = response.flatMap { r =>
       if r.statusCode / 100 == 2 then AcmeWire.decode(r.body).map(withCost)
-      else HttpErrorMapper.mapHttpError(r.statusCode, r.body, providerName, r.headers)
+      else Left(HttpErrorMapper.toError(r.statusCode, r.body, providerName, r.headers))
     }
     ProviderExchangeRecorder.record(
-      clientOptions.exchangeLogging, providerName, Some(config.model), startedAt,
-      requestText, response.toOption.map(_.body), result
+      clientOptions.exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestText,
+        model = Some(config.model),
+        responseBody = response.toOption.map(_.body)
+      ),
+      result
     )
     result
 
@@ -705,7 +746,7 @@ final class AcmeClient(
 
 ### Content parts
 
-A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`: `Text`, `Image` and `Document`, each image
+A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`: `Text`, `Image` and `Document`, each image
 or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
 encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
 `UnsupportedContentPartError(providerName, part.kind, role.name)` for any other: never drop a part, and never turn
@@ -726,22 +767,50 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.acme.example/v1"),
-    defaultModel   = Some("acme-embed-1"),
-    apiKeyEnv      = Seq("ACME_API_KEY"),
-    modelEnv       = Some("ACME_EMBEDDING_MODEL")
+    defaultBaseUrl = Some(BaseUrl("https://api.acme.example/v1")),
+    defaultModel   = Some(ModelName("acme-embed-1")),
+    apiKeyEnv      = Seq("ACME_API_KEY")
   )
 
   // What ModelDimensionRegistry answers from; override dimensionsOf for model-name variants.
-  override val modelDimensions: Map[String, Int] = Map("acme-embed-1" -> 1024)
+  override val modelDimensions: Map[ModelName, Int] = Map(ModelName("acme-embed-1") -> 1024)
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-    Right(AcmeEmbeddingProvider(config, Llm4sHttpClient.create()))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(
+      AcmeEmbeddingProvider(
+        config,
+        // the caller's own client, when EmbeddingClientOptions supplied one; else one for the config's proxy and TLS
+        context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))
+      )
+    )
 ```
 
+`context.httpClient` is the HTTP client a caller passed with
+`EmbeddingClient.from(config, EmbeddingClientOptions().withHttpClient(client))`: send your requests
+through it and do not close it, as a chat client does with `LlmClientOptions.httpClient`. Prove it with
+`assertEmbeddingUsesSuppliedHttpClient(AcmeEmbeddings, config)` in the module spec.
+
+The section a descriptor is handed, `EmbeddingProviderSection`, is typed as a chat section is: `baseUrl` is an
+`Option[BaseUrl]` and `model` an `Option[ModelName]`. A key of your own - a region, an API version - is declared
+in `EmbeddingConfigSpec.extras` with the same `ProviderConfigKey` a chat provider uses:
+
+```scala
+override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+  requiresApiKey = true,
+  extras = Seq(ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west")))
+)
+```
+
+The loader reads `llm4s.embeddings.acme.region`, applies the default, and fails the load naming a required key
+that is missing. The value arrives in `section.extra("region")`, and the default `buildConfig` carries every
+declared key over, so `build` reads `config.extra("region")`. A key you do not declare is not passed on, and a
+name every section has (`EmbeddingConfigSpec.BuiltinKeys`: `apiKey`, `apiKeyFile`, `baseUrl`, `model`,
+`timeouts`) cannot be declared.
+
 `EmbeddingConfigSpec.defaultApiKey` is for a provider that takes a key but needs no real one
-(local Ollama). Override `buildConfig(section, modelOverride)` only when the config cannot be
-expressed with the spec.
+(local Ollama). Override `buildConfig(section, context)` only when the config cannot be
+expressed with the spec; `context.modelOverride` is the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, which
+takes precedence over the section's `model`.
 
 ## Testing: `Llm4s<Name>ModuleSpec` {#testing}
 
@@ -777,7 +846,7 @@ It has these parts, all in `org.llm4s.testkit`:
 ```scala
 package com.acme.llm4s
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
@@ -848,7 +917,8 @@ Every chat client reports how a reply ended the same way, on `complete` and on `
 
 - **A finish reason on every `Completion`.** Map your provider's own value to `FinishReason`
   (`Stop`, `Length`, `ToolCalls`, or `Other(raw)` for anything else), in your own module. Never
-  report `Stop` for a reason the provider did not send.
+  report `Stop` for a reason the provider did not send: a `Completion` built without one carries
+  `FinishReason.Unknown`, which is also what to report when the provider sent none.
 - **A stream is `Right` only if the provider sent its end marker** (`finish_reason`, `[DONE]`,
   `message_stop`, `done: true`, a `finishReason`...). A stream that ends without one was cut off:
   a retryable `NetworkError`, or a `ServiceError` with status 502.
@@ -925,24 +995,28 @@ The in-repo fixtures are worked examples of each wire format: `ChatCompletionsCo
 `OllamaContractFixtures`, `BedrockContractFixtures`, `WatsonXContractFixtures` and
 `PerplexityContractFixtures`, each beside its module's `Llm4s<Name>ModuleSpec`.
 
-**Rule 3 on your `complete` path is yours to write.** `StreamingAccumulator.toCompletion` applies
-the tool-call rules to a stream, but llm4s's own helper for a whole reply is internal. After your
-client parses a `complete` reply, refuse one that ended `Length` with a tool call, and one whose
-call arguments are not a JSON object, with the malformed-tool-call error:
+**Rule 3 on your `complete` path is one call.** `StreamingAccumulator.toCompletion` applies the
+tool-call rules to a stream; `ToolCallRules.checked` applies them to a whole reply. After your client
+parses a `complete` reply, pass the `Completion` through it: a reply that ended `Length` with a tool
+call, and one whose call arguments are not a JSON object, come back as the malformed-tool-call
+`ProcessingError`:
 
 ```scala
-import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.{ Completion, FinishReason }
+import org.llm4s.llmconnect.provider.ToolCallRules
 
-private def checkedToolCalls(completion: Completion): Result[Completion] =
-  val calls = completion.message.toolCalls
-  if calls.nonEmpty && completion.finishReason == FinishReason.Length then
-    Left(ProcessingError("acme", s"malformed tool call: the output limit cut the reply while it made tool calls ${calls.map(_.name).mkString(", ")}; none is run"))
-  else
-    calls.find(_.arguments.objOpt.isEmpty) match
-      case Some(call) => Left(ProcessingError("acme", s"malformed tool call '${call.name}': the arguments are not a JSON object"))
-      case None       => Right(completion)
+AcmeWire.decode(body).flatMap(ToolCallRules.checked)
 ```
+
+Read a call's argument text with `ToolCallRules.parseArguments(name, raw)`, which is `{}` for blank
+text and a `Left` naming the call for anything that is not a complete JSON object. A stream that
+delivers a whole call in one chunk gives the accumulator `ToolCallRules.wholeCall(chunk)`, the call's
+arguments as their JSON text, and the caller's `onChunk` the chunk unchanged: the accumulator reads an
+empty `ujson.Obj()` as a placeholder, so an explicit `{}` would otherwise read as no arguments.
+
+Refuse the content parts your wire format cannot carry with `PartEncoding.check(provider, messages,
+user, tool)` before anything is sent, and encode a message's parts with `PartEncoding.encodeAll(provider,
+role, parts)(encode)`: both take the parts you send as a partial function, and a part it does not cover
+is an `UnsupportedContentPartError`, never dropped.
 
 The `ToolCallCutByLimit` and `MalformedArguments` cases fail on `complete` until you do.
 
@@ -973,7 +1047,9 @@ Your module spec runs `assertValidates(accept, reject)(clientAt)` for the first 
 `LocalProviderTestServer`: a request must reach the server before `Right(())`, a 401 must be an
 `AuthenticationError`, and nothing listening must be a `Left`. For the second it runs
 `assertValidationUnsupported(client)`. A client on `OpenAICompatibleClient` has the first already: `GET /models`,
-or the dialect's `validationPath` (`None` for a vendor with no such request).
+or the dialect's `validationUrl` (`None` for a vendor with no such request). A vendor that refuses a wrong key with
+a status other than 401 or 403 says so in the dialect's `refusesCredential`, so the refusal is an
+`AuthenticationError` from `validate()` and from a completion alike.
 
 ### Tool results
 
@@ -1008,11 +1084,13 @@ across all 1.x releases, so a provider compiled against 1.0 keeps working. That 
 - the registration SPI in `org.llm4s.llmconnect.spi` - `Llm4sProviderModule`,
   `ProviderDescriptor`, `ProviderConfigSpec`, `ProviderConfigKey`, `ProviderFeatures`,
   `EmbeddingProviderDescriptor`, `EmbeddingConfigSpec`, `EmbeddingProviderSection`,
+  `ProviderConfigContext`, `ProviderBuildContext`, `EmbeddingConfigContext`, `EmbeddingBuildContext`,
   `ProviderRegistry`;
-- `ProviderConfig`, `NamedProviderConfig`, `ContextWindowResolver`, `LlmClientOptions`;
+- `ProviderConfig`, `NamedProviderConfig`, `ContextWindowResolver`, `LlmClientOptions`, `EmbeddingClientOptions`;
 - `BaseLifecycleLLMClient`, `MetricsRecording`, `ProviderExchangeRecorder`,
   `ProviderExchangeLogging`, `HttpErrorMapper`, `CostEstimator`, `EmbeddingProvider`,
-  `StreamingAccumulator`, `SSEParser`, `StreamingToolArgumentParser`, `Llm4sHttpClient`,
+  `StreamingAccumulator`, `SSEParser`, `ToolCallRules` (`checked`, `parseArguments`, `wholeCall`),
+  `PartEncoding` (`check`, `encodeAll`), `Llm4sHttpClient`,
   `ProviderModelLister`, `RequestTransformer` and `TransformationResult`.
 
 `llm4s-provider-testkit` is **Beta**, not part of the frozen SPI: it is a test-scope dependency,

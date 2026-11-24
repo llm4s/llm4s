@@ -3,7 +3,6 @@ package fix.v06
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.agent.graph.toolloop.TurnState
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.ModelCapabilities
@@ -12,17 +11,13 @@ import org.llm4s.rag.RAGConfig
 import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
-  def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _, _, _) => s"$id $content"
-  }
-
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
     case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
   }
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
-  def model(event: ModelCallCompleted): String = event match {
-    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _) => model
+  def model(event: ModelCallCompleted) = event match {
+    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _, _) => model
   }
 
   // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone
@@ -30,13 +25,8 @@ object PositionalPatternsGainFieldsTest {
     case ContentFilteredError(_, _, _, promptBlocked) => promptBlocked
   }
 
-  def failedModel(event: TraceEvent): Option[String] = event match {
-    case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _, _) => model
-    case _ => None
-  }
-
   // gained servedTier since 0.6.0 (#2750)
-  def completionModel(event: TraceEvent): Option[String] = event match {
+  def completionModel(event: TraceEvent) = event match {
     case TraceEvent.CompletionReceived(_, model, _, _, _, _, _, _, _, _, _, _, _, _, _) => Some(model)
     case _ => None
   }
@@ -52,8 +42,8 @@ object PositionalPatternsGainFieldsTest {
   }
 
   // budgetTokens became thinking and promptCache was appended since 0.6.0 (#2115)
-  def temperature(options: CompletionOptions): Double = options match {
-    case CompletionOptions(temperature, _, _, _, _, _, _, _, _, _, _) => temperature
+  def maxTokens(options: CompletionOptions): Option[Int] = options match {
+    case CompletionOptions(_, _, maxTokens, _, _, _, _, _, _, _, _) => maxTokens
   }
 
   // gained cut since 0.6.0 (#2613)

@@ -296,7 +296,7 @@ final case class RAGConfig(
 
   /**
    * The options the answer is generated with, in place of [[RAGConfig.DefaultCompletionOptions]] (temperature 0.0):
-   * for example `CompletionOptions(temperature = 0.7, maxTokens = Some(512))`. `queryWithAnswer` and
+   * for example `CompletionOptions(temperature = Some(0.7), maxTokens = Some(512))`. `queryWithAnswer` and
    * `queryWithPermissionsAndAnswer` can still override them per call.
    */
   def withCompletionOptions(options: CompletionOptions): RAGConfig =
@@ -514,7 +514,7 @@ object RAGConfig {
   val DefaultEmbeddingProvider: ProviderId = ProviderId("openai")
 
   /** The options an answer is generated with by default: temperature 0.0, so the answer sticks to the contexts. */
-  val DefaultCompletionOptions: CompletionOptions = CompletionOptions(temperature = 0.0)
+  val DefaultCompletionOptions: CompletionOptions = CompletionOptions(temperature = Some(0.0))
 
   /** Default configuration - OpenAI `text-embedding-3-small` embeddings, sentence chunking, RRF fusion, in-memory */
   val default: RAGConfig = RAGConfig()

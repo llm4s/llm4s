@@ -3,8 +3,9 @@ layout: page
 title: Apache Flink
 description: "Enrich an Apache Flink 2.x stream with LLM calls from Scala 3: an async function per task, timeouts and capacity, and failed calls sent to a dead-letter side output."
 search_title: "Call LLMs from Apache Flink 2.x with LLM4S"
-parent: User Guide
-nav_order: 48
+parent: RAG and Data
+nav_order: 309
+grand_parent: User Guide
 ---
 
 # Using LLM4S from Apache Flink
@@ -282,5 +283,5 @@ dead-letter> DeadLetter(Ticket(5,What is the meaning of life?),unexpected answer
 ```
 
 Without `--scripted`, the job calls the provider that `resources/application.conf`, bundled in the job's jar, names
-in `llm4s.providers.provider`: a local Ollama (`ollama serve`, `ollama pull llama3`). To call another provider, change
+in `llm4s.defaultProvider`: a local Ollama (`ollama serve`, `ollama pull llama3`). To call another provider, change
 that section and add its module ([configuration](../getting-started/configuration)).

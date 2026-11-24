@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
@@ -14,7 +14,7 @@ import scala.util.Try
  * in declaration order, which is the order joins released in one superstep schedule their targets.
  * [[CompiledGraph.restore]] says which differences keep a snapshot restorable.
  */
-@Stable
+@Experimental
 final case class GraphShape private (
   entry: String,
   nodes: Vector[String],
@@ -32,6 +32,7 @@ final case class GraphShape private (
   def withResumes(value: Vector[String]): GraphShape                    = copy(resumes = value)
   def withKeys(value: Vector[String]): GraphShape                       = copy(keys = value)
 
+@Experimental
 object GraphShape:
 
   def apply(

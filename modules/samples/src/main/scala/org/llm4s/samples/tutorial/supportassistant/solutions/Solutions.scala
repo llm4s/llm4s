@@ -37,7 +37,7 @@ object Part2Solution {
 /** The solution to the tutorial's exercise 3 (`Part3Exercise.deliveryTool`). */
 object Part3Solution {
 
-  def deliveryTool: Result[ToolFunction[DeliveryQuery, DeliveryEstimate]] =
+  def deliveryTool: Result[ToolFunction[DeliveryEstimate]] =
     Tool.of[DeliveryQuery, DeliveryEstimate]("delivery_estimate", "How many working days until an order arrives") {
       query =>
         orders.get(query.orderId).toRight(s"There is no order ${query.orderId}").map { order =>

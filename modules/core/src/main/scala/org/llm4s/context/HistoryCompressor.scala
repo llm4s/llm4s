@@ -1,6 +1,6 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, SemanticBlockId }
 import org.slf4j.LoggerFactory
@@ -51,9 +51,8 @@ import scala.util.matching.Regex
  * }}}
  *
  * @see [[SemanticBlocks]] for the block grouping algorithm
- * @see [[StructuredInfo]] for the extracted information types
  */
-@Stable
+@Experimental
 object HistoryCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -149,7 +148,7 @@ object HistoryCompressor {
    * tool call id, transitively, to one of them or to a `recent` block.
    */
   private def keptBlocks(older: Seq[SemanticBlock], recent: Seq[SemanticBlock]): Set[SemanticBlockId] = {
-    def callIds(block: SemanticBlock): Set[String] =
+    def callIds(block: SemanticBlock): Set[ToolCallId] =
       block.messages.flatMap {
         case a: AssistantMessage => a.toolCalls.map(_.id)
         case t: ToolMessage      => Seq(t.toolCallId)
@@ -181,8 +180,6 @@ object HistoryCompressor {
     val digestContent = formatDigest(block, extractedInfo)
 
     HistoryDigest(
-      blockId = block.id.toString,
-      blockType = block.blockType.toString,
       content = digestContent,
       originalTokens = allContent.length / 4 // Rough token estimate
     )
@@ -249,31 +246,14 @@ object HistoryCompressor {
         consolidatedContent
 
     HistoryDigest(
-      blockId = s"consolidated-${digests.length}",
-      blockType = "ConsolidatedHistory",
       content = truncated,
       originalTokens = digests.map(_.originalTokens).sum
     )
   }
 }
 
-/**
- * Structured information extracted from a message block.
- *
- * Each field contains strings matched by the corresponding regex pattern
- * in [[HistoryCompressor]]. Matches are limited to prevent digest bloat.
- *
- * @param identifiers IDs, UUIDs, keys found in the content
- * @param urls HTTP/HTTPS URLs
- * @param constraints Requirement statements (must, should, cannot)
- * @param statusCodes HTTP status codes, error codes
- * @param errors Error messages and exception info
- * @param decisions Decision statements
- * @param toolUsage Tool/function/API call mentions
- * @param outcomes Result and conclusion statements
- */
-@Stable
-final case class StructuredInfo private (
+/** What the patterns of [[HistoryCompressor]] extracted from a block; each list is capped to keep the digest small. */
+final private case class StructuredInfo(
   identifiers: Seq[String],
   urls: Seq[String],
   constraints: Seq[String],
@@ -282,83 +262,7 @@ final case class StructuredInfo private (
   decisions: Seq[String],
   toolUsage: Seq[String],
   outcomes: Seq[String]
-) {
+)
 
-  /** Sets the IDs, UUIDs and keys. */
-  def withIdentifiers(identifiers: Seq[String]): StructuredInfo = copy(identifiers = identifiers)
-
-  /** Sets the HTTP/HTTPS URLs. */
-  def withUrls(urls: Seq[String]): StructuredInfo = copy(urls = urls)
-
-  /** Sets the requirement statements. */
-  def withConstraints(constraints: Seq[String]): StructuredInfo = copy(constraints = constraints)
-
-  /** Sets the status and error codes. */
-  def withStatusCodes(statusCodes: Seq[String]): StructuredInfo = copy(statusCodes = statusCodes)
-
-  /** Sets the error messages. */
-  def withErrors(errors: Seq[String]): StructuredInfo = copy(errors = errors)
-
-  /** Sets the decision statements. */
-  def withDecisions(decisions: Seq[String]): StructuredInfo = copy(decisions = decisions)
-
-  /** Sets the tool, function and API call mentions. */
-  def withToolUsage(toolUsage: Seq[String]): StructuredInfo = copy(toolUsage = toolUsage)
-
-  /** Sets the result and conclusion statements. */
-  def withOutcomes(outcomes: Seq[String]): StructuredInfo = copy(outcomes = outcomes)
-}
-
-object StructuredInfo {
-
-  /** Creates a [[StructuredInfo]]. */
-  def apply(
-    identifiers: Seq[String],
-    urls: Seq[String],
-    constraints: Seq[String],
-    statusCodes: Seq[String],
-    errors: Seq[String],
-    decisions: Seq[String],
-    toolUsage: Seq[String],
-    outcomes: Seq[String]
-  ): StructuredInfo =
-    new StructuredInfo(identifiers, urls, constraints, statusCodes, errors, decisions, toolUsage, outcomes)
-}
-
-/**
- * Compressed digest representation of a history block.
- *
- * Contains the formatted summary text and metadata about the original block.
- *
- * @param blockId Original semantic block ID
- * @param blockType Type of the block (UserAssistantPair, StandaloneTool, etc.)
- * @param content Formatted digest text for inclusion in conversation
- * @param originalTokens Estimated token count of original content
- */
-@Stable
-final case class HistoryDigest private (
-  blockId: String,
-  blockType: String,
-  content: String,
-  originalTokens: Int
-) {
-
-  /** Sets the original semantic block ID. */
-  def withBlockId(blockId: String): HistoryDigest = copy(blockId = blockId)
-
-  /** Sets the type of the original block. */
-  def withBlockType(blockType: String): HistoryDigest = copy(blockType = blockType)
-
-  /** Sets the formatted digest text. */
-  def withContent(content: String): HistoryDigest = copy(content = content)
-
-  /** Sets the estimated token count of the original content. */
-  def withOriginalTokens(originalTokens: Int): HistoryDigest = copy(originalTokens = originalTokens)
-}
-
-object HistoryDigest {
-
-  /** Creates a [[HistoryDigest]]. */
-  def apply(blockId: String, blockType: String, content: String, originalTokens: Int): HistoryDigest =
-    new HistoryDigest(blockId, blockType, content, originalTokens)
-}
+/** The digest text of a history block, with a rough token estimate of the content it replaces. */
+final private case class HistoryDigest(content: String, originalTokens: Int)

@@ -3,7 +3,6 @@ package org.llm4s.config
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 
 /**
  * Discovers available models from a provider's live API endpoint.

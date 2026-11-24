@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.auth
 
 import org.llm4s.error.{ AuthenticationError, CancelledError, NetworkError }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.security.{ KnownSecrets, TokenGenerations }
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,18 +22,18 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
     val calls = new AtomicInteger(0)
     def fetch(): Result[AccessToken] =
       val n = calls.incrementAndGet()
-      Right(AccessToken(s"t$n", clock.instant().plusMillis(lifetime.toMillis)))
+      Right(AccessToken(Secret.unregistered(s"t$n"), clock.instant().plusMillis(lifetime.toMillis)))
 
   "CachingAccessTokenProvider" should {
     "reuse the token until the refresh margin, then refresh" in {
       val clock    = MutableClock(start)
       val issuer   = Issuer(clock, 10.minutes)
       val provider = CachingAccessTokenProvider(() => issuer.fetch(), 1.minute, clock)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
       clock.advance(8.minutes)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
       clock.advance(1.minute + 1.second)
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
       issuer.calls.get shouldBe 2
     }
 
@@ -41,11 +41,11 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val clock    = MutableClock(start)
       val issuer   = Issuer(clock, 30.seconds)
       val provider = CachingAccessTokenProvider(() => issuer.fetch(), 60.seconds, clock)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
       clock.advance(14.seconds)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
       clock.advance(2.seconds)
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
     }
 
     "make one fetch for 20 concurrent callers" in {
@@ -54,14 +54,14 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val fetch = () => {
         calls.incrementAndGet()
         Thread.sleep(50)
-        Right(AccessToken("t1", clock.instant().plusSeconds(600)))
+        Right(AccessToken(Secret.unregistered("t1"), clock.instant().plusSeconds(600)))
       }
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       val pool     = Executors.newVirtualThreadPerTaskExecutor()
-      val tasks    = (1 to 20).map(_ => (() => provider.token()): Callable[Result[String]])
+      val tasks    = (1 to 20).map(_ => (() => provider.current()): Callable[Result[Secret]])
       val results  = pool.invokeAll(tasks.asJava).asScala.map(_.get())
       pool.shutdown()
-      results.distinct shouldBe Seq(Right("t1"))
+      results.map(_.map(_.reveal)).distinct shouldBe Seq(Right("t1"))
       calls.get shouldBe 1
     }
 
@@ -69,11 +69,11 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val clock    = MutableClock(start)
       val issuer   = Issuer(clock, 10.minutes)
       val provider = CachingAccessTokenProvider(() => issuer.fetch(), 1.minute, clock)
-      provider.token() shouldBe Right("t1")
-      provider.invalidate("t1")
-      provider.token() shouldBe Right("t2")
-      provider.invalidate("t1") // stale: a slower caller's 401 for the old token
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t1")
+      provider.invalidate(Secret.unregistered("t1"))
+      provider.current().map(_.reveal) shouldBe Right("t2")
+      provider.invalidate(Secret.unregistered("t1")) // stale: a slower caller's 401 for the old token
+      provider.current().map(_.reveal) shouldBe Right("t2")
       issuer.calls.get shouldBe 2
     }
 
@@ -82,13 +82,13 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val calls = new AtomicInteger(0)
       val fetch = () =>
         if calls.incrementAndGet() == 1 then Left(AuthenticationError("token-exchange", "nope"))
-        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+        else Right(AccessToken(Secret.unregistered("t2"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      provider.token().isLeft shouldBe true
-      provider.token().isLeft shouldBe true // inside the window: the same failure, no second fetch
+      provider.current().isLeft shouldBe true
+      provider.current().isLeft shouldBe true // inside the window: the same failure, no second fetch
       calls.get shouldBe 1
       clock.advance(CachingAccessTokenProvider.FailureTtl + 1.second)
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
       calls.get shouldBe 2
     }
 
@@ -102,7 +102,7 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       }
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       val pool     = Executors.newVirtualThreadPerTaskExecutor()
-      val tasks    = (1 to 20).map(_ => (() => provider.token()): Callable[Result[String]])
+      val tasks    = (1 to 20).map(_ => (() => provider.current()): Callable[Result[Secret]])
       val results  = pool.invokeAll(tasks.asJava).asScala.map(_.get())
       pool.shutdown()
       results.count(_.isLeft) shouldBe 20
@@ -115,21 +115,21 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val fetch = () =>
         calls.incrementAndGet() match
           case 1 => Left(AuthenticationError("token-exchange", "nope"))
-          case n => Right(AccessToken(s"t${n - 1}", clock.instant().plusSeconds(600)))
+          case n => Right(AccessToken(Secret.unregistered(s"t${n - 1}"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      provider.token().isLeft shouldBe true
+      provider.current().isLeft shouldBe true
       clock.advance(CachingAccessTokenProvider.FailureTtl + 1.second)
-      provider.token() shouldBe Right("t1")
-      provider.invalidate("t1")
-      provider.token() shouldBe Right("t2") // a rejection forces a fresh fetch at once
+      provider.current().map(_.reveal) shouldBe Right("t1")
+      provider.invalidate(Secret.unregistered("t1"))
+      provider.current().map(_.reveal) shouldBe Right("t2") // a rejection forces a fresh fetch at once
     }
 
     "not cache a token that is already expired" in {
       val clock    = MutableClock(start)
       val issuer   = Issuer(clock, 0.seconds)
       val provider = CachingAccessTokenProvider(() => issuer.fetch(), 1.minute, clock)
-      provider.token() shouldBe Right("t1")
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t2")
     }
 
     "return CancelledError, with the interrupt flag set again, to a caller interrupted while it waits for the lock" in {
@@ -139,14 +139,14 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val fetch = () => {
         entered.countDown()
         release.await()
-        Right(AccessToken("t1", clock.instant().plusSeconds(600)))
+        Right(AccessToken(Secret.unregistered("t1"), clock.instant().plusSeconds(600)))
       }
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      val holder   = Thread.ofVirtual().start(() => provider.token(): Unit)
+      val holder   = Thread.ofVirtual().start(() => provider.current(): Unit)
       entered.await()
-      val outcome = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
+      val outcome = new java.util.concurrent.atomic.AtomicReference[(Result[Secret], Boolean)]()
       val waiter =
-        Thread.ofVirtual().start(() => outcome.set(provider.token() -> Thread.currentThread().isInterrupted))
+        Thread.ofVirtual().start(() => outcome.set(provider.current() -> Thread.currentThread().isInterrupted))
       // Wait until the waiter is parked on the lock, then cancel it.
       while waiter.getState != Thread.State.WAITING do Thread.onSpinWait()
       waiter.interrupt()
@@ -156,18 +156,18 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       interrupted shouldBe true
       release.countDown()
       holder.join(5000)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
     }
 
     "leave the cache alone, with the interrupt flag set, when invalidate is interrupted" in {
       val clock    = MutableClock(start)
       val issuer   = Issuer(clock, 10.minutes)
       val provider = CachingAccessTokenProvider(() => issuer.fetch(), 1.minute, clock)
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
       Thread.currentThread().interrupt()
-      provider.invalidate("t1")
+      provider.invalidate(Secret.unregistered("t1"))
       Thread.interrupted() shouldBe true
-      provider.token() shouldBe Right("t1")
+      provider.current().map(_.reveal) shouldBe Right("t1")
     }
 
     "return a cancelled fetch to its caller alone, so a waiter and a later caller fetch afresh" in {
@@ -185,16 +185,16 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
               case Left(e) =>
                 Thread.currentThread().interrupt()
                 Left(CancelledError("http.POST", Some(e)))
-              case Right(()) => Right(AccessToken("t1", clock.instant().plusSeconds(600)))
-          case n => Right(AccessToken(s"t$n", clock.instant().plusSeconds(600)))
+              case Right(()) => Right(AccessToken(Secret.unregistered("t1"), clock.instant().plusSeconds(600)))
+          case n => Right(AccessToken(Secret.unregistered(s"t$n"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      val outcomeA = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
-      val outcomeB = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
+      val outcomeA = new java.util.concurrent.atomic.AtomicReference[(Result[Secret], Boolean)]()
+      val outcomeB = new java.util.concurrent.atomic.AtomicReference[(Result[Secret], Boolean)]()
       val callerA =
-        Thread.ofVirtual().start(() => outcomeA.set(provider.token() -> Thread.currentThread().isInterrupted))
+        Thread.ofVirtual().start(() => outcomeA.set(provider.current() -> Thread.currentThread().isInterrupted))
       entered.await()
       val callerB =
-        Thread.ofVirtual().start(() => outcomeB.set(provider.token() -> Thread.currentThread().isInterrupted))
+        Thread.ofVirtual().start(() => outcomeB.set(provider.current() -> Thread.currentThread().isInterrupted))
       while callerB.getState != Thread.State.WAITING do Thread.onSpinWait() // B is parked behind A's fetch
       callerA.interrupt()
       callerA.join(5000)
@@ -202,8 +202,8 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val (resultA, interruptedA) = outcomeA.get
       resultA.left.toOption.get shouldBe a[CancelledError]
       interruptedA shouldBe true
-      outcomeB.get shouldBe (Right("t2") -> false) // its own fetch, not A's cancellation
-      provider.token() shouldBe Right("t2") // C: the token B fetched, no cached cancellation
+      outcomeB.get shouldBe (Right(Secret.unregistered("t2")) -> false) // its own fetch, not A's cancellation
+      provider.current().map(_.reveal) shouldBe Right("t2") // C: the token B fetched, no cached cancellation
       calls.get shouldBe 2
     }
 
@@ -212,12 +212,12 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val calls = new AtomicInteger(0)
       val fetch = () =>
         if calls.incrementAndGet() == 1 then throw new InterruptedException("cancelled")
-        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+        else Right(AccessToken(Secret.unregistered("t2"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      val result   = provider.token()
+      val result   = provider.current()
       Thread.interrupted() shouldBe true // the flag is set again, and cleared here for what follows
       result.left.toOption.get shouldBe a[CancelledError]
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
       calls.get shouldBe 2
     }
 
@@ -229,12 +229,12 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
           // On a virtual thread an interrupted socket read surfaces as a plain network error.
           Thread.currentThread().interrupt()
           Left(NetworkError("socket closed", None, "token-exchange"))
-        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+        else Right(AccessToken(Secret.unregistered("t2"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      val result   = provider.token()
+      val result   = provider.current()
       Thread.interrupted() shouldBe true
       result.left.toOption.get shouldBe a[CancelledError]
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
       calls.get shouldBe 2
     }
 
@@ -243,14 +243,14 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val calls = new AtomicInteger(0)
       val fetch = () =>
         if calls.incrementAndGet() == 1 then Left(NetworkError("connection refused", None, "token-exchange"))
-        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+        else Right(AccessToken(Secret.unregistered("t2"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       CachingAccessTokenProvider.TransientFailureTtl should be < CachingAccessTokenProvider.FailureTtl
-      provider.token().left.toOption.get shouldBe a[NetworkError]
-      provider.token().left.toOption.get shouldBe a[NetworkError] // inside the window: shared
+      provider.current().left.toOption.get shouldBe a[NetworkError]
+      provider.current().left.toOption.get shouldBe a[NetworkError] // inside the window: shared
       calls.get shouldBe 1
       clock.advance(CachingAccessTokenProvider.TransientFailureTtl + 1.millis)
-      provider.token() shouldBe Right("t2")
+      provider.current().map(_.reveal) shouldBe Right("t2")
       calls.get shouldBe 2
     }
 
@@ -264,21 +264,22 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
             HttpResponse(401, s"token $issued was revoked, refusing a new one")
           )
         )
-        val config   = TokenExchangeConfig(IdentitySource.Literal("opaqueSubjectLiteral01"), "https://ws.example/token")
+        val config =
+          TokenExchangeConfig(IdentitySource.Literal(Secret("opaqueSubjectLiteral01")), "https://ws.example/token")
         val provider = CachingAccessTokenProvider(TokenExchange.rfc8693(config, http, clock), 1.minute, clock)
         // What every AccessTokenProvider consumer does with each token, before it sends it.
         val sent  = new TokenGenerations
-        val token = provider.token()
-        token shouldBe Right(issued)
-        token.foreach(sent.rotate)
+        val token = provider.current()
+        token.map(_.reveal) shouldBe Right(issued)
+        token.foreach(issued => sent.rotate(issued.reveal))
         clock.advance(2.minutes)
-        val message = provider.token().left.toOption.map(_.message).getOrElse(fail("expected a Left"))
+        val message = provider.current().left.toOption.map(_.message).getOrElse(fail("expected a Left"))
         message should include("was revoked")
         (message should not).include(issued)
       }
 
     "redact the token value in AccessToken.toString" in {
-      (AccessToken("secret", start).toString should not).include("secret")
+      (AccessToken(Secret.unregistered("secret"), start).toString should not).include("secret")
     }
 
     "return a fetch that throws as an AuthenticationError naming the exception, not throw it (#1818)" in {
@@ -289,25 +290,25 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
         throw new IllegalStateException("leaked-detail sk-should-not-appear")
       }
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
-      val error    = provider.token().swap.getOrElse(fail("expected a failure"))
+      val error    = provider.current().swap.getOrElse(fail("expected a failure"))
       error shouldBe an[AuthenticationError]
       error.message should include("IllegalStateException")
       (error.message should not).include("sk-should-not-appear")
       // Shared like any rejection for the failure window, then tried again.
-      provider.token().isLeft shouldBe true
+      provider.current().isLeft shouldBe true
       calls.get shouldBe 1
       clock.advance(6.seconds)
-      provider.token().isLeft shouldBe true
+      provider.current().isLeft shouldBe true
       calls.get shouldBe 2
     }
   }
 
   "AccessToken" should {
     "be built with apply and changed with the with* setters, its constructor and copy private (#1818)" in {
-      val token = AccessToken("t1", start)
-      token.withValue("t2") shouldBe AccessToken("t2", start)
-      token.withExpiresAt(start.plusSeconds(60)) shouldBe AccessToken("t1", start.plusSeconds(60))
-      assertDoesNotCompile("""new AccessToken("t", java.time.Instant.EPOCH)""")
-      assertDoesNotCompile("""AccessToken("t", java.time.Instant.EPOCH).copy(value = "u")""")
+      val token = AccessToken(Secret.unregistered("t1"), start)
+      token.withValue(Secret.unregistered("t2")) shouldBe AccessToken(Secret.unregistered("t2"), start)
+      token.withExpiresAt(start.plusSeconds(60)) shouldBe AccessToken(Secret.unregistered("t1"), start.plusSeconds(60))
+      assertDoesNotCompile("""new AccessToken(Secret.unregistered("t"), java.time.Instant.EPOCH)""")
+      assertDoesNotCompile("""AccessToken(Secret.unregistered("t"), java.time.Instant.EPOCH).copy(value = "u")""")
     }
   }

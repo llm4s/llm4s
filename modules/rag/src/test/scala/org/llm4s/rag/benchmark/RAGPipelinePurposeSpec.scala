@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -33,15 +34,12 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "noop",
           created = Instant.EPOCH,
-          content = "",
-          model = "noop",
-          message = AssistantMessage(contentOpt = Some("")),
+          model = ModelName("noop"),
+          message = AssistantMessage(text = Some("")),
           usage = None
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -53,7 +51,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
     val vectors  = VectorStoreFactory.inMemory().fold(e => fail(e.formatted), identity)
     val keywords = KeywordIndex.inMemory().fold(e => fail(e.formatted), identity)
     val pipeline =
-      RAGPipeline.withStores(RAGExperimentConfig.default, NoopLLM, new EmbeddingClient(provider), vectors, keywords)
+      RAGPipeline.withStores(RAGExperimentConfig.default, NoopLLM, EmbeddingClient(provider), vectors, keywords)
     try test(pipeline, provider)
     finally pipeline.close()
   }

@@ -234,7 +234,7 @@ Respond with ONLY a JSON array:"""
       )
     )
 
-    val options = CompletionOptions(temperature = 0.7, maxTokens = Some(2000))
+    val options = CompletionOptions(temperature = Some(0.7), maxTokens = Some(2000))
 
     for {
       completion <- llmClient.complete(conversation, options)

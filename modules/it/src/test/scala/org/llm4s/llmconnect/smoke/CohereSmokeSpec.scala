@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -39,7 +40,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private def config(key: String): CohereConfig =
     CohereConfig
       .fromValues(
-        modelName = "command-a-03-2025",
+        modelName = ModelName("command-a-03-2025"),
         apiKey = Secret(key),
         baseUrl = CohereConfig.DEFAULT_BASE_URL
       )
@@ -73,7 +74,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
     val client = CohereClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[String]
-    val result = client.streamComplete(conversation, CompletionOptions(), _.content.foreach(chunks += _))
+    val result = client.streamComplete(conversation, CompletionOptions())(_.content.foreach(chunks += _))
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -98,4 +99,12 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def contractClient(key: String): Result[LLMClient] = CohereClient(config(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): the native GET /v1/models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(CohereClient(config("invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(CohereClient(config(key).withModel(ModelName("llm4s-no-such-model"))))
+
+  registerValidationContract()
 }

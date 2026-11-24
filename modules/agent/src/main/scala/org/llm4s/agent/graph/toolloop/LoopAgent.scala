@@ -1,11 +1,12 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.AgentId
+import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.agent.graph.VersionedJson
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.ToolSet
-import org.llm4s.llmconnect.model.Message
+import org.llm4s.llmconnect.model.{ Message, UsageSummary }
 import upickle.default.ReadWriter
 
 /**
@@ -20,7 +21,7 @@ import upickle.default.ReadWriter
  *   estimated at four characters a token: a request over it fails the run (design §4.22)
  * @param output the response format this agent's answers must match (design 4.26), or none
  */
-@Stable
+@Experimental
 final case class LoopAgent private (
   id: AgentId,
   model: ModelStep,
@@ -44,6 +45,7 @@ final case class LoopAgent private (
   def withOutput(format: OutputFormat): LoopAgent                 = withOutput(Some(format))
   def withOutput(format: Option[OutputFormat]): LoopAgent         = copy(output = format)
 
+@Experimental
 object LoopAgent:
 
   /** The prompt section budget of an agent that sets none. */
@@ -60,13 +62,14 @@ object LoopAgent:
     new LoopAgent(id, model, tools, Nil, None, 50, Vector.empty, DefaultMaxPromptSectionTokens, None)
 
 /** A transfer the agent may make to `target`; with `preserveContext = false` the target sees only the transfer onwards. */
-@Stable
+@Experimental
 final case class LoopHandoff private (target: AgentId, reason: Option[String], preserveContext: Boolean):
   def withTarget(value: AgentId): LoopHandoff          = copy(target = value)
   def withReason(value: String): LoopHandoff           = copy(reason = Some(value))
   def withReason(value: Option[String]): LoopHandoff   = copy(reason = value)
   def withPreserveContext(value: Boolean): LoopHandoff = copy(preserveContext = value)
 
+@Experimental
 object LoopHandoff:
   def apply(target: AgentId, reason: Option[String], preserveContext: Boolean): LoopHandoff =
     new LoopHandoff(target, reason, preserveContext)
@@ -76,28 +79,84 @@ object LoopHandoff:
  * `messageId`. Recorded by the model node when it routes a transfer; the target's model reads it to
  * build the view a transfer without preserved context sends.
  */
-@Stable
+@Experimental
 final case class Transfer private (source: AgentId, target: AgentId, messageId: String) derives ReadWriter:
   def withSource(value: AgentId): Transfer   = copy(source = value)
   def withTarget(value: AgentId): Transfer   = copy(target = value)
   def withMessageId(value: String): Transfer = copy(messageId = value)
 
+@Experimental
 object Transfer:
   def apply(source: AgentId, target: AgentId, messageId: String): Transfer =
     new Transfer(source, target, messageId)
 
-/** One turn's input: the user's query and, on a new thread only, the conversation to import before it. */
-@Stable
-final case class AgentInput private (query: String, history: Vector[Message] = Vector.empty) derives ReadWriter:
-  def withQuery(value: String): AgentInput            = copy(query = value)
-  def withHistory(value: Vector[Message]): AgentInput = copy(history = value)
+/**
+ * What the admission stage did with a turn's query before the turn was stored (#2854), kept with the turn's input so
+ * that its input step neither runs the stage again nor loses what it counted. It holds no text of the query.
+ *
+ * @param agents the agents whose `admit` stacks ran: the input step runs any other owner's itself
+ * @param usage the usage of the model calls the stages made, which the input step adds to the thread's
+ * @param calls the event of each of those calls, which the input step announces
+ * @param refusedBy the guardrail or middleware that refused the query, when one did: the input then holds no
+ *   query, and its input step blocks the turn in that name
+ */
+@Experimental
+final case class Admission private (
+  agents: Vector[AgentId],
+  usage: UsageSummary = UsageSummary(),
+  calls: Vector[ModelCallCompleted] = Vector.empty,
+  refusedBy: Option[String] = None
+) derives ReadWriter:
+  def withAgents(value: Vector[AgentId]): Admission           = copy(agents = value)
+  def withUsage(value: UsageSummary): Admission               = copy(usage = value)
+  def withCalls(value: Vector[ModelCallCompleted]): Admission = copy(calls = value)
+  def withRefusedBy(value: String): Admission                 = copy(refusedBy = Some(value))
+  def withRefusedBy(value: Option[String]): Admission         = copy(refusedBy = value)
 
+@Experimental
+object Admission:
+  def apply(
+    agents: Vector[AgentId],
+    usage: UsageSummary = UsageSummary(),
+    calls: Vector[ModelCallCompleted] = Vector.empty,
+    refusedBy: Option[String] = None
+  ): Admission = new Admission(agents, usage, calls, refusedBy)
+
+/**
+ * One turn's input: the user's query and, on a new thread only, the conversation to import before it.
+ *
+ * `admission` is what the admission stage made of the query (#2854), when it ran before the turn was stored: the
+ * `query` is then the stage's - rewritten, or empty for one it refused - and never the query as submitted. `None` for
+ * an input nothing has admitted yet, a stored one written before admission existed included: its input step runs the
+ * stage.
+ */
+@Experimental
+final case class AgentInput private (
+  query: String,
+  history: Vector[Message] = Vector.empty,
+  admission: Option[Admission] = None
+) derives ReadWriter:
+  def withQuery(value: String): AgentInput                = copy(query = value)
+  def withHistory(value: Vector[Message]): AgentInput     = copy(history = value)
+  def withAdmission(value: Admission): AgentInput         = copy(admission = Some(value))
+  def withAdmission(value: Option[Admission]): AgentInput = copy(admission = value)
+
+  /** Whether `agent`'s admission stack has run on this input. */
+  private[agent] def admittedBy(agent: AgentId): Boolean = admission.exists(_.agents.contains(agent))
+
+  /** The guardrail or middleware that refused the query at admission, if one did. */
+  private[agent] def refusedBy: Option[String] = admission.flatMap(_.refusedBy)
+
+@Experimental
 object AgentInput:
-  def apply(query: String, history: Vector[Message] = Vector.empty): AgentInput =
-    new AgentInput(query, history)
+  def apply(
+    query: String,
+    history: Vector[Message] = Vector.empty,
+    admission: Option[Admission] = None
+  ): AgentInput = new AgentInput(query, history, admission)
 
 /** How a turn ended. */
-@Stable
+@Experimental
 enum TurnOutcome derives ReadWriter:
   /** The active agent gave a final answer. */
   case Completed
@@ -117,7 +176,7 @@ enum TurnOutcome derives ReadWriter:
  * left there (`written`; `None`: no stored entry). A Block restores the key only while it still holds `written`,
  * so a later write by anyone else - `updateState` while the turn waits for review - is kept (design §4.22).
  */
-@Stable
+@Experimental
 final case class PriorValue(value: Option[VersionedJson], written: Option[String]) derives ReadWriter
 
 /**
@@ -126,7 +185,7 @@ final case class PriorValue(value: Option[VersionedJson], written: Option[String
  * turn may write, as it was before the turn and as the turn left it ([[PriorValue]]), one entry per key. Reset by
  * each turn's input; a turn that ends clears `priorValues` (design §4.22).
  */
-@Stable
+@Experimental
 final case class TurnState private (
   steps: Int,
   outcome: Option[TurnOutcome],
@@ -146,6 +205,7 @@ final case class TurnState private (
   def withPriorValues(value: Map[String, PriorValue]): TurnState = copy(priorValues = value)
   def withCut(value: Boolean): TurnState                         = copy(cut = value)
 
+@Experimental
 object TurnState:
   def apply(
     steps: Int,
@@ -158,11 +218,12 @@ object TurnState:
     new TurnState(steps, outcome, startAgent, startTransfer, priorValues, cut)
 
 /** A turn's result: how it ended, and the agent active at its end - the one the next turn starts with. */
-@Stable
+@Experimental
 final case class TurnOutput private (outcome: TurnOutcome, activeAgent: AgentId) derives ReadWriter:
   def withOutcome(value: TurnOutcome): TurnOutput = copy(outcome = value)
   def withActiveAgent(value: AgentId): TurnOutput = copy(activeAgent = value)
 
+@Experimental
 object TurnOutput:
   def apply(outcome: TurnOutcome, activeAgent: AgentId): TurnOutput =
     new TurnOutput(outcome, activeAgent)

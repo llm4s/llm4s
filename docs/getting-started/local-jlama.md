@@ -4,7 +4,7 @@ title: First Answer, No Key, No Server
 description: "A first LLM answer from Scala in five minutes with no API key and no model server: llm4s-jlama runs a small open model inside your JVM."
 search_title: "llm4s-jlama: run an LLM inside the JVM, no API key"
 parent: Getting Started
-nav_order: 17
+nav_order: 6
 ---
 
 # First answer in five minutes: no key, no server
@@ -70,7 +70,7 @@ section is passed as system properties, so there is no `application.conf`.
 //> using dep org.slf4j:slf4j-simple:2.0.17
 //> using javaOpt --add-modules=jdk.incubator.vector
 //> using javaOpt --enable-preview
-//> using javaOpt -Dllm4s.providers.provider=local
+//> using javaOpt -Dllm4s.defaultProvider=local
 //> using javaOpt -Dllm4s.providers.local.provider=jlama
 //> using javaOpt -Dllm4s.providers.local.model=tjake/Llama-3.2-1B-Instruct-JQ4
 
@@ -113,9 +113,8 @@ run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-previe
 Name the model in `src/main/resources/application.conf`. No `apiKey`: the model runs in your process.
 
 ```hocon
+llm4s.defaultProvider = "local"
 llm4s.providers {
-  provider = "local"
-
   local {
     provider = "jlama"
     model    = "tjake/Llama-3.2-1B-Instruct-JQ4"
@@ -139,10 +138,7 @@ object Main extends App {
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    completion <- client.streamComplete(
-      Conversation(Seq(UserMessage("Write a haiku about the JVM."))),
-      onChunk = chunk => chunk.content.foreach(print)
-    )
+    completion <- client.streamComplete(Conversation(Seq(UserMessage("Write a haiku about the JVM."))))(chunk => chunk.content.foreach(print))
     _ = client.close()
   } yield completion
 

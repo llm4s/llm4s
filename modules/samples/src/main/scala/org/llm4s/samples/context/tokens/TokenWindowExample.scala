@@ -2,8 +2,8 @@ package org.llm4s.samples.context.tokens
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.context.{ ConversationTokenCounter, TokenWindow, ConversationWindow }
-import org.llm4s.context.tokens.TokenizerMapping
-import org.llm4s.types.{ TokenBudget, HeadroomPercent }
+import org.llm4s.llmconnect.provider.OpenAITokenizers
+import org.llm4s.types.HeadroomPercent
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -36,8 +36,8 @@ object TokenWindowExample {
       given org.llm4s.model.ModelRegistryService = registryService
       modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
-      tokenCounter <- createTokenCounter(modelName)
-      demoResults  <- runDemo(client, tokenCounter, modelName)
+      tokenCounter <- createTokenCounter(modelName.asString)
+      demoResults  <- runDemo(client, tokenCounter, modelName.asString)
     } yield demoResults
 
     result.fold(
@@ -50,16 +50,13 @@ object TokenWindowExample {
   }
 
   private def createTokenCounter(modelName: String): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.forModel(modelName).map { counter =>
-      val accuracyInfo = TokenizerMapping.getAccuracyInfo(modelName)
-
-      logger.info(s"Created token counter for model: $modelName")
-      accuracyInfo.isExact match {
-        case true  => logger.info(s"Using exact tokenizer for $modelName")
-        case false => logger.warn(s"Using approximate tokenizer for $modelName: ${accuracyInfo.description}")
-      }
-
-      counter
+    OpenAITokenizers.tokenizerFor(modelName) match {
+      case Some(tokenizerId) =>
+        logger.info(s"Using the exact tokenizer for $modelName: ${tokenizerId.name}")
+        ConversationTokenCounter.create(tokenizerId)
+      case None =>
+        logger.warn(s"No public tokenizer for $modelName: counting with cl100k_base, which can be 20-30% off")
+        ConversationTokenCounter.cl100k()
     }
 
   private def runDemo(
@@ -313,7 +310,7 @@ object TokenWindowExample {
   )
 
   case class TrimResult(
-    budget: TokenBudget,
+    budget: Int,
     conversationWindow: ConversationWindow
   )
 
@@ -321,7 +318,7 @@ object TokenWindowExample {
     modelName: String,
     contextWindow: Int,
     reserveCompletion: Int,
-    budgets: Map[String, TokenBudget]
+    budgets: Map[String, Int]
   )
 
   private def demonstrateAutomaticBudgetDerivation(

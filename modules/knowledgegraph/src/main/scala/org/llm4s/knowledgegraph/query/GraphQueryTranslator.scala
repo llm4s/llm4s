@@ -40,7 +40,7 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
         UserMessage(prompt)
       )
     )
-    completion <- llmClient.complete(conversation, CompletionOptions(temperature = 0.0))
+    completion <- llmClient.complete(conversation, CompletionOptions(temperature = Some(0.0)))
     query      <- parseQueryResponse(completion.content)
   } yield query
 

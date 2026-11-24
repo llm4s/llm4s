@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -13,7 +15,8 @@ import org.llm4s.llmconnect.model.{
   RequestOption,
   Thinking,
   ThinkingBlock,
-  ToolCall
+  ToolCall,
+  ToolCallId
 }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
@@ -180,8 +183,10 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
   /** The provider id on the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
   val ProviderId: String = "openrouter"
 
-  // OpenRouter's `/models` answers without a key, so it would pass a wrong one; `/key` describes the key sent
-  override val validationPath: Option[String] = Some("/key")
+  // OpenRouter's `/models` answers without a key, so it would pass a wrong one; `GET /key` describes the key sent
+  // and answers 401 to a wrong one (https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key, read
+  // 2026-11-24)
+  override def validationUrl(baseUrl: BaseUrl, model: ModelName): Option[String] = Some(s"${baseUrl.asUrl}/key")
 
   override val headers: Seq[(String, String)] =
     Seq("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
@@ -219,8 +224,8 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * is `Dropped` (this dialect sends Anthropic models a budget only) and the budget comes from
    * `reasoning`. On any other model a `thinking` is `Dropped`.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    val modelLower       = model.toLowerCase
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
+    val modelLower       = model.asString.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
       modelLower.contains("o1") || modelLower.contains("o3") || modelLower.contains("o4")
@@ -342,5 +347,5 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
         for {
           calls     <- done
           arguments <- OpenAICompatibleDialect.toolArguments(name, function.obj.get("arguments"))
-        } yield calls :+ ToolCall(id, name, arguments)
+        } yield calls :+ ToolCall(ToolCallId(id), name, arguments)
       })

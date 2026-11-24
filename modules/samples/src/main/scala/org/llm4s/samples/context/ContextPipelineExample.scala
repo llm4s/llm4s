@@ -1,10 +1,11 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.context.{ ContextManager, ContextConfig, ConversationTokenCounter }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ Result, TokenBudget }
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 /**
@@ -52,7 +53,7 @@ object ContextPipelineExample {
       given org.llm4s.model.ModelRegistryService = registryService
       modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
-      tokenCounter <- ConversationTokenCounter.forModel(modelName)
+      tokenCounter <- OpenAITokenizers.counterFor(modelName.asString).orElse(ConversationTokenCounter.cl100k())
       contextMgr   <- createContextManager(tokenCounter, client)
       results      <- runPipelineDemo(contextMgr, tokenCounter)
     } yield results
@@ -96,7 +97,7 @@ object ContextPipelineExample {
     contextManager: ContextManager,
     tokenCounter: ConversationTokenCounter,
     conversation: Conversation,
-    budget: TokenBudget
+    budget: Int
   ): Result[ScenarioResult] = {
     val originalTokens = tokenCounter.countConversation(conversation)
 
@@ -109,7 +110,7 @@ object ContextPipelineExample {
         originalTokens = originalTokens,
         budget = budget,
         finalTokens = managed.finalTokens,
-        stepsApplied = managed.stepsApplied.map(_.name),
+        stepsApplied = managed.stepsApplied.map(_.stage.toString),
         compressionRatio = managed.overallCompressionRatio,
         success = managed.finalTokens <= budget
       )
@@ -158,7 +159,7 @@ object ContextPipelineExample {
 
   case class ScenarioResult(
     originalTokens: Int,
-    budget: TokenBudget,
+    budget: Int,
     finalTokens: Int,
     stepsApplied: Seq[String],
     compressionRatio: Double,

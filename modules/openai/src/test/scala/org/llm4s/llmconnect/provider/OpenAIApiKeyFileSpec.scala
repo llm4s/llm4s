@@ -1,9 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
@@ -48,7 +47,7 @@ class OpenAIApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
           )
           .value
         given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-        val client                 = OpenAIProvider.buildClient(config, LlmClientOptions.default).value
+        val client                 = OpenAIProvider.build(config, ProviderBuildContext.of()).value
 
         client.complete(hello).isRight shouldBe true
         Files.writeString(file, "sk-openai-rotated-00002")
@@ -85,7 +84,7 @@ class OpenAIApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
           .value
         config.apiKeyProvider shouldBe defined
         given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-        val client                 = AzureProvider.buildClient(config, LlmClientOptions.default).value
+        val client                 = AzureProvider.build(config, ProviderBuildContext.of()).value
 
         client.complete(hello).isRight shouldBe true
         Files.writeString(file, "azure-rotated-key-00002")

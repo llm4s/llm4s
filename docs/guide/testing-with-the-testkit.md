@@ -3,8 +3,10 @@ layout: page
 title: Testing with the Testkit
 description: "Test code that calls an LLM with llm4s-testkit: a scriptable fake LLMClient that records what you sent and never touches the network."
 search_title: "Test LLM code in Scala with the LLM4S testkit"
-parent: User Guide
-nav_order: 29
+parent: Core
+nav_order: 113
+grand_parent: User Guide
+cites_closed_issues: [1497]
 ---
 
 # Testing with the Testkit
@@ -64,8 +66,8 @@ import upickle.default._
 ```scala
 final case class Temperature(city: String, celsius: Double) derives ReadWriter
 
-val temperatureTool: Result[ToolFunction[Map[String, Any], Temperature]] =
-  ToolBuilder[Map[String, Any], Temperature](
+val temperatureTool: Result[ToolFunction[Temperature]] =
+  ToolBuilder[Temperature](
     "get_temperature",
     "Current temperature in a city, in Celsius.",
     Schema
@@ -127,15 +129,17 @@ def providerError(error: LLMError): LLMError = error match {
 }
 ```
 
-To test retries, put the scripted client under a `ReliableClient`. Its `sleep` is a parameter, so the test does not wait:
+To test retries, put the scripted client under a `ReliableClient`, with a retry policy whose delay is short enough that the test does not wait:
 
 ```scala
-import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
+import scala.concurrent.duration._
 ```
 
 ```scala
 val flaky    = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("recovered"))
-val reliable = new ReliableClient(flaky, "openai", ReliabilityConfig.default, sleep = _ => ())
+val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+val reliable = ReliableClient(flaky, "openai", quick)
 
 reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")
 flaky.callCount shouldBe 2
@@ -472,7 +476,7 @@ import scala.collection.mutable.ArrayBuffer
 val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSize(5)
 
 val chunks = ArrayBuffer.empty[StreamedChunk]
-client.streamComplete(conversation, options, chunks += _)
+client.streamComplete(conversation, options)(chunks += _)
 
 chunks.flatMap(_.content).mkString shouldBe "Hello, world"
 chunks.last.finishReason shouldBe Some(FinishReason.Stop)
@@ -488,7 +492,7 @@ A reply can report token usage and a model name (`Reply.text("hi").withModel("gp
 - `withContextWindow`, `withReserveCompletion` and `withChunkSize` return a **fresh** client, with the same script and no recorded calls.
 - The kit registers no provider, so it never changes which provider `ProviderRegistry` or `Llm4sConfig` selects. You pass the client to the code under test yourself.
 - It does not contain a fake embedding client or a fake tracer, and it does not record and replay real provider traffic.
-- Its API is Scala. A Java-friendly fake is tracked in [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- Its API is Scala. Java code tests with `FakeLlmClient` from `llm4s-java-api` instead ([A test with FakeLlmClient](java-migration#a-test-with-fakellmclient), [#1497](https://github.com/llm4s/llm4s/issues/1497)).
 - The hand-written mocks in the [Testing Guide](../getting-started/testing-guide) (`MockLLMClient`, `FailingMockClient` and the rest) do the same job with more code, and are still fine for a one-off.
 
 ## See also

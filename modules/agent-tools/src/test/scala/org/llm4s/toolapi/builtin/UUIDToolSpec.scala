@@ -20,7 +20,7 @@ import scala.concurrent.{ Await, ExecutionContext, Future }
  */
 class UUIDToolSpec extends AnyFlatSpec with Matchers {
 
-  private val tool: ToolFunction[Map[String, Any], UUIDTool.UUIDsResult] =
+  private val tool: ToolFunction[UUIDTool.UUIDsResult] =
     UUIDTool.toolSafe.fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   /** Runs the tool through `execute`, the entry point providers use, and reads the JSON result back. */

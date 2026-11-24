@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.agent.memory.SimpleMemoryManager
 import org.llm4s.config.Llm4sConfig
@@ -34,14 +35,7 @@ import java.time.Instant
 class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def completionOf(message: AssistantMessage): Completion =
-    Completion(
-      id = "script",
-      created = Instant.EPOCH,
-      content = message.content,
-      model = "script",
-      message = message,
-      toolCalls = message.toolCalls.toList
-    )
+    Completion(id = "script", created = Instant.EPOCH, model = ModelName("script"), message = message)
 
   /** Answers every request with `reply(conversation)` and records the requests. */
   private class ScriptedClient(reply: Conversation => AssistantMessage) extends LLMClient {
@@ -54,9 +48,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       Right(completionOf(reply(conversation)))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -177,7 +169,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     .`object`[Map[String, Any]]("Forecast parameters")
     .withProperty(Schema.property("city", Schema.string("The city to look up")))
 
-  lazy val forecastTool = ToolBuilder[Map[String, Any], Forecast](
+  lazy val forecastTool = ToolBuilder[Forecast](
     name = "get_forecast",
     description = "Returns the forecast for a city",
     schema = forecastSchema
@@ -189,8 +181,8 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation.messages.filter(_.role == MessageRole.Tool).lastOption.map(_.content) match {
         case None =>
           AssistantMessage(
-            contentOpt = None,
-            toolCalls = Seq(ToolCall("call-1", "get_forecast", ujson.Obj("city" -> "Oslo")))
+            text = None,
+            toolCalls = Seq(ToolCall(ToolCallId("call-1"), "get_forecast", ujson.Obj("city" -> "Oslo")))
           )
         case Some(output) => AssistantMessage(s"The tool returned $output")
       }

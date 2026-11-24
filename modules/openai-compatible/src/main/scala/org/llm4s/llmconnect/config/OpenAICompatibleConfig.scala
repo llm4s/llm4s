@@ -5,7 +5,7 @@ import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange, TokenExchangeConfig }
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -56,8 +56,8 @@ import org.llm4s.types.Result
  */
 @Stable
 final case class OpenAICompatibleConfig private (
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   apiKey: Option[Secret],
   contextWindow: Int,
   reserveCompletion: Int,
@@ -68,16 +68,17 @@ final case class OpenAICompatibleConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
-  override def endpointUrl: Option[String]                      = Some(baseUrl)
-  override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
+  override def providerId: ProviderId                              = ProviderId(OpenAICompatibleConfig.ProviderIdName)
+  override def endpointUrl: Option[BaseUrl]                        = Some(baseUrl)
+  override def withModel(model: ModelName): OpenAICompatibleConfig = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OpenAICompatibleConfig = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): OpenAICompatibleConfig =
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAICompatibleConfig] = Right(
     copy(apiKeyProvider = Some(provider))
+  )
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAICompatibleConfig = copy(apiKeyProvider = provider)
 
-  def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): OpenAICompatibleConfig         = copy(baseUrl = baseUrl)
   def withApiKey(apiKey: Secret): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
   def withApiKey(apiKey: Option[Secret]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
   def withContextWindow(contextWindow: Int): OpenAICompatibleConfig = copy(contextWindow = contextWindow)
@@ -120,8 +121,8 @@ object OpenAICompatibleConfig {
    * has a default.
    */
   def apply(
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     apiKey: Option[Secret] = None,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
@@ -148,7 +149,7 @@ object OpenAICompatibleConfig {
    * The model and base URL, every other field at its default: the entry point for Java and
    * Kotlin, which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(model: String, baseUrl: String): OpenAICompatibleConfig =
+  def apply(model: ModelName, baseUrl: BaseUrl): OpenAICompatibleConfig =
     apply(model, baseUrl, apiKey = None)
 
   /**
@@ -229,7 +230,7 @@ object OpenAICompatibleConfig {
               case other => other
             }
           _ <- TokenExchange
-            .requireSecureUrl(config.baseUrl, "baseUrl", "the exchanged token")
+            .requireSecureUrl(config.baseUrl.asUrl, "baseUrl", "the exchanged token")
             .left
             .map(e => ConfigurationError(e.message, List("baseUrl")))
         yield config
@@ -243,8 +244,8 @@ object OpenAICompatibleConfig {
    *         refuses. A blank `apiKey` is treated as none.
    */
   def fromValues(
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     apiKey: Option[Secret] = None,
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
@@ -255,8 +256,8 @@ object OpenAICompatibleConfig {
     val window  = contextWindow.getOrElse(DEFAULT_CONTEXT_WINDOW)
     val reserve = reserveCompletion.getOrElse(math.min(DEFAULT_RESERVE_COMPLETION, window / 4))
     for
-      _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "model", model)
-      _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "model", model.asString)
+      _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "baseUrl", baseUrl.asUrl)
       _ <- Either.cond(
         window > 0,
         (),
@@ -272,8 +273,8 @@ object OpenAICompatibleConfig {
       )
       config <- validate(
         OpenAICompatibleConfig(
-          model = model.trim,
-          baseUrl = baseUrl.trim.stripSuffix("/"),
+          model = ModelName(model.asString.trim),
+          baseUrl = BaseUrl(baseUrl.asUrl.trim.stripSuffix("/")),
           apiKey = apiKey.map(_.reveal.trim).filter(_.nonEmpty).map(Secret(_)),
           contextWindow = window,
           reserveCompletion = reserve,

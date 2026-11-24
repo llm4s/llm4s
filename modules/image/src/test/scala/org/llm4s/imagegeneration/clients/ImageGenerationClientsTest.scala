@@ -80,9 +80,9 @@ class ImageGenerationClientsTest
     result.value(1).data shouldBe "img2"
   }
 
-  test("OpenAIImageClient should parse URL response format") {
+  test("OpenAIImageClient should parse a legacy model's URL response format") {
     val mockHttpClient = stub[HttpClient]
-    val config         = OpenAIConfig(apiKey = Secret("test-key"))
+    val config         = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val client         = new OpenAIImageClient(config, mockHttpClient)
 
     val responseBody = """{
@@ -150,7 +150,7 @@ class ImageGenerationClientsTest
     val config         = OpenAIConfig(apiKey = Secret("test-key"))
     val client         = new OpenAIImageClient(config, mockHttpClient)
 
-    val result = client.generateImages(prompt, 11) // Max is 10 for dall-e-2
+    val result = client.generateImages(prompt, 11) // Max is 10
     result.isLeft shouldBe true
     result.left.value shouldBe a[ImageValidationError]
   }
@@ -160,7 +160,8 @@ class ImageGenerationClientsTest
     val config         = OpenAIConfig(apiKey = Secret("test-key"))
     val client         = new OpenAIImageClient(config, mockHttpClient)
 
-    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
+    val mapping = """{"inferenceProviderMapping":{"hf-inference":{"status":"live","task":"text-to-image"}}}"""
+    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, mapping)))
 
     val result = client.health()
     result.isRight shouldBe true
@@ -315,7 +316,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = Secret("test-key"))
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
+    val mapping = """{"inferenceProviderMapping":{"hf-inference":{"status":"live","task":"text-to-image"}}}"""
+    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, mapping)))
 
     val result = client.health()
     result.isRight shouldBe true
@@ -431,7 +433,8 @@ class ImageGenerationClientsTest
     val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
     val client         = new StableDiffusionClient(config, mockHttpClient)
 
-    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
+    val mapping = """{"inferenceProviderMapping":{"hf-inference":{"status":"live","task":"text-to-image"}}}"""
+    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, mapping)))
 
     val result = client.health()
     result.isRight shouldBe true
@@ -564,7 +567,8 @@ class ImageGenerationClientsTest
     val config         = StabilityAIConfig(apiKey = Secret("test-key"))
     val client         = new StabilityAIClient(config, mockHttpClient)
 
-    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
+    val mapping = """{"inferenceProviderMapping":{"hf-inference":{"status":"live","task":"text-to-image"}}}"""
+    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, mapping)))
 
     val result = client.health()
     result.isRight shouldBe true

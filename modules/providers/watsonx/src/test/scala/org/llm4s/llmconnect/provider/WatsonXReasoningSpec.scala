@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
@@ -19,7 +20,7 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
   private val ask    = Conversation(Seq(UserMessage("Horoscope for Aries?")))
 
   private def complete(reply: String): Completion =
@@ -119,7 +120,7 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   private def stream(sse: String): (Completion, List[StreamedChunk]) =
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(gptOss, httpClient = streaming(streamOf(bytes(sse))))
-      .streamComplete(ask, CompletionOptions().withReasoning(ReasoningEffort.Low), chunks += _)
+      .streamComplete(ask, CompletionOptions().withReasoning(ReasoningEffort.Low))(chunks += _)
     (result.value, chunks.toList)
 
   test("stream: delta.reasoning_content pieces become thinking deltas, in order, and the completion's thinking") {

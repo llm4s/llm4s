@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -48,7 +48,7 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
 
     "contribute the chat provider under the id jlama and no embeddings" in {
       val module = new Llm4sJlamaModule
-      module.chatProviders shouldBe Seq(JlamaProvider)
+      module.providers shouldBe Seq(JlamaProvider)
       module.embeddingProviders shouldBe empty
       JlamaProvider.id.asString shouldBe "jlama"
     }
@@ -76,7 +76,7 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
     "load a JlamaConfig from a named section with no API key, as an application does" in {
       load("""llm4s.providers.local { provider = "jlama", model = "tjake/Llama-3.2-1B-Instruct-JQ4" }""") match
         case Right(config: JlamaConfig) =>
-          config.model shouldBe "tjake/Llama-3.2-1B-Instruct-JQ4"
+          config.model.asString shouldBe "tjake/Llama-3.2-1B-Instruct-JQ4"
           config.modelDir shouldBe JlamaConfig.defaultModelDir
           config.threads shouldBe None
           config.endpointUrl shouldBe None

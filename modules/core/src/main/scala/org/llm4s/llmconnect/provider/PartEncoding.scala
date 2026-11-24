@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
 import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
@@ -11,11 +12,15 @@ import java.util.Base64
  * What every chat client needs to map [[org.llm4s.llmconnect.model.ContentPart ContentPart]]s: a client describes the parts it sends as
  * a partial function from part to its wire form, and a part it does not cover fails the request
  * with an [[org.llm4s.error.UnsupportedContentPartError UnsupportedContentPartError]] - never dropped, never sent as text.
+ *
+ * A provider module uses [[check]] to refuse a conversation before anything is sent and [[encodeAll]] to encode a
+ * message's parts.
  */
-private[llm4s] object PartEncoding {
+@Stable
+object PartEncoding {
 
   /** The error for `part` in a `role` message sent to `provider`. */
-  def unsupported(provider: String, part: ContentPart, role: MessageRole): UnsupportedContentPartError =
+  private[llm4s] def unsupported(provider: String, part: ContentPart, role: MessageRole): UnsupportedContentPartError =
     UnsupportedContentPartError(provider, part.kind, role.name)
 
   /** `parts`, each encoded with `encode`; the first part `encode` does not cover fails the whole. */
@@ -69,13 +74,13 @@ private[llm4s] object PartEncoding {
    * Whether `uri` is a web URL (`http` or `https`): the only URLs a provider that fetches media itself can
    * read. A `gs://` or `s3://` URL sent to one would pass the check and fail only after the request is sent.
    */
-  def isWebUrl(uri: java.net.URI): Boolean = hasScheme(uri, "http", "https")
+  private[llm4s] def isWebUrl(uri: java.net.URI): Boolean = hasScheme(uri, "http", "https")
 
   /**
    * Whether `uri` has one of `schemes` and a non-empty authority (a host, a bucket): `http:cat.png` or `https:/cat.png`
    * is absolute but names nothing to fetch.
    */
-  def hasScheme(uri: java.net.URI, schemes: String*): Boolean =
+  private[llm4s] def hasScheme(uri: java.net.URI, schemes: String*): Boolean =
     Option(uri.getScheme).exists(s => schemes.exists(_.equalsIgnoreCase(s))) &&
       Option(uri.getRawAuthority).exists(_.nonEmpty)
 
@@ -83,27 +88,27 @@ private[llm4s] object PartEncoding {
    * `parts` without blank text parts: for a block-based API (Anthropic, Converse, Gemini) that refuses an empty
    * text block. A blank text part carries nothing, and a message of only blank text is refused by `validate`.
    */
-  def withoutBlankText(parts: Vector[ContentPart]): Vector[ContentPart] =
+  private[llm4s] def withoutBlankText(parts: Seq[ContentPart]): Vector[ContentPart] =
     parts.filter {
       case ContentPart.Text(text) => text.trim.nonEmpty
       case _                      => true
-    }
+    }.toVector
 
   /** Covers text parts only, as their text: for a role whose wire format takes nothing else. */
-  val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
+  private[llm4s] val textOnly: PartialFunction[ContentPart, String] = { case ContentPart.Text(text) => text }
 
   /** The bytes, base64-encoded. */
-  def base64(inline: MediaSource.Inline): String = Base64.getEncoder.encodeToString(bytes(inline))
+  private[llm4s] def base64(inline: MediaSource.Inline): String = Base64.getEncoder.encodeToString(bytes(inline))
 
   /** A `data:` URL carrying the bytes, as OpenAI's `image_url` and `file_data` take them. */
-  def dataUrl(inline: MediaSource.Inline, mediaType: MediaType): String =
+  private[llm4s] def dataUrl(inline: MediaSource.Inline, mediaType: MediaType): String =
     s"data:${mediaType.mimeType};base64,${base64(inline)}"
 
   /** A copy of the bytes, for an SDK that takes an array. */
-  def bytes(inline: MediaSource.Inline): Array[Byte] = inline.bytes.asInstanceOf[Array[Byte]].clone()
+  private[llm4s] def bytes(inline: MediaSource.Inline): Array[Byte] = inline.bytes.asInstanceOf[Array[Byte]].clone()
 
   /** Whether `source` is a file uploaded to `provider`. */
-  def isFileOf(provider: String, source: MediaSource): Boolean = source match {
+  private[llm4s] def isFileOf(provider: String, source: MediaSource): Boolean = source match {
     case MediaSource.ProviderFile(owner, _) => owner == provider
     case _                                  => false
   }

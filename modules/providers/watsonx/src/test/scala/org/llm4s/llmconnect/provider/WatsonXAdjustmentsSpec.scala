@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
@@ -20,13 +21,13 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
   private val hi     = Conversation(Seq(UserMessage("Hi")))
 
   private val reply =
     """{"id":"g","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
 
-  private def adjustments(cfg: WatsonXConfig, options: CompletionOptions): List[RequestAdjustment] =
+  private def adjustments(cfg: WatsonXConfig, options: CompletionOptions): Seq[RequestAdjustment] =
     new WatsonXClient(cfg, httpClient = routed(_ => Right(iamToken()), _ => Right(HttpResponse(200, reply))))
       .complete(hi, options)
       .value
@@ -102,7 +103,7 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
     val options = CompletionOptions().withReasoning(ReasoningEffort.Minimal)
     val chunks  = ListBuffer.empty[StreamedChunk]
     val streamed = new WatsonXClient(gptOss, httpClient = streaming(streamOf(bytes(events))))
-      .streamComplete(hi, options, chunks += _)
+      .streamComplete(hi, options)(chunks += _)
       .value
     streamed.adjustments shouldBe adjustments(gptOss, options)
     streamed.adjustments should not be empty

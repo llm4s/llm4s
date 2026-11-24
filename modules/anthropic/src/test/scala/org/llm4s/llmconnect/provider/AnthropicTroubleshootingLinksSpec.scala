@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
@@ -43,8 +45,8 @@ final class AnthropicTroubleshootingLinksSpec extends AnyWordSpec with Matchers 
     new AnthropicClient(
       AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = "claude-3-5-haiku-latest",
-        baseUrl = baseUrl,
+        model = ModelName("claude-3-5-haiku-latest"),
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = 200000,
         reserveCompletion = 4096
       )

@@ -99,7 +99,7 @@ object CliPlaygroundDemo extends App {
     llmSays("A monad is a design pattern that chains together a sequence of")
     llmSays("computations while automatically handling context such as")
     llmSays("optionality, failure, or side-effects.")
-    info("completion id: cmpl-demo-001  model: gpt-4o  tokens: 42")
+    info("completion id: cmpl-demo-001  model: gpt-5.6-terra  tokens: 42")
   }
 
   //  scenario 2: multi-turn conversation

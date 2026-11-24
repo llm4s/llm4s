@@ -27,7 +27,7 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
   private def resultOf(content: ToolContent): ToolMessage = {
     val tool   = SpecTools.tool("render")((_, _) => ToolOutcome.success(content))
     val client = ScriptedLLMClient.of(calling(call("c1", "render")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(tool)))
     agent.run(ThreadId("parts"), "go").value.answer shouldBe Some("done")
     client.sent(1).collect { case t: ToolMessage => t }.head
   }
@@ -48,7 +48,8 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
       Right(CompletionFixture.simple("""{"customer":"Acme"}""")),
       Right(CompletionFixture.simple("""{"customer":"Acme","total":3.5}"""))
     )
-    val agent  = built(Agent.builder("extractor", client).withOutput(invoiceSchema).withTools(SpecTools.set(chartTool)))
+    val agent =
+      built(Agent.builder("extractor", client).withOutput(invoiceSchema).withToolSet(SpecTools.set(chartTool)))
     val result = agent.run(ThreadId("parts-format"), "bill from the chart").value
 
     result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 3.5))
@@ -79,7 +80,7 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
   "ContextPruning's default counter" should "count media, so a media-only message is not free" in {
     ContextPruning.defaultTokenCounter(UserMessage(Vector(chart))) shouldBe
       ContextPruning.defaultTokenCounter(UserMessage("")) + ContentPart.EstimatedImageTokens
-    ContextPruning.defaultTokenCounter(ToolMessage(Vector(ContentPart.Text("a b"), chart), "c")) shouldBe
-      ContextPruning.defaultTokenCounter(ToolMessage("a b", "c")) + ContentPart.EstimatedImageTokens
+    ContextPruning.defaultTokenCounter(ToolMessage(Vector(ContentPart.Text("a b"), chart), ToolCallId("c"))) shouldBe
+      ContextPruning.defaultTokenCounter(ToolMessage("a b", ToolCallId("c"))) + ContentPart.EstimatedImageTokens
   }
 }

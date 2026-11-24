@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,13 +22,18 @@ class VoyageInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
   private given ModelRegistryService = ModelRegistryService.default().value
 
   private def assertBuildsEmbeddings(provider: String, config: EmbeddingProviderConfig): Unit =
-    EmbeddingClient.from(provider, config).value.providerId shouldBe Some(ProviderId(provider))
+    EmbeddingClient.from(config).value.providerId shouldBe Some(ProviderId(provider))
 
   "llm4s-voyage, configured in code" should {
     "build a Voyage embedding client from a base URL, model and key" in {
       assertBuildsEmbeddings(
         "voyage",
-        EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com", model = "voyage-3", apiKey = Secret("pa-test"))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("https://api.voyageai.com"),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("pa-test"))
+        )
       )
     }
   }

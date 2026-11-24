@@ -1,12 +1,20 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  KeylessSetting,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -76,7 +84,7 @@ object AzureProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     requiresApiKey = true,
     apiKeyEnv = Seq(OpenAIConfigKeys.AZURE_OPENAI_API_KEY),
-    keylessWhen = Some(AuthenticationKey -> EntraIdAuthentication),
+    keylessWhen = Some(KeylessSetting(AuthenticationKey, EntraIdAuthentication)),
     extras = Seq(
       ProviderConfigKey(
         EndpointKey,
@@ -103,31 +111,30 @@ object AzureProvider extends ProviderDescriptor:
     )
   )
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      endpoint <- ProviderDescriptor.requireExtra(providerName, section, EndpointKey)
-      mode     <- authentication(providerName, section)
+      endpoint <- ProviderDescriptor.requireExtra(context.providerName, section, EndpointKey)
+      mode     <- authentication(context.providerName, section)
       apiVersion = section.extra(ApiVersionKey).getOrElse(AzureConfig.DEFAULT_API_VERSION)
-      model      = section.model.asString
+      model      = section.model
       clientId   = section.extra(ClientIdKey).map(_.trim).filter(_.nonEmpty)
       config <-
         if mode == EntraIdAuthentication then
           AzureEntraIdSupport
             .tokenProvider(clientId)
-            .flatMap(AzureConfig.fromTokenProvider(model, _, endpoint, apiVersion))
+            .flatMap(AzureConfig.fromTokenProvider(model, _, BaseUrl(endpoint), apiVersion))
         else if clientId.isDefined then
           Left(
             ConfigurationError(
-              s"llm4s.providers.$providerName.$ClientIdKey applies only with " +
+              s"llm4s.providers.${context.providerName}.$ClientIdKey applies only with " +
                 s"$AuthenticationKey = \"$EntraIdAuthentication\"; remove it, or set $AuthenticationKey"
             )
           )
         else
           ProviderDescriptor
-            .requireApiKey(providerName, section)
-            .flatMap(AzureConfig.fromValues(model, _, endpoint, apiVersion))
+            .requireApiKey(context.providerName, section)
+            .flatMap(AzureConfig.fromValues(model, _, BaseUrl(endpoint), apiVersion))
     yield config
 
   /** The section's `authentication`, normalised: [[ApiKeyAuthentication]] or [[EntraIdAuthentication]]. */
@@ -143,9 +150,8 @@ object AzureProvider extends ProviderDescriptor:
           )
         )
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[AzureConfig](id, config)
-      .flatMap(OpenAIClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(OpenAIClient(_, context.metrics, context.exchangeLogging))

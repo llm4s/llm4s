@@ -205,9 +205,9 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       UserMessage("Use the tool to get the weather"),
       AssistantMessage(
         content = "I will call the weather function now.",
-        toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))
+        toolCalls = Seq(ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "London")))
       ),
-      ToolMessage("""{"temp": 15, "condition": "cloudy"}""", "call_1"),
+      ToolMessage("""{"temp": 15, "condition": "cloudy"}""", ToolCallId("call_1")),
       AssistantMessage("The tool returned that the weather in London is 15°C and cloudy.")
     )
 
@@ -280,11 +280,11 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "render", ujson.Obj())))
+    val call = AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c1"), "render", ujson.Obj())))
     val messages = Seq(
       UserMessage("Draw it"),
       call,
-      ToolMessage(Vector(chart), "c1"),
+      ToolMessage(Vector(chart), ToolCallId("c1")),
       AssistantMessage("Here it is."),
       UserMessage("Question 2"),
       AssistantMessage("Answer 2"),
@@ -293,8 +293,8 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
     )
     val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
     processed should contain(call)
-    processed should contain(ToolMessage(Vector(chart), "c1"))
-    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), "c1"))
+    processed should contain(ToolMessage(Vector(chart), ToolCallId("c1")))
+    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), ToolCallId("c1")))
     // every kept call has its result, and every kept result its call
     val calls   = processed.collect { case a: AssistantMessage => a.toolCalls.map(_.id) }.flatten.toSet
     val results = processed.collect { case t: ToolMessage => t.toolCallId }.toSet
@@ -309,18 +309,18 @@ class HistoryCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val call = AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c9", "render", ujson.Obj())))
+    val call = AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c9"), "render", ujson.Obj())))
     val messages = Seq(
       UserMessage("Question 1"),
       AssistantMessage("Answer 1"),
       UserMessage("Draw it"),
       call,
-      ToolMessage(Vector(chart), "c9")
+      ToolMessage(Vector(chart), ToolCallId("c9"))
     )
     // the last block - the tool result alone - is recent; the call's block is older
     val processed = HistoryCompressor.compressToDigest(messages, counter, capTokens = 500, keepLastK = 1).toOption.get
     processed should contain(call)
-    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), "c9"))
+    processed.indexOf(call) should be < processed.indexOf(ToolMessage(Vector(chart), ToolCallId("c9")))
   }
 
   it should "keep the history's order: the older blocks from the first kept one on stay as they are" in {

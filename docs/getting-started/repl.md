@@ -3,8 +3,10 @@ layout: page
 title: Try llm4s in the REPL
 description: "One import for the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat, history and lastUsage, with an offline session that needs no API key."
 search_title: "Try LLM4S in the Scala REPL, a worksheet or a script"
-parent: Getting Started
-nav_order: 16
+parent: Build Tools and Playgrounds
+nav_order: 6
+grand_parent: Getting Started
+cites_closed_issues: [2296]
 ---
 
 # Try llm4s in the REPL
@@ -56,7 +58,7 @@ Every helper takes a `Session` from a context parameter, so you set it once:
 import org.llm4s.repl.*
 import org.llm4s.testkit.Reply
 
-// The section `llm4s.providers.provider` names in application.conf
+// The section `llm4s.defaultProvider` names in application.conf
 val fromConfig = Session.fromConfig()
 // A named section, llm4s.providers.openai-main
 val named = Session.named("openai-main")
@@ -114,7 +116,7 @@ val invoice = extract[Invoice]("ACME, 12.50 EUR, two widgets") // Done(Invoice(A
 
 ```
 scala> chat()
-Chatting with default provider, gpt-4o-mini. :q leaves, :history shows the conversation, :reset forgets it.
+Chatting with default provider, gpt-5.6-luna. :q leaves, :history shows the conversation, :reset forgets it.
 you> What is a monad?
 llm> A monad is ...
 you> :q
@@ -129,7 +131,7 @@ import org.llm4s.repl.*
 import org.llm4s.testkit.Reply
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 
-val weather = ToolBuilder[Map[String, Any], ujson.Value](
+val weather = ToolBuilder[ujson.Value](
   "get_weather",
   "The weather in a city",
   Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))
@@ -171,8 +173,8 @@ val answers = for {
 - **A Metals worksheet**: a `*.worksheet.sc` file with the `//> using dep` lines above. Metals shows each value
   beside its line; `ask` also prints the answer.
 - **A Scala CLI script**: a `*.sc` file, run with `scala-cli run hello.sc`.
-- **Almond notebooks** are tracked in [#2296](https://github.com/llm4s/llm4s/issues/2296); this page will link them
-  once they exist.
+- **Almond notebooks**: [Jupyter Notebooks](../guide/notebooks) runs LLM4S in Jupyter with the Almond Scala
+  kernel ([#2296](https://github.com/llm4s/llm4s/issues/2296)).
 
 The repository's [`examples/repl`](https://github.com/llm4s/llm4s/tree/main/examples/repl) has a script and a
 worksheet that run against `Session.offline`; CI runs both with Scala CLI against the library built from the

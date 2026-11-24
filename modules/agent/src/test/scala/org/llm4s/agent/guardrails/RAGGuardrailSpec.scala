@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.guardrails.rag._
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -34,17 +35,14 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          content = response,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -63,9 +61,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(NetworkError("Mock network error", None, "mock://test"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -876,7 +872,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
 
   "RAGGuardrails.custom" should "allow custom combinations" in {
     val config = RAGGuardrails.custom(
-      inputGuardrails = Seq(new org.llm4s.agent.guardrails.builtin.LengthCheck(1, 1000)),
+      inputGuardrails = Seq(org.llm4s.agent.guardrails.builtin.LengthCheck(1, 1000)),
       outputGuardrails = Seq.empty,
       ragGuardrails = Seq.empty
     )

@@ -84,15 +84,14 @@ object GeminiTestExample {
 
     val result = client.streamComplete(
       conversation,
-      CompletionOptions(),
-      onChunk = { chunk =>
-        chunkCount += 1
-        chunk.content.foreach { c =>
-          fullContent.append(c)
-          print(c)
-        }
+      CompletionOptions()
+    ) { chunk =>
+      chunkCount += 1
+      chunk.content.foreach { c =>
+        fullContent.append(c)
+        print(c)
       }
-    )
+    }
 
     println()
 
