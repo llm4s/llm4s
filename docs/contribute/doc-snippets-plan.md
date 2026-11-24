@@ -121,6 +121,8 @@ not convert the same one.
 | `tutorials/support-assistant/part-3-tools.md` | 3 | checked |
 | `tutorials/support-assistant/part-4-help-centre.md` | 4 | checked |
 | `tutorials/support-assistant/part-5-safety-memory.md` | 3 | checked |
+| `tutorials/support-assistant/part-6-testing.md` | 3 | checked |
+| `tutorials/support-assistant/part-7-serving.md` | 5 | checked |
 | `guide/migrating-from-langchain4j.md` | 9 | checked by `ComparisonGuideSpec` |
 
 ## To convert, in this order

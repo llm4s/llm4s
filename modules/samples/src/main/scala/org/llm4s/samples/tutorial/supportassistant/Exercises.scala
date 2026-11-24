@@ -2,11 +2,16 @@ package org.llm4s.samples.tutorial.supportassistant
 
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.metrics.{ Metric, MetricsCollector }
 import org.llm4s.rag.RAG
+import org.llm4s.samples.tutorial.supportassistant.Part7Serving.ChatResponse
 import org.llm4s.schema.*
+import org.llm4s.testkit.ScriptedLLMClient
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
+
+import scala.concurrent.duration.*
 
 /**
  * The exercises of the "Build a support assistant" tutorial (`docs/tutorials/support-assistant/`). Each `???` is a
@@ -82,4 +87,29 @@ object Part5Exercise {
    */
   def noPromises: OutputGuardrail =
     ??? // TODO: implement OutputGuardrail's `name` and `validate`
+}
+
+object Part6Exercise {
+
+  /**
+   * Exercise 6: a fake model for the refund question. The first call of a turn whose message mentions "refund", in
+   * any case, calls the tool `refund_policy` with the topic `refund`; the call after that tool's result answers with
+   * the policy's `text`, word for word. Any other conversation is unscripted.
+   */
+  def refundModel(): ScriptedLLMClient =
+    ??? // TODO: ScriptedLLMClient.respondingTo, with the EndsWithUser and AfterToolResult extractors
+}
+
+object Part7Exercise {
+
+  /** How long a reply took, by how its run ended: the timer exercise 7 records. */
+  val ReplyDuration: Metric.Timer =
+    Metric.timer("support.reply.duration", "How long a reply took", Seq(1.second, 5.seconds, 30.seconds), "status")
+
+  /**
+   * Exercise 7: like `Part7Serving.counted`, but records in [[ReplyDuration]] how long `respond` took, labelled with
+   * the response's status, or `error` for a `Left`.
+   */
+  def timed(metrics: MetricsCollector)(respond: String => Result[ChatResponse]): String => Result[ChatResponse] =
+    ??? // TODO: time the call with System.nanoTime and record it with metrics.observe
 }

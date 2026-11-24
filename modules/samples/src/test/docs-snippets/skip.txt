@@ -212,6 +212,12 @@ tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import o
 tutorials/support-assistant/part-4-help-centre.md | 2c732129e1 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 8eaffdfd48 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }
+tutorials/support-assistant/part-6-testing.md | fd17c84896 | with | import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory
+tutorials/support-assistant/part-7-serving.md | 7ed3b72556 | with | import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory
+tutorials/support-assistant/part-7-serving.md | f4db8156b8 | with | import org.llm4s.types.Result; import upickle.default.ReadWriter; import org.llm4s.samples.tutorial.supportassistant.Part7Serving.{ ChatRequest, ChatResponse }
+tutorials/support-assistant/part-7-serving.md | 6cbe6363a1 | with | import org.llm4s.agent.Agent; import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.{ Part3Tools, Part5SafetyMemory }
+tutorials/support-assistant/part-7-serving.md | ba2bc61006 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part7Serving.ChatResponse
+tutorials/support-assistant/part-7-serving.md | a6a1be9c13 | with | import com.sun.net.httpserver.HttpServer; import org.llm4s.llmconnect.LLMClient; import org.llm4s.trace.Tracing; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part7Serving.{ counted, observedAgent, respond, serve }
 guide/agents/guardrails.md | 8ad9467374 | skip | continues the imports block above with `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
 guide/agents/guardrails.md | a492bbe7ca | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
 guide/agents/guardrails.md | eb9f09daf4 | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code

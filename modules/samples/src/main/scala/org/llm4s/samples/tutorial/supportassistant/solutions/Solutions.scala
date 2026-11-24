@@ -4,12 +4,23 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
-import org.llm4s.samples.tutorial.supportassistant.{ DeliveryEstimate, DeliveryQuery, Part1FirstCall, RefundRequest }
+import org.llm4s.metrics.MetricsCollector
+import org.llm4s.samples.tutorial.supportassistant.{
+  DeliveryEstimate,
+  DeliveryQuery,
+  Part1FirstCall,
+  Part7Exercise,
+  RefundRequest
+}
 import org.llm4s.samples.tutorial.supportassistant.Part3Tools.orders
+import org.llm4s.samples.tutorial.supportassistant.Part7Serving.ChatResponse
 import org.llm4s.rag.RAG
 import org.llm4s.schema.*
+import org.llm4s.testkit.{ AfterToolResult, EndsWithUser, Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
+
+import scala.concurrent.duration.*
 
 /** The solution to the tutorial's exercise 1 (`Part1Exercise.askIn`). */
 object Part1Solution {
@@ -64,4 +75,29 @@ object Part5Solution {
         Left(ValidationError.invalid("answer", "an answer must not guarantee anything"))
       else Right(value)
   }
+}
+
+/** The solution to the tutorial's exercise 6 (`Part6Exercise.refundModel`). */
+object Part6Solution {
+
+  def refundModel(): ScriptedLLMClient =
+    ScriptedLLMClient.respondingTo {
+      case EndsWithUser(message) if message.toLowerCase.contains("refund") =>
+        Reply.toolCall("refund_policy", """{"topic": "refund"}""")
+      case AfterToolResult("refund_policy", result) =>
+        Reply.text(ujson.read(result)("text").str)
+    }
+}
+
+/** The solution to the tutorial's exercise 7 (`Part7Exercise.timed`). */
+object Part7Solution {
+
+  def timed(metrics: MetricsCollector)(respond: String => Result[ChatResponse]): String => Result[ChatResponse] =
+    message => {
+      val started  = System.nanoTime()
+      val response = respond(message)
+      val status   = response.fold(_ => "error", _.status)
+      metrics.observe(Part7Exercise.ReplyDuration, Seq(status), (System.nanoTime() - started).nanos)
+      response
+    }
 }

@@ -6,7 +6,7 @@ grand_parent: Tutorials
 nav_order: 5
 description: "Support assistant tutorial, part 5: LLM4S guardrails that mask personal data and refuse prompt injection, and a conversation that remembers the turn before."
 search_title: "Support assistant tutorial 5: guardrails and memory"
-cites_closed_issues: [2292]
+cites_issues: [2879]
 ---
 
 # Part 5: safety and memory
@@ -129,6 +129,6 @@ add it to the output guardrails of `safeAgent`. The solution is `Part5Solution` 
 [`solutions`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/tutorial/supportassistant/solutions/Solutions.scala)
 package.
 
-Previous: [Part 4, help-centre answers](part-4-help-centre). The series planned in
-[#2292](https://github.com/llm4s/llm4s/issues/2292) goes on to testing with `llm4s-testkit` and a judge, then serving and observing; those parts are not
-written yet.
+Previous: [Part 4, help-centre answers](part-4-help-centre). Next: [Part 6, testing it](part-6-testing), with
+`llm4s-testkit` fakes and a judge, then [Part 7](part-7-serving), serving and observing the assistant
+([#2879](https://github.com/llm4s/llm4s/issues/2879)).

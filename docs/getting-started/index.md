@@ -99,7 +99,8 @@ Before starting, you should have:
 - **Full Tutorial**: ~30 minutes
 
 When you have made a first call, [Build a support assistant](../tutorials/support-assistant/) takes one application
-from a first call to typed answers, tools and an agent, a part at a time, with exercises a test suite checks.
+from a first call to typed answers, tools, an agent, tests and a served, observed service, a part at a time, with
+exercises a test suite checks.
 
 ## Need Help?
 

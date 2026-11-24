@@ -641,6 +641,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md)'s parts 6 (testing: `llm4s-testkit` fakes, a judged evaluation) and 7 (an HTTP endpoint, tracing, Prometheus metrics, deployment), with exercises that `Part6Spec` and `Part7Spec` check offline ([#2879](https://github.com/llm4s/llm4s/issues/2879)).
 - **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
   `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`), as do the enterprise deploy overlay, its LiteLLM gateway config and the Kotlin KDoc; the watsonx pages say it ships unverified, the
   observability guide that Langfuse Cloud removed the ingestion API the `langfuse` mode uses, and the release checklist gains the checks [#2832](https://github.com/llm4s/llm4s/issues/2832) [#2887](https://github.com/llm4s/llm4s/issues/2887).
