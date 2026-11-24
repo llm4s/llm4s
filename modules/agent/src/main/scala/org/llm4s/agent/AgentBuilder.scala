@@ -143,7 +143,8 @@ final class AgentBuilder private (
    * and its `afterAgent` on every final answer, after the answering agent's own - so a
    * [[org.llm4s.agent.graph.middleware.GuardrailMiddleware]] on the root still applies after a
    * handoff. A handoff target's boundary hooks apply only while it is active, and model and tool
-   * wrappers (`wrapModelCall`, `wrapToolCall`) only to the agent they are given to.
+   * wrappers (`wrapModelCall`, `wrapToolCall`) only to the agent they are given to. [[build]] refuses a middleware
+   * whose id the agent uses itself (`MiddlewareId.reserved`: `agent-guardrails`, `delegation`, ...).
    */
   @Experimental
   def withMiddleware(middleware: AgentMiddleware*): AgentBuilder = copy(middleware = this.middleware ++ middleware)
