@@ -90,7 +90,23 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
-and [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824).
+[which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824)
+and [the removal of `ConfigKeys` and the move of `llm4s.workspace`](#configkeys-is-removed-and-llm4sworkspace-moves-to-llm4s-workspace-client-2806).
+
+## `ConfigKeys` is removed, and `llm4s.workspace` moves to `llm4s-workspace-client` (#2806)
+
+`org.llm4s.config.ConfigKeys` held one constant, `EMBEDDING_MODEL`, and named none of the other variables core binds.
+It is removed: use the string `"EMBEDDING_MODEL"`, or set `llm4s.embeddings.model` in `application.conf`. The
+variables llm4s reads are listed in
+[the configuration guide](../getting-started/configuration.md#environment-variables-llm4s-reads).
+
+The `llm4s.workspace` block (`WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`) is bound by `llm4s-workspace-client`'s
+`reference.conf` instead of core's. An application that uses `WorkspaceConfigSupport` already depends on that module,
+so nothing changes for it; one that read `llm4s.workspace.*` from core's config without that module binds the keys in
+its own `application.conf`.
+
+The error for an `llm4s.credentials.<id>` entry that sets both `apiKey` and `apiKeyFile` names the variable the
+provider's spec declares in `apiKeyEnv`, not `OPENAI_API_KEY` and `COHERE_API_KEY`.
 
 ## `ReliableClient` has a private constructor (#2797)
 

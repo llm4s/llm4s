@@ -295,7 +295,12 @@ private[llm4s] object NamedProviderConfigValidator:
             // Read once now, so a missing or empty file fails the load; the client reads it again when it changes.
             case Some(file) => keyFromFile(sectionPath, file).map(Some(_))
             case None =>
-              credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+              credentials.resolve(
+                normalized.apiKey.map(_.asKey),
+                s"$sectionPath.apiKey",
+                normalized.provider,
+                env = descriptor.configSpec.apiKeyEnv
+              )
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,

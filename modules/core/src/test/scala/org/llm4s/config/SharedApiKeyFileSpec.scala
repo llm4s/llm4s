@@ -91,6 +91,20 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
       error.message should include("llm4s.credentials.fixturechat sets both apiKey and apiKeyFile")
       error.message should include("unset that variable")
       (error.message should not).include("sk-literal-0001")
+      // Core names no vendor's variable: fixturechat's spec declares no apiKeyEnv (#2806).
+      (error.message should not).include("OPENAI_API_KEY")
+      (error.message should not).include("COHERE_API_KEY")
+    }
+
+    "be refused beside apiKey, naming the variable the provider's spec declares (#2806)" in {
+      val hocon =
+        credentialsFile("fixtureembedding", keyFile("sk-shared-file-0001")) +
+          "llm4s.credentials.fixtureembedding.apiKey = \"sk-literal-0001\"\n"
+      val error = loadEmbeddings(hocon).left.value
+      error.message should include("llm4s.credentials.fixtureembedding sets both apiKey and apiKeyFile")
+      error.message should include(s"unset ${org.llm4s.testutil.FixtureEmbeddingProvider.ApiKeyEnv}")
+      (error.message should not).include("OPENAI_API_KEY")
+      (error.message should not).include("sk-literal-0001")
     }
 
     "be refused when it is not a valid path" in {

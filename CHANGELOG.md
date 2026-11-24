@@ -231,6 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its turn count with no other limit set
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
   [migration](docs/reference/migration.md#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
+- `ConfigKeys` is removed and `llm4s.workspace` is bound by `llm4s-workspace-client`, not core (#2806);
+  [migration](docs/reference/migration.md#configkeys-is-removed-and-llm4sworkspace-moves-to-llm4s-workspace-client-2806).
 - `EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) is removed: select embeddings with `EMBEDDING_MODEL=provider/model`;
   [migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed).
 - Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`), and `ProviderConfigKey`'s
@@ -341,6 +343,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** `MessageRole` is a Scala 3 `enum`. The derived JSON of `FinishReason`, `ServiceTier`, `RequestOption` and `RequestAdjustment`, which durable agent events store, is pinned by tests. [#2809](https://github.com/llm4s/llm4s/issues/2809)
 - **Changed** `LLMConnect.getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` are the only entry points. **Removed** `LLMConnect.fromConfig`, `fromProvider` and the `MetricsCollector` overloads. [#2810](https://github.com/llm4s/llm4s/issues/2810)
 - **Changed** `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback has its own parameter list, so the default options are reachable without named arguments. `MetricsRecording.withMetrics` has no defaulted parameters. [#2810](https://github.com/llm4s/llm4s/issues/2810)
+- **Removed** `org.llm4s.config.ConfigKeys`, and core's `reference.conf` no longer binds `llm4s.workspace`, which
+  `llm4s-workspace-client`'s now does; a shared-credential key-and-file error names the provider's `apiKeyEnv`
+  ([#2806](https://github.com/llm4s/llm4s/issues/2806)).
 - **Changed** The context compression pipeline (`ContextManager`, `ContextConfig`, `ContextStep`,
   `ManagedConversation`, `TokenWindow`, `DeterministicCompressor`, `ToolOutputCompressor`, `LLMCompressor`,
   `HistoryCompressor`, `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; token counting stays `@Stable`.

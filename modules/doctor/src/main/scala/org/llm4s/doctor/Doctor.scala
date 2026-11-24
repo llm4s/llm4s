@@ -354,7 +354,9 @@ object Doctor {
       DoctorCheck.pass(Key, s"section '$name' authenticates with $setting and needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
-      SharedCredentials.read(source).resolve(section.apiKey.map(_.asKey), ownPath, descriptor.id) match {
+      SharedCredentials
+        .read(source)
+        .resolve(section.apiKey.map(_.asKey), ownPath, descriptor.id, env = descriptor.configSpec.apiKeyEnv) match {
         case Right(Some(resolved)) => DoctorCheck.pass(Key, s"found at ${resolved.path} (the value is not shown)")
         case Right(None) =>
           DoctorCheck

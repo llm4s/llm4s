@@ -255,7 +255,8 @@ private[config] object EmbeddingsConfigLoader {
         section.apiKey.map(_.reveal),
         EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"),
         descriptor.id,
-        keyFile
+        keyFile,
+        descriptor.configSpec.apiKeyEnv
       )
 
   /**

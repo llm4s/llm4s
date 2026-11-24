@@ -80,8 +80,8 @@ import scala.util.Try
  * has the same methods: each method here calls the one of the same name on the [[Llm4sSettings]] of the
  * process-wide configuration.
  *
- * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
- *      `reference.conf` binds.
+ * The environment variables core's `reference.conf` binds are listed in
+ * `docs/getting-started/configuration.md#environment-variables-llm4s-reads`.
  */
 @Stable
 object Llm4sConfig {

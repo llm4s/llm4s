@@ -1159,7 +1159,7 @@ also set in `application.conf` or with `-D`.
 | `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD` | `llm4s.http.proxy.url`, `.nonProxyHosts`, `.username`, `.password` ([Corporate networks](#corporate-networks-a-proxy-and-a-custom-ca)) | `llm4s-core` |
 | `LLM4S_TRUSTSTORE`, `LLM4S_TRUSTSTORE_PASSWORD`, `LLM4S_KEYSTORE`, `LLM4S_KEYSTORE_PASSWORD` | `llm4s.http.tls.trustStore`, `.trustStorePassword`, `.keyStore`, `.keyStorePassword` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
-| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
+| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-workspace-client` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-agent-tools` |
 | `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
 | `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |

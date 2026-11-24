@@ -84,7 +84,7 @@ object JevConfigLoader {
 
     for {
       s        <- settings
-      resolved <- SharedCredentials.read(source).resolve(s.apiKey, s"$Section.apiKey", Id)
+      resolved <- SharedCredentials.read(source).resolve(s.apiKey, s"$Section.apiKey", Id, env = Seq(TYPESAFE_API_KEY))
       key <- resolved.toRight(
         ConfigurationError(
           "Missing Jev apiKey: " + SharedCredentials.missingKeyHint(Seq(TYPESAFE_API_KEY), Id, Section)
