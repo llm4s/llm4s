@@ -49,6 +49,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
 [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
+[`SQLiteVectorStore` escapes metadata and filters exactly](#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759),
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
@@ -2353,6 +2354,23 @@ unless you use it.
   and a reclaimed thread's fence. They never remove an item.
 - **A custom `LongTermStore`** has a contract to pass: mix `LongTermStoreContract` (`llm4s-agent-testkit`) into a
   spec. `InMemoryLongTermStore`'s behaviour is unchanged.
+
+## `SQLiteVectorStore` escapes metadata and filters exactly (#2759)
+
+Metadata was written as JSON without escaping, so a key or value with a quote was cut short when read, and filters
+matched with `LIKE` on that text. No API changes; stored files and filter results do:
+
+- **Existing files need nothing.** Opening one changes no row. A row written from now on starts with a space and is
+  JSON; any other row is read, and filtered, as the unescaped text 0.6.0 and earlier wrote, and is replaced when you
+  upsert it.
+- **Some old text is ambiguous**, where a key or value held quotes in the arrangement of a separator: `","` or `":"`, a
+  key or value ending in `",`, a key ending in `":`. JSON stored as a value can be one. Such a row may read as other entries
+  than were written: upsert it again. So may a row another program wrote as JSON with backslash escapes.
+- **0.6.0 can open the file**, but does not unescape the new rows: a value is cut at its first quote and a backslash is
+  doubled.
+- **Filters compare exactly.** `Equals`, `Contains` and `In` are case-sensitive, `%` and `_` are ordinary characters,
+  and `Contains` and `HasKey` look only at the named key. `deleteByFilter` deletes fewer rows where it used to delete
+  look-alikes (`user_1` also deleted `userX1`). `In` works with more than one value, and matches nothing with none.
 
 ## `RAG.ingestChunks` takes `DocumentChunk`s (#2732)
 

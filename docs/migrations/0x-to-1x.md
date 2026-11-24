@@ -62,6 +62,7 @@ The breaking changes since 0.6.0, in the CHANGELOG's `[Unreleased]` section:
   [`DocumentRegistry` is source-scoped](../reference/migration#documentregistry-is-source-scoped-2714),
   [RAG tracing covers every model call and each query's stages](../reference/migration#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
   [`RAG.ingestChunks` takes `DocumentChunk`s](../reference/migration#ragingestchunks-takes-documentchunks-2732),
+  [`SQLiteVectorStore` escapes metadata and filters exactly](../reference/migration#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759),
   [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](../reference/migration#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 - Configuration:
   [the legacy embedding provider selector is removed](../reference/migration#the-legacy-embedding-provider-selector-is-removed),

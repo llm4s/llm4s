@@ -239,6 +239,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
 - `RAG.ingestChunks` takes `Seq[DocumentChunk]` and returns `Seq[IndexedChunk]`, and `SearchIndex.ingest` returns the
   stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
+- `SQLiteVectorStore`'s metadata filters are case-sensitive and read `%` and `_` literally, as `MetadataFilter`
+  describes (#2759);
+  [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
 - `DirectoryLoader` skips symbolic links that leave its root, and a positional pattern on `UrlLoader`, `CrawlerConfig`
   or `DirectoryLoader` gains a field (#2724); [migration](docs/reference/migration.md#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 - Opening a `PostgresCheckpointer` moves its schema from version 5 to 6, which an older build refuses: upgrade every
@@ -602,6 +605,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 - **Changed** `EmbeddingProviderConfig` carries `providerId: ProviderId`, `baseUrl: BaseUrl`, `model: ModelName` and `apiKey: Option[Secret]` (a keyless provider has `None`); `EmbeddingClient.from(config, options)` resolves the provider from it, and `RAGASFactory.fromConfigs` / `basicFromConfigs` take the config alone ([migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805), [#2804](https://github.com/llm4s/llm4s/issues/2804).
 - **Changed** `LocalEmbeddingModels` and the local encoders' dimension table (`LocalEmbeddingModels.dimension`) moved to `llm4s-rag`; `ModelDimensionRegistry` answers from registered providers only, and `localDimension` / `LocalProvider` are removed [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Fixed** `SQLiteVectorStore` metadata with a quote, backslash or control character survives a write and a read, and
+  its filters compare exactly instead of with `LIKE` on the JSON text; earlier rows still read
+  [#2759](https://github.com/llm4s/llm4s/issues/2759);
+  [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
 
 ### Observability
 
