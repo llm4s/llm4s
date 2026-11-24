@@ -13,7 +13,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.it.Tier
+import org.llm4s.it.{ GeminiSmoke, Tier }
 import org.llm4s.it.tags.Cloud
 
 /**
@@ -23,7 +23,8 @@ import org.llm4s.it.tags.Cloud
  * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.smoke.*"`
  * or the `sbt testSmoke` alias.
  *
- * Requires: `GEMINI_API_KEY` environment variable.
+ * Requires: `GOOGLE_API_KEY`, or `GEMINI_API_KEY` when that is unset. The model and the key lookup are
+ * [[org.llm4s.it.GeminiSmoke]]'s, shared with the other Gemini `@Cloud` suites.
  */
 @Cloud
 class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
@@ -31,12 +32,12 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
-  private val apiKey: Option[String] = Option(System.getenv("GEMINI_API_KEY")).filter(_.nonEmpty)
+  private val apiKey: Option[String] = GeminiSmoke.apiKey
 
   private def config(key: String): GeminiConfig =
     GeminiConfig
       .fromValues(
-        modelName = ModelName("gemini-1.5-flash"),
+        modelName = ModelName(GeminiSmoke.Model),
         apiKey = Secret(key),
         baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta")
       )
@@ -45,7 +46,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
   "Gemini" should "complete a basic request" in {
-    Tier.require(apiKey.isDefined, "GEMINI_API_KEY not set")
+    Tier.require(apiKey.isDefined, s"${GeminiSmoke.KeyEnvVars} not set")
 
     val clientResult = GeminiClient(config(apiKey.get))
     withClue(s"Client creation failed: ${clientResult.swap.toOption}") {
@@ -62,7 +63,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   }
 
   it should "stream a response" in {
-    Tier.require(apiKey.isDefined, "GEMINI_API_KEY not set")
+    Tier.require(apiKey.isDefined, s"${GeminiSmoke.KeyEnvVars} not set")
 
     val client = GeminiClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
@@ -86,7 +87,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
 
   override protected def providerLabel: String                          = "Gemini"
-  override protected def apiKeyEnvVar: String                           = "GEMINI_API_KEY"
+  override protected def apiKeyEnvVar: String                           = GeminiSmoke.KeyEnvVars
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = GeminiClient(config(key))
 
