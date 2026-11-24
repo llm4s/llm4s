@@ -316,7 +316,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       }
       open shouldBe empty
       ms.last("type").str shouldBe "assistant"
-      ms.last("data")("toolCalls").arr shouldBe empty
+      ms.last("toolCalls").arr shouldBe empty
     }
   }
 

@@ -55,7 +55,10 @@ internal class RecordingClient(private val reply: Either<LLMError, Completion>) 
 }
 
 /** A reply with text, a model, usage, a cost and a tool call; Scala types appear only in building it. */
-internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.apply(0.0015)): Completion =
+internal fun reply(
+    text: String = "Let me check.",
+    cost: Option<scala.math.BigDecimal> = Option.apply(scala.math.BigDecimal(BigDecimal("0.0015"))),
+): Completion =
     Completion.apply(
         "reply-1", Instant.EPOCH, "gpt-4o-2024-08-06",
         AssistantMessage.apply(
