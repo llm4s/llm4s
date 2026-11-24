@@ -183,6 +183,59 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     }
   }
 
+  private lazy val noopTool =
+    org.llm4s.toolapi
+      .ToolBuilder[String](
+        "noop",
+        "Does nothing",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
+      )
+      .withHandler(_ => Right("ok"))
+      .buildSafe()
+      .fold(e => fail(e.formatted), identity)
+
+  it should "send gpt-6-luna a request with tools at reasoning_effort none, and report it (#2886)" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        LocalProviderTestServer.openAICompletion("hi", "gpt-6-luna")
+      )
+    } { baseUrl =>
+      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-6-luna", Secret("sk-test"), baseUrl).value).value
+      val options =
+        CompletionOptions(maxTokens = Some(256)).withTools(Seq(noopTool)).withReasoning(ReasoningEffort.High)
+      val completion = client.complete(hello, options).value
+      client.close()
+
+      val body = seen.get().body
+      body("reasoning_effort").str shouldBe "none"
+      body("max_completion_tokens").num shouldBe 256
+      body.obj.contains("max_tokens") shouldBe false
+      body("tools").arr should have size 1
+      completion.adjustments.map(_.option) should contain(org.llm4s.llmconnect.model.RequestOption.Reasoning)
+    }
+  }
+
+  it should "refuse a request with tools to gpt-6.1-terra before sending it (#2886)" in {
+    val requests = new java.util.concurrent.atomic.AtomicInteger()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      requests.incrementAndGet()
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "x"))
+    } { baseUrl =>
+      val client  = OpenAIClient(OpenAIConfig.fromValues("gpt-6.1-terra", Secret("sk-test"), baseUrl).value).value
+      val options = CompletionOptions().withTools(Seq(noopTool))
+      val sync    = client.complete(hello, options)
+      val stream  = client.streamComplete(hello, options)(_ => ())
+      client.close()
+
+      Seq(sync, stream).foreach(_.left.value.message should include("Responses API"))
+      requests.get() shouldBe 0
+    }
+  }
+
   it should "map a 401 to an AuthenticationError naming the provider" in {
     LocalProviderTestServer.withServer("/") { exchange =>
       exchange.getRequestBody.readAllBytes()
