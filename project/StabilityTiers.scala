@@ -802,11 +802,6 @@ object StabilityTiers {
       "org.llm4s.context.tokens.TokenizerAccuracy.Unknown",
       "a fixed accuracy case holding only its description"
     ),
-    GrowthExempt(
-      "org.llm4s.http.MultipartPart.FilePart",
-      "a multipart file part is exactly a name, a path and a filename"
-    ),
-    GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
     GrowthExempt("org.llm4s.llmconnect.ProviderExchangeLogging.Enabled", "a single-value wrapper over the sink"),
     GrowthExempt(

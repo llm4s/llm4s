@@ -147,26 +147,49 @@ class NetworkSecuritySpec extends AnyFlatSpec with Matchers {
     // FTP is blocked by default
     NetworkSecurity.validateUrl("ftp://8.8.8.8/file").isLeft shouldBe true
     // But allowed when explicitly permitted (still fails on DNS for hostname)
-    NetworkSecurity.validateUrl("ftp://8.8.8.8/file", allowedProtocols = Set("ftp")).isRight shouldBe true
+    NetworkSecurity.validateUrl("ftp://8.8.8.8/file", Set.empty, Set("ftp")).isRight shouldBe true
   }
 
-  "NetworkSecurity.validateIP" should "reject blocked IPs" in {
-    NetworkSecurity.validateIP("127.0.0.1").isLeft shouldBe true
-    NetworkSecurity.validateIP("192.168.1.1").isLeft shouldBe true
-    NetworkSecurity.validateIP("10.0.0.1").isLeft shouldBe true
-    NetworkSecurity.validateIP("169.254.169.254").isLeft shouldBe true
-  }
-
-  it should "allow public IPs" in {
-    NetworkSecurity.validateIP("8.8.8.8").isRight shouldBe true
-    NetworkSecurity.validateIP("1.1.1.1").isRight shouldBe true
-  }
-
-  it should "reject invalid IP strings" in {
-    NetworkSecurity.validateIP("not-an-ip") match {
-      case Left(error) => error.message should include("Invalid IP")
-      case Right(_)    => fail("Expected invalid IP to be rejected")
+  it should "refuse with an error that is not retryable (#2826)" in {
+    val refusals = Seq(
+      NetworkSecurity.validateUrl("http://localhost:8080/api"),
+      NetworkSecurity.validateUrl("http://169.254.169.254/latest/meta-data/"),
+      NetworkSecurity.validateUrl("ftp://example.com/file.txt"),
+      NetworkSecurity.validateUrl("not-a-valid-url"),
+      NetworkSecurity.validateHostname("192.168.1.1"),
+      NetworkSecurity.validateHostname("")
+    )
+    refusals.foreach { refusal =>
+      val error = refusal.left.toOption.getOrElse(fail("expected a refusal"))
+      withClue(error.message)(org.llm4s.error.LLMError.isRecoverable(error) shouldBe false)
     }
+  }
+
+  it should "return the addresses it vetted, so the caller can connect to one of them (#2826)" in {
+    NetworkSecurity.validateUrl("https://8.8.8.8/dns-query") shouldBe Right(Seq(InetAddress.getByName("8.8.8.8")))
+    NetworkSecurity.validateHostname("1.1.1.1") shouldBe Right(Seq(InetAddress.getByName("1.1.1.1")))
+  }
+
+  it should "report a name that does not resolve as a retryable NetworkError naming the host" in {
+    // .invalid never resolves (RFC 2606)
+    NetworkSecurity.validateHostname("no-such-host.invalid") match {
+      case Left(error: org.llm4s.error.NetworkError) =>
+        error.endpoint shouldBe "no-such-host.invalid"
+        org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
+      case other => fail(s"expected a NetworkError, got $other")
+    }
+  }
+
+  "NetworkSecurity.validateHostname" should "reject blocked IP literals" in {
+    NetworkSecurity.validateHostname("127.0.0.1").isLeft shouldBe true
+    NetworkSecurity.validateHostname("192.168.1.1").isLeft shouldBe true
+    NetworkSecurity.validateHostname("10.0.0.1").isLeft shouldBe true
+    NetworkSecurity.validateHostname("169.254.169.254").isLeft shouldBe true
+  }
+
+  it should "allow public IP literals" in {
+    NetworkSecurity.validateHostname("8.8.8.8").isRight shouldBe true
+    NetworkSecurity.validateHostname("1.1.1.1").isRight shouldBe true
   }
 
   "NetworkSecurity.isBlockedIP" should "handle IPv6 loopback" in {
@@ -175,11 +198,5 @@ class NetworkSecuritySpec extends AnyFlatSpec with Matchers {
 
   "NetworkSecurity constants" should "have correct cloud metadata IP" in {
     NetworkSecurity.CloudMetadataIP shouldBe "169.254.169.254"
-  }
-
-  it should "have default blocked hostnames" in {
-    NetworkSecurity.DefaultBlockedHostnames should contain("localhost")
-    NetworkSecurity.DefaultBlockedHostnames should contain("metadata.google.internal")
-    NetworkSecurity.DefaultBlockedHostnames should contain("metadata.internal")
   }
 }

@@ -3,7 +3,7 @@ package org.llm4s.mcp
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -110,7 +110,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
     logged.foreach(line => (line should not).include("hunter2-SENTINEL"))
   }
 
-  Seq[(String, Llm4sHttpClient => MCPTransportImpl, Class[?])](
+  Seq[(String, StubbedHttpCalls => MCPTransportImpl, Class[?])](
     (
       "StreamableHTTPTransportImpl",
       http =>
@@ -127,8 +127,8 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
       val nonJsonRpc = s"""{"api_key":"hunter2-SENTINEL","x":"${"x" * (1024 * 1024)}"}"""
       val response   = """{"jsonrpc":"2.0","id":"1","result":{}}"""
       val sseBody    = s"data: $nonJsonRpc\n\ndata: $response\n\n"
-      val http       = stub[Llm4sHttpClient]
-      (http.post _)
+      val http       = stub[StubbedHttpCalls]
+      (http.onPost _)
         .when(*, *, *, *)
         .returns(Right(HttpResponse(200, sseBody, Map("content-type" -> Seq("text/event-stream")))))
 

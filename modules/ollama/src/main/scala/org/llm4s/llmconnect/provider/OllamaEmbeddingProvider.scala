@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -66,7 +66,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create(cfg.network)
+    private val httpClient = Llm4sHttpClient.create(HttpClientOptions(cfg.network))
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =

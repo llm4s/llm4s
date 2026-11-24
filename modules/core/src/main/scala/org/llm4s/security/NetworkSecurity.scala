@@ -1,7 +1,7 @@
 package org.llm4s.security
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.NetworkError
+import org.llm4s.error.{ LLMError, NetworkError, ValidationError }
 import org.llm4s.types.Result
 
 import java.net.{ InetAddress, URI }
@@ -43,17 +43,25 @@ import scala.util.Try
  * == Name resolution ==
  * `validateUrl` and `validateHostname` resolve the host with `InetAddress.getAllByName`, which cannot be
  * interrupted: a caller that runs them under a deadline (as the HTTP tool does) can stop waiting, but the thread doing
- * the lookup stays blocked until the system resolver answers or gives up, by its own timeout. The address is resolved
- * again when the connection is made, so a host whose answer changes in between (DNS rebinding) is not covered.
+ * the lookup stays blocked until the system resolver answers or gives up, by its own timeout.
+ *
+ * Both return the addresses they vetted. A caller that connects to one of those addresses (sending the original
+ * `Host` header and, for `https`, the original server name) is safe from a host whose DNS answer changes after the
+ * check (DNS rebinding); a caller that hands the URL to a client that resolves the name again is not.
+ *
+ * == Errors ==
+ * A refusal - a blocked host name or address, a protocol that is not allowed, a URL that cannot be parsed - is a
+ * [[org.llm4s.error.ValidationError]]: asking again gives the same answer, so it is not retryable. A name that
+ * cannot be resolved is a [[org.llm4s.error.NetworkError]], which is.
  *
  * @example
  * {{{
  * import org.llm4s.security.NetworkSecurity
  *
  * // Validate a URL before fetching
- * NetworkSecurity.validateUrl("https://example.com/api") // Right(())
- * NetworkSecurity.validateUrl("http://169.254.169.254/") // Left(NetworkError)
- * NetworkSecurity.validateUrl("http://192.168.1.1/admin") // Left(NetworkError)
+ * NetworkSecurity.validateUrl("https://example.com/api") // Right(the addresses example.com resolves to)
+ * NetworkSecurity.validateUrl("http://169.254.169.254/") // Left(ValidationError)
+ * NetworkSecurity.validateUrl("http://192.168.1.1/admin") // Left(ValidationError)
  * }}}
  */
 @Stable
@@ -62,7 +70,7 @@ object NetworkSecurity {
   /**
    * Default blocked hostnames (in addition to IP-based blocking).
    */
-  val DefaultBlockedHostnames: Set[String] = Set(
+  private val DefaultBlockedHostnames: Set[String] = Set(
     "localhost",
     "localhost.localdomain",
     "metadata.google.internal", // GCP metadata
@@ -189,137 +197,119 @@ object NetworkSecurity {
   }
 
   /**
+   * Check if a hostname is one of the blocked ones (`localhost` and the cloud metadata names) or a subdomain of one
+   * (case-insensitive).
+   *
+   * @param hostname The hostname to check
+   * @return true if the hostname should be blocked
+   */
+  def isBlockedHostname(hostname: String): Boolean = isBlockedHostname(hostname, Set.empty)
+
+  /**
    * Check if a hostname should be blocked (case-insensitive).
    *
    * @param hostname The hostname to check
-   * @param additionalBlocked Additional hostnames to block
+   * @param additionalBlocked Hostnames to block, with their subdomains, on top of the built-in ones
    * @return true if the hostname should be blocked
    */
-  def isBlockedHostname(
-    hostname: String,
-    additionalBlocked: Set[String] = Set.empty
-  ): Boolean = {
+  def isBlockedHostname(hostname: String, additionalBlocked: Set[String]): Boolean = {
     val normalizedHostname = hostname.toLowerCase(Locale.ROOT).trim
     val allBlocked         = DefaultBlockedHostnames ++ additionalBlocked.map(_.toLowerCase(Locale.ROOT))
 
     allBlocked.exists(blocked => normalizedHostname == blocked || normalizedHostname.endsWith(s".$blocked"))
   }
 
+  /** The URL protocols [[validateUrl(urlString:String)*]] allows. */
+  private val DefaultAllowedProtocols: Set[String] = Set("http", "https")
+
   /**
-   * Validate a URL for SSRF safety.
+   * Validate an `http` or `https` URL for SSRF safety, and return the addresses its host may be reached at.
    *
-   * This performs DNS resolution and checks if the resolved IP is in a blocked range.
+   * This performs DNS resolution and checks that no resolved address is in a blocked range.
    * It also validates the hostname against known blocked hostnames.
    *
    * The lookup (`InetAddress.getAllByName`) cannot be interrupted, so it can block the calling thread for as long as
    * the system resolver takes, whatever deadline the caller has; see "Name resolution" above.
    *
    * @param urlString The URL to validate
-   * @param additionalBlockedHostnames Additional hostnames to block
-   * @param allowedProtocols Allowed URL protocols (default: http, https)
-   * @return Right(()) if safe, Left(NetworkError) if blocked
+   * @return the vetted addresses of the URL's host, never empty; `Left(ValidationError)` if the URL is refused,
+   *         `Left(NetworkError)` if its host cannot be resolved
+   */
+  def validateUrl(urlString: String): Result[Seq[InetAddress]] =
+    validateUrl(urlString, Set.empty, DefaultAllowedProtocols)
+
+  /**
+   * [[validateUrl(urlString:String)*]] with more hostnames blocked and a chosen set of protocols.
+   *
+   * @param urlString The URL to validate
+   * @param additionalBlockedHostnames Hostnames to block, with their subdomains, on top of the built-in ones
+   * @param allowedProtocols Allowed URL protocols, in lower case
+   * @return the vetted addresses of the URL's host, never empty; `Left(ValidationError)` if the URL is refused,
+   *         `Left(NetworkError)` if its host cannot be resolved
    */
   def validateUrl(
     urlString: String,
-    additionalBlockedHostnames: Set[String] = Set.empty,
-    allowedProtocols: Set[String] = Set("http", "https")
-  ): Result[Unit] = {
-    val result = for {
-      // Parse URL
-      uri <- Try(new URI(urlString)).toEither.left.map(e => s"Invalid URL: ${e.getMessage}")
-      url <- Try(uri.toURL).toEither.left.map(e => s"Cannot convert to URL: ${e.getMessage}")
-
-      // Check protocol
+    additionalBlockedHostnames: Set[String],
+    allowedProtocols: Set[String]
+  ): Result[Seq[InetAddress]] =
+    for {
+      uri <- Try(new URI(urlString)).toEither.left.map(e => refused("url", s"Invalid URL: ${e.getMessage}"))
+      url <- Try(uri.toURL).toEither.left.map(e => refused("url", s"Cannot convert to URL: ${e.getMessage}"))
       protocol = Option(url.getProtocol).map(_.toLowerCase(Locale.ROOT)).getOrElse("")
       _ <- Either.cond(
         allowedProtocols.contains(protocol),
         (),
-        s"Protocol '$protocol' is not allowed. Allowed: ${allowedProtocols.mkString(", ")}"
+        refused("url", s"Protocol '$protocol' is not allowed. Allowed: ${allowedProtocols.toSeq.sorted.mkString(", ")}")
       )
-
-      // Get hostname
       host = Option(url.getHost).getOrElse("")
-      _ <- Either.cond(host.nonEmpty, (), "URL has no host")
-
-      // Check hostname blocklist
-      _ <- Either.cond(
-        !isBlockedHostname(host, additionalBlockedHostnames),
-        (),
-        s"Hostname '$host' is blocked"
-      )
-
-      // Resolve DNS and check IP
-      addresses <- Try(InetAddress.getAllByName(host)).toEither.left
-        .map(e => s"DNS resolution failed for '$host': ${e.getMessage}")
-
-      // Check all resolved IPs (some hosts may resolve to multiple addresses)
-      _ <- addresses.find(isBlockedIP) match {
-        case Some(blockedIP) =>
-          Left(s"Resolved IP '${blockedIP.getHostAddress}' for host '$host' is in a blocked range")
-        case None =>
-          Right(())
-      }
-    } yield ()
-
-    result.left.map(msg => NetworkError(msg, None, "ssrf-protection"))
-  }
+      _         <- Either.cond(host.nonEmpty, (), refused("url", "URL has no host"))
+      addresses <- vetted("url", host, additionalBlockedHostnames)
+    } yield addresses
 
   /**
-   * Validate a hostname for SSRF safety (without full URL parsing).
+   * Validate a hostname for SSRF safety (without full URL parsing), and return the addresses it may be reached at.
    *
    * Like `validateUrl`, this resolves the name with `InetAddress.getAllByName`, which cannot be interrupted: the
    * calling thread waits for the system resolver, whatever deadline the caller has.
    *
    * @param hostname The hostname to validate
-   * @param additionalBlockedHostnames Additional hostnames to block
-   * @return Right(()) if safe, Left(NetworkError) if blocked
+   * @return the vetted addresses of the host, never empty; `Left(ValidationError)` if the host is refused,
+   *         `Left(NetworkError)` if it cannot be resolved
    */
-  def validateHostname(
-    hostname: String,
-    additionalBlockedHostnames: Set[String] = Set.empty
-  ): Result[Unit] = {
-    val result = for {
-      _ <- Either.cond(hostname.nonEmpty, (), "Hostname is empty")
-
-      _ <- Either.cond(
-        !isBlockedHostname(hostname, additionalBlockedHostnames),
-        (),
-        s"Hostname '$hostname' is blocked"
-      )
-
-      // Resolve DNS and check IP
-      addresses <- Try(InetAddress.getAllByName(hostname)).toEither.left
-        .map(e => s"DNS resolution failed for '$hostname': ${e.getMessage}")
-
-      _ <- addresses.find(isBlockedIP) match {
-        case Some(blockedIP) =>
-          Left(s"Resolved IP '${blockedIP.getHostAddress}' for host '$hostname' is in a blocked range")
-        case None =>
-          Right(())
-      }
-    } yield ()
-
-    result.left.map(msg => NetworkError(msg, None, "ssrf-protection"))
-  }
+  def validateHostname(hostname: String): Result[Seq[InetAddress]] = validateHostname(hostname, Set.empty)
 
   /**
-   * Validate an IP address string directly.
+   * [[validateHostname(hostname:String)*]] with more hostnames blocked.
    *
-   * @param ipString The IP address string to validate
-   * @return Right(()) if safe, Left(NetworkError) if blocked
+   * @param hostname The hostname to validate
+   * @param additionalBlockedHostnames Hostnames to block, with their subdomains, on top of the built-in ones
    */
-  def validateIP(ipString: String): Result[Unit] = {
-    val result = for {
-      ip <- Try(InetAddress.getByName(ipString)).toEither.left
-        .map(e => s"Invalid IP address '$ipString': ${e.getMessage}")
+  def validateHostname(hostname: String, additionalBlockedHostnames: Set[String]): Result[Seq[InetAddress]] =
+    for {
+      _         <- Either.cond(hostname.nonEmpty, (), refused("hostname", "Hostname is empty"))
+      addresses <- vetted("hostname", hostname, additionalBlockedHostnames)
+    } yield addresses
 
+  /** The addresses `host` resolves to, when the name and every one of them is allowed. */
+  private def vetted(field: String, host: String, additionalBlockedHostnames: Set[String]): Result[Seq[InetAddress]] =
+    for {
       _ <- Either.cond(
-        !isBlockedIP(ip),
+        !isBlockedHostname(host, additionalBlockedHostnames),
         (),
-        s"IP address '$ipString' is in a blocked range"
+        refused(field, s"Hostname '$host' is blocked")
       )
-    } yield ()
+      // Not a refusal: the resolver may answer the next time it is asked.
+      addresses <- Try(InetAddress.getAllByName(host).toSeq).toEither.left
+        .map(e => NetworkError(s"DNS resolution failed for '$host': ${e.getMessage}", Some(e), host))
+      _ <- Either.cond(addresses.nonEmpty, (), refused(field, s"DNS resolution returned no address for '$host'"))
+      // Every address is checked: a host may resolve to several, and a client may connect to any of them.
+      _ <- addresses.find(isBlockedIP) match {
+        case Some(blockedIP) =>
+          Left(refused(field, s"Resolved IP '${blockedIP.getHostAddress}' for host '$host' is in a blocked range"))
+        case None => Right(())
+      }
+    } yield addresses
 
-    result.left.map(msg => NetworkError(msg, None, "ssrf-protection"))
-  }
+  /** A policy refusal: not retryable, since the same URL or host is refused every time. */
+  private def refused(field: String, reason: String): LLMError = ValidationError(field, reason)
 }

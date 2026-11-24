@@ -11,7 +11,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "validate and normalize a full providers config" in {
       val raw = RawProvidersConfig(
-        selectedProvider = Some(ProviderName("fixturechat-primary")),
+        defaultProvider = Some(ProviderName("fixturechat-primary")),
         namedProviders = Map(
           ProviderName("fixturechat-primary") -> RawNamedProviderSection(
             provider = Some(" fixturechat "),
@@ -33,7 +33,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
-          cfg.selectedProvider.map(_.asName) shouldBe Some("fixturechat-primary")
+          cfg.defaultProvider.map(_.asName) shouldBe Some("fixturechat-primary")
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
 
           val primary = cfg.namedProviders(ProviderName("fixturechat-primary"))
@@ -53,7 +53,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "allow providers config without a selected provider" in {
       val raw = RawProvidersConfig(
-        selectedProvider = None,
+        defaultProvider = None,
         namedProviders = Map(
           ProviderName("fixturechat-main") -> RawNamedProviderSection(
             provider = Some("fixturechat"),
@@ -66,7 +66,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
-          cfg.selectedProvider shouldBe None
+          cfg.defaultProvider shouldBe None
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-main")
           cfg.namedProviders(ProviderName("fixturechat-main")).provider shouldBe ProviderId("fixturechat")
         case Left(err) =>
@@ -75,7 +75,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "fail clearly when the selected provider is not defined" in {
       val raw = RawProvidersConfig(
-        selectedProvider = Some(ProviderName("missing-provider")),
+        defaultProvider = Some(ProviderName("missing-provider")),
         namedProviders = Map(
           ProviderName("fixturechat-primary") -> RawNamedProviderSection(
             provider = Some("fixturechat"),
@@ -95,7 +95,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "surface normalization errors from invalid named providers" in {
       val raw = RawProvidersConfig(
-        selectedProvider = Some(ProviderName("broken")),
+        defaultProvider = Some(ProviderName("broken")),
         namedProviders = Map(
           ProviderName("broken") -> RawNamedProviderSection(
             provider = None,

@@ -36,7 +36,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(cfg) =>
-          cfg.selectedProvider.map(_.asName) shouldBe Some("fixturechat-primary")
+          cfg.defaultProvider.map(_.asName) shouldBe Some("fixturechat-primary")
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
 
           val primary = cfg.namedProviders(ProviderName("fixturechat-primary"))
@@ -81,20 +81,20 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(cfg) =>
-          val selectedProviderName =
-            cfg.selectedProvider.getOrElse(fail("Expected selected provider to be defined"))
+          val defaultProviderName =
+            cfg.defaultProvider.getOrElse(fail("Expected selected provider to be defined"))
 
-          val selectedProvider =
+          val defaultProvider =
             cfg.namedProviders
-              .get(selectedProviderName)
+              .get(defaultProviderName)
               .getOrElse(
-                fail(s"Expected selected provider '${selectedProviderName.asName}' to exist in namedProviders")
+                fail(s"Expected selected provider '${defaultProviderName.asName}' to exist in namedProviders")
               )
 
-          selectedProviderName.asName shouldBe "fixturechat-main"
-          selectedProvider.provider shouldBe ProviderId("fixturechat")
-          selectedProvider.model.asString shouldBe "fixture-model"
-          selectedProvider.apiKey.map(_.asKey) shouldBe Some("fixture-key")
+          defaultProviderName.asName shouldBe "fixturechat-main"
+          defaultProvider.provider shouldBe ProviderId("fixturechat")
+          defaultProvider.model.asString shouldBe "fixture-model"
+          defaultProvider.apiKey.map(_.asKey) shouldBe Some("fixture-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -146,7 +146,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(cfg) =>
-          cfg.selectedProvider shouldBe None
+          cfg.defaultProvider shouldBe None
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")

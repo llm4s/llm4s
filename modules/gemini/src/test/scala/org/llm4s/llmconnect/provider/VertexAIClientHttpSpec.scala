@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.VertexAIConfig
 import org.llm4s.llmconnect.model._
@@ -85,10 +85,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     }
 
   private def streamingClient(sseData: String): VertexAIClient = {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8)))))
     new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
@@ -102,15 +102,15 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
    *
    * This covers all three auth-provider code paths, making tests environment-agnostic.
    */
-  private def stubHttpWithAuth(mockHttp: Llm4sHttpClient, completionResponse: HttpResponse): VertexAIClient = {
-    (mockHttp.post _).when(*, *, *, *).onCall {
+  private def stubHttpWithAuth(mockHttp: StubbedHttpCalls, completionResponse: HttpResponse): VertexAIClient = {
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
           else completionResponse
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
 
@@ -124,7 +124,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   // ============================================================
 
   "VertexAIClient.complete()" should "parse text content from a 200 response" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -138,7 +138,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   it should "report the sources of a grounded answer as citations (#1216)" in {
     val body =
       """{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}}]}"""
-    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body))
+    val client = stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(body))
 
     client.complete(conversation("Hi"), CompletionOptions()).toOption.get.citations shouldBe List(
       Citation(url = "https://src/a", title = Some("A")),
@@ -147,7 +147,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "parse token usage from the response" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -164,7 +164,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
          | "usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":40,
          | "cachedContentTokenCount":64,"totalTokenCount":145}}""".stripMargin
-    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body))
+    val client = stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(body))
 
     client.complete(conversation("Hi"), CompletionOptions()).toOption.get.usage shouldBe Some(
       TokenUsage(
@@ -178,7 +178,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return an empty answer with its usage when thinking spent the whole token budget (no parts)" in {
-    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(noPartsMaxTokensBody))
+    val client = stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(noPartsMaxTokensBody))
 
     val completion = client.complete(conversation("Hi"), CompletionOptions()) match {
       case Right(c) => c
@@ -193,7 +193,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   noContentShapes.foreach { case (body, expected, filtered) =>
     it should s"fail naming the reason for a candidate with no parts: $expected (${body.take(40)})" in {
       noContentMessage(
-        stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body)).complete(conversation("Hi"), CompletionOptions()),
+        stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(body)).complete(conversation("Hi"), CompletionOptions()),
         filtered
       ) should include(expected)
     }
@@ -201,7 +201,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   it should "fail with a ContentFilteredError naming the block reason when Gemini blocked the prompt" in {
     noContentMessage(
-      stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(promptBlockedBody))
+      stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(promptBlockedBody))
         .complete(conversation("Hi"), CompletionOptions())
     ) should include("blocked the prompt: blockReason PROHIBITED_CONTENT")
   }
@@ -209,7 +209,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   it should "parse a tool call response" in {
     val toolCallBody =
       """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"London"}}}],"role":"model"}}]}"""
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpOk(toolCallBody))
 
     val result = client.complete(conversation("What's the weather?"), CompletionOptions())
@@ -221,7 +221,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return AuthenticationError on HTTP 401" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpErr(401))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -231,7 +231,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return AuthenticationError on HTTP 403" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpErr(403))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -241,7 +241,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return RateLimitError on HTTP 429" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpErr(429))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -251,7 +251,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return ValidationError on HTTP 400" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpErr(400))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -261,7 +261,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "return ServiceError on HTTP 500" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpErr(500))
 
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -272,8 +272,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   it should "send Authorization Bearer header to the Vertex AI endpoint" in {
     var capturedHeaders: Map[String, String] = Map.empty
-    val mockHttp                             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp                             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
@@ -283,7 +283,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           }
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -298,8 +298,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   it should "build the correct Vertex AI generateContent URL" in {
     var capturedUrl = ""
-    val mockHttp    = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp    = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
@@ -309,7 +309,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           }
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -330,15 +330,15 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     val sink = new ProviderExchangeSink {
       override def record(exchange: ProviderExchange): Unit = exchanges += exchange
     }
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
           else httpOk(successBody)
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -367,10 +367,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = new VertexAIClient(
@@ -388,9 +388,9 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   it should "report a requested reasoning effort as dropped, from complete and from a stream (RFC 0008)" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
-    (mockHttp.postStream _)
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .onCall((_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right(
@@ -423,10 +423,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           )
         ) + ",\"finishReason\":\"STOP\"}]}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
-    val mockHttp    = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp    = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client =
       new VertexAIClient(
@@ -447,10 +447,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -473,10 +473,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         "\"cachedContentTokenCount\":64,\"totalTokenCount\":145}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -499,10 +499,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     val sseData     = "data: " + ujson.read(noPartsMaxTokensBody).render() + "\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -543,10 +543,10 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     val errorBody   = """{"error":{"message":"UNAUTHENTICATED","status":"UNAUTHENTICATED"}}"""
     val inputStream = new ByteArrayInputStream(errorBody.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = new VertexAIClient(
       testConfig,
@@ -575,8 +575,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     val client = new VertexAIClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -605,8 +605,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     val client = new VertexAIClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -716,7 +716,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   }
 
   private def completeOf(body: String): org.llm4s.types.Result[Completion] =
-    stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body)).complete(conversation("Hi"), CompletionOptions())
+    stubHttpWithAuth(stub[StubbedHttpCalls], httpOk(body)).complete(conversation("Hi"), CompletionOptions())
 
   private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] =
     streamingClient(sse).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
@@ -725,8 +725,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   "VertexAIClient" should "send Flex and Priority as the shared request type header, and Auto and Default as none" in {
     var capturedHeaders: Map[String, String] = Map.empty
-    val mockHttp                             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp                             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
@@ -736,7 +736,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           }
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     val client = new VertexAIClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -778,8 +778,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   it should "send ServiceTier.Other as the shared request type header, as written" in {
     var capturedHeaders: Map[String, String] = Map.empty
-    val mockHttp                             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp                             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
@@ -789,7 +789,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           }
         }
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     val client = new VertexAIClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,

@@ -31,7 +31,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(raw) =>
-          raw.selectedProvider.map(_.asName) shouldBe Some("openai-main")
+          raw.defaultProvider.map(_.asName) shouldBe Some("openai-main")
           raw.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main")
 
           val provider = raw.namedProviders(ProviderName("openai-main"))
@@ -97,7 +97,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(raw) =>
-          raw.selectedProvider.map(_.asName) shouldBe Some("openai-main")
+          raw.defaultProvider.map(_.asName) shouldBe Some("openai-main")
           raw.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
 
           val openai = raw.namedProviders(ProviderName("openai-main"))
@@ -131,7 +131,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(raw) =>
-          raw.selectedProvider.map(_.asName) shouldBe Some("openai")
+          raw.defaultProvider.map(_.asName) shouldBe Some("openai")
           raw.namedProviders.keySet.map(_.asName) shouldBe Set("openai")
 
           val provider = raw.namedProviders(ProviderName("openai"))

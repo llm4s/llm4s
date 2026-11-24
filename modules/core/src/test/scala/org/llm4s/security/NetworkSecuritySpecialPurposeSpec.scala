@@ -70,7 +70,7 @@ class NetworkSecuritySpecialPurposeSpec extends AnyFlatSpec with Matchers {
   "NetworkSecurity.isBlockedIP" should "block 240.0.0.0/4, 255.255.255.255, 192.0.0.0/24 and 192.88.99.0/24" in {
     for (v4 <- newlyBlockedV4) {
       withClue(v4)(blocked(v4) shouldBe true)
-      withClue(v4)(NetworkSecurity.validateIP(v4).isLeft shouldBe true)
+      withClue(v4)(NetworkSecurity.validateHostname(v4).isLeft shouldBe true)
     }
   }
 
@@ -97,7 +97,7 @@ class NetworkSecuritySpecialPurposeSpec extends AnyFlatSpec with Matchers {
     blocked("::ffff:0:a9fe:a9fe") shouldBe true // 169.254.169.254
     blocked("::ffff:0:a00:1") shouldBe true     // 10.0.0.1
     blocked("::ffff:0:808:808") shouldBe true   // 8.8.8.8: a translator-internal form, never a destination
-    NetworkSecurity.validateIP("::ffff:0:7f00:1").isLeft shouldBe true
+    NetworkSecurity.validateHostname("::ffff:0:7f00:1").isLeft shouldBe true
   }
 
   it should "keep allowing the IPv4-mapped, NAT64 and 6to4 forms of public IPv4 addresses" in {
@@ -172,7 +172,7 @@ class NetworkSecuritySpecialPurposeSpec extends AnyFlatSpec with Matchers {
         NetworkSecurity.isBlockedHostname("INTERNAL.example", Set("internal.example")),
         NetworkSecurity.isBlockedHostname("api.INTERNAL.EXAMPLE", Set("Internal.Example")),
         NetworkSecurity.isBlockedHostname("METADATA.GOOGLE.INTERNAL"),
-        NetworkSecurity.validateUrl("HTTP://INTERNAL.example/", Set("internal.example")).isLeft
+        NetworkSecurity.validateUrl("HTTP://INTERNAL.example/", Set("internal.example"), Set("http", "https")).isLeft
       )
     }
     Locale.setDefault(previous)

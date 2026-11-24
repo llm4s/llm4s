@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
@@ -100,8 +100,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   // ============================================================
 
   "GeminiClient.complete()" should "parse text content from a 200 response" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(successBody)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -113,8 +113,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "parse token usage from the response" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(successBody)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -127,8 +127,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "report thinking and cached tokens from usageMetadata (#2348)" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(thinkingCachedBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(thinkingCachedBody)))
 
     mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.usage shouldBe Some(
       TokenUsage(
@@ -142,8 +142,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return an empty answer with its usage when thinking spent the whole token budget (no parts)" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(noPartsMaxTokensBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(noPartsMaxTokensBody)))
 
     val completion = mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()) match {
       case Right(c) => c
@@ -159,8 +159,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     it should s"fail naming the reason for a candidate with no parts: $expected (${body.take(40)})" in {
       noContentMessage(
         {
-          val mockHttp = stub[Llm4sHttpClient]
-          (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
+          val mockHttp = stub[StubbedHttpCalls]
+          (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(body)))
           mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions())
         },
         filtered
@@ -170,8 +170,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "fail with a ContentFilteredError naming the block reason when Gemini blocked the prompt" in {
     noContentMessage {
-      val mockHttp = stub[Llm4sHttpClient]
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(promptBlockedBody)))
+      val mockHttp = stub[StubbedHttpCalls]
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(promptBlockedBody)))
       mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions())
     } should include("blocked the prompt: blockReason PROHIBITED_CONTENT")
   }
@@ -179,8 +179,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "parse a tool call response" in {
     val toolCallBody =
       """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"London"}}}],"role":"model"}}]}"""
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(toolCallBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(toolCallBody)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("What's the weather?"), CompletionOptions())
@@ -194,8 +194,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "report the sources of a grounded answer as citations (#1216)" in {
     val body =
       """{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}}]}"""
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val completion = mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value
     completion.citations shouldBe List(
@@ -205,16 +205,16 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "report no citations for an answer that was not grounded" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(successBody)))
 
     mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.citations shouldBe empty
   }
 
   private def requestBody(config: GeminiConfig, options: CompletionOptions): ujson.Value = {
     var body     = ""
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
         body = sent
         Right(httpOk(successBody))
@@ -248,8 +248,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return AuthenticationError on HTTP 401" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(401)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpErr(401)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -259,8 +259,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return AuthenticationError on HTTP 403" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(403)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpErr(403)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -270,8 +270,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return RateLimitError on HTTP 429" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(429)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpErr(429)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -281,8 +281,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return ValidationError on HTTP 400" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(400)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpErr(400)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -294,8 +294,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "return AuthenticationError when Gemini reports an invalid API key with HTTP 400" in {
     val invalidKeyBody =
       """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"""
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(400, invalidKeyBody, Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(400, invalidKeyBody, Map.empty)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -307,8 +307,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "keep non-auth Gemini HTTP 400 responses as ValidationError" in {
     val invalidRequestBody =
       """{"error":{"code":400,"message":"Invalid value at 'contents[0].parts[0].text'","status":"INVALID_ARGUMENT"}}"""
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(400, invalidRequestBody, Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(400, invalidRequestBody, Map.empty)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -318,8 +318,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "return ServiceError on HTTP 500" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(500)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpErr(500)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hi"), CompletionOptions())
@@ -334,8 +334,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       override def record(exchange: ProviderExchange): Unit =
         exchanges += exchange
     }
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(successBody)))
 
     val client = new GeminiClient(
       testConfig,
@@ -355,8 +355,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "include responseMimeType and no responseSchema when ResponseFormat.Json is set" in {
     var capturedBody: String = ""
-    val mockHttp             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           capturedBody = body
@@ -376,8 +376,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "include responseMimeType and responseSchema when ResponseFormat.JsonSchema is set" in {
     var capturedBody: String = ""
-    val mockHttp             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           capturedBody = body
@@ -398,8 +398,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "omit responseMimeType and responseSchema when responseFormat is not set" in {
     var capturedBody: String = ""
-    val mockHttp             = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp             = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right {
           capturedBody = body
@@ -427,8 +427,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = mkClient(mockHttp)
@@ -442,9 +442,9 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   // RFC 0008 (#2115): Gemini's request carries no reasoning setting, so a requested one is reported, not dropped silently
   it should "report a requested reasoning effort as dropped, from complete and from a stream" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .onCall((_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right(
@@ -494,8 +494,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
           )
         ) + ",\"finishReason\":\"STOP\"}]}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
-    val mockHttp    = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp    = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
     completion.content shouldBe "Hello world"
@@ -511,8 +511,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp)
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
@@ -533,8 +533,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         "\"cachedContentTokenCount\":64,\"totalTokenCount\":145}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
     completion.content shouldBe "Done"
@@ -555,8 +555,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       "data: " + ujson.read(noPartsMaxTokensBody).render() + "\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val chunks = ListBuffer.empty[StreamedChunk]
     val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
@@ -575,8 +575,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       noContentMessage(
         {
           val sseData  = s"data: ${ujson.read(body).render()}\n\n"
-          val mockHttp = stub[Llm4sHttpClient]
-          (mockHttp.postStream _)
+          val mockHttp = stub[StubbedHttpCalls]
+          (mockHttp.onPostStream _)
             .when(*, *, *, *)
             .returns(
               Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))))
@@ -592,8 +592,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "end the stream with a ContentFilteredError naming the block reason when Gemini blocks the prompt" in {
     noContentMessage {
       val sseData  = s"data: $promptBlockedBody\n\n"
-      val mockHttp = stub[Llm4sHttpClient]
-      (mockHttp.postStream _)
+      val mockHttp = stub[StubbedHttpCalls]
+      (mockHttp.onPostStream _)
         .when(*, *, *, *)
         .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8)))))
       mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
@@ -611,8 +611,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"STOP\"}]," +
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
-    val mockHttp    = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+    val mockHttp    = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = new GeminiClient(
       testConfig,
@@ -635,8 +635,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val errorBody   = """{"error":{"message":"API key missing","status":"UNAUTHENTICATED"}}"""
     val inputStream = new ByteArrayInputStream(errorBody.getBytes(StandardCharsets.UTF_8))
 
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = mkClient(mockHttp)
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
@@ -660,7 +660,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
-    val client = mkClient(stub[Llm4sHttpClient])
+    val client = mkClient(stub[StubbedHttpCalls])
     toolResult match {
       case Right(tool) =>
         val geminiTool = client.convertToolToGeminiFormat(tool)
@@ -682,7 +682,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
-    val client = mkClient(stub[Llm4sHttpClient])
+    val client = mkClient(stub[StubbedHttpCalls])
     toolResult match {
       case Right(tool) =>
         val geminiTool = client.convertToolToGeminiFormat(tool)
@@ -697,8 +697,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val resetting = new java.io.InputStream {
       override def read(): Int = throw new java.io.IOException("Connection reset")
     }
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
 
     mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()) match {
       case Left(e: org.llm4s.error.NetworkError) =>
@@ -800,14 +800,14 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   private def completeOf(body: String): org.llm4s.types.Result[Completion] = {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(body)))
     mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions())
   }
 
   private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] = {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)))))
     mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
@@ -817,8 +817,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "GeminiClient" should "send a service tier as serviceTier, and report Auto as not needed" in {
     var body: ujson.Value = ujson.Null
-    val mockHttp          = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp          = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
         body = ujson.read(sent)
         Right(httpOk(successBody))
@@ -846,8 +846,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "send ServiceTier.Other as written" in {
     var body: ujson.Value = ujson.Null
-    val mockHttp          = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall {
+    val mockHttp          = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
         body = ujson.read(sent)
         Right(httpOk(successBody))
@@ -858,8 +858,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "servedTier" should "be the tier the x-gemini-service-tier header names, on complete and on a stream (#2746)" in {
     def served(headers: Map[String, Seq[String]]): Option[ServiceTier] = {
-      val mockHttp = stub[Llm4sHttpClient]
-      (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, successBody, headers)))
+      val mockHttp = stub[StubbedHttpCalls]
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, successBody, headers)))
       mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.servedTier
     }
     served(Map("x-gemini-service-tier" -> Seq("standard"))) shouldBe Some(ServiceTier.Default)
@@ -871,8 +871,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val sse =
       """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(
         Right(

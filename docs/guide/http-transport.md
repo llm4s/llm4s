@@ -38,7 +38,8 @@ It depends on `llm4s-core` and sttp client 4's `core` only. `SttpLlm4sHttpClient
   `anthropic`, `bedrock`) keep the SDK's transport and ignore it. Embedding providers do not take one yet.
 - **It behaves as the default client does**: a non-2xx status is a response, not an error; a timeout is a
   `TimeoutError`, a refused connection a `NetworkError`, an invalid URL a `ValidationError`; streamed replies are read
-  as they arrive. Each request's timeout becomes its sttp `readTimeout`. A transport contract runs against both
+  as they arrive. Each request's `responseTimeout` becomes its sttp `readTimeout`, and its `idleTimeout` bounds every read of the
+  body whatever the backend. A transport contract runs against both
   clients to keep it so.
 
 ## Reuse your backend and its middleware

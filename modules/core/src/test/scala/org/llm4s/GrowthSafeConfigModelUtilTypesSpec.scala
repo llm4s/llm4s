@@ -44,20 +44,20 @@ class GrowthSafeConfigModelUtilTypesSpec extends AnyFlatSpec with Matchers {
 
   "ProvidersConfig" should "build through apply and set each field" in {
     val cfg = ProvidersConfig(Some(main), Map(main -> section))
-    cfg.selectedProvider shouldBe Some(main)
+    cfg.defaultProvider shouldBe Some(main)
     cfg.namedProviders shouldBe Map(main -> section)
     cfg.defaultProviderName shouldBe Right(main)
 
-    cfg.withSelectedProvider(other) shouldBe ProvidersConfig(Some(other), Map(main -> section))
-    cfg.withSelectedProvider(None) shouldBe ProvidersConfig(None, Map(main -> section))
-    cfg.withSelectedProvider(None).defaultProviderName.isLeft shouldBe true
-    cfg.withSelectedProvider(Some(other)) shouldBe ProvidersConfig(Some(other), Map(main -> section))
+    cfg.withDefaultProvider(other) shouldBe ProvidersConfig(Some(other), Map(main -> section))
+    cfg.withDefaultProvider(None) shouldBe ProvidersConfig(None, Map(main -> section))
+    cfg.withDefaultProvider(None).defaultProviderName.isLeft shouldBe true
+    cfg.withDefaultProvider(Some(other)) shouldBe ProvidersConfig(Some(other), Map(main -> section))
     cfg.withNamedProviders(Map(other -> section)) shouldBe ProvidersConfig(Some(main), Map(other -> section))
   }
 
   it should "keep its constructor and copy private" in {
     assertDoesNotCompile("""new ProvidersConfig(None, Map.empty)""")
-    assertDoesNotCompile("""ProvidersConfig(None, Map.empty).copy(selectedProvider = None)""")
+    assertDoesNotCompile("""ProvidersConfig(None, Map.empty).copy(defaultProvider = None)""")
   }
 
   "TransformationResult" should "default requiresFakeStreaming to false" in {

@@ -59,7 +59,7 @@ class NetworkSecurityIPv6Spec extends AnyFlatSpec with Matchers {
   "NetworkSecurity.isBlockedIP" should "block IPv6 unique-local addresses (fc00::/7)" in {
     for (a <- Seq("fc00::1", "fd00::1", "fd12:3456:789a::1", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))
       withClue(a)(blocked(a) shouldBe true)
-    NetworkSecurity.validateIP("fd00::1").isLeft shouldBe true
+    NetworkSecurity.validateHostname("fd00::1").isLeft shouldBe true
     NetworkSecurity.validateHostname("fc00::1").isLeft shouldBe true
   }
 

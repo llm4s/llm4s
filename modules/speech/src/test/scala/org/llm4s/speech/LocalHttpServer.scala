@@ -7,7 +7,6 @@ import org.llm4s.types.Result
 import java.net.{ InetAddress, InetSocketAddress }
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters._
 
 /** One request as it arrived on the wire at [[LocalHttpServer]]. */
@@ -68,31 +67,14 @@ object LocalHttpServer {
 final class RecordingHttpClient(delegate: Llm4sHttpClient = Llm4sHttpClient.create()) extends Llm4sHttpClient {
   @volatile var uploads: Seq[Path] = Seq.empty
 
-  override def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration): Result[HttpResponse] =
-    delegate.get(u, h, p, t)
-  override def post(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] =
-    delegate.post(u, h, b, t)
-  override def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration): Result[HttpResponse] =
-    delegate.postBytes(u, h, d, t)
-  override def postMultipart(
-    u: String,
-    h: Map[String, String],
-    parts: Seq[MultipartPart],
-    t: FiniteDuration
-  ): Result[HttpResponse] = {
-    uploads = uploads ++ parts.collect { case MultipartPart.FilePart(_, path, _) => path }
-    delegate.postMultipart(u, h, parts, t)
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    request.body match {
+      case HttpBody.Multipart(parts) =>
+        uploads = uploads ++ parts.collect { case MultipartPart.FilePart(_, MultipartPart.Content.File(path), _, _) =>
+          path
+        }
+      case _ => ()
+    }
+    delegate.send(request)
   }
-  override def put(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] =
-    delegate.put(u, h, b, t)
-  override def delete(u: String, h: Map[String, String], t: FiniteDuration): Result[HttpResponse] =
-    delegate.delete(u, h, t)
-  override def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpRawResponse] =
-    delegate.postRaw(u, h, b, t)
-  override def postStream(
-    u: String,
-    h: Map[String, String],
-    b: String,
-    t: FiniteDuration
-  ): Result[StreamingHttpResponse] = delegate.postStream(u, h, b, t)
 }

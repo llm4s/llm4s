@@ -2,7 +2,7 @@ package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
-import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
@@ -28,11 +28,9 @@ import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
-import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.ListBuffer
 
@@ -816,28 +814,9 @@ object ProviderModuleChecks extends ProviderModuleChecks:
     def requests: Seq[String] = sentRequests.asScala.toSeq
     def closed: Boolean       = !isOpen
 
-    private def record(method: String, url: String): Result[HttpResponse] =
-      sentRequests.add(s"$method $url")
-      Right(HttpResponse(400, ErrorBody))
-
-    def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: FiniteDuration) =
-      record("GET", url)
-    def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-      record("POST", url)
-    def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) =
-      record("POST", url)
-    def postMultipart(url: String, headers: Map[String, String], parts: Seq[MultipartPart], timeout: FiniteDuration) =
-      record("POST", url)
-    def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-      record("PUT", url)
-    def delete(url: String, headers: Map[String, String], timeout: FiniteDuration) =
-      record("DELETE", url)
-    def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-      record("POST", url).map(r => HttpRawResponse(r.statusCode, r.body.getBytes(StandardCharsets.UTF_8)))
-    def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-      record("POST", url).map(r =>
-        StreamingHttpResponse(r.statusCode, new ByteArrayInputStream(r.body.getBytes(StandardCharsets.UTF_8)))
-      )
+    def send(request: HttpRequest): Result[StreamingHttpResponse] =
+      sentRequests.add(s"${request.method.name} ${request.url}")
+      Right(HttpResponse(400, ErrorBody).toStreaming)
     override def close(): Unit = isOpen = false
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */

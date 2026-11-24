@@ -1,7 +1,7 @@
 package org.llm4s.mcp
 
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
@@ -88,7 +88,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl initialization" should {
 
     "create transport with correct configuration" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       transport.name shouldBe testName
@@ -98,13 +98,13 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl.sendRequest" should {
 
     "send POST request with correct base headers for initialize" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1", Some(ujson.Obj("protocolVersion" -> "2024-11-05")))
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(
           testUrl,
           Map(
@@ -121,7 +121,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "NOT include MCP-Protocol-Version header on initialize request" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -129,7 +129,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       // Stub to capture headers
       var capturedHeaders: Map[String, String] = Map.empty
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -145,7 +145,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "include MCP-Protocol-Version header on non-initialize requests" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       // Capture headers from both calls
@@ -156,7 +156,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val request                                = createRequest("tools/list", "2")
       val responseJson                           = createResponse("2")
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -185,13 +185,13 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle successful JSON response" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -199,7 +199,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle successful SSE stream response" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request        = createRequest("initialize", "1")
@@ -207,7 +207,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val sseResponse    = createSSEResponse(responseJson)
       val contentTypeSSE = Map("content-type" -> Seq("text/event-stream; charset=utf-8"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentTypeSSE)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentTypeSSE)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -215,7 +215,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "parse SSE events with event type and id fields" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -223,14 +223,14 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val sseResponse  = createSSEResponse(responseJson, eventType = Some("message"), id = Some("event-1"))
       val contentType  = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
     }
 
     "extract session ID from initialize response headers" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request       = createRequest("initialize", "1")
@@ -242,7 +242,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       var callCount                              = 0
       var secondCallHeaders: Map[String, String] = Map.empty
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -269,14 +269,14 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle server without session management" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1")
       val headers      = Map.empty[String, Seq[String]] // No session header
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson, headers)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson, headers)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -286,7 +286,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val request2                             = createRequest("tools/list", "2")
       val responseJson2                        = createResponse("2")
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -302,7 +302,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle multiple SSE events and extract JSON-RPC response" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -320,7 +320,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -331,7 +331,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl error handling" should {
 
     "handle HTTP 404 with active session as session expiration" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val initRequest      = createRequest("initialize", "1")
@@ -340,7 +340,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       // Handle both calls
       var callCount = 0
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -363,11 +363,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle HTTP 400+ errors with body in error message" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(500, "Internal Server Error: Database down")))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(500, "Internal Server Error: Database down")))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -375,13 +375,13 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle JSON-RPC error responses" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request       = createRequest("initialize", "1")
       val errorResponse = createErrorResponse("1", -32600, "Invalid Request")
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, errorResponse)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, errorResponse)))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -390,11 +390,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle malformed JSON in response" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, "{invalid-json")))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, "{invalid-json")))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -402,11 +402,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle network exceptions" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .returns(Left(org.llm4s.error.TimeoutError("Connection timed out", testTimeout, "http.POST")))
 
@@ -416,11 +416,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle connection failures" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .returns(Left(org.llm4s.error.NetworkError("Connection refused", None, testUrl)))
 
@@ -430,7 +430,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty SSE stream with no valid JSON-RPC response" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
@@ -445,7 +445,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -456,7 +456,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl SSE parsing" should {
 
     "handle SSE with valid JSON-RPC response on single data line" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -470,14 +470,14 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
     }
 
     "handle SSE comments (lines starting with colon)" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -492,14 +492,14 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
     }
 
     "handle [DONE] sentinel in SSE data" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -514,14 +514,14 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
     }
 
     "skip non-JSON-RPC data in SSE stream" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request      = createRequest("initialize", "1")
@@ -538,7 +538,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -549,7 +549,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl.sendNotification" should {
 
     "send notification with Content-Type header" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       var capturedHeaders: Map[String, String] = Map.empty
@@ -559,7 +559,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
         params = None
       )
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -577,7 +577,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "include MCP-Protocol-Version in notification headers" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       var capturedHeaders: Map[String, String] = Map.empty
@@ -587,7 +587,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
         params = None
       )
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -605,7 +605,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "include session ID in notification if present" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val initRequest      = createRequest("initialize", "1")
@@ -619,7 +619,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       // Handle both request and notification calls
       var callCount                                = 0
       var notificationHeaders: Map[String, String] = Map.empty
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -646,7 +646,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle notification errors" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val notification = JsonRpcNotification(
@@ -655,7 +655,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
         params = None
       )
 
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(500, "Server Error")))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(500, "Server Error")))
 
       val result = transport.sendNotification(notification)
       result.isLeft shouldBe true
@@ -666,19 +666,19 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl.close" should {
 
     "send DELETE request if session exists" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
       // Expect DELETE on close - capture headers
       var capturedHeaders: Map[String, String] = Map.empty
-      (mockHttp.delete _)
+      (mockHttp.onDelete _)
         .when(*, *, *)
         .onCall { (_: String, headers: Map[String, String], _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -695,17 +695,17 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "clear session after close" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
-      (mockHttp.delete _).when(*, *, *).returns(Right(httpResponse(200, "")))
+      (mockHttp.onDelete _).when(*, *, *).returns(Right(httpResponse(200, "")))
 
       transport.close()
 
@@ -714,7 +714,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val request2                             = createRequest("initialize", "2")
       val responseJson2                        = createResponse("2")
 
-      (mockHttp.post _)
+      (mockHttp.onPost _)
         .when(*, *, *, *)
         .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
           Right {
@@ -730,25 +730,25 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle 405 error during session termination gracefully" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       // Initialize with session
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
+      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
       // DELETE fails with 405
-      (mockHttp.delete _).when(*, *, *).returns(Right(httpResponse(405, "Method Not Allowed")))
+      (mockHttp.onDelete _).when(*, *, *).returns(Right(httpResponse(405, "Method Not Allowed")))
 
       // Should not throw
       noException should be thrownBy transport.close()
     }
 
     "allow close without session" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       // Should not throw
@@ -759,7 +759,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
   "SSETransportImpl.generateId" should {
 
     "generate unique sequential IDs" in {
-      val mockHttp  = stub[Llm4sHttpClient]
+      val mockHttp  = stub[StubbedHttpCalls]
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val id1 = transport.generateId()

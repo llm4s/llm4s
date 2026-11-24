@@ -111,33 +111,9 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
     var seen = List.empty[FiniteDuration]
     val http = new org.llm4s.http.Llm4sHttpClient:
       private val inner = routed(_ => Right(iamToken()), _ => Right(chatReply))
-      override def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        seen = seen :+ timeout
-        inner.post(url, headers, body, timeout)
-      override def get(
-        url: String,
-        headers: Map[String, String],
-        params: Map[String, String],
-        timeout: FiniteDuration
-      ) =
-        inner.get(url, headers, params, timeout)
-      override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) =
-        inner.postBytes(url, headers, data, timeout)
-      override def postMultipart(
-        url: String,
-        headers: Map[String, String],
-        parts: Seq[org.llm4s.http.MultipartPart],
-        timeout: FiniteDuration
-      ) =
-        inner.postMultipart(url, headers, parts, timeout)
-      override def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        inner.put(url, headers, body, timeout)
-      override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration) =
-        inner.delete(url, headers, timeout)
-      override def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        inner.postRaw(url, headers, body, timeout)
-      override def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        inner.postStream(url, headers, body, timeout)
+      override def send(request: org.llm4s.http.HttpRequest) =
+        seen = seen :+ request.responseTimeout
+        inner.send(request)
     new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions())
     seen shouldBe List(30.seconds, 120.seconds)
   }
