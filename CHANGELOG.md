@@ -511,6 +511,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RunOutcome.Truncated`, `TaskRefusal.Truncated`, traced `truncated`; Java `AgentStatusKind.TRUNCATED` and `JAgentStatus.partialAnswer()`),
   with the `AgentStatusGainsTruncated` Scalafix lint ([migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) open question 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 
+### Configuration
+
+- **Fixed** the config-policy `allowedProviders` check: it compares provider names trimmed and case-insensitively on both sides, and
+  `allowedProviders`/`allowedModels` report an unset provider or model as such [#2504](https://github.com/llm4s/llm4s/issues/2504).
+
 ### Agent harness
 
 - **Added** `PostgresCheckpointer.longTermStore`: a `LongTermStore` in the checkpoint database, so every machine of an
