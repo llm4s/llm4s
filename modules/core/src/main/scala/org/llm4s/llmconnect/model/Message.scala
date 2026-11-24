@@ -64,7 +64,7 @@ object Message {
   private[model] def partsJson(parts: Seq[ContentPart], obj: ujson.Obj): ujson.Obj = {
     parts match {
       case Seq(ContentPart.Text(text)) => obj("content") = text
-      case _                              => obj("parts") = ujson.read(write(parts))
+      case _                           => obj("parts") = ujson.read(write(parts))
     }
     obj
   }

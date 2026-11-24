@@ -205,33 +205,35 @@ private[config] object EmbeddingsConfigLoader {
     val at   = source.at(path)
     if (!at.value().isRight) Right(EmbeddingProviderSection())
     else
-      removedModel(source, descriptor).flatMap(_ => at.load[EmbeddingProviderSection]
-        .left
-        .map { failures =>
-          // The path says which key a failure is about, which its description alone ("Cannot convert
-          // 'soon' to ...FiniteDuration") does not.
-          val msg = failures.toList
-            .map {
-              case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
-              case failure                                          => failure.description
-            }
-            .mkString("; ")
-          ConfigurationError(s"Failed to load $path via PureConfig: $msg")
-        }
-        .flatMap { section =>
-          ProviderTimeouts
-            .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
-            .map(_ => section)
-        }
-        .flatMap { section =>
-          // A blank baseUrl is unset, so the provider's default applies; any other must be an http(s) URL (#2347).
-          trimmed(section.baseUrl.map(_.asUrl))
-            .fold[Result[EmbeddingProviderSection]](Right(section))(url =>
-              BaseUrlValidation
-                .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
-                .map(_ => section)
-            )
-        })
+      removedModel(source, descriptor).flatMap(_ =>
+        at.load[EmbeddingProviderSection]
+          .left
+          .map { failures =>
+            // The path says which key a failure is about, which its description alone ("Cannot convert
+            // 'soon' to ...FiniteDuration") does not.
+            val msg = failures.toList
+              .map {
+                case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
+                case failure                                          => failure.description
+              }
+              .mkString("; ")
+            ConfigurationError(s"Failed to load $path via PureConfig: $msg")
+          }
+          .flatMap { section =>
+            ProviderTimeouts
+              .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
+              .map(_ => section)
+          }
+          .flatMap { section =>
+            // A blank baseUrl is unset, so the provider's default applies; any other must be an http(s) URL (#2347).
+            trimmed(section.baseUrl.map(_.asUrl))
+              .fold[Result[EmbeddingProviderSection]](Right(section))(url =>
+                BaseUrlValidation
+                  .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
+                  .map(_ => section)
+              )
+          }
+      )
   }
 
   /**

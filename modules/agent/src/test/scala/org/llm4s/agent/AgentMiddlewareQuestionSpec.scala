@@ -234,7 +234,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val env     = new Environment(ran)
     val client  = ScriptedLLMClient.of(calling(call("c1", "deploy", "one")), CompletionFixture.simple("done"))
     val approve = new ApprovalMiddleware(_ => Some("check"))
-    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(env, approve))
+    val agent =
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy)).withMiddleware(env, approve))
     val parked = agent.run("deploy").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val approval = asked.status match {

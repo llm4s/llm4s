@@ -441,7 +441,8 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
       batch(read("/a.txt")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withToolSet(toolSet(backend)).withMiddleware(new CrashAfterEdit))
+    val agent =
+      built(Agent.builder("assistant", client).withToolSet(toolSet(backend)).withMiddleware(new CrashAfterEdit))
     val thread = ThreadId("replayed")
     agent.run(thread, "go").isLeft shouldBe true
     val out = results(agent.recover(thread).value)

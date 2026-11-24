@@ -38,7 +38,6 @@ private[javaapi] object AgentBuilds {
   private def all[A, B](as: Vector[A])(f: A => Result[B]): Result[Vector[B]] =
     as.foldLeft[Result[Vector[B]]](Right(Vector.empty))((acc, a) => acc.flatMap(done => f(a).map(done :+ _)))
 
-
   def build(spec: Spec): Result[JAgent] = agent(spec).map(a => new JAgent(FacadeToken.INSTANCE, Right(a)))
 
   /**

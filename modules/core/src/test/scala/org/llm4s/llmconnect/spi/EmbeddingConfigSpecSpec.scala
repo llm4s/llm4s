@@ -45,7 +45,9 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "skip a blank or whitespace-only override" in {
       EmbeddingConfigSpec.resolveModel(id, Some(ModelName("")), withDefault) shouldBe Right(ModelName("default-model"))
-      EmbeddingConfigSpec.resolveModel(id, Some(ModelName("   ")), withDefault) shouldBe Right(ModelName("default-model"))
+      EmbeddingConfigSpec.resolveModel(id, Some(ModelName("   ")), withDefault) shouldBe Right(
+        ModelName("default-model")
+      )
     }
 
     "trim the override" in {

@@ -442,7 +442,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("recovered")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withToolSet(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -557,7 +560,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("moved on")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withToolSet(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"abandon-cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)

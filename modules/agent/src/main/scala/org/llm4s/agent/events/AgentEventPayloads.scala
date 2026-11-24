@@ -126,22 +126,22 @@ final case class ModelCallCompleted private (
   servedTier: Option[ServiceTier] = None,
   duration: FiniteDuration = Duration.Zero
 ):
-  def withAgent(value: String): ModelCallCompleted                        = copy(agent = value)
-  def withModel(value: ModelName): ModelCallCompleted                     = copy(model = value)
-  def withAttempts(value: Int): ModelCallCompleted                        = copy(attempts = value)
-  def withToolCalls(value: Int): ModelCallCompleted                       = copy(toolCalls = value)
-  def withUsage(value: CallUsage): ModelCallCompleted                     = copy(usage = Some(value))
-  def withUsage(value: Option[CallUsage]): ModelCallCompleted             = copy(usage = value)
-  def withEstimatedCost(value: Double): ModelCallCompleted                = copy(estimatedCost = Some(value))
-  def withEstimatedCost(value: Option[Double]): ModelCallCompleted        = copy(estimatedCost = value)
-  def withProvider(value: ProviderId): ModelCallCompleted                 = copy(provider = Some(value))
-  def withProvider(value: Option[ProviderId]): ModelCallCompleted         = copy(provider = value)
+  def withAgent(value: String): ModelCallCompleted                       = copy(agent = value)
+  def withModel(value: ModelName): ModelCallCompleted                    = copy(model = value)
+  def withAttempts(value: Int): ModelCallCompleted                       = copy(attempts = value)
+  def withToolCalls(value: Int): ModelCallCompleted                      = copy(toolCalls = value)
+  def withUsage(value: CallUsage): ModelCallCompleted                    = copy(usage = Some(value))
+  def withUsage(value: Option[CallUsage]): ModelCallCompleted            = copy(usage = value)
+  def withEstimatedCost(value: Double): ModelCallCompleted               = copy(estimatedCost = Some(value))
+  def withEstimatedCost(value: Option[Double]): ModelCallCompleted       = copy(estimatedCost = value)
+  def withProvider(value: ProviderId): ModelCallCompleted                = copy(provider = Some(value))
+  def withProvider(value: Option[ProviderId]): ModelCallCompleted        = copy(provider = value)
   def withAdjustments(value: Seq[RequestAdjustment]): ModelCallCompleted = copy(adjustments = value)
-  def withFinishReason(value: FinishReason): ModelCallCompleted           = copy(finishReason = Some(value))
-  def withFinishReason(value: Option[FinishReason]): ModelCallCompleted   = copy(finishReason = value)
-  def withServedTier(value: ServiceTier): ModelCallCompleted              = copy(servedTier = Some(value))
-  def withServedTier(value: Option[ServiceTier]): ModelCallCompleted      = copy(servedTier = value)
-  def withDuration(value: FiniteDuration): ModelCallCompleted             = copy(duration = value)
+  def withFinishReason(value: FinishReason): ModelCallCompleted          = copy(finishReason = Some(value))
+  def withFinishReason(value: Option[FinishReason]): ModelCallCompleted  = copy(finishReason = value)
+  def withServedTier(value: ServiceTier): ModelCallCompleted             = copy(servedTier = Some(value))
+  def withServedTier(value: Option[ServiceTier]): ModelCallCompleted     = copy(servedTier = value)
+  def withDuration(value: FiniteDuration): ModelCallCompleted            = copy(duration = value)
 
 @Experimental
 object ModelCallCompleted:

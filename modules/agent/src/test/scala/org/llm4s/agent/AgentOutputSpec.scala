@@ -410,7 +410,10 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       (Right(calling(call("c1", "write", "one"))) +: Vector.fill(4)(Right(CompletionFixture.simple(invalid))))*
     )
     val agent = built(
-      withFormat(scripted).withToolSet(SpecTools.set(write)).withMiddleware(reviewer).withRuntime(new GraphRuntime(store))
+      withFormat(scripted)
+        .withToolSet(SpecTools.set(write))
+        .withMiddleware(reviewer)
+        .withRuntime(new GraphRuntime(store))
     )
     val thread = ThreadId("restored-after-question")
 

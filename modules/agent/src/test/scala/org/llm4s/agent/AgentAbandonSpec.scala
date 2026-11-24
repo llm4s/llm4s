@@ -43,7 +43,9 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       flakyRan.incrementAndGet()
       ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
     }
-    built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)).withRuntime(new GraphRuntime(store)))
+    built(
+      Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)).withRuntime(new GraphRuntime(store))
+    )
   }
 
   "Agent.abandon" should "give each unfinished call the reason, keep a finished call's result, and let the thread take a new turn" in {

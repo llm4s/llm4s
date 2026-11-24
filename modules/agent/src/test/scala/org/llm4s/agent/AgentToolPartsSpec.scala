@@ -48,7 +48,8 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
       Right(CompletionFixture.simple("""{"customer":"Acme"}""")),
       Right(CompletionFixture.simple("""{"customer":"Acme","total":3.5}"""))
     )
-    val agent  = built(Agent.builder("extractor", client).withOutput(invoiceSchema).withToolSet(SpecTools.set(chartTool)))
+    val agent =
+      built(Agent.builder("extractor", client).withOutput(invoiceSchema).withToolSet(SpecTools.set(chartTool)))
     val result = agent.run(ThreadId("parts-format"), "bill from the chart").value
 
     result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 3.5))

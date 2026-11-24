@@ -762,7 +762,7 @@ class OpenAIClient private[provider] (
   // one text part goes as a plain string, as every message did before content parts
   private def singleText(parts: Seq[ContentPart]): Boolean = parts match {
     case Seq(ContentPart.Text(_)) => true
-    case _                           => false
+    case _                        => false
   }
 
   private def toOpenAIMessage(message: Message): ChatCompletionMessageParam =
