@@ -177,12 +177,14 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
       underlying.calls.get() shouldBe 0
     }
     // switched off, the client passes calls through and reads none of it
+    val passedThrough = new StubClient(() => ok)
     val off = new ReliableClient(
-      new StubClient(() => ok),
+      passedThrough,
       "provider-x",
       ReliabilityConfig.disabled.withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 0))
     )
     off.complete(conversation) shouldBe ok
-    off.validate() shouldBe Right(())
+    // the stub has no validation request (#2847), so what passes through is its ValidationUnsupportedError
+    off.validate() shouldBe passedThrough.validate()
   }
 }
