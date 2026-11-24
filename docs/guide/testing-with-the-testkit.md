@@ -128,15 +128,17 @@ def providerError(error: LLMError): LLMError = error match {
 }
 ```
 
-To test retries, put the scripted client under a `ReliableClient`. Its `sleep` is a parameter, so the test does not wait:
+To test retries, put the scripted client under a `ReliableClient`, with a retry policy whose delay is short enough that the test does not wait:
 
 ```scala
-import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
+import scala.concurrent.duration._
 ```
 
 ```scala
 val flaky    = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("recovered"))
-val reliable = new ReliableClient(flaky, "openai", ReliabilityConfig.default, sleep = _ => ())
+val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+val reliable = ReliableClient(flaky, "openai", quick)
 
 reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")
 flaky.callCount shouldBe 2

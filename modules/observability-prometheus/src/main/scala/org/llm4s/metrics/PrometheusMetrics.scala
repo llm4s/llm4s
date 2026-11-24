@@ -20,13 +20,11 @@ import scala.util.{ Failure, Success, Try }
  * - `llm4s_cost_usd_total`
  * - `llm4s_errors_total`
  * - `llm4s_request_duration_seconds`
- * - `llm4s_image_generations_total`
- * - `llm4s_images_generated_total`
- * - `llm4s_image_generation_duration_seconds`
- * - `llm4s_image_generation_cost_usd_total`
- * - `llm4s_image_generation_errors_total`
  *
- * Generic [[Metric]]s that other modules declare (the agent runtime's run, claim, queue and child-task metrics) are
+ * Generic [[Metric]]s that other modules declare (the agent runtime's run, claim, queue and child-task metrics, and
+ * `llm4s-image`'s `ImageMetrics`: `llm4s_image_generations_total`, `llm4s_images_generated_total`,
+ * `llm4s_image_generation_duration_seconds`, `llm4s_image_generation_cost_usd_total` and
+ * `llm4s_image_generation_errors_total`) are
  * registered on their first recording, their name's dots turned into underscores: a counter
  * `llm4s.agent.runs.started` is exposed as `llm4s_agent_runs_started_total`, a timer as a histogram
  * `<name>_seconds` with the metric's buckets, a gauge under its name. Label values are bounded as
@@ -94,47 +92,6 @@ final class PrometheusMetrics(
     .help("Request duration in seconds")
     .labelNames("provider", "model")
     .classicUpperBounds(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0)
-    .register(registry)
-
-  // Image generation counter
-  private val imageGenerationsTotal = Counter
-    .builder()
-    .name("llm4s_image_generations_total")
-    .help("Total number of image generation operations")
-    .labelNames("provider", "model", "operation", "status")
-    .register(registry)
-
-  // Image count counter
-  private val imagesGeneratedTotal = Counter
-    .builder()
-    .name("llm4s_images_generated_total")
-    .help("Total number of images generated")
-    .labelNames("provider", "model")
-    .register(registry)
-
-  // Image generation duration histogram
-  private val imageGenerationDuration = Histogram
-    .builder()
-    .name("llm4s_image_generation_duration_seconds")
-    .help("Image generation duration in seconds")
-    .labelNames("provider", "model", "operation")
-    .classicUpperBounds(1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
-    .register(registry)
-
-  // Image generation cost counter
-  private val imageGenerationCostUsdTotal = Counter
-    .builder()
-    .name("llm4s_image_generation_cost_usd_total")
-    .help("Total estimated image generation cost in USD")
-    .labelNames("provider", "model")
-    .register(registry)
-
-  // Image generation error counter (Issue #501 requirement)
-  private val imageGenerationErrorsTotal = Counter
-    .builder()
-    .name("llm4s_image_generation_errors_total")
-    .help("Total number of image generation errors")
-    .labelNames("provider", "model", "operation", "error_type")
     .register(registry)
 
   /** Convert ErrorKind to a stable snake_case label for metrics. */
@@ -215,73 +172,16 @@ final class PrometheusMetrics(
       logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
     }
 
-  /**
-   * Record an image generation operation.
-   *
-   * Updates `llm4s_image_generations_total` and
-   * `llm4s_image_generation_duration_seconds`. Successful operations with
-   * images also update `llm4s_images_generated_total`; error outcomes update
-   * `llm4s_errors_total` and `llm4s_image_generation_errors_total`.
-   *
-   * Safe: catches and logs any Prometheus errors without propagating.
-   */
-  override def observeImageGeneration(
-    provider: String,
-    model: String,
-    operation: String,
-    outcome: Outcome,
-    duration: FiniteDuration,
-    imageCount: Int
-  ): Unit =
-    Try {
-      val status = outcome match {
-        case Outcome.Success          => "success"
-        case Outcome.Error(errorKind) => s"error_${errorKindToLabel(errorKind)}"
-      }
-
-      imageGenerationsTotal.labelValues(provider, model, operation, status).inc()
-      imageGenerationDuration.labelValues(provider, model, operation).observe(duration.toMillis / 1000.0)
-
-      if (outcome == Outcome.Success && imageCount > 0) {
-        imagesGeneratedTotal.labelValues(provider, model).inc(imageCount.toDouble)
-      }
-
-      outcome match {
-        case Outcome.Error(errorKind) =>
-          val errorLabel = errorKindToLabel(errorKind)
-          errorsTotal.labelValues(provider, errorLabel).inc()
-          imageGenerationErrorsTotal.labelValues(provider, model, operation, errorLabel).inc()
-        case _ =>
-      }
-    }.recover { case e: Exception =>
-      logger.warn(s"Failed to record image generation metrics: ${e.getMessage}")
-    }
-
-  /**
-   * Record estimated image generation cost in USD.
-   *
-   * Updates `llm4s_image_generation_cost_usd_total`.
-   *
-   * Safe: catches and logs any Prometheus errors without propagating.
-   */
-  override def recordImageGenerationCost(
-    provider: String,
-    model: String,
-    costUsd: Double,
-    imageCount: Int
-  ): Unit =
-    Try {
-      imageGenerationCostUsdTotal.labelValues(provider, model).inc(costUsd)
-    }.recover { case e: Exception =>
-      logger.warn(s"Failed to record image generation cost metrics: ${e.getMessage}")
-    }
-
   // ---- generic metrics ----
 
   private val labels     = new MetricLabels()
   private val counters   = new ConcurrentHashMap[String, Registered[Counter]]()
   private val histograms = new ConcurrentHashMap[String, Registered[Histogram]]()
   private val gauges     = new ConcurrentHashMap[String, Registered[Gauge]]()
+
+  // `MetricsCollector.Errors` is `llm4s_errors_total`, the counter `observeRequest` already feeds: a module that
+  // records it (llm4s-image, for a failed image generation) adds to that family rather than registering a second.
+  counters.put(MetricsCollector.Errors.name, Registered(MetricsCollector.Errors, Success(errorsTotal)))
 
   /** A generic metric's family, as registered for the definition first recorded under its name. */
   final private case class Registered[F](metric: Metric, family: Try[F])

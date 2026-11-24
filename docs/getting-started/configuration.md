@@ -983,8 +983,7 @@ LANGFUSE_URL=https://cloud.langfuse.com
 That module's `reference.conf` binds the `LANGFUSE_*` variables under
 `llm4s.tracing.langfuse`, so they can equally be set there in `application.conf`. Both keys are
 required: without one, `Tracing.fromSettings` returns a `ConfigurationError` naming
-`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)` and/or `secretKey`, and
-`Tracing.create` logs it and traces nothing. Without the module, `TRACING_MODE=langfuse` gives
+`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)` and/or `secretKey`. Without the module, `TRACING_MODE=langfuse` gives
 an error naming the `llm4s-observability` artifact.
 
 Traces are private to your Langfuse project. `llm4s.tracing.langfuse.public = true` (no variable
@@ -1102,8 +1101,8 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.trace.{ TraceEvent, Tracing }
 
 // Build the tracer that llm4s.tracing.mode selects. fromSettings fails if the mode's
-// backend - here llm4s-observability-otel - is not on the classpath; Tracing.create
-// would log that and fall back to NoOpTracing instead.
+// backend - here llm4s-observability-otel - is not on the classpath. To run untraced
+// instead, write the fallback here: Tracing.fromSettings(settings).getOrElse(new NoOpTracing()).
 val result = for {
   settings <- Llm4sConfig.tracing()
   tracer   <- Tracing.fromSettings(settings)
@@ -1120,8 +1119,9 @@ val result = for {
 `META-INF/services/org.llm4s.trace.spi.TracingBackend` - `langfuse` by `llm4s-observability`,
 `opentelemetry` by `llm4s-observability-otel`. A mode llm4s has no name for, such as
 `TRACING_MODE=datadog`, is read as `TracingMode.Named("datadog")` and goes to whichever backend
-declares that mode. With no such backend, `Tracing.create` logs an error listing the available
-modes and traces nothing. For `langfuse` and `opentelemetry` the error also names the module to
+declares that mode, or declares it as an alias (`otel` is an alias `llm4s-observability-otel`'s
+backend declares; core knows none). With no such backend, `Tracing.fromSettings` returns an error
+listing the available modes. For `langfuse` and `opentelemetry` the error also names the module to
 add, since llm4s knows which of its own modules serves them:
 
 ```text
@@ -1450,7 +1450,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 
 def reliable(client: LLMClient): LLMClient =
-  new ReliableClient(
+  ReliableClient(
     client,
     "openai-main",
     ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 4, baseDelay = 2.seconds))

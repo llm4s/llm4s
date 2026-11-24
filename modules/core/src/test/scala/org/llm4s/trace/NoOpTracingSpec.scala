@@ -17,8 +17,8 @@ import java.time.Instant
 
 /**
  * Dedicated coverage for [[NoOpTracing]], the tracer every application gets when tracing is
- * disabled (`TRACING_MODE=none`) and the fallback `Tracing.create` returns when a backend is
- * missing or cannot start (#946).
+ * disabled (`TRACING_MODE=none`), and what a caller falls back to when `Tracing.fromSettings`
+ * reports a backend missing or unable to start (#946).
  *
  * `TracingSpec` already checks that each method returns `Right(())` once, and
  * `TracingEdgeCasesSpec` that `close()` does not throw. This spec covers what those do not:

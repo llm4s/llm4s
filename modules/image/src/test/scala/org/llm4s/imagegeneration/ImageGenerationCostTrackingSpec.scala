@@ -345,13 +345,14 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   // MetricsCollector.noop compatibility
   // ─────────────────────────────────────────────────────────────
 
-  "MetricsCollector.noop" should "not throw on image generation methods" in {
+  "MetricsCollector.noop" should "not throw when the image metrics are recorded" in {
     val metrics = MetricsCollector.noop
 
     noException should be thrownBy {
-      metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-      metrics.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-      metrics.observeImageGeneration(
+      ImageMetrics.observed(metrics, "openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
+      ImageMetrics.cost(metrics, "openai", "dall-e-3", 0.04)
+      ImageMetrics.observed(
+        metrics,
         "openai",
         "dall-e-3",
         "generate",

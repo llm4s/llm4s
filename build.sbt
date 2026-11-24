@@ -1250,9 +1250,16 @@ lazy val speech = (project in file("modules/speech"))
 
 lazy val image = (project in file("modules/image"))
   // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
-  // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
-  // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
-  .dependsOn(media, core % "compile->compile;test->test", observabilityPrometheus % Test, providerTestkit % Test)
+  // image metrics back out of a real `PrometheusMetrics` registry, and with `observabilityMicrometer % Test`
+  // for `ImageMetricsSeriesSpec`, which pins the series both backends export for `ImageMetrics` (#2801).
+  // Test scope only: the published `llm4s-image` depends on the `MetricsCollector` contract, not on a backend.
+  .dependsOn(
+    media,
+    core                    % "compile->compile;test->test",
+    observabilityPrometheus % Test,
+    observabilityMicrometer % Test,
+    providerTestkit         % Test
+  )
   .settings(
     name := "llm4s-image",
     commonSettings,
@@ -1266,8 +1273,9 @@ lazy val image = (project in file("modules/image"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.ujson,
-      Deps.scalatest % Test,
-      Deps.scalamock % Test
+      Deps.scalatest            % Test,
+      Deps.scalamock            % Test,
+      Deps.micrometerPrometheus % Test
     )
   )
 

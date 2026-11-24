@@ -6,9 +6,9 @@ import org.llm4s.trace.{ Tracing, TracingMode }
 import org.llm4s.types.Result
 
 /**
- * A tracing backend: what one integration contributes to `Tracing.create`.
+ * A tracing backend: what one integration contributes to `Tracing.fromSettings`.
  *
- * `Tracing.create` builds the two backends that need nothing beyond core -
+ * `Tracing.fromSettings` builds the two backends that need nothing beyond core -
  * `NoOp` and `Console` - itself, and hands every other [[org.llm4s.trace.TracingMode TracingMode]] to the
  * backend registered for it. Adding a backend is then adding a dependency, with
  * no edit to core: the same arrangement slice 4 gave providers (#1131, #1133).
@@ -44,6 +44,17 @@ trait TracingBackend:
    * `TracingMode.Named`; matching is by [[org.llm4s.trace.TracingMode.name TracingMode.name]], case-insensitively.
    */
   def mode: TracingMode
+
+  /**
+   * Other names that select this backend, matched case-insensitively like [[mode]]: `llm4s-observability-otel`
+   * answers to `otel` as well as `opentelemetry`. Core knows no alias of its own.
+   *
+   * An alias selects the backend and nothing else: `Llm4sConfig.tracing` replaces it with [[mode]], so
+   * `settings.mode` is this backend's mode and `settings.extras` its own `llm4s.tracing.<mode>` block whichever
+   * name the operator wrote. A name another registered backend also answers to is an error when it is selected
+   * ([[TracingBackends.find]]), so keep an alias as specific as the mode.
+   */
+  def aliases: Set[String] = Set.empty
 
   /**
    * Builds the tracer for `settings`.

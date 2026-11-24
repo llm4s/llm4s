@@ -1,13 +1,13 @@
 package org.llm4s.samples.reliability
 
-import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.error.{ LLMError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.types.Result
 
 import java.time.Instant
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 
@@ -15,14 +15,14 @@ import scala.concurrent.duration._
  * What [[org.llm4s.reliability.ReliableClient]] retries and what it does not, with no provider and no
  * configuration: the client it wraps is scripted.
  *
- * Four scenarios, all deterministic and instant because `sleep` records the delay instead of sleeping and the
- * `clock` is a value the sample moves by hand:
+ * Four scenarios, all deterministic. The waits are real but short: the retries back off from 20 ms, and the
+ * circuit's `recoveryTimeout` is 200 ms.
  *
  *  1. A flaky client fails twice with a retryable 503 [[org.llm4s.error.ServiceError]], then succeeds.
  *  1. A [[org.llm4s.error.ValidationError]] is not transient, so it is returned after one attempt.
  *  1. A client that always fails: the attempts run out and the last error is returned unchanged.
  *  1. The circuit opens after repeated failures, refuses calls with a `CircuitOpenError`, and lets one through
- *     again once `recoveryTimeout` has passed on its clock.
+ *     again once `recoveryTimeout` has passed.
  *
  * Which errors are retried is `RetryPolicy.isRetryable`; how long each waits is the policy's `delayFor`.
  *
@@ -33,7 +33,7 @@ import scala.concurrent.duration._
  */
 object ErrorRecoveryExample {
 
-  private val baseDelay    = 100.milliseconds
+  private val baseDelay    = 20.milliseconds
   private val conversation = Conversation(Seq(UserMessage("Hello")))
 
   def main(args: Array[String]): Unit = {
@@ -45,11 +45,14 @@ object ErrorRecoveryExample {
 
   /** A client whose every call is answered by `reply`, counting the calls. */
   final private class Scripted(reply: () => Result[String]) extends LLMClient {
-    val calls = new AtomicInteger(0)
+    val calls    = new AtomicInteger(0)
+    val failures = ListBuffer.empty[LLMError]
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls.incrementAndGet()
-      reply().map { text =>
+      val outcome = reply()
+      outcome.left.foreach(failures += _)
+      outcome.map { text =>
         Completion(
           id = "demo",
           created = Instant.now(),
@@ -66,16 +69,18 @@ object ErrorRecoveryExample {
     override def getReserveCompletion(): Int = 1024
   }
 
-  /** Runs one call through a `ReliableClient` over `client`, recording delays instead of sleeping. */
+  /**
+   * Runs one call through a `ReliableClient` over `client`. The delays are the ones its policy chose: the wait
+   * after each failed attempt that was followed by another.
+   */
   private def run(client: Scripted, maxAttempts: Int): (Result[String], List[FiniteDuration]) = {
-    val delays = ListBuffer.empty[FiniteDuration]
-    val reliable = new ReliableClient(
-      client,
-      "demo-service",
-      ReliabilityConfig(retryPolicy = RetryPolicy.linearBackoff(maxAttempts = maxAttempts, baseDelay = baseDelay)),
-      sleep = delay => { delays += delay; () }
-    )
-    (reliable.complete(conversation).map(_.content), delays.toList)
+    val policy   = RetryPolicy.linearBackoff(maxAttempts = maxAttempts, baseDelay = baseDelay)
+    val reliable = ReliableClient(client, "demo-service", ReliabilityConfig(retryPolicy = policy))
+    val result   = reliable.complete(conversation).map(_.content)
+    val delays = client.failures.toList.take(client.calls.get() - 1).zipWithIndex.map { case (error, index) =>
+      policy.delayFor(index + 1, error)
+    }
+    (result, delays)
   }
 
   private def describe(result: Result[String]): String =
@@ -121,21 +126,18 @@ object ErrorRecoveryExample {
 
   private def circuitBreaker(): Unit = {
     println("=== 4. Circuit breaker ===")
-    val start   = Instant.parse("2026-01-01T00:00:00Z")
-    val now     = new AtomicReference[Instant](start)
-    val healthy = new AtomicReference[Boolean](false)
+    val healthy = new AtomicBoolean(false)
     val service = new Scripted(() =>
       if (healthy.get()) Right("ok") else Left(ServiceError(503, "demo-service", "unavailable"))
     )
-    val breaker = new ReliableClient(
+    val breaker = ReliableClient(
       service,
       "demo-service",
       ReliabilityConfig(
         // no retries, so each call is one attempt and the circuit's count is easy to follow
         retryPolicy = RetryPolicy.noRetry,
-        circuitBreaker = CircuitBreakerConfig(failureThreshold = 3, recoveryTimeout = 30.seconds, successThreshold = 1)
-      ),
-      clock = () => now.get()
+        circuitBreaker = CircuitBreakerConfig(failureThreshold = 3, recoveryTimeout = 200.millis, successThreshold = 1)
+      )
     )
 
     def report(label: String): Unit = {
@@ -149,9 +151,9 @@ object ErrorRecoveryExample {
       report(s"  call $i")
     }
 
-    now.set(start.plusSeconds(31))
+    Thread.sleep(250)
     healthy.set(true)
-    println("Clock advanced 31 seconds, past the 30 second recoveryTimeout")
+    println("Waited 250 ms, past the 200 ms recoveryTimeout")
     println("Call 5: half-open, one probe is let through")
     report("  call 5")
     println("Call 6: the probe succeeded, so the circuit is closed again")

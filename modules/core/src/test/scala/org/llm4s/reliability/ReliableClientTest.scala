@@ -83,11 +83,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
 
   test("ReliableClient succeeds on first attempt without retries") {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliableClient = new ReliableClient(
+    val reliableClient = ReliableClient(
       mockClient,
       "test",
-      ReliabilityConfig.default,
-      None
+      ReliabilityConfig.default
     )
 
     val result = reliableClient.complete(testConversation)
@@ -111,7 +110,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     )
 
     val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliableClient = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     val result = reliableClient.complete(testConversation)
 
@@ -130,7 +129,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
 
     val result = reliableClient.complete(testConversation)
 
@@ -148,7 +147,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
 
     val result = reliableClient.complete(testConversation)
 
@@ -170,7 +169,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
 
     val result = reliableClient.complete(testConversation)
 
@@ -188,7 +187,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     )
 
     val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliableClient = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     // Make 3 failing requests
     reliableClient.complete(testConversation)
@@ -228,7 +227,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     var fakeTime = 0L
     val metrics  = new TestMetricsCollector()
     val reliableClient =
-      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
+      ReliableClient(mockClient, "test", config).withMetrics(metrics).withClock(() => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation)
@@ -266,7 +265,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     var fakeTime = 0L
     val metrics  = new TestMetricsCollector()
     val reliableClient =
-      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
+      ReliableClient(mockClient, "test", config).withMetrics(metrics).withClock(() => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation)
@@ -298,7 +297,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
 
     var fakeTime = 0L
     val reliableClient =
-      new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(fakeTime))
+      ReliableClient(mockClient, "test", config).withClock(() => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation) // fail #1
@@ -329,7 +328,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = Some(0.millis)
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     result match {
@@ -349,7 +348,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = Some(1.second)
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     Thread.interrupted() shouldBe true
@@ -371,7 +370,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = Some(10.seconds)
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     Thread.interrupted() shouldBe true
@@ -393,7 +392,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     )
 
     val reliableClient =
-      new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(times.dequeue()))
+      ReliableClient(mockClient, "test", config).withClock(() => Instant.ofEpochMilli(times.dequeue()))
     val result = reliableClient.complete(testConversation)
 
     result match {
@@ -412,7 +411,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
       .withDeadline(None)
-    val client = new ReliableClient(mockClient, "test-provider", config)
+    val client = ReliableClient(mockClient, "test-provider", config)
     val result = client.complete(testConversation)
     val flag   = Thread.interrupted()
     flag shouldBe true
@@ -430,7 +429,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     Thread.interrupted() shouldBe true
@@ -452,7 +451,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     Thread.interrupted() shouldBe true
@@ -477,7 +476,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     result shouldBe Left(serviceError)
@@ -502,7 +501,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
     val result         = reliableClient.complete(testConversation)
 
     result shouldBe Right(testCompletion)
@@ -540,17 +539,14 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
       deadline = Some(deadline)
     )
-    val client = new ReliableClient(
+    val client = ReliableClient(
       mockClient,
       "test",
-      config,
-      None,
-      clock = time.clock,
-      sleep = delay => {
-        waits += delay
-        time.advance(delay + waitOvershoot)
-      }
-    )
+      config
+    ).withClock(time.clock).withSleep { delay =>
+      waits += delay
+      time.advance(delay + waitOvershoot)
+    }
     def run(): Result[Completion] = client.complete(testConversation)
   }
 
@@ -610,7 +606,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
 
     // Create thread pool
     val executor                      = Executors.newFixedThreadPool(20)
@@ -647,11 +643,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       Left(TimeoutError("timeout", 1.second, "test"))
     })
 
-    val reliableClient = new ReliableClient(
+    val reliableClient = ReliableClient(
       mockClient,
       "test",
-      ReliabilityConfig.disabled,
-      None
+      ReliabilityConfig.disabled
     )
 
     val result = reliableClient.complete(testConversation)
@@ -671,7 +666,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     )
 
     val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliableClient = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     val result = reliableClient.complete(testConversation)
 
@@ -698,7 +693,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val waits   = scala.collection.mutable.ArrayBuffer.empty[FiniteDuration]
     val metrics = new TestMetricsCollector()
     val reliableClient =
-      new ReliableClient(mockClient, "test-provider", config, Some(metrics), sleep = delay => waits += delay)
+      ReliableClient(mockClient, "test-provider", config).withMetrics(metrics).withSleep(delay => waits += delay)
 
     val result = reliableClient.complete(testConversation)
 
@@ -724,7 +719,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val waits   = scala.collection.mutable.ArrayBuffer.empty[FiniteDuration]
     val metrics = new TestMetricsCollector()
     val reliableClient =
-      new ReliableClient(mockClient, "anthropic", config, Some(metrics), sleep = delay => waits += delay)
+      ReliableClient(mockClient, "anthropic", config).withMetrics(metrics).withSleep(delay => waits += delay)
 
     val result = reliableClient.complete(testConversation)
 
@@ -743,7 +738,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val reliableClient = ReliableClient(mockClient, "test", config)
 
     // Open the circuit
     reliableClient.complete(testConversation)
@@ -761,7 +756,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
       deadline = None
     )
-    val reliableClient = new ReliableClient(new MockClient(() => Right(testCompletion)), "test", config, None)
+    val reliableClient = ReliableClient(new MockClient(() => Right(testCompletion)), "test", config)
 
     reliableClient.decideRetry(1, TimeoutError("timeout", 1.second, "test")) shouldBe
       RetryDecision.Retry(10.millis)
@@ -773,7 +768,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
       deadline = None
     )
-    val reliableClient = new ReliableClient(new MockClient(() => Right(testCompletion)), "test", config, None)
+    val reliableClient = ReliableClient(new MockClient(() => Right(testCompletion)), "test", config)
 
     reliableClient.decideRetry(1, AuthenticationError("Invalid API key", "test")) shouldBe RetryDecision.DoNotRetry
   }
@@ -784,7 +779,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
       deadline = None
     )
-    val reliableClient = new ReliableClient(new MockClient(() => Right(testCompletion)), "test", config, None)
+    val reliableClient = ReliableClient(new MockClient(() => Right(testCompletion)), "test", config)
 
     reliableClient.decideRetry(3, TimeoutError("timeout", 1.second, "test")) shouldBe RetryDecision.DoNotRetry
   }

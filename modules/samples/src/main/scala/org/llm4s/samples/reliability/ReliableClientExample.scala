@@ -101,7 +101,7 @@ object ReliableClientExample {
       }
     })
 
-    val reliableClient = new ReliableClient(mockBaseClient, "openai-demo", retryConfig)
+    val reliableClient = ReliableClient(mockBaseClient, "openai-demo", retryConfig)
 
     logger.info("Executing completion request...")
     val result = reliableClient.complete(testConversation)
@@ -142,7 +142,7 @@ object ReliableClientExample {
       Left(ServiceError(httpStatus = 503, provider = "mock-provider", details = "Service is down"))
     })
 
-    val reliableClient = new ReliableClient(mockBaseClient, "broken-provider", circuitConfig)
+    val reliableClient = ReliableClient(mockBaseClient, "broken-provider", circuitConfig)
 
     // Call the client 4 times.
     // The first 3 calls should trigger the base client and fail.
@@ -184,7 +184,7 @@ object ReliableClientExample {
       Left(ServiceError(500, "slow-provider", "Transient connection failure"))
     })
 
-    val reliableClient = new ReliableClient(mockBaseClient, "slow-provider", deadlineConfig)
+    val reliableClient = ReliableClient(mockBaseClient, "slow-provider", deadlineConfig)
 
     logger.info("Executing completion request with a 1-second deadline and 600ms retry delay...")
     val result = reliableClient.complete(testConversation)
@@ -213,7 +213,7 @@ object ReliableClientExample {
       _ = logger.info(s"Loaded configured provider: ${providerCfg.providerId.asString}")
 
       // Wrap with ReliabilityConfig (default: exponential backoff + circuit breaker)
-      reliableClient = new ReliableClient(baseClient, providerCfg.providerId.asString, ReliabilityConfig.default)
+      reliableClient = ReliableClient(baseClient, providerCfg.providerId.asString, ReliabilityConfig.default)
 
       _ = logger.info("Sending request through ReliableClient wrapped real provider...")
       completion <- reliableClient.complete(

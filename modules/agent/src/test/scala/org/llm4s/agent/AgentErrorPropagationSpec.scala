@@ -65,7 +65,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = Duration.Zero))
 
   private def reliable(inner: LLMClient, provider: String): ReliableClient =
-    new ReliableClient(inner, provider, retries3, sleep = _ => ())
+    ReliableClient(inner, provider, retries3).withSleep(_ => ())
 
   "Agent.run" should "return the exact NetworkError the provider produced" in {
     val original = NetworkError("connection refused", None, "https://llm.example/v1")
@@ -226,7 +226,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.noRetry)
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 2))
-    val client = new ReliableClient(inner, "provider-x", config, sleep = _ => ())
+    val client = ReliableClient(inner, "provider-x", config).withSleep(_ => ())
 
     runError(client) shouldBe provider
     runError(client) shouldBe provider

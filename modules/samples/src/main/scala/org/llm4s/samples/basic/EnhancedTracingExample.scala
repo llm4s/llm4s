@@ -23,7 +23,7 @@ object EnhancedTracingExample {
     val result = for {
       // Load tracing settings from config / env
       tracingSettings <- Llm4sConfig.tracing()
-      tracer = Tracing.create(tracingSettings)
+      tracer          <- Tracing.fromSettings(tracingSettings)
 
       // Create LLM client from provider config
       providerCfg     <- Llm4sConfig.defaultProvider()

@@ -30,7 +30,7 @@ import scala.util.control.NonFatal
  *
  * {{{
  * // Create from settings
- * val tracing = Tracing.create(settings)
+ * val tracing: Result[Tracing] = Tracing.fromSettings(settings)
  *
  * // Or use directly
  * val tracing: Tracing = new ConsoleTracing()
@@ -364,11 +364,12 @@ object TracingMode {
    * Parses a mode string into a `TracingMode`, case-insensitively.
    *
    * `"console"` gives `Console`; `"none"` and `"noop"` give `NoOp`.
-   * `"otel"` is kept as an alias for `Named("opentelemetry")`. Any other non-blank
-   * value, `"langfuse"` and `"opentelemetry"` included, becomes [[Named]], lower-cased,
-   * for a backend outside core to claim; whether one does is decided when the
-   * tracer is built, by `Tracing.fromSettings`. A blank value logs a warning and
-   * returns `NoOp`.
+   * Any other non-blank value, `"langfuse"` and `"opentelemetry"` included, becomes
+   * [[Named]], lower-cased, for a backend outside core to claim by its mode or one of
+   * its [[org.llm4s.trace.spi.TracingBackend.aliases aliases]]; whether one does is
+   * decided when the tracer is built, by `Tracing.fromSettings`. Core knows no alias:
+   * `"otel"` is `Named("otel")`, which `llm4s-observability-otel`'s backend answers to.
+   * A blank value logs a warning and returns `NoOp`.
    *
    * @param mode mode string, typically the value of the `TRACING_MODE` environment variable
    * @return the matching `TracingMode`
@@ -376,7 +377,6 @@ object TracingMode {
   def fromString(mode: String): TracingMode = mode.trim.toLowerCase(Locale.ROOT) match {
     case "console"       => Console
     case "none" | "noop" => NoOp
-    case "otel"          => Named("opentelemetry")
     case "" =>
       logger.warn("Blank tracing mode, falling back to NoOp")
       NoOp
@@ -388,11 +388,11 @@ object TracingMode {
  * Factory for creating [[Tracing]] instances.
  *
  * {{{
- * // From TracingSettings: falls back to NoOp, with an error logged, if the backend is missing
- * val tracing = Tracing.create(settings)
- *
- * // The same, but a missing or failing backend is an error the caller sees
+ * // From TracingSettings: a missing or failing backend is an error the caller sees
  * val checked: Result[Tracing] = Tracing.fromSettings(settings)
+ *
+ * // A caller that would rather run untraced than not at all says so where it builds the tracer
+ * val tracing: Tracing = checked.getOrElse(new NoOpTracing())
  *
  * // Direct instantiation
  * val console = new ConsoleTracing()
@@ -404,33 +404,14 @@ object TracingMode {
  */
 object Tracing {
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-
-  // The llm4s artifact that registers each well-known mode, named in the missing-backend
-  // error. A hint only: dispatch never consults it, and a third-party mode needs no entry.
+  // The llm4s artifact that registers each well-known mode name, named in the missing-backend
+  // error. Message text only: dispatch never consults it, a third-party mode needs no entry,
+  // and `otel` is here as a name an operator may have written, not as an alias core resolves.
   private val knownArtifacts: Map[String, String] = Map(
     "langfuse"      -> "llm4s-observability",
-    "opentelemetry" -> "llm4s-observability-otel"
+    "opentelemetry" -> "llm4s-observability-otel",
+    "otel"          -> "llm4s-observability-otel"
   )
-
-  /**
-   * Create a tracing instance from configuration settings.
-   *
-   * Never fails: when the configured backend is not on the classpath, or cannot
-   * start, this logs the reason at error level and returns a [[NoOpTracing]], so a
-   * tracing problem cannot stop the application. Use [[fromSettings]] to see the
-   * error instead.
-   *
-   * @param settings Tracing configuration including mode and backend-specific options
-   * @return Configured tracing instance, or `NoOpTracing`
-   */
-  def create(settings: TracingSettings): Tracing =
-    fromSettings(settings) match {
-      case Right(tracing) => tracing
-      case Left(error) =>
-        logger.error(s"${error.message} Falling back to NoOpTracing.")
-        new NoOpTracing()
-    }
 
   /**
    * Builds the tracer `settings` select, reporting a missing or failing backend as an error.
@@ -442,8 +423,8 @@ object Tracing {
    *
    * @return the tracer, or a [[org.llm4s.error.ConfigurationError]] when no backend
    *         is registered for the mode - naming the llm4s module to add for `langfuse`
-   *         (`llm4s-observability`) and `opentelemetry` (`llm4s-observability-otel`) - or
-   *         the backend's own error when it cannot start
+   *         (`llm4s-observability`) and `opentelemetry` (`llm4s-observability-otel`) - or when
+   *         more than one answers to it, or the backend's own error when it cannot start
    */
   def fromSettings(settings: TracingSettings): Result[Tracing] =
     resolve(settings, TracingBackends.discover())
@@ -463,7 +444,7 @@ object Tracing {
       case TracingMode.Console => ConsoleTracing.fromExtras(settings.extras)
       case mode =>
         val available = backends
-        available.find(mode) match {
+        available.find(mode).flatMap {
           case Some(backend) => createWith(backend, settings)
           case None          => Left(missingBackend(mode, available))
         }

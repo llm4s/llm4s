@@ -7,10 +7,11 @@ import org.llm4s.types.Result
 
 /**
  * Registers [[OpenTelemetryTracing]] for `TracingMode.Named("opentelemetry")`
- * (`TRACING_MODE=opentelemetry` or `otel`).
+ * (`TRACING_MODE=opentelemetry`), and for its alias `otel`, which this backend declares:
+ * core knows no alias.
  *
  * Declared in this module's `META-INF/services/org.llm4s.trace.spi.TracingBackend`,
- * so depending on `llm4s-observability-otel` is all it takes; `Tracing.create`
+ * so depending on `llm4s-observability-otel` is all it takes; `Tracing.fromSettings`
  * finds it by `ServiceLoader`. That replaced the `Class.forName` reflection core
  * used to load this module (#1133).
  *
@@ -19,6 +20,9 @@ import org.llm4s.types.Result
  */
 final class OpenTelemetryTracingBackend extends TracingBackend:
   val mode: TracingMode = OpenTelemetryConfig.Mode
+
+  /** `TRACING_MODE=otel` selects this backend too, and reads the same `llm4s.tracing.opentelemetry` block. */
+  override val aliases: Set[String] = Set("otel")
 
   /**
    * Builds the tracer from `settings.extras`, the `llm4s.tracing.opentelemetry` block

@@ -1,0 +1,2 @@
+# A backend that declares aliases.
+org.llm4s.trace.spi.fixtures.AliasedFixtureTracingBackend

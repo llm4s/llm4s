@@ -25,28 +25,34 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "be discovered for the opentelemetry mode through its services entry" in {
       val backends = TracingBackends.discover(getClass.getClassLoader)
 
-      backends.find(TracingMode.Named("opentelemetry")).map(_.getClass) shouldBe Some(
+      backends.find(TracingMode.Named("opentelemetry")).value.map(_.getClass) shouldBe Some(
         classOf[OpenTelemetryTracingBackend]
       )
       backends.failures shouldBe empty
       new OpenTelemetryTracingBackend().mode shouldBe OpenTelemetryConfig.Mode
     }
 
-    "be selected by the otel alias too" in {
-      TracingBackends
-        .discover(getClass.getClassLoader)
-        .find(TracingMode.fromString("otel"))
-        .map(_.getClass) shouldBe Some(classOf[OpenTelemetryTracingBackend])
+    "declare the otel alias itself, which core no longer knows" in {
+      new OpenTelemetryTracingBackend().aliases shouldBe Set("otel")
+      TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
     }
 
-    "be what Tracing.fromSettings and Tracing.create build for opentelemetry" in {
-      val checked = Tracing.fromSettings(settings).value
-      checked shouldBe an[OpenTelemetryTracing]
-      checked.close()
+    "be selected by the otel alias too, whatever its case" in {
+      val backends = TracingBackends.discover(getClass.getClassLoader)
 
-      val created = Tracing.create(settings)
-      created shouldBe an[OpenTelemetryTracing]
-      created.close()
+      Seq("otel", "OTEL").foreach { name =>
+        backends.find(TracingMode.fromString(name)).value.map(_.getClass) shouldBe Some(
+          classOf[OpenTelemetryTracingBackend]
+        )
+      }
+    }
+
+    "be what Tracing.fromSettings builds for opentelemetry and for otel" in {
+      Seq(settings, settings.withMode(TracingMode.fromString("otel"))).foreach { selected =>
+        val checked = Tracing.fromSettings(selected).value
+        checked shouldBe an[OpenTelemetryTracing]
+        checked.close()
+      }
     }
 
     "be registrable explicitly, for a shaded jar whose services files did not survive" in {
