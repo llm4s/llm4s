@@ -314,18 +314,21 @@ object Message {
  * Maps directly to the `role` field in provider API payloads.
  * The string representation returned by `toString` is the lowercase name
  * forwarded verbatim to the provider (e.g. `"user"`, `"assistant"`).
+ *
+ * A Scala 3 `enum`, as the sum types of this package are when every case is a plain value or plain data
+ * ([[FinishReason]], [[ServiceTier]], [[ThinkingBlock]], [[RequestAdjustment]]). The ones that stay a `sealed trait`
+ * need what an `enum` case cannot have: [[Thinking.Budget]] a constructor only its validating factory may call,
+ * [[ResponseFormat.JsonSchema]] the private `copy` and setters of a growth-safe type, and [[ReasoningEffort]] its own
+ * ordered `values: Seq`, where an `enum`'s is an `Array`.
  */
 @Stable
-sealed trait MessageRole {
-  def name: String
-  override def toString: String = name
-}
+enum MessageRole(val name: String) {
+  case System    extends MessageRole("system")
+  case User      extends MessageRole("user")
+  case Assistant extends MessageRole("assistant")
+  case Tool      extends MessageRole("tool")
 
-object MessageRole {
-  case object System    extends MessageRole { val name = "system"    }
-  case object User      extends MessageRole { val name = "user"      }
-  case object Assistant extends MessageRole { val name = "assistant" }
-  case object Tool      extends MessageRole { val name = "tool"      }
+  override def toString: String = name
 }
 
 /**
