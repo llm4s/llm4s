@@ -208,7 +208,8 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         LocalProviderTestServer.openAICompletion("hi", "gpt-6-luna")
       )
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-6-luna"), Secret("sk-test"), BaseUrl(baseUrl)).value).value
+      val client =
+        OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-6-luna"), Secret("sk-test"), BaseUrl(baseUrl)).value).value
       val options =
         CompletionOptions(maxTokens = Some(256)).withTools(Seq(noopTool)).withReasoning(ReasoningEffort.High)
       val completion = client.complete(hello, options).value
@@ -229,7 +230,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       requests.incrementAndGet()
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "x"))
     } { baseUrl =>
-      val client  = OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-6.1-terra"), Secret("sk-test"), BaseUrl(baseUrl)).value).value
+      val client = OpenAIClient(
+        OpenAIConfig.fromValues(ModelName("gpt-6.1-terra"), Secret("sk-test"), BaseUrl(baseUrl)).value
+      ).value
       val options = CompletionOptions().withTools(Seq(noopTool))
       val sync    = client.complete(hello, options)
       val stream  = client.streamComplete(hello, options)(_ => ())
