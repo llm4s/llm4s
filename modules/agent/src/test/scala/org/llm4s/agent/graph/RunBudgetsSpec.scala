@@ -288,4 +288,13 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     again shouldBe GraphError.SuperstepLimitExceeded(3)
     second.get(count).value shouldBe 6
   }
+
+  // Decided (#2829): the marker says what is retried without anyone deciding, not whether `recover` can go on.
+  it should "fail with an error nothing retries automatically, though recover continues the run" in {
+    val error = GraphError.SuperstepLimitExceeded(3)
+    LLMError.isRecoverable(error) shouldBe false
+    org.llm4s.reliability.RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.milli).isRetryable(error) shouldBe false
+    // unlike a deadline, which a worker gives back for a later attempt
+    LLMError.isRecoverable(GraphError.DeadlineExceeded("t", None)) shouldBe true
+  }
 }

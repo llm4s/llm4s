@@ -14,6 +14,7 @@ import org.llm4s.agent.events
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{
+  AdmissionContext,
   GuardrailBlocked,
   MiddlewareAsked,
   MiddlewareId,
@@ -383,7 +384,9 @@ object ModelStep:
  *
  *  - A turn takes an [[AgentInput]]. On a new thread `input` imports its `history` - no system
  *    message, and a valid conversation - and makes the root the active agent; on an existing thread
- *    a `history` is refused. It then runs the root's `beforeAgent` stack on the query and, when
+ *    a `history` is refused. It then runs the root's `beforeAgent` stack on the query - as its admission left it
+ *    (#2854): `Agent` runs every owner's `admit` stack before the turn is stored, and `input` runs any the input
+ *    does not record, and blocks a turn whose query an admission refused - and, when
  *    another agent is active, that agent's stack on the result, appends the user message, resets
  *    [[LoopKeys.turn]] and routes to the active agent's model. A `Left` from either stack, or a
  *    blank query, blocks the run without the query or a model call; a new thread still keeps its
@@ -481,8 +484,53 @@ final class ToolLoop private (
   askedNodes: Set[NodeId],
   callToolNodes: Set[NodeId],
   continuations: Map[(AgentId, AgentNode), Set[NodeId]],
-  modelNodes: Set[NodeId]
+  modelNodes: Set[NodeId],
+  root: AgentId,
+  stacks: Map[AgentId, MiddlewareStack]
 ):
+
+  /** Whether the family has a handoff target, whose admission depends on which agent a thread is with. */
+  private[agent] def hasTargets: Boolean = stacks.size > 1
+
+  /**
+   * Runs the admission stage on `input`'s query before the turn is stored (#2854): the root's `admit` stack, then -
+   * when the thread is with another agent - `active`'s, each on the query the one before returned. Only the stacks
+   * `input` does not record as run are run, so an input admitted before - by a queue's submitter - is not admitted
+   * twice, and one already refused is returned as it is.
+   *
+   * The result's input is what the turn is started with: the query as the stages left it and a record of the
+   * admission, or, for a refused query, no query and the refusing guardrail's name; `refused` is then the block,
+   * reason and all, for the caller. A `Left` that is not a block - a stage's failure, a question, a blank query
+   * returned - refuses the turn: nothing is started. `active` is read before the thread is claimed, so it may be out
+   * of date; an agent it missed is admitted by the input step.
+   */
+  private[agent] def admit(
+    input: AgentInput,
+    active: Option[AgentId],
+    threadId: ThreadId,
+    config: RunConfig
+  ): Result[ToolLoop.Admitted] =
+    val owners = (root +: active.filter(_ != root).toVector).filter(id => stacks.contains(id) && !input.admittedBy(id))
+    if input.refusedBy.isDefined || owners.isEmpty then Right(ToolLoop.Admitted(input, None))
+    else
+      val ledger = new AdmissionContext.Collected
+      val passed = owners.foldLeft[Result[String]](Right(input.query)) { (query, owner) =>
+        query.flatMap { text =>
+          stacks(owner).admit(text, AdmissionContext.before(threadId, owner, config.tenantId, config.principal, ledger))
+        }
+      }
+      val prior = input.admission.getOrElse(Admission(Vector.empty))
+      def record(refusedBy: Option[String]) =
+        Admission(prior.agents ++ owners, prior.usage.merge(ledger.usage), prior.calls ++ ledger.calls, refusedBy)
+      passed match
+        case Right(query) if query.trim.isEmpty =>
+          Left(ValidationError("query", "admit returned a blank query"))
+        case Right(query) => Right(ToolLoop.Admitted(input.withQuery(query).withAdmission(record(None)), None))
+        case Left(blocked: GuardrailBlocked) =>
+          // nothing of the query goes on: the turn it starts holds who refused it, and what the stages counted
+          val refused = input.withQuery("").withAdmission(record(Some(blocked.guardrail)))
+          Right(ToolLoop.Admitted(refused, Some(blocked)))
+        case Left(error) => Left(error)
 
   /**
    * Whether a task of `node` may be cut by a boundary stop (Stage 5 W3, design 4.57): an agent's model call, whose
@@ -571,6 +619,12 @@ final class ToolLoop private (
 
 @Experimental
 object ToolLoop:
+
+  /**
+   * A turn's input after admission ([[ToolLoop.admit]]), and the block that refused its query, if one did: the
+   * reason, which the input does not hold.
+   */
+  final private[agent] case class Admitted(input: AgentInput, refused: Option[GuardrailBlocked])
 
   /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */
   private[agent] def settled(output: TurnOutput): RunOutcome = output.outcome match
@@ -1166,9 +1220,14 @@ object ToolLoop:
     val family = Family(agents.values.flatMap(_.harnessWrites).toSet)
     val steps = prepared.map(p => p.agent.id -> implement(b, agents(p.agent.id), agents, root, preserves, family)).toMap
 
-    // An input Block (a beforeAgent `Left`, or a blank query) stores nothing of the turn: the run ends as a
-    // finished failure, committing only a new thread's seed - its imported history and the root as active agent -
-    // and the usage of the hooks' own model calls. A middleware question stores nothing else either: the input runs
+    // The turn's query was admitted before the turn was stored when its input records so (#2854): the step then counts
+    // what the admission stages counted, and blocks the turn in the name of the stage that refused it, with no
+    // query to run anything on. An owner whose admission the input does not record - the turn was stored before the
+    // agent saw it, or the thread changed agent since - is admitted here, before any beforeAgent.
+    //
+    // An input Block (an admission's refusal, a beforeAgent `Left`, or a blank query) stores nothing of the turn: the
+    // run ends as a finished failure, committing only a new thread's seed - its imported history and the root as active
+    // agent - and the usage of the hooks' own model calls. A middleware question stores nothing else either: the input runs
     // again, with the answers, once it is answered. The hooks' updates commit with the input, so the turn's first
     // model call sees them, and the turn records each key's value before them, for an output Block to restore.
     def inputStep(in: AgentInput, state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
@@ -1190,36 +1249,76 @@ object ToolLoop:
       yield
         // the root's boundary hooks guard the whole family; the active agent's own run inside them
         val owners = if agentId == root then Vector(nodes) else Vector(agents(root), nodes)
-        threaded(owners, in.query, context, answers, state)(_.beforeAgent(_, _, _)) match
-          case Left(undeclared) => NodeResult.Fail(undeclared)
-          case Right(Left((owner, asked: MiddlewareAsked))) =>
-            askedSuspend(owner, asked, MiddlewareHook.BeforeAgent, answers, Some(in), usageOf(context))
-          case Right(Left((_, error))) =>
-            boundary(error, seeded.update.combine(usageOf(context)), context, GuardrailPhase.Input)
-          case Right(Right((transformed, _))) if transformed.trim.isEmpty =>
-            // stored, a blank query would fail every model call and every recover after it
-            boundary(
-              ValidationError("query", "beforeAgent returned a blank query"),
-              seeded.update.combine(usageOf(context)),
-              context,
-              GuardrailPhase.Input
-            )
-          case Right(Right((transformed, hooks))) =>
-            // the hooks' keys as they were, and as the hooks leave them: an output Block restores only the latter
-            state.applyUpdate(hooks) match
-              case Left(failed) => NodeResult.Fail(failed)
-              case Right(after) =>
-                val keys  = keysOf(hooks)
-                val prior = written(remembered(Map.empty, keys, state), keys, after)
-                NodeResult.Continue(
-                  Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
-                    // a new turn: no child of it has been counted yet
-                    .update(DelegationKeys.counted, CountedUpdate.Reset)
-                    .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
-                    .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer, prior))
-                    .goto(nodes.model)
-                )
+        // once: when the step runs again with a middleware's answers, the first run has committed them
+        if answers.isEmpty then
+          in.admission.foreach(a => hookContext(root, context, answers, state).countAdmitted(a.usage, a.calls))
+        def blocked(error: LLMError) =
+          boundary(error, seeded.update.combine(usageOf(context)), context, GuardrailPhase.Input)
+        // the stacks the input does not record as admitted, each on the query the one before returned
+        def admitted: Either[LLMError, String] =
+          owners.filterNot(o => in.admittedBy(o.agent.id)).foldLeft[Either[LLMError, String]](Right(in.query)) {
+            (query, owner) =>
+              query.flatMap { text =>
+                val hook = hookContext(owner.agent.id, context, answers, state)
+                owner.stack.admit(text, AdmissionContext.within(hook, owner.agent.id))
+              }
+          }
+        in.refusedBy.map(GuardrailBlocked(_, None)).toLeft(()).flatMap(_ => admitted) match
+          case Left(error) => blocked(error)
+          case Right(query) if query.trim.isEmpty =>
+            blocked(ValidationError("query", "admit returned a blank query"))
+          case Right(query) =>
+            // what a middleware question keeps to run the step again with: the query as admitted, by every owner,
+            // so no stage runs twice; what the stages counted before the turn was stored is committed by then
+            val prior = in.admission.getOrElse(Admission(Vector.empty))
+            val kept = in
+              .withQuery(query)
+              .withAdmission(prior.withAgents((prior.agents ++ owners.map(_.agent.id)).distinct))
+            beforeAgentStep(kept, owners, nodes, agentId, seeded, transfer, state, context, answers)
       outcome.fold(NodeResult.Fail(_), identity)
+
+    // The admitted query through every owner's beforeAgent, then the turn's first route.
+    def beforeAgentStep(
+      in: AgentInput,
+      owners: Vector[AgentNodes],
+      nodes: AgentNodes,
+      agentId: AgentId,
+      seeded: Command,
+      transfer: Option[Transfer],
+      state: ThreadState,
+      context: RunContext,
+      answers: Vector[GivenAnswer]
+    ): NodeResult =
+      val taskId = context.position.taskId.value
+      threaded(owners, in.query, context, answers, state)(_.beforeAgent(_, _, _)) match
+        case Left(undeclared) => NodeResult.Fail(undeclared)
+        case Right(Left((owner, asked: MiddlewareAsked))) =>
+          askedSuspend(owner, asked, MiddlewareHook.BeforeAgent, answers, Some(in), usageOf(context))
+        case Right(Left((_, error))) =>
+          boundary(error, seeded.update.combine(usageOf(context)), context, GuardrailPhase.Input)
+        case Right(Right((transformed, _))) if transformed.trim.isEmpty =>
+          // stored, a blank query would fail every model call and every recover after it
+          boundary(
+            ValidationError("query", "beforeAgent returned a blank query"),
+            seeded.update.combine(usageOf(context)),
+            context,
+            GuardrailPhase.Input
+          )
+        case Right(Right((transformed, hooks))) =>
+          // the hooks' keys as they were, and as the hooks leave them: an output Block restores only the latter
+          state.applyUpdate(hooks) match
+            case Left(failed) => NodeResult.Fail(failed)
+            case Right(after) =>
+              val keys  = keysOf(hooks)
+              val prior = written(remembered(Map.empty, keys, state), keys, after)
+              NodeResult.Continue(
+                Command(seeded.update.combine(hooks).combine(usageOf(context)), seeded.routes)
+                  // a new turn: no child of it has been counted yet
+                  .update(DelegationKeys.counted, CountedUpdate.Reset)
+                  .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
+                  .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer, prior))
+                  .goto(nodes.model)
+              )
 
     val input = b.node[AgentInput]("input", writes = inputWrites ++ family.writes) { (in, state, context) =>
       inputStep(in, state, context, Vector.empty)
@@ -1303,7 +1402,9 @@ object ToolLoop:
           // every node that runs a model call: each agent's model node and its `wrapModelCall` question nodes,
           // where a model call resumed after a middleware question runs
           prepared.map(p => ToolLoop.modelNode(p.agent.id)).toSet ++
-            all.flatMap(owner => asked(owner, MiddlewareHook.WrapModelCall))
+            all.flatMap(owner => asked(owner, MiddlewareHook.WrapModelCall)),
+          root,
+          prepared.map(p => p.agent.id -> p.stack).toMap
         )
       }
 
@@ -1554,18 +1655,20 @@ object ToolLoop:
         def call(req: ModelRequest): Result[ModelResponse] =
           val result = stack.wrapModelCall(req, hooks, check) { r =>
             // every call is checked against the token budget, also a wrapper's second one (#2084)
-            hooks.admitted(
-              callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
+            hooks.admitted {
+              val (called, took) = ModelContext.timed(callModel(agent.model, agent.id, context, attempts)(r))
+              called.map { (completion, attempt) =>
                 hooks.recordCall(
                   completion,
                   attempt,
                   r.sentMessages,
                   ModelContext.definitions(r.tools.toolFunctions, agent.model.responseFormat(r.tools)),
-                  agent.model.providerId
+                  agent.model.providerId,
+                  took
                 )
                 ModelResponse(completion)
               }
-            )
+            }
           }
           // an undeclared write fails the step whatever the wrappers returned; otherwise a call refused at the
           // token budget ends the turn, whatever they returned (#2084)

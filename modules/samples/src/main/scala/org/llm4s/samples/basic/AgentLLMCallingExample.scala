@@ -124,9 +124,6 @@ object AgentLLMCallingExample {
                   )
                   .build()
 
-                // Trace agent initialization
-                _ = TracingUtil.traceAgentInitialization(tracing, query, tools)
-
                 _ = logger.info("🔄 Running calculator agent...")
                 _ = logger.info("Query: {}", query)
 

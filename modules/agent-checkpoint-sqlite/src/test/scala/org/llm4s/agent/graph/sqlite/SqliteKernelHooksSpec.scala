@@ -55,7 +55,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
       next: ModelRequest => Result[ModelResponse]
     ): Result[ModelResponse] = next(request).map(_.addUpdate(StateUpdate.update(notes, "model")))
     override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-      if answer.contains("secret") then Left(GuardrailBlocked("secrets", "no"))
+      if answer.contains("secret") then Left(GuardrailBlocked("secrets", Some("no")))
       else Right(BoundaryResult(answer, StateUpdate.update(notes, "after")))
   }
 

@@ -2,10 +2,11 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.AgentId
+import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.agent.graph.VersionedJson
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.ToolSet
-import org.llm4s.llmconnect.model.Message
+import org.llm4s.llmconnect.model.{ Message, UsageSummary }
 import upickle.default.ReadWriter
 
 /**
@@ -89,16 +90,70 @@ object Transfer:
   def apply(source: AgentId, target: AgentId, messageId: String): Transfer =
     new Transfer(source, target, messageId)
 
-/** One turn's input: the user's query and, on a new thread only, the conversation to import before it. */
+/**
+ * What the admission stage did with a turn's query before the turn was stored (#2854), kept with the turn's input so
+ * that its input step neither runs the stage again nor loses what it counted. It holds no text of the query.
+ *
+ * @param agents the agents whose `admit` stacks ran: the input step runs any other owner's itself
+ * @param usage the usage of the model calls the stages made, which the input step adds to the thread's
+ * @param calls the event of each of those calls, which the input step announces
+ * @param refusedBy the guardrail or middleware that refused the query, when one did: the input then holds no
+ *   query, and its input step blocks the turn in that name
+ */
 @Experimental
-final case class AgentInput private (query: String, history: Vector[Message] = Vector.empty) derives ReadWriter:
-  def withQuery(value: String): AgentInput            = copy(query = value)
-  def withHistory(value: Vector[Message]): AgentInput = copy(history = value)
+final case class Admission private (
+  agents: Vector[AgentId],
+  usage: UsageSummary = UsageSummary(),
+  calls: Vector[ModelCallCompleted] = Vector.empty,
+  refusedBy: Option[String] = None
+) derives ReadWriter:
+  def withAgents(value: Vector[AgentId]): Admission           = copy(agents = value)
+  def withUsage(value: UsageSummary): Admission               = copy(usage = value)
+  def withCalls(value: Vector[ModelCallCompleted]): Admission = copy(calls = value)
+  def withRefusedBy(value: String): Admission                 = copy(refusedBy = Some(value))
+  def withRefusedBy(value: Option[String]): Admission         = copy(refusedBy = value)
+
+@Experimental
+object Admission:
+  def apply(
+    agents: Vector[AgentId],
+    usage: UsageSummary = UsageSummary(),
+    calls: Vector[ModelCallCompleted] = Vector.empty,
+    refusedBy: Option[String] = None
+  ): Admission = new Admission(agents, usage, calls, refusedBy)
+
+/**
+ * One turn's input: the user's query and, on a new thread only, the conversation to import before it.
+ *
+ * `admission` is what the admission stage made of the query (#2854), when it ran before the turn was stored: the
+ * `query` is then the stage's - rewritten, or empty for one it refused - and never the query as submitted. `None` for
+ * an input nothing has admitted yet, a stored one written before admission existed included: its input step runs the
+ * stage.
+ */
+@Experimental
+final case class AgentInput private (
+  query: String,
+  history: Vector[Message] = Vector.empty,
+  admission: Option[Admission] = None
+) derives ReadWriter:
+  def withQuery(value: String): AgentInput                = copy(query = value)
+  def withHistory(value: Vector[Message]): AgentInput     = copy(history = value)
+  def withAdmission(value: Admission): AgentInput         = copy(admission = Some(value))
+  def withAdmission(value: Option[Admission]): AgentInput = copy(admission = value)
+
+  /** Whether `agent`'s admission stack has run on this input. */
+  private[agent] def admittedBy(agent: AgentId): Boolean = admission.exists(_.agents.contains(agent))
+
+  /** The guardrail or middleware that refused the query at admission, if one did. */
+  private[agent] def refusedBy: Option[String] = admission.flatMap(_.refusedBy)
 
 @Experimental
 object AgentInput:
-  def apply(query: String, history: Vector[Message] = Vector.empty): AgentInput =
-    new AgentInput(query, history)
+  def apply(
+    query: String,
+    history: Vector[Message] = Vector.empty,
+    admission: Option[Admission] = None
+  ): AgentInput = new AgentInput(query, history, admission)
 
 /** How a turn ended. */
 @Experimental

@@ -30,6 +30,25 @@ final private[agent] class MiddlewareStack private (val ordered: Vector[AgentMid
   val writes: Set[StateKey[?, ?]] = ordered.flatMap(_.writes).toSet
 
   /**
+   * Runs each `admit` in stack order, threading the query; the first `Left` stops. A question is refused, naming the
+   * middleware that asked it: admission cannot suspend the turn (#2854).
+   */
+  private[agent] def admit(query: String, context: AdmissionContext): Result[String] =
+    ordered.foldLeft[Result[String]](Right(query))((acc, m) =>
+      acc.flatMap(text =>
+        guarded(m)(m.admit(text, context)) match
+          case Left(_: MiddlewareAsked) =>
+            Left(
+              ValidationError(
+                "admit",
+                s"middleware '${m.id.value}' asked a question from admit, which cannot suspend the turn: ask from beforeAgent"
+              )
+            )
+          case other => other
+      )
+    )
+
+  /**
    * Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. Each middleware's
    * update is kept with its id, in the order the hooks ran, and checked by `check` as its hook returns: an
    * undeclared write stops the fold too, and is in `check` whatever the caller makes of the `Left`.

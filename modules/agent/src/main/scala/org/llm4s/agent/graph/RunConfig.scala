@@ -400,6 +400,9 @@ final private[agent] class TaskUsage:
   def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
 
+  /** Adds usage counted before this task ran: an admission stage's own model calls (#2854). */
+  def addAll(other: UsageSummary): Unit = recorded.updateAndGet(_.merge(other)): Unit
+
   /** Whether the task made an agent's model step: its own model call, not a hook's (design 4.45). */
   private val stepped = new java.util.concurrent.atomic.AtomicBoolean(false)
 

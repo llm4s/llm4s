@@ -978,7 +978,8 @@ val agent = Agent.builder("assistant", client)
   .build()
 ```
 
-A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays usable.
+A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays
+usable. The reason is given to the caller of the run that was blocked and is never stored.
 
 [Learn more about guardrails →](guardrails)
 

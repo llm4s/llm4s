@@ -219,8 +219,12 @@ object ProviderRegistry:
     val (dedupedChat, chatCollisionIds)            = lastWins(descriptors)(_.id.asString)
     val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(embeddingDescriptors)(_.id.asString)
     val idCollisions =
-      chatCollisionIds.map(id => ProviderIdCollision("chat", id, "explicit registration", None)) ++
-        embeddingCollisionIds.map(id => ProviderIdCollision("embedding", id, "explicit registration", None))
+      chatCollisionIds.map(id =>
+        ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId(id), "explicit registration", None)
+      ) ++
+        embeddingCollisionIds.map(id =>
+          ProviderIdCollision(ProviderCollisionKind.Embedding, ProviderId(id), "explicit registration", None)
+        )
     // Alias collisions belong to the set as it now stands, so they are recomputed rather than
     // accumulated: replacing the provider that declared an alias can resolve one.
     val collisions = report.collisions.filterNot(isAliasCollision) ++ idCollisions ++
@@ -238,11 +242,7 @@ object ProviderRegistry:
   ): ProviderRegistry =
     new ProviderRegistry(descriptors, embeddingDescriptors, report)
 
-  private val ChatAlias      = "chat alias"
-  private val EmbeddingAlias = "embedding alias"
-
-  private def isAliasCollision(collision: ProviderIdCollision): Boolean =
-    collision.kind == ChatAlias || collision.kind == EmbeddingAlias
+  private def isAliasCollision(collision: ProviderIdCollision): Boolean = collision.kind.isAlias
 
   /**
    * Alias to descriptor, in canonical spelling. An alias equal to a registered id is left out,
@@ -261,15 +261,15 @@ object ProviderRegistry:
     chat: Vector[ProviderDescriptor],
     embeddings: Vector[EmbeddingProviderDescriptor]
   ): Vector[ProviderIdCollision] =
-    aliasCollisionsOf(chat, ChatAlias)(_.id.asString, _.aliases) ++
-      aliasCollisionsOf(embeddings, EmbeddingAlias)(_.id.asString, _.aliases)
+    aliasCollisionsOf(chat, ProviderCollisionKind.ChatAlias)(_.id.asString, _.aliases) ++
+      aliasCollisionsOf(embeddings, ProviderCollisionKind.EmbeddingAlias)(_.id.asString, _.aliases)
 
   /**
    * The aliases that do not resolve to the descriptor declaring them: one equal to another
    * provider's id (the id wins), and one an earlier descriptor also declared (the later wins).
    * `keptModule` and `droppedModule` name the providers, since one module can supply both.
    */
-  private def aliasCollisionsOf[D](descriptors: Vector[D], kind: String)(
+  private def aliasCollisionsOf[D](descriptors: Vector[D], kind: ProviderCollisionKind)(
     idOf: D => String,
     aliasesOf: D => Set[String]
   ): Vector[ProviderIdCollision] =
@@ -278,7 +278,7 @@ object ProviderRegistry:
     val pairs                = aliasPairs(descriptors)(aliasesOf).map((alias, descriptor) => alias -> idOf(descriptor))
     val shadowed = pairs.collect {
       case (alias, owner) if ids.contains(alias) && alias != owner =>
-        ProviderIdCollision(kind, alias, provider(alias), Some(provider(owner)))
+        ProviderIdCollision(kind, ProviderId(alias), provider(alias), Some(provider(owner)))
     }
     val shared = pairs
       .filterNot((alias, _) => ids.contains(alias))
@@ -288,7 +288,12 @@ object ProviderRegistry:
       .flatMap { (alias, claims) =>
         val owners = claims.map(_._2).distinct
         Option.when(owners.sizeIs > 1)(
-          ProviderIdCollision(kind, alias, provider(owners.last), Some(provider(owners(owners.size - 2))))
+          ProviderIdCollision(
+            kind,
+            ProviderId(alias),
+            provider(owners.last),
+            Some(provider(owners(owners.size - 2)))
+          )
         )
       }
     shadowed ++ shared
@@ -332,8 +337,8 @@ object ProviderRegistry:
     val (dedupedChat, chatCollisionIds)            = lastWins(scan.descriptors)(_.id.asString)
     val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(scan.embeddingDescriptors)(_.id.asString)
     val collisions =
-      collisionsOf(scan.modules, chatCollisionIds, "chat", _.providerIds) ++
-        collisionsOf(scan.modules, embeddingCollisionIds, "embedding", _.embeddingProviderIds) ++
+      collisionsOf(scan.modules, chatCollisionIds, ProviderCollisionKind.Chat, _.providerIds) ++
+        collisionsOf(scan.modules, embeddingCollisionIds, ProviderCollisionKind.Embedding, _.embeddingProviderIds) ++
         aliasCollisions(dedupedChat, dedupedEmbeddings)
 
     val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures, collisions)
@@ -391,8 +396,8 @@ object ProviderRegistry:
               val embeddingKept = embeddings.map(_._1).getOrElse(Vector.empty)
               val entry = ProviderModuleReport(
                 moduleClass = name,
-                providerIds = chatKept.map(_._2),
-                embeddingProviderIds = embeddingKept.map(_._2),
+                providerIds = chatKept.map(kept => ProviderId(kept._2)),
+                embeddingProviderIds = embeddingKept.map(kept => ProviderId(kept._2)),
                 source = sourceOf(module)
               )
               loop(
@@ -430,14 +435,14 @@ object ProviderRegistry:
   private def collisionsOf(
     modules: Vector[ProviderModuleReport],
     duplicateIds: Vector[String],
-    kind: String,
-    idsOf: ProviderModuleReport => Seq[String]
+    kind: ProviderCollisionKind,
+    idsOf: ProviderModuleReport => Seq[ProviderId]
   ): Vector[ProviderIdCollision] =
     duplicateIds.map { id =>
-      val moduleNames = modules.filter(module => idsOf(module).contains(id)).map(_.moduleClass)
+      val moduleNames = modules.filter(module => idsOf(module).contains(ProviderId(id))).map(_.moduleClass)
       val kept        = moduleNames.lastOption.getOrElse("unknown module")
       val dropped     = moduleNames.init.lastOption
-      ProviderIdCollision(kind, id, kept, dropped)
+      ProviderIdCollision(kind, ProviderId(id), kept, dropped)
     }
 
   /** What one pass of [[discover]] has accumulated so far. */

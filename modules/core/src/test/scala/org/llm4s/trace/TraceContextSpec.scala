@@ -94,7 +94,7 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
     val context = TraceContext(trace, span)
     val placed  = TraceSpan(context.spanFor("e"), Some(context), Instant.EPOCH)
     TraceEvent.CustomEvent("x", ujson.Obj()).span shouldBe None
-    TraceEvent.AgentInitialized("q", Vector.empty).span shouldBe None
+    TraceEvent.CacheHit(0.9, 0.8).span shouldBe None
 
     val custom = TraceEvent.CustomEvent("x", ujson.Obj(), span = Some(placed)).toJson
     custom("trace_id").str shouldBe trace
@@ -102,10 +102,18 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
     custom("parent_span_id").str shouldBe span
 
     val run =
-      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Nil, UsageSummary(), span = Some(placed.withParent(None)))
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        TraceEvent.RunStatus.Completed,
+        Nil,
+        UsageSummary(),
+        span = Some(placed.withParent(None))
+      )
     run.toJson.obj.contains("parent_span_id") shouldBe false
     run.toJson("trace_id").str shouldBe trace
     TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", span = Some(placed)).toJson("span_id").str shouldBe
       placed.context.spanId
-    TraceEvent.ErrorOccurred(new RuntimeException("x"), "c", span = Some(placed)).span shouldBe Some(placed)
+    TraceEvent.ErrorOccurred("x", "RuntimeException", "c", span = Some(placed)).span shouldBe Some(placed)
   }

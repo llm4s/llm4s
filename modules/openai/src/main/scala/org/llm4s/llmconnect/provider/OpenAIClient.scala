@@ -36,14 +36,7 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{
-  ContentFilteredError,
-  LLMError,
-  NetworkError,
-  ServiceError,
-  UnknownError,
-  ValidationUnsupportedError
-}
+import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.syntax.toLLMError
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -533,15 +526,15 @@ class OpenAIClient private[provider] (
    *    an unknown model is the `ServiceError` 404 a completion gets.
    *  - '''Requesty''': `GET /models`, the router's listing. `Right(())` means the endpoint answered and took the
    *    key; the model is not looked for.
-   *  - '''Azure OpenAI''': `Left(ValidationUnsupportedError)`. `model` is a deployment name, and the deployment
-   *    listing is a management-plane request this client's key does not authorise.
+   *  - '''Azure OpenAI''': the resource's model listing, `GET <endpoint>/openai/models?api-version=...` (the data
+   *    plane's "Models - List"), or `GET <endpoint>/openai/v1/models` for a v1 endpoint, with the `api-key` or
+   *    Entra ID token a completion carries. `Right(())` means the resource answered and took the credential. The
+   *    deployment is not looked for: `model` is a deployment name, the listing holds the resource's base models,
+   *    and the deployment listing is a management-plane request this credential does not authorise.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    config match {
-      case _: AzureConfig                     => Left(ValidationUnsupportedError(clientDescription))
-      case _ if provider == OpenAIProvider.id => call("model lookup")(transport.retrieveModel(model))
-      case _                                  => call("model listing")(transport.listModels())
-    }
+    if (provider == OpenAIProvider.id) call("model lookup")(transport.retrieveModel(model))
+    else call("model listing")(transport.listModels())
   }
 
   /**
@@ -1045,16 +1038,17 @@ object OpenAIClient {
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
       ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
-      HttpErrorMapper
-        .mapHttpError(
-          service.statusCode(),
-          // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
-          // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
-          Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
-          provider,
-          Try(headerMap(service.headers())).getOrElse(Map.empty)
-        )
-        .left
+      Left(
+        HttpErrorMapper
+          .toError(
+            service.statusCode(),
+            // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
+            // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
+            Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
+            provider,
+            Try(headerMap(service.headers())).getOrElse(Map.empty)
+          )
+      ).left
         .getOrElse(redactMessage(SdkErrorMapper(service, provider), service))
     case io: OpenAIIoException if io.getCause != null =>
       redactMessage(SdkErrorMapper(io.getCause, provider), io.getCause)

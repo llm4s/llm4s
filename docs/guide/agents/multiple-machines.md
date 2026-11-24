@@ -122,6 +122,12 @@ submitter.submit(ThreadId("t-42"), AgentId("assistant"), QueuedInput.query("Summ
 
 - **Every instance runs the same agents under the same ids.** A worker takes only entries for the agent ids it was
   built with; a typed agent goes in as `QueuedAgent.typed(boundAgent)`.
+- **A queued query is stored as you submit it.** `QueuedInput.query(text)` is in the queue before any guardrail has
+  seen it, and the worker that takes it runs the agent's input guardrails before the turn's first checkpoint. To keep
+  what a guardrail would refuse or rewrite out of the queue as well, admit the query on the submitting instance and
+  queue the result: `agent.admit(threadId, text).map(QueuedInput.admitted)`. The entry then holds the query as the
+  guardrails left it - or, for a refused one, only the refusing guardrail's name - and the worker does not run them
+  again. See [Admission](middleware#admission).
 - **Following a run** is `submitter.follow(tenant, entryId, after, limit, wait)`, a page at a time from a thread
   sequence number: it waits for the next commit on whichever machine makes it, and resuming from the last number seen
   repeats nothing. `submitter.await(tenant, entryId, timeout)` waits for the entry to close.

@@ -33,4 +33,11 @@ object RemovedApis_1_0Test {
   val both = org.llm4s.Result.combine(Right(1), Right("a")) // assert: RemovedApis_1_0.resultHelperRemoved
 
   val done = org.llm4s.AsyncResult.success(1) // assert: RemovedApis_1_0.resultHelperRemoved
+
+  val started = org.llm4s.trace.TraceEvent.AgentInitialized("query", Vector("echo")) // assert: RemovedApis_1_0.agentInitializedRemoved
+
+  def initialized(event: org.llm4s.trace.TraceEvent): Boolean = event match {
+    case _: org.llm4s.trace.TraceEvent.AgentInitialized => true // assert: RemovedApis_1_0.agentInitializedRemoved
+    case _                                              => false
+  }
 }

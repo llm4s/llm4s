@@ -66,7 +66,7 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
         "t1/~task/general/x",
         "child-run",
         "general",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Seq(UserMessage("q"), AssistantMessage("a")),
         UsageSummary(),
         t0.plusSeconds(3),
@@ -88,7 +88,7 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
         "t1",
         "parent-run",
         "lead",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Seq(UserMessage("q")),
         UsageSummary(),
         t0.plusSeconds(5),
@@ -129,6 +129,49 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
     // each message of a run is under the run
     val messages = observations.filter(_("name").str.matches("(User Input|LLM Generation) \\d+"))
     messages.map(_("parentObservationId").str).toSet shouldBe Set(parentRun.spanId, childRun.spanId)
+  }
+
+  // Decided as intended (#2829): Langfuse's trace-create is an upsert by trace id, and the backend keeps no state
+  // that says whether an earlier run of the trace - on this machine or another - already created it.
+  it should "send the trace again for a later run in it, under the same id, with that run's span unparented" in {
+    val tracing = new Recording
+    val first   = TraceContext.rootFor("run:first")
+    val resumed = first.spanFor("run:resumed")
+    tracing.traceEvent(
+      TraceEvent.AgentRunEnded(
+        "t1",
+        "run-1",
+        "lead",
+        TraceEvent.RunStatus.Suspended,
+        Seq(UserMessage("q")),
+        UsageSummary(),
+        t0.plusSeconds(1),
+        span = Some(TraceSpan(first, None, t0))
+      )
+    )
+    tracing.traceEvent(
+      TraceEvent.AgentRunEnded(
+        "t1",
+        "run-2",
+        "lead",
+        TraceEvent.RunStatus.Completed,
+        Seq(UserMessage("q"), AssistantMessage("a")),
+        UsageSummary(),
+        t0.plusSeconds(9),
+        span = Some(TraceSpan(resumed, Some(first), t0.plusSeconds(8)))
+      )
+    )
+
+    val traces = tracing.ofType("trace-create")
+    traces.map(_("id").str) shouldBe Seq(first.traceId, first.traceId)
+    // the later run's is the one that stands: its status and its answer
+    traces.map(_("metadata")("status").str) shouldBe Seq("suspended", "completed")
+    traces.map(_("output").str) shouldBe Seq("", "a")
+
+    val runs = tracing.ofType("span-create").filter(_("name").str == "invoke_agent lead")
+    runs.map(_("id").str) shouldBe Seq(first.spanId, resumed.spanId)
+    runs.foreach(_("traceId").str shouldBe first.traceId)
+    runs.foreach(_.obj.contains("parentObservationId") shouldBe false)
   }
 
   it should "report a model call's output as billed: the completion plus the thinking it leaves out" in {
@@ -179,7 +222,9 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
 
   it should "trace an unplaced run as before: its own trace, keyed by run" in {
     val tracing = new Recording
-    tracing.traceEvent(TraceEvent.AgentRunEnded("t1", "run-1", "lead", "completed", Seq.empty, UsageSummary()))
+    tracing.traceEvent(
+      TraceEvent.AgentRunEnded("t1", "run-1", "lead", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
+    )
     lone(tracing.ofType("trace-create"))("id").str shouldBe "run-1"
   }
 }

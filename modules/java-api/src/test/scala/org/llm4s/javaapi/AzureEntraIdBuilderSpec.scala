@@ -14,8 +14,8 @@ import scala.jdk.CollectionConverters.*
 class AzureEntraIdBuilderSpec extends AnyFlatSpec with Matchers {
 
   private val tokens = new AccessTokenProvider {
-    def token(): Result[String]            = Right("entra-token")
-    def invalidate(rejected: String): Unit = ()
+    def token(): Result[String]                     = Right("entra-token")
+    override def invalidate(rejected: String): Unit = ()
   }
 
   "AzureOpenAiClientBuilder.tokenProvider" should "authenticate with the provider's bearer token and no API key" in {

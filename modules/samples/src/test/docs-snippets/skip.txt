@@ -152,7 +152,7 @@ guide/agents/guardrails.md | 910bf055fb | skip | continues the sequential compos
 guide/agents/guardrails.md | 8b33e88afe | with | import org.llm4s.agent.Agent
 guide/agents/guardrails.md | 2bde24ac11 | with | import org.llm4s.agent.Agent
 guide/agents/guardrails.md | b3393df8fd | with | import org.llm4s.agent.Agent
-guide/agents/guardrails.md | f7bcfba7cd | with | import org.llm4s.agent.AgentStatus
+guide/agents/guardrails.md | 98787c99d1 | with | import org.llm4s.agent.AgentStatus
 guide/agents/guardrails.md | 8f11dfd07b | with | import org.llm4s.agent.Agent; import org.llm4s.agent.guardrails.builtin._
 guide/agents/guardrails.md | fcab15ce3f | with | import org.llm4s.agent.guardrails.builtin._
 guide/agents/human-review.md | 25590550c3 | skip | runtime, graph and input stand for the reader's own GraphRuntime, compiled graph and input

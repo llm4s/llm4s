@@ -116,7 +116,8 @@ private[llm4s] object FacadeInternals {
         Optional.empty,
         Optional.empty,
         Optional.ofNullable(guardrail),
-        Optional.ofNullable(reason),
+        // present on the result of the run that was blocked; a reason is never stored (#2853)
+        Optional.ofNullable(reason.orNull),
         none
       )
     case AgentStatus.StepLimitReached =>

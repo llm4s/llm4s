@@ -111,7 +111,7 @@ final class ReliableClient(
       configError.map(error => Left(error): Result[Completion]).getOrElse {
         // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
         // deliver the reply again from the start and run (and bill) the call twice. A failure before the
-        // first chunk is retried as usual. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule.
+        // first chunk is retried as usual.
         val delivered = new java.util.concurrent.atomic.AtomicBoolean(false)
         // The caller's own onChunk threw: the client turns that into a Left, but it says nothing about the
         // provider, so the circuit breaker counts it as neither success nor failure. It is rethrown unchanged.

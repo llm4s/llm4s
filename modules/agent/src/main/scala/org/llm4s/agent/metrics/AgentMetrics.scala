@@ -65,9 +65,10 @@ object AgentMetrics:
     Metric.counter("llm4s.agent.runs.started", "Agent runs started, by how they began", "graph", "trigger")
 
   /**
-   * Runs that ended: `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`). A run that
-   * stops without a terminal event - its process died, or it lost its claim - ends nothing here; its recovery starts
-   * a run.
+   * Runs that ended: `graph`, `status` - the status the run's trace reports (`TraceEvent.RunStatus`): `completed`,
+   * `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out` or
+   * `failed`. A guardrail block is `blocked`, never `failed`, and no label names the guardrail. A run that stops
+   * without a terminal event - its process died, or it lost its claim - ends nothing here; its recovery starts a run.
    */
   val RunsEnded: Metric.Counter =
     Metric.counter("llm4s.agent.runs.ended", "Agent runs ended, by status", "graph", "status")

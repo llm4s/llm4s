@@ -193,4 +193,10 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(MistralClient(config("invalid-key-for-testing")))
+
+  registerValidationContract()
 }

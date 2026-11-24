@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, ServiceTier, TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,14 +21,6 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     val now = Instant.now()
     ts.isAfter(now) shouldBe false
     ts.isBefore(now.minusSeconds(60)) shouldBe false
-  }
-
-  "AgentInitialized" should "default its timestamp and set every field" in {
-    stampedNow(TraceEvent.AgentInitialized("q", Vector("a")).timestamp)
-    val e = TraceEvent.AgentInitialized("q", Vector("a"), t0)
-    val c = e.withQuery("q2").withTools(Vector("b")).withTimestamp(t1)
-    c shouldBe TraceEvent.AgentInitialized("q2", Vector("b"), t1)
-    e.query shouldBe "q"
   }
 
   "CompletionReceived" should "default its timestamp and set every field" in {
@@ -56,22 +49,36 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       .withTimestamp(t1) shouldBe TraceEvent.ToolExecuted("n2", "i2", "o2", 2.millis, false, t1)
   }
 
-  "ErrorOccurred" should "default its timestamp and span and set every field" in {
-    val boom = new RuntimeException("boom")
-    val d    = TraceEvent.ErrorOccurred(boom, "ctx")
+  "ErrorOccurred" should "default its timestamp, cause and span and set every field" in {
+    val d = TraceEvent.ErrorOccurred("boom", "RuntimeException", "ctx")
     stampedNow(d.timestamp)
-    d.span shouldBe None
+    (d.cause, d.span, d.usage) shouldBe ((None, None, None))
     val other = new IllegalStateException("other")
-    val e     = TraceEvent.ErrorOccurred(boom, "ctx", t0)
-    val c     = e.withError(other).withContext("ctx2").withTimestamp(t1).withSpan(span)
-    c shouldBe TraceEvent.ErrorOccurred(other, "ctx2", t1, Some(span))
+    val c = d
+      .withMessage("other")
+      .withErrorType("IllegalStateException")
+      .withContext("ctx2")
+      .withCause(other)
+      .withTimestamp(t1)
+      .withSpan(span)
+    c shouldBe TraceEvent.ErrorOccurred("other", "IllegalStateException", "ctx2", Some(other), t1, Some(span))
+    c.withCause(None).cause shouldBe None
+    c.withCause(Some(other)).cause shouldBe Some(other)
     c.withSpan(None).span shouldBe None
     c.withSpan(Some(span)).span shouldBe Some(span)
-    d.usage shouldBe None
     c.withUsage(TokenUsage(1, 2, 3)).usage shouldBe Some(TokenUsage(1, 2, 3))
     c.withUsage(TokenUsage(1, 2, 3)).withUsage(None).usage shouldBe None
-    TraceEvent.ErrorOccurred(boom, "ctx", t0, None, None, None, None, None, None) shouldBe
-      TraceEvent.ErrorOccurred(boom, "ctx", t0)
+  }
+
+  it should "be built from an exception, which is its cause, or from an LLMError, which has none (#2800)" in {
+    val boom = new RuntimeException("boom")
+    TraceEvent.ErrorOccurred.of(boom, "ctx").withTimestamp(t0) shouldBe
+      TraceEvent.ErrorOccurred("boom", "RuntimeException", "ctx", Some(boom), t0)
+    TraceEvent.ErrorOccurred.of(new IllegalStateException(), "ctx").message shouldBe ""
+
+    val error = org.llm4s.error.ProcessingError("store", "store down")
+    TraceEvent.ErrorOccurred.of(error, "ctx").withTimestamp(t0) shouldBe
+      TraceEvent.ErrorOccurred(error.message, "ProcessingError", "ctx", None, t0)
   }
 
   "TokenUsageRecorded" should "default its timestamp and span and set every field" in {
@@ -91,7 +98,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "AgentRunEnded" should "default its timestamp, parents and span and set every field" in {
-    val d = TraceEvent.AgentRunEnded("th", "r", "a", "completed", Seq.empty, UsageSummary())
+    val d = TraceEvent.AgentRunEnded("th", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
     stampedNow(d.timestamp)
     d.parentThreadId shouldBe None
     d.parentRunId shouldBe None
@@ -100,13 +107,18 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     d.toJson.obj.contains("user_id") shouldBe false
     d.withUserId("alice").toJson("user_id").str shouldBe "alice"
     d.withUserId("alice").withUserId(None).userId shouldBe None
+    (d.blockedBy, d.activeAgent) shouldBe ((None, None))
+    d.withBlockedBy("pii").withActiveAgent("billing").blockedBy shouldBe Some("pii")
+    d.withBlockedBy("pii").withActiveAgent("billing").activeAgent shouldBe Some("billing")
+    d.withBlockedBy(Some("pii")).withBlockedBy(None).blockedBy shouldBe None
+    d.withActiveAgent(Some("billing")).withActiveAgent(None).activeAgent shouldBe None
     val usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None)
     val msgs  = Seq(UserMessage("hi"))
     val c = d
       .withThreadId("th2")
       .withRunId("r2")
       .withAgent("a2")
-      .withStatus("failed")
+      .withStatus(TraceEvent.RunStatus.Failed)
       .withMessages(msgs)
       .withUsage(usage)
       .withTimestamp(t1)
@@ -117,7 +129,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       "th2",
       "r2",
       "a2",
-      "failed",
+      TraceEvent.RunStatus.Failed,
       msgs,
       usage,
       t1,
@@ -186,12 +198,12 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "ImageGenerationCompleted" should "default cost, success, error and timestamp and set every field" in {
-    val d = TraceEvent.ImageGenerationCompleted("m", "p", "generate", 1, "1024x1024", "hd", 1.milli)
+    val d = TraceEvent.ImageGenerationCompleted("m", "generate", 1, "1024x1024", "hd", 1.milli)
     stampedNow(d.timestamp)
-    (d.costUsd, d.success, d.errorMessage) shouldBe ((None, true, None))
+    (d.costUsd, d.success, d.errorMessage, d.provider) shouldBe ((None, true, None, None))
     val c = d
       .withModel("m2")
-      .withProvider("p2")
+      .withProvider(ProviderId("p2"))
       .withOperation("edit")
       .withImageCount(2)
       .withSize("512x512")
@@ -203,7 +215,6 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       .withTimestamp(t1)
     c shouldBe TraceEvent.ImageGenerationCompleted(
       "m2",
-      "p2",
       "edit",
       2,
       "512x512",
@@ -212,11 +223,14 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       Some(0.04),
       false,
       Some("bad"),
-      t1
+      t1,
+      Some(ProviderId("p2"))
     )
-    val cleared = c.withCostUsd(None).withErrorMessage(None)
-    (cleared.costUsd, cleared.errorMessage) shouldBe ((None, None))
-    cleared.withCostUsd(Some(0.04)).withErrorMessage(Some("bad")) shouldBe c
+    c.toJson("provider").str shouldBe "p2"
+    d.toJson.obj.contains("provider") shouldBe false
+    val cleared = c.withCostUsd(None).withErrorMessage(None).withProvider(None)
+    (cleared.costUsd, cleared.errorMessage, cleared.provider) shouldBe ((None, None, None))
+    cleared.withCostUsd(Some(0.04)).withErrorMessage(Some("bad")).withProvider(Some(ProviderId("p2"))) shouldBe c
   }
 
   "CacheHit" should "default its timestamp and set every field" in {

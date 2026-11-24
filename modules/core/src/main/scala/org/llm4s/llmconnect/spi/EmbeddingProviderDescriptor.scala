@@ -61,8 +61,12 @@ trait EmbeddingProviderDescriptor:
   /** Alternative spellings accepted in `EMBEDDING_MODEL=<name>/<model>`, folded onto [[id]]. */
   def aliases: Set[String] = Set.empty
 
-  /** What this provider needs from `llm4s.embeddings.<id>`, and its defaults. */
-  def configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec()
+  /**
+   * What this provider needs from `llm4s.embeddings.<id>`, and its defaults. Abstract, as
+   * `ProviderDescriptor.configSpec` is: a provider says what it needs. `EmbeddingConfigSpec()` is one that needs
+   * nothing but a model.
+   */
+  def configSpec: EmbeddingConfigSpec
 
   /**
    * Vector dimensions of the models this provider knows, keyed by model name as

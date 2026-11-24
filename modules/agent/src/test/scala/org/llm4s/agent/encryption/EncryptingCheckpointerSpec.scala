@@ -450,4 +450,98 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     metrics.durations(AgentMetrics.CommitDuration, "ok") should have size 1
     (ujson.write(upickle.default.writeJs(raw.eventsAfter(on, 0L, 10).value)) should not).include("researcher")
   }
+
+  /** A settled checkpoint over `checkpoint(on)`, closing its run as `outcome`. */
+  private def settled(on: ThreadId, outcome: RunOutcome, id: String = "c2"): Checkpoint =
+    checkpoint(on, id = id, parent = Some("c1")).withStatus(CheckpointStatus.Failed).withOutcome(outcome)
+
+  private def outcomes: Vector[RunOutcome] = Vector(
+    RunOutcome.Failed("ProcessingError", s"the tool returned: $Secret"),
+    RunOutcome.Failed("Empty", ""),
+    RunOutcome.OutputInvalid(Vector(s"`diagnosis` was '$Secret'", s"and so was `note`: $Secret")),
+    RunOutcome.OutputInvalid(Vector(s"one error: $Secret")),
+    RunOutcome.OutputInvalid(Vector.empty),
+    // text that is itself an envelope's JSON is a text like any other
+    RunOutcome.Failed("Lookalike", s"""{"${PayloadCipher.Marker}":"1.k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}"""),
+    RunOutcome.Blocked("NoDiagnoses"),
+    RunOutcome.Answered,
+    RunOutcome.Truncated,
+    RunOutcome.StepLimitReached,
+    RunOutcome.TokenLimitReached
+  )
+
+  it should "seal the error text of a settled run's outcome, and read back the outcome it was given (#2853)" in {
+    outcomes.foreach { outcome =>
+      val raw   = InMemoryCheckpointer()
+      val store = EncryptingCheckpointer(raw, StaticKeySource(key("k1")))
+      val on    = thread()
+      val token = claimed(store, on)
+      store.commit(on, Commit(token, Some(checkpoint(on)))).value
+      store.commit(on, Commit(token, Some(settled(on, outcome)))).value
+
+      withClue(s"$outcome as the store holds it: ") {
+        val kept = stored(raw, on).outcome.value
+        (kept.toString should not).include(Secret)
+        // which way the run settled stays readable: the case, a guardrail's name, a failure's kind
+        kept.getClass shouldBe outcome.getClass
+        (kept, outcome) match {
+          case (RunOutcome.Failed(kind, message), RunOutcome.Failed(expected, _)) =>
+            kind shouldBe expected
+            message should include(PayloadCipher.Marker)
+          case (RunOutcome.OutputInvalid(errors), _) =>
+            errors should have size 1
+            errors.head should include(PayloadCipher.Marker)
+          case (plain, _) => plain shouldBe outcome
+        }
+      }
+      store.latest(on).value.value.checkpoint.outcome shouldBe Some(outcome)
+      store.history(on, None, 10).value.map(_.outcome) shouldBe Vector(Some(outcome), None)
+      store.checkpoint(on, "c2").value.value.outcome shouldBe Some(outcome)
+      store.latestOfRuns(on, Set(RunId("r1"))).value.value.outcome shouldBe Some(outcome)
+    }
+  }
+
+  it should "refuse an outcome's text stored in plain by default, and read it with plaintext reads on (#2853)" in {
+    val keys = StaticKeySource(key("k1"))
+    Vector[RunOutcome](
+      RunOutcome.Failed("ProcessingError", s"said $Secret"),
+      RunOutcome.OutputInvalid(Vector(s"a: $Secret", s"b: $Secret"))
+    ).foreach { outcome =>
+      val on  = thread()
+      val raw = InMemoryCheckpointer()
+      // a row whose values are sealed and whose outcome is not: one a build before #2853 wrote, or one put there since
+      val sealedRow = {
+        val scratch = InMemoryCheckpointer()
+        val through = EncryptingCheckpointer(scratch, keys)
+        through.commit(on, Commit(claimed(through, on), Some(checkpoint(on)))).value
+        stored(scratch, on)
+      }
+      raw.commit(on, Commit(claimed(raw, on), Some(sealedRow.withOutcome(outcome)))).value
+
+      EncryptingCheckpointer(raw, keys).latest(on).left.value shouldBe a[EncryptionError.NotEncrypted]
+      val migrating = EncryptingCheckpointer(raw, keys, EncryptionSettings().withPlaintextReads(true))
+      migrating.latest(on).value.value.checkpoint.outcome shouldBe Some(outcome)
+    }
+  }
+
+  it should "refuse a sealed outcome moved to another checkpoint, or its message put where its errors go (#2853)" in {
+    val keys  = StaticKeySource(key("k1"))
+    val raw   = InMemoryCheckpointer()
+    val store = EncryptingCheckpointer(raw, keys)
+    val on    = thread()
+    val token = claimed(store, on)
+    store.commit(on, Commit(token, Some(checkpoint(on)))).value
+    store.commit(on, Commit(token, Some(settled(on, RunOutcome.Failed("ProcessingError", s"said $Secret"))))).value
+    val kept = stored(raw, on)
+    val text = kept.outcome.value match {
+      case RunOutcome.Failed(_, message) => message
+      case other                         => fail(s"not a failure: $other")
+    }
+
+    val moved = EncryptingCheckpointer(planted(kept.withId("c9").withParent(None)), keys)
+    moved.latest(on).left.value shouldBe a[EncryptionError.DecryptionFailed]
+    val swapped =
+      EncryptingCheckpointer(planted(kept.withParent(None).withOutcome(RunOutcome.OutputInvalid(Vector(text)))), keys)
+    swapped.latest(on).left.value shouldBe a[EncryptionError.DecryptionFailed]
+  }
 }

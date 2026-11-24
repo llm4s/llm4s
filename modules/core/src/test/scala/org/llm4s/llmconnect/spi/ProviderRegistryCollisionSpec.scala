@@ -37,7 +37,8 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
 
   /** An embedding descriptor with no provider behind it: enough to exercise registration. */
   final private class StubEmbeddingProvider(name: String) extends EmbeddingProviderDescriptor:
-    val id: ProviderId = ProviderId(name)
+    val id: ProviderId                                           = ProviderId(name)
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
       Left(ConfigurationError(s"stub $name"))
@@ -51,7 +52,9 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
 
       registry.resolve(ProviderId("acme")) shouldBe Right(second)
       registry.report.hasCollisions shouldBe true
-      registry.report.collisions shouldBe Seq(ProviderIdCollision("chat", "acme", "explicit registration", None))
+      registry.report.collisions shouldBe Seq(
+        ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "explicit registration", None)
+      )
     }
 
     "report no collision when every id is unique" in {
@@ -69,7 +72,7 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
       registry.findEmbedding(ProviderId("acme")) shouldBe Some(second)
       registry.report.hasCollisions shouldBe true
       registry.report.collisions shouldBe Seq(
-        ProviderIdCollision("embedding", "acme", "explicit registration", None)
+        ProviderIdCollision(ProviderCollisionKind.Embedding, ProviderId("acme"), "explicit registration", None)
       )
     }
   }
@@ -88,10 +91,10 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
       registry.report.hasCollisions shouldBe true
 
       val collision = registry.report.collisions
-        .find(_.id == "fixturecloud")
+        .find(_.id == ProviderId("fixturecloud"))
         .getOrElse(fail(s"no collision reported: ${registry.report.describe}"))
 
-      collision.kind shouldBe "chat"
+      collision.kind shouldBe ProviderCollisionKind.Chat
       collision.keptModule shouldBe "org.llm4s.llmconnect.spi.fixtures.CollidingProviderModule"
       collision.droppedModule shouldBe Some("org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule")
     }
@@ -118,10 +121,10 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
       registry.report.hasCollisions shouldBe true
 
       val collision = registry.report.collisions
-        .find(_.id == "fixtureembed")
+        .find(_.id == ProviderId("fixtureembed"))
         .getOrElse(fail(s"no collision reported: ${registry.report.describe}"))
 
-      collision.kind shouldBe "embedding"
+      collision.kind shouldBe ProviderCollisionKind.Embedding
       collision.keptModule shouldBe "org.llm4s.llmconnect.spi.fixtures.CollidingEmbeddingModule"
       collision.droppedModule shouldBe Some("org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
     }
@@ -131,7 +134,9 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
     "include a line naming the colliding id and both modules" in {
       val description = ProviderRegistryReport(
         discovered = true,
-        collisions = Seq(ProviderIdCollision("chat", "acme", "second-module", Some("first-module")))
+        collisions = Seq(
+          ProviderIdCollision(ProviderCollisionKind.Chat, ProviderId("acme"), "second-module", Some("first-module"))
+        )
       ).describe
 
       description should include("chat id 'acme'")

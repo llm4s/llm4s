@@ -93,8 +93,12 @@ enum TaskOutcome[+O]:
 @Experimental
 enum TaskRefusal derives ReadWriter:
 
-  /** A guardrail of the child blocked its turn. */
-  case Blocked(guardrail: String, reason: String)
+  /**
+   * A guardrail of the child blocked its turn. `reason` is the guardrail's, on the outcome of the call whose child
+   * run was blocked; it is never stored (#2853), so the same refusal read again from the child's thread has `None`,
+   * and the parent model's tool error names the guardrail only.
+   */
+  case Blocked(guardrail: String, reason: Option[String])
 
   /** The child used its `maxSteps` model calls without an answer. */
   case StepLimitReached
@@ -111,14 +115,15 @@ enum TaskRefusal derives ReadWriter:
   /** The child run failed: its error's message. */
   case Failed(message: String)
 
-  /** A one-line description, for the parent model's tool error. */
+  /** A one-line description, for the parent model's tool error: stored with the parent's history. */
   def describe: String = this match
-    case Blocked(guardrail, reason) => s"blocked by guardrail '$guardrail': $reason"
-    case StepLimitReached           => "reached its step limit without an answer"
-    case TokenLimitReached          => "reached its token budget without an answer"
-    case Truncated                  => "its answer was cut off at the model's output limit"
-    case OutputInvalid(errors)      => s"its answer did not match its output schema: ${errors.mkString("; ")}"
-    case Failed(message)            => s"failed: $message"
+    // the tool error is stored in the parent's history, and is the same on a replay: the guardrail, never its reason
+    case Blocked(guardrail, _) => s"blocked by guardrail '$guardrail'"
+    case StepLimitReached      => "reached its step limit without an answer"
+    case TokenLimitReached     => "reached its token budget without an answer"
+    case Truncated             => "its answer was cut off at the model's output limit"
+    case OutputInvalid(errors) => s"its answer did not match its output schema: ${errors.mkString("; ")}"
+    case Failed(message)       => s"failed: $message"
 
 @Experimental
 object TaskRefusal:

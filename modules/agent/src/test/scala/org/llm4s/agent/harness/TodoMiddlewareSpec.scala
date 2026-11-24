@@ -234,7 +234,7 @@ class TodoMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues wit
     val guard = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("guard")
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(answer))
+        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(answer))
     }
     val store  = new InMemoryCheckpointer
     val thread = ThreadId("blocked")

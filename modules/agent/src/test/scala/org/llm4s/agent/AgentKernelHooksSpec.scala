@@ -34,7 +34,9 @@ class AgentKernelHooksSpec extends AnyFlatSpec with Matchers {
 
     agent.run("q").isLeft shouldBe true
     client.callCount shouldBe 1
-    tracing.ended.map(e => (e.status, e.usage.requestCount, e.usage.inputTokens)) shouldBe Vector(("failed", 1L, 10L))
+    tracing.ended.map(e => (e.status.name, e.usage.requestCount, e.usage.inputTokens)) shouldBe Vector(
+      ("failed", 1L, 10L)
+    )
   }
 
   "AgentBuilder.withMaxPromptSectionTokens" should "refuse a budget below 1" in {

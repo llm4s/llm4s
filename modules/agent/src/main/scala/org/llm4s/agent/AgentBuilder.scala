@@ -139,7 +139,7 @@ final class AgentBuilder private (
 
   /**
    * Appends `middleware` to the agent's stack, in order. The root agent's run-boundary hooks guard
-   * the whole family: its `beforeAgent` runs on every turn's query, before the active agent's own,
+   * the whole family: its `admit` and `beforeAgent` run on every turn's query, before the active agent's own,
    * and its `afterAgent` on every final answer, after the answering agent's own - so a
    * [[org.llm4s.agent.graph.middleware.GuardrailMiddleware]] on the root still applies after a
    * handoff. A handoff target's boundary hooks apply only while it is active, and model and tool
@@ -158,9 +158,13 @@ final class AgentBuilder private (
    * stores nothing; one that transforms the query passes its result to the next. On the root agent they guard the
    * whole family, as a root `GuardrailMiddleware` does: they run on every turn's query, whichever agent is active.
    *
+   * They run as the turn is admitted, before anything of it is stored (#2854): a query they refuse is in no
+   * checkpoint, event, queue entry or trace, and one they rewrite is stored only as rewritten. So they see the query
+   * as submitted, before any middleware's `beforeAgent`; text a `beforeAgent` hook adds is not checked by them.
+   *
    * The input and output guardrails set here run as one `GuardrailMiddleware` with the id `agent-guardrails`, innermost
    * in this agent's stack, closest to the model: after every middleware given to [[withMiddleware]] (and a harness's),
-   * so its input checks run after their `beforeAgent`s and its output checks before their `afterAgent`s. A middleware
+   * so its input checks run after their `admit` stages and its output checks before their `afterAgent`s. A middleware
    * that must not see a blocked answer, such as a semantic memory, so works with them as it is. A
    * `GuardrailMiddleware` added with `withMiddleware` still runs, in its own place, outside these, so both apply. For
    * another placement or a constraint on the order, use `withMiddleware(new GuardrailMiddleware(...))`, which is

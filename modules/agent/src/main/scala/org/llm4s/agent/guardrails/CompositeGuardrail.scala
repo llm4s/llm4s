@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.agent.graph.middleware.ModelContext
+import org.llm4s.agent.graph.middleware.UsageAccounting
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 
@@ -28,7 +28,7 @@ class CompositeGuardrail[A](
   def validate(value: A): Result[A] = run(value)(_.validate(value))
 
   /** As `validate(value)`, each guardrail validating with `context`, so a judge's calls are accounted. */
-  override def validate(value: A, context: ModelContext): Result[A] = run(value)(_.validate(value, context))
+  override def validate(value: A, context: UsageAccounting): Result[A] = run(value)(_.validate(value, context))
 
   private def run(value: A)(check: Guardrail[A] => Result[A]): Result[A] = mode match {
     case ValidationMode.All =>
@@ -127,7 +127,7 @@ object CompositeGuardrail {
     def validate(value: A): Result[A] =
       guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate))
 
-    override def validate(value: A, context: ModelContext): Result[A] =
+    override def validate(value: A, context: UsageAccounting): Result[A] =
       guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate(_, context)))
 
     val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"

@@ -213,3 +213,13 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
     event.servedTier shouldBe Some(ServiceTier.Other("Scale"))
     event.usage shouldBe usage
   }
+
+  it should "store the call's duration in milliseconds, and read an event stored before the field as zero (#2829)" in {
+    import scala.concurrent.duration.*
+    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None).withDuration(1500.millis)
+    ujson.read(write(event))("duration").num shouldBe 1500.0
+    read[ModelCallCompleted](write(event)) shouldBe event
+    val stored = ujson.read(write(ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01))))
+    stored.obj.remove("duration")
+    read[ModelCallCompleted](stored).duration shouldBe Duration.Zero
+  }

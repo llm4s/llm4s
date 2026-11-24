@@ -9,6 +9,11 @@ import scala.concurrent.duration.FiniteDuration
  * Errors raised while building, running or restoring a typed graph. Every case is a
  * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
+ *
+ * The marker says what should happen without anyone deciding: a `RecoverableError` may be tried again as it is (an
+ * `AgentWorker` gives such an entry back for a later attempt), a `NonRecoverableError` is reported. It does not say
+ * whether the thread can go on. A run that ended [[GraphError.NodeFailed]], [[GraphError.Cancelled]] or
+ * [[GraphError.SuperstepLimitExceeded]] leaves its checkpoint `Running`, and an explicit `recover` continues it.
  */
 @Experimental
 sealed trait GraphError extends LLMError
@@ -115,7 +120,13 @@ object GraphError:
     override val message: String =
       s"Run on thread '$threadId' exceeded its deadline${lastCheckpoint.fold("")(c => s"; recover from $c")}"
 
-  /** The run reached its superstep limit with work still scheduled. */
+  /**
+   * The run reached its superstep limit (`RunBudgets.maxSupersteps`) with work still scheduled. The checkpoint stays
+   * `Running`, and `recover` continues the run with a fresh allowance: the limit counts one run's supersteps. It is
+   * a [[org.llm4s.error.NonRecoverableError NonRecoverableError]] all the same, deliberately: the limit guards
+   * against a graph that does not stop, so nothing retries past it automatically - a retry would only multiply the
+   * limit by the attempts - and continuing is the caller's decision.
+   */
   final case class SuperstepLimitExceeded(limit: Int) extends GraphError with NonRecoverableError:
     override val message: String = s"Graph exceeded its limit of $limit supersteps"
 

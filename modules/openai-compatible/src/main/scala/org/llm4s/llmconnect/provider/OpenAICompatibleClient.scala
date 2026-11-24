@@ -8,6 +8,7 @@ import org.llm4s.error.{
   LLMError,
   NetworkError,
   ServiceError,
+  TroubleshootingLinks,
   ValidationError,
   ValidationUnsupportedError
 }
@@ -144,13 +145,7 @@ class OpenAICompatibleClient(
                   .flatMap(filteredReply)
                   .flatMap(ToolCallRules.checked)
                   .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
-              else
-                HttpErrorMapper.mapHttpError(
-                  response.statusCode,
-                  Redaction.scrubRemote(body),
-                  providerName,
-                  response.headers
-                )
+              else errorResponse(response.statusCode, body, response.headers)
             recordExchange(startedAt, requestText, Some(body), result)
             result
           }
@@ -207,7 +202,7 @@ class OpenAICompatibleClient(
         Try(Using.resource(body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)))
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
-      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody), providerName, headers)
+      errorResponse(statusCode, errorBody, headers)
     } else
       // A failure while reading the open body is classified as a transport failure would be
       Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
@@ -769,33 +764,48 @@ class OpenAICompatibleClient(
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
   /**
-   * Sends one `GET` to the dialect's [[OpenAICompatibleDialect.validationPath validationPath]] under the base URL -
-   * the model listing, `<baseUrl>/models`, unless the dialect names another request - with the headers and the
-   * credential of a completion, and returns the error a reply that is not 2xx maps to: an `AuthenticationError`
-   * for a refused key, a `ServiceError` for an endpoint that is not this API. A dynamic credential's 401 is retried
-   * once with a fresh token, as a completion's is.
+   * The error a response that is not 2xx maps to, its body scrubbed of registered credentials first: what
+   * `HttpErrorMapper` makes of the status, except that a response the dialect says
+   * [[OpenAICompatibleDialect.refusesCredential refuses the credential]] is an `AuthenticationError` whatever its
+   * status.
+   */
+  private def errorResponse(statusCode: Int, body: String, headers: Map[String, Seq[String]]): Result[Nothing] = {
+    val scrubbed = Redaction.scrubRemote(body)
+    if (dialect.refusesCredential(statusCode, body))
+      Left(
+        TroubleshootingLinks.annotate(
+          AuthenticationError(
+            providerName,
+            HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, providerName),
+            statusCode.toString
+          )
+        )
+      )
+    else Left(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers))
+  }
+
+  /**
+   * Sends one `GET` to the dialect's [[OpenAICompatibleDialect.validationUrl validationUrl]] - the model listing,
+   * `<baseUrl>/models`, unless the dialect names another request - with the headers and the credential of a
+   * completion, and returns the error a reply that is not 2xx maps to: an `AuthenticationError` for a refused key,
+   * a `ServiceError` for an endpoint that is not this API. A dynamic credential's 401 is retried once with a fresh
+   * token, as a completion's is.
    *
-   * It shows that the endpoint answers and takes the credential. It does not look for the configured model in the
-   * listing: a gateway may serve a model it does not list, and an alias is often listed under another id. A
-   * dialect with no such request ([[OpenAICompatibleDialect.validationPath]] `None`) is
+   * It shows that the endpoint answers and takes the credential. The standard request does not look for the
+   * configured model in the listing: a gateway may serve a model it does not list, and an alias is often listed
+   * under another id. A dialect with no such request ([[OpenAICompatibleDialect.validationUrl]] `None`) is
    * `Left(ValidationUnsupportedError)`.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    dialect.validationPath match
+    dialect.validationUrl(settings.baseUrl, settings.model) match
       case None => Left(ValidationUnsupportedError(clientDescription))
-      case Some(path) =>
+      case Some(url) =>
         withAuthRetry { headers =>
           httpClient
-            .get(s"${settings.baseUrl}$path", headers - "Content-Type", Map.empty, validationTimeout)
+            .get(url, headers - "Content-Type", Map.empty, validationTimeout)
             .flatMap { response =>
               if (response.statusCode >= 200 && response.statusCode < 300) Right(())
-              else
-                HttpErrorMapper.mapHttpError(
-                  response.statusCode,
-                  Redaction.scrubRemote(response.body),
-                  providerName,
-                  response.headers
-                )
+              else errorResponse(response.statusCode, response.body, response.headers)
             }
         }
   }

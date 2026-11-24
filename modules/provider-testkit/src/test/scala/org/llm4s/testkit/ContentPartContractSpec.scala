@@ -125,7 +125,10 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
 
   "assertProviderRejectionIsTyped" should "pass a client that maps a 400 and a 413 with the provider's message" in {
     assertProviderRejectionIsTyped(openAIError) { url =>
-      new Rejected(url, (status, body) => HttpErrorMapper.mapHttpError(status, body, "reference").left.toOption.get)
+      new Rejected(
+        url,
+        (status, body) => Left(HttpErrorMapper.toError(status, body, "reference", Map.empty)).left.toOption.get
+      )
     }
   }
 

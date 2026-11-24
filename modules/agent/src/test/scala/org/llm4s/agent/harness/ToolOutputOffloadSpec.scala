@@ -272,7 +272,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val guard = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("guard")
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(answer))
+        if (answer.contains("secret")) Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(answer))
     }
     val big    = new Big
     val store  = new InMemoryCheckpointer

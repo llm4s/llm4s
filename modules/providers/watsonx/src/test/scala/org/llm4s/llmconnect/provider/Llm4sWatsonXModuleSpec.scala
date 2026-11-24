@@ -145,8 +145,35 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       assertModelCallContract(WatsonXContractFixtures.replies(routed))(clientAt)
     }
 
-    "say that validate() checks nothing: it has no validation request (#2830)" in {
-      assertValidationUnsupported(clientAt("http://localhost:1"))
+    "validate by exchanging the API key at IAM, afresh on every call (#2855)" in {
+      assertValidates(
+        sendJsonResponse(_, 200, tokenBody),
+        (exchange, status, message) =>
+          sendJsonResponse(exchange, status, ujson.Obj("errorCode" -> "BXNIM0415E", "errorMessage" -> message).render())
+      )(clientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+      withServer("/") { exchange =>
+        val body = new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+        seen.add(s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}" -> body)
+        sendJsonResponse(exchange, 200, tokenBody)
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        client.validate() shouldBe Right(())
+        // a cached token would hide a key revoked since: each call asks IAM again
+        client.validate() shouldBe Right(())
+        client.close()
+      }
+      val exchangeBody = "grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=test-key"
+      seen.toArray.toSeq shouldBe Seq.fill(2)(s"POST $IamPath" -> exchangeBody)
+
+      // IAM answers a key it does not know with a 400
+      withServer("/")(sendJsonResponse(_, 400, """{"errorCode":"BXNIM0415E","errorMessage":"not found"}""")) {
+        baseUrl =>
+          val client = clientAt(baseUrl)
+          client.validate() should matchPattern { case Left(_: org.llm4s.error.AuthenticationError) => }
+          client.close()
+      }
     }
 
     "return CancelledError when a call is interrupted" in {

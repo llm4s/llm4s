@@ -453,7 +453,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
   private object BlockSecrets extends AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("block")
     override def afterAgent(text: String, context: ModelContext): Result[BoundaryResult] =
-      if text.contains("secret") then Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(text))
+      if text.contains("secret") then Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(text))
   }
 
   "An output Block" should "undo the turn's edits of state files" in {

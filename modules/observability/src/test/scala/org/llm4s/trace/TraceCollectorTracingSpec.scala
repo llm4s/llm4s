@@ -33,7 +33,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         end,
@@ -77,7 +77,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         t0.plusSeconds(10),
@@ -134,7 +134,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "convert ErrorOccurred event to Error status span" in {
     val error = new RuntimeException("test error")
-    val event = TraceEvent.ErrorOccurred(error, "test-context")
+    val event = TraceEvent.ErrorOccurred.of(error, "test-context")
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -150,7 +150,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "put a failed call's billed usage on its error span (#2676)" in {
     val event =
-      TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+      TraceEvent.ErrorOccurred("filtered", "ContentFilteredError", "chat", usage = Some(TokenUsage(7, 4, 11)))
     collector.traceEvent(event) shouldBe Right(())
 
     val span = store.getSpans(collector.traceId).loneElement
@@ -250,14 +250,12 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("hit").asBoolean shouldBe Some(false)
   }
 
-  it should "convert AgentInitialized and AgentRunEnded to AgentCall spans" in {
-    val initEvent = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"))
-    val endEvent  = TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary())
-    collector.traceEvent(initEvent) shouldBe Right(())
+  it should "convert AgentRunEnded to an AgentCall span" in {
+    val endEvent = TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
     collector.traceEvent(endEvent) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
-    spans should have size 2
+    spans should have size 1
     spans.foreach(_.kind shouldBe SpanKind.AgentCall)
   }
 
@@ -267,7 +265,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
       "thread-1",
       "run-1",
       "assistant",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(UserMessage("hi"), AssistantMessage("hello")),
       usage
     )
@@ -322,7 +320,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val filteredCollector = TracingComposer.filter(collector)(_.eventType == "tool_executed")
 
     val toolEvent  = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
-    val otherEvent = TraceEvent.AgentInitialized("query", Vector.empty)
+    val otherEvent = TraceEvent.CacheHit(0.9, 0.8)
 
     filteredCollector.traceEvent(toolEvent) shouldBe Right(())
     filteredCollector.traceEvent(otherEvent) shouldBe Right(())

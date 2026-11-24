@@ -107,6 +107,6 @@ class AzureSectionValidationSpec extends AnyFlatSpec with Matchers {
     )
 
     AzureProvider.buildConfig("in-code", section).left.toOption.getOrElse(fail("Expected Left")).message shouldBe
-      "Configured provider 'in-code' is missing endpoint (llm4s.providers.<name>.endpoint)"
+      "Configured provider 'in-code' is missing endpoint (llm4s.providers.in-code.endpoint)"
   }
 }

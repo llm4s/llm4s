@@ -132,7 +132,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
 
     ran.asScala.toVector shouldBe Vector("RuleA", "RuleB", "Passes")
     status match
-      case AgentStatus.Blocked(first, reason) =>
+      case AgentStatus.Blocked(first, Some(reason)) =>
         first shouldBe "RuleA"
         reason should (include("RuleA refused").and(include("RuleB refused")))
       case other => fail(s"expected Blocked, got $other")
@@ -162,7 +162,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
 
     ran.asScala.toVector shouldBe Vector("RuleA")
     status match
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe composite.name
         reason should include("RuleA refused")
         (reason should not).include("RuleB")

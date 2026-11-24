@@ -748,7 +748,9 @@ result.status().guardrail().ifPresent(g ->
   query or an answer, and `json()`, which checks only an answer - `inputGuardrails` does not compile with it. Each list
   runs in order. A guardrail that fails ends the turn `BLOCKED`, with the guardrail's name in `status().guardrail()` and
   its reason in `status().reason()`; a blocked query stores nothing of the turn, a blocked answer is not kept, and the
-  conversation stays usable. Guardrails written in Java are not available yet.
+  conversation stays usable. Input guardrails run before the turn is stored, so a blocked query is in no checkpoint,
+  event or trace, and the reason - which may quote the query - is on the result of the blocked turn and never stored.
+  Guardrails written in Java are not available yet.
 - **Context window.** `JContextWindow.lastMessages(n)` sends each model call at most the `n` most recent messages,
   dropping the oldest first. The system prompt is always sent and not counted; the current turn is always sent whole; a
   tool call is never sent without its result. Only what is sent is pruned: `messages()` of a result still has the whole

@@ -70,29 +70,6 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
   private val at    = Instant.parse("2026-11-03T10:00:00Z")
   private val limit = TraceAttributes.ContentLimit
 
-  "AgentInitialized" should {
-
-    "be the `LLM4S Agent Run` span with its tools and no input by default" in {
-      val (name, attributes) = mapped(TraceEvent.AgentInitialized("what is 2+2?", Vector("search", "calculator"), at))
-      name shouldBe "LLM4S Agent Run"
-      str(attributes, "event.type") shouldBe "trace-create"
-      str(attributes, "tools") shouldBe "search, calculator"
-      str(attributes, "input") shouldBe null
-    }
-
-    "record its input with captureContent, cut to ContentLimit characters" in {
-      val (_, whole) = mapped(TraceEvent.AgentInitialized("a" * limit, Vector.empty, at), captureContent = true)
-      str(whole, "input") shouldBe "a" * limit
-
-      val (_, cut) = mapped(TraceEvent.AgentInitialized("a" * (limit + 1), Vector.empty, at), captureContent = true)
-      str(cut, "input") shouldBe "a" * limit
-    }
-
-    "be an INTERNAL span" in {
-      kind(TraceEvent.AgentInitialized("q", Vector.empty, at)) shouldBe SpanKind.INTERNAL
-    }
-  }
-
   "CompletionReceived" should {
 
     "cut each message part to ContentLimit characters with captureContent" in {
@@ -194,7 +171,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
   "ErrorOccurred without an operation" should {
 
     "be the `Error` span with the error's message, simple class name and context" in {
-      val (name, attributes) = mapped(TraceEvent.ErrorOccurred(new IllegalStateException("boom"), "loading config", at))
+      val (name, attributes) =
+        mapped(TraceEvent.ErrorOccurred.of(new IllegalStateException("boom"), "loading config").withTimestamp(at))
       name shouldBe "Error"
       str(attributes, "event.type") shouldBe "event-create"
       str(attributes, "error.message") shouldBe "boom"
@@ -207,12 +185,12 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "be the call's span with the GenAI usage a content-filtered reply was billed (#2676)" in {
       val filtered = TraceEvent.ErrorOccurred(
-        new RuntimeException("filtered"),
+        "filtered",
+        "ContentFilteredError",
         "chat",
-        at,
+        timestamp = at,
         operation = Some("chat"),
         model = Some("gemini-2.5-flash"),
-        errorType = Some("ContentFilteredError"),
         usage = Some(TokenUsage(7, 4, 11, thinkingTokens = Some(2)))
       )
       val (name, attributes) = mapped(filtered)
@@ -224,7 +202,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "carry no usage when the call reported none" in {
       val (_, attributes) =
-        mapped(TraceEvent.ErrorOccurred(new RuntimeException("x"), "chat", at, operation = Some("chat")))
+        mapped(TraceEvent.ErrorOccurred("x", "RateLimitError", "chat", timestamp = at, operation = Some("chat")))
       long(attributes, "gen_ai.usage.input_tokens") shouldBe null
     }
   }
@@ -331,7 +309,6 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     def image(costUsd: Option[Double] = None, errorMessage: Option[String] = None, success: Boolean = true) =
       TraceEvent.ImageGenerationCompleted(
         model = "gpt-image-1",
-        provider = "openai",
         operation = "generate",
         imageCount = 2,
         size = "1024x1024",
@@ -340,7 +317,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         costUsd = costUsd,
         success = success,
         errorMessage = errorMessage,
-        timestamp = at
+        timestamp = at,
+        provider = Some(ProviderId("openai"))
       )
 
     "be `Image Generation - <operation>` with the request's details" in {
@@ -428,14 +406,16 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       kind(TraceEvent.CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)) shouldBe SpanKind.CLIENT
       kind(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "m", "index", 1, at)) shouldBe SpanKind.CLIENT
       kind(
-        TraceEvent.ImageGenerationCompleted("gpt-image-1", "openai", "generate", 1, "1024x1024", "hd", 1.second)
+        TraceEvent.ImageGenerationCompleted("gpt-image-1", "generate", 1, "1024x1024", "hd", 1.second)
       ) shouldBe SpanKind.CLIENT
-      kind(TraceEvent.ErrorOccurred(failure, "chat", at, operation = Some("chat"))) shouldBe SpanKind.CLIENT
+      kind(
+        TraceEvent.ErrorOccurred.of(failure, "chat").withTimestamp(at).withOperation("chat")
+      ) shouldBe SpanKind.CLIENT
       kind(TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj(), at)) shouldBe SpanKind.CLIENT
     }
 
     "be INTERNAL for an event that calls no remote service (#2531)" in {
-      kind(TraceEvent.ErrorOccurred(failure, "loading config", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.ErrorOccurred.of(failure, "loading config").withTimestamp(at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CostRecorded(0.01, "gpt-4o", "completion", 500, "total", at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CacheHit(0.97, 0.9, at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired, at)) shouldBe SpanKind.INTERNAL
@@ -447,7 +427,6 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         TraceEvent.CustomEvent("x", ujson.Obj(), at, Some(TraceSpan(TraceContext.random(), None, at)))
       ) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", at)) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.AgentInitialized("q", Vector.empty, at)) shouldBe SpanKind.INTERNAL
     }
 
     "be exported as INTERNAL for a cache hit" in withTracing() { (tracing, spans) =>
@@ -488,6 +467,18 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val exception = events.head.getAttributes
       str(exception, "exception.type") shouldBe "java.lang.IllegalStateException"
       str(exception, "exception.message") shouldBe "boom"
+    }
+
+    "record an LLMError's type and message, and no exception: it is not one (#2800)" in withTracing() {
+      (tracing, spans) =>
+        val error = org.llm4s.error.ProcessingError("store", "store down")
+        tracing.traceError(error, "commit") shouldBe Right(())
+
+        val span = spans().loneElement
+        span.getName shouldBe "Error"
+        str(span.getAttributes, "error.type") shouldBe "ProcessingError"
+        str(span.getAttributes, "error.message") shouldBe error.message
+        span.getEvents.asScala shouldBe empty
     }
   }
 

@@ -7,7 +7,7 @@ import org.llm4s.util.DurationJson
 import org.slf4j.LoggerFactory
 import upickle.default.{ macroRW, ReadWriter }
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{ Duration, FiniteDuration }
 import scala.util.Try
 
 // Durable payloads: committed with the task that emitted them, replayable. They carry no message content.
@@ -107,7 +107,9 @@ object CallUsage:
  * this version cannot read, a case added later, is `FinishReason.Other` with the value it was stored as. `servedTier` is
  * the completion's (`Completion.servedTier`): the tier the provider reports serving the call at (#2746), `None` when it
  * reported none, for usage recorded without a call, and in an event stored before the field existed; a tier this
- * version cannot read is `ServiceTier.Other`, as a finish reason is.
+ * version cannot read is `ServiceTier.Other`, as a finish reason is. `duration` is how long the provider call took, as
+ * the agent measured it around the client (#2829): the length of the call's `chat` span. Stored in milliseconds; zero
+ * for usage recorded without a call, and in an event stored before the field existed.
  */
 @Experimental
 final case class ModelCallCompleted private (
@@ -120,8 +122,9 @@ final case class ModelCallCompleted private (
   provider: Option[ProviderId] = None,
   adjustments: List[RequestAdjustment] = List.empty,
   finishReason: Option[FinishReason] = None,
-  servedTier: Option[ServiceTier] = None
-) derives ReadWriter:
+  servedTier: Option[ServiceTier] = None,
+  duration: FiniteDuration = Duration.Zero
+):
   def withAgent(value: String): ModelCallCompleted                        = copy(agent = value)
   def withModel(value: String): ModelCallCompleted                        = copy(model = value)
   def withAttempts(value: Int): ModelCallCompleted                        = copy(attempts = value)
@@ -137,6 +140,7 @@ final case class ModelCallCompleted private (
   def withFinishReason(value: Option[FinishReason]): ModelCallCompleted   = copy(finishReason = value)
   def withServedTier(value: ServiceTier): ModelCallCompleted              = copy(servedTier = Some(value))
   def withServedTier(value: Option[ServiceTier]): ModelCallCompleted      = copy(servedTier = value)
+  def withDuration(value: FiniteDuration): ModelCallCompleted             = copy(duration = value)
 
 @Experimental
 object ModelCallCompleted:
@@ -150,7 +154,8 @@ object ModelCallCompleted:
     provider: Option[ProviderId] = None,
     adjustments: List[RequestAdjustment] = List.empty,
     finishReason: Option[FinishReason] = None,
-    servedTier: Option[ServiceTier] = None
+    servedTier: Option[ServiceTier] = None,
+    duration: FiniteDuration = Duration.Zero
   ): ModelCallCompleted =
     new ModelCallCompleted(
       agent,
@@ -162,8 +167,13 @@ object ModelCallCompleted:
       provider,
       adjustments,
       finishReason,
-      servedTier
+      servedTier,
+      duration
     )
+
+  given ReadWriter[ModelCallCompleted] =
+    import DurationJson.millisRW
+    macroRW
 
 /** How a tool call ended for the loop. */
 @Experimental
@@ -244,9 +254,9 @@ enum GuardrailPhase derives ReadWriter:
   case Input, Output
 
 /**
- * A guardrail blocked the turn. The reason is on `AgentStatus.Blocked`, never in the event log: no durable event of a
- * blocked run holds it (its `TaskFailed` and `RunFailed` name the guardrail only). The run's closing checkpoint does,
- * as `RunOutcome.Blocked`.
+ * A guardrail blocked the turn. The reason is on the blocked run's `AgentStatus.Blocked`, never in the event log or
+ * the checkpoint store (#2853): no durable event of a blocked run holds it (its `TaskFailed` and `RunFailed` name the
+ * guardrail only), and the run's closing checkpoint records the guardrail's name alone, as `RunOutcome.Blocked`.
  */
 @Experimental
 final case class GuardrailBlock private (guardrail: String, phase: GuardrailPhase) derives ReadWriter:

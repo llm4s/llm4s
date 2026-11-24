@@ -14,35 +14,6 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   private val fixedTimestamp = Instant.parse("2024-01-15T10:30:00Z")
 
-  // ============ AgentInitialized ============
-
-  "TraceEvent.AgentInitialized" should "have correct event type" in {
-    val event = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"), fixedTimestamp)
-
-    event.eventType shouldBe "agent_initialized"
-    event.query shouldBe "test query"
-    event.tools shouldBe Vector("tool1", "tool2")
-    event.timestamp shouldBe fixedTimestamp
-  }
-
-  it should "serialize to JSON correctly" in {
-    val event = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"), fixedTimestamp)
-
-    val json = event.toJson
-
-    json("event_type").str shouldBe "agent_initialized"
-    json("timestamp").str shouldBe "2024-01-15T10:30:00Z"
-    json("query").str shouldBe "test query"
-    json("tools").arr.map(_.str) shouldBe Seq("tool1", "tool2")
-  }
-
-  it should "handle empty tools list" in {
-    val event = TraceEvent.AgentInitialized("query", Vector.empty, fixedTimestamp)
-
-    event.tools shouldBe empty
-    event.toJson("tools").arr shouldBe empty
-  }
-
   // ============ CompletionReceived ============
 
   "TraceEvent.CompletionReceived" should "have correct event type" in {
@@ -104,16 +75,28 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent.ErrorOccurred" should "have correct event type" in {
     val error = new RuntimeException("Test error")
-    val event = TraceEvent.ErrorOccurred(error, "test context", fixedTimestamp)
+    val event = TraceEvent.ErrorOccurred.of(error, "test context").withTimestamp(fixedTimestamp)
 
     event.eventType shouldBe "error_occurred"
-    event.error shouldBe error
+    event.message shouldBe "Test error"
+    event.errorType shouldBe "RuntimeException"
+    event.cause shouldBe Some(error)
     event.context shouldBe "test context"
+  }
+
+  it should "carry an LLMError's message and type, and no stack trace (#2800)" in {
+    val error = org.llm4s.error.ProcessingError("store", "store down")
+    val json  = TraceEvent.ErrorOccurred.of(error, "commit").withTimestamp(fixedTimestamp).toJson
+
+    json("error_type").str shouldBe "ProcessingError"
+    json("error_message").str shouldBe error.message
+    json("context").str shouldBe "commit"
+    json("stack_trace").str shouldBe ""
   }
 
   it should "serialize to JSON with error details" in {
     val error = new IllegalArgumentException("Bad argument")
-    val event = TraceEvent.ErrorOccurred(error, "validation", fixedTimestamp)
+    val event = TraceEvent.ErrorOccurred.of(error, "validation").withTimestamp(fixedTimestamp)
 
     val json = event.toJson
 
@@ -158,7 +141,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
       "thread-1",
       "run-1",
       "assistant",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(UserMessage("hi"), AssistantMessage("hello")),
       usage,
       Instant.EPOCH
@@ -173,6 +156,34 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     json("input_tokens").num shouldBe 10
     json("output_tokens").num shouldBe 5
     json.obj.contains("messages") shouldBe false
+    json.obj.contains("blocked_by") shouldBe false
+    json.obj.contains("active_agent") shouldBe false
+  }
+
+  it should "name a blocked run's guardrail beside its status, and the agent a handoff left active (#2829)" in {
+    val json = TraceEvent
+      .AgentRunEnded("thread-1", "run-1", "triage", TraceEvent.RunStatus.Blocked, Seq.empty, UsageSummary())
+      .withBlockedBy("pii")
+      .withActiveAgent("billing")
+      .toJson
+    json("status").str shouldBe "blocked"
+    json("blocked_by").str shouldBe "pii"
+    json("agent").str shouldBe "triage"
+    json("active_agent").str shouldBe "billing"
+  }
+
+  "TraceEvent.RunStatus" should "write each status under one name, and call only failed, cancelled and timed out errors" in {
+    TraceEvent.RunStatus.values.map(s => s.name -> s.isError).toSeq shouldBe Seq(
+      "completed"           -> false,
+      "step_limit_reached"  -> false,
+      "token_limit_reached" -> false,
+      "truncated"           -> false,
+      "suspended"           -> false,
+      "blocked"             -> false,
+      "cancelled"           -> true,
+      "timed_out"           -> true,
+      "failed"              -> true
+    )
   }
 
   // ============ CustomEvent ============
@@ -313,12 +324,12 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent" should "have timestamp on all events" in {
     val events: Seq[TraceEvent] = Seq(
-      TraceEvent.AgentInitialized("q", Vector.empty, fixedTimestamp),
       TraceEvent.CompletionReceived("id", "model", 0, "c", fixedTimestamp),
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true, fixedTimestamp),
-      TraceEvent.ErrorOccurred(new Exception(), "", fixedTimestamp),
+      TraceEvent.ErrorOccurred.of(new Exception(), "").withTimestamp(fixedTimestamp),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o", fixedTimestamp),
-      TraceEvent.AgentRunEnded("t", "r", "a", "s", Seq.empty, UsageSummary(), fixedTimestamp),
+      TraceEvent
+        .AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary(), fixedTimestamp),
       TraceEvent.CustomEvent("n", ujson.Obj(), fixedTimestamp),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0, fixedTimestamp),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t", fixedTimestamp),
@@ -330,12 +341,11 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize all events to JSON" in {
     val events: Seq[TraceEvent] = Seq(
-      TraceEvent.AgentInitialized("q", Vector.empty),
       TraceEvent.CompletionReceived("id", "model", 0, "c"),
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true),
-      TraceEvent.ErrorOccurred(new Exception("e"), ""),
+      TraceEvent.ErrorOccurred.of(new Exception("e"), ""),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o"),
-      TraceEvent.AgentRunEnded("t", "r", "a", "s", Seq.empty, UsageSummary()),
+      TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("n", ujson.Obj()),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t"),

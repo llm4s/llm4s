@@ -14,7 +14,7 @@ import java.util.Optional;
  * switch (s.kind()) {
  *     case COMPLETED           -> System.out.println(s.answer().orElseThrow());
  *     case TRUNCATED           -> System.out.println("Cut off: " + s.partialAnswer().orElseThrow());
- *     case BLOCKED             -> System.out.println(s.guardrail().orElseThrow() + ": " + s.reason().orElseThrow());
+ *     case BLOCKED             -> System.out.println(s.guardrail().orElseThrow() + ": " + s.reason().orElse(""));
  *     case STEP_LIMIT_REACHED  -> System.out.println("Hit the step limit");
  *     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
  *     case SUSPENDED           -> s.pending().forEach(p -> answers.add(Answer.approve(p.id())));
@@ -75,7 +75,11 @@ public final class JAgentStatus {
     return guardrail;
   }
 
-  /** Every refusing guardrail's error, for {@code BLOCKED}; empty otherwise. */
+  /**
+   * Every refusing guardrail's error, for {@code BLOCKED} on the result of the run that was blocked; empty
+   * otherwise. A reason is never stored - it may quote the text the guardrail refused - so a {@code BLOCKED} status
+   * read again from the thread has a {@link #guardrail()} and no reason: keep it if you need it later.
+   */
   public Optional<String> reason() {
     return reason;
   }

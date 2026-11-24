@@ -315,7 +315,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       .value
 
     result.status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "MinLength"
         reason should include("Input must be at least 50 chars; got 5")
       case other => fail(s"expected Blocked, got $other")

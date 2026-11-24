@@ -1625,7 +1625,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val l =
       buildSingle(model, set(Tools().echo), Seq(new GuardrailMiddleware(Nil, Seq(new Banned("secret-word"))))).value
     val (state, error) = runInMemory(l.graph, AgentInput("go")).failed
-    error shouldBe GuardrailBlocked("Banned", ValidationError("output", "contains secret-word").formatted)
+    error shouldBe GuardrailBlocked("Banned", Some(ValidationError("output", "contains secret-word").formatted))
     messagesOf(state) shouldBe empty
     (state.toString should not).include("secret-word is here")
   }

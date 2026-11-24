@@ -83,7 +83,6 @@ object CopyToWithSetters_1_0 {
           "llmconnect/model/VideoInput"
         ),
         "traceevent-cases-are-growth-safe-2377" -> List(
-          "trace/TraceEvent.AgentInitialized",
           "trace/TraceEvent.AgentRunEnded",
           "trace/TraceEvent.CacheHit",
           "trace/TraceEvent.CacheMiss",

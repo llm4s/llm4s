@@ -27,7 +27,7 @@ object TraceCollectorExample {
       collector <- TraceCollectorTracing[Id](store)
 
       // 1. Record a tool call, some events and an error
-      _ <- collector.traceEvent(TraceEvent.AgentInitialized("What is 2 + 2?", Vector("calculator")))
+      _ <- collector.traceEvent(TraceEvent.CustomEvent("question", ujson.Obj("text" -> "What is 2 + 2?")))
       _ <- collector.traceToolCall(
         "calculator",
         """{"expression":"2 + 2"}""",
@@ -56,7 +56,7 @@ object TraceCollectorExample {
       _      = println("\n=== Console and store together ===")
       before = store.getSpans(collector.traceId).size
       both   = TracingComposer.combine(collector, new ConsoleTracing(captureContent = true))
-      _ <- both.traceEvent(TraceEvent.AgentInitialized("What is 3 + 3?", Vector("calculator")))
+      _ <- both.traceEvent(TraceEvent.CustomEvent("question", ujson.Obj("text" -> "What is 3 + 3?")))
       _ <- both.traceToolCall(
         "calculator",
         """{"expression":"3 + 3"}""",

@@ -82,4 +82,10 @@ class XaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
   override protected def contractClient(key: String): Result[LLMClient] = XaiClient(config(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models; xAI refuses a wrong key with a 400 (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(XaiClient(config("xai-invalid-key-for-testing")))
+
+  registerValidationContract()
 }

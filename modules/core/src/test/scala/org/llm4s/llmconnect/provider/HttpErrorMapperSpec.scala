@@ -13,48 +13,48 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   // ── Status code mapping ──────────────────────────────────────────
 
   "HttpErrorMapper.mapHttpError" should "return AuthenticationError for 401" in {
-    val result = HttpErrorMapper.mapHttpError(401, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(401, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[AuthenticationError]
   }
 
   it should "return AuthenticationError for 403" in {
-    val result = HttpErrorMapper.mapHttpError(403, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(403, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[AuthenticationError]
   }
 
   it should "carry the HTTP status as the AuthenticationError's code, so a caller can tell 401 from 403" in {
     for status <- Seq(401, 403) do
-      val error = HttpErrorMapper.mapHttpError(status, "{}", provider).left.getOrElse(fail())
+      val error = Left(HttpErrorMapper.toError(status, "{}", provider, Map.empty)).left.getOrElse(fail())
       error.asInstanceOf[AuthenticationError].code shouldBe Some(status.toString)
   }
 
   it should "return RateLimitError for 429" in {
-    val result = HttpErrorMapper.mapHttpError(429, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(429, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[RateLimitError]
   }
 
   it should "return ValidationError for 400" in {
-    val result = HttpErrorMapper.mapHttpError(400, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(400, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[ValidationError]
   }
 
   it should "return ServiceError for 500" in {
-    val result = HttpErrorMapper.mapHttpError(500, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(500, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[ServiceError]
   }
 
   it should "return ServiceError for 502" in {
-    val result = HttpErrorMapper.mapHttpError(502, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(502, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[ServiceError]
   }
 
   it should "return ServiceError for 503" in {
-    val result = HttpErrorMapper.mapHttpError(503, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(503, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[ServiceError]
   }
 
   it should "return ServiceError for unknown status codes like 418" in {
-    val result = HttpErrorMapper.mapHttpError(418, "{}", provider)
+    val result = Left(HttpErrorMapper.toError(418, "{}", provider, Map.empty))
     result.left.getOrElse(fail()) shouldBe a[ServiceError]
   }
 
@@ -160,7 +160,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "redact API key in the LLMError.message returned by mapHttpError for 401" in {
     val key       = "sk-" + "F" * 40
     val body      = s"""{"message": "invalid key $key"}"""
-    val Left(err) = HttpErrorMapper.mapHttpError(401, body, provider): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(401, body, provider, Map.empty)): @unchecked
     (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
@@ -168,7 +168,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "redact API key in the LLMError.message returned by mapHttpError for 400" in {
     val key       = "sk-ant-" + "G" * 30
     val body      = s"""{"message": "bad request with key $key"}"""
-    val Left(err) = HttpErrorMapper.mapHttpError(400, body, provider): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(400, body, provider, Map.empty)): @unchecked
     (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
@@ -176,7 +176,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "redact API key in the LLMError.message returned by mapHttpError for 500" in {
     val key       = "AIza" + "H" * 35
     val body      = s"""{"message": "server error processing $key"}"""
-    val Left(err) = HttpErrorMapper.mapHttpError(500, body, provider): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(500, body, provider, Map.empty)): @unchecked
     (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
@@ -213,24 +213,24 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   // ── Integration: provider name in error ──────────────────────────
 
   it should "include provider name in AuthenticationError" in {
-    val Left(err) = HttpErrorMapper.mapHttpError(401, """{"message":"denied"}""", "gemini"): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(401, """{"message":"denied"}""", "gemini", Map.empty)): @unchecked
     err.asInstanceOf[AuthenticationError].provider shouldBe "gemini"
   }
 
   it should "include provider name in RateLimitError" in {
-    val Left(err) = HttpErrorMapper.mapHttpError(429, "{}", "deepseek"): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(429, "{}", "deepseek", Map.empty)): @unchecked
     err.asInstanceOf[RateLimitError].provider shouldBe "deepseek"
   }
 
   it should "include provider name in ServiceError" in {
-    val Left(err) = HttpErrorMapper.mapHttpError(503, "{}", "ollama"): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(503, "{}", "ollama", Map.empty)): @unchecked
     err.asInstanceOf[ServiceError].provider shouldBe "ollama"
   }
 
   // ── Retry-After on 503 ───────────────────────────────────────────
 
   private def serviceError(status: Int, headers: Map[String, Seq[String]]): ServiceError =
-    HttpErrorMapper.mapHttpError(status, "{}", provider, headers, clock) match {
+    Left(HttpErrorMapper.toErrorAt(status, "{}", provider, headers, clock)) match {
       case Left(err: ServiceError) => err
       case other                   => fail(s"Expected ServiceError, got: $other")
     }
@@ -255,7 +255,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   // ── Retry-After on 429 ───────────────────────────────────────────
 
   private def rateLimit(headers: Map[String, Seq[String]]): RateLimitError =
-    HttpErrorMapper.mapHttpError(429, "{}", provider, headers, clock) match {
+    Left(HttpErrorMapper.toErrorAt(429, "{}", provider, headers, clock)) match {
       case Left(err: RateLimitError) => err
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
@@ -267,7 +267,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "use the public overload with headers" in {
-    val Left(err) = HttpErrorMapper.mapHttpError(429, "{}", provider, Map("retry-after" -> Seq("2"))): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(429, "{}", provider, Map("retry-after" -> Seq("2")))): @unchecked
     err.asInstanceOf[RateLimitError].retryAfter shouldBe Some(2.seconds)
   }
 
@@ -307,7 +307,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not read Retry-After for other statuses" in {
-    HttpErrorMapper.mapHttpError(503, "{}", provider, Map("retry-after" -> Seq("5")), clock) match {
+    Left(HttpErrorMapper.toErrorAt(503, "{}", provider, Map("retry-after" -> Seq("5")), clock)) match {
       case Left(err: ServiceError) => err.httpStatus shouldBe 503
       case other                   => fail(s"Expected ServiceError, got: $other")
     }
@@ -316,12 +316,10 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   "extractErrorDetails" should "read IBM watsonx's errors array, and keep a 413's message" in {
     val watsonx = ujson.Obj("errors" -> ujson.Arr(ujson.Obj("code" -> "bad", "message" -> "too many images"))).render()
     HttpErrorMapper.extractErrorDetails(watsonx, 400, "watsonx") shouldBe "too many images"
-    HttpErrorMapper
-      .mapHttpError(413, """{"error":{"message":"request too large"}}""", "gemini")
-      .left
-      .toOption
-      .get
-      .message should
+    Left(
+      HttpErrorMapper
+        .toError(413, """{"error":{"message":"request too large"}}""", "gemini", Map.empty)
+    ).left.toOption.get.message should
       include("request too large")
   }
 

@@ -54,6 +54,9 @@ final case class PerplexityConfig private (
   /** The Agent API endpoint requests are posted to. */
   def agentUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/agent" else s"$baseUrl/v1/agent"
 
+  /** The Agent API's model listing, which `validate()` gets. */
+  def modelsUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/models" else s"$baseUrl/v1/models"
+
   override def toString: String =
     s"PerplexityConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, webSearch=$webSearch, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, headers=${headers.keys.mkString("[", ",", "]")}, " +

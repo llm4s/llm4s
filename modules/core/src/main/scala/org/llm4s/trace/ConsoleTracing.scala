@@ -16,7 +16,7 @@ import scala.util.Try
  *
  * By default it prints metadata only: each event's type, timestamp, model, ids, tool names,
  * success flags, durations, token counts and costs. Text that may hold personal or confidential
- * data - the query of `AgentInitialized`, the content of `CompletionReceived`, the input and
+ * data - the content of `CompletionReceived`, the input and
  * output of `ToolExecuted`, the field values of a `CustomEvent` (whose data is defined by whoever
  * emits it, so may hold anything), and the message and context of an error - is replaced
  * by `[withheld: N chars]` (a `CustomEvent` shows its field names). Standard output is often
@@ -42,7 +42,7 @@ import scala.util.Try
  *
  * // Trace events functionally
  * for {
- *   _ <- tracing.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
+ *   _ <- tracing.traceEvent(TraceEvent.CustomEvent("query_received", ujson.Obj("tools" -> 1)))
  *   _ <- tracing.traceTokenUsage(TokenUsage(100, 50, 150), "gpt-4", "completion")
  * } yield ()
  * }}}
@@ -94,14 +94,6 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
   def traceEvent(event: TraceEvent): Result[Unit] =
     Try {
       event match {
-        case e: TraceEvent.AgentInitialized =>
-          println()
-          printSubHeader("AGENT INITIALIZED", GREEN)
-          println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${GREEN}${content("Query", e.query, Int.MaxValue)}$RESET")
-          println(s"${GREEN}Tools: ${e.tools.mkString(", ")}$RESET")
-          println()
-
         case e: TraceEvent.CompletionReceived =>
           println()
           printHeader("COMPLETION RECEIVED")
@@ -128,8 +120,8 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println()
           printHeader("ERROR OCCURRED")
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${RED}Type: ${e.error.getClass.getSimpleName}$RESET")
-          println(s"${RED}${content("Message", String.valueOf(e.error.getMessage), Int.MaxValue)}$RESET")
+          println(s"${RED}Type: ${e.errorType}$RESET")
+          println(s"${RED}${content("Message", e.message, Int.MaxValue)}$RESET")
           println(s"${RED}${content("Context", e.context, Int.MaxValue)}$RESET")
           e.usage.foreach { u =>
             println(s"${MAGENTA}Prompt Tokens: ${u.promptTokens}$RESET")
@@ -155,7 +147,9 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println()
           printSubHeader("AGENT RUN ENDED", BLUE)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${BLUE}Agent: ${e.agent}  Status: ${e.status}$RESET")
+          val blockedBy = e.blockedBy.fold("")(guardrail => s" by $guardrail")
+          val active    = e.activeAgent.filter(_ != e.agent).fold("")(agent => s"  Active agent: $agent")
+          println(s"${BLUE}Agent: ${e.agent}  Status: ${e.status.name}$blockedBy$active$RESET")
           println(s"${BLUE}Thread: ${e.threadId}  Run: ${e.runId}$RESET")
           println(
             s"${BLUE}Messages: ${e.messages.size}  Tokens: ${e.usage.inputTokens} in / ${e.usage.outputTokens} out$RESET"
@@ -212,7 +206,7 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           printSubHeader("IMAGE GENERATION COMPLETED", if (e.success) GREEN else RED)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
           println(s"${GREEN}Model: ${e.model}$RESET")
-          println(s"${GREEN}Provider: ${e.provider}$RESET")
+          e.provider.foreach(p => println(s"${GREEN}Provider: ${p.asString}$RESET"))
           println(s"${GREEN}Operation: ${e.operation}$RESET")
           println(s"${GREEN}Images: ${e.imageCount}$RESET")
           println(s"${GREEN}Size: ${e.size}$RESET")

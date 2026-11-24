@@ -3,6 +3,7 @@ package org.llm4s.imagegeneration
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.metrics.{ MetricsCollector, Outcome, ErrorKind }
 import org.llm4s.trace.{ Tracing, TraceEvent }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.nio.file.Path
 import scala.concurrent.{ ExecutionContext, Future }
@@ -172,7 +173,6 @@ class InstrumentedImageGenerationClient(
 
     val event = TraceEvent.ImageGenerationCompleted(
       model = model,
-      provider = providerName,
       operation = operation,
       imageCount = imageCount,
       size = sizeStr,
@@ -180,7 +180,8 @@ class InstrumentedImageGenerationClient(
       duration = duration,
       costUsd = costUsd,
       success = result.isRight,
-      errorMessage = result.left.toOption.map(_.message)
+      errorMessage = result.left.toOption.map(_.message),
+      provider = Some(ProviderId(providerName))
     )
     tracing.traceEvent(event)
   }
