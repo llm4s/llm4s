@@ -53,10 +53,12 @@ has a `thinking` property.
 level's default budget. A pair that contradicts itself on a provider with one control for both, such as `thinking = Off` with
 `reasoning = High` on OpenAI, is resolved by this rule and the level is reported as `Adjusted`.
 
-**The exception.** Some current models reject a manual thinking budget with a 400 (Claude Opus 4.7, Opus 4.8 and
-Fable 5 among those in the bundled model metadata). For a model whose capabilities say so
-(`ModelCapabilities.supportsBudgetThinking = Some(false)`), a `reasoning`-only request is sent as adaptive thinking at
-that effort instead, reported as `Adjusted(Reasoning, "budget_tokens", "output_config.effort", ...)`.
+**The exception.** Some current models reject a manual thinking budget with a 400: Claude Opus 4.7 and later and
+every Claude 5 model (Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, Fable, Mythos). For a model whose capabilities say
+so (`ModelCapabilities.supportsBudgetThinking = Some(false)` in the bundled model metadata, or, for an Anthropic model
+id the metadata does not know, its name), a `reasoning`-only request is sent as adaptive thinking at that effort
+instead, reported as `Adjusted(Reasoning, "budget_tokens", "output_config.effort", ...)`. The same models take no
+`temperature`: see [Anthropic](providers#sampling-parameters-thinking-and-output-length).
 
 ### What each provider sends
 

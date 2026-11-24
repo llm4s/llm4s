@@ -58,6 +58,40 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
     }
   }
 
+  // #2909: a gateway that serves Claude (LiteLLM, a company proxy) forwards the parameter, and the model answers 400
+  it should "leave out a temperature and a top_p the registry says the model rejects, and report them" in {
+    def sent(model: String): (ujson.Value, Seq[RequestAdjustment]) = {
+      var request: ujson.Value = ujson.Null
+      var adjustments          = Seq.empty[RequestAdjustment]
+      withServer("/v1/chat/completions") { exchange =>
+        request =
+          ujson.read(new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+        sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
+      } { baseUrl =>
+        val client =
+          new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), BaseUrl(baseUrl), 128000, 4096))
+        adjustments = client.complete(hello, CompletionOptions().withTemperature(0.2).withTopP(0.9)).value.adjustments
+      }
+      (request, adjustments)
+    }
+
+    val (flagged, dropped) = sent("claude-sonnet-5-5")
+    flagged.obj.keySet should contain noneOf ("temperature", "top_p")
+    dropped shouldBe List(
+      RequestAdjustment.Dropped(RequestOption.Temperature, "temperature not supported for claude-sonnet-5-5"),
+      RequestAdjustment.Dropped(RequestOption.TopP, "top_p not supported for claude-sonnet-5-5")
+    )
+
+    for (model <- List("claude-sonnet-4-6", "mistral-small-latest", "a-model-no-registry-knows")) {
+      val (request, adjustments) = sent(model)
+      withClue(model) {
+        request("temperature").num shouldBe 0.2
+        request("top_p").num shouldBe 0.9
+        adjustments shouldBe empty
+      }
+    }
+  }
+
   it should "report a service tier as dropped, sending none (#2726)" in {
     val model = "mistral-small-latest"
     withServer("/v1/chat/completions") { exchange =>

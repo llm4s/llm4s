@@ -261,6 +261,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** A `temperature` or thinking budget set for Claude Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, Fable or Mythos was sent and answered 400: no sampling parameter and no `budget_tokens` goes to these models (Anthropic, Bedrock, an OpenAI-compatible gateway), by the catalog's `supports_sampling_params` (new `ModelCapabilities.supportsSamplingParams`) or the model's name, and each drop is a `RequestAdjustment`. [#2909](https://github.com/llm4s/llm4s/issues/2909)
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
   and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).

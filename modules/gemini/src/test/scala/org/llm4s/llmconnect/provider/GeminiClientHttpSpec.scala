@@ -489,6 +489,17 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       not contain "thinkingConfig"
   }
 
+  // #2909: the catalog flags these Gemini models `supports_sampling_params: false`; not checked against the live API
+  it should "send no temperature or topP to a model the registry says takes no sampling parameter" in {
+    val options = CompletionOptions().withTemperature(0.2).withTopP(0.9)
+    val flagged = requestBody(testConfig.withModel(ModelName("gemini-3.6-flash")), options)
+    flagged.obj.get("generationConfig").map(_.obj.keySet.toSet).getOrElse(Set.empty) should
+      contain noneOf ("temperature", "topP")
+    val unflagged = requestBody(testConfig, options)("generationConfig")
+    unflagged("temperature").num shouldBe 0.2
+    unflagged("topP").num shouldBe 0.9
+  }
+
   it should "report grounding sources from the stream as citations, however the chunks carry them" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +

@@ -20,14 +20,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaType }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.model.{
-  AdjustmentLog,
-  ModelRegistryService,
-  RequestTransformer,
-  PromptCacheReport,
-  TransformationResult,
-  UnmappedOptions
-}
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, PromptCacheReport, TransformationResult, UnmappedOptions }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -278,7 +271,8 @@ class BedrockClient(
         config.model,
         options,
         conversation.messages,
-        RequestTransformer.default(registryService),
+        // the registry's capabilities, and the Claude models it does not know by name (BedrockClaudeRules)
+        BedrockClaudeRules.transformer(registryService),
         dropUnsupported = true
       )
       .map { t =>
@@ -480,7 +474,7 @@ class BedrockClient(
 
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
     // Only what the caller set is sent: unset, the model's own default applies, and some models reject
-    // temperature and top-p together.
+    // temperature and top-p together. A model that takes neither has had them dropped (see `transformed`).
     val cfg = InferenceConfiguration.builder()
     options.temperature.foreach(t => cfg.temperature(t.floatValue()))
     options.maxTokens.foreach(m => cfg.maxTokens(m))
