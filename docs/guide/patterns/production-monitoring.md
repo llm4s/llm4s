@@ -51,14 +51,15 @@ import org.llm4s.types.Result
 
 def tracedAgent(client: LLMClient): Result[Agent] = for {
   settings <- Llm4sConfig.tracing()   // llm4s.tracing.*, e.g. TRACING_MODE=langfuse with LANGFUSE_* set
+  tracing  <- Tracing.fromSettings(settings)
   agent <- Agent.builder("assistant", client)
-             .withTracing(Tracing.create(settings))
+             .withTracing(tracing)
              .build()
 } yield agent
 ```
 
-`Tracing.create` never fails: a backend that is missing or cannot start is logged and replaced by a no-op tracer, so
-tracing cannot stop the application. Use `Tracing.fromSettings` to see that error instead. What each mode records, and
+`Tracing.fromSettings` returns an error when the backend is missing or cannot start. If tracing must never stop the
+application, say so here: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`, logging the error first. What each mode records, and
 which settings keep message content out of traces, is in
 [Data Protection](../data-protection#logging-and-tracing-defaults).
 

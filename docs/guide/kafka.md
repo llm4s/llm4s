@@ -300,8 +300,9 @@ val clientResource: Resource[IO, LLMClient] =
       registry <- Llm4sConfig.modelRegistryService()
       config   <- Llm4sConfig.defaultProvider()
       tracing  <- Llm4sConfig.tracing()
+      tracer   <- Tracing.fromSettings(tracing)
       client   <- LLMConnect.getClient(config)(using registry)
-    } yield TracingLLMClient(client, Tracing.create(tracing), config)
+    } yield TracingLLMClient(client, tracer, config)
   }.flatMap {
     case Right(client) => IO.pure(client)
     case Left(error)   => IO.raiseError(new LLMException(error))

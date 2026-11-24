@@ -16,8 +16,7 @@ import org.llm4s.types.Result
  * reads its named section.
  *
  * Without both keys it refuses to start, so `Tracing.fromSettings` reports the missing
- * variables and `Tracing.create` falls back to `NoOpTracing` with that error logged,
- * rather than returning a tracer that drops every batch.
+ * variables, rather than returning a tracer that drops every batch.
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader`
  * instantiates it through a public no-arg constructor.

@@ -29,6 +29,33 @@ final class OtherFixtureTracingBackend extends TracingBackend:
   def create(settings: TracingSettings): Result[Tracing] =
     Right(new FixtureTracing("OtherFixtureTracingBackend", settings))
 
+/** A backend that answers to two more names than its mode, as `llm4s-observability-otel` answers to `otel`. */
+final class AliasedFixtureTracingBackend extends TracingBackend:
+  val mode: TracingMode = TracingMode.Named("aliased")
+
+  override val aliases: Set[String] = Set("ali", "Shorty")
+
+  def create(settings: TracingSettings): Result[Tracing] =
+    Right(new FixtureTracing("AliasedFixtureTracingBackend", settings))
+
+/** A backend of another mode that claims an alias [[AliasedFixtureTracingBackend]] also claims. */
+final class AliasClashTracingBackend extends TracingBackend:
+  val mode: TracingMode = TracingMode.Named("clash")
+
+  override val aliases: Set[String] = Set("ali")
+
+  def create(settings: TracingSettings): Result[Tracing] =
+    Right(new FixtureTracing("AliasClashTracingBackend", settings))
+
+/** A backend whose alias is another backend's mode: `fixture`, the mode of [[FixtureTracingBackend]]. */
+final class ModeClashTracingBackend extends TracingBackend:
+  val mode: TracingMode = TracingMode.Named("modeclash")
+
+  override val aliases: Set[String] = Set("fixture")
+
+  def create(settings: TracingSettings): Result[Tracing] =
+    Right(new FixtureTracing("ModeClashTracingBackend", settings))
+
 /** A backend whose own code fails when asked to build its tracer. */
 final class ThrowingTracingBackend extends TracingBackend:
   val mode: TracingMode = TracingMode.Named("throwing")

@@ -144,7 +144,7 @@ llm4s {
 
 ### OpenTelemetry Integration
 
-For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (alias `otel`) exports traces via OTLP:
+For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (or `otel`, an alias the module's backend declares) exports traces via OTLP:
 
 ```bash
 TRACING_MODE=opentelemetry
@@ -258,7 +258,10 @@ com.example.DatadogTracingBackend
 
 `TRACING_MODE=datadog` then selects it. `Tracing.fromSettings(settings)` returns a
 `ConfigurationError` when no backend serves the configured mode, and the backend's own error when
-`create` fails; `Tracing.create(settings)` logs either and falls back to `NoOpTracing`. Where
+`create` fails. A backend that answers to more than one name declares the others as `aliases`
+(`override val aliases = Set("dd")`); `Llm4sConfig.tracing` replaces an alias by the backend's mode, so the backend
+always reads its own `llm4s.tracing.<mode>` block. Two backends that answer to one name are a `ConfigurationError`
+naming both when that name is selected. Where
 services files do not survive packaging (some shaded jars), register the backend explicitly:
 `Tracing.fromSettings(settings, TracingBackends.of(new DatadogTracingBackend))`.
 
@@ -505,7 +508,8 @@ LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted URL
 
 Both keys are required. With either missing, `Tracing.fromSettings` returns a
 `ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
-(LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
+(LANGFUSE_PUBLIC_KEY)`. An application that would rather run untraced than stop says so where it
+builds the tracer: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
 **Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
 open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace

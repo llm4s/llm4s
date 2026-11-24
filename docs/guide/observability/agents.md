@@ -29,13 +29,13 @@ Three independent pieces, each off until you ask for it:
 
 | Piece | What turns it on | Module |
 |---|---|---|
-| Traces of each run | `AgentBuilder.withTracing(tracing)`, the tracer from `Tracing.create(Llm4sConfig.tracing())` | `llm4s-observability` (Langfuse, `TRACING_MODE=langfuse`) or `llm4s-observability-otel` (OpenTelemetry, `TRACING_MODE=opentelemetry` or `otel`) |
+| Traces of each run | `AgentBuilder.withTracing(tracing)`, the tracer from `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` | `llm4s-observability` (Langfuse, `TRACING_MODE=langfuse`) or `llm4s-observability-otel` (OpenTelemetry, `TRACING_MODE=opentelemetry` or `otel`) |
 | Per-call model metrics | `LLMConnect.getClient(providerConfig, metrics)` | `llm4s-observability-prometheus` or `llm4s-observability-micrometer` |
 | Agent runtime and run queue metrics | `MeteredCheckpointer(store.checkpointer, metrics)`, and the same `metrics` given to `AgentWorker` and `RunSubmitter` | `llm4s-agent`, recording into either metrics module |
 
 `llm4s.tracing.mode` (bound to `TRACING_MODE`) selects the backend; core builds `console` (the default) and `noop`
-itself and finds any other mode's backend on the classpath. `Tracing.create` never fails: a missing or failing backend
-is logged and replaced by a no-op tracer; `Tracing.fromSettings` returns that error instead. The backends' own keys
+itself and finds any other mode's backend on the classpath. `Tracing.fromSettings` returns a missing or failing backend
+as an error; whether to run untraced instead (`.getOrElse(new NoOpTracing())`) is the application's choice. The backends' own keys
 are in [Monitoring](index#configuration).
 
 An agent service that queues its runs ([Running agents on several machines](../agents/multiple-machines)) wires all
@@ -57,7 +57,7 @@ val service = for {
   configured      <- MetricsConfigLoader.default()       // llm4s.metrics: a PrometheusMetrics and its /metrics endpoint
   (metrics, endpoint) = configured
   tracingSettings <- Llm4sConfig.tracing()               // llm4s.tracing.mode, from TRACING_MODE
-  tracing          = Tracing.create(tracingSettings)
+  tracing         <- Tracing.fromSettings(tracingSettings)
   client          <- LLMConnect.getClient(providerConfig, metrics)       // requests, tokens, cost, errors
   store           <- CheckpointerConfigLoader.open()                     // llm4s.agent.checkpointer
   queue           <- store.runQueue
@@ -89,9 +89,10 @@ import org.llm4s.config.{ LangfuseConfigLoader, Llm4sConfig }
 import org.llm4s.trace.{ LangfuseTracing, Tracing, TracingComposer }
 
 val tracing = for {
-  settings <- Llm4sConfig.tracing()          // e.g. TRACING_MODE=opentelemetry
-  langfuse <- LangfuseConfigLoader.default() // llm4s.tracing.langfuse, LANGFUSE_* variables
-} yield TracingComposer.combine(Tracing.create(settings), LangfuseTracing.from(langfuse))
+  settings   <- Llm4sConfig.tracing()          // e.g. TRACING_MODE=opentelemetry
+  configured <- Tracing.fromSettings(settings)
+  langfuse   <- LangfuseConfigLoader.default() // llm4s.tracing.langfuse, LANGFUSE_* variables
+} yield TracingComposer.combine(configured, LangfuseTracing.from(langfuse))
 ```
 
 Metrics compose the same way with `MetricsCollector.compose(a, b)`; a collector that throws does not stop the others.
