@@ -49,9 +49,10 @@ none. A type in a module 1.0 does not freeze (anything Beta or Experimental in t
 [Package Map](v1-scope#package-map)) carries neither.
 
 `sbt stabilityTierCheck` (a CI quick check) fails the build for a top-level public type of a frozen
-module that has neither annotation or both, and for a Beta dialect that lives inside a frozen module
-and is not `@Experimental`: today the Mistral, Cohere and xAI dialects of `llm4s-openai-compatible`, listed in
-`build.sbt`. It also fails for a public member of a `@Stable` type whose signature names an
+module that has neither annotation or both, and for a type of a Beta part that lives inside a frozen module
+and is not `@Experimental`: the Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
+`org.llm4s.assistant` in `llm4s-agent`, listed in `build.sbt` (`stabilityExperimentalFiles`; an entry that matches no
+file fails the check too). It also fails for a public member of a `@Stable` type whose signature names an
 `@Experimental` type - a `def`, `val`, enum `case`, nested type or constructor parameter, unless it is `private`,
 `protected` or itself `@Experimental` - because renaming or reshaping the Experimental type would then break the
 Stable signature ([#1818](https://github.com/llm4s/llm4s/issues/1818)). Promote the type, or keep the member out of
@@ -242,10 +243,13 @@ the file; they cannot be changed with `set`:
    silently hide a real break in the same class. Then re-run the check and re-add only what the new baseline needs.
 5. Update this page and the CHANGELOG entry if the covered module list changes.
 
-Before the first run against the baseline, review the Beta parts that ship inside frozen modules, because
-[1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral, Cohere
-and xAI dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
-decide that they are frozen too. A module that must miss the shared baseline is held back with
+The Beta parts that ship inside frozen modules are left out of the 0.7.0 baseline, because [1.0 Scope](v1-scope)
+does not freeze them ([#2835](https://github.com/llm4s/llm4s/issues/2835)): `org.llm4s.assistant.*` (`llm4s-agent`)
+and the Mistral, Cohere and xAI dialects (`llm4s-openai-compatible`). No filter lists them. Every one of their
+top-level types is `@Experimental`, which `stabilityTierCheck` enforces for the files `stabilityExperimentalFiles` in
+`build.sbt` names, and MiMa skips an `@Experimental` class together with its companion and every class nested in it
+(`mimaExcludeAnnotations` reads the annotation along the class's chain of enclosing classes). A Beta part added to a
+frozen module later joins that list. A module that must miss the shared baseline is held back with
 `"<module>" -> None` in `mimaBaselineOverrides` and given `Some("X.Y.Z")` later; it stays a frozen module
 meanwhile, so the stability, dependency and tier checks keep covering it. No module is planned to: `llm4s-agent`
 takes the shared baseline ([RFC 0001](../rfcs/0001-agent-baseline), rejected).

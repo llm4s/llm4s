@@ -395,8 +395,14 @@ lazy val stabilityTierCheck = taskKey[Unit](
     "public constructor or copy"
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama", "agent")
-// Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
-val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r)
+// The Beta parts that live inside frozen modules (#2835): every top-level public type in a matching file must be
+// `@Experimental`, so `mimaExcludeAnnotations` (in `mimaFrozen`) leaves it out of the 0.7.0 baseline, nested types
+// and companions included. The Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
+// `org.llm4s.assistant` (`llm4s-agent`). An entry that matches no file fails `stabilityTierCheck`.
+val stabilityExperimentalFiles = Seq(
+  """/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r,
+  """/org/llm4s/assistant/[^/]+\.scala$""".r
+)
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))

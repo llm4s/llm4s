@@ -97,13 +97,14 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       [#2778](https://github.com/llm4s/llm4s/issues/2778)): the `@Stable` core of
       [#2785](https://github.com/llm4s/llm4s/issues/2785) is what 1.0 promises, everything else `@Experimental`.
       Check that no Stable overload shares its name with an `@Experimental` one, which MiMa would skip with it
-      ([What MiMa Covers](../reference/api-stability#what-mima-covers)), and decide the Beta parts inside frozen modules
+      ([What MiMa Covers](../reference/api-stability#what-mima-covers)). A Beta part added to a frozen module since is
+      listed in `stabilityExperimentalFiles`, so it stays out of the baseline
       ([The Baseline](../reference/api-stability#the-baseline)).
 - [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
-- [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
 - [ ] Add the umbrella Scalafix rule `Llm4sMigrateFrom_0_7`, for code compiled against 0.7.x, the way
       `Llm4sMigrateFrom_0_6` is built: each rule for a break after 0.7.0 joins it and every older umbrella
       ([Scalafix](../reference/scalafix#migration-rules)).
+- [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
       ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)), and change the pages that
       say no baseline is set yet ([API Stability](../reference/api-stability), [Compatibility and Deprecation Policy](../reference/compatibility-policy),
       [1.0 Scope](../reference/v1-scope), [Enterprise Evaluation](../reference/enterprise-evaluation), `SECURITY.md`, this page).

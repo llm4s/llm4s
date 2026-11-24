@@ -748,7 +748,18 @@ object StabilityTiers {
         "is a GrowthExempted entry that matches no @Stable case class or enum case with a public constructor or copy; remove it"
       )
     }
-    (perModule.flatMap(_._2._3) ++ stale, perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
+    // An entry of the build's Experimental list that matches no source file is stale: the Beta part it names was
+    // moved or renamed, so the list no longer says what the MiMa baseline leaves out.
+    val allSources = modules.flatMap(m => sources(m / "src" / "main" / "scala")).map(_.getPath)
+    val unmatched = experimentalIn.filterNot(re => allSources.exists(p => re.findFirstIn(p).nonEmpty)).map { re =>
+      Violation(
+        file("build.sbt"),
+        0,
+        s"stabilityExperimentalFiles: $re",
+        "matches no source file of a frozen module; update or remove the entry"
+      )
+    }
+    (perModule.flatMap(_._2._3) ++ stale ++ unmatched, perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
   }
 
   /**
