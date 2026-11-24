@@ -122,7 +122,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       threadId = "t",
       runId = "r",
       agent = "a",
-      status = "completed",
+      status = TraceEvent.RunStatus.Completed,
       messages = messages,
       usage = UsageSummary()
     )
@@ -169,7 +169,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       TraceEvent.ToolExecuted("tool", "input", "output", 100.millis, true),
       TraceEvent.ErrorOccurred(new RuntimeException("error"), "context"),
       TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
-      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary()),
+      TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("name", ujson.Obj("key" -> "value"))
     )
 

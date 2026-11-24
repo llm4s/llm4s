@@ -152,17 +152,18 @@ final private[agent] class AgentTracing(
     val state  = result.toOption.map(AgentTracing.stateOf)
     val active = state.flatMap(_.get(LoopKeys.activeAgent).toOption.flatten).getOrElse(root)
     val status = result.flatMap(r => AgentRun.status(r, blockedBy.get.isDefined, loop))
-    val label  = AgentTracing.label(terminal, status)
+    val ending = AgentTracing.ending(terminal, status)
     val messages = status match
       case Right(_: AgentStatus.Blocked) | Left(_) => Vector.empty
       case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
-    status.left.foreach(error => if label == "failed" then traceError(error.message, at))
+    status.left.foreach(error => if ending == TraceEvent.RunStatus.Failed then traceError(error.message, at))
     trace(
       TraceEvent.AgentRunEnded(
         handle.threadId.value,
         handle.runId.value,
-        active.value,
-        label,
+        // the run is its root agent's, whichever agent a handoff left active
+        root.value,
+        ending,
         messages,
         usage.get,
         // the run ends at its terminal event, not when tracing got to it
@@ -171,7 +172,9 @@ final private[agent] class AgentTracing(
         parentRunId = parent.map(_._2.value),
         span = Some(TraceSpan(runSpan, continues, startedAt.get.getOrElse(attachedAt))),
         provider = provider.get,
-        userId = principal.get
+        userId = principal.get,
+        blockedBy = status.toOption.collect { case AgentStatus.Blocked(guardrail, _) => guardrail },
+        activeAgent = Some(active.value)
       )
     )
 
@@ -252,21 +255,22 @@ private[agent] object AgentTracing:
 
   /**
    * The `AgentRunEnded` status of a run whose terminal event is `terminal` and whose turn ended with
-   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`,
-   * `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed` - a turn `await` refuses is `failed`.
+   * `status` ([[AgentRun.status]]); a turn `await` refuses is `Failed`. The run metrics derive the same statuses from
+   * the same terminal event and the outcome its checkpoint records
+   * ([[org.llm4s.agent.metrics.MeteredCheckpointer MeteredCheckpointer]]).
    */
-  def label(terminal: RunEvent, status: Result[AgentStatus]): String = status match
-    case Right(_: AgentStatus.Completed)          => "completed"
-    case Right(AgentStatus.StepLimitReached)      => "step_limit_reached"
-    case Right(AgentStatus.TokenLimitReached)     => "token_limit_reached"
-    case Right(_: AgentStatus.Truncated)          => "truncated"
-    case Right(_: AgentStatus.Suspended)          => "suspended"
-    case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
+  def ending(terminal: RunEvent, status: Result[AgentStatus]): TraceEvent.RunStatus = status match
+    case Right(_: AgentStatus.Completed)      => TraceEvent.RunStatus.Completed
+    case Right(AgentStatus.StepLimitReached)  => TraceEvent.RunStatus.StepLimitReached
+    case Right(AgentStatus.TokenLimitReached) => TraceEvent.RunStatus.TokenLimitReached
+    case Right(_: AgentStatus.Truncated)      => TraceEvent.RunStatus.Truncated
+    case Right(_: AgentStatus.Suspended)      => TraceEvent.RunStatus.Suspended
+    case Right(_: AgentStatus.Blocked)        => TraceEvent.RunStatus.Blocked
     case Left(_) =>
       terminal match
-        case RunEvent.RunCancelled(_) => "cancelled"
-        case RunEvent.RunTimedOut(_)  => "timed_out"
-        case _                        => "failed"
+        case RunEvent.RunCancelled(_) => TraceEvent.RunStatus.Cancelled
+        case RunEvent.RunTimedOut(_)  => TraceEvent.RunStatus.TimedOut
+        case _                        => TraceEvent.RunStatus.Failed
 
   /** The usage a terminal event carries for the attempts that committed nothing; `None` for any other event. */
   def lostUsage(event: RunEvent): Option[UsageSummary] = event match

@@ -45,7 +45,7 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
           "thread-1",
           "run-1",
           "assistant",
-          "completed",
+          TraceEvent.RunStatus.Completed,
           Seq(UserMessage(query), AssistantMessage(answer)),
           UsageSummary()
         )

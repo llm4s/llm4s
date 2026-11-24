@@ -42,21 +42,21 @@ class AgentRunStatusSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   "AgentRun.status" should "refuse a completed turn without an assistant message, and tracing call it failed" in {
     val status = AgentRun.status(completed(stateWith(UserMessage("q"))), isBlock = false, loop)
     status should matchPattern { case Left(_: ValidationError) => }
-    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "failed"
+    AgentTracing.ending(RunEvent.RunCompleted, status).name shouldBe "failed"
   }
 
   it should "complete a turn with its last assistant message, and tracing call it completed" in {
     val status =
       AgentRun.status(completed(stateWith(UserMessage("q"), AssistantMessage("a"))), isBlock = false, loop)
     status shouldBe Right(AgentStatus.Completed("a"))
-    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "completed"
+    AgentTracing.ending(RunEvent.RunCompleted, status).name shouldBe "completed"
   }
 
   it should "map a turn that ended at the token budget to TokenLimitReached, and tracing call it token_limit_reached" in {
     val ended  = RunResult.Completed(stateWith(), TurnOutput(TurnOutcome.TokenLimitReached, AgentId.unsafe("a")), 1)
     val status = AgentRun.status(ended, isBlock = false, loop)
     status shouldBe Right(AgentStatus.TokenLimitReached)
-    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "token_limit_reached"
+    AgentTracing.ending(RunEvent.RunCompleted, status).name shouldBe "token_limit_reached"
   }
 
   it should "map a turn whose answer was cut off to Truncated with its last assistant message, and tracing call it truncated" in {
@@ -64,7 +64,7 @@ class AgentRunStatusSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val ended  = RunResult.Completed(state, TurnOutput(TurnOutcome.Truncated, AgentId.unsafe("a")), 1)
     val status = AgentRun.status(ended, isBlock = false, loop)
     status shouldBe Right(AgentStatus.Truncated("half"))
-    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "truncated"
+    AgentTracing.ending(RunEvent.RunCompleted, status).name shouldBe "truncated"
   }
 
   "TaskRefusal.Truncated" should "describe a child's cut-off answer without its content, labelled truncated" in {

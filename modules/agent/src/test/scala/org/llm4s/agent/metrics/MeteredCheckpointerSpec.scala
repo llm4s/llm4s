@@ -1,9 +1,11 @@
 package org.llm4s.agent.metrics
 
-import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, FailingLLMClient, NTurnFakeLLMClient }
+import org.llm4s.agent.{ Agent, AgentId, AgentStatus, CompletionFixture, FailingLLMClient, NTurnFakeLLMClient }
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.model.UsageSummary
 import org.scalatest.{ EitherValues, OptionValues }
@@ -135,6 +137,33 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     f.metrics.count(RunsEnded, graph, "failed") shouldBe 1.0
     f.metrics.count(RunsStarted, graph, "recover") shouldBe 1.0
     f.metrics.count(RunsEnded, graph, "completed") shouldBe 1.0
+  }
+
+  it should "end a run with the status its trace reports: blocked, step_limit_reached, not failed or completed (#2829)" in {
+    val f = new Fixture
+    val blocked = Agent
+      .builder("assistant", new NTurnFakeLLMClient(CompletionFixture.simple("far too long an answer")))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withRuntime(new GraphRuntime(f.metered))
+      .build()
+      .value
+    val on = thread()
+    blocked.run(on, "hello").value.status shouldBe a[AgentStatus.Blocked]
+    val graph = f.store.latest(on).value.value.checkpoint.snapshot.graphId
+    f.metrics.series(RunsEnded) shouldBe Map(Vector(graph, "blocked") -> 1.0)
+    f.metrics.durations(RunDuration, graph, "blocked") should have size 1
+
+    val g = new Fixture
+    val looping = Agent
+      .builder("assistant", new NTurnFakeLLMClient(CompletionFixture.withToolCall("missing_tool", ujson.Obj())))
+      .withMaxSteps(2)
+      .withRuntime(new GraphRuntime(g.metered))
+      .build()
+      .value
+    val limited = thread()
+    looping.run(limited, "loop").value.status shouldBe AgentStatus.StepLimitReached
+    val loopGraph = g.store.latest(limited).value.value.checkpoint.snapshot.graphId
+    g.metrics.series(RunsEnded) shouldBe Map(Vector(loopGraph, "step_limit_reached") -> 1.0)
   }
 
   it should "end a cancelled run committed with no checkpoint under the graph it started with, timing it" in {

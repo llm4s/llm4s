@@ -282,18 +282,24 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
           "thread-1",
           "run-1",
           "assistant",
-          "completed",
+          TraceEvent.RunStatus.Completed,
           Seq.empty,
           UsageSummary(),
           t0.plusSeconds(2),
           span = Some(TraceSpan(run, None, t0)),
-          provider = Some(ProviderId("bedrock"))
+          provider = Some(ProviderId("bedrock")),
+          blockedBy = Some("pii"),
+          activeAgent = Some("billing")
         )
       )
 
       val byName = spans().map(s => s.getName -> s).toMap
       str(byName("chat claude-sonnet-4-5"), "gen_ai.provider.name") shouldBe "anthropic"
       str(byName("invoke_agent assistant"), "gen_ai.provider.name") shouldBe "aws.bedrock"
+      // the span is the root agent's; the guardrail and the agent active at the end are attributes (#2829)
+      str(byName("invoke_agent assistant"), "gen_ai.agent.name") shouldBe "assistant"
+      str(byName("invoke_agent assistant"), "blocked_by") shouldBe "pii"
+      str(byName("invoke_agent assistant"), "active_agent") shouldBe "billing"
     }
   }
 

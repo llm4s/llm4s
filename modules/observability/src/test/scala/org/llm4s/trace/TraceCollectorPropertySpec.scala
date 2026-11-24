@@ -109,7 +109,7 @@ class TraceCollectorPropertySpec
 
   val genAgentRunEnded: Gen[TraceEvent] =
     for {
-      status <- genNonEmptyString
+      status <- Gen.oneOf(TraceEvent.RunStatus.values.toSeq)
       msgs   <- Gen.choose(0, 10)
       ts     <- genInstant
     } yield TraceEvent.AgentRunEnded(

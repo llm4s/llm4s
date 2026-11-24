@@ -469,9 +469,9 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
   `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
   the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
 - a `TokenUsageRecorded` for each model call that reports usage;
-- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
-  (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
-  `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
+- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the root agent and the agent
+  active at the end, a status (`completed`, `suspended`, `step_limit_reached`, `blocked` with the
+  guardrail as `blockedBy`, `cancelled`, `timed_out`, `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
   out or failed), the run's own `UsageSummary` - the model calls this run made, summed from its
   `agent.model_call_completed` events, not the thread's total, so per-run figures add up - and
   `userId`, the run's `RunConfig.principal` (`None` when the run names none).
@@ -782,7 +782,7 @@ val metered = MeteredCheckpointer(store.checkpointer, metrics) // every GraphRun
 | Metric (Prometheus series) | Type | Labels | Recorded by |
 |---|---|---|---|
 | `llm4s_agent_runs_started_total` | counter | `graph`, `trigger` (`start`, `resume`, `recover`) | checkpointer |
-| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`) | checkpointer |
+| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out`, `failed`) | checkpointer |
 | `llm4s_agent_run_duration_seconds` | histogram | `graph`, `status` | checkpointer |
 | `llm4s_agent_claims_total` | counter | `result` (`acquired`, `taken_over`, `busy`, `failed`) | checkpointer |
 | `llm4s_agent_claim_renewals_total` | counter | `result` (`renewed`, `lost`, `failed`) | checkpointer |

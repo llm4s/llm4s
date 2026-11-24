@@ -49,7 +49,7 @@ object BasicLLMCallingWithTrace {
                 threadId = "sample-thread",
                 runId = java.util.UUID.randomUUID().toString,
                 agent = "sample-agent",
-                status = "completed",
+                status = TraceEvent.RunStatus.Completed,
                 messages = finalMessages,
                 usage = UsageSummary()
               )

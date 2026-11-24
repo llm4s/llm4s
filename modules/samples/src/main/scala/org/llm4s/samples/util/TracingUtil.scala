@@ -44,15 +44,19 @@ object TracingUtil {
         runId = result.runId.value,
         agent = result.activeAgent.value,
         status = result.status match {
-          case AgentStatus.Completed(_)      => "completed"
-          case AgentStatus.Truncated(_)      => "truncated"
-          case AgentStatus.Blocked(g, _)     => s"blocked:$g"
-          case AgentStatus.StepLimitReached  => "step_limit_reached"
-          case AgentStatus.TokenLimitReached => "token_limit_reached"
-          case _: AgentStatus.Suspended      => "suspended"
+          case AgentStatus.Completed(_)      => TraceEvent.RunStatus.Completed
+          case AgentStatus.Truncated(_)      => TraceEvent.RunStatus.Truncated
+          case AgentStatus.Blocked(_, _)     => TraceEvent.RunStatus.Blocked
+          case AgentStatus.StepLimitReached  => TraceEvent.RunStatus.StepLimitReached
+          case AgentStatus.TokenLimitReached => TraceEvent.RunStatus.TokenLimitReached
+          case _: AgentStatus.Suspended      => TraceEvent.RunStatus.Suspended
         },
         messages = result.messages,
-        usage = result.usage
+        usage = result.usage,
+        blockedBy = result.status match {
+          case AgentStatus.Blocked(guardrail, _) => Some(guardrail)
+          case _                                 => None
+        }
       )
     )
 

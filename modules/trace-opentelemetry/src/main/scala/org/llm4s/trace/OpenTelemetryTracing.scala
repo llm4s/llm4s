@@ -194,7 +194,7 @@ class OpenTelemetryTracing private[trace] (
 
   /** A run that did not end well, and a tool call that errored: their spans' status is `ERROR`. */
   private def failed(event: TraceEvent): Boolean = event match {
-    case e: TraceEvent.AgentRunEnded => Set("failed", "cancelled", "timed_out").contains(e.status)
+    case e: TraceEvent.AgentRunEnded => e.status.isError
     case e: TraceEvent.CustomEvent if e.name == TraceAttributes.AgentToolExecuted =>
       TraceAttributes.payload(e).flatMap(_.get("outcome")).exists(_.toString.contains("Errored"))
     case _ => false
@@ -379,12 +379,14 @@ class OpenTelemetryTracing private[trace] (
           .put("thread_id", e.threadId)
           .put("run_id", e.runId)
           .put("agent", e.agent)
-          .put("status", e.status)
+          .put("status", e.status.name)
           .put("message_count", e.messages.size.toLong)
           .put("gen_ai.usage.input_tokens", e.usage.inputTokens)
           .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
         e.parentThreadId.foreach(id => attributes.put(TraceAttributes.ParentThreadId, id))
         e.parentRunId.foreach(id => attributes.put(TraceAttributes.ParentRunId, id))
+        e.blockedBy.foreach(guardrail => attributes.put("blocked_by", guardrail))
+        e.activeAgent.foreach(agent => attributes.put("active_agent", agent))
         e.provider.foreach(p => attributes.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         (s"${TraceAttributes.InvokeAgent} ${e.agent}", attributes.build())
 

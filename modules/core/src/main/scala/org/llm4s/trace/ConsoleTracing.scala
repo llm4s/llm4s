@@ -155,7 +155,9 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println()
           printSubHeader("AGENT RUN ENDED", BLUE)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${BLUE}Agent: ${e.agent}  Status: ${e.status}$RESET")
+          val blockedBy = e.blockedBy.fold("")(guardrail => s" by $guardrail")
+          val active    = e.activeAgent.filter(_ != e.agent).fold("")(agent => s"  Active agent: $agent")
+          println(s"${BLUE}Agent: ${e.agent}  Status: ${e.status.name}$blockedBy$active$RESET")
           println(s"${BLUE}Thread: ${e.threadId}  Run: ${e.runId}$RESET")
           println(
             s"${BLUE}Messages: ${e.messages.size}  Tokens: ${e.usage.inputTokens} in / ${e.usage.outputTokens} out$RESET"

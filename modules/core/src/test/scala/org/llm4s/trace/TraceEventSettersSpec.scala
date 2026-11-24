@@ -91,7 +91,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "AgentRunEnded" should "default its timestamp, parents and span and set every field" in {
-    val d = TraceEvent.AgentRunEnded("th", "r", "a", "completed", Seq.empty, UsageSummary())
+    val d = TraceEvent.AgentRunEnded("th", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
     stampedNow(d.timestamp)
     d.parentThreadId shouldBe None
     d.parentRunId shouldBe None
@@ -100,13 +100,18 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     d.toJson.obj.contains("user_id") shouldBe false
     d.withUserId("alice").toJson("user_id").str shouldBe "alice"
     d.withUserId("alice").withUserId(None).userId shouldBe None
+    (d.blockedBy, d.activeAgent) shouldBe ((None, None))
+    d.withBlockedBy("pii").withActiveAgent("billing").blockedBy shouldBe Some("pii")
+    d.withBlockedBy("pii").withActiveAgent("billing").activeAgent shouldBe Some("billing")
+    d.withBlockedBy(Some("pii")).withBlockedBy(None).blockedBy shouldBe None
+    d.withActiveAgent(Some("billing")).withActiveAgent(None).activeAgent shouldBe None
     val usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None)
     val msgs  = Seq(UserMessage("hi"))
     val c = d
       .withThreadId("th2")
       .withRunId("r2")
       .withAgent("a2")
-      .withStatus("failed")
+      .withStatus(TraceEvent.RunStatus.Failed)
       .withMessages(msgs)
       .withUsage(usage)
       .withTimestamp(t1)
@@ -117,7 +122,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       "th2",
       "r2",
       "a2",
-      "failed",
+      TraceEvent.RunStatus.Failed,
       msgs,
       usage,
       t1,

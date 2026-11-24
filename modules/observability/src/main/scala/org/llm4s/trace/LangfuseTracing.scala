@@ -266,9 +266,9 @@ class LangfuseTracing(
       ),
       if (isChild) span else span.withParent(None)
     )
-    if (Set("failed", "cancelled", "timed_out").contains(run.status)) {
+    if (run.status.isError) {
       runBody("level") = "ERROR"
-      runBody("statusMessage") = run.status
+      runBody("statusMessage") = run.status.name
     }
     events += ujson.Obj("id" -> uuid, "timestamp" -> nowIso, "type" -> "span-create", "body" -> runBody)
 
@@ -778,7 +778,7 @@ object LangfuseTracing {
     val metadata = ujson.Obj(
       "framework"     -> "llm4s",
       "agent"         -> run.agent,
-      "status"        -> run.status,
+      "status"        -> run.status.name,
       "thread_id"     -> run.threadId,
       "run_id"        -> run.runId,
       "message_count" -> run.messages.size,
@@ -788,6 +788,8 @@ object LangfuseTracing {
     )
     run.parentThreadId.foreach(id => metadata("parent_thread_id") = id)
     run.parentRunId.foreach(id => metadata("parent_run_id") = id)
+    run.blockedBy.foreach(guardrail => metadata("blocked_by") = guardrail)
+    run.activeAgent.foreach(agent => metadata("active_agent") = agent)
     metadata
   }
 

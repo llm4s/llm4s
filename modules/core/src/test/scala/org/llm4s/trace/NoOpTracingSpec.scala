@@ -49,7 +49,14 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
    * `llm4s-agent`, whose `AgentRunTracingSpec` covers building it.
    */
   private val agentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", runMessages, UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      runMessages,
+      UsageSummary()
+    )
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
@@ -139,7 +146,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
     val empty   = agentRunEnded.withMessages(Seq.empty)
-    val failed  = agentRunEnded.withStatus("failed")
+    val failed  = agentRunEnded.withStatus(TraceEvent.RunStatus.Failed)
 
     tracing.traceEvent(agentRunEnded) shouldBe Right(())
     tracing.traceEvent(empty) shouldBe Right(())

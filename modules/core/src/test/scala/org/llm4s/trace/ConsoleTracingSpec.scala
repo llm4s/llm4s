@@ -21,7 +21,7 @@ import java.time.Instant
  */
 class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
-  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+  private def ended(status: TraceEvent.RunStatus, messages: Seq[Message]): TraceEvent.AgentRunEnded =
     TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
 
   // ==========================================================================
@@ -80,7 +80,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state with minimal configuration" in {
     val tracing = new ConsoleTracing()
-    val event   = ended("completed", Seq.empty)
+    val event   = ended(TraceEvent.RunStatus.Completed, Seq.empty)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -92,7 +92,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(Some("I'm doing well, thanks!"), Seq.empty),
       UserMessage("Great to hear!")
     )
-    val event = ended("completed", messages)
+    val event = ended(TraceEvent.RunStatus.Completed, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -100,7 +100,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   it should "trace agent state with system message" in {
     val tracing  = new ConsoleTracing()
     val messages = Seq(SystemMessage("You are a helpful assistant"), UserMessage("Hello"))
-    val event    = ended("suspended", messages)
+    val event    = ended(TraceEvent.RunStatus.Suspended, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -113,14 +113,15 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
       ToolMessage("3", "call-123")
     )
-    val event = ended("completed", messages)
+    val event = ended(TraceEvent.RunStatus.Completed, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace an agent run that ended with usage" in {
     val tracing = new ConsoleTracing()
-    val event   = ended("failed", Seq.empty).withUsage(UsageSummary().add("m", TokenUsage(1, 2, 3), None))
+    val event =
+      ended(TraceEvent.RunStatus.Failed, Seq.empty).withUsage(UsageSummary().add("m", TokenUsage(1, 2, 3), None))
 
     noException should be thrownBy tracing.traceEvent(event)
   }

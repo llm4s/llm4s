@@ -315,7 +315,14 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
    * specs are about the composers, and the agent runtime is in `llm4s-agent` (#1242).
    */
   private def agentStateEvent(): TraceEvent.AgentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      Seq(UserMessage("Hello")),
+      UsageSummary()
+    )
 
   private def createCompletion(): Completion =
     Completion(

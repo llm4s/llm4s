@@ -102,7 +102,15 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
     custom("parent_span_id").str shouldBe span
 
     val run =
-      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Nil, UsageSummary(), span = Some(placed.withParent(None)))
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        TraceEvent.RunStatus.Completed,
+        Nil,
+        UsageSummary(),
+        span = Some(placed.withParent(None))
+      )
     run.toJson.obj.contains("parent_span_id") shouldBe false
     run.toJson("trace_id").str shouldBe trace
     TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", span = Some(placed)).toJson("span_id").str shouldBe

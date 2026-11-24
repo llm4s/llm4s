@@ -366,6 +366,49 @@ object TraceEvent {
   }
 
   /**
+   * How an agent run ended: the one vocabulary of a run's end, which the run's trace ([[AgentRunEnded.status]]) and the
+   * agent runtime's run metrics (`llm4s.agent.runs.ended`'s `status` label) both report by [[name]].
+   */
+  enum RunStatus(val name: String) {
+
+    /** The turn ended with an answer. */
+    case Completed extends RunStatus("completed")
+
+    /** The turn reached its step limit. */
+    case StepLimitReached extends RunStatus("step_limit_reached")
+
+    /** The turn reached its run's token budget. */
+    case TokenLimitReached extends RunStatus("token_limit_reached")
+
+    /** The turn's answer was cut off at the model's output limit. */
+    case Truncated extends RunStatus("truncated")
+
+    /** The run suspended, waiting for an approval or an answer. */
+    case Suspended extends RunStatus("suspended")
+
+    /** A guardrail blocked the turn; [[AgentRunEnded.blockedBy]] names it. */
+    case Blocked extends RunStatus("blocked")
+
+    /** The run was cancelled. */
+    case Cancelled extends RunStatus("cancelled")
+
+    /** The run exceeded its deadline. */
+    case TimedOut extends RunStatus("timed_out")
+
+    /** The run failed. */
+    case Failed extends RunStatus("failed")
+
+    /**
+     * Whether the run did not end by its own logic - it failed, was cancelled or timed out - which backends report as
+     * an error. A block and a limit are outcomes, not errors.
+     */
+    def isError: Boolean = this match {
+      case Cancelled | TimedOut | Failed => true
+      case _                             => false
+    }
+  }
+
+  /**
    * An agent run ended. Emitted once per run, from the run's own final state, by the agent's
    * tracing; it carries the turn's conversation for backends that record it (Langfuse turns it into
    * a trace with one span per message). A blocked turn has been removed from the thread by then, so
@@ -373,9 +416,9 @@ object TraceEvent {
    *
    * @param threadId the conversation's thread; backends use it as the session
    * @param runId    this run
-   * @param agent    the agent active when the run ended
-   * @param status   `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`,
-   *                 `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed`
+   * @param agent    the agent the run was started on - its root agent - which backends name the run's span after
+   *                 (`invoke_agent <agent>`), whichever agent a handoff left active
+   * @param status   how the run ended
    * @param messages this turn's messages, from its user message on; empty when blocked, cancelled,
    *                 timed out or failed. Not included in [[toJson]], which stays a flat summary.
    * @param usage    this run's own token usage and cost, per model: the model calls the run made,
@@ -390,12 +433,15 @@ object TraceEvent {
    *                 several), when its client reported one; OpenTelemetry's `gen_ai.provider.name`
    * @param userId   who the run was for, as the application names them: the agent's tracing sets it to the run's
    *                 `RunConfig.principal`. `None` when the run has none; a backend then names no user (#2828)
+   * @param blockedBy the guardrail that blocked the turn, when `status` is [[RunStatus.Blocked]]; `None` otherwise
+   * @param activeAgent the agent active when the run ended: `agent`, or the one a handoff moved the turn to. `None`
+   *                 when the emitter does not say
    */
   final case class AgentRunEnded private (
     threadId: String,
     runId: String,
     agent: String,
-    status: String,
+    status: RunStatus,
     messages: Seq[Message],
     usage: UsageSummary,
     timestamp: Instant,
@@ -403,12 +449,14 @@ object TraceEvent {
     parentRunId: Option[String],
     override val span: Option[TraceSpan],
     provider: Option[ProviderId],
-    userId: Option[String]
+    userId: Option[String],
+    blockedBy: Option[String],
+    activeAgent: Option[String]
   ) extends TraceEvent {
     def withThreadId(threadId: String): AgentRunEnded                     = copy(threadId = threadId)
     def withRunId(runId: String): AgentRunEnded                           = copy(runId = runId)
     def withAgent(agent: String): AgentRunEnded                           = copy(agent = agent)
-    def withStatus(status: String): AgentRunEnded                         = copy(status = status)
+    def withStatus(status: RunStatus): AgentRunEnded                      = copy(status = status)
     def withMessages(messages: Seq[Message]): AgentRunEnded               = copy(messages = messages)
     def withUsage(usage: UsageSummary): AgentRunEnded                     = copy(usage = usage)
     def withTimestamp(timestamp: Instant): AgentRunEnded                  = copy(timestamp = timestamp)
@@ -422,6 +470,10 @@ object TraceEvent {
     def withProvider(provider: Option[ProviderId]): AgentRunEnded         = copy(provider = provider)
     def withUserId(userId: String): AgentRunEnded                         = copy(userId = Some(userId))
     def withUserId(userId: Option[String]): AgentRunEnded                 = copy(userId = userId)
+    def withBlockedBy(blockedBy: String): AgentRunEnded                   = copy(blockedBy = Some(blockedBy))
+    def withBlockedBy(blockedBy: Option[String]): AgentRunEnded           = copy(blockedBy = blockedBy)
+    def withActiveAgent(activeAgent: String): AgentRunEnded               = copy(activeAgent = Some(activeAgent))
+    def withActiveAgent(activeAgent: Option[String]): AgentRunEnded       = copy(activeAgent = activeAgent)
 
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
@@ -431,7 +483,7 @@ object TraceEvent {
         "thread_id"     -> threadId,
         "run_id"        -> runId,
         "agent"         -> agent,
-        "status"        -> status,
+        "status"        -> status.name,
         "message_count" -> messages.size,
         "input_tokens"  -> usage.inputTokens.toDouble,
         "output_tokens" -> usage.outputTokens.toDouble,
@@ -441,6 +493,8 @@ object TraceEvent {
       parentRunId.foreach(id => json("parent_run_id") = id)
       provider.foreach(p => json("provider") = p.asString)
       userId.foreach(id => json("user_id") = id)
+      blockedBy.foreach(guardrail => json("blocked_by") = guardrail)
+      activeAgent.foreach(active => json("active_agent") = active)
       TraceSpan.annotate(json, span)
     }
   }
@@ -450,7 +504,7 @@ object TraceEvent {
       threadId: String,
       runId: String,
       agent: String,
-      status: String,
+      status: RunStatus,
       messages: Seq[Message],
       usage: UsageSummary,
       timestamp: Instant = Instant.now(),
@@ -458,7 +512,9 @@ object TraceEvent {
       parentRunId: Option[String] = None,
       span: Option[TraceSpan] = None,
       provider: Option[ProviderId] = None,
-      userId: Option[String] = None
+      userId: Option[String] = None,
+      blockedBy: Option[String] = None,
+      activeAgent: Option[String] = None
     ): AgentRunEnded =
       new AgentRunEnded(
         threadId,
@@ -472,7 +528,9 @@ object TraceEvent {
         parentRunId,
         span,
         provider,
-        userId
+        userId,
+        blockedBy,
+        activeAgent
       )
   }
 

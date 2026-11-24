@@ -33,7 +33,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         end,
@@ -77,7 +77,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
         "t",
         "r",
         "a",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Nil,
         org.llm4s.llmconnect.model.UsageSummary(),
         t0.plusSeconds(10),
@@ -252,7 +252,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   it should "convert AgentInitialized and AgentRunEnded to AgentCall spans" in {
     val initEvent = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"))
-    val endEvent  = TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary())
+    val endEvent  = TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary())
     collector.traceEvent(initEvent) shouldBe Right(())
     collector.traceEvent(endEvent) shouldBe Right(())
 
@@ -267,7 +267,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
       "thread-1",
       "run-1",
       "assistant",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(UserMessage("hi"), AssistantMessage("hello")),
       usage
     )

@@ -23,7 +23,14 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   "OpenTelemetryTracing" should "assign correct SpanKind for events" in {
     tracing.getSpanKind(TraceEvent.AgentInitialized("query", Vector.empty)) shouldBe SpanKind.INTERNAL
     tracing.getSpanKind(
-      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, org.llm4s.llmconnect.model.UsageSummary())
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        TraceEvent.RunStatus.Completed,
+        Seq.empty,
+        org.llm4s.llmconnect.model.UsageSummary()
+      )
     ) shouldBe SpanKind.INTERNAL
     tracing.getSpanKind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "model", "op")) shouldBe SpanKind.INTERNAL
 

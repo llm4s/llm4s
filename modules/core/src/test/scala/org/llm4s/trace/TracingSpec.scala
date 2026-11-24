@@ -136,7 +136,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracing.traceEvent(TraceEvent.ErrorOccurred(new Exception("e"), "ctx")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "o")).isRight shouldBe true
     tracing
-      .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary()))
+      .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()))
       .isRight shouldBe true
     tracing.traceEvent(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "m", "o", 5)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.CostRecorded(0.001, "m", "o", 100, "t")).isRight shouldBe true
@@ -323,7 +323,14 @@ class TracingSpec extends AnyFlatSpec with Matchers {
    * agent runtime is in `llm4s-agent`, whose specs cover building it.
    */
   private def agentStateEvent(): TraceEvent.AgentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      Seq(UserMessage("Hello")),
+      UsageSummary()
+    )
 
   private def createTestCompletion(): Completion =
     Completion(

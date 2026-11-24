@@ -201,13 +201,15 @@ class TraceCollectorTracing[F[_]](
             "thread_id"     -> SpanValue.StringValue(run.threadId),
             "run_id"        -> SpanValue.StringValue(run.runId),
             "agent"         -> SpanValue.StringValue(run.agent),
-            "status"        -> SpanValue.StringValue(run.status),
+            "status"        -> SpanValue.StringValue(run.status.name),
             "message_count" -> SpanValue.LongValue(run.messages.size.toLong),
             "input_tokens"  -> SpanValue.LongValue(run.usage.inputTokens),
             "output_tokens" -> SpanValue.LongValue(run.usage.outputTokens)
           ) ++ run.parentThreadId.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
             run.parentRunId.map(id => "parent_run_id" -> SpanValue.StringValue(id)) ++
-            run.userId.map(id => "user_id" -> SpanValue.StringValue(id))
+            run.userId.map(id => "user_id" -> SpanValue.StringValue(id)) ++
+            run.blockedBy.map(guardrail => "blocked_by" -> SpanValue.StringValue(guardrail)) ++
+            run.activeAgent.map(agent => "active_agent" -> SpanValue.StringValue(agent))
         )
 
       case TraceEvent.CustomEvent(name, data, ts, _) =>

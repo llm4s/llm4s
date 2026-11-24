@@ -329,7 +329,18 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .keySet should contain noneOf ("provider", "duration_ms")
 
       val ended = TraceEvent
-        .AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary(), Instant.EPOCH, None, None, None)
+        .AgentRunEnded(
+          "t",
+          "r",
+          "a",
+          TraceEvent.RunStatus.Completed,
+          Seq.empty,
+          UsageSummary(),
+          Instant.EPOCH,
+          None,
+          None,
+          None
+        )
         .withProvider(ProviderId("anthropic"))
       ended.toJson("provider").str shouldBe "anthropic"
       ended.withProvider(None).provider shouldBe None
