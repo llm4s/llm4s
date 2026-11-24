@@ -78,9 +78,13 @@ my-llm4s-acme/
         └── Llm4sAcmeModuleSpec.scala
 ```
 
-Use your own package. The in-repo modules keep `org.llm4s.*` for source compatibility with
-earlier releases; a third-party module has no reason to, and anything `private[llm4s]` stays
-out of reach either way (see [Stability](#stability)).
+Use your own package. The in-repo modules, the template `modules/providers/voyage` included, are
+declared in `org.llm4s.*` because they are llm4s: their class names are part of earlier releases.
+That is not something to copy. Being inside `org.llm4s` lets them reach `private[llm4s]` helpers
+your module cannot, and the template uses one: `org.llm4s.util.Redaction.safeBody`, for the body of
+an error message. Everything else it calls is the public SPI this guide describes; build your error
+from the response with `HttpErrorMapper.toError`, which redacts and truncates the body itself (see
+[Stability](#stability)).
 
 ## Registration
 
@@ -185,7 +189,8 @@ check the config's type rather than cast - `ProviderDescriptor.expectConfig` doe
 `aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
 alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
 two providers declaring one alias the later registered keeps it; both cases appear in
-`ProviderRegistry.report.collisions` (kind `chat alias` or `embedding alias`) and in the discovery log.
+`ProviderRegistry.report.collisions` (kind `ProviderCollisionKind.ChatAlias` or `EmbeddingAlias`) and in the
+discovery log. The report is the registry's to build and yours to read: its ids are `ProviderId`s.
 
 ### Workload identity
 
@@ -503,12 +508,12 @@ to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbedding
 ### `HttpErrorMapper`
 
 ```scala
-HttpErrorMapper.mapHttpError(
+HttpErrorMapper.toError(
   statusCode: Int,
   body: String,
   provider: String,
-  headers: Map[String, Seq[String]] = Map.empty
-): Result[Nothing]
+  headers: Map[String, Seq[String]]
+): LLMError
 ```
 
 Maps a non-2xx response to the standard error types - 401/403 `AuthenticationError`, 429
@@ -517,7 +522,11 @@ common JSON error shapes, redacted and truncated. Retry and fallback logic keys 
 so use it rather than inventing your own. Pass the response's `headers`: a `Retry-After`
 (delta-seconds or an HTTP-date) becomes the error's `retryAfter`, a `FiniteDuration` - on a 429's
 `RateLimitError`, or a 503's (any other status's) `ServiceError` - so retries wait as long as the
-provider asked rather than a guessed backoff.
+provider asked rather than a guessed backoff. It returns the error itself: your client wraps it in a `Left`.
+
+`HttpErrorMapper.mapStreamError(status, message, provider)` is the same mapping for a failure a provider
+reports inside a stream, after the 200 status: give it the status the event states, or 502 when it states
+none, and the provider's message, which every error type it returns keeps.
 
 ### `CostEstimator`
 
@@ -603,7 +612,7 @@ provider, if it has one, win over it, because that is a deliberate choice and ca
 can. If your models embed both alike, ignore it and do not send a field for it. Test the exact wire field
 for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 
-### Streaming: `SSEParser`, `StreamingAccumulator`, `StreamingToolArgumentParser`
+### Streaming: `SSEParser`, `StreamingAccumulator`, `ToolCallRules`
 
 - `SSEParser.createStreamingParser()` returns an incremental parser: `addChunk(text)`, then drain
   `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Feed it the body as it arrives, in
@@ -619,7 +628,7 @@ for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 - Pass each streamed argument fragment to the accumulator as-is, as `ujson.Str(raw)` (`ujson.Obj()`
   for an empty one): the accumulator joins the fragments and parses the whole. Do not parse a
   fragment on its own - a fragment that happens to be valid JSON (`":"`, `"Paris"`, `1`) would lose
-  its quotes or be dropped. `StreamingToolArgumentParser.parse(raw: String): Result[ujson.Value]` is
+  its quotes or be dropped. `ToolCallRules.parseArguments(raw: String): Result[ujson.Value]` is
   for a reassembled argument string: `{}` for empty or blank, the object when it is a complete JSON
   object, and otherwise a `Left`, the malformed-tool-call `ProcessingError` (cut or invalid JSON,
   JSON that is not an object, or JSON nested more than 512 levels deep, which is never parsed).
@@ -690,7 +699,7 @@ final class AcmeClient(
     val response  = http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120.seconds)
     val result = response.flatMap { r =>
       if r.statusCode / 100 == 2 then AcmeWire.decode(r.body).map(withCost)
-      else HttpErrorMapper.mapHttpError(r.statusCode, r.body, providerName, r.headers)
+      else Left(HttpErrorMapper.toError(r.statusCode, r.body, providerName, r.headers))
     }
     ProviderExchangeRecorder.record(
       clientOptions.exchangeLogging, providerName, Some(config.model), startedAt,
@@ -926,24 +935,28 @@ The in-repo fixtures are worked examples of each wire format: `ChatCompletionsCo
 `OllamaContractFixtures`, `BedrockContractFixtures`, `WatsonXContractFixtures` and
 `PerplexityContractFixtures`, each beside its module's `Llm4s<Name>ModuleSpec`.
 
-**Rule 3 on your `complete` path is yours to write.** `StreamingAccumulator.toCompletion` applies
-the tool-call rules to a stream, but llm4s's own helper for a whole reply is internal. After your
-client parses a `complete` reply, refuse one that ended `Length` with a tool call, and one whose
-call arguments are not a JSON object, with the malformed-tool-call error:
+**Rule 3 on your `complete` path is one call.** `StreamingAccumulator.toCompletion` applies the
+tool-call rules to a stream; `ToolCallRules.checked` applies them to a whole reply. After your client
+parses a `complete` reply, pass the `Completion` through it: a reply that ended `Length` with a tool
+call, and one whose call arguments are not a JSON object, come back as the malformed-tool-call
+`ProcessingError`:
 
 ```scala
-import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.{ Completion, FinishReason }
+import org.llm4s.llmconnect.provider.ToolCallRules
 
-private def checkedToolCalls(completion: Completion): Result[Completion] =
-  val calls = completion.message.toolCalls
-  if calls.nonEmpty && completion.finishReason == FinishReason.Length then
-    Left(ProcessingError("acme", s"malformed tool call: the output limit cut the reply while it made tool calls ${calls.map(_.name).mkString(", ")}; none is run"))
-  else
-    calls.find(_.arguments.objOpt.isEmpty) match
-      case Some(call) => Left(ProcessingError("acme", s"malformed tool call '${call.name}': the arguments are not a JSON object"))
-      case None       => Right(completion)
+AcmeWire.decode(body).flatMap(ToolCallRules.checked)
 ```
+
+Read a call's argument text with `ToolCallRules.parseArguments(name, raw)`, which is `{}` for blank
+text and a `Left` naming the call for anything that is not a complete JSON object. A stream that
+delivers a whole call in one chunk gives the accumulator `ToolCallRules.wholeCall(chunk)`, the call's
+arguments as their JSON text, and the caller's `onChunk` the chunk unchanged: the accumulator reads an
+empty `ujson.Obj()` as a placeholder, so an explicit `{}` would otherwise read as no arguments.
+
+Refuse the content parts your wire format cannot carry with `PartEncoding.check(provider, messages,
+user, tool)` before anything is sent, and encode a message's parts with `PartEncoding.encodeAll(provider,
+role, parts)(encode)`: both take the parts you send as a partial function, and a part it does not cover
+is an `UnsupportedContentPartError`, never dropped.
 
 The `ToolCallCutByLimit` and `MalformedArguments` cases fail on `complete` until you do.
 
@@ -974,7 +987,9 @@ Your module spec runs `assertValidates(accept, reject)(clientAt)` for the first 
 `LocalProviderTestServer`: a request must reach the server before `Right(())`, a 401 must be an
 `AuthenticationError`, and nothing listening must be a `Left`. For the second it runs
 `assertValidationUnsupported(client)`. A client on `OpenAICompatibleClient` has the first already: `GET /models`,
-or the dialect's `validationPath` (`None` for a vendor with no such request).
+or the dialect's `validationUrl` (`None` for a vendor with no such request). A vendor that refuses a wrong key with
+a status other than 401 or 403 says so in the dialect's `refusesCredential`, so the refusal is an
+`AuthenticationError` from `validate()` and from a completion alike.
 
 ### Tool results
 
@@ -1013,7 +1028,8 @@ across all 1.x releases, so a provider compiled against 1.0 keeps working. That 
 - `ProviderConfig`, `NamedProviderConfig`, `ContextWindowResolver`, `LlmClientOptions`;
 - `BaseLifecycleLLMClient`, `MetricsRecording`, `ProviderExchangeRecorder`,
   `ProviderExchangeLogging`, `HttpErrorMapper`, `CostEstimator`, `EmbeddingProvider`,
-  `StreamingAccumulator`, `SSEParser`, `StreamingToolArgumentParser`, `Llm4sHttpClient`,
+  `StreamingAccumulator`, `SSEParser`, `ToolCallRules` (`checked`, `parseArguments`, `wholeCall`),
+  `PartEncoding` (`check`, `encodeAll`), `Llm4sHttpClient`,
   `ProviderModelLister`, `RequestTransformer` and `TransformationResult`.
 
 `llm4s-provider-testkit` is **Beta**, not part of the frozen SPI: it is a test-scope dependency,

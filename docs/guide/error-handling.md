@@ -117,10 +117,10 @@ is not recoverable, since nothing says a retry can help.
 | `ContentFilteredError` | no | The provider's content filter stopped the call: Gemini or Vertex AI blocked the prompt (`promptFeedback.blockReason`) or stopped the reply with a filter `finishReason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, the image ones and others), even after some text. It carries the `provider`, the `reason` and `promptBlocked`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure. |
 | `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
 | `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and the OpenAI, Anthropic, Bedrock and Spring AI clients for an SDK exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
-| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries `httpStatus`; see the note below. |
+| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries `httpStatus`; see the note below. |
 | `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `Safety.fromThrowable`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
 | `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions as [section 7](#7-turning-exceptions-into-errors) describes. |
-| `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool and MCP failures are other types; see the note below. |
+| `ExecutionError` | yes | Nothing in the library: it is there for an operation of your own that failed in a way worth trying again. Tool and MCP failures are other types; see the note below. |
 | `CircuitOpenError` | yes | A `ReliableClient` refused the call without making it: its circuit is open, or half-open with a probe in flight. `retryAfter` is the time left before a probe is let through. |
 | `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
@@ -128,7 +128,7 @@ is not recoverable, since nothing says a retry can help.
 | `NotFoundError` | no | A memory store (in-memory, SQLite, Postgres) is asked to update a memory it does not hold, or `VectorStoreFactory` is given an unknown backend name. |
 | `ContextError` | no | Context compression fails: `LLMCompressor`'s LLM call fails, or `ToolOutputCompressor` cannot store an artifact or parse JSON content. |
 | `TokenizerError` | no | `ConversationTokenCounter` has no tokenizer for the requested id. |
-| `ValidationUnsupportedError` | no | Only `LLMClient.validate()`, on a client with no request to check itself with (Azure OpenAI, Vertex AI, Bedrock and others, and any client that does not implement the check): nothing was checked, and the client may well work ([startup validation](observability/index#startup-validation)). |
+| `ValidationUnsupportedError` | no | Only `LLMClient.validate()`, on a client with no request to check itself with (Bedrock, Z.ai, and any client that does not implement the check): nothing was checked, and the client may well work ([startup validation](observability/index#startup-validation)). |
 | `SimpleError` | no | The MCP client and its transports (`llm4s-mcp`): connection, session, JSON-RPC and server-process failures. |
 | `UnknownError` | no | An unexpected exception, wrapped: the fallback of `Safety.fromThrowable` (and so of `toResult` and `toLLMError`), an unexpected failure in llm4s's HTTP client, or a tracing backend that fails to start or to export. |
 
@@ -147,8 +147,7 @@ going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverable
 `ServiceError` only when it is; see the next paragraph.
 
 **Recoverable is not the same as retried automatically.** Every retry in the library -
-`recoverWithBackoff`, `ReliableClient`'s `RetryPolicy`, `LLMClientRetry` and the agent graph's default node
-retry - uses one rule, `RetryPolicy.isRetryable`: it resends the identical request with nobody in the loop,
+`ReliableClient`'s `RetryPolicy` and the agent graph's default node retry - uses one rule, `RetryPolicy.isRetryable`: it resends the identical request with nobody in the loop,
 so it retries a recoverable error unless repeating the request cannot help. That leaves out three recoverable
 cases: a `ServiceError` with a client-error status (any 4xx but 408 and 429), because the
 request itself is wrong, an `OptimisticLockFailure`, because you must re-read the record first, and a
@@ -336,32 +335,30 @@ parseAll(List("1", "x", "y")) // Left(...), the first failure
 
 ## 9. Recovering from failures
 
-A recoverable error is worth a retry. `ErrorRecovery.recoverWithBackoff` calls an operation up to
-`maxAttempts` times in all, waiting between attempts. Here `client` is any `LLMClient` and `conversation` a `Conversation`, built as in
+A recoverable error is worth a retry. `ReliableClient` wraps any `LLMClient` and retries its calls, up to its
+`RetryPolicy`'s `maxAttempts` in all, waiting between attempts. It is the library's one retry and circuit-breaker
+mechanism. Here `client` is any `LLMClient` and `conversation` a `Conversation`, built as in
 [section 3](#3-chaining-with-for-comprehensions):
 
 ```scala
-import org.llm4s.error.ErrorRecovery
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 
 import scala.concurrent.duration._
 
-val result = ErrorRecovery.recoverWithBackoff(
-  () => client.complete(conversation),
-  maxAttempts = 3,
-  baseDelay = 1.second
+val reliable = new ReliableClient(
+  client,
+  providerName = "openai",
+  config = ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))
 )
+
+val result = reliable.complete(conversation)
 ```
 
 It retries what every retry in the library retries (`RetryPolicy.isRetryable`; see
-[section 4](#4-error-types-and-when-each-is-raised)), each error on its own schedule. The delays are not
-exponential:
-
-| Error | Wait before the next attempt |
-|---|---|
-| `RateLimitError` | Its `retryDelay`: the provider's `retryAfter` when it gave one, else 30 seconds (`RateLimitError.DefaultRetryDelay`). `baseDelay` is not used. |
-| `ServiceError` with a 5xx, 429 or 408 status | The provider's `retryAfter` when it gave one, else `baseDelay` times the number of the attempt that failed: `baseDelay`, then `2 * baseDelay`, and so on. |
-| `TimeoutError` | `baseDelay`, every time. |
-| `NetworkError`, `ExecutionError` | `baseDelay` times the number of the attempt that failed, as for a `ServiceError` without a hint. |
+[section 4](#4-error-types-and-when-each-is-raised)). A `RateLimitError` waits its `retryDelay` (the provider's
+`retryAfter` when it gave one, else 30 seconds) and a `ServiceError` the provider's `retryAfter` when it gave one.
+Every other wait is the policy's: `RetryPolicy.exponentialBackoff` (`baseDelay`, doubled after each attempt, up to `maxDelay`),
+`linearBackoff`, `fixedDelay`, or your own with `RetryPolicy.custom`.
 
 Every other error comes back unchanged straight away, whichever attempt it happens on: a
 `ValidationError` on the last attempt, after a retried timeout, is still a `ValidationError`. That
@@ -369,19 +366,21 @@ includes a `ServiceError` with any other status, an `OptimisticLockFailure` and 
 `CircuitOpenError`. A
 `CancelledError` is never retried or wrapped, and an interrupt during a wait returns one.
 
-When the last attempt fails with a retried error, you get an `ExecutionError` whose
-message gives the number of attempts and the last error's message, and whose `operation` is the last
-error's `formatted` text; the original error's type is not kept. `ExecutionError` is itself a
-`RecoverableError` that the rule retries, so an outer `recoverWithBackoff` or `RetryPolicy` will retry it. The operation
-always runs at least once, even if `maxAttempts` is below 1.
+When the last attempt fails with a retried error, you get that error, unchanged: its type is kept, so the code
+that handles a `RateLimitError` from one call handles it after three. A `ReliabilityConfig` also sets a deadline for
+the attempts taken together (five minutes by default); once it has passed no further attempt starts and the result
+is a `TimeoutError`.
 
-To stop calling a service that keeps failing, wrap the call in an `ErrorRecovery.CircuitBreaker`.
-After `failureThreshold` consecutive failures (a success resets the count) it opens, and further calls fail fast with a `ServiceError`
-without reaching the service, until `recoveryTimeout` has passed and a single probe call is allowed.
+The same wrapper stops calling a provider that keeps failing. After `failureThreshold` failures in a row (a success
+resets the count) its circuit opens, and further calls fail fast with a `CircuitOpenError` without reaching the
+provider, until `recoveryTimeout` has passed and a single probe call is let through. A `CircuitOpenError` is not
+retried.
 
-For production use, `ReliableClient` wraps a client with retry (its own `RetryPolicy`, with
-configurable backoff), a circuit breaker, and an optional deadline and rate limit, in one place. See [Error Recovery](patterns/error-recovery) for retry strategies, fallbacks and
-graceful degradation.
+`ReliableClient` retries model calls. For an operation of your own, a `RetryPolicy` gives the same rule and the
+same waits: `policy.isRetryable(error)` and `policy.delayFor(attemptNumber, error)`.
+
+The [reliability guide](reliability) covers the configuration, the rate limit and the metrics. See
+[Error Recovery](patterns/error-recovery) for retry strategies, fallbacks and graceful degradation.
 
 ## 10. Testing code that returns Result
 

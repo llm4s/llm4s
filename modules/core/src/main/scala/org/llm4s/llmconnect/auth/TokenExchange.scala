@@ -286,7 +286,7 @@ object TokenExchange:
         Left(AuthenticationError(Provider, s"token endpoint rejected the identity token (HTTP $status): $errorBody"))
       case status =>
         // Scrubbed of the exact values before HttpErrorMapper extracts and redacts its detail.
-        HttpErrorMapper.mapHttpError(status, Redaction.scrubRemote(response.body), Provider, response.headers)
+        Left(HttpErrorMapper.toError(status, Redaction.scrubRemote(response.body), Provider, response.headers))
 
   /** The `exp` claim of `token`, if it is a JWT with a numeric one; the signature is not checked. */
   private def jwtExpiry(token: String): Option[Instant] =

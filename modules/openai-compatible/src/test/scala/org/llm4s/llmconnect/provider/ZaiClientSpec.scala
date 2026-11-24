@@ -720,7 +720,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
   }
 
   def testParseStreamingArguments(raw: String): Result[ujson.Value] =
-    org.llm4s.llmconnect.streaming.StreamingToolArgumentParser.parse(raw)
+    ToolCallRules.parseArguments(raw)
 }
 
 // ============ Metrics Tests ============

@@ -151,7 +151,8 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   // which included every Ollama model - nomic-embed-text is 768. Dimensions now come from the
   // embedding provider's descriptor, so a fixture provider stands in for any of them.
   private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("fixture")
+    val id: ProviderId                                           = ProviderId("fixture")
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     override val modelDimensions: Map[String, Int] = Map("fixture-768" -> 768)
 

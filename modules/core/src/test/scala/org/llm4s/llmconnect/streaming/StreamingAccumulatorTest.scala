@@ -158,7 +158,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("should preserve raw string fragments for later assembly") {
     val accumulator = StreamingAccumulator("test-model")
 
-    // Partial JSON arrives as ujson.Str fragments via StreamingToolArgumentParser
+    // Partial JSON arrives as ujson.Str fragments
     val partial1 = ToolCall("tool-1", "search", ujson.Str("{\"query\":"))
     val partial2 = ToolCall("tool-1", "", ujson.Str("\"hello world\"}"))
 

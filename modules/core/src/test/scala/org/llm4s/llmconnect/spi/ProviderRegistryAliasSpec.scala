@@ -32,11 +32,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
 
   final private class EmbeddingStub(name: String, override val aliases: Set[String] = Set.empty)
       extends EmbeddingProviderDescriptor:
-    val id: ProviderId = ProviderId(name)
+    val id: ProviderId                                           = ProviderId(name)
+    val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
     def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Left(ConfigurationError(s"stub $name"))
 
-  private def aliasCollisions(registry: ProviderRegistry) = registry.report.collisions.filter(_.kind.endsWith("alias"))
+  private def aliasCollisions(registry: ProviderRegistry) = registry.report.collisions.filter(_.kind.isAlias)
 
   "find and resolve" should {
     "find a provider by an alias it declares, in any spelling" in {
@@ -68,7 +69,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
       ProviderRegistry.of(acme, beta).resolve(ProviderId("beta")) shouldBe Right(beta)
 
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("chat alias", "beta", "provider 'beta'", Some("provider 'acme'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.ChatAlias,
+          ProviderId("beta"),
+          "provider 'beta'",
+          Some("provider 'acme'")
+        )
       )
       registry.report.describe should include(
         "chat alias 'beta' registered by both provider 'acme' and provider 'beta'"
@@ -89,7 +95,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
 
       registry.resolve(ProviderId("shared")) shouldBe Right(second)
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("chat alias", "shared", "provider 'second'", Some("provider 'first'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.ChatAlias,
+          ProviderId("shared"),
+          "provider 'second'",
+          Some("provider 'first'")
+        )
       )
     }
 
@@ -99,7 +110,12 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
         new EmbeddingStub("two", aliases = Set("shared"))
       )
       aliasCollisions(registry) shouldBe Seq(
-        ProviderIdCollision("embedding alias", "shared", "provider 'two'", Some("provider 'one'"))
+        ProviderIdCollision(
+          ProviderCollisionKind.EmbeddingAlias,
+          ProviderId("shared"),
+          "provider 'two'",
+          Some("provider 'one'")
+        )
       )
     }
 
@@ -143,8 +159,8 @@ class ProviderRegistryAliasSpec extends AnyWordSpec with Matchers:
       val module = registry.report.modules
         .find(_.moduleClass.endsWith("SkewedProviderModule"))
         .getOrElse(fail(registry.report.describe))
-      module.providerIds shouldBe Seq("fixturecloud")
-      module.embeddingProviderIds shouldBe Seq("fixtureembed")
+      module.providerIds.map(_.asString) shouldBe Seq("fixturecloud")
+      module.embeddingProviderIds.map(_.asString) shouldBe Seq("fixtureembed")
     }
 
     "scan core's own loader as well when the context loader finds no module" in {

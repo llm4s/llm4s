@@ -166,4 +166,12 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(OpenAIClient(config("sk-invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(OpenAIClient(config(key, "llm4s-no-such-model")))
+
+  registerValidationContract()
 }

@@ -107,7 +107,7 @@ final class StreamingAccumulator private (model: String) {
     partialToolCalls.values.map { p =>
       val raw = p.argumentsBuilder.toString
       // the one boundary parser: unparseable or nested too deeply stays the raw Str, never parsed (#1562)
-      ToolCall(id = p.id, name = p.name, arguments = StreamingToolArgumentParser.parse(raw).getOrElse(ujson.Str(raw)))
+      ToolCall(id = p.id, name = p.name, arguments = ToolCallRules.parseArguments(raw).getOrElse(ujson.Str(raw)))
     }.toSeq
 
   /**

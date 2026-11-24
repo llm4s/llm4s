@@ -118,4 +118,10 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
   }
 
   registerCapabilityContract()
+
+  // ---- validate() (#2855) ----
+  override protected def validationUnsupported: Option[String] =
+    Some("Z.ai documents no model listing or other cheap authenticated request")
+
+  registerValidationContract()
 }

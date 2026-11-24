@@ -95,7 +95,7 @@ b.recover(threadId, graph) match
 ```
 
 A refusal up front accepts and discards nothing, so `ThreadBusy` is a `RecoverableError`: the caller retries, and generic retry
-code (`RetryPolicy`, `ErrorRecovery`) does too. `holder` is a `GraphError.BusyHolder`:
+code (`RetryPolicy`) does too. `holder` is a `GraphError.BusyHolder`:
 
 - `Run(runId)`, the holding run, when it is of the caller's tenant: a run of the same runtime with the caller's
   tenant, or a claim the store recorded for the caller's tenant - each claim records its run's

@@ -92,8 +92,8 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
     Using.resource(RecordingProxy.start(body = LocalProviderTestServer.openAICompletion("keyless", "gpt-4o"))) {
       proxy =>
         val tokens = new org.llm4s.llmconnect.auth.AccessTokenProvider {
-          def token(): org.llm4s.types.Result[String] = Right("entra-token")
-          def invalidate(rejected: String): Unit      = ()
+          def token(): org.llm4s.types.Result[String]     = Right("entra-token")
+          override def invalidate(rejected: String): Unit = ()
         }
         val config = AzureConfig
           .keyless("http://my-resource.openai.test", "gpt-4o", tokens)

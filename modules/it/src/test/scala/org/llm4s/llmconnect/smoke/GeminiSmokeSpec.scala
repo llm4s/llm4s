@@ -89,4 +89,12 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def contractClient(key: String): Result[LLMClient] = GeminiClient(config(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(GeminiClient(config("invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(GeminiClient(config(key).withModel("llm4s-no-such-model")))
+
+  registerValidationContract()
 }

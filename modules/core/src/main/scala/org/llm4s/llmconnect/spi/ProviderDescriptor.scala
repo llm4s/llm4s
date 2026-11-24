@@ -147,7 +147,7 @@ object ProviderDescriptor:
     section: ProvidersConfigModel.NamedProviderConfig,
     key: String
   ): Result[String] =
-    requireField(providerName, key, section.extra(key), s"llm4s.providers.<name>.$key")
+    requireField(providerName, key, section.extra(key), s"llm4s.providers.$providerName.$key")
 
   /**
    * Reads a key the provider declares in `ProviderConfigSpec.authExtras` as required, or gives a
@@ -191,5 +191,5 @@ object ProviderDescriptor:
       providerName,
       "base URL",
       section.baseUrl.map(_.asUrl).orElse(spec.defaultBaseUrl),
-      "llm4s.providers.<name>.baseUrl"
+      s"llm4s.providers.$providerName.baseUrl"
     )

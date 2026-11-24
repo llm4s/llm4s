@@ -155,8 +155,30 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       assertModelCallContract(PerplexityContractFixtures.replies)(clientAt)
     }
 
-    "say that validate() checks nothing: it has no validation request (#2830)" in {
-      assertValidationUnsupported(clientAt("http://localhost:1"))
+    "validate with the Agent API's model listing, carrying the key a completion carries (#2855)" in {
+      val listed = """{"object":"list","data":[{"id":"perplexity/sonar","object":"model"}]}"""
+      // the refusal api.perplexity.ai sends for a wrong key (2026-11-24)
+      def refuse(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("message" -> message, "type" -> "invalid_api_key", "code" -> status)).render()
+        )
+      assertValidates(sendJsonResponse(_, 200, listed), refuse)(clientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+      withServer("/") { exchange =>
+        seen.add(
+          s"${exchange.getRequestMethod} ${exchange.getRequestURI}" ->
+            Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("")
+        )
+        sendJsonResponse(exchange, 200, listed)
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        client.validate() shouldBe Right(())
+        client.close()
+      }
+      seen.toArray.toSeq shouldBe Seq("GET /v1/models" -> "Bearer test-key")
     }
 
     "return CancelledError when a call is interrupted" in {

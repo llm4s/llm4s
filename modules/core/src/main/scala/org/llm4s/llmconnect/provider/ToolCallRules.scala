@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model.{ Completion, FinishReason, StreamedChunk, ToolCall }
 import org.llm4s.types.Result
@@ -10,7 +11,7 @@ import org.llm4s.util.BoundedJson
  * Part 3):
  *
  *  1. A call whose arguments are not a complete JSON object is a `Left`: never `{}`, never dropped, never passed on as
- *     a raw string. Arguments nested more than [[BoundedJson.MaxDepth]] levels deep stay unparsed, and fail the same
+ *     a raw string. Arguments nested more than `BoundedJson.MaxDepth` levels deep stay unparsed, and fail the same
  *     way (#1562).
  *  1. Absent or blank arguments are `{}` (a call to a tool with no parameters) only when the reply ended cleanly,
  *     with `ToolCalls` or `Stop`.
@@ -19,22 +20,28 @@ import org.llm4s.util.BoundedJson
  *
  * The `Left` is the malformed-tool-call [[org.llm4s.error.ProcessingError ProcessingError]] the clients already
  * returned for a call they could not read.
+ *
+ * A provider module applies them with [[checked]] to a whole reply, [[parseArguments]] to a call's argument text
+ * and [[wholeCall]] to a chunk that carries a whole call; `StreamingAccumulator.toCompletion` applies them to a
+ * stream.
  */
-private[llm4s] object ToolCallRules {
+@Stable
+object ToolCallRules {
 
   /** The operation a shared malformed-tool-call error names; a client with its own names its provider instead. */
-  val Operation: String = "tool-calls"
+  private[llm4s] val Operation: String = "tool-calls"
 
   /** The malformed-tool-call error, `ProcessingError(operation, "malformed tool call: <detail>")`. */
-  def malformed(detail: String, operation: String = Operation): ProcessingError =
+  private[llm4s] def malformed(detail: String, operation: String = Operation): ProcessingError =
     ProcessingError(operation, s"malformed tool call: $detail")
 
   /** The malformed-tool-call error for the call named `name`: `"malformed tool call '<name>': <detail>"`. */
-  def malformedCall(name: String, detail: String): ProcessingError =
+  private[llm4s] def malformedCall(name: String, detail: String): ProcessingError =
     ProcessingError(Operation, s"malformed tool call '$name': $detail")
 
   /** Whether a reply that ended with `reason` ended cleanly, so blank arguments mean "no arguments" (rule 2). */
-  def cleanEnd(reason: FinishReason): Boolean = reason == FinishReason.ToolCalls || reason == FinishReason.Stop
+  private[llm4s] def cleanEnd(reason: FinishReason): Boolean =
+    reason == FinishReason.ToolCalls || reason == FinishReason.Stop
 
   /**
    * A call's arguments, as the text the provider sent, read as a JSON object (rule 1); blank is `{}` (rule 2: the
@@ -59,13 +66,13 @@ private[llm4s] object ToolCallRules {
       }
 
   /** Rule 1 on parsed arguments: a JSON object, or a `Left` naming the call. */
-  def requireObject(name: String, arguments: ujson.Value): Result[ujson.Value] = arguments match {
+  private[llm4s] def requireObject(name: String, arguments: ujson.Value): Result[ujson.Value] = arguments match {
     case obj: ujson.Obj => Right(obj)
     case other          => Left(notAnObject(name, other))
   }
 
   /** Rule 2: a call with blank arguments in a reply that did not end cleanly is a `Left`. */
-  def blankArguments(name: String, reason: FinishReason): Result[Unit] =
+  private[llm4s] def blankArguments(name: String, reason: FinishReason): Result[Unit] =
     if (cleanEnd(reason)) Right(())
     else
       Left(
@@ -87,7 +94,7 @@ private[llm4s] object ToolCallRules {
   }
 
   /** Rule 3's error: the output limit cut a reply that made the calls named `names`. */
-  def cutByLimit(names: Seq[String]): ProcessingError =
+  private[llm4s] def cutByLimit(names: Seq[String]): ProcessingError =
     malformed(
       "the output limit cut the reply (FinishReason.Length) while it made tool calls " +
         names.map(n => s"'$n'").mkString(", ") + "; none is run"

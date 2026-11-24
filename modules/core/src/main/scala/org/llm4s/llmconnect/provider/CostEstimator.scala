@@ -54,7 +54,7 @@ object CostEstimator {
    * @param usage Token usage statistics
    * @return Estimated cost in USD, or None if pricing is unavailable
    */
-  def estimateFromMetadata(metadata: Option[ModelMetadata], usage: TokenUsage): Option[Double] =
+  private[llm4s] def estimateFromMetadata(metadata: Option[ModelMetadata], usage: TokenUsage): Option[Double] =
     metadata.flatMap { meta =>
       val pricing = meta.pricing
 

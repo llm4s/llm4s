@@ -28,8 +28,8 @@ sealed trait RetryPolicy {
    * Check if an error is retryable: whether the identical request is worth sending again, with nobody in the
    * loop.
    *
-   * This is the library's one rule for automatic retry, and `LLMClientRetry` and the agent graph's node retries
-   * use it too. It is derived from [[org.llm4s.error.LLMError.isRecoverable]], never wider: an error is retried
+   * This is the library's one rule for automatic retry: [[ReliableClient]] applies it, and the agent graph's node
+   * retries use it too. It is derived from [[org.llm4s.error.LLMError.isRecoverable]], never wider: an error is retried
    * only if it is a [[org.llm4s.error.RecoverableError]]. `isRecoverable` says an error may succeed if tried again,
    * perhaps after the caller does something first; this rule keeps the part where repeating the same request is
    * enough. A recoverable error is therefore retried unless one of three documented exceptions applies:

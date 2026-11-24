@@ -714,7 +714,7 @@ object HttpRequest {
  *
  * A non-2xx status is '''not''' an error at this layer: it is a `Right` response, which the
  * caller inspects (`HttpResponse.ensureSuccess`, or
- * [[org.llm4s.llmconnect.provider.HttpErrorMapper.mapHttpError]] with the response headers).
+ * [[org.llm4s.llmconnect.provider.HttpErrorMapper.toError]] with the response headers).
  *
  * '''Timeouts.''' The `timeout` of a convenience method is both of [[HttpRequest]]'s: the longest wait for
  * the response's status line and headers, and separately the longest any read of the body waits for more

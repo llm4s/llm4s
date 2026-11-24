@@ -68,7 +68,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule")
         .getOrElse(fail(s"fixture module was not reported: ${registry.report.describe}"))
 
-      fixtureModule.providerIds shouldBe Seq("fixturecloud")
+      fixtureModule.providerIds.map(_.asString) shouldBe Seq("fixturecloud")
       fixtureModule.source should not be empty
     }
 
@@ -119,8 +119,8 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
         .getOrElse(fail(s"embedding module was not reported: ${registry.report.describe}"))
 
-      module.providerIds shouldBe empty
-      module.embeddingProviderIds shouldBe Seq("fixtureembed")
+      module.providerIds.map(_.asString) shouldBe empty
+      module.embeddingProviderIds.map(_.asString) shouldBe Seq("fixtureembed")
       module.contribution should include("embeddings: fixtureembed")
     }
 
