@@ -698,7 +698,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
 
   it should "report each run's own usage on its AgentRunEnded, not the thread's" in {
     val tracing = Recording()
-    val costed  = (text: String) => answer(text).withEstimatedCost(Some(0.25))
+    val costed  = (text: String) => answer(text).withEstimatedCost(BigDecimal("0.25"))
     val agent   = traced(Scripted(Right(costed("first answer")), Right(costed("second answer"))), tracing)
     ok(agent.run(ThreadId("t11"), "one"))
     val two = ok(agent.run(ThreadId("t11"), "two"))

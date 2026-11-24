@@ -128,8 +128,8 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     val pricing = summon[ModelRegistryService].lookup("claude-sonnet-4-6").toOption.get.pricing
     val expected = 10 * pricing.inputCostPerToken.get + 3000 * pricing.cacheReadInputTokenCost.get +
       500 * pricing.cacheCreationInputTokenCost.get + 20 * pricing.outputCostPerToken.get
-    completion.estimatedCost.get shouldBe expected +- 1e-12
-    CostEstimator.estimate("claude-sonnet-4-6", tokens).get shouldBe expected +- 1e-12
+    completion.estimatedCost.get.toDouble shouldBe expected +- 1e-12
+    CostEstimator.estimate("claude-sonnet-4-6", tokens).get.toDouble shouldBe expected +- 1e-12
   }
 
   it should "report it dropped when nothing was read from or written to the cache" in {

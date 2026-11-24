@@ -533,7 +533,7 @@ class WatsonXClient(
       Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
-  private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
+  private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding

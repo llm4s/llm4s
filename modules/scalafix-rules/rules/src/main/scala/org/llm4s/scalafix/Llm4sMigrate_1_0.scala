@@ -32,7 +32,9 @@ class Llm4sMigrate_1_0 extends SemanticRule("Llm4sMigrate_1_0") {
     new CompressionRuleTransform,
     new AgentCopyToWithSetters,
     new AgentStatusGainsTruncated,
-    new ResultSyntaxMoved
+    new ResultSyntaxMoved,
+    new SamplingOptionsOptional,
+    new CompletionFromMessage
   )
 
   override def fix(implicit doc: SemanticDocument): Patch = rules.map(_.fix).asPatch

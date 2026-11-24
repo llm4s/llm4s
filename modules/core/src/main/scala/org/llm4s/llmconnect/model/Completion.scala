@@ -17,8 +17,8 @@ import java.time.Instant
  *                calls are [[toolCalls]]. They are read from the message, never stored beside it, so they cannot
  *                disagree with it; change them with `withMessage(message.withContent(...))`.
  * @param usage Optional token usage statistics for the completion.
- * @param estimatedCost Optional estimated cost of this completion in USD.
- *                      Computed from token usage and model pricing when available.
+ * @param estimatedCost Optional estimated cost of this completion in USD, a `BigDecimal` so that it is exact and
+ *                      sums without drift. Computed from token usage and model pricing when available.
  * @param citations The sources the model cited in its answer, when the provider reports them
  *                  (see [[Citation]]); empty for a model that does not search or does not cite,
  *                  and for a completion assembled from streamed chunks, which carry none.
@@ -43,7 +43,7 @@ final case class Completion private (
   model: String,
   message: AssistantMessage,
   usage: Option[TokenUsage],
-  estimatedCost: Option[Double],
+  estimatedCost: Option[BigDecimal],
   citations: List[Citation],
   adjustments: List[RequestAdjustment],
   finishReason: FinishReason,
@@ -55,8 +55,8 @@ final case class Completion private (
   def withMessage(message: AssistantMessage): Completion                = copy(message = message)
   def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
   def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
-  def withEstimatedCost(estimatedCost: Double): Completion              = copy(estimatedCost = Some(estimatedCost))
-  def withEstimatedCost(estimatedCost: Option[Double]): Completion      = copy(estimatedCost = estimatedCost)
+  def withEstimatedCost(estimatedCost: BigDecimal): Completion          = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[BigDecimal]): Completion  = copy(estimatedCost = estimatedCost)
   def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
   def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
   def withFinishReason(finishReason: FinishReason): Completion          = copy(finishReason = finishReason)
@@ -113,7 +113,7 @@ object Completion {
     model: String,
     message: AssistantMessage,
     usage: Option[TokenUsage] = None,
-    estimatedCost: Option[Double] = None,
+    estimatedCost: Option[BigDecimal] = None,
     citations: List[Citation] = List.empty,
     adjustments: List[RequestAdjustment] = List.empty,
     finishReason: FinishReason = FinishReason.Unknown,

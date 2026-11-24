@@ -59,7 +59,7 @@ object CostTrackingExample {
   private[samples] val ExampleOutputPerMillion: Double = 8.0
 
   /** One request's token usage and estimated cost; `cost` is `None` when the registry has no price for the model. */
-  final case class RequestCost(model: String, usage: Option[TokenUsage], cost: Option[Double])
+  final case class RequestCost(model: String, usage: Option[TokenUsage], cost: Option[BigDecimal])
 
   /** The custom-pricing demo: the rates registered, the request priced with them, and the demo's own tracker. */
   final case class CustomPricing(
@@ -223,7 +223,7 @@ object CostTrackingExample {
   private def tokens(usage: UsageSummary): String = s"${usage.inputTokens} in, ${usage.outputTokens} out"
 
   private def costOrUnknown(request: RequestCost): String =
-    request.cost.fold(s"unknown (no price for '${request.model}' in the registry)")(c => dollars(BigDecimal.decimal(c)))
+    request.cost.fold(s"unknown (no price for '${request.model}' in the registry)")(dollars)
 
   /** The output, one line each; the cost lines say when a total of 0 means "no price" and not "free". */
   private[samples] def render(report: CostReport): Seq[String] = {

@@ -261,7 +261,11 @@ class PerplexityClient(
       model = reply.model.getOrElse(config.model),
       message = message,
       usage = reply.usage,
-      estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
+      // a reported cost that is not a number has no decimal value: the estimate stands in for it
+      estimatedCost = reply.cost
+        .filter(_.isFinite)
+        .map(BigDecimal.decimal)
+        .orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
       citations = reply.citations,
       finishReason = finishReasonOf(reply)
     )

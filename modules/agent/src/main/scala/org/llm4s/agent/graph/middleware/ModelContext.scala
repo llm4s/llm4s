@@ -42,7 +42,7 @@ trait UsageAccounting:
   def accounted(client: LLMClient): LLMClient
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal] = None): Unit
 
 /**
  * What a middleware's `beforeAgent`, `wrapModelCall`, `promptSections` and `afterAgent` hooks see: the task's
@@ -73,7 +73,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
   def accounted(client: LLMClient): LLMClient = new ModelContext.Accounted(client, this)
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double]): Unit =
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal]): Unit =
     record(ModelContext.recordedUsage(agent, model, usage, estimatedCost))
 
   /**
@@ -135,7 +135,7 @@ object ModelContext:
   final private[agent] case class Recorded(
     model: String,
     charged: TokenUsage,
-    cost: Option[Double],
+    cost: Option[BigDecimal],
     event: events.ModelCallCompleted
   )
 
@@ -163,7 +163,7 @@ object ModelContext:
         attempt,
         Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
         completion.usage.map(events.CallUsage.fromTokenUsage),
-        completion.estimatedCost,
+        completion.estimatedCost.map(_.toDouble),
         provider,
         nonNull(completion.adjustments).toList,
         Option(completion.finishReason),
@@ -173,7 +173,7 @@ object ModelContext:
     )
 
   /** Usage that arrived without a client call, counted as one request of `agent`'s to `model`. */
-  private[agent] def recordedUsage(agent: AgentId, model: String, usage: TokenUsage, cost: Option[Double]): Recorded =
+  private[agent] def recordedUsage(agent: AgentId, model: String, usage: TokenUsage, cost: Option[BigDecimal]): Recorded =
     Recorded(
       model,
       usage,
@@ -184,7 +184,7 @@ object ModelContext:
         0,
         0,
         Some(events.CallUsage.fromTokenUsage(usage)),
-        cost,
+        cost.map(_.toDouble),
         None,
         Nil,
         None,

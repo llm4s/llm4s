@@ -265,7 +265,9 @@ private[llm4s] object FacadeInternals {
       usage.outputTokens,
       usage.thinkingTokens,
       usage.totalCost.bigDecimal,
-      java.util.Collections.unmodifiableMap(byModel)
+      java.util.Collections.unmodifiableMap(byModel),
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
   }
 
@@ -276,7 +278,9 @@ private[llm4s] object FacadeInternals {
       usage.inputTokens,
       usage.outputTokens,
       usage.thinkingTokens,
-      usage.totalCost.bigDecimal
+      usage.totalCost.bigDecimal,
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
 
   /** `completion` as Java and Kotlin callers read it. */
@@ -287,9 +291,7 @@ private[llm4s] object FacadeInternals {
       completion.model,
       java.util.List.copyOf(completion.toolCalls.map(toolCall).asJava),
       completion.usage.map(tokenUsage).toJava,
-      // as core's `ModelUsage.add` converts it, so a reply's cost and an agent turn's total agree; a cost that is not a
-      // number has no decimal value and reads as unknown
-      completion.estimatedCost.filter(_.isFinite).map(BigDecimal.decimal(_).bigDecimal).toJava,
+      completion.estimatedCost.map(_.bigDecimal).toJava,
       completion.thinking.toJava,
       completion.servedTier.map(tierName).toJava
     )

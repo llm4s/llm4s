@@ -83,7 +83,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
         model = "gpt-4o",
         message = AssistantMessage("ok"),
         usage = usage,
-        estimatedCost = cost
+        estimatedCost = cost.map(BigDecimal.decimal)
       )
     )
 

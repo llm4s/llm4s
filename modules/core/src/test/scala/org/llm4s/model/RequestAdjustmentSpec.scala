@@ -165,14 +165,14 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
       .withModel("m2")
       .withMessage(message)
       .withUsage(usage)
-      .withEstimatedCost(0.5)
+      .withEstimatedCost(BigDecimal("0.5"))
       .withCitations(citations)
 
     (set.id, set.created, set.content, set.model, set.message) shouldBe
       ("id2", Instant.EPOCH.plusSeconds(1), "there", "m2", message)
     (set.usage, set.estimatedCost, set.citations, set.adjustments) shouldBe
-      (Some(usage), Some(0.5), citations, adjustments)
-    val cleared = set.withUsage(None: Option[TokenUsage]).withEstimatedCost(None: Option[Double])
+      (Some(usage), Some(BigDecimal("0.5")), citations, adjustments)
+    val cleared = set.withUsage(None: Option[TokenUsage]).withEstimatedCost(None: Option[BigDecimal])
     (cleared.usage, cleared.estimatedCost) shouldBe (None, None)
   }
 

@@ -1,5 +1,5 @@
 /*
-rule = CompletionCreatedToInstant
+rules = [CompletionCreatedToInstant, CompletionFromMessage]
 */
 package fix.v1
 

@@ -171,7 +171,7 @@ final private[rag] class QueryMeter {
       embeddingTokens = embeddingTokens,
       promptTokens = usage.map(_.promptTokens),
       completionTokens = usage.map(_.completionTokens),
-      costUsd = answer.flatMap(_.estimatedCost)
+      costUsd = answer.flatMap(_.estimatedCost).map(_.toDouble)
     )
   }
 }

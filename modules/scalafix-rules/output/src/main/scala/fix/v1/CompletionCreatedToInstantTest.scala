@@ -5,9 +5,9 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import java.time.Instant
 
 object CompletionCreatedToInstantTest {
-  val completion = Completion(id = "1", created = Instant.ofEpochSecond(1700000000L), content = "hi", model = "m", message = AssistantMessage("hi"))
+  val completion = Completion(id = "1", created = Instant.ofEpochSecond(1700000000L), model = "m", message = AssistantMessage("hi"))
 
-  val fixture = Completion("2", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+  val fixture = Completion("2", Instant.EPOCH, "m", AssistantMessage("hi"))
 
   def restamp(c: Completion, seconds: Long): Completion = c.withCreated(Instant.ofEpochSecond(seconds))
 

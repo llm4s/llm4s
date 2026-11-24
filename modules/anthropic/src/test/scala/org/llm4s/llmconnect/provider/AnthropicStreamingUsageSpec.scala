@@ -173,7 +173,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
         3000 * pricing.cacheReadInputTokenCost.value +
         250 * pricing.cacheCreationInputTokenCost.value +
         40 * pricing.outputCostPerToken.value
-      completion.estimatedCost.value shouldBe expected +- 1e-12
+      completion.estimatedCost.value.toDouble shouldBe expected +- 1e-12
     }
   }
 }

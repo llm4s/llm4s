@@ -17,13 +17,24 @@ public final class JModelUsage {
   private final long outputTokens;
   private final long thinkingTokens;
   private final BigDecimal totalCost;
+  private final long cachedTokens;
+  private final long cacheCreationTokens;
 
-  JModelUsage(long requestCount, long inputTokens, long outputTokens, long thinkingTokens, BigDecimal totalCost) {
+  JModelUsage(
+      long requestCount,
+      long inputTokens,
+      long outputTokens,
+      long thinkingTokens,
+      BigDecimal totalCost,
+      long cachedTokens,
+      long cacheCreationTokens) {
     this.requestCount = requestCount;
     this.inputTokens = inputTokens;
     this.outputTokens = outputTokens;
     this.thinkingTokens = thinkingTokens;
     this.totalCost = totalCost;
+    this.cachedTokens = cachedTokens;
+    this.cacheCreationTokens = cacheCreationTokens;
   }
 
   /** Calls to this model. */
@@ -51,6 +62,16 @@ public final class JModelUsage {
     return totalCost;
   }
 
+  /** Input tokens this model served from its prompt cache, a part of {@code inputTokens}; zero where none. */
+  public long cachedTokens() {
+    return cachedTokens;
+  }
+
+  /** Input tokens written into this model's prompt cache, a part of {@code inputTokens}; zero where none. */
+  public long cacheCreationTokens() {
+    return cacheCreationTokens;
+  }
+
   @Override
   public boolean equals(Object other) {
     return other instanceof JModelUsage that
@@ -58,12 +79,21 @@ public final class JModelUsage {
         && inputTokens == that.inputTokens
         && outputTokens == that.outputTokens
         && thinkingTokens == that.thinkingTokens
+        && cachedTokens == that.cachedTokens
+        && cacheCreationTokens == that.cacheCreationTokens
         && totalCost.compareTo(that.totalCost) == 0;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost.stripTrailingZeros());
+    return Objects.hash(
+        requestCount,
+        inputTokens,
+        outputTokens,
+        thinkingTokens,
+        totalCost.stripTrailingZeros(),
+        cachedTokens,
+        cacheCreationTokens);
   }
 
   @Override

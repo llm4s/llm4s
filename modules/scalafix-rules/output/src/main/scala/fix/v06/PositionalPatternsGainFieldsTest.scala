@@ -3,7 +3,6 @@ package fix.v06
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.agent.graph.toolloop.TurnState
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.ModelCapabilities
@@ -12,10 +11,6 @@ import org.llm4s.rag.RAGConfig
 import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
-  def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _, _, _) => s"$id $content"
-  }
-
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
     case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
   }

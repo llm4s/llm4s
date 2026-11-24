@@ -129,13 +129,6 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     reply.estimatedCost.get() shouldBe turn.totalCost.bigDecimal
   }
 
-  it should "read a cost that is not a number as unknown, not fail" in {
-    Seq(Double.NaN, Double.PositiveInfinity).foreach { cost =>
-      val result = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q")
-      result.get().estimatedCost.isPresent shouldBe false
-    }
-  }
-
   it should "read a null text as empty, as the agent's messages do" in {
     Llm4s.wrapClient(replying(bare.withMessage(bare.message.withContent(null: String)))).completion("q").get().content shouldBe ""
   }

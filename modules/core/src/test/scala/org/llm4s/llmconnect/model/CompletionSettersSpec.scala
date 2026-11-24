@@ -41,7 +41,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     model: String = "model-a",
     message: AssistantMessage = AssistantMessage("answer", Seq(sampleToolCall)),
     usage: Option[TokenUsage] = Some(bareUsage),
-    estimatedCost: Option[Double] = Some(0.25),
+    estimatedCost: Option[BigDecimal] = Some(BigDecimal("0.25")),
     citations: List[Citation] = List(citation)
   ): Completion =
     Completion(
@@ -94,12 +94,14 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set and clear the estimated cost, with both overloads" in {
-    fullCompletion.withEstimatedCost(1.5) shouldBe completion(estimatedCost = Some(1.5))
-    fullCompletion.withEstimatedCost(Some(1.5)) shouldBe completion(estimatedCost = Some(1.5))
+    val cost = BigDecimal("1.5")
+    fullCompletion.withEstimatedCost(cost) shouldBe completion(estimatedCost = Some(cost))
+    fullCompletion.withEstimatedCost(Some(cost)) shouldBe completion(estimatedCost = Some(cost))
     fullCompletion.withEstimatedCost(None) shouldBe completion(estimatedCost = None)
 
-    bareCompletion.withEstimatedCost(0.75).estimatedCost shouldBe Some(0.75)
-    bareCompletion.withEstimatedCost(0.75).withEstimatedCost(None) shouldBe bareCompletion
+    val small = BigDecimal("0.75")
+    bareCompletion.withEstimatedCost(small).estimatedCost shouldBe Some(small)
+    bareCompletion.withEstimatedCost(small).withEstimatedCost(None) shouldBe bareCompletion
   }
 
   it should "update hasToolCalls and hasCitations" in {

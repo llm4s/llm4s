@@ -98,7 +98,55 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     gemini.totalCost shouldBe BigDecimal("0.005")
   }
 
-  "UsageSummary JSON" should "round-trip correctly" in {
+  // #2807: the cache counters were dropped, so what a prompt cache saved could not be added up
+  "UsageSummary.add" should "accumulate cache reads and writes, in total and per model" in {
+    val cached = TokenUsage(100, 10, 110, cachedTokens = Some(60), cacheCreationTokens = Some(30))
+    val plain  = TokenUsage(40, 5, 45)
+
+    val summary = UsageSummary().add("m1", cached, None).add("m1", cached, None).add("m2", plain, None)
+
+    summary.cachedTokens shouldBe 120L
+    summary.cacheCreationTokens shouldBe 60L
+    summary.byModel("m1").cachedTokens shouldBe 120L
+    summary.byModel("m1").cacheCreationTokens shouldBe 60L
+    summary.byModel("m2").cachedTokens shouldBe 0L
+    summary.byModel("m2").cacheCreationTokens shouldBe 0L
+  }
+
+  "UsageSummary.merge" should "sum the cache counters" in {
+    val one = UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)), None)
+    val two = UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(3)), None)
+
+    val merged = one.merge(two)
+    (merged.cachedTokens, merged.cacheCreationTokens) shouldBe (7L, 2L)
+    (merged.byModel("m").cachedTokens, merged.byModel("m").cacheCreationTokens) shouldBe (7L, 2L)
+  }
+
+  "UsageSummary JSON" should "read a document written before the cache counters existed" in {
+    val stored =
+      """{"requestCount":2,"inputTokens":100,"outputTokens":50,"thinkingTokens":10,"totalCost":"0.1234",""" +
+        """"byModel":{"test-model":{"requestCount":2,"inputTokens":100,"outputTokens":50,"thinkingTokens":10,""" +
+        """"totalCost":"0.1234"}}}"""
+
+    val decoded = read[UsageSummary](stored)
+
+    decoded.requestCount shouldBe 2L
+    decoded.totalCost shouldBe BigDecimal("0.1234")
+    (decoded.cachedTokens, decoded.cacheCreationTokens) shouldBe (0L, 0L)
+    decoded.byModel("test-model").inputTokens shouldBe 100L
+    (decoded.byModel("test-model").cachedTokens, decoded.byModel("test-model").cacheCreationTokens) shouldBe (0L, 0L)
+  }
+
+  it should "round-trip the cache counters" in {
+    val original = UsageSummary().add(
+      "m",
+      TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)),
+      Some(BigDecimal("0.000001"))
+    )
+    read[UsageSummary](write(original)) shouldBe original
+  }
+
+  it should "round-trip correctly" in {
     val original =
       UsageSummary(
         requestCount = 2,
