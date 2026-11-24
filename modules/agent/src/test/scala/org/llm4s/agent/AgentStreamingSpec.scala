@@ -18,6 +18,7 @@ import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 import java.time.Instant
+import scala.concurrent.duration.Duration
 
 class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
@@ -147,8 +148,9 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val (plain, p) = streamed(Agent.builder("assistant", ToolThenText()), "hi")
     plain.map(_.answer) shouldBe Right(Some("done"))
     plain.map(_.messages.map(_.content)) shouldBe result.map(_.messages.map(_.content))
-    p.all.collect { case AgentEvents.ModelCallCompleted(m) => m } shouldBe
-      c.all.collect { case AgentEvents.ModelCallCompleted(m) => m }
+    // the measured duration is wall-clock time, so it is left out of the comparison
+    p.all.collect { case AgentEvents.ModelCallCompleted(m) => m.withDuration(Duration.Zero) } shouldBe
+      c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.withDuration(Duration.Zero) }
   }
 
   "A non-streaming agent" should "call complete and send no deltas" in {
