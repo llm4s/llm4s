@@ -68,7 +68,9 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
   /** The lead delegates once, then answers with the tool result it read. */
   private def leadRoute: PartialFunction[Vector[Message], Result[Completion]] = {
     case messages if isLead(messages) && results(messages).isEmpty =>
-      Right(calling(ToolCall("c1", "task", ujson.Obj("subagent_type" -> "worker", "description" -> "do it"))))
+      Right(
+        calling(ToolCall(ToolCallId("c1"), "task", ujson.Obj("subagent_type" -> "worker", "description" -> "do it")))
+      )
     case messages if isLead(messages) => Right(text(s"lead read: ${results(messages).mkString}"))
   }
 
@@ -92,7 +94,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     val client = Routing(leadRoute.orElse {
       case m if isWorker(m) =>
         workerCall.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("p1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ValidationError("provider", "the provider is down"))
           case _ => Right(text("recovered report"))
     })
@@ -146,7 +148,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     val store = newCheckpointer()
     val client = Routing(leadRoute.orElse {
       case m if isWorker(m) && results(m).isEmpty =>
-        Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("p1"), "probe", ujson.Obj("text" -> "x"))))
       case m if isWorker(m) => Right(text("probed"))
     })
     val probe = AgentTool(textSpec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("probed"))))

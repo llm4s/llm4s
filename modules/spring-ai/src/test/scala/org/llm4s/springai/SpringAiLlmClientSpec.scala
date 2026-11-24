@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -154,13 +155,14 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "send llm4s tools as Spring AI tool definitions, and return the model's tool calls" in {
-    val call  = new SpringAssistantMessage.ToolCall("call-1", "function", "weather", """{"city":"Paris"}""")
+    val call =
+      new SpringAssistantMessage.ToolCall(ToolCallId("call-1").asString, "function", "weather", """{"city":"Paris"}""")
     val model = new FakeChatModel(_ => reply("", calls = Seq(call), finish = "TOOL_CALLS"))
     val done = new SpringAiLlmClient(model)
       .complete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions().withTools(Seq(weather)))
       .value
 
-    done.toolCalls shouldBe List(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")))
+    done.toolCalls shouldBe List(ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris")))
     done.message.toolCalls shouldBe done.toolCalls
     done.message.text shouldBe None
     val callback = model.prompts.head.getOptions.asInstanceOf[ToolCallingChatOptions].getToolCallbacks.asScala.head
@@ -178,12 +180,14 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
         UserMessage("Weather?"),
         AssistantMessage(
           text = None,
-          toolCalls =
-            Seq(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("c2", "weather", ujson.Obj()))
+          toolCalls = Seq(
+            ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")),
+            ToolCall(ToolCallId("c2"), "weather", ujson.Obj())
+          )
         ),
-        ToolMessage("sunny in Paris", "c1"),
-        ToolMessage("sunny in Oslo", "c2"),
-        ToolMessage("orphan", "c9")
+        ToolMessage("sunny in Paris", ToolCallId("c1")),
+        ToolMessage("sunny in Oslo", ToolCallId("c2")),
+        ToolMessage("orphan", ToolCallId("c9"))
       )
     )
     new SpringAiLlmClient(model)
@@ -228,7 +232,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       ValidationError
     ]
     val bad = new FakeChatModel(_ =>
-      reply("", calls = Seq(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{x")))
+      reply("", calls = Seq(new SpringAssistantMessage.ToolCall(ToolCallId("c").asString, "function", "weather", "{x")))
     )
     new SpringAiLlmClient(bad)
       .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
@@ -272,7 +276,8 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "deliver each tool call once, however many responses repeat it" in {
-    val call = new SpringAssistantMessage.ToolCall("c1", "function", "weather", """{"city":"Paris"}""")
+    val call =
+      new SpringAssistantMessage.ToolCall(ToolCallId("c1").asString, "function", "weather", """{"city":"Paris"}""")
     val pieces =
       Flux.just(
         reply("", calls = Seq(call), id = "", finish = ""),
@@ -284,8 +289,10 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
-    chunks.result().flatMap(_.toolCall) shouldBe Vector(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))
-    done.toolCalls shouldBe List(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))
+    chunks.result().flatMap(_.toolCall) shouldBe Vector(
+      ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
+    )
+    done.toolCalls shouldBe List(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))
     done.content shouldBe ""
     done.usage shouldBe None
     done.id should not be empty
@@ -302,7 +309,13 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     val bad = new FakeChatModel(
       _ => reply("unused"),
-      _ => Flux.just(reply("", calls = Seq(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{x"))))
+      _ =>
+        Flux.just(
+          reply(
+            "",
+            calls = Seq(new SpringAssistantMessage.ToolCall(ToolCallId("c").asString, "function", "weather", "{x"))
+          )
+        )
     )
     new SpringAiLlmClient(bad)
       .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())

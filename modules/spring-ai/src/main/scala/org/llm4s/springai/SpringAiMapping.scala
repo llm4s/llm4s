@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -100,7 +101,7 @@ private[springai] object SpringAiMapping {
           .getResponses
           .asScala
           .toSeq
-          .map(response => ToolMessage(Option(response.responseData).getOrElse(""), response.id))
+          .map(response => ToolMessage(Option(response.responseData).getOrElse(""), ToolCallId(response.id)))
       )
   }
 
@@ -108,7 +109,7 @@ private[springai] object SpringAiMapping {
   def toolCalls(message: SpringAssistantMessage): Result[Vector[ToolCall]] =
     message.getToolCalls.asScala.toList.foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (acc, call) =>
       acc.flatMap(calls =>
-        arguments(call.name, call.arguments).map(args => calls :+ ToolCall(call.id, call.name, args))
+        arguments(call.name, call.arguments).map(args => calls :+ ToolCall(ToolCallId(call.id), call.name, args))
       )
     }
 
@@ -250,7 +251,9 @@ private[springai] object SpringAiMapping {
     val builder = SpringAssistantMessage.builder()
     val _       = builder.content(text)
     val _ = builder.toolCalls(
-      toolCalls.map(c => new SpringAssistantMessage.ToolCall(c.id, "function", c.name, c.arguments.render())).asJava
+      toolCalls
+        .map(c => new SpringAssistantMessage.ToolCall(c.id.asString, "function", c.name, c.arguments.render()))
+        .asJava
     )
     builder.build()
   }
@@ -298,7 +301,7 @@ private[springai] object SpringAiMapping {
           case a: AssistantMessage => out :+ assistant(a.content, a.toolCalls)
           case t: ToolMessage =>
             val response =
-              new ToolResponseMessage.ToolResponse(t.toolCallId, names.getOrElse(t.toolCallId, ""), t.content)
+              new ToolResponseMessage.ToolResponse(t.toolCallId.asString, names.getOrElse(t.toolCallId, ""), t.content)
             // The answers to one assistant message's calls are one Spring AI message, as its models expect.
             out.lastOption match {
               case Some(previous: ToolResponseMessage) =>

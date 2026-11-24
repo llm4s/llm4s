@@ -68,7 +68,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   private def answer(text: String): Completion =
     Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text))
 
-  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def calling: Completion =
     Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(toolCall)))
 

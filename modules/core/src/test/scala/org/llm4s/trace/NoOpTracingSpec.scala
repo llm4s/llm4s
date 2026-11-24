@@ -34,14 +34,14 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   private val usage = TokenUsage(promptTokens = 12, completionTokens = 8, totalTokens = 20)
 
-  private val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
   /** Every kind of message, as an agent run leaves its conversation. */
   private val runMessages = Seq(
     SystemMessage("You are a calculator."),
     UserMessage("What is 1 + 2?"),
     AssistantMessage(None, Seq(toolCall)),
-    ToolMessage("""{"result":3}""", "call-1"),
+    ToolMessage("""{"result":3}""", ToolCallId("call-1")),
     AssistantMessage("3")
   )
 
@@ -71,8 +71,15 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   /** One of every `TraceEvent` case. */
   private val everyEvent: Seq[TraceEvent] = Seq(
     TraceEvent.CompletionReceived("completion-1", ModelName("test-model"), toolCalls = 1, content = ""),
-    TraceEvent.ToolExecuted("calculator", """{"a":1,"b":2}""", "3", duration = 5.millis, success = true),
-    TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1.millis, success = false),
+    TraceEvent
+      .ToolExecuted("calculator", ToolCallId("""{"a":1,"b":2}""").asString, "3", duration = 5.millis, success = true),
+    TraceEvent.ToolExecuted(
+      "calculator",
+      ToolCallId("{}").asString,
+      "missing argument 'a'",
+      duration = 1.millis,
+      success = false
+    ),
     TraceEvent.ErrorOccurred.of(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
     TraceEvent.TokenUsageRecorded(usage, ModelName("test-model"), "completion"),
     agentRunEnded,
@@ -155,7 +162,9 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   it should "succeed for failed tool calls and empty tool call arguments" in {
     val tracing = new NoOpTracing()
 
-    tracing.traceEvent(TraceEvent.ToolExecuted("calculator", "{}", "error", 1.millis, success = false)) shouldBe Right(
+    tracing.traceEvent(
+      TraceEvent.ToolExecuted("calculator", ToolCallId("{}").asString, "error", 1.millis, success = false)
+    ) shouldBe Right(
       ()
     )
     tracing.traceToolCall("", "", "", scala.concurrent.duration.Duration.Zero, success = true) shouldBe Right(())

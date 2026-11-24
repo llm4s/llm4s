@@ -54,10 +54,11 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
   private val physicsTools = ToolSet.of(tool("calculate")).value
 
   private def handoff(id: String, to: AgentId): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(id, HandoffTools.toolName(to), ujson.Obj("reason" -> "physics"))))
+    _ =>
+      AssistantMessage(None, Seq(ToolCall(ToolCallId(id), HandoffTools.toolName(to), ujson.Obj("reason" -> "physics"))))
 
   private def call(id: String, name: String): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(id, name, ujson.Obj("text" -> id))))
+    _ => AssistantMessage(None, Seq(ToolCall(ToolCallId(id), name, ujson.Obj("text" -> id))))
 
   private def answer(text: String): Vector[Message] => AssistantMessage = _ => AssistantMessage(text)
 
@@ -84,7 +85,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     physicsModel.seen.get(0).head shouldBe SystemMessage("Do physics.")
     physicsModel.seen.get(0).collect { case s: SystemMessage => s } shouldBe Vector(SystemMessage("Do physics."))
     physicsModel.seen.get(0).tail shouldBe messagesOf(state).init
-    messagesOf(state) should contain(ToolMessage("Transferred to physics", "h1"))
+    messagesOf(state) should contain(ToolMessage("Transferred to physics", ToolCallId("h1")))
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
     state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.Completed), Some(triage))
   }
@@ -118,7 +119,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     output shouldBe TurnOutput(TurnOutcome.Completed, triage)
     triageModel.calls shouldBe 2
     physicsModel.calls shouldBe 1
-    messagesOf(state) should contain(ToolMessage("Transferred to triage", "h2"))
+    messagesOf(state) should contain(ToolMessage("Transferred to triage", ToolCallId("h2")))
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
   }
 
@@ -128,8 +129,8 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       AssistantMessage(
         None,
         Seq(
-          ToolCall("r1", "route", ujson.Obj("text" -> "x")),
-          ToolCall("h1", "handoff_to_physics", ujson.Obj("reason" -> "y"))
+          ToolCall(ToolCallId("r1"), "route", ujson.Obj("text" -> "x")),
+          ToolCall(ToolCallId("h1"), "handoff_to_physics", ujson.Obj("reason" -> "y"))
         )
       )
     val triageModel  = ScriptedModel(mixed, answer("ok, no handoff"))
@@ -147,7 +148,10 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       ujson
         .Obj("error" -> "A handoff must be the only tool call in a message; no call in this message was run")
         .render()
-    triageModel.seen.get(1).takeRight(2) shouldBe Vector(ToolMessage(error, "r1"), ToolMessage(error, "h1"))
+    triageModel.seen.get(1).takeRight(2) shouldBe Vector(
+      ToolMessage(error, ToolCallId("r1")),
+      ToolMessage(error, ToolCallId("h1"))
+    )
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
     state.get(LoopKeys.turn).value.steps shouldBe 2
   }
@@ -157,8 +161,8 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       AssistantMessage(
         None,
         Seq(
-          ToolCall("h1", "handoff_to_physics", ujson.Obj("reason" -> "y")),
-          ToolCall("h2", "handoff_to_physics", ujson.Obj("reason" -> "z"))
+          ToolCall(ToolCallId("h1"), "handoff_to_physics", ujson.Obj("reason" -> "y")),
+          ToolCall(ToolCallId("h2"), "handoff_to_physics", ujson.Obj("reason" -> "z"))
         )
       )
     val triageModel  = ScriptedModel(both, answer("fine"))
@@ -184,12 +188,13 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     val runtime = GraphRuntime(InMemoryCheckpointer())
 
     val (state, _) = runtime.start(thread, graph.graph, AgentInput("go"), RunConfig()).awaited.value.completed
-    val transfer   = AssistantMessage(None, Seq(ToolCall("h1", "handoff_to_physics", ujson.Obj("reason" -> "physics"))))
+    val transfer =
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("h1"), "handoff_to_physics", ujson.Obj("reason" -> "physics"))))
     physicsModel.seen.get(0) shouldBe Vector(
       SystemMessage("Do physics."),
       UserMessage("go"),
       transfer,
-      ToolMessage("Transferred to physics", "h1")
+      ToolMessage("Transferred to physics", ToolCallId("h1"))
     )
     // the history itself is untouched
     messagesOf(state).head shouldBe UserMessage("go")
@@ -201,7 +206,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       SystemMessage("Do physics."),
       UserMessage("go"),
       transfer,
-      ToolMessage("Transferred to physics", "h1"),
+      ToolMessage("Transferred to physics", ToolCallId("h1")),
       AssistantMessage("fresh"),
       UserMessage("again")
     )
@@ -216,16 +221,16 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     val imported = Vector(
       UserMessage("earlier"),
-      AssistantMessage(None, Seq(ToolCall("h0", "handoff_to_physics", ujson.Obj("reason" -> "old")))),
-      ToolMessage("Transferred to physics", "h0"),
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("h0"), "handoff_to_physics", ujson.Obj("reason" -> "old")))),
+      ToolMessage("Transferred to physics", ToolCallId("h0")),
       AssistantMessage("old answer")
     )
 
     runInMemory(graph.graph, AgentInput("go", imported)).completed
     physicsModel.seen.get(0) shouldBe Vector(
       UserMessage("go"),
-      AssistantMessage(None, Seq(ToolCall("h1", "handoff_to_physics", ujson.Obj("reason" -> "physics")))),
-      ToolMessage("Transferred to physics", "h1")
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("h1"), "handoff_to_physics", ujson.Obj("reason" -> "physics")))),
+      ToolMessage("Transferred to physics", ToolCallId("h1"))
     )
   }
 
@@ -280,8 +285,8 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
       AssistantMessage(
         None,
         Seq(
-          ToolCall("h1", "handoff_to_physics", ujson.Obj("reason" -> "y")),
-          ToolCall("h2", "handoff_to_chemistry", ujson.Obj("reason" -> "z"))
+          ToolCall(ToolCallId("h1"), "handoff_to_physics", ujson.Obj("reason" -> "y")),
+          ToolCall(ToolCallId("h2"), "handoff_to_chemistry", ujson.Obj("reason" -> "z"))
         )
       )
     val triageModel    = ScriptedModel(both, answer("fine"))
@@ -303,8 +308,8 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
         .Obj("error" -> "A handoff must be the only tool call in a message; no call in this message was run")
         .render()
     messagesOf(state).collect { case t: ToolMessage => t } shouldBe Vector(
-      ToolMessage(error, "h1"),
-      ToolMessage(error, "h2")
+      ToolMessage(error, ToolCallId("h1")),
+      ToolMessage(error, ToolCallId("h2"))
     )
     state.get(LoopKeys.transfer).value shouldBe None
   }

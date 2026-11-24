@@ -233,9 +233,9 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "record tool calls and tool results as their own message parts" in withTracing(captureContent = true) {
       (tracing, spans) =>
-        val call = ToolCall("call-1", "search", ujson.Obj("q" -> "france"))
+        val call = ToolCall(ToolCallId("call-1"), "search", ujson.Obj("q" -> "france"))
         val history = Conversation(
-          Seq(UserMessage("find it"), AssistantMessage(None, Seq(call)), ToolMessage("Paris", "call-1"))
+          Seq(UserMessage("find it"), AssistantMessage(None, Seq(call)), ToolMessage("Paris", ToolCallId("call-1")))
         )
         TracingLLMClient(new Stub("openai"), tracing).complete(history, options)
 

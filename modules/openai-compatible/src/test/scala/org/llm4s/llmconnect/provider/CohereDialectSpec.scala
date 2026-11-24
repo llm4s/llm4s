@@ -50,8 +50,11 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
         Seq(
           SystemMessage("Today is April 30th"),
           UserMessage("Next flight from Miami to Seattle?"),
-          AssistantMessage(None, List(ToolCall("get_flight_info0", "get_flight_info", ujson.Obj("a" -> 1)))),
-          ToolMessage("Miami to Seattle, May 1st, 10 AM.", "get_flight_info0")
+          AssistantMessage(
+            None,
+            List(ToolCall(ToolCallId("get_flight_info0"), "get_flight_info", ujson.Obj("a" -> 1)))
+          ),
+          ToolMessage("Miami to Seattle, May 1st, 10 AM.", ToolCallId("get_flight_info0"))
         )
       ),
       CompletionOptions().withReasoning(ReasoningEffort.High)

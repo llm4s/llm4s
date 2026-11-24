@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model.{
   Message,
   MessageRole,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -130,8 +131,8 @@ object ContentPartContract:
       if role == MessageRole.Tool then
         Seq(
           UserMessage("Fetch it."),
-          AssistantMessage(text = None, toolCalls = Seq(ToolCall("call_parts", "fetch", ujson.Obj()))),
-          ToolMessage(parts, "call_parts")
+          AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("call_parts"), "fetch", ujson.Obj()))),
+          ToolMessage(parts, ToolCallId("call_parts"))
         )
       else Seq(UserMessage(parts))
     Conversation(messages)

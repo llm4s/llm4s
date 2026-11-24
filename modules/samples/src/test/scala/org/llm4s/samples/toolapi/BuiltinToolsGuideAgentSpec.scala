@@ -37,7 +37,11 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
             AssistantMessage(
               text = None,
               toolCalls = Seq(
-                ToolCall("call-1", "calculator", ujson.Obj("operation" -> "percentage", "a" -> 15, "b" -> 850))
+                ToolCall(
+                  ToolCallId("call-1"),
+                  "calculator",
+                  ujson.Obj("operation" -> "percentage", "a" -> 15, "b" -> 850)
+                )
               )
             )
           )

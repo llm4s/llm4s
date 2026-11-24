@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,7 +17,7 @@ import java.time.Instant
 class CompletionSettersSpec extends AnyFlatSpec with Matchers {
 
   private val createdAt      = Instant.parse("2026-01-01T00:00:00Z")
-  private val sampleToolCall = ToolCall("call-1", "lookup", ujson.Obj("q" -> "scala"))
+  private val sampleToolCall = ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj("q" -> "scala"))
   private val citation       = Citation("https://example.com/a")
   private val bareUsage      = TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)
 
@@ -66,7 +67,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read content and toolCalls from the message, so they cannot disagree with it (#2807)" in {
-    val second  = ToolCall("call-2", "fetch", ujson.Obj())
+    val second  = ToolCall(ToolCallId("call-2"), "fetch", ujson.Obj())
     val message = AssistantMessage("other", Seq(sampleToolCall, second))
     val changed = fullCompletion.withMessage(message)
 
@@ -217,7 +218,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set and clear the tool call, with both overloads" in {
-    val other = ToolCall("call-2", "fetch", ujson.Obj())
+    val other = ToolCall(ToolCallId("call-2"), "fetch", ujson.Obj())
 
     fullChunk.withToolCall(other) shouldBe chunk(toolCall = Some(other))
     fullChunk.withToolCall(Some(other)) shouldBe chunk(toolCall = Some(other))

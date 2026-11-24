@@ -1,7 +1,14 @@
 package org.llm4s.trace
 
 import org.llm4s.types.ProviderModelTypes.ModelName
-import org.llm4s.llmconnect.model.{ AssistantMessage, EmbeddingUsage, TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  EmbeddingUsage,
+  TokenUsage,
+  ToolCallId,
+  UsageSummary,
+  UserMessage
+}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,7 +49,8 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ ToolExecuted ============
 
   "TraceEvent.ToolExecuted" should "have correct event type" in {
-    val event = TraceEvent.ToolExecuted("calculator", "{\"a\": 1}", "3", 150.millis, true, fixedTimestamp)
+    val event =
+      TraceEvent.ToolExecuted("calculator", ToolCallId("{\"a\": 1}").asString, "3", 150.millis, true, fixedTimestamp)
 
     event.eventType shouldBe "tool_executed"
     event.name shouldBe "calculator"

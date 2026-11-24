@@ -330,20 +330,21 @@ class PerplexityClient(
           am.thinking.collect { case ThinkingBlock.Opaque(ProviderName, data) => data }.flatMap(decode).toMap
         val text = Option.when(am.content.nonEmpty)(messageItem("assistant", ujson.Str(am.content)))
         val calls = am.toolCalls.map { call =>
-          callNames(call.id) = call.name
+          callNames(call.id.asString) = call.name
           val item = ujson.Obj(
             "type"      -> "function_call",
-            "call_id"   -> call.id,
+            "call_id"   -> call.id.asString,
             "name"      -> call.name,
             "arguments" -> requestArguments(call.arguments)
           )
-          signatures.get(call.id).foreach(sig => item("thought_signature") = sig)
+          signatures.get(call.id.asString).foreach(sig => item("thought_signature") = sig)
           item
         }
         text.toSeq ++ calls
       case tm: ToolMessage =>
-        val item = ujson.Obj("type" -> "function_call_output", "call_id" -> tm.toolCallId, "output" -> tm.content)
-        callNames.get(tm.toolCallId).foreach(name => item("name") = name)
+        val item =
+          ujson.Obj("type" -> "function_call_output", "call_id" -> tm.toolCallId.asString, "output" -> tm.content)
+        callNames.get(tm.toolCallId.asString).foreach(name => item("name") = name)
         Seq(item)
     })
   }
@@ -602,7 +603,7 @@ object PerplexityClient {
         text = text,
         toolCalls = calls.map(_._1),
         signatures = calls.collect { case (call, Some(sig)) =>
-          ThinkingBlock.Opaque(ProviderName, encode(call.id, sig))
+          ThinkingBlock.Opaque(ProviderName, encode(call.id.asString, sig))
         },
         citations = citations,
         usage = usage.flatMap(parseUsage),
@@ -621,7 +622,10 @@ object PerplexityClient {
       callId <- item.get("call_id").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("it has no call_id"))
       name   <- item.get("name").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("it has no name"))
       args   <- arguments(item.get("arguments"))
-    } yield ToolCall(callId, name, args) -> item.get("thought_signature").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield ToolCall(ToolCallId(callId), name, args) -> item
+      .get("thought_signature")
+      .flatMap(_.strOpt)
+      .filter(_.nonEmpty)
 
   /** A call's `arguments`, a JSON string on the wire, as a JSON object; absent or blank is `{}`. */
   private def arguments(raw: Option[ujson.Value]): Result[ujson.Value] = raw match {

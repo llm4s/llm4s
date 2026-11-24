@@ -103,7 +103,7 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
   }
 
   it should "leave out a tool call no ToolMessage answers, keeping the turn's text" in {
-    val toolCall = ToolCall("call-1", "get_weather", ujson.Obj("city" -> "London"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "London"))
     val json = buildParamsJson(
       UserMessage("What is the weather?"),
       AssistantMessage(Some("TOOL_CALL_MARKER"), Seq(toolCall))
@@ -115,7 +115,7 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
   it should "convert a ToolMessage to a user turn with the [Tool result for …] prefix" in {
     val json = buildParamsJson(
       UserMessage("What's the weather?"),
-      ToolMessage("Sunny and 22C", "call-99")
+      ToolMessage("Sunny and 22C", ToolCallId("call-99"))
     )
     json should include("[Tool result for call-99]: Sunny and 22C")
   }
@@ -124,7 +124,7 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
     val id = "abc-def-123-xyz"
     val json = buildParamsJson(
       UserMessage("Lookup something"),
-      ToolMessage("result value", id)
+      ToolMessage("result value", ToolCallId(id))
     )
     json should include(s"[Tool result for $id]: result value")
   }
@@ -132,8 +132,8 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
   it should "handle multiple ToolMessages in one turn, each with its own prefix" in {
     val json = buildParamsJson(
       UserMessage("Check both cities"),
-      ToolMessage("Rainy", "call-a"),
-      ToolMessage("Sunny", "call-b")
+      ToolMessage("Rainy", ToolCallId("call-a")),
+      ToolMessage("Sunny", ToolCallId("call-b"))
     )
     json should include("[Tool result for call-a]: Rainy")
     json should include("[Tool result for call-b]: Sunny")
@@ -144,12 +144,12 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
   // ---------------------------------------------------------------------------
 
   it should "handle a complete tool-call round-trip correctly" in {
-    val toolCall = ToolCall("call-1", "get_weather", ujson.Obj("city" -> "London"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "London"))
     val json = buildParamsJson(
       SystemMessage("You are a weather assistant."),
       UserMessage("What's the weather in London?"),
       AssistantMessage(None, Seq(toolCall)),                   // a tool_use block
-      ToolMessage("15C and cloudy", "call-1"),                 // its tool_result block
+      ToolMessage("15C and cloudy", ToolCallId("call-1")),     // its tool_result block
       AssistantMessage(Some("The weather is 15C."), Seq.empty) // forwarded as assistant turn
     )
     // Custom system message used, default not injected

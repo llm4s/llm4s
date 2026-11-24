@@ -1,9 +1,10 @@
 package org.llm4s.javaapi
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Suspension, AgentNode, AgentStatus }
-import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
+import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId, NodeId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.{

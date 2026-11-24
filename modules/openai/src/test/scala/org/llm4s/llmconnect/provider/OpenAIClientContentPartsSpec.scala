@@ -53,7 +53,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(text = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c1"), "t", ujson.Obj()))),
         result
       )
     )
@@ -78,10 +78,11 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "send a tool result's text parts as an array of text parts" in {
-    val messages = sent(toolResult(ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1"))).value
+    val messages =
+      sent(toolResult(ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1")))).value
     messages(2)("content") shouldBe
       ujson.Arr(ujson.Obj("type" -> "text", "text" -> "a"), ujson.Obj("type" -> "text", "text" -> "b"))
-    sent(toolResult(ToolMessage("r", "c1"))).value(2)("content") shouldBe ujson.Str("r")
+    sent(toolResult(ToolMessage("r", ToolCallId("c1")))).value(2)("content") shouldBe ujson.Str("r")
   }
 
   it should "refuse, without sending, a PDF by URL, another provider's file, a text document and media in a tool result" in {
@@ -92,7 +93,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
       sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
         UnsupportedContentPartError("openai", part.kind, "user")
     }
-    sent(toolResult(ToolMessage(Vector(imageInline), "c1"))).left.value shouldBe
+    sent(toolResult(ToolMessage(Vector(imageInline), ToolCallId("c1")))).left.value shouldBe
       UnsupportedContentPartError("openai", imageInline.kind, "tool")
   }
 

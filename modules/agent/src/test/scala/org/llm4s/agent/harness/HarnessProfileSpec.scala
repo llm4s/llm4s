@@ -1,5 +1,6 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Agent, AgentStatus, CompletionFixture, ScriptedLLMClient }
@@ -27,11 +28,11 @@ import scala.concurrent.duration.*
 class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private def call(name: String, args: ujson.Obj, id: String = "c1"): Completion =
-    CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall(id, name, args))))
+    CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall(ToolCallId(id), name, args))))
 
   private def calls(cs: (String, ujson.Obj)*): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, cs.zipWithIndex.map { case ((name, args), i) => ToolCall(s"c$i", name, args) })
+      AssistantMessage(None, cs.zipWithIndex.map { case ((name, args), i) => ToolCall(ToolCallId(s"c$i"), name, args) })
     )
 
   /** The text of `path` in `state`, read through `backend`; `None` when it does not exist. */

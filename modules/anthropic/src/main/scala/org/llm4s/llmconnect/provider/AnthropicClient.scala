@@ -488,7 +488,8 @@ curl https://api.anthropic.com/v1/messages \
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
                         content = None,
-                        toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                        toolCall =
+                          Some(ToolCall(id = ToolCallId(toolCallId), name = "", arguments = ujson.Str(fragment))),
                         finishReason = None
                       )
                       accumulator.addChunk(chunk)
@@ -514,7 +515,8 @@ curl https://api.anthropic.com/v1/messages \
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
                     content = None,
-                    toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
+                    toolCall =
+                      Some(ToolCall(id = ToolCallId(toolUse.id()), name = toolUse.name(), arguments = ujson.Obj())),
                     finishReason = None
                   )
                   accumulator.addChunk(chunk)
@@ -695,7 +697,7 @@ curl https://api.anthropic.com/v1/messages \
         }
 
       case (tm: ToolMessage, index) if pairing.resultPaired(index) =>
-        val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId)
+        val result = ToolResultBlockParam.builder().toolUseId(tm.toolCallId.asString)
         tm.parts match {
           case Vector(ContentPart.Text(text)) => result.content(text)
           case parts =>
@@ -910,7 +912,7 @@ curl https://api.anthropic.com/v1/messages \
         calls.flatMap { taken =>
           BoundedJson.read(input) match {
             case Right(arguments: ujson.Obj) =>
-              Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
+              Right(taken :+ ToolCall(id = ToolCallId(toolUse.id()), name = toolUse.name(), arguments = arguments))
             // an input that is not an object is never passed on (RFC 0009, Part 3)
             case Right(_) => Left(malformedToolCall(s"'${toolUse.name()}': the input is not a JSON object"))
             case Left(BoundedJson.TooDeep()) =>
@@ -1446,7 +1448,7 @@ object AnthropicClient {
       case _              => ujson.Obj()
     }
     val input = ObjectMappers.jsonMapper().readValue(arguments.render(), classOf[ToolUseBlockParam.Input])
-    ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id).name(call.name).input(input).build())
+    ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id.asString).name(call.name).input(input).build())
   }
 
   /**

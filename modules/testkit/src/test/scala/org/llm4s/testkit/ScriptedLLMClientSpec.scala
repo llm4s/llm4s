@@ -54,13 +54,16 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "return a tool-call reply as tool calls on both the completion and its message, numbering empty ids" in {
     val client = ScriptedLLMClient.sequence(
       Reply.text("first"),
-      Reply.toolCalls(ToolCall("", "one", ujson.Obj("a" -> 1)), ToolCall("keep", "two", ujson.Obj()))
+      Reply.toolCalls(
+        ToolCall(ToolCallId(""), "one", ujson.Obj("a" -> 1)),
+        ToolCall(ToolCallId("keep"), "two", ujson.Obj())
+      )
     )
     ask(client, "q1").value
     val result = ask(client, "q2").value
     result.toolCalls shouldBe List(
-      ToolCall("call-2-1", "one", ujson.Obj("a" -> 1)),
-      ToolCall("keep", "two", ujson.Obj())
+      ToolCall(ToolCallId("call-2-1"), "one", ujson.Obj("a" -> 1)),
+      ToolCall(ToolCallId("keep"), "two", ujson.Obj())
     )
     result.message.toolCalls shouldBe result.toolCalls
     result.message.text shouldBe None
@@ -202,7 +205,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
           UserMessage("early"),
           UserMessage("the question"),
           AssistantMessage("a reply"),
-          ToolMessage("42", "call-1")
+          ToolMessage("42", ToolCallId("call-1"))
         )
       ),
       options
@@ -235,7 +238,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "emit each tool call as a chunk and finish with 'tool_calls'" in {
     val client = ScriptedLLMClient.sequence(
-      Reply.toolCalls(ToolCall("", "one", ujson.Obj()), ToolCall("", "two", ujson.Obj()))
+      Reply.toolCalls(ToolCall(ToolCallId(""), "one", ujson.Obj()), ToolCall(ToolCallId(""), "two", ujson.Obj()))
     )
     val chunks = ArrayBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation("q"), options)(chunks += _).value
@@ -249,7 +252,8 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   // RFC 0009: the same scripted reply has the same reason from complete and from a stream
   it should "report ToolCalls for a reply with calls and Stop for text, from complete as from a stream" in {
-    val client = ScriptedLLMClient.sequence(Reply.toolCalls(ToolCall("", "one", ujson.Obj())), Reply.text("done"))
+    val client =
+      ScriptedLLMClient.sequence(Reply.toolCalls(ToolCall(ToolCallId(""), "one", ujson.Obj())), Reply.text("done"))
     client.complete(conversation("q"), options).value.finishReason shouldBe FinishReason.ToolCalls
     client.complete(conversation("q"), options).value.finishReason shouldBe FinishReason.Stop
   }

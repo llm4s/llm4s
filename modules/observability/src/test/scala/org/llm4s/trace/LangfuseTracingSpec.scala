@@ -6,7 +6,7 @@ import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, Llm4sHttpClient, MockHttpClient }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId }
 import org.slf4j.LoggerFactory
 
 import java.util.Base64
@@ -14,7 +14,8 @@ import scala.concurrent.duration.*
 
 class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
 
-  private def simpleEvent = TraceEvent.ToolExecuted("test-tool", """{"q":"hello"}""", "result", 100.millis, true)
+  private def simpleEvent =
+    TraceEvent.ToolExecuted("test-tool", ToolCallId("""{"q":"hello"}""").asString, "result", 100.millis, true)
 
   private def withLangfuseLoggerSilenced[A](body: => A): A = {
     val logger   = LoggerFactory.getLogger(classOf[LangfuseTracing]).asInstanceOf[LBLogger]

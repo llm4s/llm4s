@@ -57,7 +57,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
   private class OrderModel extends LLMClient {
     val calls                     = new AtomicInteger(0)
     val sent: ArrayBuffer[String] = ArrayBuffer.empty
-    private val call              = ToolCall("c1", "orderStatus", ujson.Obj("orderId" -> "42"))
+    private val call              = ToolCall(ToolCallId("c1"), "orderStatus", ujson.Obj("orderId" -> "42"))
 
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.synchronized(sent += o.tools.map(_.name).mkString(","))

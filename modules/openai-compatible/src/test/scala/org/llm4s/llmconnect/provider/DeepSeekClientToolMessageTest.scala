@@ -8,13 +8,14 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{
-  Conversation,
-  CompletionOptions,
-  ResponseFormat,
-  ToolMessage,
-  UserMessage,
   AssistantMessage,
-  ToolCall
+  CompletionOptions,
+  Conversation,
+  ResponseFormat,
+  ToolCall,
+  ToolCallId,
+  ToolMessage,
+  UserMessage
 }
 
 /**
@@ -55,7 +56,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
           text = None,
           toolCalls = List(
             ToolCall(
-              id = "call_abc123",
+              id = ToolCallId("call_abc123"),
               name = "get_weather",
               arguments = ujson.Obj("location" -> "San Francisco")
             )
@@ -63,7 +64,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
         ),
         ToolMessage(
           content = """{"temperature": 72, "condition": "sunny"}""",
-          toolCallId = "call_abc123"
+          toolCallId = ToolCallId("call_abc123")
         )
       )
     )
@@ -95,12 +96,12 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
           text = None,
           toolCalls = List(
             ToolCall(
-              id = "call_1",
+              id = ToolCallId("call_1"),
               name = "get_weather",
               arguments = ujson.Obj("location" -> "SF")
             ),
             ToolCall(
-              id = "call_2",
+              id = ToolCallId("call_2"),
               name = "get_weather",
               arguments = ujson.Obj("location" -> "NYC")
             )
@@ -108,11 +109,11 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
         ),
         ToolMessage(
           content = """{"temp": 72}""",
-          toolCallId = "call_1"
+          toolCallId = ToolCallId("call_1")
         ),
         ToolMessage(
           content = """{"temp": 45}""",
-          toolCallId = "call_2"
+          toolCallId = ToolCallId("call_2")
         )
       )
     )

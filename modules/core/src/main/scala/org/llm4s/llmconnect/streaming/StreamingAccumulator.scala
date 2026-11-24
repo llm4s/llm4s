@@ -39,7 +39,7 @@ final class StreamingAccumulator private (model: ModelName) {
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
   // in hash order; callers that run tools sequentially depend on it (#1132).
-  private val partialToolCalls = mutable.LinkedHashMap[String, PartialToolCall]()
+  private val partialToolCalls = mutable.LinkedHashMap[ToolCallId, PartialToolCall]()
 
   /**
    * Add a streaming chunk to the accumulator
@@ -58,7 +58,7 @@ final class StreamingAccumulator private (model: ModelName) {
 
     // Handle tool calls
     chunk.toolCall.foreach { toolCall =>
-      if (toolCall.id.nonEmpty) {
+      if (toolCall.id.asString.nonEmpty) {
         // New tool call or update to existing
         val partial = partialToolCalls.getOrElseUpdate(
           toolCall.id,
@@ -249,7 +249,7 @@ final class StreamingAccumulator private (model: ModelName) {
    * Helper class for partial tool call accumulation
    */
   private case class PartialToolCall(
-    id: String,
+    id: ToolCallId,
     var name: String,
     argumentsBuilder: StringBuilder
   )

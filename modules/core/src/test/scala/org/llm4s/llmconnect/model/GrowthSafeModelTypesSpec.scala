@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -39,15 +40,15 @@ class GrowthSafeModelTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolCall" should "change each field through its setter" in {
-    val call    = ToolCall("1", "weather", ujson.Obj("city" -> "Paris"))
-    val changed = call.withId("2").withName("time").withArguments(ujson.Obj("tz" -> "UTC"))
+    val call    = ToolCall(ToolCallId("1"), "weather", ujson.Obj("city" -> "Paris"))
+    val changed = call.withId(ToolCallId("2")).withName("time").withArguments(ujson.Obj("tz" -> "UTC"))
 
-    changed shouldBe ToolCall("2", "time", ujson.Obj("tz" -> "UTC"))
-    call.id shouldBe "1"
+    changed shouldBe ToolCall(ToolCallId("2"), "time", ujson.Obj("tz" -> "UTC"))
+    call.id shouldBe ToolCallId("1")
   }
 
   it should "keep its JSON" in {
-    val call = ToolCall("1", "weather", ujson.Obj("city" -> "Paris"))
+    val call = ToolCall(ToolCallId("1"), "weather", ujson.Obj("city" -> "Paris"))
     write(call) shouldBe """{"id":"1","name":"weather","arguments":{"city":"Paris"}}"""
     read[ToolCall](write(call)) shouldBe call
   }
@@ -73,8 +74,8 @@ class GrowthSafeModelTypesSpec extends AnyFlatSpec with Matchers {
     assertTypeError("""Conversation(Seq.empty).copy(messages = Seq.empty)""")
     assertTypeError("""new SystemMessage("s")""")
     assertTypeError("""SystemMessage("s").copy(content = "t")""")
-    assertTypeError("""new ToolCall("1", "n", ujson.Obj())""")
-    assertTypeError("""ToolCall("1", "n", ujson.Obj()).copy(id = "2")""")
+    assertTypeError("""new ToolCall(ToolCallId("1"), "n", ujson.Obj())""")
+    assertTypeError("""ToolCall(ToolCallId("1"), "n", ujson.Obj()).copy(id = "2")""")
     assertTypeError("""new ResponseFormat.JsonSchema(ujson.Obj(), "n", true)""")
     assertTypeError("""ResponseFormat.JsonSchema(ujson.Obj()).copy(strict = false)""")
   }

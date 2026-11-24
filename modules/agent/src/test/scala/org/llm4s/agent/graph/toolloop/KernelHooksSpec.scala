@@ -73,7 +73,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
 
   /** A model turn calling `write` with `name`. */
   private def callWrite(name: String): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(s"c-$name", "write", ujson.Obj("text" -> name))))
+    _ => AssistantMessage(None, Seq(ToolCall(ToolCallId(s"c-$name"), "write", ujson.Obj("text" -> name))))
 
   /** An output guardrail blocking any answer that mentions a secret. */
   private def secretGuard: AgentMiddleware = middleware(
@@ -450,7 +450,11 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   it should "restore a key a handoff source's tool wrote, when the target's answer is blocked" in {
     val agentB = AgentId.unsafe("b")
     val handoff: Vector[Message] => AssistantMessage =
-      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "over"))))
+      _ =>
+        AssistantMessage(
+          None,
+          Seq(ToolCall(ToolCallId("h1"), HandoffTools.toolName(agentB), ujson.Obj("reason" -> "over")))
+        )
     val source = LoopAgent(agentA, ScriptedModel(callWrite("draft"), handoff), ToolSet.of(write).value)
       .withMiddleware(Seq(secretGuard))
       .withHandoffs(Vector(LoopHandoff(agentB, None, preserveContext = true)))

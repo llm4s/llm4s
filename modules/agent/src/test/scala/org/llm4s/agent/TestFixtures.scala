@@ -170,7 +170,7 @@ private[agent] object CompletionFixture {
    * @param callId Tool call identifier; defaults to `"call-1"`.
    */
   def withToolCall(name: String, args: ujson.Value, callId: String = "call-1"): Completion = {
-    val tc      = ToolCall(id = callId, name = name, arguments = args)
+    val tc      = ToolCall(id = ToolCallId(callId), name = name, arguments = args)
     val message = AssistantMessage("", Seq(tc))
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
@@ -320,7 +320,8 @@ private[agent] object SpecTools {
 
   def tool(name: String)(run: (Text, ToolContext) => ToolOutcome): AgentTool[Text] = AgentTool(spec(name))(run)
 
-  def call(id: String, name: String, text: String = "x"): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
+  def call(id: String, name: String, text: String = "x"): ToolCall =
+    ToolCall(ToolCallId(id), name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
 }

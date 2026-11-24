@@ -72,7 +72,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       turn += 1
       val toolCalls =
-        script.lift(turn - 1).map { case (name, args) => ToolCall(s"call-$turn", name, args) }.toList
+        script.lift(turn - 1).map { case (name, args) => ToolCall(ToolCallId(s"call-$turn"), name, args) }.toList
       val message =
         if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")

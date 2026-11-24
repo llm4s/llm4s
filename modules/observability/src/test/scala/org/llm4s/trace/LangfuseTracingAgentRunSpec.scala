@@ -79,7 +79,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
 
-  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
 
   private val client = () =>
     new SequencedClient(

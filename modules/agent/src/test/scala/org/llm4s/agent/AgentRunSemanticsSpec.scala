@@ -47,11 +47,11 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
 
   /** A model turn that calls a tool no agent has, so the loop goes round again. */
   private def callsMissingTool(n: Int): Result[Completion] =
-    val call = ToolCall(s"call-$n", "missing_tool", ujson.Obj())
+    val call = ToolCall(ToolCallId(s"call-$n"), "missing_tool", ujson.Obj())
     Right(Completion(s"turn-$n", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage))
 
   private def calling(name: String, id: String): Completion =
-    val call = ToolCall(id, name, ujson.Obj("reason" -> "needs the specialist"))
+    val call = ToolCall(ToolCallId(id), name, ujson.Obj("reason" -> "needs the specialist"))
     Completion(s"turn-$id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)
 
   /** An input guardrail that fails (or passes) and records that it ran. */

@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import org.llm4s.error.{ RateLimitError, ValidationError }
-import org.llm4s.llmconnect.model.{ TokenUsage, ToolCall }
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCall, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -21,12 +21,12 @@ class ReplySpec extends AnyFlatSpec with Matchers {
 
   "Reply.toolCall" should "make one call with the name and the parsed arguments, and an empty id for the client to number" in {
     val reply = Reply.toolCall("get_weather", """{"city": "Paris", "days": 3}""")
-    reply.toolCalls shouldBe List(ToolCall("", "get_weather", ujson.Obj("city" -> "Paris", "days" -> 3)))
+    reply.toolCalls shouldBe List(ToolCall(ToolCallId(""), "get_weather", ujson.Obj("city" -> "Paris", "days" -> 3)))
     reply.content shouldBe ""
   }
 
   it should "default to no arguments and accept an explicit id" in {
-    Reply.toolCall("ping").toolCalls shouldBe List(ToolCall("", "ping", ujson.Obj()))
+    Reply.toolCall("ping").toolCalls shouldBe List(ToolCall(ToolCallId(""), "ping", ujson.Obj()))
     Reply.toolCall("ping", id = Some("abc")).toolCalls.map(_.id) shouldBe List("abc")
   }
 
@@ -46,9 +46,9 @@ class ReplySpec extends AnyFlatSpec with Matchers {
       .withToolCall("get_time", """{"zone": "CET"}""", id = Some("t1"))
       .withToolCall("ping")
     reply.toolCalls shouldBe List(
-      ToolCall("", "get_weather", ujson.Obj("city" -> "Oslo")),
-      ToolCall("t1", "get_time", ujson.Obj("zone" -> "CET")),
-      ToolCall("", "ping", ujson.Obj())
+      ToolCall(ToolCallId(""), "get_weather", ujson.Obj("city" -> "Oslo")),
+      ToolCall(ToolCallId("t1"), "get_time", ujson.Obj("zone" -> "CET")),
+      ToolCall(ToolCallId(""), "ping", ujson.Obj())
     )
     Reply.text("checking").withToolCall("ping").content shouldBe "checking"
   }
@@ -58,8 +58,8 @@ class ReplySpec extends AnyFlatSpec with Matchers {
   }
 
   "Reply.toolCalls" should "keep the calls in the order given" in {
-    val first  = ToolCall("a", "one", ujson.Obj())
-    val second = ToolCall("b", "two", ujson.Obj())
+    val first  = ToolCall(ToolCallId("a"), "one", ujson.Obj())
+    val second = ToolCall(ToolCallId("b"), "two", ujson.Obj())
     Reply.toolCalls(first, second).toolCalls shouldBe List(first, second)
     Reply.toolCalls().toolCalls shouldBe empty
   }
@@ -76,8 +76,8 @@ class ReplySpec extends AnyFlatSpec with Matchers {
     base.withContent("y") shouldBe base.copyForTest(content = "y")
     base.withModel("m") shouldBe base.copyForTest(model = "m")
     base.withUsage(usage) shouldBe base.copyForTest(usage = Some(usage))
-    base.withToolCalls(List(ToolCall("i", "n", ujson.Obj()))) shouldBe
-      base.copyForTest(toolCalls = List(ToolCall("i", "n", ujson.Obj())))
+    base.withToolCalls(List(ToolCall(ToolCallId("i"), "n", ujson.Obj()))) shouldBe
+      base.copyForTest(toolCalls = List(ToolCall(ToolCallId("i"), "n", ujson.Obj())))
   }
 
   it should "let the Option overload of withUsage clear the usage again" in {

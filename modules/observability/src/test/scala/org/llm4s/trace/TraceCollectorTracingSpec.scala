@@ -2,7 +2,7 @@ package org.llm4s.trace
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
-import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, ToolCallId, UsageSummary, UserMessage }
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
 import org.llm4s.trace.store.InMemoryTraceStore
 import org.scalatest.{ BeforeAndAfterEach, LoneElement }
@@ -119,7 +119,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "convert ToolExecuted event to ToolCall span" in {
-    val event = TraceEvent.ToolExecuted("test-tool", "input", "output", 100.millis, true)
+    val event = TraceEvent.ToolExecuted("test-tool", ToolCallId("input").asString, "output", 100.millis, true)
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -310,7 +310,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val console  = new ConsoleTracing()
     val combined = TracingComposer.combine(collector, console)
 
-    val event = TraceEvent.ToolExecuted("composite-tool", "in", "out", 50.millis, true)
+    val event = TraceEvent.ToolExecuted("composite-tool", ToolCallId("in").asString, "out", 50.millis, true)
     combined.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -321,7 +321,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "be composable with filtered tracing" in {
     val filteredCollector = TracingComposer.filter(collector)(_.eventType == "tool_executed")
 
-    val toolEvent  = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
+    val toolEvent  = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
     val otherEvent = TraceEvent.CacheHit(0.9, 0.8)
 
     filteredCollector.traceEvent(toolEvent) shouldBe Right(())
@@ -337,7 +337,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val customCollector =
       TraceCollectorTracing(store, customTraceId).getOrElse(fail("could not create custom collector"))
 
-    val event = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
+    val event = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
     customCollector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(customTraceId)
@@ -347,7 +347,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "produce a span with the given spanId, deterministically for the same event" in {
     import org.llm4s.trace.model.SpanId
 
-    val event  = TraceEvent.ToolExecuted("tool", "in", "out", 10.millis, true)
+    val event  = TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 10.millis, true)
     val spanId = SpanId.generate()
 
     val span1 = collector.eventToSpan(event, spanId)

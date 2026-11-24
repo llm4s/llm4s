@@ -1,10 +1,11 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
-import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, RunBudgets, RunConfig, StateKey, StateUpdate, ThreadId }
+import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
 import org.llm4s.agent.graph.tool.{
   AgentTool,
@@ -68,12 +69,12 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   /** A tool logging its start and end; while `meet` is set, it waits for `meet` to reach zero. */
   private def logging(log: CopyOnWriteArrayList[String], meet: Option[CountDownLatch], locked: Boolean) =
     AgentTool(lockedSpec("work", locked)) { (_, context) =>
-      log.add(s"start ${context.toolCallId.value}")
+      log.add(s"start ${context.toolCallId.asString}")
       val met = meet.forall { latch =>
         latch.countDown()
         latch.await(5, TimeUnit.SECONDS)
       }
-      log.add(s"end ${context.toolCallId.value}")
+      log.add(s"end ${context.toolCallId.asString}")
       ToolOutcome.success(ToolContent.Json(ujson.Str(if (met) "met" else "alone")))
     }
 
@@ -81,10 +82,10 @@ class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val log  = new CopyOnWriteArrayList[String]()
     val meet = new CountDownLatch(2)
     val tool = AgentTool(lockedSpec("work", locked = true)) { (args, context) =>
-      log.add(s"start ${context.toolCallId.value}")
+      log.add(s"start ${context.toolCallId.asString}")
       // a and b must be inside the tool at once; c runs alone, after a
-      val met = if (context.toolCallId.value == "c") true else { meet.countDown(); meet.await(5, TimeUnit.SECONDS) }
-      log.add(s"end ${context.toolCallId.value}")
+      val met = if (context.toolCallId.asString == "c") true else { meet.countDown(); meet.await(5, TimeUnit.SECONDS) }
+      log.add(s"end ${context.toolCallId.asString}")
       ToolOutcome.success(ToolContent.Json(ujson.Str(s"${args.text}:${if (met) "met" else "alone"}")))
     }
     val client = ScriptedLLMClient.of(

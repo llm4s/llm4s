@@ -121,7 +121,7 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
       seen.incrementAndGet(); Vector(ToolResource(Operation.Write, t.text))
     })((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("never"))))
     val client = ScriptedLLMClient.of(
-      calling(ToolCall("c1", "write", ujson.Obj("other" -> 1))),
+      calling(ToolCall(ToolCallId("c1"), "write", ujson.Obj("other" -> 1))),
       CompletionFixture.simple("done")
     )
     toolResults(agentOver(client, tool).run("go").value).head should include("Invalid arguments for 'write'")

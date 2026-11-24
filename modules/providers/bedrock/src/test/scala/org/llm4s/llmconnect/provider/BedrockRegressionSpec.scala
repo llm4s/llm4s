@@ -48,10 +48,13 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
           UserMessage("Weather and time?"),
           AssistantMessage(
             Some("Checking."),
-            Seq(ToolCall("tc-1", "get_weather", args), ToolCall("tc-2", "get_time", ujson.Obj()))
+            Seq(
+              ToolCall(ToolCallId("tc-1"), "get_weather", args),
+              ToolCall(ToolCallId("tc-2"), "get_time", ujson.Obj())
+            )
           ),
-          ToolMessage(toolCallId = "tc-1", content = """{"temp":22}"""),
-          ToolMessage(toolCallId = "tc-2", content = "noon"),
+          ToolMessage(toolCallId = ToolCallId("tc-1"), content = """{"temp":22}"""),
+          ToolMessage(toolCallId = ToolCallId("tc-2"), content = "noon"),
           UserMessage("Thanks!")
         )
       )

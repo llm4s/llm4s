@@ -57,14 +57,14 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
         .withHandler(_ => Right("ok"))
         .buildSafe()
         .fold(e => fail(e.toString), identity)
-      val call = ToolCall("call-1", "echo", ujson.Obj())
+      val call = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj())
 
       local.complete(hello, CompletionOptions().withTools(Seq(tool))) match
         case Left(e: ValidationError) => e.message should include("tool calling")
         case other                    => fail(s"expected a ValidationError, got $other")
       local.complete(Conversation(Seq(UserMessage("Hi"), AssistantMessage("", Seq(call))))) shouldBe a[Left[?, ?]]
       local.complete(
-        Conversation(Seq(UserMessage("Hi"), AssistantMessage("", Seq(call)), ToolMessage("ok", "call-1")))
+        Conversation(Seq(UserMessage("Hi"), AssistantMessage("", Seq(call)), ToolMessage("ok", ToolCallId("call-1"))))
       ) shouldBe a[Left[?, ?]]
       loader.loads.get shouldBe 0
     }

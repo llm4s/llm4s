@@ -392,7 +392,7 @@ private[agent] object TaskTools:
       case StoredMessage(_, assistant: AssistantMessage) => assistant.toolCalls.filter(c => names(c.name))
       case _                                             => Vector.empty
     }
-    calls.lastIndexWhere(_.id == ctx.toolCallId.value) match
+    calls.lastIndexWhere(_.id == ctx.toolCallId) match
       case -1 => calls.size + 1
       case at => at + 1
 

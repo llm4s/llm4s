@@ -108,11 +108,11 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state with assistant tool calls" in {
     val tracing  = new ConsoleTracing()
-    val toolCall = ToolCall("call-123", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+    val toolCall = ToolCall(ToolCallId("call-123"), "calculator", ujson.Obj("a" -> 1, "b" -> 2))
     val messages = Seq(
       UserMessage("Calculate 1+2"),
       AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
-      ToolMessage("3", "call-123")
+      ToolMessage("3", ToolCallId("call-123"))
     )
     val event = ended(TraceEvent.RunStatus.Completed, messages)
 
@@ -160,7 +160,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace completion with tool calls" in {
     val tracing  = new ConsoleTracing()
-    val toolCall = ToolCall("call-456", "web_search", ujson.Obj("query" -> "test"))
+    val toolCall = ToolCall(ToolCallId("call-456"), "web_search", ujson.Obj("query" -> "test"))
     val completion = Completion(
       id = "cmpl-tools",
       created = Instant.now(),
@@ -270,7 +270,9 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   "What ConsoleTracing prints" should "show the tool, its outcome and its duration for ToolExecuted" in {
     val output = printed {
       new ConsoleTracing(captureContent = true)
-        .traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42.millis, false))
+        .traceEvent(
+          TraceEvent.ToolExecuted("echo", ToolCallId("""{"message":"hi"}""").asString, "hi", 42.millis, false)
+        )
     }
 
     output should include("--- TOOL EXECUTED ---")
@@ -306,12 +308,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show the model named by the caller and the tool call count for traceCompletion" in {
-    val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hi"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hi"))
     val completion = Completion(
       id = "completion-7",
       created = Instant.EPOCH,
       model = ModelName("model-in-completion"),
-      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId("call-2")))
+      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId(ToolCallId("call-2"))))
     )
 
     val output =

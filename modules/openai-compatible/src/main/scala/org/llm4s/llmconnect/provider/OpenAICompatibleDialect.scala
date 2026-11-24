@@ -10,7 +10,8 @@ import org.llm4s.llmconnect.model.{
   ResponseFormat,
   ResponseFormatMapper,
   ThinkingBlock,
-  ToolCall
+  ToolCall,
+  ToolCallId
 }
 import org.llm4s.media.MediaSource
 import org.llm4s.model.UnmappedOptions
@@ -284,7 +285,7 @@ object OpenAICompatibleDialect:
         calls     <- done
         arguments <- toolArguments(name, function.flatMap(_.get("arguments")))
       } yield calls :+ ToolCall(
-        id = call.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(""),
+        id = ToolCallId(call.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse("")),
         name = name,
         arguments = arguments
       )

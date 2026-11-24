@@ -1,6 +1,7 @@
 package org.llm4s.mcp
 
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolCallInfo }
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, ToolBuilder, ToolCallInfo }
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
@@ -16,7 +17,7 @@ import scala.jdk.CollectionConverters._
  */
 class MCPToolCallMetaSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
-  private val call = ToolCallInfo(toolCallId = "call_1", idempotencyKey = "key-1")
+  private val call = ToolCallInfo(toolCallId = ToolCallId("call_1"), idempotencyKey = IdempotencyKey("key-1"))
 
   private val whoami = ToolBuilder[String]("whoami", "The call it runs", Schema.`object`("args"))
     .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
@@ -79,7 +80,7 @@ class MCPToolCallMetaSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   "MCPToolCallMeta.fromParams" should "need an idempotency key, and fall back to the request id for the call id" in {
     def params(meta: ujson.Obj) = Some(ujson.Obj("name" -> "t", "_meta" -> meta))
     MCPToolCallMeta.fromParams(params(ujson.Obj("llm4s.org/idempotencyKey" -> "k")), "7") shouldBe
-      Some(ToolCallInfo("7", "k"))
+      Some(ToolCallInfo(ToolCallId("7"), IdempotencyKey("k")))
     MCPToolCallMeta.fromParams(params(ujson.Obj("llm4s.org/toolCallId" -> "c")), "7") shouldBe None
     MCPToolCallMeta.fromParams(params(ujson.Obj("llm4s.org/idempotencyKey" -> "")), "7") shouldBe None
     MCPToolCallMeta.fromParams(Some(ujson.Obj("name" -> "t")), "7") shouldBe None

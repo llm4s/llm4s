@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import org.llm4s.llmconnect.model.{ FinishReason, StreamedChunk, ToolCall }
+import org.llm4s.llmconnect.model.{ FinishReason, StreamedChunk, ToolCall, ToolCallId }
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 
 /**
@@ -21,7 +21,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     StreamedChunk(
       id = msgId,
       content = None,
-      toolCall = Some(ToolCall(id = toolId, name = toolName, arguments = ujson.Obj())),
+      toolCall = Some(ToolCall(id = ToolCallId(toolId), name = toolName, arguments = ujson.Obj())),
       finishReason = None
     )
 
@@ -29,7 +29,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     StreamedChunk(
       id = msgId,
       content = None,
-      toolCall = Some(ToolCall(id = toolId, name = "", arguments = ujson.Str(fragment))),
+      toolCall = Some(ToolCall(id = ToolCallId(toolId), name = "", arguments = ujson.Str(fragment))),
       finishReason = None
     )
 

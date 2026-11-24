@@ -77,7 +77,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
         val client = new BedrockClient(config(url))
         val ask    = UserMessage("Weather?")
         val first  = client.complete(Conversation(Seq(ask)), CompletionOptions()).toOption.value
-        val again  = Conversation(Seq(ask, first.message, ToolMessage("sunny", "tc-1")))
+        val again  = Conversation(Seq(ask, first.message, ToolMessage("sunny", ToolCallId("tc-1"))))
         client.complete(again, CompletionOptions()).isRight shouldBe true
         client.close()
 
@@ -122,7 +122,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     seen.peek()("messages").arr.toSeq
   }
 
-  private def weather = ToolCall("tc-1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private def weather = ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
@@ -134,7 +134,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
         UserMessage("Weather?"),
         AssistantMessage(Some("Checking."), Seq(weather)),
         UserMessage("Still there?"),
-        ToolMessage("sunny", "tc-1")
+        ToolMessage("sunny", ToolCallId("tc-1"))
       )
       val rendered = messages.map(_.render()).mkString
       (rendered should not).include("toolUse")
@@ -144,14 +144,14 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     }
 
     "come first in their user turn, before an unpaired result's text" in {
-      val time = ToolCall("tc-2", "get_time", ujson.Obj())
+      val time = ToolCall(ToolCallId("tc-2"), "get_time", ujson.Obj())
       val messages = sentMessages(
         UserMessage("Weather, then time?"),
         AssistantMessage(None, Seq(weather)),
-        ToolMessage("sunny", "tc-1"),
+        ToolMessage("sunny", ToolCallId("tc-1")),
         AssistantMessage(None, Seq(time)),
-        ToolMessage("late duplicate", "tc-1"),
-        ToolMessage("noon", "tc-2")
+        ToolMessage("late duplicate", ToolCallId("tc-1")),
+        ToolMessage("noon", ToolCallId("tc-2"))
       )
       messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "assistant", "user")
       val last = messages(4)("content").arr
@@ -162,7 +162,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
   }
 
   "a signed tool-call turn" should {
-    val time = ToolCall("tc-2", "get_time", ujson.Obj())
+    val time = ToolCall(ToolCallId("tc-2"), "get_time", ujson.Obj())
     val sealedThinking =
       Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted(redacted))
 
@@ -170,7 +170,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
       val messages = sentMessages(
         UserMessage("Weather and time?"),
         AssistantMessage(Some("Checking."), Seq(weather, time)).withThinking(sealedThinking),
-        ToolMessage("sunny", "tc-1")
+        ToolMessage("sunny", ToolCallId("tc-1"))
       )
       val turn = messages(1)
       turn("role").str shouldBe "assistant"
@@ -184,8 +184,8 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
       val messages = sentMessages(
         ask,
         answering(ask)(AssistantMessage(None, Seq(weather, time)).withThinking(sealedThinking)),
-        ToolMessage("sunny", "tc-1"),
-        ToolMessage("noon", "tc-2")
+        ToolMessage("sunny", ToolCallId("tc-1")),
+        ToolMessage("noon", ToolCallId("tc-2"))
       )
       val blocks = messages(1)("content").arr
       blocks.map(_.obj.keySet.head) shouldBe Seq("reasoningContent", "reasoningContent", "toolUse", "toolUse")
@@ -236,11 +236,11 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
       val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
       val turn    = answering(history*)(AssistantMessage(None, Seq(weather)).withThinking(sealedThinking))
 
-      val full = sentMessages((history :+ turn :+ ToolMessage("sunny", "tc-1"))*)
+      val full = sentMessages((history :+ turn :+ ToolMessage("sunny", ToolCallId("tc-1")))*)
       full.map(_.render()).mkString should include("sig-h")
 
       // ContextPruning dropped the oldest exchange but kept the signed turn
-      val pruned   = sentMessages(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1"))
+      val pruned   = sentMessages(UserMessage("Weather?"), turn, ToolMessage("sunny", ToolCallId("tc-1")))
       val rendered = pruned.map(_.render()).mkString
       (rendered should not).include("reasoningContent")
       pruned(1)("content").arr.map(_.obj.keySet.head) shouldBe Seq("toolUse")
@@ -251,7 +251,12 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
         AssistantMessage(None, Seq(weather)).withThinking(sealedThinking)
       )
       val rendered =
-        sentMessages(SystemMessage("Be terse."), UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1"))
+        sentMessages(
+          SystemMessage("Be terse."),
+          UserMessage("Weather?"),
+          turn,
+          ToolMessage("sunny", ToolCallId("tc-1"))
+        )
           .map(_.render())
           .mkString
       (rendered should not).include("sig-h")
@@ -260,7 +265,9 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     "not go back when no client bound it" in {
       val handBuilt = AssistantMessage(None, Seq(weather)).withThinking(sealedThinking)
       val rendered =
-        sentMessages(UserMessage("Weather?"), handBuilt, ToolMessage("sunny", "tc-1")).map(_.render()).mkString
+        sentMessages(UserMessage("Weather?"), handBuilt, ToolMessage("sunny", ToolCallId("tc-1")))
+          .map(_.render())
+          .mkString
       (rendered should not).include("sig-h")
     }
 
@@ -274,7 +281,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
         val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
         val first   = client.complete(Conversation(history), CompletionOptions()).toOption.value
         first.message.thinkingBinding shouldBe defined
-        val answer = ToolMessage("sunny", "tc-1")
+        val answer = ToolMessage("sunny", ToolCallId("tc-1"))
         client.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
         client.complete(Conversation(history.drop(2) :+ first.message :+ answer), CompletionOptions()).isRight shouldBe
           true

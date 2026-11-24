@@ -199,7 +199,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
-      val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
+      val toolCalls = if (calls == 1) Seq(ToolCall(ToolCallId("call-1"), toolName, args)) else Seq.empty
       val message =
         if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
@@ -238,7 +238,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
   "An Agent with tools from the MCP reference server" should "feed the server's result back into the conversation" in {
     val toolMessages = runAgent("echo", ujson.Obj("message" -> "hello from the agent"))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("Echo: hello from the agent")
   }
 
@@ -247,7 +247,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
     // as discovered - so the missing `b` is reported back to the model rather than summed.
     val toolMessages = runAgent("get-sum", ujson.Obj("a" -> 2))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     (toolMessages.head.content should not).include("The sum of")
     toolMessages.head.content should include("$.b: required property missing")
   }

@@ -79,7 +79,7 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
   "ContextPruning's default counter" should "count media, so a media-only message is not free" in {
     ContextPruning.defaultTokenCounter(UserMessage(Vector(chart))) shouldBe
       ContextPruning.defaultTokenCounter(UserMessage("")) + ContentPart.EstimatedImageTokens
-    ContextPruning.defaultTokenCounter(ToolMessage(Vector(ContentPart.Text("a b"), chart), "c")) shouldBe
-      ContextPruning.defaultTokenCounter(ToolMessage("a b", "c")) + ContentPart.EstimatedImageTokens
+    ContextPruning.defaultTokenCounter(ToolMessage(Vector(ContentPart.Text("a b"), chart), ToolCallId("c"))) shouldBe
+      ContextPruning.defaultTokenCounter(ToolMessage("a b", ToolCallId("c"))) + ContentPart.EstimatedImageTokens
   }
 }

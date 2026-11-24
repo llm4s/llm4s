@@ -166,7 +166,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val thread  = ThreadId("cut-mid-turn")
     val history = Seq(
       UserMessage("look it up"),
-      AssistantMessage(None, Seq(ToolCall("call-1", "lookup", ujson.Obj("q" -> "x"))))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj("q" -> "x"))))
     )
 
     val error = agent.run(thread, "and?", RunConfig(), history).error

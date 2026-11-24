@@ -1,8 +1,10 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.HarnessTestSupport.stateOf
-import org.llm4s.agent.graph.{ IdempotencyKey, StateKey, StateUpdate, ToolCallId }
+import org.llm4s.agent.graph.{ StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.{ LockKey, ToolContext }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result

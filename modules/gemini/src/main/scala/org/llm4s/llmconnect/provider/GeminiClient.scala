@@ -389,7 +389,7 @@ class GeminiClient(
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
-        am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
+        am.toolCalls.foreach(tc => toolCallIdToName(tc.id.asString) = tc.name)
         // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
         // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
         // goes back verbatim with it
@@ -412,7 +412,7 @@ class GeminiClient(
         // Gemini uses functionResponse for tool results
         // The name field should be the function name, not the tool call ID
         // Look up the function name from our mapping, fallback to toolCallId if not found
-        val functionName = toolCallIdToName.getOrElse(toolCallId, toolCallId)
+        val functionName = toolCallIdToName.getOrElse(toolCallId.asString, toolCallId.asString)
         contents += ujson.Obj(
           "role" -> "user",
           "parts" -> ujson.Arr(
@@ -423,7 +423,7 @@ class GeminiClient(
                   "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
-                if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId
+                if (callIdsSentWithId.contains(toolCallId.asString)) response("id") = toolCallId.asString
                 response
               }
             )

@@ -35,7 +35,7 @@ object TextOnlyThreadFixture:
       Schema.`object`[Arg](name).withRequiredField("text", Schema.string("Text"))
     )
 
-  def call(id: String, name: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> "x"))
+  def call(id: String, name: String): ToolCall = ToolCall(ToolCallId(id), name, ujson.Obj("text" -> "x"))
 
   def completion(message: AssistantMessage): Completion =
     Completion(

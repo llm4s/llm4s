@@ -57,7 +57,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
     Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
-    val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
+    val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = ujson.Obj("v" -> "x")))
     Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 

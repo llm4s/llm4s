@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ AgentStatus, Suspension }
-import org.llm4s.agent.graph.{ IdempotencyKey, InterruptId }
+import org.llm4s.agent.graph.InterruptId
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
@@ -15,11 +15,12 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UsageSummary,
   UserMessage
 }
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, ToolBuilder, ToolRegistry }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -150,7 +151,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     system.role shouldBe JMessageRole.SYSTEM
     system.content shouldBe "be brief"
 
-    val tool = FacadeInternals.message(ToolMessage("42", "call-1"))
+    val tool = FacadeInternals.message(ToolMessage("42", ToolCallId("call-1")))
     tool.role shouldBe JMessageRole.TOOL
     tool.content shouldBe "42"
     tool.toolCallId shouldBe Optional.of("call-1")
@@ -162,19 +163,22 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     FacadeInternals.message(UserMessage(null: String)).content shouldBe ""
     FacadeInternals.message(SystemMessage(null)).content shouldBe ""
     FacadeInternals.message(AssistantMessage(Some(null))).content shouldBe ""
-    val tool = FacadeInternals.message(ToolMessage(null: String, null))
+    val tool = FacadeInternals.message(ToolMessage(null: String, ToolCallId(null)))
     tool.content shouldBe ""
     tool.toolCallId shouldBe Optional.empty
     tool.toString shouldBe "TOOL: "
   }
 
   it should "render a call's ujson.Str arguments as a JSON string literal" in {
-    FacadeInternals.toolCall(ToolCall("c1", "say", ujson.Str("hi"))).argumentsJson shouldBe "\"hi\""
+    FacadeInternals.toolCall(ToolCall(ToolCallId("c1"), "say", ujson.Str("hi"))).argumentsJson shouldBe "\"hi\""
   }
 
   it should "read an assistant message's tool calls, as JSON text, and its reasoning" in {
-    val calls = Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1, "b" -> 2)), ToolCall("c2", "now", ujson.Obj()))
-    val m     = FacadeInternals.message(AssistantMessage(None, calls).withThinking("adding first"))
+    val calls = Seq(
+      ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1, "b" -> 2)),
+      ToolCall(ToolCallId("c2"), "now", ujson.Obj())
+    )
+    val m = FacadeInternals.message(AssistantMessage(None, calls).withThinking("adding first"))
     m.role shouldBe JMessageRole.ASSISTANT
     m.content shouldBe ""
     m.toolCallId shouldBe Optional.empty
@@ -192,18 +196,22 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "be a value, as its tool calls are" in {
-    val m = FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
-    m shouldBe FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
+    val m = FacadeInternals.message(AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1)))))
+    m shouldBe FacadeInternals.message(
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1))))
+    )
     m.hashCode shouldBe FacadeInternals
-      .message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)))))
+      .message(AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1)))))
       .hashCode
-    m should not be FacadeInternals.message(AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 2)))))
+    m should not be FacadeInternals.message(
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 2))))
+    )
     m should not be "ASSISTANT: "
 
     val call = m.toolCalls.get(0)
-    call shouldBe FacadeInternals.toolCall(ToolCall("c1", "add", ujson.Obj("a" -> 1)))
-    call.hashCode shouldBe FacadeInternals.toolCall(ToolCall("c1", "add", ujson.Obj("a" -> 1))).hashCode
-    call should not be FacadeInternals.toolCall(ToolCall("c2", "add", ujson.Obj("a" -> 1)))
+    call shouldBe FacadeInternals.toolCall(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1)))
+    call.hashCode shouldBe FacadeInternals.toolCall(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1))).hashCode
+    call should not be FacadeInternals.toolCall(ToolCall(ToolCallId("c2"), "add", ujson.Obj("a" -> 1)))
     call should not be "c1"
   }
 
@@ -375,7 +383,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def toolCall: Completion = {
-    val call = ToolCall("call-1", "echo", ujson.Obj("input" -> "hi"))
+    val call = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("input" -> "hi"))
     Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call)))
   }
 

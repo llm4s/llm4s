@@ -6,7 +6,7 @@ import org.llm4s.agent.{ AgentTraceSpans, CompletionFixture }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.ToolCall
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId }
 import org.llm4s.trace.{ TraceContext, TraceEvent }
 import org.scalatest.{ EitherValues, LoneElement, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -79,7 +79,7 @@ class SpanTreeSpec
     val task   = own.collect { case e: TraceEvent.CustomEvent if e.name == "agent.tool_executed" => e }.loneElement
     val origin = agent.children(ThreadId("t1")).value.loneElement.origin
     task.span.value.context shouldBe AgentTraceSpans.toolCall(runSpan.context, origin.call)
-    task.data("payload")("idempotencyKey").str shouldBe origin.call.value
+    task.data("payload")("idempotencyKey").str shouldBe origin.call.asString
     !task.span.value.startedAt.isAfter(task.timestamp) shouldBe true
 
     // the child's run is under the task call's span, and its events under the child's run
@@ -318,7 +318,7 @@ class SpanTreeSpec
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
         childCalls.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ProcessingError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }

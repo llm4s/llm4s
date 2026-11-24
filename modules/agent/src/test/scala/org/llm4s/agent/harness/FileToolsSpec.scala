@@ -15,7 +15,7 @@ import org.llm4s.agent.graph.middleware.{
 }
 import org.llm4s.agent.graph.tool.{ AgentTool, LockKey, Operation, ToolContext, ToolOutcome, ToolResource, ToolSet }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -36,7 +36,7 @@ class FileToolsSpec extends AnyFlatSpec with Matchers with EitherValues {
   /** One model message calling each of `calls` (a tool name and its arguments). */
   private def batch(calls: (String, ujson.Obj)*): Completion =
     CompletionFixture.withMessage(
-      AssistantMessage(None, calls.map((name, args) => ToolCall(s"c${ids.next()}", name, args)))
+      AssistantMessage(None, calls.map((name, args) => ToolCall(ToolCallId(s"c${ids.next()}"), name, args)))
     )
 
   /** A tool error as the loop records it for the model. */

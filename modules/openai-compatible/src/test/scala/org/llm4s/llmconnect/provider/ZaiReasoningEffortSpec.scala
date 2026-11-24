@@ -23,7 +23,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
 
   private val plain = Conversation(Seq(UserMessage("Is 91 prime?")))
 
-  private val call = ToolCall("call-1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   /** A conversation whose assistant turn replays reasoning, so `clear_thinking` is set too. */
   private val replaying = Conversation(

@@ -95,9 +95,9 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   }
 
   "GeminiParts.check" should "refuse media in a tool result and another provider's file, naming the part" in {
-    val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
+    val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())))
     GeminiParts
-      .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), "c1")), gemini)
+      .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), ToolCallId("c1"))), gemini)
       .left
       .value shouldBe
       UnsupportedContentPartError("gemini", inline.kind, "tool")
@@ -120,12 +120,12 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     (http.onPost _).when(*, *, *, *).onCall { (_, _, body, _) =>
       sent.set(body); Right(HttpResponse(200, successBody, Map.empty))
     }
-    val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
+    val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())))
     val conversation = Conversation(
       Seq(
         UserMessage(Vector(ContentPart.Text("look"), inline)),
         assistant,
-        ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1")
+        ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1"))
       )
     )
     client(http).complete(conversation, CompletionOptions()).isRight shouldBe true

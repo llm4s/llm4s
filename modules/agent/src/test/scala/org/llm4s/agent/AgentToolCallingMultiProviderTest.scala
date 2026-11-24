@@ -36,7 +36,7 @@ class AgentToolCallingMultiProviderTest extends AnyFlatSpec with Matchers {
     built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get))
   }
 
-  private def add(id: String, item: String) = ToolCall(id, "add_inventory_item", ujson.Obj("item" -> item))
+  private def add(id: String, item: String) = ToolCall(ToolCallId(id), "add_inventory_item", ujson.Obj("item" -> item))
 
   "Agent" should "handle the complete tool calling flow and a follow-up turn" in {
     val client = ScriptedLLMClient.of(
@@ -51,7 +51,7 @@ class AgentToolCallingMultiProviderTest extends AnyFlatSpec with Matchers {
     val first        = agent.run("I want to take the sword").value
     val toolMessages = first.messages.collect { case tm: ToolMessage => tm }
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call_test_123"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call_test_123")
     toolMessages.head.content should include("sword")
     first.answer.get should include("inventory")
 

@@ -35,7 +35,7 @@ object LocksFixture:
 
   final case class Arg(text: String) derives ReadWriter
 
-  def call(id: String): ToolCall = ToolCall(id, "step", ujson.Obj("text" -> id))
+  def call(id: String): ToolCall = ToolCall(ToolCallId(id), "step", ujson.Obj("text" -> id))
 
   def completion(message: AssistantMessage): Completion =
     Completion(
@@ -77,7 +77,7 @@ object LocksFixture:
       .builder("assistant", client)
       .withSystemPrompt("You are a fixture.")
       .withTools(ToolSet.of(step).fold(e => throw new IllegalStateException(e.message), identity))
-      .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+      .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("review")))
       .withRuntime(GraphRuntime(store))
       .build()
       .fold(e => throw new IllegalStateException(e.message), identity)

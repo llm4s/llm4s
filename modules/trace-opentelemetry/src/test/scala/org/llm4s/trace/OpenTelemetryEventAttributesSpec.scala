@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.model.{
   ServiceTier,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -96,8 +97,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         content = "done",
         timestamp = at,
         input = Seq(
-          AssistantMessage(None, Seq(ToolCall("call-1", "search", arguments))),
-          ToolMessage("f" * (limit + 1), "call-1")
+          AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "search", arguments))),
+          ToolMessage("f" * (limit + 1), ToolCallId("call-1"))
         )
       )
       val (_, attributes) = mapped(event, captureContent = true)
@@ -431,7 +432,9 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       kind(TraceEvent.CacheHit(0.97, 0.9, at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired, at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.RAGOperationCompleted("index", 1.second, timestamp = at)) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.ToolExecuted("search", "in", "out", 100.millis, true, at)) shouldBe SpanKind.INTERNAL
+      kind(
+        TraceEvent.ToolExecuted("search", ToolCallId("in").asString, "out", 100.millis, true, at)
+      ) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CustomEvent(TraceAttributes.AgentToolExecuted, ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CustomEvent("x", ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
       kind(

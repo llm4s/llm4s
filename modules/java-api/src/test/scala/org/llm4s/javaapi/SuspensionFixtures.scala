@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolCallId }
 import org.llm4s.toolapi.Schema
 import upickle.default.ReadWriter
 
@@ -38,7 +38,7 @@ private[javaapi] object SuspensionFixtures {
       ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
   }
 
-  def call(id: String, name: String, text: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
+  def call(id: String, name: String, text: String): ToolCall = ToolCall(ToolCallId(id), name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion =
     Completion("turn", Instant.EPOCH, ModelName("m"), AssistantMessage(None, calls))

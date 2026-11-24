@@ -19,6 +19,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   UserMessage
 }
 import org.llm4s.toolapi.Schema
@@ -219,7 +220,7 @@ object Fixtures {
         onComplete = () => {
           val n = calls.getAndIncrement()
           if (n < turns) {
-            val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
+            val call = ToolCall(ToolCallId(s"call-$n"), "pinger", ujson.Obj("text" -> "x"))
             Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
           } else if (n == turns)
             Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("done"))))

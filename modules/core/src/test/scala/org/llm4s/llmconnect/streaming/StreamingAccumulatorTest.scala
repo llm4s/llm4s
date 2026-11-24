@@ -44,8 +44,8 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("should accumulate tool calls") {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
 
-    val toolCall1 = ToolCall("tool-1", "function1", ujson.Obj("arg" -> "value1"))
-    val toolCall2 = ToolCall("tool-2", "function2", ujson.Obj("arg" -> "value2"))
+    val toolCall1 = ToolCall(ToolCallId("tool-1"), "function1", ujson.Obj("arg" -> "value1"))
+    val toolCall2 = ToolCall(ToolCallId("tool-2"), "function2", ujson.Obj("arg" -> "value2"))
 
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(toolCall1), None))
     accumulator.addChunk(StreamedChunk("msg-1", Some("text"), None, None))
@@ -60,7 +60,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("the completion's toolCalls and content are its message's (#2807)") {
     // the completion used to hold a second, empty `toolCalls` beside the message's, which each client copied over
     val accumulator = StreamingAccumulator(ModelName("test-model"))
-    val call        = ToolCall("tool-1", "function1", ujson.Obj("arg" -> "value1"))
+    val call        = ToolCall(ToolCallId("tool-1"), "function1", ujson.Obj("arg" -> "value1"))
     accumulator.addChunk(StreamedChunk("msg-1", Some("text"), None, None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(call), Some(FinishReason.ToolCalls)))
 
@@ -145,15 +145,15 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
 
     // Simulate receiving tool call in parts — empty sentinel signals "no args yet"
-    val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Obj())
-    val partialCall2 = ToolCall("tool-1", "", ujson.Obj("location" -> "SF"))
+    val partialCall1 = ToolCall(ToolCallId("tool-1"), "get_weather", ujson.Obj())
+    val partialCall2 = ToolCall(ToolCallId("tool-1"), "", ujson.Obj("location" -> "SF"))
 
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall2), None))
 
     val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(1)
-    toolCalls.head.id shouldBe "tool-1"
+    toolCalls.head.id shouldBe ToolCallId("tool-1")
     toolCalls.head.name shouldBe "get_weather"
   }
 
@@ -161,7 +161,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
 
     // Empty Obj() is the sentinel for "no arguments yet" — should not be appended
-    val sentinelCall = ToolCall("tool-1", "get_weather", ujson.Obj())
+    val sentinelCall = ToolCall(ToolCallId("tool-1"), "get_weather", ujson.Obj())
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(sentinelCall), None))
 
     val toolCalls = accumulator.currentToolCalls
@@ -174,8 +174,8 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
 
     // Partial JSON arrives as ujson.Str fragments
-    val partial1 = ToolCall("tool-1", "search", ujson.Str("{\"query\":"))
-    val partial2 = ToolCall("tool-1", "", ujson.Str("\"hello world\"}"))
+    val partial1 = ToolCall(ToolCallId("tool-1"), "search", ujson.Str("{\"query\":"))
+    val partial2 = ToolCall(ToolCallId("tool-1"), "", ujson.Str("\"hello world\"}"))
 
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial2), None))
@@ -188,8 +188,8 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("should assemble tool call arguments from raw JSON fragments") {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
 
-    val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Str("{\"location\":"))
-    val partialCall2 = ToolCall("tool-1", "", ujson.Str("\"SF\"}"))
+    val partialCall1 = ToolCall(ToolCallId("tool-1"), "get_weather", ujson.Str("{\"location\":"))
+    val partialCall2 = ToolCall(ToolCallId("tool-1"), "", ujson.Str("\"SF\"}"))
 
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall2), None))
@@ -425,11 +425,13 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     // Each call opens with its id, name and first fragment, then all continue interleaved.
     ids.zipWithIndex.foreach { (id, i) =>
-      accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall(id, s"tool_$i", ujson.Str("{\"n\":"))), None))
+      accumulator.addChunk(
+        StreamedChunk("msg-1", None, Some(ToolCall(ToolCallId(id), s"tool_$i", ujson.Str("{\"n\":"))), None)
+      )
     }
     ids.reverse.zipWithIndex.foreach { (id, i) =>
       accumulator.addChunk(
-        StreamedChunk("msg-1", None, Some(ToolCall(id, "", ujson.Str(s"${ids.size - 1 - i}}"))), None)
+        StreamedChunk("msg-1", None, Some(ToolCall(ToolCallId(id), "", ujson.Str(s"${ids.size - 1 - i}}"))), None)
       )
     }
 
@@ -449,7 +451,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("tool-call arguments nested too deeply are never parsed: a raw Str live, a Left at the end") {
     val deep        = "[" * 100000 + "]" * 100000
     val accumulator = StreamingAccumulator(ModelName("test-model"))
-    accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "f", ujson.Str(deep))), None))
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall(ToolCallId("call-1"), "f", ujson.Str(deep))), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(FinishReason.ToolCalls)))
 
     SmallStack.run(accumulator.currentToolCalls.map(_.arguments == ujson.Str(deep))) shouldBe Right(Seq(true))
@@ -463,9 +465,13 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
   private def streamed(arguments: Seq[String], reason: Option[FinishReason]): Result[Completion] = {
     val accumulator = StreamingAccumulator(ModelName("test-model"))
-    accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "lookup", ujson.Obj())), None))
+    accumulator.addChunk(
+      StreamedChunk("msg-1", None, Some(ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj())), None)
+    )
     arguments.foreach { fragment =>
-      accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "", ujson.Str(fragment))), None))
+      accumulator.addChunk(
+        StreamedChunk("msg-1", None, Some(ToolCall(ToolCallId("call-1"), "", ujson.Str(fragment))), None)
+      )
     }
     reason.foreach(r => accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(r))))
     accumulator.toCompletion(Instant.EPOCH)

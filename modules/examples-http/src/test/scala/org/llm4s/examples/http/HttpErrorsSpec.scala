@@ -1,6 +1,7 @@
 package org.llm4s.examples.http
 
-import org.llm4s.agent.graph.{ GraphError, NodeId, StateKeyId, TaskId, ToolCallId, ToolName }
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.agent.graph.{ GraphError, NodeId, StateKeyId, TaskId, ToolName }
 import org.llm4s.error.{
   AuthenticationError,
   ConfigurationError,

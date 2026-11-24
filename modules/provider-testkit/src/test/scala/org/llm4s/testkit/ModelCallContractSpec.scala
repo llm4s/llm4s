@@ -39,7 +39,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         .body()
 
     private def callsOf(json: ujson.Value): List[ToolCall] =
-      json.obj.get("calls").toList.flatMap(_.arr).map(c => ToolCall(c("id").str, c("name").str, c("args")))
+      json.obj.get("calls").toList.flatMap(_.arr).map(c => ToolCall(ToolCallId(c("id").str), c("name").str, c("args")))
 
     private def completion(text: String, calls: List[ToolCall], finish: FinishReason): Result[Completion] =
       val broken = calls.exists(_.arguments.objOpt.isEmpty) || (calls.nonEmpty && finish == FinishReason.Length)

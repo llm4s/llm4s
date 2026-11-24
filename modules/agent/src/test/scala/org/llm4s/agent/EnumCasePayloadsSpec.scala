@@ -1,11 +1,12 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.delegation.{ ChildInterrupt, ChildRef, DelegatedRequest }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.middleware.MiddlewareId
 import org.llm4s.agent.graph.tool.{ ToolContent, ToolOutcome, ToolSuccess }
 import org.llm4s.agent.graph.toolloop._
-import org.llm4s.llmconnect.model.{ ToolCall, UsageSummary }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, UsageSummary }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -29,7 +30,7 @@ class EnumCasePayloadsSpec extends AnyFlatSpec with Matchers {
     base.breakpoints shouldBe empty
     base.delegated shouldBe empty
 
-    val call     = ToolCall("call-1", "deploy", ujson.Obj())
+    val call     = ToolCall(ToolCallId("call-1"), "deploy", ujson.Obj())
     val key      = IdempotencyKey("call-1")
     val approval = InterruptId("a") -> ApprovalRequest("m1", call, "risky", ApprovalSource.Tool, key)
     val question = InterruptId("q") -> ToolQuestionRequest("m1", call, ujson.Str("which?"), key)

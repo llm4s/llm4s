@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.testutil.TestTimeLimit
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -30,7 +31,7 @@ class GraphIdsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     IdType[InterruptId]("InterruptId", InterruptId.apply, _.value),
     IdType[TenantId]("TenantId", TenantId.apply, _.value),
     IdType[Principal]("Principal", Principal.apply, _.value),
-    IdType[ToolCallId]("ToolCallId", ToolCallId.apply, _.value),
+    IdType[ToolCallId]("ToolCallId", ToolCallId.apply, _.asString),
     IdType[ToolName]("ToolName", ToolName.apply, _.value)
   )
 

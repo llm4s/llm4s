@@ -206,7 +206,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val calls = new java.util.concurrent.atomic.AtomicInteger(0)
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       val n    = calls.incrementAndGet()
-      val call = ToolCall(s"c$n", "add", ujson.Obj("a" -> 1, "b" -> 2))
+      val call = ToolCall(ToolCallId(s"c$n"), "add", ujson.Obj("a" -> 1, "b" -> 2))
       Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =

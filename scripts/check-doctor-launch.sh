@@ -27,12 +27,12 @@ trap 'rm -rf "$WORK"' EXIT
 fail=0
 note() { printf '%s\n' "$*"; }
 
-OLLAMA_CONF='llm4s.providers {
-  provider = "local"
+OLLAMA_CONF='llm4s.defaultProvider = "local"
+llm4s.providers {
   local { provider = "ollama", model = "llama3", baseUrl = "http://localhost:11434" }
 }'
-OPENAI_CONF='llm4s.providers {
-  provider = "main"
+OPENAI_CONF='llm4s.defaultProvider = "main"
+llm4s.providers {
   main { provider = "openai", model = "gpt-4o-mini", apiKey = "sk-doctor-launch-check-0123456789" }
 }'
 

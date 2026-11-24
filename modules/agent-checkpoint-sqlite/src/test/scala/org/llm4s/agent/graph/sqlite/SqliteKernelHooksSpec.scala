@@ -86,7 +86,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("hooks-recover")
     val failing = new AtomicBoolean(true)
-    val calling = AssistantMessage(None, Seq(ToolCall("c1", "write", ujson.Obj("text" -> "one"))))
+    val calling = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "write", ujson.Obj("text" -> "one"))))
     // the second model call, after the tool batch, fails once
     val loop  = loopOf(new Model(failing, 1, calling, AssistantMessage("done"), AssistantMessage("done")))
     val first = SqliteFiles.opened(db, Clock.systemUTC())
@@ -114,7 +114,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("hooks-block")
     val failing = new AtomicBoolean(true)
-    val calling = AssistantMessage(None, Seq(ToolCall("c1", "write", ujson.Obj("text" -> "two"))))
+    val calling = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "write", ujson.Obj("text" -> "two"))))
     val loop    = loopOf(new Model(failing, 1, calling, AssistantMessage("a secret"), AssistantMessage("a secret")))
     val first   = SqliteFiles.opened(db, Clock.systemUTC())
     result(GraphRuntime(first).start(thread, loop.graph, AgentInput("go"))) shouldBe a[RunResult.Failed]

@@ -7,7 +7,7 @@ import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.MistralConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolCallId, ToolMessage, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
@@ -698,7 +698,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       exchange.getResponseBody.close()
     } { baseUrl =>
       val client           = new MistralClient(config(baseUrl))
-      val toolConversation = Conversation(Seq(UserMessage("Hello"), ToolMessage("tool result", "call-123")))
+      val toolConversation = Conversation(Seq(UserMessage("Hello"), ToolMessage("tool result", ToolCallId("call-123"))))
 
       client.complete(toolConversation, CompletionOptions()).map(_.content) shouldBe Right("done")
     }

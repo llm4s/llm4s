@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -15,7 +15,7 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
     Completion("r", Instant.EPOCH, ModelName("m"), AssistantMessage(None, calls.toList))
       .withFinishReason(reason)
 
-  private val call = ToolCall("c1", "lookup", ujson.Obj("q" -> "x"))
+  private val call = ToolCall(ToolCallId("c1"), "lookup", ujson.Obj("q" -> "x"))
 
   private def malformed(result: Either[?, ?]): Boolean = result match {
     case Left(e: ProcessingError) => e.message.contains("malformed tool call")
@@ -35,13 +35,16 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
 
   it should "fail a call whose arguments are not a JSON object (rule 1)" in {
     Seq[ujson.Value](ujson.Str("{\"q\":"), ujson.Arr(1), ujson.Num(1), ujson.Null).foreach { arguments =>
-      malformed(ToolCallRules.checked(reply(FinishReason.ToolCalls, ToolCall("c1", "lookup", arguments)))) shouldBe true
+      malformed(
+        ToolCallRules.checked(reply(FinishReason.ToolCalls, ToolCall(ToolCallId("c1"), "lookup", arguments)))
+      ) shouldBe true
     }
   }
 
   "wholeCall" should "keep a whole call's explicit {} as arguments the accumulator reads, whatever the finish" in {
     val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName("test-model"))
-    val chunk = org.llm4s.llmconnect.model.StreamedChunk("m", None, Some(ToolCall("c1", "now", ujson.Obj())), None)
+    val chunk =
+      org.llm4s.llmconnect.model.StreamedChunk("m", None, Some(ToolCall(ToolCallId("c1"), "now", ujson.Obj())), None)
     accumulator.addChunk(ToolCallRules.wholeCall(chunk))
     accumulator.addChunk(org.llm4s.llmconnect.model.StreamedChunk("m", None, None, Some(FinishReason.Other("OTHER"))))
     accumulator.toCompletion.map(_.message.toolCalls.map(_.arguments)) shouldBe Right(Seq(ujson.Obj()))

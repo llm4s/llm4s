@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{
   AgentTool,
@@ -12,7 +13,7 @@ import org.llm4s.agent.graph.tool.{
 }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.agent.graph.toolloop.ToolLoopFixtures
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolCallId, UserMessage }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -87,7 +88,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val request = ToolCallRequest(
     AgentToolSpec[Search]("search", "Searches", searchSchema),
-    ToolCall("call-1", "search", ujson.Obj("query" -> "x"))
+    ToolCall(ToolCallId("call-1"), "search", ujson.Obj("query" -> "x"))
   )
   private val modelRequest = ModelRequest(Vector.empty, ToolSet.of().value)
 

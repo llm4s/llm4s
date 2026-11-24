@@ -139,7 +139,10 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       Right(
         AssistantMessage(
           None,
-          Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "r1")), ToolCall("c2", "echo", ujson.Obj("text" -> "r2")))
+          Seq(
+            ToolCall(ToolCallId("c1"), "echo", ujson.Obj("text" -> "r1")),
+            ToolCall(ToolCallId("c2"), "echo", ujson.Obj("text" -> "r2"))
+          )
         )
       )
     })

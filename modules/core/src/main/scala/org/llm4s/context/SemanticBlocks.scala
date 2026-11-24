@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory
  * val messages = Seq(
  *   UserMessage("What's the weather?"),
  *   AssistantMessage("I'll check for you..."),
- *   ToolMessage("""{"temp": 72}""", "call_1"),
+ *   ToolMessage("""{"temp": 72}""", ToolCallId("call_1")),
  *   AssistantMessage("It's 72 degrees.")
  * )
  * val blocks = SemanticBlocks.groupIntoSemanticBlocks(messages)

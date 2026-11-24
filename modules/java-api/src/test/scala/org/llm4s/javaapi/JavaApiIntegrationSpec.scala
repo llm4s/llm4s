@@ -32,7 +32,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
         callCount += 1
         if (callCount == 1) {
-          val tc  = ToolCall("call-1", toolName, toolArgs)
+          val tc  = ToolCall(ToolCallId("call-1"), toolName, toolArgs)
           val msg = AssistantMessage(text = None, toolCalls = Seq(tc))
           Right(Completion("id", Instant.EPOCH, ModelName("test-model"), msg))
         } else {

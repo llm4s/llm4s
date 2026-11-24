@@ -29,7 +29,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
       dialect
     )
 
-  private val call = ToolCall("abcdefghi", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("abcdefghi"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   private val history = Conversation(
     Seq(

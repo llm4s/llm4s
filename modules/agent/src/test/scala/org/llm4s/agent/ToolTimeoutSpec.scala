@@ -1,10 +1,11 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
-import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, StateKey, StateUpdate, ThreadId }
+import org.llm4s.agent.graph.{ GraphError, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.llmconnect.model._

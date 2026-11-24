@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.events.GuardrailPhase
@@ -8,7 +9,6 @@ import org.llm4s.agent.graph.{
   EventRecord,
   GraphError,
   GraphRuntime,
-  IdempotencyKey,
   InMemoryCheckpointer,
   InterruptId,
   RunEvent,
@@ -509,7 +509,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     approval.answered shouldBe empty
     approval.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     approval.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
-    approval.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    approval.withCall(call("c2", "deploy")).call.id shouldBe ToolCallId("c2")
     approval.withReason("because").reason shouldBe "because"
     approval.withSource(ApprovalSource.Middleware(mw)).source shouldBe ApprovalSource.Middleware(mw)
     approval.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
@@ -518,7 +518,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     (question.approved, question.answered) shouldBe ((false, Vector.empty))
     question.withIdempotencyKey(IdempotencyKey("key-2")).idempotencyKey shouldBe IdempotencyKey("key-2")
     question.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
-    question.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    question.withCall(call("c2", "deploy")).call.id shouldBe ToolCallId("c2")
     question.withQuestion(ujson.Num(3)).question shouldBe ujson.Num(3)
     question.withApproved(true).approved shouldBe true
     question.withAnswered(Vector(given1)).answered shouldBe Vector(given1)

@@ -56,7 +56,7 @@ class SqliteAbandonSpec extends AnyFlatSpec with Matchers with EitherValues with
   }
 
   private def results(messages: Seq[Message]): Vector[(String, String)] =
-    messages.collect { case t: ToolMessage => t.toolCallId -> t.content }.toVector
+    messages.collect { case t: ToolMessage => t.toolCallId.asString -> t.content }.toVector
 
   "Agent.abandon over SQLite" should "close a turn another process crashed in, from what the file holds" in {
     val file   = SqliteFiles.fresh()

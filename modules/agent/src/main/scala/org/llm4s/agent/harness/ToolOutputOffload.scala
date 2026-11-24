@@ -73,7 +73,7 @@ final class ToolOutputOffload(
         text.filter(_.length.toLong > thresholdChars) match
           case None => unchanged
           case Some(large) =>
-            val segment = segmentOf(context.idempotencyKey.value)
+            val segment = segmentOf(context.idempotencyKey.asString)
             val tool    = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
             // the key and the tool name take at most MetadataBytes, so the entry always fits the bound on its own
             val (stored, isCut) = Text.cutEncoded(large, maxResultBytes)

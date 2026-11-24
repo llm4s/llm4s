@@ -347,11 +347,16 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     // From #1035 by @kannupriyakalra: the spans are only one trace in Langfuse if they share its id.
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
-    val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+    val call    = ToolCall(ToolCallId("call-1"), "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
     val event = ended(
       TraceEvent.RunStatus.Completed,
-      Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
+      Seq(
+        UserMessage("1 + 2?"),
+        AssistantMessage(None, Seq(call)),
+        ToolMessage("3", ToolCallId("call-1")),
+        AssistantMessage("3")
+      )
     )
 
     tracing.traceEvent(event) shouldBe Right(())
@@ -425,7 +430,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1))
+    val toolCall = ToolCall(ToolCallId("call-1"), "calculator", ujson.Obj("a" -> 1))
     val completion = Completion(
       id = "comp-tools",
       created = Instant.EPOCH,

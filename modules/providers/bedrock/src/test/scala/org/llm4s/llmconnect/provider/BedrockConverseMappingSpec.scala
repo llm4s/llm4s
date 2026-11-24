@@ -58,8 +58,8 @@ class BedrockConverseMappingSpec extends AnyWordSpec with Matchers {
       val conv = Conversation(
         Seq(
           UserMessage("go"),
-          AssistantMessage(None, Seq(ToolCall("tc-1", "t", weatherArgs))),
-          ToolMessage(toolCallId = "tc-1", content = "done")
+          AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "t", weatherArgs))),
+          ToolMessage(toolCallId = ToolCallId("tc-1"), content = "done")
         )
       )
       val rendered = requestBody(conv)("messages")(1)("content")(0)("toolUse")("input")

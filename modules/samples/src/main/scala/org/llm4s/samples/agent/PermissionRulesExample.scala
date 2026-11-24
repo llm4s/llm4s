@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.tool.{
 }
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.samples.cookbook.ScriptedClient
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
@@ -69,9 +69,21 @@ object PermissionRulesExample {
         AssistantMessage(
           None,
           Seq(
-            ToolCall("write-source", "write_file", ujson.Obj("path" -> SourcePath, "content" -> "object A")),
-            ToolCall("write-denied", "write_file", ujson.Obj("path" -> DeniedPath, "content" -> "not allowed")),
-            ToolCall("write-deploy", "write_file", ujson.Obj("path" -> DeployPath, "content" -> "app: demo"))
+            ToolCall(
+              ToolCallId("write-source"),
+              "write_file",
+              ujson.Obj("path" -> SourcePath, "content" -> "object A")
+            ),
+            ToolCall(
+              ToolCallId("write-denied"),
+              "write_file",
+              ujson.Obj("path" -> DeniedPath, "content" -> "not allowed")
+            ),
+            ToolCall(
+              ToolCallId("write-deploy"),
+              "write_file",
+              ujson.Obj("path" -> DeployPath, "content" -> "app: demo")
+            )
           )
         )
       else AssistantMessage("The source and deployment files were written; the /etc write was denied.")

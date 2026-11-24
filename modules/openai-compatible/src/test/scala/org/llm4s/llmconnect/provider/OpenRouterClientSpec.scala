@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   ResponseFormat,
   StreamedChunk,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -106,7 +107,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize tool message with correct fields" in {
     val client      = new OpenRouterClientTestHelper(testConfig)
-    val conv        = Conversation(Seq(ToolMessage("tool-output", "call-42")))
+    val conv        = Conversation(Seq(ToolMessage("tool-output", ToolCallId("call-42"))))
     val requestBody = client.exposedCreateRequestBody(conv, CompletionOptions())
     val toolMsg     = requestBody("messages")(0)
 

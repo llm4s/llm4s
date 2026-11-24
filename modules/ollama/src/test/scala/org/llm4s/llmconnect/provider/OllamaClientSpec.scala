@@ -303,7 +303,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val conv = Conversation(messages =
       Seq(
         UserMessage("Hello"),
-        ToolMessage("tool result", "call-1")
+        ToolMessage("tool result", ToolCallId("call-1"))
       )
     )
     val body = OllamaRequestBodyTestHelper.createRequestBody(conv, CompletionOptions(), stream = false)
