@@ -81,7 +81,7 @@ llm4s {
 
     claude {                          # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
   }
 }
@@ -256,7 +256,7 @@ llm4s {
 
 ### Available Models
 
-Claude models such as `claude-opus-4-6`, `claude-sonnet-4-5` and `claude-haiku-4-5`; see
+Claude models such as `claude-opus-4-6`, `claude-sonnet-5-5` and `claude-haiku-4-5`; see
 [Anthropic's model list](https://docs.anthropic.com/en/docs/about-claude/models). The context window of each comes from
 the [model registry](../reference/model-metadata).
 
@@ -278,7 +278,7 @@ cites arrive on `Completion.citations` (see [Citations and grounding sources](#c
 ```hocon
 llm4s.providers.claude-search {
   provider  = "anthropic"
-  model     = "claude-sonnet-4-5"
+  model     = "claude-sonnet-5-5"
   webSearch = true
 }
 ```
@@ -324,7 +324,7 @@ llm4s {
 
     gemini-main {
       provider = "gemini"            # "google" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       # apiKey = ${?GEMINI_TEAM_API_KEY}   # optional; default: GOOGLE_API_KEY or GEMINI_API_KEY
       # baseUrl = "..."              # optional; default https://generativelanguage.googleapis.com/v1beta
     }
@@ -402,7 +402,7 @@ llm4s {
 
     vertex-main {
       provider = "vertexai"          # "vertex" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       project  = ${?VERTEXAI_PROJECT}
       location = "europe-west4"      # optional
       apiKey   = ${?GOOGLE_APPLICATION_CREDENTIALS}  # optional: path to a credential file
@@ -468,8 +468,8 @@ unchanged.
 > mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
-> which held; it has not been run yet. Until it has
-> been run, treat tool calling and streaming as unconfirmed.
+> which held; it had not been run as of 2026-11-24, so `llm4s-watsonx` ships unverified against the live service.
+> Until it has been run, treat tool calling and streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
@@ -605,8 +605,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
 ```hocon
 llm4s.providers.claude-bedrock {
   provider = "bedrock"
-  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"   # or an inference profile, us.anthropic....
-  region   = ${?AWS_REGION}                                 # required, never defaulted
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile; or a bare model id, anthropic....
+  region   = ${?AWS_REGION}                     # required, never defaulted
 }
 ```
 
@@ -628,9 +628,13 @@ variables, `~/.aws/credentials`, an EC2 instance profile, an ECS task role).
 No environment variable is read by the module itself: the `AWS_*` names above are the conventional ones, bound in
 the section with `${?...}`, or found by the AWS SDK's default chain.
 
-**Model ids** are Bedrock's, not the vendor's: `anthropic.claude-3-5-sonnet-20241022-v2:0`, not the Anthropic
-API's id for the same model. Which models a region serves, and which need an inference profile rather than the bare
-model id, is in the [Bedrock model list](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
+**Model ids** are Bedrock's, not the vendor's: `anthropic.claude-sonnet-5-5`, or its US inference profile
+`us.anthropic.claude-sonnet-5-5`, not the Anthropic API's `claude-sonnet-5-5`. Which Regions serve a model, and
+whether it takes the bare model id or only an inference profile (Claude Sonnet 5.5 takes only a profile), is on the
+model's page in the [Bedrock model cards](https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html);
+a model's Legacy and end-of-life dates are in the
+[model lifecycle](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html) pages. (Model ids
+checked 2026-11-24.)
 The context window and the completion reserve come from the [model registry](../reference/model-metadata), for a
 bare id and for an inference profile alike.
 

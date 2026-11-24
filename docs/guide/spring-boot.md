@@ -166,7 +166,7 @@ names the section the starter uses:
 ```properties
 llm4s.providers.provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
-llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.model=gemini-3.8-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
 ```
 

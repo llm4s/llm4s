@@ -57,7 +57,7 @@ llm4s needs **JDK 21**.
 |---|---|---|
 | `ChatModel`, built with e.g. `OpenAiChatModel.builder()` [L1][L3] | `ChatModel`, and the fluent `ChatClient` [S1] | `JLlmClient`, from `Llm4s.openAi()` and the other builders, or `Llm4s.createDefaultClient()`; in Spring, the `LLM4STemplate` bean |
 | An AI Service: an interface `AiServices` implements [L1] | `ChatClient.prompt().user(...).call().content()` [S1] | `Llm4s.aiService(MyService.class).client(client).build()`, with `@SystemMessage`, `@UserMessage`, `@V` and `@MemoryId` ([Java AI services](java-ai-services)); or `client.complete(prompt)` |
-| A POJO or record as an AI Service return type [L1] | `.call().entity(SomeClass.class)` [S1] | `client.complete(prompt, SomeRecord.class)` |
+| A POJO as an AI Service return type [L1] | `.call().entity(SomeClass.class)` [S1] | `client.complete(prompt, SomeRecord.class)` |
 | `@Tool` methods, `@P` parameters [L2] | `@Tool` methods, `@ToolParam` parameters; `MethodToolCallback`, `FunctionToolCallback` [S2] | `@Tool` methods with `@Param` parameters (`JTool.fromAnnotated`), or `JTool.builder(...)` with a lambda; run by a `JAgent` |
 | `ChatMemory`, `MessageWindowChatMemory`, `@MemoryId` with a `ChatMemoryProvider` [L1] | `ChatMemory`, `MessageWindowChatMemory`, `MessageChatMemoryAdvisor`, `ChatMemory.CONVERSATION_ID` [S3] | A `Conversation` you build and pass (`ConversationBuilder`), or a `JAgent` thread you continue (`continueConversation`) |
 | `EmbeddingModel` [L4] | `EmbeddingModel` [S4] | `JEmbeddingClient`, from `Llm4s.createEmbeddingClient("provider/model")` |
@@ -102,7 +102,7 @@ runs the call against `FakeLlmClient` and checks the prompt it sent.
 
 ## Structured output into a record
 
-Where LangChain4j returns a record from an AI Service method [L1] and Spring AI calls `.entity(SomeClass.class)` [S1],
+Where LangChain4j returns a POJO from an AI Service method [L1] and Spring AI calls `.entity(SomeClass.class)` [S1],
 pass the record class to `complete`:
 
 ```java
@@ -355,7 +355,7 @@ LlmResult<JLlmClient> azure = Llm4s.azureOpenAi()
     .build();
 LlmResult<JLlmClient> anthropic = Llm4s.anthropic()
     .apiKey(anthropicKey)
-    .model("claude-sonnet-4-20250514")
+    .model("claude-sonnet-5-5")
     .build();
 LlmResult<JLlmClient> ollama = Llm4s.ollama()
     .baseUrl("http://localhost:11434")
@@ -375,7 +375,7 @@ llm4s {
 
     claude-bedrock {
       provider = "bedrock"
-      model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      model    = "us.anthropic.claude-sonnet-5-5"
       region   = "us-east-1"
     }
   }
@@ -387,7 +387,7 @@ The same in Spring Boot, where the starter reads properties rather than `applica
 ```properties
 llm4s.providers.provider=claude-bedrock
 llm4s.providers.claude-bedrock.provider=bedrock
-llm4s.providers.claude-bedrock.model=anthropic.claude-3-5-sonnet-20241022-v2:0
+llm4s.providers.claude-bedrock.model=us.anthropic.claude-sonnet-5-5
 llm4s.providers.claude-bedrock.region=us-east-1
 ```
 
@@ -419,12 +419,12 @@ Plainly, as of this page's sources:
 
 ## Sources
 
-Fetched on 2026-11-04, against LangChain4j 1.23.0 and Spring AI 2.0.2 (and 1.1 for the Azure row).
+Fetched on 2026-11-24, against LangChain4j 1.24.0 and Spring AI 2.1.0 (and 1.1 for the Azure row).
 
 | Tag | Page | Names used |
 |---|---|---|
 | L1 | [LangChain4j: AI Services](https://docs.langchain4j.dev/tutorials/ai-services) | `AiServices`, `ChatModel`, `StreamingChatModel`, `TokenStream`, `ChatMemory`, `MessageWindowChatMemory`, `@MemoryId`, `ChatMemoryProvider`, `ContentRetriever`, return types (POJO, `Flux<String>`, `CompletableFuture`) |
-| L2 | [LangChain4j: tools](https://docs.langchain4j.dev/tutorials/tools) | `@Tool`, `@P` (`dev.langchain4j.agent.tool`) |
+| L2 | [LangChain4j: tools](https://docs.langchain4j.dev/tutorials/tools) | `@Tool`, `@P` (package `dev.langchain4j.agent.tool`, from the [Javadoc](https://docs.langchain4j.dev/apidocs/dev/langchain4j/agent/tool/package-summary.html)) |
 | L3 | [LangChain4j: OpenAI](https://docs.langchain4j.dev/integrations/language-models/open-ai) | `OpenAiChatModel.builder()`, `apiKey`, `modelName`, `langchain4j.open-ai.chat-model.*` |
 | L4 | [LangChain4j: RAG](https://docs.langchain4j.dev/tutorials/rag) | `EmbeddingModel`, `EmbeddingStore`, `EmbeddingStoreIngestor`, `EmbeddingStoreContentRetriever`, `RetrievalAugmentor` |
 | L5 | [LangChain4j: `dev.langchain4j.exception`](https://docs.langchain4j.dev/apidocs/dev/langchain4j/exception/package-tree.html) | `LangChain4jException`, `RetriableException`, `NonRetriableException` and their subclasses |
@@ -435,7 +435,7 @@ Fetched on 2026-11-04, against LangChain4j 1.23.0 and Spring AI 2.0.2 (and 1.1 f
 | L10 | [LangChain4j: Amazon Bedrock](https://docs.langchain4j.dev/integrations/language-models/amazon-bedrock) | `BedrockChatModel`, `modelId`, `region`, the Converse API |
 | S1 | [Spring AI: ChatClient](https://docs.spring.io/spring-ai/reference/api/chatclient.html) | `ChatClient`, `ChatClient.Builder`, `call().content()`, `entity()`, `stream().content()`, `MessageChatMemoryAdvisor`, `QuestionAnswerAdvisor` |
 | S2 | [Spring AI: tool calling](https://docs.spring.io/spring-ai/reference/api/tools.html) | `@Tool`, `@ToolParam`, `MethodToolCallback`, `FunctionToolCallback` |
-| S3 | [Spring AI: chat memory](https://docs.spring.io/spring-ai/reference/api/chat-memory.html) | `ChatMemory`, `MessageWindowChatMemory`, `ChatMemoryRepository`, `ChatMemory.CONVERSATION_ID` |
+| S3 | [Spring AI: chat memory](https://docs.spring.io/spring-ai/reference/api/chat-memory.html) | `ChatMemory`, `MessageWindowChatMemory`, `ChatMemoryRepository`, `ChatMemory.CONVERSATION_ID`; the page marks this API deprecated since 2.1.0, for removal in 3.0.0, in favour of session memory |
 | S4 | [Spring AI: vector databases](https://docs.spring.io/spring-ai/reference/api/vectordbs.html) | `VectorStore`, `EmbeddingModel` |
 | S5 | [Spring AI: `org.springframework.ai.retry`](https://docs.spring.io/spring-ai/docs/current/api/org/springframework/ai/retry/package-summary.html) | `TransientAiException`, `NonTransientAiException` |
 | S6 | [Spring AI: OpenAI chat](https://docs.spring.io/spring-ai/reference/api/chat/openai-chat.html) | `spring.ai.openai.api-key`, `spring.ai.openai.chat.model`, `spring.ai.retry.*` |

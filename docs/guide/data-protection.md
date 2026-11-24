@@ -143,7 +143,7 @@ For example, a section that keeps processing in the EU on Vertex AI:
 ```hocon
 llm4s.providers.gemini-eu {
   provider = "vertexai"
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = ${?VERTEXAI_PROJECT}
   location = "europe-west4"
 }

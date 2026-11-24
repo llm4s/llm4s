@@ -509,7 +509,7 @@ Java v2 `bedrockruntime` artifact (Apache-2.0, the same SDK release train `llm4s
 ```hocon
 llm4s.providers.claude-bedrock {
   provider = "bedrock"
-  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile id
   region   = ${?AWS_REGION}
 }
 ```

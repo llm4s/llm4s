@@ -245,7 +245,7 @@ llm4s {
 
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-5"
+      model    = "claude-sonnet-5-5"
     }
   }
 }

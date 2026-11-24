@@ -53,7 +53,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
 
       Llm4sConfig.defaultProvider(source) match {
         case Right(anthropic: AnthropicConfig) =>
-          anthropic.model shouldBe "claude-sonnet-4-20250514"
+          anthropic.model shouldBe "claude-sonnet-5-5"
           anthropic.apiKey.reveal shouldBe "sk-anthropic-env"
         case other => fail(s"Expected AnthropicConfig, got $other")
       }

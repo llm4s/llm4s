@@ -360,7 +360,7 @@ literal `identityToken`):
 ```hocon
 anthropic-wif {
   provider = "anthropic"
-  model    = "claude-sonnet-4-5"
+  model    = "claude-sonnet-5-5"
   auth {
     identityTokenFile = "/var/run/secrets/spiffe/anthropic"
     federationRuleId  = ${?ANTHROPIC_FEDERATION_RULE_ID}
@@ -484,12 +484,12 @@ llm4s {
 
     claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
 
     gemini-main {                         # key from GOOGLE_API_KEY or GEMINI_API_KEY
       provider = "gemini"
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
     }
 
     azure-main {                          # key from AZURE_OPENAI_API_KEY
@@ -1243,7 +1243,7 @@ llm4s {
     provider = "claude"
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
       apiKey   = ${?ANTHROPIC_API_KEY}   # explicit in production: which account this bills
     }
   }
