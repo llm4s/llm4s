@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.error.ConfigurationError
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -33,6 +34,14 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       )
       val res = EmbeddingClient.from("unknown", cfg)
       res.isLeft shouldBe true
+    }
+
+    "report an unknown provider as the registry's ConfigurationError, with no invented HTTP status" in {
+      val cfg   = EmbeddingProviderConfig(baseUrl = "http://localhost", model = "m", apiKey = Secret("k"))
+      val error = EmbeddingClient.from("unknown", cfg).left.toOption.getOrElse(fail("expected an error"))
+
+      error shouldBe a[ConfigurationError]
+      error.code shouldBe None
     }
 
     "name the registered embedding providers when one is unknown" in {

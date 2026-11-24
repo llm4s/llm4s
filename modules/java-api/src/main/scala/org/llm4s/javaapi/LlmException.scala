@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error.*
-import org.llm4s.llmconnect.model.EmbeddingError
+import org.llm4s.error.EmbeddingError
 
 import java.time.Duration
 import java.util.{ Optional, OptionalInt }

@@ -123,7 +123,7 @@ class PgSharedVectorTableSpec extends AnyFlatSpec with Matchers with BeforeAndAf
 
     // Before the fix: Left(... column "created_at" does not exist ...)
     val rag = RAG
-      .buildWithClient(RAGConfig.default.withSearchIndex(index), new EmbeddingClient(new FixedEmbeddingProvider()))
+      .buildWithClient(RAGConfig.default.withSearchIndex(index), EmbeddingClient(new FixedEmbeddingProvider()))
       .fold(e => fail(s"RAG.build failed: ${e.formatted}"), identity)
     rag.close()
     columnNames(url, table) should contain("created_at")

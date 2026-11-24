@@ -2,7 +2,8 @@ package org.llm4s.error
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.{ Completion, Conversation, EmbeddingError }
+import org.llm4s.llmconnect.model.{ Completion, Conversation }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }
 import org.llm4s.types.Result

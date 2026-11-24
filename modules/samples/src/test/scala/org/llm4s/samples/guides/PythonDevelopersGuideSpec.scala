@@ -106,7 +106,7 @@ class PythonDevelopersGuideSpec extends AnyFlatSpec with Matchers with EitherVal
     val rag = RAG
       .buildWithEmbeddings(
         RAGConfig.default.withLLM(client),
-        new EmbeddingClient(embeddings),
+        EmbeddingClient(embeddings),
         EmbeddingModelConfig("fixed", 2)
       )
       .value

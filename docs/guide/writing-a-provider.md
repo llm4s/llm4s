@@ -588,7 +588,6 @@ The transform never logs. llm4s's own clients log each adjustment at WARN once p
 ```scala
 trait EmbeddingProvider:
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse]
-  def embedMultimodal(request: MultimediaEmbeddingRequest): Result[EmbeddingResponse] // defaults to a 501 error
 ```
 
 What an `EmbeddingProviderDescriptor.build` returns. Report failures as `EmbeddingError(code,

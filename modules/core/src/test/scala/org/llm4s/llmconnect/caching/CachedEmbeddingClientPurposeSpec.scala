@@ -36,7 +36,7 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
   private def setup(): (PurposeEchoProvider, InMemoryEmbeddingCache, CachedEmbeddingClient) = {
     val provider = new PurposeEchoProvider
     val cache    = InMemoryEmbeddingCache.create().toOption.get
-    (provider, cache, new CachedEmbeddingClient(new EmbeddingClient(provider), cache))
+    (provider, cache, new CachedEmbeddingClient(EmbeddingClient(provider), cache))
   }
 
   "CachedEmbeddingClient" should "not serve a cached document vector for a query with the same text" in {
@@ -110,7 +110,7 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
     val seen  = ListBuffer.empty[(String, String, InputPurpose)]
     val cache = InMemoryEmbeddingCache.create().toOption.get
     val client = new CachedEmbeddingClient(
-      new EmbeddingClient(new PurposeEchoProvider),
+      EmbeddingClient(new PurposeEchoProvider),
       cache,
       (text, modelName, purpose) => { seen += ((text, modelName, purpose)); s"$purpose|$modelName|$text" }
     )

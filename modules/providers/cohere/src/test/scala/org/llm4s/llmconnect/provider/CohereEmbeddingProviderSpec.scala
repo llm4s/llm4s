@@ -12,7 +12,8 @@ import org.llm4s.http.{
   StreamingHttpResponse
 }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result

@@ -93,7 +93,7 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
     val withIndex  = if (permissions) config.withSearchIndex(OneChunkIndex).vectorOnly else config
     val rag =
       RAG
-        .buildWithClient(withIndex.withLLM(client), new EmbeddingClient(embeddings))
+        .buildWithClient(withIndex.withLLM(client), EmbeddingClient(embeddings))
         .fold(e => fail(e.message), identity)
     if (!permissions) rag.ingestText("The blue widget costs 42.", "doc1").fold(e => fail(e.message), identity)
     embeddings.inputs.clear()

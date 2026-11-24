@@ -1,10 +1,12 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.rag.embed
 
+import org.llm4s.error.EmbeddingError
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.MultimodalEmbeddingProvider
 import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -39,8 +41,8 @@ object TextChunkingConfig {
  * @param textModel         Model configuration (name + dimensions) used for text-like files.
  * @param localModels       Model configurations for the image, audio and video modalities.
  * @param chunking          Text chunking settings; if enabled, extracted text is split before embedding.
- * @param experimentalStubs When `false`, image/audio/video files are read and forwarded to
- *                          `client.embedMultimodal()` for real provider embeddings. When `true`,
+ * @param experimentalStubs When `false`, image/audio/video files are read and forwarded to the
+ *                          `MultimodalEmbeddingProvider` given to `encodeFromPath`. When `true`,
  *                          deterministic stub vectors are returned instead.
  * @param maxMediaFileSize  Maximum allowed media file size in bytes. Files exceeding this limit
  *                          are rejected with an error. Defaults to 50 MB.
@@ -69,8 +71,8 @@ final case class FileEmbeddingConfig(
  *
  *  - **Image / Audio / Video**: behaviour depends on `config.experimentalStubs`.
  *    When `false`, the file bytes are read (bounded by `config.maxMediaFileSize`)
- *    and forwarded to `client.embedMultimodal()` to obtain real provider
- *    embeddings. When `true`, a deterministic L2-normalised stub vector is
+ *    and forwarded to the `MultimodalEmbeddingProvider` passed to
+ *    `encodeFromPath`; without one the call fails. When `true`, a deterministic L2-normalised stub vector is
  *    returned instead; the vector is seeded from the file name, size, and
  *    last-modified time, so the same file always produces the same stub
  *    vector.
@@ -102,18 +104,22 @@ object FileEmbedder {
    * Encodes the file at `path` into one or more embedding vectors.
    *
    * @param path   Path to the file to encode; must exist and be a regular file.
-   * @param client Embedding client used for text files, and for multimodal files when
-   *               `config.experimentalStubs` is `false`.
+   * @param client Embedding client used for text files.
    * @param config Model, chunking and media settings; see [[FileEmbeddingConfig]].
+   * @param multimodal Embeds image, audio and video files when `config.experimentalStubs` is `false`. No
+   *               provider llm4s ships is one: implement
+   *               [[org.llm4s.llmconnect.provider.MultimodalEmbeddingProvider]] over a multimodal endpoint.
    * @return `Right(vectors)` — one vector per text chunk, or one vector per non-text file.
    *         `Left(EmbeddingError)` when the file does not exist, the MIME type is unsupported,
-   *         or the media file exceeds `config.maxMediaFileSize`; `Left(ValidationError)` when text chunking is
+   *         the media file exceeds `config.maxMediaFileSize`, or a media file is given with neither a
+   *         `multimodal` provider nor `config.experimentalStubs`; `Left(ValidationError)` when text chunking is
    *         enabled with a non-positive `size` or an `overlap` that is not smaller than `size`.
    */
   def encodeFromPath(
     path: Path,
     client: EmbeddingClient,
-    config: FileEmbeddingConfig
+    config: FileEmbeddingConfig,
+    multimodal: Option[MultimodalEmbeddingProvider] = None
   ): Result[Seq[EmbeddingVector]] = {
     val f = path.toFile
     if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", "extractor"))
@@ -122,9 +128,9 @@ object FileEmbedder {
     logger.debug(s"[FileEmbedder] MIME detected: $mime")
 
     if (TikaDocumentExtractor.canExtract(mime)) encodeTextFile(f, mime, client, config)
-    else if (mime.startsWith("image/")) encodeMediaFile(f, mime, Image, client, config, seedXor = 0L)
-    else if (mime.startsWith("audio/")) encodeMediaFile(f, mime, Audio, client, config, AudioSeedXor)
-    else if (mime.startsWith("video/")) encodeMediaFile(f, mime, Video, client, config, VideoSeedXor)
+    else if (mime.startsWith("image/")) encodeMediaFile(f, mime, Modality.Image, multimodal, config, seedXor = 0L)
+    else if (mime.startsWith("audio/")) encodeMediaFile(f, mime, Modality.Audio, multimodal, config, AudioSeedXor)
+    else if (mime.startsWith("video/")) encodeMediaFile(f, mime, Modality.Video, multimodal, config, VideoSeedXor)
     else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", "encoder"))
   }
 
@@ -159,14 +165,12 @@ object FileEmbedder {
     val req       = EmbeddingRequest(input = inputs, model = textModel)
 
     client.embed(req).map { resp =>
-      val dim = textModel.dimensions
       resp.embeddings.zipWithIndex.map { case (vec, i) =>
         EmbeddingVector(
           id = s"${file.getName}#chunk_$i",
-          modality = Text,
+          modality = Modality.Text,
           model = textModel.name,
-          dim = dim,
-          values = l2(vec.map(_.toFloat).toArray),
+          values = l2(vec),
           meta = Map(
             "provider" -> resp.metadata.getOrElse("provider", "unknown"),
             "mime"     -> mime,
@@ -181,7 +185,7 @@ object FileEmbedder {
     file: File,
     mime: String,
     modality: Modality,
-    client: EmbeddingClient,
+    multimodal: Option[MultimodalEmbeddingProvider],
     config: FileEmbeddingConfig,
     seedXor: Long
   ): Result[Seq[EmbeddingVector]] = {
@@ -198,7 +202,6 @@ object FileEmbedder {
             id = file.getName,
             modality = modality,
             model = model.name,
-            dim = safeDim,
             values = l2(raw),
             meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
           )
@@ -212,30 +215,38 @@ object FileEmbedder {
           EmbeddingError(None, s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}", "encoder")
         )
       } else {
-        modelResult.flatMap { model =>
-          readBounded(file, maxMediaFileSize).flatMap { bytes =>
+        for {
+          provider <- multimodal.toRight(
+            EmbeddingError(
+              None,
+              s"No multimodal embedding provider for the ${modality.toString.toLowerCase} file ${file.getName}: " +
+                "pass one to encodeFromPath, or set experimentalStubs",
+              "encoder"
+            )
+          )
+          model <- modelResult
+          bytes <- readBounded(file, maxMediaFileSize)
+          vectors <- {
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
               model = model,
               modality = modality,
               meta = Map("mime" -> mime, "file" -> file.getName)
             )
-            client.embedMultimodal(req).map { resp =>
-              val dim    = model.dimensions
+            provider.embedMultimodal(req).map { resp =>
               val prefix = modality.toString.toLowerCase
               resp.embeddings.zipWithIndex.map { case (vec, i) =>
                 EmbeddingVector(
                   id = s"${file.getName}#${prefix}_$i",
                   modality = modality,
                   model = model.name,
-                  dim = dim,
-                  values = l2(vec.map(_.toFloat).toArray),
+                  values = l2(vec),
                   meta = resp.metadata ++ Map("mime" -> mime)
                 )
               }
             }
           }
-        }
+        } yield vectors
       }
     }
   }
@@ -259,9 +270,9 @@ object FileEmbedder {
       } finally is.close()
     }.toEither.left.map(e => EmbeddingError(None, s"Failed to read media file: ${e.getMessage}", "encoder"))
 
-  private def l2(v: Array[Float]): Array[Float] = {
-    val n = math.sqrt(v.foldLeft(0.0)((s, x) => s + x * x)).toFloat
-    if (n <= 1e-6f) v else v.map(_ / n)
+  private def l2(v: Seq[Double]): Seq[Double] = {
+    val n = math.sqrt(v.foldLeft(0.0)((s, x) => s + x * x))
+    if (n <= 1e-6) v else v.map(_ / n)
   }
 
   /** Stable file-based seed for deterministic stub vectors. */
@@ -276,15 +287,15 @@ object FileEmbedder {
   }
 
   /** Pseudo-random, but deterministic for a given seed; values in [-0.5, 0.5]. */
-  private def fillDeterministic(dim: Int, seed: Long): Array[Float] = {
+  private def fillDeterministic(dim: Int, seed: Long): Seq[Double] = {
     var z   = seed
-    val out = Array.ofDim[Float](dim)
+    val out = Array.ofDim[Double](dim)
     var i   = 0
     while (i < dim) {
       z ^= (z << 13); z ^= (z >>> 7); z ^= (z << 17) // xorshift
-      out(i) = ((z & 0xffffff).toInt % 1001) / 1000.0f - 0.5f
+      out(i) = ((z & 0xffffff).toInt % 1001) / 1000.0 - 0.5
       i += 1
     }
-    out
+    out.toVector
   }
 }

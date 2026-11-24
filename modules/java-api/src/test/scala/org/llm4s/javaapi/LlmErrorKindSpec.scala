@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error._
-import org.llm4s.llmconnect.model.EmbeddingError
+import org.llm4s.error.EmbeddingError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

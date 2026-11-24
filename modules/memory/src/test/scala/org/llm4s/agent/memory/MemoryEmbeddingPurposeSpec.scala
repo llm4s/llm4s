@@ -38,7 +38,7 @@ class MemoryEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   }
 
   private def serviceOver(provider: RecordingProvider): LLMEmbeddingService =
-    LLMEmbeddingService(new EmbeddingClient(provider), modelConfig)
+    LLMEmbeddingService(EmbeddingClient(provider), modelConfig)
 
   private def memory(content: String): Memory =
     Memory(MemoryId.generate(), content, MemoryType.Conversation, Map.empty, Instant.now())

@@ -46,7 +46,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   }
 
   private val mockLLM             = new MockLLMClient
-  private val mockEmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+  private val mockEmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
   private val embeddingConfig     = EmbeddingModelConfig("test-model", 3)
 
   "RAGASFactory.create" should "create evaluator with all four default metrics" in {

@@ -28,7 +28,7 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
       .get
 
   private def model(declared: Int): Llm4sEmbeddingModel =
-    Llm4sEmbeddingModel.of(new EmbeddingClient(fixture), EmbeddingModelConfig("fixture-embed-small", declared))
+    Llm4sEmbeddingModel.of(EmbeddingClient(fixture), EmbeddingModelConfig("fixture-embed-small", declared))
 
   "call" should "embed every text of the request, in order, with the model the provider named" in {
     val response = model(256).call(new EmbeddingRequest(java.util.List.of("a", "bb", "ccc"), null))
@@ -55,7 +55,7 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
   "a failure" should "throw the LlmException the client's result holds" in {
     val failing: EmbeddingProvider = _ => Left(AuthenticationError("fixtureembedding", "bad key"))
     val m = new Llm4sEmbeddingModel(
-      Llm4s.wrapEmbeddingClient(new EmbeddingClient(failing), EmbeddingModelConfig("fixture-embed-small", 256))
+      Llm4s.wrapEmbeddingClient(EmbeddingClient(failing), EmbeddingModelConfig("fixture-embed-small", 256))
     )
     intercept[LlmException](m.embed("hi")).getKind shouldBe LlmErrorKind.AUTHENTICATION
   }
