@@ -60,7 +60,8 @@ mechanical part ([Scalafix: migration rules](../reference/scalafix#migration-rul
   break; the rule `ErrorProviderIdTyped` rewrites both.
 - [A cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](../reference/migration#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933):
   behaviour, not signatures. An agent with `withOutput` whose answer is cut off ends `AgentStatus.Truncated` where
-  0.7.0 returned a `Left`, and `llm4s-anthropic` no longer sends `max_tokens = 2048` when `maxTokens` is unset.
+  0.7.0 returned a `Left`, and `llm4s-anthropic` no longer sends `max_tokens = 2048` when `maxTokens` is unset;
+  the OpenRouter client no longer fits a Claude model's thinking budget under 2048.
 
 ---
 
