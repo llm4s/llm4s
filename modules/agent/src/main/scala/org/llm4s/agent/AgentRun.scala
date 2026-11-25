@@ -6,7 +6,7 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
 import org.llm4s.error.{ ProcessingError, ValidationError }
-import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ModelUsage, UsageSummary, UserMessage }
 import org.llm4s.trace.{ TraceContext, Tracing }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -187,9 +187,12 @@ final class AgentRun private[agent] (
             next(rest)
     next(scopes.asScala.toList)
 
-  /** The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent. */
+  /**
+   * The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent; the run's own
+   * usage is counted from the state it was admitted with.
+   */
   private def summary(state: ThreadState, active: Option[AgentId], status: AgentStatus): Result[AgentResult] =
-    AgentRun.result(threadId, runId, root, state, active, status)
+    AgentRun.result(threadId, runId, root, state, active, status, handle.admitted)
 
 private[agent] object AgentRun:
   private val logger = LoggerFactory.getLogger(classOf[AgentRun])
@@ -197,7 +200,9 @@ private[agent] object AgentRun:
   /**
    * The result of run `runId` on `threadId`, which ended with `status`: `state`'s messages and usage, with `active` or
    * else the thread's active agent, else `root`. What [[AgentRun.await]] returns, and what the child runner rebuilds
-   * from a child thread's latest checkpoint (design 4.42).
+   * from a child thread's latest checkpoint (design 4.42). `admitted` is the thread's state as the run was admitted,
+   * which its own usage is counted from ([[usageSince]]); with `None` - a result rebuilt from a checkpoint, or a
+   * handle the runtime did not make - the run's usage is the thread's.
    */
   def result(
     threadId: ThreadId,
@@ -205,13 +210,54 @@ private[agent] object AgentRun:
     root: AgentId,
     state: ThreadState,
     active: Option[AgentId],
-    status: AgentStatus
+    status: AgentStatus,
+    admitted: Option[ThreadState] = None
   ): Result[AgentResult] =
     for
       messages <- state.get(Messages.key).map(_.map(_.message))
       usage    <- state.get(LoopKeys.usage)
+      start    <- admitted.fold[Result[UsageSummary]](Right(UsageSummary()))(_.get(LoopKeys.usage))
       stored   <- state.get(LoopKeys.activeAgent)
-    yield AgentResult(threadId, runId, active.orElse(stored).getOrElse(root), status, messages, usage)
+    yield AgentResult(
+      threadId,
+      runId,
+      active.orElse(stored).getOrElse(root),
+      status,
+      messages,
+      usage,
+      usageSince(start, usage)
+    )
+
+  /**
+   * What a run recorded (#2922): the thread's usage at its end, `now`, less the thread's usage as the run was
+   * admitted, `start`. [[LoopKeys.usage]] only ever grows - every task's update is merged in, and a blocked turn's
+   * retraction keeps it - so the difference is exactly the updates this run's tasks committed, per model; it is the
+   * amount `RunBudgets.maxTokens` counts (`ToolLoop.runTokens`). A model the run did not call is left out of `byModel`.
+   */
+  private[agent] def usageSince(start: UsageSummary, now: UsageSummary): UsageSummary =
+    val byModel = now.byModel.flatMap { (model, total) =>
+      val before = start.byModel.getOrElse(model, ModelUsage())
+      val own = ModelUsage(
+        requestCount = total.requestCount - before.requestCount,
+        inputTokens = total.inputTokens - before.inputTokens,
+        outputTokens = total.outputTokens - before.outputTokens,
+        thinkingTokens = total.thinkingTokens - before.thinkingTokens,
+        totalCost = total.totalCost - before.totalCost,
+        cachedTokens = total.cachedTokens - before.cachedTokens,
+        cacheCreationTokens = total.cacheCreationTokens - before.cacheCreationTokens
+      )
+      Option.when(own != ModelUsage())(model -> own)
+    }
+    UsageSummary(
+      requestCount = now.requestCount - start.requestCount,
+      inputTokens = now.inputTokens - start.inputTokens,
+      outputTokens = now.outputTokens - start.outputTokens,
+      thinkingTokens = now.thinkingTokens - start.thinkingTokens,
+      totalCost = now.totalCost - start.totalCost,
+      byModel = byModel,
+      cachedTokens = now.cachedTokens - start.cachedTokens,
+      cacheCreationTokens = now.cacheCreationTokens - start.cacheCreationTokens
+    )
 
   /**
    * `body`, run with the calling thread's interrupt flag cleared; a flag that was set is set again

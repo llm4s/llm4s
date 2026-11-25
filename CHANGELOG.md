@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `AgentResult` has a seventh field, `runUsage`, so a positional pattern on it takes one more binder (the `PositionalPatternsGainFields` Scalafix rule adds it), and `PromptInjectionDetector`'s default `dan_jailbreak`, `roleplay_evil`, `no_restrictions` and prompt-extraction patterns match fewer texts
+  ([migration](docs/reference/migration.md#agentresultrunusage-and-tighter-promptinjectiondetector-defaults-2922-2923)) [#2922](https://github.com/llm4s/llm4s/issues/2922), [#2923](https://github.com/llm4s/llm4s/issues/2923).
 - `LLMClient.getContextWindow()`, `getReserveCompletion()` and `getContextBudget(...)` are `contextWindow`, `reserveCompletion` and `contextBudget(...)`; `ConversationTokenCounter.getTokenBreakdown` is `tokenBreakdown`, `ModelDimensionRegistry.getDimension` is `dimension`, and `ToolBuilder.buildSafe()` is `build()`
   ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - `ThinkingBlock.Opaque.provider` is a `ProviderId`, `BaseLifecycleLLMClient.providerName: String` is `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; stored JSON is unchanged
@@ -506,6 +508,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Added** `AgentResult.runUsage` (`JAgentResult.runUsage()` for Java and Kotlin): what the run that just finished used, beside `usage`, the thread's total; a `resume`'s or `recover`'s is that run's alone [#2922](https://github.com/llm4s/llm4s/issues/2922).
+- **Added** `AgentBuilder.withOutputCheck[O](check)` and `withOutputJsonCheck`: an application check on a structured answer that shares `withOutput`'s corrective retry and ends `GraphError.OutputInvalid` with its problems ([Agents](docs/guide/agents/index.md#a-typed-answer)) [#2920](https://github.com/llm4s/llm4s/issues/2920).
+- **Changed** `PromptInjectionDetector`'s defaults no longer match ordinary narrative sentences ("ask Dan to act as lookout", "repeat the instructions"); `PromptInjectionDetector.defaults.without(names*)` drops default patterns by name and `defaultPatternNames` lists them ([Guardrails](docs/guide/agents/guardrails.md#prompt-injection-protection)) [#2923](https://github.com/llm4s/llm4s/issues/2923).
 - **Changed** `AgentBuilder.withTools(ToolSet)` is `withToolSet` and `Guardrail.validate(value, context)` is `validateIn`, so no `@Experimental` method shares a name with a `@Stable` one, which MiMa would skip with it ([What MiMa Covers](docs/reference/api-stability.md#what-mima-covers)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
   which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).

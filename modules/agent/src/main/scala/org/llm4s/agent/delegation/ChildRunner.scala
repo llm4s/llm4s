@@ -714,7 +714,7 @@ private[agent] object ChildRunner:
       childEnd
 
     private def rebuilt(checkpoint: Checkpoint, exec: Execution, status: AgentStatus): Result[AgentResult] =
-      AgentRun.result(childId, RunId(checkpoint.runId), agent.id, exec.state, None, status)
+      AgentRun.result(childId, RunId(checkpoint.runId), agent.id, exec.state, None, status, admitted = None)
 
     /**
      * The child's roll-up (rules 10, 11): its committed usage, its prior usage, and the lost usage on the terminal

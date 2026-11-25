@@ -19,7 +19,8 @@ import scalafix.v1._
  * `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
  * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
  * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
- * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). A pattern with any other number of arguments is left
+ * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). `AgentResult`'s six, the same in
+ * 0.5.1 and 0.6.0, gain `runUsage` (#2922). A pattern with any other number of arguments is left
  * alone.
  */
 class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
@@ -53,6 +54,7 @@ object PositionalPatternsGainFields {
    */
   val arity: Map[String, (Int, Int)] = Map(
     "org/llm4s/error/ServiceError"                                  -> (4  -> 5),
+    "org/llm4s/agent/AgentResult"                                   -> (6  -> 7),
     "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 11),
     "org/llm4s/agent/events/ToolExecuted"                           -> (5  -> 6),
     "org/llm4s/agent/graph/Checkpoint"                              -> (10 -> 11),
