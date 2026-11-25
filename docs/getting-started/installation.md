@@ -875,6 +875,19 @@ libraryDependencies += "org.llm4s" %% "llm4s-repl" % llm4sVersion
 that needs no API key. It is experimental, and depends on `llm4s-core`, `llm4s-schema-derivation` and
 `llm4s-testkit`. See [Try llm4s in the REPL](repl).
 
+### Upgrading across a breaking release (Scalafix rules)
+
+```scala
+// build.sbt, with sbt-scalafix: a build-tool dependency, never a libraryDependency.
+// llm4sVersion is the release you are moving to: the rules are published from 1.0.0
+ThisBuild / scalafixDependencies += "org.llm4s" %% "llm4s-scalafix" % llm4sVersion
+```
+
+`llm4s-scalafix` holds the rules that rewrite your code across llm4s's breaking changes, one umbrella rule per
+version you start from: `sbt "scalafixAll Llm4sMigrateFrom_0_7"` for code on 0.7.x.
+Scalafix loads it into the build, as a Scala 2.13 artifact, so it is not in the BOM and adds nothing to your application. See
+[Scalafix: migration rules](../reference/scalafix#migration-rules).
+
 ### For provider authors (testing a provider module)
 
 ```scala

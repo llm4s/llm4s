@@ -155,12 +155,18 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 - [ ] In the support table, mark 0.7.x `security-only` with `security_until` three months after 1.0 (critical fixes),
       and every older 0.x line `eol` ([Update the support table](#update-the-support-table)).
-- [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
-      ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)), and put the one-line
-      command in the 1.0 upgrade notes. Publishing it adds an artifact's files to the release, which takes it over
-      Sonatype's monthly file limit as counted today
-      ([What is published to Maven Central](#what-is-published-to-maven-central)): have the limit raised, or drop an
-      artifact from the release, before tagging.
+- [x] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
+      ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)): the
+      `scalafixRules` project is in the root aggregate, so `sbt ci-release` publishes `llm4s-scalafix_2.13`, and the
+      one-line command is in the [1.0 upgrade notes](../migrations/0x-to-1x#when-10-ships) (done).
+- [ ] Set `CentralBundle.MaxFiles` (`project/CentralBundle.scala`), and the limit this page states, to the monthly file
+      limit Sonatype now allows the organisation. With `llm4s-scalafix` a release uploads 1,004 files (984 in the sbt
+      bundle, 20 from `llm4s-kotlin-api`), over the 1,000 both still record, and `sonaBundle` warns of it
+      ([What is published to Maven Central](#what-is-published-to-maven-central)). If the limit is not raised, drop an
+      artifact from the release before tagging.
+- [ ] Once 1.0.0 is on Maven Central, run the documented command against it
+      ([Running a migration rule](../reference/scalafix#running-a-migration-rule)) and propose `llm4s-scalafix` for
+      Scala Steward's `scalafix-migrations` ([#2330](https://github.com/llm4s/llm4s/issues/2330)).
 - [ ] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
       `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
       `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to
@@ -361,10 +367,13 @@ The bundle is checked as it is built: `sonaBundle` fails on a checksum of a sign
 than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
 in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
 signed with a throwaway key, never uploaded). What a release uploads follows from
-`sbt listPublishedArtifacts`: 16 files for each `artifact` line, 4 for the BOM and for each relocation stub, plus 20 files
+`sbt listPublishedArtifacts`: 16 files for each `artifact` line (the Scala 3 modules, and `llm4s-scalafix_2.13`, the
+[Scalafix migration rules](../reference/scalafix#migration-rules), a Scala 2.13 build-tool artifact that the BOM does
+not list), 4 for the BOM and for each relocation stub, plus 20 files
 from `llm4s-kotlin-api`. The limit the bundle is checked against is `CentralBundle.MaxFiles`
 (`project/CentralBundle.scala`); check a second release in a month (a patch release included) against what the first
-uploaded.
+uploaded. The bundle is the sbt artifacts only: when it fits but the release with `llm4s-kotlin-api`'s 20 files does
+not, `sonaBundle` logs a warning with the total instead of failing.
 `scripts/verify-release.sh` checks the published result: each file's `.asc`, `.md5` and `.sha1`, and no `.asc.md5` or
 `-cyclonedx.json`.
 

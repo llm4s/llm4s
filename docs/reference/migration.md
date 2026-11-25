@@ -3107,14 +3107,22 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
-source in this repository) rewrites the mechanical source breaks
+The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published from 1.0.0 as
+`org.llm4s::llm4s-scalafix`, before that only as source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
 on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)), which rewrites the renames
-of 0.7.0 that its [rule table](scalafix#migration-rules) lists. These need a hand edit:
+of 0.7.0 that its [rule table](scalafix#migration-rules) lists. Either runs with one command, from the 1.0.0 rules
+and on code that still compiles against the release it is on
+([Running a migration rule](scalafix#running-a-migration-rule)):
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_0_6@org.llm4s::llm4s-scalafix:1.0.0"
+```
+
+These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and

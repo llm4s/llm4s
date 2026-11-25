@@ -528,6 +528,14 @@ lazy val llm4s = (project in file("."))
       val unaggregated = projects.collect { case (n, false) if !aggregated(n) => n }
       if (unaggregated.nonEmpty)
         sys.error(s"Published but not in the root aggregate, so never released: ${unaggregated.sorted.mkString(", ")}")
+      val suffixes = PublishedArtifacts.suffixProblems(
+        Def
+          .task((name.value, (publish / skip).value, crossPaths.value, scalaBinaryVersion.value))
+          .all(ScopeFilter(inAnyProject))
+          .value,
+        (ThisBuild / scalaBinaryVersion).value
+      )
+      if (suffixes.nonEmpty) sys.error(suffixes.mkString("\n"))
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
       PomDescriptions.check(described, streams.value.log)
     },
@@ -536,7 +544,8 @@ lazy val llm4s = (project in file("."))
       val inDocs = (docs / Compile / sources).value.toSet
       val modules = Def
         .task((name.value, (publish / skip).value, (Compile / sources).value))
-        .all(ScopeFilter(inAnyProject -- inProjects(docs)))
+        // `scalafixRules` is Scala 2.13 (Scalafix rules must be), so the Scala 3 Scaladoc cannot take its sources.
+        .all(ScopeFilter(inAnyProject -- inProjects(docs, scalafixRules)))
         .value
       val published = modules.collect { case (n, false, srcs) if srcs.nonEmpty => (n, srcs) }
       val missing   = published.collect { case (n, srcs) if srcs.exists(f => !inDocs(f)) => n }.sorted
@@ -3269,8 +3278,11 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // Semantic rewrite rules that move user code across llm4s's breaking changes (docs/reference/scalafix.md#migration-rules).
 // Scalafix rules compile against `scalafix-core`, which is Scala 2.13 only, so `scalafixRules` is a Scala 2.13
 // build-tool module: Scalafix loads it into the build, and it never enters a user's runtime classpath. That does not
-// conflict with the Scala 3-only library policy (#1126). It is not published yet; publishing it with the release
-// workflow, and listing it in the BOM, are the rest of #2330.
+// conflict with the Scala 3-only library policy (#1126). It is published with every release as
+// `org.llm4s:llm4s-scalafix_2.13` (in the root aggregate, so `sbt ci-release` publishes it), which is what
+// `dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:<version>` resolves. It is not in the BOM, which pins
+// what a project's own resolution brings in: see `PublishedArtifacts.BuildTools`. The testkit projects are not
+// published.
 //
 // The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
@@ -3308,18 +3320,26 @@ lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
 lazy val scalafixRules = (project in file("modules/scalafix-rules/rules"))
   .settings(
     name                 := "llm4s-scalafix",
-    description          := "Scalafix rules that migrate user code across llm4s's breaking changes.",
+    description          := PomDescriptions.of(name.value),
     scalaVersion         := scalafixScala213,
     crossScalaVersions   := Seq(scalafixScala213),
-    publish / skip       := true,
     mimaFailOnNoPrevious := false,
     // The build's SemanticDB plugin (4.15) has no Scala 2.13.14 artifact, and the only Scalafix rules the build runs
     // on these sources are syntactic, so neither 2.13 project emits SemanticDB.
     semanticdbEnabled := false,
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Xlint", "-Werror", "-release", javaRelease),
     libraryDependencies += "ch.epfl.scala" %% "scalafix-core" % scalafixVersion,
-    // Unpublished, so no Scaladoc; the rules are documented in docs/reference/scalafix.md.
-    Compile / doc / sources := Seq.empty,
+    // No Scaladoc of its own: the rules are documented in docs/reference/scalafix.md, and Scala 2.13 sources cannot
+    // join the `docs` project's Scala 3 Scaladoc (`docsSourcesCheck` leaves this module out). Like every published
+    // module its -javadoc.jar is the pointer (project/JavadocPointer.scala), which Maven Central requires.
+    Compile / doc / sources                := Seq.empty,
+    Compile / packageDoc / publishArtifact := true,
+    Compile / packageDoc / mappings := JavadocPointer.mappings(
+      target.value / "javadoc-pointer",
+      s"${moduleName.value}_${scalaBinaryVersion.value}",
+      version.value
+    ),
+    Test / packageDoc / publishArtifact := false,
     // The rule code is measured by the golden files of `scalafixTests`, which run in another project; scoverage
     // cannot attribute those measurements here, so the module declares no floor of its own.
     coverageDisabled
