@@ -37,8 +37,8 @@ Hacker News, Reddit, JVM newsletters and InfoQ rather than in Scala channels
 
 ## Dates
 
-`T` is the day the `v1.0.0` tag is pushed and the release is on Maven Central. The 1.0 date is not set yet (#1281);
-when it is, the maintainers write the calendar dates into this table. The posts are spread over two weeks so they read
+`T` is the day the `v1.0.0` tag is pushed and the release is on Maven Central. `v1.0.0` was tagged on 2026-11-25 (#1281), so
+`T` is that day and the dates below are counted from it. The posts are spread over two weeks so they read
 as separate news items, not as a campaign. Weekday posts go out between 14:00 and 16:00 UTC (morning in the US,
 afternoon in Europe).
 
