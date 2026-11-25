@@ -62,7 +62,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 | Pillar | Current status | Next deliverable |
 |--------|----------------|------------------|
 | **Testing and CI** | Broad suite, Ubuntu/Windows CI, integration suites in tiers (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud`) enforced by `it/itTierCheck`, per-module coverage floors, DCO, config-policy check. | Suite timeouts / hang isolation; split fast/integration/Docker/provider/benchmark jobs. |
-| **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa compares the frozen modules with their baseline on every pull request, and 1.0.0 is released. | Move the MiMa baseline to 1.0.0 once it is on Maven Central. |
+| **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa compares the frozen modules with their 1.0.0 artifacts, the baseline, on every pull request. | Keep the frozen modules compatible across 1.x: a Stable API is deprecated first and removed only in a major release. |
 | **Provider parity** | Broad coverage, one SPI, a provider testkit; uneven feature parity. | Fake-provider contracts; more declared facts in the generated capability matrix. |
 | **JVM adoption** | Strong Scala-native design; Java, Spring Boot, cats-effect and ZIO modules, published from 0.5.0, and Kotlin from 0.6.0. | Maven and Gradle paths with CI-tested runnable samples. |
 | **Security** | Threat model, Dependabot, MCP auth/bind, redaction, config-policy, prompt-injection detector, per-module SBOMs. | Default-deny tool/MCP, allowlists, audit logs, release-gate tests. |
@@ -94,7 +94,7 @@ Target: **0.7.0** for the baseline; **1.0** for the release. Both are released.
 | Modularisation: `modules/core` split into per-concern artifacts ([#1126](https://github.com/llm4s/llm4s/issues/1126); slices [#1127](https://github.com/llm4s/llm4s/issues/1127)–[#1133](https://github.com/llm4s/llm4s/issues/1133), [#1242](https://github.com/llm4s/llm4s/issues/1242)) | **Landed** | Published as separate artifacts with 0.5.0 ([#1281](https://github.com/llm4s/llm4s/issues/1281)). |
 | Name stable module boundaries for v1.0 | **Landed** | [1.0 Scope](v1-scope) names each package's tier (Frozen at 1.0, Beta or Experimental). |
 | Stability tiers in code; compatibility and deprecation policy | **Landed** | `@Stable`/`@Experimental`; [policy](compatibility-policy) published. |
-| MiMa binary-compatibility checks | **Done** | The baseline is **0.7.0** for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none): CI compares each with its 0.7.0 artifact, until the baseline moves to 1.0.0. |
+| MiMa binary-compatibility checks | **Done** | The first baseline was **0.7.0**, for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none); it is **1.0.0** now, and CI compares each frozen module with its 1.0.0 artifact. |
 | Package-level Scaladoc | **In progress** | Public API intent documented; the published Scaladoc covers every module. |
 | Deferred Scala 2.13 support for the frozen spine | **Deferred** | After 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); 1.0 is Scala 3 only. |
 

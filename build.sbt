@@ -175,13 +175,14 @@ addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
 // ---- binary compatibility (MiMa) ----
-// MiMa compares a module with the artifact of the same name in a previous release. The baseline is 0.7.0 (#1281),
-// for the frozen modules (`llm4s-agent` included) only: `mimaPreviousArtifacts` names each one's 0.7.0 artifact and
-// `sbt mimaReportBinaryIssues` fails on a binary-incompatible change to it. No earlier release is a baseline:
+// MiMa compares a module with the artifact of the same name in a previous release. The baseline is 1.0.0 (#1281),
+// for the frozen modules (`llm4s-agent` included) only: `mimaPreviousArtifacts` names each one's 1.0.0 artifact and
+// `sbt mimaReportBinaryIssues` fails on a binary-incompatible change to it. It was 0.7.0, the first baseline, until
+// 1.0.0 was on Maven Central; 1.0.0 needed no filter against it. No earlier release is a baseline:
 // 0.4.1 is a single `llm4s-core` of the pre-modularisation code (#1126 moved every package this check would
 // cover), and 0.5.0, 0.5.1 and 0.6.0 were published while the designs were still changing. See
 // docs/reference/api-stability.md.
-val mimaBaselineVersion: Option[String] = Some("0.7.0")
+val mimaBaselineVersion: Option[String] = Some("1.0.0")
 
 // The baseline is per module (#2355): a frozen module listed here is compared with its own release instead of
 // `mimaBaselineVersion`. `Some("X.Y.Z")` gives it a different baseline, for example a later one for `llm4s-agent`
@@ -402,7 +403,7 @@ lazy val stabilityTierCheck = taskKey[Unit](
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama", "agent")
 // The Beta parts that live inside frozen modules (#2835): every top-level public type in a matching file must be
-// `@Experimental`, so `mimaExcludeAnnotations` (in `mimaFrozen`) leaves it out of the 0.7.0 baseline, nested types
+// `@Experimental`, so `mimaExcludeAnnotations` (in `mimaFrozen`) leaves it out of the baseline, nested types
 // and companions included. The Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
 // `org.llm4s.assistant` (`llm4s-agent`). An entry that matches no file fails `stabilityTierCheck`.
 val stabilityExperimentalFiles = Seq(
@@ -490,6 +491,8 @@ lazy val llm4s = (project in file("."))
     scalafixTests06,
     scalafixInput07,
     scalafixTests07,
+    scalafixInput10,
+    scalafixTests10,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -3292,6 +3295,8 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // `scalafixInput06` and `scalafixTests06` test `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0 on code compiled
 // against the 0.6.0 artifacts, with the expected output under `fix/v06`, and `scalafixInput07` and `scalafixTests07`
 // `Llm4sMigrateFrom_0_7` on code compiled against the 0.7.0 artifacts, with the expected output under `fix/v07`.
+// `scalafixInput10` and `scalafixTests10` are those of `Llm4sMigrateFrom_1_0`, for code compiled against the 1.0.0
+// artifacts, with the expected output under `fix/v10`.
 // Neither input nor output is formatted
 // (.scalafmt.conf excludes them), because the rules' output is compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"
@@ -3300,6 +3305,7 @@ lazy val scalafixOldLlm4s = "0.4.1"
 lazy val scalafix05Llm4s  = "0.5.1"
 lazy val scalafix06Llm4s  = "0.6.0"
 lazy val scalafix07Llm4s  = "0.7.0"
+lazy val scalafix10Llm4s  = "1.0.0"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
   publish / skip       := true,
   mimaFailOnNoPrevious := false,
@@ -3386,6 +3392,15 @@ lazy val scalafixInput07 = (project in file("modules/scalafix-rules/input-0.7"))
     )
   )
 
+lazy val scalafixInput10 = (project in file("modules/scalafix-rules/input-1.0"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled := true,
+    libraryDependencies ++= Seq("core", "openai-compatible", "openai", "anthropic", "gemini", "rag", "agent").map(m =>
+      "org.llm4s" %% s"llm4s-$m" % scalafix10Llm4s
+    )
+  )
+
 lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
   .dependsOn(scalafixRules)
   .enablePlugins(ScalafixTestkitPlugin)
@@ -3467,6 +3482,27 @@ lazy val scalafixTests07 = (project in file("modules/scalafix-rules/tests-0.7"))
     scalafixTestkitInputClasspath          := (scalafixInput07 / Compile / fullClasspath).value,
     scalafixTestkitInputScalacOptions      := (scalafixInput07 / Compile / scalacOptions).value,
     scalafixTestkitInputScalaVersion       := (scalafixInput07 / Compile / scalaVersion).value,
+    Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
+  )
+
+lazy val scalafixTests10 = (project in file("modules/scalafix-rules/tests-1.0"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput10 / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput10 / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput10 / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput10 / Compile / scalaVersion).value,
     Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
     Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )

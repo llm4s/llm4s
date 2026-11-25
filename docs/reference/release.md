@@ -165,18 +165,25 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       limit Sonatype allows the organisation: 1,100. With `llm4s-scalafix` a release uploads 1,004 files (984 in the
       sbt bundle, 20 from `llm4s-kotlin-api`)
       ([What is published to Maven Central](#what-is-published-to-maven-central)).
-- [ ] Once 1.0.0 is on Maven Central, run the documented command against it
-      ([Running a migration rule](../reference/scalafix#running-a-migration-rule)) and propose `llm4s-scalafix` for
-      Scala Steward's `scalafix-migrations` ([#2330](https://github.com/llm4s/llm4s/issues/2330)).
-- [ ] Once 1.0.0 is on Maven Central, in one follow-up pull request: set `mimaBaselineVersion = Some("1.0.0")`
+- [x] Once 1.0.0 is on Maven Central, run the documented command against it
+      ([Running a migration rule](../reference/scalafix#running-a-migration-rule)) (done: on a project compiled
+      against 0.7.0, `Llm4sMigrateFrom_0_7` from `llm4s-scalafix` 1.0.0 rewrote the errors' providers, and the result
+      compiled against 1.0.0).
+- [ ] Propose `llm4s-scalafix` for Scala Steward's `scalafix-migrations`, a pull request to
+      `scala-steward-org/scala-steward` ([#2330](https://github.com/llm4s/llm4s/issues/2330)). Scala Steward picks a
+      migration by the version an update crosses, not by the version it starts from, so one entry can name one
+      umbrella rule: `Llm4sMigrateFrom_0_7` for an update to 1.0.0.
+- [x] Once 1.0.0 is on Maven Central, in one follow-up pull request: set `mimaBaselineVersion = Some("1.0.0")`
       ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)) and change the
       pages that say the baseline is still 0.7.0, and move the pins that resolve the release from Central:
-      `docs/_data/project.yml`, `modules/gradle-demo`, the notebooks, and the Mill, Scala CLI, Flink, JBang, Maven,
-      Helidon and Micronaut samples. Two of them build an error with a `String` provider, which 1.0.0 does not
-      compile ([migration note](../reference/migration#an-errors-provider-is-a-providerid-2936)), so each changes
-      with its pin: `ServiceError(500, ProviderId("scripted"), ...)` in `modules/samples/flink/EnrichTickets.scala`,
-      and `RateLimitError(ProviderId("openai"))` in the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template's
-      `PromptExecutorSpec`, with its default `llm4s_version`.
+      `docs/_data/project.yml`, `modules/gradle-demo`, the notebooks, and the Mill, Scala CLI, Flink, Spark, JBang,
+      Maven, Helidon and Micronaut samples. The Flink sample builds an error with a `String` provider, which 1.0.0
+      does not compile ([migration note](../reference/migration#an-errors-provider-is-a-providerid-2936)), so it
+      changes with its pin: `ServiceError(500, ProviderId("scripted"), ...)` in
+      `modules/samples/flink/EnrichTickets.scala` (done; `Llm4sMigrateFrom_1_0`, with `scalafixInput10` and
+      `scalafixTests10`, was added with it).
+- [ ] Move the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template to 1.0.0: its default `llm4s_version`, and
+      `RateLimitError(ProviderId("openai"))` in its `PromptExecutorSpec`, which 1.0.0 does not compile with a `String`.
 - [x] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
       `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
       `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to
@@ -505,9 +512,9 @@ need a maintainer:
 
 ## Release readiness: a MiMa dry run
 
-`mimaBaselineVersion` in `build.sbt` is `Some("0.7.0")` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compares every frozen
-module with its 0.7.0 artifact ([The Baseline](../reference/api-stability#the-baseline);
-[#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. It moves to `Some("1.0.0")` in a follow-up pull request once 1.0.0 is on Maven Central. `scripts/mima-dry-run.sh` was written to do those steps before 0.7.0 existed, against a throwaway version, and still checks the wiring itself (before the baseline moves, or after a change to the MiMa settings):
+`mimaBaselineVersion` in `build.sbt` is `Some("1.0.0")` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compares every frozen
+module with its 1.0.0 artifact ([The Baseline](../reference/api-stability#the-baseline);
+[#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.7.0 was the first baseline, and 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` was written to do those steps before 0.7.0 existed, against a throwaway version, and still checks the wiring itself (before the baseline moves, or after a change to the MiMa settings):
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -534,7 +541,7 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
 **not** prove that any API is compatible with anything: it compares the build with a copy of itself, and the real
-check against 0.7.0 is `sbt mimaReportBinaryIssues`. It is a manual script,
+check against the baseline, 1.0.0, is `sbt mimaReportBinaryIssues`. It is a manual script,
 not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself
 without sbt.
 

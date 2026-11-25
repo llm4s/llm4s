@@ -15,7 +15,7 @@ repositories {
     mavenCentral()
 }
 
-val llm4sVersion = "0.7.0"
+val llm4sVersion = "1.0.0"
 
 dependencies {
     // The _3 suffix selects the Scala 3 artifact. Gradle does not resolve Scala
