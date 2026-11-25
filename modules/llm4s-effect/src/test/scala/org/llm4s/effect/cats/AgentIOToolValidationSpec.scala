@@ -43,7 +43,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       executed.incrementAndGet()
       EchoResult(v)
     }
-  ).buildSafe() match {
+  ).build() match {
     case Right(t) => t
     case Left(e)  => fail(s"could not build tool: $e")
   }
@@ -60,8 +60,8 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     }
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   private def text(s: String): Completion =
@@ -143,8 +143,8 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
         }
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 1
-      def getReserveCompletion(): Int = 1
+      def contextWindow: Int     = 1
+      def reserveCompletion: Int = 1
     }
     val agent = io(client)()
     val first = agent.run("q1").unsafeRunSync()

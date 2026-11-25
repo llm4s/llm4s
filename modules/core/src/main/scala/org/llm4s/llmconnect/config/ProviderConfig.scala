@@ -184,8 +184,8 @@ object ProviderConfig {
     error: LLMError
   ): LLMError =
     error match
-      case ConfigurationError(message, List(field)) =>
+      case ConfigurationError(message, Seq(field)) =>
         val key = sectionKeys.getOrElse(field, field)
-        ConfigurationError(s"llm4s.providers.$providerName.$key: $message", List(key))
+        ConfigurationError(s"llm4s.providers.$providerName.$key: $message", Seq(key))
       case other => other
 }

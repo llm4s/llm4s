@@ -34,8 +34,8 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   private def failingClient(error: LLMError): LLMClient = new LLMClient {
@@ -44,8 +44,8 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(error)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   "run(String)" should "return a completed AgentResult when the LLM completes normally" in {

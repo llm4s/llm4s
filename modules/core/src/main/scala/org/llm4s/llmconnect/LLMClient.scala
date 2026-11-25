@@ -137,7 +137,7 @@ trait LLMClient extends AutoCloseable {
    *
    * @return total context window size in tokens (e.g., 4096, 8192, 128000)
    */
-  def getContextWindow(): Int
+  def contextWindow: Int
 
   /**
    * Returns the number of tokens reserved for the model's completion response.
@@ -147,7 +147,7 @@ trait LLMClient extends AutoCloseable {
    *
    * @return number of tokens reserved for completion
    */
-  def getReserveCompletion(): Int
+  def reserveCompletion: Int
 
   /**
    * Calculates available token budget for prompts after accounting for completion reserve and headroom.
@@ -159,8 +159,8 @@ trait LLMClient extends AutoCloseable {
    * @param headroom safety margin as percentage of prompt budget (default: HeadroomPercent.Standard ~10%)
    * @return maximum tokens available for prompt content
    */
-  def getContextBudget(headroom: HeadroomPercent = HeadroomPercent.Standard): Int = {
-    val promptBudget = getContextWindow() - getReserveCompletion()
+  def contextBudget(headroom: HeadroomPercent = HeadroomPercent.Standard): Int = {
+    val promptBudget = contextWindow - reserveCompletion
     (promptBudget * (1.0 - headroom.asRatio)).toInt
   }
 

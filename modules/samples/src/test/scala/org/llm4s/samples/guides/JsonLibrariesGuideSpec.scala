@@ -54,8 +54,8 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   // snippet: model
@@ -127,7 +127,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
         case Left(error) => Left(error.getMessage)
       }
     }
-    .buildSafe()
+    .build()
   // end snippet
 
   // snippet: circe-answers
@@ -236,7 +236,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
         .left
         .map(_.getMessage)
     }
-    .buildSafe()
+    .build()
   // end snippet
 
   // snippet: numbers

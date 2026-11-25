@@ -53,8 +53,8 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
           )
         )
       }
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     val printed = Vector.newBuilder[String]
 

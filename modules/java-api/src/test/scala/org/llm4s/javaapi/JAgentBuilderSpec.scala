@@ -39,9 +39,9 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       f(StreamedChunk(id = "c", content = Some(answer)))
       reply(c, o, streamed = true)
     }
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-    def last: Call                           = calls.asScala.last
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
+    def last: Call                      = calls.asScala.last
   }
 
   private def client(model: LLMClient): JLlmClient = Llm4s.wrapClient(model)
@@ -249,8 +249,8 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   /** A tracer that keeps the events it is given. */

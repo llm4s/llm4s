@@ -150,7 +150,7 @@ final case class AgentResult private (
   runId: RunId,
   activeAgent: AgentId,
   status: AgentStatus,
-  messages: Vector[Message],
+  messages: Seq[Message],
   usage: UsageSummary
 ):
 
@@ -203,6 +203,6 @@ object AgentResult:
     runId: RunId,
     activeAgent: AgentId,
     status: AgentStatus,
-    messages: Vector[Message],
+    messages: Seq[Message],
     usage: UsageSummary
   ): AgentResult = new AgentResult(threadId, runId, activeAgent, status, messages, usage)

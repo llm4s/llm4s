@@ -29,7 +29,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))
-  ).withHandler(ex => ex.getString("v").map(EchoResult(_))).buildSafe() match {
+  ).withHandler(ex => ex.getString("v").map(EchoResult(_))).build() match {
     case Right(t) => t
     case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
   }
@@ -49,8 +49,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
     }
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   private def text(s: String): Completion =
@@ -122,8 +122,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             throw failure
-          def getContextWindow(): Int     = 1
-          def getReserveCompletion(): Int = 1
+          def contextWindow: Int     = 1
+          def reserveCompletion: Int = 1
         }
         z(client)().run("q").flip.map { err =>
           assertTrue(err.isInstanceOf[GraphError.NodeFailed]) &&
@@ -170,8 +170,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
-          def getContextWindow(): Int     = 1
-          def getReserveCompletion(): Int = 1
+          def contextWindow: Int     = 1
+          def reserveCompletion: Int = 1
         }
         val agent = z(client)()
         for {
@@ -204,8 +204,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
-          def getContextWindow(): Int     = 8192
-          def getReserveCompletion(): Int = 512
+          def contextWindow: Int     = 8192
+          def reserveCompletion: Int = 512
         }
         val (capture, thread) = Fixtures.threadCapture()
         val agent             = z(client)(_.withTools(tools).withMiddleware(capture))
@@ -226,8 +226,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
-          def getContextWindow(): Int     = 8192
-          def getReserveCompletion(): Int = 512
+          def contextWindow: Int     = 8192
+          def reserveCompletion: Int = 512
         }
         val (capture, thread) = Fixtures.threadCapture()
         val agent             = z(client)(_.withTools(tools).withMiddleware(capture))

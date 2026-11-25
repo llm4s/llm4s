@@ -32,7 +32,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       } yield TestResult(s"Success: $item, $qty, $loc")
 
       result.left.map(_.message)
-    }.buildSafe()
+    }.build()
   }
 
   "Enhanced error messages" should "clearly indicate null arguments" in {
@@ -132,7 +132,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
         case Right(v)  => Right(TestResult(s"Result: ${10.0 / v}"))
         case Left(err) => Left(err.message)
       }
-    }.buildSafe()
+    }.build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {

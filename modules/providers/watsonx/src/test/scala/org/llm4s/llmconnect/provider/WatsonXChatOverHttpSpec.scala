@@ -92,7 +92,7 @@ class WatsonXChatOverHttpSpec
       .`object`[Map[String, Any]]("params")
       .withProperty(Schema.property("a", Schema.integer("first")))
       .withProperty(Schema.property("b", Schema.integer("second")))
-  ).withHandler(_ => Right("46")).buildSafe().fold(e => fail(e.toString), identity)
+  ).withHandler(_ => Right("46")).build().fold(e => fail(e.toString), identity)
 
   private val withTools = CompletionOptions().withTools(Seq(addTool))
   private val askToAdd  = Conversation(Seq(SystemMessage("You add numbers."), UserMessage("What is 12 + 34?")))

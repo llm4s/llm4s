@@ -471,7 +471,7 @@ object OllamaTools extends App {
       // Mock implementation
       WeatherResult(s"Weather in $location: Sunny, 72F")
     }
-  }.buildSafe()
+  }.build()
 
   val result = for {
     weatherTool    <- getWeather

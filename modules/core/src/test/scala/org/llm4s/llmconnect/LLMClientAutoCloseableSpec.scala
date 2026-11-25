@@ -35,9 +35,9 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(stubCompletion)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-    override def close(): Unit               = closeCount += 1
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
+    override def close(): Unit          = closeCount += 1
   }
 
   "LLMClient" should "be an instance of AutoCloseable" in {

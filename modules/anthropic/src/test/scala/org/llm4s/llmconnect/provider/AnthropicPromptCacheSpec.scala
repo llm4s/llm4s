@@ -36,7 +36,7 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))
     )
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .toOption
       .get
 

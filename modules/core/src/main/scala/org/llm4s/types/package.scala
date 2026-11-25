@@ -123,7 +123,7 @@ package object types {
    * Helpers for building and combining `Result` values (`Either[LLMError, A]`).
    *
    * {{{
-   * val all: Result[List[Int]] = Result.traverse(lines)(parseLine)
+   * val all: Result[Seq[Int]] = Result.traverse(lines)(parseLine)
    * }}}
    */
   object Result {
@@ -143,10 +143,9 @@ package object types {
       opt.toRight(error)
 
     /**
-     * Collects a list of results into a result of a list: the values in order, or the first
-     * `Left` in the list.
+     * Collects results into a result of their values: the values in order, or the first `Left`.
      */
-    def sequence[A](results: List[Result[A]]): Result[List[A]] =
+    def sequence[A](results: Seq[Result[A]]): Result[Seq[A]] =
       traverse(results)(result => result)
 
     /**
@@ -154,18 +153,17 @@ package object types {
      * `f` is not called on any element after the first failure, so side effects and expensive work
      * in `f` stop there too.
      */
-    def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] = {
+    def traverse[A, B](items: Seq[A])(f: A => Result[B]): Result[Seq[B]] = {
+      val remaining = items.iterator
       @scala.annotation.tailrec
-      def loop(remaining: List[A], acc: List[B]): Result[List[B]] =
-        remaining match {
-          case Nil => Right(acc.reverse)
-          case head :: tail =>
-            f(head) match {
-              case Right(value) => loop(tail, value :: acc)
-              case Left(error)  => Left(error)
-            }
-        }
-      loop(list, Nil)
+      def loop(acc: Vector[B]): Result[Seq[B]] =
+        if (!remaining.hasNext) Right(acc)
+        else
+          f(remaining.next()) match {
+            case Right(value) => loop(acc :+ value)
+            case Left(error)  => Left(error)
+          }
+      loop(Vector.empty)
     }
 
     /**
@@ -180,7 +178,7 @@ package object types {
      * first: `Left` with all the errors in item order when any item fails, otherwise `Right` with the
      * validated values in order.
      */
-    def validateAll[A](items: List[A])(validator: A => Result[A]): Either[List[error.LLMError], List[A]] = {
+    def validateAll[A](items: Seq[A])(validator: A => Result[A]): Either[Seq[error.LLMError], Seq[A]] = {
       val results   = items.map(validator)
       val errors    = results.collect { case Left(error) => error }
       val successes = results.collect { case Right(value) => value }

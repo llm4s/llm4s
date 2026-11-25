@@ -27,9 +27,9 @@ object StarterContractSpec {
       Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("mock")))
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-    override def close(): Unit               = onClose()
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
+    override def close(): Unit          = onClose()
   }
 
   /** Closes of [[CloseCountingBeans]]' client only: SpringProvidersSpec also uses [[UserBeans]], and may run alongside. */
@@ -349,8 +349,8 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       }
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
     val template = StarterTestSupport.template(JLlmClientTestFactory.create(echo))
     val threads  = 16
@@ -382,8 +382,8 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       }
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
     val template = StarterTestSupport.template(JLlmClientTestFactory.create(capturing))
     val conv     = Conversation(Seq(UserMessage("hi")))

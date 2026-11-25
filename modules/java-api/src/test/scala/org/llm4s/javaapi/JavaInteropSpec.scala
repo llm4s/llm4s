@@ -41,8 +41,8 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   "the documented Java quick-start" should "compile from Java and run end to end" in {

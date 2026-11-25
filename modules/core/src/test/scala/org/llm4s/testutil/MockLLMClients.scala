@@ -32,8 +32,8 @@ object MockLLMClients {
     ): Result[Completion] =
       complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /** Cycles through responses in order; wraps around at the end. */
@@ -61,8 +61,8 @@ object MockLLMClients {
     ): Result[Completion] =
       complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /** Always fails with a NetworkError. */
@@ -75,7 +75,7 @@ object MockLLMClients {
     ): Result[Completion] =
       complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 }

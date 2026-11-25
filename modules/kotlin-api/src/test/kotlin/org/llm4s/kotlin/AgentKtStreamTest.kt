@@ -87,8 +87,8 @@ class AgentKtStreamTest {
             onChunk: Function1<StreamedChunk, BoxedUnit>,
         ): Either<LLMError, Completion> = onStream { onChunk.apply(it) }
 
-        override fun getContextWindow(): Int = 4096
-        override fun getReserveCompletion(): Int = 256
+        override fun contextWindow(): Int = 4096
+        override fun reserveCompletion(): Int = 256
     }
 
     private fun completion(text: String): Either<LLMError, Completion> =

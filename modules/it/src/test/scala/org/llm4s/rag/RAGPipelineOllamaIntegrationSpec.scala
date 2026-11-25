@@ -144,9 +144,9 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = delegate.streamComplete(conversation, options)(onChunk)
 
-    override def getContextWindow(): Int     = delegate.getContextWindow()
-    override def getReserveCompletion(): Int = delegate.getReserveCompletion()
-    override def close(): Unit               = delegate.close()
+    override def contextWindow: Int     = delegate.contextWindow
+    override def reserveCompletion: Int = delegate.reserveCompletion
+    override def close(): Unit          = delegate.close()
   }
 
   private def newOllamaClient(): OllamaClient =

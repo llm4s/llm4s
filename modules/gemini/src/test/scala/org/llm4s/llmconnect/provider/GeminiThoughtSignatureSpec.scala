@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
@@ -148,7 +148,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   private def blocksOf(message: AssistantMessage, provider: String): Seq[ujson.Obj] =
     message.thinking
-      .collect { case ThinkingBlock.Opaque(`provider`, data) => ujson.read(data).obj }
+      .collect { case ThinkingBlock.Opaque(p, data) if p == ProviderId(provider) => ujson.read(data).obj }
       .map(ujson.Obj.from(_))
 
   for ((label, provider, make) <- clients) {
@@ -467,8 +467,8 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val first = client.complete(firstTurn, CompletionOptions()).value.message
       val noisy = first.withThinking(
         first.thinking ++ Seq(
-          ThinkingBlock.Opaque("openrouter", """{"call":"x","sig":"WRONG"}"""),
-          ThinkingBlock.Opaque(provider, "not json")
+          ThinkingBlock.Opaque(ProviderId("openrouter"), """{"call":"x","sig":"WRONG"}"""),
+          ThinkingBlock.Opaque(ProviderId(provider), "not json")
         )
       )
 
@@ -558,7 +558,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   "GeminiThoughtSignatures.parse" should "record the offset of each signed text part" in {
     val parsed = GeminiThoughtSignatures.parse(
-      "gemini",
+      ProviderId("gemini"),
       parseParts(text("ab"), text("cde", Some("S1")), text("", Some("S2"))).arr.toSeq,
       textOffset = 10,
       newId = newIds()
@@ -575,7 +575,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       text("answer")
     ).arr.toSeq
 
-    val parsed = GeminiThoughtSignatures.parse("gemini", parts, 0, newIds())
+    val parsed = GeminiThoughtSignatures.parse(ProviderId("gemini"), parts, 0, newIds())
 
     parsed.signatures shouldBe empty
     parsed.text shouldBe "answer"
@@ -584,7 +584,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   it should "accept a function call without args" in {
     val parts  = parseParts(part("functionCall" -> ujson.Obj("name" -> "ping"))).arr.toSeq
-    val parsed = GeminiThoughtSignatures.parse("gemini", parts, 0, newIds())
+    val parsed = GeminiThoughtSignatures.parse(ProviderId("gemini"), parts, 0, newIds())
 
     parsed.calls.map(c => (c.name, c.arguments)) shouldBe Seq(("ping", ujson.Obj()))
   }
@@ -592,31 +592,35 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
   "GeminiThoughtSignatures.parts" should "send one unsigned part when the signed text no longer fits the content" in {
     val message = AssistantMessage(
       text = Some("Something else entirely"),
-      thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "Hello", "sig" -> "S").render()))
+      thinking =
+        Seq(ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("at" -> 0, "text" -> "Hello", "sig" -> "S").render()))
     )
 
-    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(ujson.Obj("text" -> "Something else entirely"))
+    GeminiThoughtSignatures.parts(ProviderId("gemini"), message) shouldBe Seq(
+      ujson.Obj("text" -> "Something else entirely")
+    )
   }
 
   it should "send one unsigned part when signed texts overlap" in {
     val message = AssistantMessage(
       text = Some("abcdef"),
       thinking = Seq(
-        ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 0, "text" -> "abcd", "sig" -> "S1").render()),
-        ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 2, "text" -> "cdef", "sig" -> "S2").render())
+        ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("at" -> 0, "text" -> "abcd", "sig" -> "S1").render()),
+        ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("at" -> 2, "text" -> "cdef", "sig" -> "S2").render())
       )
     )
 
-    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(ujson.Obj("text" -> "abcdef"))
+    GeminiThoughtSignatures.parts(ProviderId("gemini"), message) shouldBe Seq(ujson.Obj("text" -> "abcdef"))
   }
 
   it should "keep a signed part in the middle of the text, with plain parts either side" in {
     val message = AssistantMessage(
       text = Some("one two three"),
-      thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("at" -> 4, "text" -> "two ", "sig" -> "S").render()))
+      thinking =
+        Seq(ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("at" -> 4, "text" -> "two ", "sig" -> "S").render()))
     )
 
-    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(
+    GeminiThoughtSignatures.parts(ProviderId("gemini"), message) shouldBe Seq(
       ujson.Obj("text" -> "one "),
       ujson.Obj("text" -> "two ", "thoughtSignature" -> "S"),
       ujson.Obj("text" -> "three")
@@ -630,11 +634,11 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       toolCalls = Seq(call),
       thinking = Seq(
         ThinkingBlock.Text("The model's own reasoning summary."),
-        ThinkingBlock.Opaque("gemini", ujson.Obj("call" -> "call-1", "sig" -> "S").render())
+        ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("call" -> "call-1", "sig" -> "S").render())
       )
     )
 
-    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(
+    GeminiThoughtSignatures.parts(ProviderId("gemini"), message) shouldBe Seq(
       ujson.Obj("functionCall" -> ujson.Obj("name" -> "f", "args" -> ujson.Obj()), "thoughtSignature" -> "S")
     )
   }
@@ -644,10 +648,10 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val message = AssistantMessage(
       text = None,
       toolCalls = Seq(call),
-      thinking = Seq(ThinkingBlock.Opaque("gemini", ujson.Obj("call" -> "other-id", "sig" -> "S").render()))
+      thinking = Seq(ThinkingBlock.Opaque(ProviderId("gemini"), ujson.Obj("call" -> "other-id", "sig" -> "S").render()))
     )
 
-    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(
+    GeminiThoughtSignatures.parts(ProviderId("gemini"), message) shouldBe Seq(
       ujson.Obj("functionCall" -> ujson.Obj("name" -> "f", "args" -> ujson.Obj()))
     )
   }

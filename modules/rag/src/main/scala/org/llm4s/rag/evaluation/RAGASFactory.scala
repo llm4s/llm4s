@@ -61,7 +61,7 @@ object RAGASFactory {
     embeddingConfig: org.llm4s.llmconnect.config.EmbeddingProviderConfig
   )(using ProviderRegistry): Result[EmbeddingModelConfig] =
     ModelDimensionRegistry
-      .getDimension(embeddingConfig.providerId, embeddingConfig.model)
+      .dimension(embeddingConfig.providerId, embeddingConfig.model)
       .map(dims => EmbeddingModelConfig(embeddingConfig.model, dims))
 
   /**

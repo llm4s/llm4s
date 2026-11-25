@@ -119,7 +119,7 @@ object CancellationSpec extends ZIOSpecDefault {
               case Right(_) => Right("unblocked")
             }
           } else Right("done")
-        }.buildSafe() match {
+        }.build() match {
           case Right(t) => t
           case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
         }
@@ -135,8 +135,8 @@ object CancellationSpec extends ZIOSpecDefault {
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             complete(c, o)
-          def getContextWindow(): Int     = 4096
-          def getReserveCompletion(): Int = 256
+          def contextWindow: Int     = 4096
+          def reserveCompletion: Int = 256
         }
         val (capture, thread) = threadCapture()
         val agent =

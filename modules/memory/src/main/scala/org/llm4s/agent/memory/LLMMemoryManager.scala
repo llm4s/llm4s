@@ -87,7 +87,7 @@ final case class LLMMemoryManager(
    * - Task success status (consolidate successful/failed tasks separately)
    *
    * Only groups with minCount+ memories are returned.
-   * Uses client.getContextBudget() to dynamically limit the group size based on token count
+   * Uses client.contextBudget() to dynamically limit the group size based on token count
    * to prevent context window overflow during summarization. The token budget is also
    * capped by config.maxMemoriesPerGroup as a secondary limit.
    *
@@ -102,8 +102,8 @@ final case class LLMMemoryManager(
     memories: Seq[Memory],
     minCount: Int
   ): Seq[Seq[Memory]] = {
-    // getContextBudget() already applies HeadroomPercent.Standard (~8% headroom)
-    val tokenBudget = client.getContextBudget()
+    // contextBudget() already applies HeadroomPercent.Standard (~8% headroom)
+    val tokenBudget = client.contextBudget()
     val maxPerGroup = config.consolidationConfig.maxMemoriesPerGroup
 
     /**

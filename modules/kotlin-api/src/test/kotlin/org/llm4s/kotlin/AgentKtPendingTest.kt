@@ -152,8 +152,8 @@ class AgentKtPendingTest {
             options: CompletionOptions,
             onChunk: Function1<StreamedChunk, BoxedUnit>,
         ): Either<LLMError, Completion> = reply()
-        override fun getContextWindow(): Int = 4096
-        override fun getReserveCompletion(): Int = 256
+        override fun contextWindow(): Int = 4096
+        override fun reserveCompletion(): Int = 256
     }
 
     private fun agentOf(vararg replies: () -> Either<LLMError, Completion>): AgentKt = Llm4s.wrapAgent(scalaAgentOf(*replies))

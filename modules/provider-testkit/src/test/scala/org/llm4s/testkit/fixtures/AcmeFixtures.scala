@@ -78,8 +78,8 @@ final case class AcmeClient(config: AcmeConfig) extends LLMClient:
     onChunk(StreamedChunk("acme-1", Some("hi")))
     complete(conversation, options)
 
-  def getContextWindow(): Int     = config.contextWindow
-  def getReserveCompletion(): Int = config.reserveCompletion
+  def contextWindow: Int     = config.contextWindow
+  def reserveCompletion: Int = config.reserveCompletion
 
 object AcmeEmbeddings extends EmbeddingProviderDescriptor:
   val id: ProviderId                = ProviderId("acme")

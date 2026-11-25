@@ -320,10 +320,10 @@ import org.llm4s.types.Result
 
 import scala.util.Try
 
-def parseAll(inputs: List[String]): Result[List[Int]] =
+def parseAll(inputs: List[String]): Result[Seq[Int]] =
   Result.traverse(inputs)(s => Try(s.toInt).toResult)
 
-parseAll(List("1", "2", "3")) // Right(List(1, 2, 3))
+parseAll(List("1", "2", "3")) // Right(Seq(1, 2, 3))
 parseAll(List("1", "x", "y")) // Left(...), the first failure
 ```
 
@@ -331,7 +331,7 @@ parseAll(List("1", "x", "y")) // Left(...), the first failure
   it, so side effects and expensive work stop there too. `Result.sequence` returns the first failure
   in a list of results that have already been computed.
 - `Result.validateAll(items)(check)` runs every check and returns **all** the failures as a
-  `Left(List[LLMError])`: use it when you want to report every problem at once.
+  `Left(Seq[LLMError])`: use it when you want to report every problem at once.
 
 ## 9. Recovering from failures
 

@@ -324,7 +324,7 @@ object BraveSearchTool {
         )
         result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Create a Brave search tool with explicit API key and optional overrides.

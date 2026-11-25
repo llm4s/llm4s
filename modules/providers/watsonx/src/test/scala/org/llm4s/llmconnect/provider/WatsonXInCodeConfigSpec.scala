@@ -25,7 +25,7 @@ class WatsonXInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValue
   private def assertBuilds(config: ProviderConfig, provider: String): Unit =
     config.providerId shouldBe ProviderId(provider)
     val client = LLMConnect.getClient(config).value
-    val window = client.getContextWindow()
+    val window = client.contextWindow
     client.close()
     window shouldBe config.contextWindow
 

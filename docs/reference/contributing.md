@@ -215,9 +215,12 @@ has a private constructor and is built through its companion.
 fields it is a `sealed trait` with one `final case class X private` per case, each with its companion `apply` and
 `with*` setters: an `enum` case with fields has a public constructor and `copy`, which a new field would break.
 
-**Accessors.** A method that returns a value is named for the value (`usage`, `contextWindow`), not `getUsage`.
-The `getX` methods still in the library (`LLMClient.getContextWindow` among them) predate this and are renamed
-together, not one at a time.
+**Accessors.** A method that returns a value is named for the value (`usage`, `contextWindow`), not `getUsage`,
+and has no parameter list when it takes no argument (`client.contextWindow`, not `client.contextWindow()`). The one
+family of `get` names is a typed read by key, as `Map.get` and Typesafe Config's `getString` are:
+`SafeParameterExtractor.getString(path)`, `getInt`, `getOptionalString`. A `getX` left in an `@Experimental` type
+(`SemanticBlock.getBlockSummary`, `TokenWindow.getUsageInfo`) predates the rule and is renamed when that type is
+next changed.
 
 **Constants.** `PascalCase`, as the Scala style guide has it: `MaxDepth`, `DefaultTimeout`. The exception is a
 constant named after an external identifier, which keeps that spelling (`TokenizerId.CL100K_BASE`).

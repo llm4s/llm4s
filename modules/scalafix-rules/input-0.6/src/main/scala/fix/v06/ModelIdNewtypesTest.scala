@@ -1,5 +1,5 @@
 /*
-rules = [ModelIdNewtypes, CompletionFromMessage]
+rules = [ModelIdNewtypes, CompletionFromMessage, AccessorRenames]
 */
 package fix.v06
 

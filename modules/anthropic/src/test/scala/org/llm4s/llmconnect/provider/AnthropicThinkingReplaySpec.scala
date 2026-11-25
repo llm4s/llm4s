@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
@@ -184,7 +184,8 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val mixed = answering(UserMessage("hi"))(
       AssistantMessage(None, Seq(call)).withThinking(
         Seq(
-          ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.encrypted","data":"or-data","index":0}"""),
+          ThinkingBlock
+            .Opaque(ProviderId("openrouter"), """{"type":"reasoning.encrypted","data":"or-data","index":0}"""),
           ThinkingBlock.Text("Mine.", Some("sig-mine"))
         )
       )
@@ -334,7 +335,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
           .withProperty(org.llm4s.toolapi.Schema.property("city", org.llm4s.toolapi.Schema.string("City")))
       )
       .withHandler(_ => Right("sunny"))
-      .buildSafe()
+      .build()
       .toOption
       .get
     val turn = answering(UserMessage("Weather?"))(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))

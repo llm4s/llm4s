@@ -91,8 +91,8 @@ object AgentPekkoNestedEventsSpec {
           c.content.grouped(3).foreach(piece => onChunk(StreamedChunk("c", Some(piece))))
           c
         }
-      def getContextWindow(): Int     = 128000
-      def getReserveCompletion(): Int = 4096
+      def contextWindow: Int     = 128000
+      def reserveCompletion: Int = 4096
     }
     val general = TypedAgent.text("general", "Says hello").withSystemPrompt("CHILD").withStreaming()
     Agent

@@ -96,16 +96,16 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   private def failingWith(error: LLMError): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Left(error)
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       Left(error)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   private def client(underlying: LLMClient): JLlmClient = Llm4s.wrapClient(underlying)
@@ -559,8 +559,8 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
           Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
         override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) = complete(c, o)
-        override def getContextWindow(): Int                                                         = 4096
-        override def getReserveCompletion(): Int                                                     = 512
+        override def contextWindow: Int                                                              = 4096
+        override def reserveCompletion: Int                                                          = 512
         override def close(): Unit = { closes.incrementAndGet(); () }
       }
 
@@ -574,8 +574,8 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
           throw new InterruptedException("cancelled")
         override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) = complete(c, o)
-        override def getContextWindow(): Int                                                         = 4096
-        override def getReserveCompletion(): Int                                                     = 512
+        override def contextWindow: Int                                                              = 4096
+        override def reserveCompletion: Int                                                          = 512
       }
       // on a thread of its own, so the restored flag does not leak into other tests
       val result  = new java.util.concurrent.atomic.AtomicReference[LlmResult[String]]()

@@ -371,7 +371,7 @@ object ExaSearchTool {
           query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
           result   <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt)
         } yield result
-      }.buildSafe()
+      }.build()
     } yield tool
 
   /**

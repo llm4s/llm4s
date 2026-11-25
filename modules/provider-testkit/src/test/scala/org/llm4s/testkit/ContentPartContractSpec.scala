@@ -47,8 +47,8 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
         Completion(id = "x", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("ok"))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   private val text: PartialFunction[ContentPart, ujson.Value] = { case ContentPart.Text(t) => ujson.Str(t) }
   private val inlineImages: PartialFunction[ContentPart, ujson.Value] = {
@@ -114,8 +114,8 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
       Left(map(response.statusCode(), response.body()))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   private def openAIError: (com.sun.net.httpserver.HttpExchange, Int, String) => Unit = (exchange, status, message) =>
     LocalProviderTestServer.sendJsonResponse(

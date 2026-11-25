@@ -732,13 +732,13 @@ the no-gateway alternative.
 
 ### Token Budgets
 
-Use `LLMClient.getContextBudget()` to stay within limits:
+Use `LLMClient.contextBudget()` to stay within limits:
 
 ```scala
 import org.llm4s.agent.{Agent, ContextWindowConfig}
 import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
-val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
+val budgetTokens = client.contextBudget(HeadroomPercent.Standard)
 
 // Prune what is sent to the model with ContextWindowMiddleware
 val agent = Agent.builder("assistant", client)

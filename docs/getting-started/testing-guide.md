@@ -298,7 +298,7 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
         capturedCity = Some(city)
         s"Weather in $city: 20°C"
       }
-    }.buildSafe()
+    }.build()
 
     val client = ScriptedLLMClient.sequence(
       Reply.toolCall("get_weather", """{"city": "London"}"""),
