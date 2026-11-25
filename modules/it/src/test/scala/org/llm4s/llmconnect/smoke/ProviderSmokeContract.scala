@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
-import org.llm4s.error.{ AuthenticationError, ServiceError, ValidationUnsupportedError }
+import org.llm4s.error.{ AuthenticationError, ModelNotFoundError, ServiceError, ValidationUnsupportedError }
 import org.llm4s.it.Tier
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
@@ -129,7 +129,8 @@ trait ProviderSmokeContract extends BeforeAndAfterAll { self: AnyFlatSpec & Matc
 
   /**
    * A client, using the real `key`, for a model the provider does not have, where `validate()` looks the model up:
-   * its `validate()` must be the `ServiceError` 404 a completion gets. `None` (the default) cancels the case.
+   * its `validate()` must be the error a completion gets: a `ModelNotFoundError`, or a `ServiceError` 404 where the
+   * provider's response does not say the model is unknown. `None` (the default) cancels the case.
    */
   protected def unknownModelClient(key: String): Option[Result[LLMClient]] = None
 
@@ -172,7 +173,10 @@ trait ProviderSmokeContract extends BeforeAndAfterAll { self: AnyFlatSpec & Matc
       unknownModelClient(contractKey.getOrElse("")) match {
         case None => cancel(s"$providerLabel's validation request does not look the model up")
         case Some(built) =>
-          validated(built) should matchPattern { case Left(error: ServiceError) if error.status == 404 => }
+          validated(built) should matchPattern {
+            case Left(_: ModelNotFoundError)                      =>
+            case Left(error: ServiceError) if error.status == 404 =>
+          }
       }
     }
   }

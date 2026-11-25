@@ -86,17 +86,18 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     withClient(_.validate() shouldBe Right(()))
   }
 
-  it should "report a model the server does not have as the 404 a completion gets, with the pull hint" in {
+  it should "report a model the server does not have as the ModelNotFoundError a completion gets, with the pull hint" in {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
     val client = new OllamaClient(config.withModel(ModelName("llm4s-no-such-model:latest")))
     val result = client.validate()
     client.close()
     result match {
-      case Left(error: org.llm4s.error.ServiceError) =>
-        error.status shouldBe 404
+      case Left(error: org.llm4s.error.ModelNotFoundError) =>
+        error.httpStatus shouldBe Some(404)
+        error.model shouldBe Some("llm4s-no-such-model:latest")
         error.message should include("ollama pull")
-      case other => fail(s"expected a ServiceError 404, got $other")
+      case other => fail(s"expected a ModelNotFoundError, got $other")
     }
   }
 
