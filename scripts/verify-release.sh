@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Verifies that a release is on Maven Central: every artifact the build publishes resolves at <version>.
 #
-#   scripts/verify-release.sh 0.7.0
-#   scripts/verify-release.sh v0.7.0                       # a leading v is accepted
-#   scripts/verify-release.sh 0.7.0 --list expected.txt    # use a saved list instead of asking sbt
-#   scripts/verify-release.sh 0.7.0 --attestations         # also check each artifact's build provenance
+#   scripts/verify-release.sh 1.0.0
+#   scripts/verify-release.sh v1.0.0                       # a leading v is accepted
+#   scripts/verify-release.sh 1.0.0 --list expected.txt    # use a saved list instead of asking sbt
+#   scripts/verify-release.sh 1.0.0 --attestations         # also check each artifact's build provenance
 #
 # The expected coordinates come from the build (`sbt -error listPublishedArtifacts`), not from a list kept
 # here, so a module added to the build is checked the day it is added. For each real artifact the POM and

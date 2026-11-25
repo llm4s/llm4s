@@ -68,7 +68,7 @@ refreshed at each LLM4S release.
 | Testing and evaluation | RAGAS-style metrics and a benchmark harness for RAG ([guide](rag-evaluation)); LLM-as-judge guardrails; `llm4s-testkit` (scripted clients for application tests, [#1475](https://github.com/llm4s/llm4s/issues/1475)); `llm4s-provider-testkit` for provider authors | not verified | `Evaluator`, `RelevancyEvaluator` and `FactCheckingEvaluator` [S1] | not verified | not verified |
 | Frameworks and runtimes | Spring Boot 3 and 4 starter, every provider ([guide](spring-boot)), a Quarkus extension, built from source and outside the 1.0 scope ([guide](quarkus)), Micronaut and Helidon samples ([Micronaut](micronaut), [Helidon](helidon)), cats-effect ([guide](cats-effect)), ZIO ([guide](zio)), Pekko Streams ([guide](pekko)), Project Reactor ([guide](java-reactor)), a Kotlin coroutine API, a Java facade ([guide](java)); the versions each is tested with are in the [compatibility matrix](../reference/compatibility-matrix#tested-versions) | Spring Boot 3 and 4 starters and `@AiService`; example projects for Spring Boot, Quarkus, Helidon, Payara Micro, WildFly and Jakarta EE/MicroProfile [L2][L8] | Spring AI 2.0.x supports Spring Boot 4.0.x and 4.1.x [S9]; Spring Boot starters, for example for its MCP client and server [S3] | Spring Boot and Ktor integrations (both beta) [K1] | Built on Spring [E1] |
 | Java baseline | JDK 21: CI runs only JDK 21, and the agent runtime depends on Ox, whose jars are JDK 21 bytecode ([Scala and JDK support](../reference/v1-scope#scala-and-jdk-support)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
-| Maturity | Pre-1.0: latest release v{{ site.data.project.latest_release }}; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.24.0, 2026-11-18 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.1.0, 2026-11-20 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.4, 2026-10-28 [R4] |
+| Maturity | Latest release v{{ site.data.project.latest_release }}; seven modules frozen at 1.0, binary compatible across 1.x; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.24.0, 2026-11-18 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.1.0, 2026-11-20 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.4, 2026-10-28 [R4] |
 
 Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "LangChain4j Spring Boot integration requires Java 17" [L8]. This is a statement about that project, quoted as fetched on 2026-11-24. <!-- doc-support: ignore -->
 
@@ -83,7 +83,9 @@ Plainly, as of the date above:
 - **An MCP user guide.** The client and server exist; the guide is an open issue
   ([#1442](https://github.com/llm4s/llm4s/issues/1442)).
 - **No Scala 2.13 artifact.** The artifacts are Scala 3 only.
-- **A stable 1.0 API.** The split artifacts are first published in 0.5.0, and the compatibility promise starts at 1.0.
+- **A frozen API beyond seven modules.** The 1.x compatibility promise covers `llm4s-core`, the Stable core of
+  `llm4s-agent` and five provider modules; RAG, memory, MCP, the Java and Kotlin APIs and the rest of the agent
+  runtime are Beta or Experimental ([1.0 Scope](../reference/v1-scope)).
 
 ## When not to choose LLM4S
 
@@ -94,7 +96,8 @@ Plainly, as of the date above:
   provider that LLM4S does not have a module for. The two projects whose pages list their stores, LangChain4j and Spring AI,
   each list far more vector stores than LLM4S has.
 - You need to stay on a JDK older than 21.
-- You need a stable, frozen API today. LLM4S is pre-1.0.
+- You need a frozen API for something outside the seven frozen modules, such as RAG, memory or the graph runtime:
+  those are Beta or Experimental and can change in a 1.x minor release.
 
 ## When LLM4S fits
 

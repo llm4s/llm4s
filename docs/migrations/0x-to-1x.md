@@ -24,30 +24,45 @@ every breaking change; this page says which of them apply to you.
 
 ---
 
-## The road to 1.0
+## Upgrading to 1.0.0
 
-The releases left are few: **0.7.0** sets the binary-compatibility baseline (MiMa) for the seven frozen modules,
-`llm4s-agent` included, and **1.0** follows it. Until 0.7.0 any release may break source or binary compatibility, each
-break listed under the CHANGELOG's *Breaking changes* with a note in the [Migration Guide](../reference/migration). What
-the baseline and 1.0 then promise is in the [Compatibility and Deprecation Policy](../reference/compatibility-policy).
+**1.0.0** is released. Every 0.x release could break source or binary compatibility, each break listed under the
+CHANGELOG's *Breaking changes* with a note in the [Migration Guide](../reference/migration); **0.7.0** set the
+binary-compatibility baseline (MiMa) for the seven frozen modules, `llm4s-agent` included, and 1.0.0 followed it with
+no release in between. From 1.0.0 the frozen modules are source and binary compatible across 1.x: what that covers is
+in the [Compatibility and Deprecation Policy](../reference/compatibility-policy).
 
 **Scalafix.** The mechanical source breaks since 0.4.1 have Scalafix rules
-([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are published from 1.0.0, as
-`org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
-change by hand. Run the one umbrella rule for the version you start from: `Llm4sMigrateFrom_0_5` from 0.5.x,
-`Llm4sMigrateFrom_0_6` from 0.6.x, `Llm4sMigrateFrom_0_7` from 0.7.x.
-The command, once 1.0.0 is out, is under [When 1.0 ships](#when-10-ships).
+([Scalafix: migration rules](../reference/scalafix#migration-rules)), published from 1.0.0 as
+`org.llm4s::llm4s-scalafix`. Run the one umbrella rule for the version you start from, while your code still compiles
+against that version, with [sbt-scalafix](../reference/scalafix#running-a-migration-rule) and
+`semanticdbEnabled := true` in the build:
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:1.0.0"
+```
+
+That is the rule for 0.7.x; from 0.6.x it is `Llm4sMigrateFrom_0_6`, and from 0.5.x `Llm4sMigrateFrom_0_5`. Then set
+the llm4s version to 1.0.0, compile, and work through the notes of your release's section and every section above it:
+a rule reports a lint where it cannot rewrite safely, and the
+[changes no rule automates](../reference/migration#changes-since-051-that-no-rule-automates) are made by hand.
 
 ---
 
-## From 0.7.0 to 1.0
+## From 0.7.0 to 1.0.0
 
-0.7.0 is the baseline, so a break after it is a frozen API found wrong and fixed before 1.0, each with a MiMa filter
-where the binary changes. The Scalafix rule `Llm4sMigrateFrom_0_7` rewrites the mechanical part
-([Scalafix: migration rules](../reference/scalafix#migration-rules)).
+0.7.0 is the baseline, so little changed after it: a frozen API found wrong was fixed before 1.0.0 made the promise.
+Nothing in the frozen modules changed binary-incompatibly. The Scalafix rule `Llm4sMigrateFrom_0_7` rewrites the
+mechanical part ([Scalafix: migration rules](../reference/scalafix#migration-rules)).
 
 - [An error's `provider` is a `ProviderId`](../reference/migration#an-errors-provider-is-a-providerid-2936):
-  `RateLimitError(ProviderId("openai"))`, and `error.provider.asString` where a `String` is wanted.
+  `RateLimitError(ProviderId("openai"))`, and `error.provider.asString` where a `String` is wanted. The one source
+  break; the rule `ErrorProviderIdTyped` rewrites both.
+- [A cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](../reference/migration#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933):
+  behaviour, not signatures. An agent with `withOutput` whose answer is cut off ends `AgentStatus.Truncated` where
+  0.7.0 returned a `Left`, and `llm4s-anthropic` no longer sends `max_tokens = 2048` when `maxTokens` is unset.
+
+---
 
 ## From 0.6.0 to 0.7.0
 
@@ -262,20 +277,3 @@ The `DBx` module (PostgreSQL and vector-store scaffolding) was removed. Its repl
 
 The sbt modules moved from the repository root into `modules/` (`core/` to `modules/core/`, and so on). Artifact
 coordinates did not change in 0.1.13; they changed in 0.4.0, above.
-
----
-
-## When 1.0 ships
-
-The 1.0 release adds its own section here. Its Scalafix rules are run with one command, while your code still
-compiles against the 0.x release you are on, with [sbt-scalafix](../reference/scalafix#running-a-migration-rule) and
-`semanticdbEnabled := true` in the build:
-
-```bash
-sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:1.0.0"
-```
-
-That is the rule for 0.7.x; from 0.6.x it is `Llm4sMigrateFrom_0_6`, and from 0.5.x `Llm4sMigrateFrom_0_5`. Then set
-the llm4s version to 1.0.0 and compile. Follow the
-[CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) and the
-[GitHub releases](https://github.com/llm4s/llm4s/releases) for announcements.

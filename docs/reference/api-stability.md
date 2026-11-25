@@ -25,11 +25,11 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 | Release type | Guarantee |
 |---|---|
-| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
-| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0 is the next release after 0.7.0. A frozen API found wrong in between is still fixed, in 1.0, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member; a 0.7.x patch release makes no binary-breaking change in a frozen module ([After the baseline](#after-the-baseline)) |
+| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, could break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0.0 was the next release after 0.7.0. A frozen API found wrong in between was fixed in 1.0.0, with a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member (a binary break would also have needed a MiMa filter; there was none); a 0.7.x patch release makes no binary-breaking change in a frozen module ([After the baseline](#after-the-baseline)) |
 | **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes, after a deprecation |
 
-The 0.7.0 baseline makes every break visible and reviewed; the compatibility promise starts at 1.0.
+The 0.7.0 baseline made every break visible and reviewed; the compatibility promise started at 1.0.0, which is released.
 
 One kind of change is not a break in any of those rows: a Stable sealed type or enum that the compatibility policy
 lists under [Sealed types that may gain a case](compatibility-policy#sealed-types-that-may-gain-a-case) (`ContentPart`,
@@ -108,7 +108,7 @@ And it enforces [RFC 0002](../rfcs/#index), growth safety ([#2369](https://githu
 it fails for a `case class` in a `@Stable` type (top-level or nested in a `@Stable` type or its companion, and also
 for an untiered public one) whose primary constructor is not `private` or `private[x]`, naming the file, line and
 type, and for a public `copy` defined in one. Adding a field to a public constructor or `copy` changes its
-signature, which MiMa reports as a break once the baseline exists, so a growth-prone type is written so that a
+signature, which MiMa reports as a break, so a growth-prone type is written so that a
 field can be added later:
 
 ```scala
@@ -122,8 +122,8 @@ object Limits:
 ```
 
 To add a field, add it to the constructor and, with a default, to `apply`, and add a `withX` setter. Also keep the
-previous `apply` as an overload without defaults that forwards to the new one: the 0.7.0 baseline holds its
-signature, and MiMa reports its removal. (Up to 0.7.0 there was one `apply` per type, so the baseline froze no
+previous `apply` as an overload without defaults that forwards to the new one: the baseline holds its
+signature, and MiMa reports its removal. (Up to 0.7.0 there was one `apply` per type, so the 0.7.0 baseline froze no
 overload.) Never re-expose
 `copy`. A case class with no fields is exempt. A type that is deliberately closed (a single-value wrapper, a fixed
 record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
@@ -223,26 +223,33 @@ are compared with, and `mimaBaselineOverrides` gives a module a different one: `
 compares it with its own release, `"llm4s-<name>" -> None` holds it back with no baseline while the others
 have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `Some("0.7.0")` and the
 map is empty, so every frozen module is compared with its 0.7.0 artifact: `sbt mimaReportBinaryIssues`, which CI
-runs on every pull request, fails on a binary-incompatible change to one.
+runs on every pull request, fails on a binary-incompatible change to one. There is no filter: 1.0.0 is binary
+compatible with 0.7.0 in the frozen modules. The baseline moves to `Some("1.0.0")` once 1.0.0 is on Maven Central
+([Setting and bumping the baseline](#setting-and-bumping-the-baseline)).
 
 No earlier release is a baseline. 0.5.0, 0.5.1 and 0.6.0, the first releases with the split coordinates, were
 published without one, while the designs were still changing. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
 they are not usable baselines for the split modules: the packages they hold have since moved to other
-artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is **0.7.0**, for every
+artifacts, and `llm4s-agent` and the provider modules do not exist there. The first baseline is **0.7.0**, for every
 frozen module ([#1281](https://github.com/llm4s/llm4s/issues/1281)); it was set once 0.7.0 was on Maven Central.
 `llm4s-agent` takes the same baseline as the other frozen modules: [RFC 0001](../rfcs/0001-agent-baseline), which
 proposed a later one, was rejected once the graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) was complete.
 
 ### After the baseline
 
-The release after 0.7.0 is 1.0. No minor release is planned between them, and 1.0 does not wait for the baseline to
-survive a number of releases. `mimaBaselineVersion` is `Some("0.7.0")`, so CI compares every frozen module on `main`
-with 0.7.0, so a break in the baselined surface is reported on the pull request that makes it. A break found
-necessary before 1.0 is still made: the API is fixed outright, and the break is recorded as a narrow MiMa filter with
-its reason, a line under the CHANGELOG's *Breaking changes* and a note in the [Migration Guide](migration)
-([Adding a Binary-Incompatible Change](#adding-a-binary-incompatible-change)). The filters in `build.sbt` at 1.0 are
-then the reviewed list of everything that changed in the frozen modules between 0.7.0 and 1.0. A 0.7.x patch release,
-cut only for a critical fix, makes no binary-breaking change in a frozen module.
+The release after 0.7.0 was 1.0.0, with no minor release and no release candidate between them; 1.0 did not wait
+for the baseline to survive a number of releases. CI compared every frozen module on `main` with 0.7.0, so a break in
+the baselined surface was reported on the pull request that made it. A break found necessary before 1.0.0 was still
+made: the API was fixed outright, and the break recorded as a narrow MiMa filter with its reason, a line under the
+CHANGELOG's *Breaking changes* and a note in the [Migration Guide](migration). None was needed: `build.sbt` has no
+filter at 1.0.0, so nothing in the frozen modules changed binary-incompatibly between 0.7.0 and 1.0.0. The one
+frozen API fixed in between, [an error's `provider` is a `ProviderId`](migration#an-errors-provider-is-a-providerid-2936),
+breaks source only: `ProviderId` is an opaque type over `String`. A 0.7.x patch release, cut only for a critical
+security fix, makes no binary-breaking change in a frozen module.
+
+From 1.0.0 a binary break to a Stable API waits for a major release
+([Adding a Binary-Incompatible Change](#adding-a-binary-incompatible-change)). Once 1.0.0 is on Maven Central the
+baseline moves to it, so every 1.x release is compared with 1.0.0.
 
 ### Setting and bumping the baseline
 
@@ -287,12 +294,16 @@ version returns, CI must run it cross-built (with sbt's `+` prefix) to check eac
 
 ## Adding a Binary-Incompatible Change
 
-A change to a frozen module that breaks binary compatibility with the baseline needs:
+From 1.0.0 a binary break to a `@Stable` API of a frozen module ships only in a major release, after the old API
+has been deprecated ([Deprecating and removing](compatibility-policy#deprecating-and-removing)). In a 1.x release,
+add the new API beside the old one, which stays as a `@deprecated` member pointing to it until the next major
+release; that needs no filter. A change that still breaks binary compatibility with the baseline (a major release's
+removal, or a break in something the promise does not cover that MiMa does not skip) needs:
 
 1. A `ProblemFilters.exclude` entry in the module's `mimaBinaryIssueFilters`, with a comment saying why the break is intentional
 2. A line under `### Breaking changes` in `CHANGELOG.md`'s `[Unreleased]`, and a note in the [Migration Guide](migration)
-3. From 1.0 only: a `@deprecated` version of the old API pointing to the new one, kept until the next major release.
-   Between the baseline and 1.0 there is no `@deprecated` member and no shim: the API is fixed outright
+3. For a Stable API: an earlier release that deprecated it. (Between the 0.7.0 baseline and 1.0.0 there was no
+   `@deprecated` member and no shim: the API was fixed outright.)
 
 `ProblemFilters` is not in sbt's default imports, so `build.sbt` needs
 `import com.typesafe.tools.mima.core._` at the top before a filter compiles.
@@ -300,7 +311,7 @@ A change to a frozen module that breaks binary compatibility with the baseline n
 ```scala
 // build.sbt, in the module's settings
 mimaBinaryIssueFilters ++= Seq(
-  // Agent.run gained a parameter (between 0.7.0 and 1.0); migration note: "Agent.run takes ...".
+  // Agent.run lost its deprecated overload (2.0.0); migration note: "Agent.run takes ...".
   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.Agent.run")
 )
 ```
@@ -315,9 +326,10 @@ Use the narrowest problem type and the narrowest name that matches, not `[Proble
 sbt mimaReportBinaryIssues
 ```
 
-This reports binary incompatibilities between the current code and the baseline release, 0.7.0. A module
+This reports binary incompatibilities between the current code and the baseline release (0.7.0 until it moves to
+1.0.0). A module
 with no baseline (every module outside the frozen set) logs `mimaPreviousArtifacts not set` (or `is empty`)
-and is skipped. For a frozen module, success means its API is compatible with 0.7.0, and failure lists each
+and is skipped. For a frozen module, success means its API is compatible with the baseline, and failure lists each
 problem with the `ProblemFilters.exclude` line that would silence it. To check one module, run
 `sbt agent/mimaReportBinaryIssues`. `scripts/mima-dry-run.sh` checks the wiring itself, against a throwaway
 baseline: that a baseline resolves, that the check can fail and that `@Experimental` types are skipped (see [Release readiness](../contribute/release#release-readiness-a-mima-dry-run)).

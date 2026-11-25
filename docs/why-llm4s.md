@@ -96,7 +96,7 @@ description: "Why build LLM applications in Scala on the JVM, what LLM4S gives a
       </div>
     </div>
     <div class="lp-callout">
-      <p><strong>Where it is not the right fit yet.</strong> LLM4S is pre-1.0 and Scala 3 only, and needs JDK 21. Its Spring Boot starter wires three providers, and LangChain4j and Spring AI each list far more vector stores. If you need those today, the <a href="{{ '/guide/comparison#when-not-to-choose-llm4s' | relative_url }}">comparison</a> says so plainly.</p>
+      <p><strong>Where it is not the right fit yet.</strong> LLM4S is Scala 3 only and needs JDK 21, and 1.0 freezes seven modules: the rest are Beta or Experimental. Its Spring Boot starter wires three providers, and LangChain4j and Spring AI each list far more vector stores. If you need those today, the <a href="{{ '/guide/comparison#when-not-to-choose-llm4s' | relative_url }}">comparison</a> says so plainly.</p>
     </div>
   </div>
 </section>
@@ -128,7 +128,7 @@ description: "Why build LLM applications in Scala on the JVM, what LLM4S gives a
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card"><h3>Modular artifacts</h3><p>Depend on <code>llm4s-core</code> and add only the providers and integrations you use. <code>llm4s-bom</code> pins every artifact to one version. The core holds no vendor SDK.</p><a href="{{ '/reference/v1-scope' | relative_url }}">1.0 scope</a></li>
-      <li class="lp-card"><h3>A compatibility promise</h3><p>Every package has a tier: Frozen at 1.0, Beta or Experimental. Frozen modules will be binary compatible across 1.x, enforced by MiMa from a pre-1.0 baseline, with deprecation before removal.</p><a href="{{ '/reference/compatibility-policy' | relative_url }}">Compatibility policy</a></li>
+      <li class="lp-card"><h3>A compatibility promise</h3><p>Every package has a tier: Frozen at 1.0, Beta or Experimental. Frozen modules are source and binary compatible across 1.x, checked by MiMa on every pull request, with deprecation before removal.</p><a href="{{ '/reference/compatibility-policy' | relative_url }}">Compatibility policy</a></li>
       <li class="lp-card"><h3>Security work in the open</h3><p>A published threat model, API-key redaction, a sandboxed workspace for tool execution, MCP auth hardening, a config-policy CI gate, Dependabot and a CycloneDX SBOM for every module.</p><a href="{{ '/reference/security' | relative_url }}">Security reference</a></li>
       <li class="lp-card"><h3>MIT licence</h3><p>Permissive licensing with no field-of-use restrictions, and a DCO sign-off on every contribution.</p><a href="https://github.com/llm4s/llm4s/blob/main/LICENSE">Licence</a></li>
       <li class="lp-card"><h3>Open governance</h3><p>Governance, maintainers and release process are documented in the repository, and the roadmap is public.</p><a href="https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md">Governance</a></li>

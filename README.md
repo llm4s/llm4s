@@ -79,13 +79,13 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Current Status
 
-LLM4S is under active pre-1.0 development. The latest published release is [v0.7.0](https://github.com/llm4s/llm4s/releases/tag/v0.7.0), which sets the binary-compatibility baseline for 1.0; [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
+The latest published release is [v1.0.0](https://github.com/llm4s/llm4s/releases/tag/v1.0.0), for Scala 3.7.1 and JDK 21. From 1.0.0 llm4s follows semantic versioning: the seven frozen modules (`llm4s-core`, `llm4s-agent`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`) are source and binary compatible across 1.x, checked by MiMa on every pull request, and a frozen API is removed only in a major release, after a deprecation. Every other module is Beta or Experimental and may change in a minor release, with a migration note; in `llm4s-agent` a small `@Stable` core is frozen and the rest of the runtime is Experimental. See the [compatibility policy](https://llm4s.org/reference/compatibility-policy) and the [support policy](https://llm4s.org/reference/support-policy).
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
-Since 0.5.0, llm4s ships as separate modules. RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. Langfuse tracing, the trace collector and store, and `CostTracker` are in `llm4s-observability`, and Prometheus metrics in `llm4s-observability-prometheus`, leaving `llm4s-core` with only the tracing and metrics contracts, console and no-op tracing, and no observability dependency. The agent runtime is in `llm4s-agent` and the built-in tools in `llm4s-agent-tools`, so `llm4s-core` is now a small spine, and its API has been cleaned up ahead of the compatibility baseline, which is set at a pre-1.0 release once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Upgrading from 0.4.x? Start with [Upgrading from 0.4.1 to 0.5.0](https://llm4s.org/migrations/0-4-1-to-0-5-0). See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+Since 0.5.0, llm4s ships as separate modules. RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. Langfuse tracing, the trace collector and store, and `CostTracker` are in `llm4s-observability`, and Prometheus metrics in `llm4s-observability-prometheus`, leaving `llm4s-core` with only the tracing and metrics contracts, console and no-op tracing, and no observability dependency. The agent runtime is in `llm4s-agent` and the built-in tools in `llm4s-agent-tools`, so `llm4s-core` is now a small spine; its API review finished in 0.7.0, the release the compatibility baseline was set at ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Upgrading from a 0.x release? Start with [Migrating from 0.x to 1.0](https://llm4s.org/migrations/0x-to-1x); from 0.4.x, with [Upgrading from 0.4.1 to 0.5.0](https://llm4s.org/migrations/0-4-1-to-0-5-0). See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
 
-The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
+The work that led to 1.0 was stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for where each stands.
 
 ## Why Scala for LLMs?
 
@@ -167,14 +167,14 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 
 ### Use LLM4S in your project
 
-LLM4S is on Maven Central; the current release is **0.7.0**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
+LLM4S is on Maven Central; the current release is **1.0.0**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
 `llm4s-core` holds no provider client, so add the module of the provider you call next to it:
 
 ```scala
 // build.sbt
 ThisBuild / scalaVersion := "3.7.1"
 
-val llm4sVersion = "0.7.0"
+val llm4sVersion = "1.0.0"
 
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-core"   % llm4sVersion,
@@ -347,8 +347,8 @@ Our goal is to build a production-grade, type-safe AI application framework for 
 The roadmap covers:
 - **Current Capability Map**: What exists today and what still needs hardening
 - **Production Pillars**: Testing, API stability, provider parity, JVM adoption, security, performance, cost, documentation, and observability
-- **2026 Stabilization Phases**: The path from broad pre-1.0 functionality to a production-ready v1.0
-- **Reference Applications**: The maintained end-to-end apps needed before v1.0
+- **2026 Stabilization Phases**: The path from broad 0.x functionality to v1.0
+- **Reference Applications**: The maintained end-to-end apps
 
 ### High-Level Goals
 
@@ -359,7 +359,7 @@ The roadmap covers:
 | Agentic framework | Single-agent workflows, handoffs, memory, guardrails, streaming events, async tools, reasoning modes, and serialization exist | API freeze, replay/debugging, maintained reference apps |
 | RAG and retrieval | Vector stores, hybrid search, reranking, permission-aware RAG, RAGAS-style evaluation, and benchmarking exist | Cost/latency tracking, deployment patterns, compile-tested golden paths |
 | JVM ecosystem adoption | Scala-first path is the main supported API | Java facade, Kotlin coroutine API, Spring Boot starter, Maven/Gradle examples |
-| Stable v1.0 platform | Pre-1.0, API stabilizing | MiMa or equivalent compatibility checks, threat model, benchmarks, docs cleanup, release gates |
+| Stable v1.0 platform | 1.0.0 released: seven frozen modules, binary compatible across 1.x and checked by MiMa | Keeping the promise across 1.x: MiMa on every pull request, deprecation before removal |
 
 ## Tool Calling
 
@@ -456,7 +456,7 @@ sbt new llm4s/llm4s.g8 \
 --name=<your.project.name> \
 --package=<your.organization> \
 --version=<your.project.version> \
---llm4s_version=0.7.0 \
+--llm4s_version=1.0.0 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --force
@@ -952,7 +952,7 @@ Want to connect with maintainers? The LLM4S project is maintained by:
 
 - [CHANGELOG.md](CHANGELOG.md) — full release history from v0.1.0 to present, following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
 - [Migration guides](docs/migrations/) — step-by-step upgrade instructions between versions
-  - [0.x → 1.0 consolidated guide](docs/migrations/0x-to-1x.md) — the upgrade path to 1.0 from any 0.x release
+  - [0.x → 1.0 consolidated guide](docs/migrations/0x-to-1x.md) — how to upgrade to 1.0 from any 0.x release
   - [v0.2.9 → v0.3.0](docs/migrations/v0.2.9-to-v0.3.0.md) — migrate throwing APIs to type-safe `Result[T]`
 
 ## License

@@ -237,9 +237,9 @@ Sealed traits force exhaustiveness. `Result[A]` for runtime errors.
 Prefer straightforward ADT over advanced type-level programming unless justified.
 
 **P6. API stability, on the policy's schedule**
-Before 1.0 a wrong API is fixed outright: a breaking change needs a CHANGELOG *Breaking changes* line and a migration
-note (and, from the 0.7.0 baseline, a MiMa filter), never a `@deprecated` shim. From 1.0 a breaking change to a Frozen
-module needs a deprecation cycle and a major release. See the
+A breaking change to a Frozen module needs a deprecation cycle and a major release: in a 1.x release the old API
+stays, `@deprecated`, beside the new one. A Beta or Experimental API may change in a minor release, with a CHANGELOG
+*Breaking changes* line and a migration note. See the
 [Compatibility and Deprecation Policy](../reference/compatibility-policy).
 
 **P7. Soft functional style - pragmatism over purity**
@@ -1021,19 +1021,19 @@ Iterator.continually(rs).takeWhile(_.next()).map(extractRow).toSeq
 
 **Check**:
 
-- [ ] Breaking change? A line under the CHANGELOG's `### Breaking changes` and a note in the [Migration Guide](../reference/migration); from the 0.7.0 baseline, a narrow MiMa filter in a frozen module
-- [ ] Before 1.0: no `@deprecated` member and no compatibility shim; the old API is removed. From 1.0: deprecate, and keep the old API until the next major release
+- [ ] Breaking change to a Beta or Experimental API? A line under the CHANGELOG's `### Breaking changes` and a note in the [Migration Guide](../reference/migration)
+- [ ] Change to a `@Stable` API of a frozen module? No break in a 1.x release: deprecate the old API (`@deprecated`, a CHANGELOG *Deprecated* line) and keep it until the next major release; no MiMa filter excuses it
 - [ ] ScalaDoc on all `trait`, `case class`, public `def` with params
 - [ ] Binary compatibility check via MiMa (if applicable)
 
 **Template for API change comment**:
 
 ```markdown
-[HIGH] Breaking API change has no migration note
+[HIGH] Breaking change to a Stable API
 
-**Problem**: Renaming `Agent.execute` to `Agent.run` breaks existing code, and the PR says nothing about it
-**Fix**: Add a line under the CHANGELOG's `### Breaking changes` and a note in docs/reference/migration.md
-(before 1.0, no `@deprecated` wrapper: remove `execute`; from 1.0, deprecate it and keep it until the next major)
+**Problem**: Renaming `Agent.execute` to `Agent.run` breaks existing code, and `Agent` is `@Stable`
+**Fix**: Add `run`, keep `execute` as a `@deprecated` forwarder until the next major release, and add a line under
+the CHANGELOG's `### Deprecated`
 **Reference**: Section 6.1
 ```
 

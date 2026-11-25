@@ -6,7 +6,7 @@
 - Multi-provider support (OpenAI, Anthropic, Azure, Ollama, Google Gemini, IBM watsonx.ai)
 - Type-safe design with `Result[A]` error handling
 - Agent framework with tools, guardrails, handoffs, and memory
-- Scala 3 only (3.7.1). Scala 2.13 support is deferred to post-1.0 — see [#1126](https://github.com/llm4s/llm4s/issues/1126)
+- Scala 3 only (3.7.1). Scala 2.13 support is deferred to after 1.0 — see [#1126](https://github.com/llm4s/llm4s/issues/1126)
 
 **Tech Stack:** Scala 3.7.1, JDK 21, SBT, ScalaTest, Cats, uPickle, Docker
 
@@ -19,7 +19,7 @@
 
 ## Status
 
-The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the release run: 0.5.0, 0.5.1 and 0.6.0 were published with no MiMa baseline, **0.7.0 is the baseline** (`mimaBaselineVersion = Some("0.7.0")`), and 1.0 follows directly, with no release in between. "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`): `sbt mimaReportBinaryIssues` (CI) compares each with its 0.7.0 artifact and fails on a binary break to a `@Stable` type. The baseline makes a break visible; the compatibility promise starts at 1.0. Until 1.0 a bad API is still fixed outright, in 1.0 and never in a 0.7.x patch: record the break as a narrow MiMa filter with its reason (`mimaBinaryIssueFilters`), a line under the CHANGELOG's *Breaking changes* and a migration note, and add no shim or `@deprecated` overload. From 1.0 a break needs a major version, after a deprecation ([API Stability](docs/reference/api-stability.md#after-the-baseline)). Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
+**1.0.0 is released** (2026-11-25; the release run is [#1281](https://github.com/llm4s/llm4s/issues/1281)), and llm4s follows semantic versioning. "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`): its `@Stable` API is source and binary compatible across 1.x. `sbt mimaReportBinaryIssues` (CI) compares each with the baseline and fails on a binary break to a `@Stable` type; the baseline is 0.7.0, with no filter, until a follow-up moves `mimaBaselineVersion` to 1.0.0 once that is on Maven Central. **A `@Stable` API is never broken in 1.x**, in source or binary: no rename, removal, changed signature or new abstract member, and no MiMa filter to excuse one. To replace one, add the new API beside it and deprecate the old with `@deprecated("use <replacement>", since = "<version>")`, a line under the CHANGELOG's *Deprecated* and a migration note; it stays until the next major release. `@Experimental` types, and Beta and Experimental modules, may still change in a minor release, with a CHANGELOG *Breaking changes* line and a migration note and no shim. A patch release changes no API. See the [Compatibility and Deprecation Policy](docs/reference/compatibility-policy.md) and [API Stability](docs/reference/api-stability.md). Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
 
 ## Architecture rules
 
@@ -50,11 +50,11 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## API rules (frozen modules)
 
-- No speculative public types and no `@deprecated` members: delete, with a migration note.
+- No speculative public types: public is a promise for the whole of 1.x. A `@Stable` member is removed only in a major release, after a release that deprecated it (Status, above); an `@Experimental` one is deleted outright, with a migration note.
 - A new top-level public type needs `@Stable` (or `@Experimental` for Beta) from `org.llm4s.annotation`; `sbt stabilityTierCheck` enforces it. A companion object is covered by its class.
 - Public signatures expose no third-party type (fansi, cats type classes) and no implicit that a wildcard import would pull in.
 - **Growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`, `ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`, `ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`, `RateLimitConfig`, `ContextConfig`, and any new one that may grow) are `final case class X private (...)` with a companion `apply` carrying the defaults and `with*` setters (an `Option` field's setter takes the value or an `Option`). `.copy` is private and stays private.
-  - To add a field: add it to the constructor and, with a default, to `apply`; add `withX`; and keep the previous `apply` as an overload without defaults that forwards, because the 0.7.0 baseline holds its signature (MiMa fails without it).
+  - To add a field: add it to the constructor and, with a default, to `apply`; add `withX`; and keep the previous `apply` as an overload without defaults that forwards, because 1.x keeps its signature (MiMa fails without it).
   - A type with an upickle `macroRW` keeps its constructor defaults, because the reader fills missing keys from them.
   - The provider SPI's context and option types (`ProviderConfigContext`, `ProviderBuildContext`, `EmbeddingConfigContext`, `EmbeddingBuildContext`, `EmbeddingClientOptions`, `EmbeddingProviderSection`) and `ContextLimits` follow the same pattern.
 - **Stored JSON never changes by accident.** A change to a type inside stored messages, checkpoints, durable events or the exchange log pins the wire format with a test written against the old code first.

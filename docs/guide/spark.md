@@ -21,14 +21,16 @@ Enrich a DataFrame with LLM calls from a Spark job: one client per partition, re
 
 ---
 
-**Verified: 2026-10-21**, with llm4s 0.5.1. The example job in
+**Verified: 2026-11-25**, with llm4s 1.0.0. The example job in
 [`modules/samples/spark`](https://github.com/llm4s/llm4s/tree/main/modules/samples/spark) was run in Spark local mode
-(`local[2]`) against a local fake model:
+(`local[2]`) against a local fake model, its sources unchanged since 0.5.1:
 
 | Spark | Scala | JDK | Result |
 |---|---|---|---|
-| 4.0.1 | 2.13.16 | 21 and 17 | runs, enriched rows below |
+| 4.0.1 | 2.13.16 | 21 | runs, enriched rows below |
 | 3.5.9 | 2.13.16 (see [Spark 3.5](#spark-35-and-databricks-164-lts)) | 21 | runs locally |
+
+The JDK 17 run of 2026-10-21 was with llm4s 0.5.1: from 0.6.0 every artifact is JDK 21 bytecode, so JDK 17 no longer loads it. <!-- doc-support: ignore -->
 
 Not verified on a Databricks cluster. What the Databricks release notes say about the runtimes is under
 [Databricks](#databricks).
@@ -91,8 +93,9 @@ on a cluster, where the runtime's 2.13.8 or 2.13.10 is used, that is not verifie
 From the Databricks release notes (read 2026-10-21):
 
 - [Databricks Runtime 17.3 LTS](https://docs.databricks.com/aws/en/release-notes/runtime/17.3lts): Apache Spark
-  4.0.0, Scala 2.13.16, Java 17 (Zulu 17). This matches the verified route: Spark 4, Scala 2.13.16, and the example <!-- doc-support: ignore -->
-  also ran on JDK 17. <!-- doc-support: ignore -->
+  4.0.0, Scala 2.13.16, Java 17 (Zulu 17). Spark 4 and Scala 2.13.16 match the verified route; Java 17 does not. <!-- doc-support: ignore -->
+  LLM4S has been JDK 21 bytecode since 0.6.0, so a Java 17 JVM refuses its classes (`UnsupportedClassVersionError`): <!-- doc-support: ignore -->
+  the cluster's JVM has to be JDK 21. The example's own JDK 17 run was with llm4s 0.5.1. <!-- doc-support: ignore -->
 - [Databricks Runtime 16.4 LTS](https://docs.databricks.com/aws/en/release-notes/runtime/16.4lts): Apache Spark
   3.5.2, in a Scala 2.12 image (not usable, above) and a Scala 2.13 image with `scala-library` 2.13.10 (see <!-- doc-support: ignore -->
   [Spark 3.5](#spark-35-and-databricks-164-lts)).

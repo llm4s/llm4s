@@ -29,7 +29,7 @@ The carves, all published from 0.5.0:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
-**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 is the next release after it ([#1281](https://github.com/llm4s/llm4s/issues/1281); [After the baseline](api-stability#after-the-baseline)). The baseline is set: the build compares each frozen module with its 0.7.0 artifact. Until 1.0 a frozen API that is wrong is still fixed: "Frozen at 1.0" is the tier a module will hold. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the first baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and **1.0.0** was the next release after it ([#1281](https://github.com/llm4s/llm4s/issues/1281); [After the baseline](api-stability#after-the-baseline)). 1.0.0 is released, so "Frozen at 1.0" is the tier a module now holds: the compatibility promise started there. The build compares each frozen module with its 0.7.0 artifact, with no filter, until the baseline moves to 1.0.0 once that is on Maven Central.
 
 ## Maturity Legend
 
@@ -37,7 +37,7 @@ These definitions are shared with the [Roadmap](roadmap) so the two pages agree.
 
 | Status | Meaning |
 |--------|---------|
-| **Frozen at 1.0** | Source and binary compatible within the 1.x series once published under its target module. This is the compatibility promise 1.0 makes. |
+| **Frozen at 1.0** | Source and binary compatible within the 1.x series. This is the compatibility promise 1.0 makes. |
 | **Beta** | Implemented and usable, but API, provider behavior, or docs still need hardening before v1.0. |
 | **Experimental** | Useful prototype or advanced feature; expect changes. |
 | **Planned** | Roadmap item, design, issue, or PR queue item; not a stable user contract. |
@@ -156,9 +156,9 @@ them ([#2785](https://github.com/llm4s/llm4s/issues/2785)). That summary is not 
 type's tier is its `@Stable` or `@Experimental` annotation (`org.llm4s.annotation`), shown in the
 [Scaladoc](/scaladoc/), and MiMa skips `@Experimental` types ([API Stability](api-stability#tiers-in-the-code)).
 
-- **Source and binary compatible within 1.x.** From 1.0, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all 1.x releases. Between the 0.7.0 baseline and 1.0 MiMa already runs, but a minor release may still break a frozen API, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note.
+- **Source and binary compatible within 1.x.** `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all 1.x releases. Between the 0.7.0 baseline and 1.0.0 MiMa already ran, and a frozen API could still be fixed with a CHANGELOG *Breaking changes* line and a migration note; 1.0.0 needed no MiMa filter.
 - **A sealed type may gain a case.** The Stable sealed types and enums that the policy lists under [Sealed types that may gain a case](compatibility-policy#sealed-types-that-may-gain-a-case), `ContentPart`, `TraceEvent`, `AgentStatus` and `LLMError`'s hierarchy among them, may gain a case in a minor release, so a match on one needs a default case. Removing or renaming a case is a break.
-- **Deprecate before removing, from 1.0.** A Frozen API is then only removed after a deprecation cycle, never dropped outright in a minor release. Before 1.0 a wrong API is fixed outright, with no `@deprecated` shim. See the [Compatibility and Deprecation Policy](compatibility-policy).
+- **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, in a major release, never dropped outright in a minor release. (Before 1.0 a wrong API was fixed outright, with no `@deprecated` shim.) See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 
 ## Scala and JDK support
@@ -178,7 +178,7 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 **Bytecode.** The build pins the bytecode level to the minimum (`Common.javaRelease` in `project/Dependencies.scala`): the Scala compiler gets `-java-output-version 21` and `javac` gets `--release 21`, so every class is class-file version 65 whichever JDK runs the build, and the build cannot use an API newer than JDK 21. The Gradle builds match it: `llm4s-kotlin-api` targets `JvmTarget.JVM_21` with `release 21` for Java, and the [Gradle Java sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) compiles with `release 21`. `scripts/check-doc-support.sh` fails CI when a project or a Gradle build targets another level, and `JavaReleaseSpec` in `llm4s-core`, `llm4s-agent` and `llm4s-java-api` reads the compiled classes' version. Up to 0.5.1 nothing pinned it: the Scala classes were version 52 and only the few Java sources (`@Stable`, `@Experimental`, and `llm4s-java-api`'s enums and value types) were 65, built on JDK 21, so the bytecode did not show the floor.
 
-**Why not JDK 17 for some artifacts** ([#1493](https://github.com/llm4s/llm4s/issues/1493)). A lower floor for a chat-only subset, with Ox made optional or `JAgent` split from `llm4s-java-api`, was considered and rejected: `llm4s-core` itself starts a virtual thread (`ToolRegistry`), the provider modules and `llm4s-java-api` depend on core, and the cancellation contract (interrupts that close a blocking socket read) is defined on JDK 21 virtual threads. A JDK 17 floor would mean a second code path for core and every provider, and a second JDK in CI, for a pre-1.0 library whose agent runtime needs 21 regardless.
+**Why not JDK 17 for some artifacts** ([#1493](https://github.com/llm4s/llm4s/issues/1493)). A lower floor for a chat-only subset, with Ox made optional or `JAgent` split from `llm4s-java-api`, was considered and rejected: `llm4s-core` itself starts a virtual thread (`ToolRegistry`), the provider modules and `llm4s-java-api` depend on core, and the cancellation contract (interrupts that close a blocking socket read) is defined on JDK 21 virtual threads. A JDK 17 floor would mean a second code path for core and every provider, and a second JDK in CI, for a library whose agent runtime needs 21 regardless.
 
 ## Outside 1.0
 
@@ -187,4 +187,4 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 ## Programme status
 
-The modularisation ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is complete. The 0.7.0 baseline is set. What remains before 1.0 is the release itself, tracked in [#1281](https://github.com/llm4s/llm4s/issues/1281).
+The modularisation ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is complete. The 0.7.0 baseline was set, and 1.0.0 is released ([#1281](https://github.com/llm4s/llm4s/issues/1281)).

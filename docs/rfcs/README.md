@@ -11,16 +11,16 @@ cites_issues: all
 
 # RFCs: proposing a change to the public API
 
-From 1.0, a breaking change to a Frozen module needs a deprecation cycle and a major release
-([Compatibility and Deprecation Policy](../reference/compatibility-policy)). Before 1.0, APIs are still being fixed and
-improved: a break ships with a migration note (and, from the 0.7.0 baseline, a MiMa filter), and an RFC is optional.
+1.0.0 is released: a breaking change to a Frozen module needs a deprecation cycle and a major release
+([Compatibility and Deprecation Policy](../reference/compatibility-policy)). Before 1.0, APIs were still being fixed
+and improved: a break shipped with a migration note, and an RFC was optional.
 An RFC is where a change is proposed, in the open, before it is built: one Markdown file in this directory,
 reviewed as a pull request. The process is deliberately small. [GOVERNANCE.md](https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md)
 already says who decides; this page says where the proposal lives and what it covers.
 
 ## When an RFC is required
 
-From 1.0, for:
+For:
 
 - Any change to the public API of a **Frozen** module ([API Stability](../reference/api-stability)): a new, changed
   or removed public type or member, whether or not MiMa would flag it.
@@ -32,8 +32,8 @@ From 1.0, for:
 
 ## When it is not
 
-- Anything before 1.0. Write one anyway for a change that is large or contested, or that sets a pattern later
-  changes will follow; RFC 0008 and RFC 0009 are examples.
+- A change to a Beta or Experimental API that moves no tier. Write one anyway for a change that is large or
+  contested, or that sets a pattern later changes will follow; RFC 0008 and RFC 0009, written before 1.0, are examples.
 - Bug fixes that keep the documented behaviour, and documentation.
 - Internals: anything `private`, `private[llm4s]` or in a non-public package.
 - **Beta** and **Experimental** APIs. Their changes need only a migration note in the CHANGELOG. Write an RFC anyway

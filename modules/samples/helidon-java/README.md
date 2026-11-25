@@ -14,7 +14,7 @@ Against a release:
 ```bash
 ollama pull llama3.2
 cd modules/samples/helidon-java
-gradle run -Pllm4sVersion=0.7.0
+gradle run -Pllm4sVersion=1.0.0
 curl -X POST -H 'Content-Type: text/plain' -d 'What is Helidon, in one sentence?' http://localhost:8080/chat
 ```
 

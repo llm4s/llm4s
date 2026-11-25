@@ -14,7 +14,7 @@ run the sample against a release:
 
 ```bash
 cd modules/samples/maven-java
-OPENAI_API_KEY=sk-... mvn -q compile exec:java -Dllm4s.version=0.7.0
+OPENAI_API_KEY=sk-... mvn -q compile exec:java -Dllm4s.version=1.0.0
 ```
 
 Without `-Dllm4s.version` the build uses `0.1.0-SNAPSHOT`, the code in this checkout, which you publish to your

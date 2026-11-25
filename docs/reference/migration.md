@@ -128,7 +128,9 @@ From 0.6.0 to 0.7.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by 
 [`LLMClient.streamComplete` takes its callback in a second parameter list](#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810),
 [a tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey`](#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)
 and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingclients-key-function-takes-the-request-2908).
-Since 0.7.0, [an error's `provider` is a `ProviderId`](#an-errors-provider-is-a-providerid-2936).
+From 0.7.0 to 1.0.0, [an error's `provider` is a `ProviderId`](#an-errors-provider-is-a-providerid-2936), the one
+source break, and three behaviour changes:
+[a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
 
 ## An error's `provider` is a `ProviderId` (#2936)
 
@@ -3246,7 +3248,10 @@ These need a hand edit:
 - Since 0.7.0, with `ErrorProviderIdTyped` run: a literal provider in a pattern on an error
   (`case ServiceError(_, _, "openai", _, _)`), which the compiler reports, and the text of an error built with a
   provider name that was not lower case, which now reads in lower case
-  ([note](#an-errors-provider-is-a-providerid-2936)).
+  ([note](#an-errors-provider-is-a-providerid-2936)). And behaviour, which no rule can rewrite: a `withOutput`
+  agent's cut-off answer, now `AgentStatus.Truncated` where it was `Left(GraphError.OutputInvalid)`, Anthropic's
+  default `max_tokens`, and the penalties a provider now sends or reports
+  ([note](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)).
 
 ## `completionTokens` no longer includes thinking tokens (#2564)
 

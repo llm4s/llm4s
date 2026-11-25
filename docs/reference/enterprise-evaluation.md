@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 2280, 2307, 2310]
+cites_open_issues: [2280, 2307, 2310]
 cites_closed_issues: [1465]
 ---
 
@@ -42,11 +42,11 @@ linked to its open issue.
 
 | Question | Answer and evidence |
 |---|---|
-| How are versions numbered? | Semantic versioning, with `versionScheme := early-semver` in the published POMs. Before the compatibility baseline (0.7.0) any release may break compatibility, each break listed in the CHANGELOG with a migration note. See the [Compatibility and Deprecation Policy](compatibility-policy#versions). |
+| How are versions numbered? | Semantic versioning, with `versionScheme := early-semver` in the published POMs. From 1.0.0 a breaking change to a frozen module needs a new major version, after a deprecation; up to 1.0.0 a release could break compatibility, each break listed in the CHANGELOG with a migration note. See the [Compatibility and Deprecation Policy](compatibility-policy#versions). |
 | Which APIs are stable? | Each module is Frozen, Beta or Experimental: [1.0 Scope](v1-scope), with the promise per tier in the [Compatibility and Deprecation Policy](compatibility-policy). Every top-level public type of a Frozen module carries `@Stable` or `@Experimental`: [Tiers in the Code](api-stability#tiers-in-the-code). |
-| Is binary compatibility checked? | Yes, for the seven frozen modules: MiMa compares each with its 0.7.0 artifact on every pull request. The compatibility promise itself starts at 1.0: [API Stability](api-stability#the-baseline) and [Known gaps](#known-gaps). |
+| Is binary compatibility checked? | Yes, for the seven frozen modules: MiMa compares each with its baseline artifact on every pull request (0.7.0, with no filter, until the baseline moves to 1.0.0). The frozen modules are source and binary compatible across 1.x: [API Stability](api-stability#the-baseline) and the [Compatibility and Deprecation Policy](compatibility-policy). |
 | How are releases made, and where are the notes? | From a tag, by CI, to Maven Central: [Release Process](../contribute/release). Notes are the [GitHub Releases](https://github.com/llm4s/llm4s/releases) and the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md); upgrades are in the [Migration Guide](migration). |
-| Which versions get fixes, and for how long? | Before 1.0, fixes ship in the latest release only. From 1.0, the latest 1.x minor gets bug and security fixes and the previous minor security fixes for three months after its successor; 0.7.x gets critical security fixes for three months after 1.0. No LTS line before 2.0; minor releases at most about quarterly. See the [Support Policy](support-policy) and [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions). |
+| Which versions get fixes, and for how long? | The latest 1.x minor gets bug and security fixes and the previous minor security fixes for three months after its successor; 0.7.x gets critical security fixes until 2027-02-25, three months after 1.0.0, and older 0.x releases none. No LTS line before 2.0; minor releases at most about quarterly. See the [Support Policy](support-policy) and [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions). |
 
 ## Security
 
@@ -64,7 +64,7 @@ linked to its open issue.
 |---|---|
 | Is there an SBOM? | Yes: a CycloneDX SBOM per published module on each GitHub Release, also built and validated on every pull request. See [Software Bill of Materials](sbom). |
 | Are dependencies scanned? | OSV-Scanner scans the SBOMs weekly and on pull requests that change dependencies; a pull request that adds a HIGH or CRITICAL advisory fails. See [Vulnerability scanning](sbom#vulnerability-scanning). |
-| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`); the key's fingerprint and the commands to check a signature are in [Verifying Releases](../contribute/verifying-releases). From 0.7.0 the workflow also attests SLSA build provenance for the jars and POMs, the SBOMs on the GitHub Release and the container image; no release has shipped one yet: see [Known gaps](#known-gaps). |
+| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`); the key's fingerprint and the commands to check a signature are in [Verifying Releases](../contribute/verifying-releases). From 0.7.0 the workflow also attests SLSA build provenance for the jars and POMs, the SBOMs on the GitHub Release and the container image; 0.7.0 was the first release to carry it. |
 | OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet; the evidence for each passing criterion is in [OpenSSF Best Practices](best-practices), and see [Known gaps](#known-gaps). |
 
 ## Data protection
@@ -113,7 +113,6 @@ closes, so this list is updated when the gap is.
 
 | Gap | Issue |
 |---|---|
-| No compatibility promise yet: the 0.7.0 baseline makes each break to a frozen module visible and reviewed, and the promise starts at 1.0, the next release | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
 
@@ -133,12 +132,11 @@ Dependency licences: per-module licence report on each GitHub Release; CI fails 
 Governance: GOVERNANCE.md (lazy consensus; maintainer majority for larger decisions; RFCs for
   Frozen API changes). Two maintainers (MAINTAINERS.md). Stewarded by the LLM4S Foundation
   (https://llm4s.org/foundation/).
-Versioning: semantic versioning (early-semver). Binary compatibility of the frozen
-  modules is checked against the 0.7.0 baseline (MiMa); a break before 1.0 needs a reviewed filter
-  and a migration note (https://llm4s.org/reference/compatibility-policy). The compatibility
-  promise starts at 1.0 (https://github.com/llm4s/llm4s/issues/1281).
-Support policy: before 1.0, fixes ship in the latest release only. From 1.0, the latest 1.x minor gets
-  bug and security fixes, the previous minor security fixes for three months; no LTS before 2.0
+Versioning: semantic versioning (early-semver) from 1.0.0. The seven frozen modules are source
+  and binary compatible across 1.x, checked on every pull request (MiMa); a frozen API is removed
+  only in a major release, after a deprecation (https://llm4s.org/reference/compatibility-policy).
+Support policy: the latest 1.x minor gets bug and security fixes, the previous minor security
+  fixes for three months; 0.7.x critical security fixes until 2027-02-25; no LTS before 2.0
   (https://llm4s.org/reference/support-policy). Volunteer-maintained, best effort,
   no SLA, no commercial support (SUPPORT.md).
 Security: SECURITY.md; reports handled by the Security Committee and maintainers, best
