@@ -67,6 +67,72 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     low("thinking")("budget_tokens").num shouldBe 1024
   }
 
+  // #2933: with no maxTokens the request carries no max_tokens, so there is no limit of the caller's to fit a
+  // budget under. The client used to fit it under 2048 all the same.
+  it should "send a reasoning level's whole budget when maxTokens is unset and the registry does not know the model" in {
+    val unknown = "anthropic/claude-3.5-sonnet"
+    summon[ModelRegistryService].lookup(OpenRouterDialect.ProviderId, ModelName(unknown)).isLeft shouldBe true
+
+    def budget(effort: ReasoningEffort) = {
+      val sent = body(unknown, CompletionOptions().withReasoning(effort), hi)
+      sent.obj.keySet should not contain "max_tokens"
+      sent("thinking")("type") shouldBe ujson.Str("enabled")
+      sent("thinking")("budget_tokens").num.toInt
+    }
+    budget(ReasoningEffort.Minimal) shouldBe 1024
+    budget(ReasoningEffort.Low) shouldBe 2048
+    budget(ReasoningEffort.Medium) shouldBe 8192
+    budget(ReasoningEffort.High) shouldBe 32768
+    budget(ReasoningEffort.XHigh) shouldBe 49152
+    budget(ReasoningEffort.Max) shouldBe 65536
+  }
+
+  it should "fit a budget under the model's maximum output, from the registry, when maxTokens is unset" in {
+    val fable = "anthropic/claude-fable-5.2"
+    summon[ModelRegistryService]
+      .lookup(OpenRouterDialect.ProviderId, ModelName(fable))
+      .value
+      .maxOutputTokens shouldBe Some(128000)
+
+    body(fable, CompletionOptions().withReasoning(ReasoningEffort.Max), hi)("thinking")("budget_tokens").num shouldBe
+      65536
+
+    val options = CompletionOptions().withThinking(Thinking.budget(200000).toOption.get)
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 200, openAICompletion("ok"))) { baseUrl =>
+      val client = new OpenRouterClient(config(fable, baseUrl))
+      client.createRequestBody(Conversation(Seq(hi)), options)("thinking")("budget_tokens").num shouldBe 127999
+      client.complete(Conversation(Seq(hi)), options).value.adjustments shouldBe List(
+        RequestAdjustment.Adjusted(
+          RequestOption.Thinking,
+          "Budget(200000)",
+          "Budget(127999)",
+          "Anthropic takes a budget of at least 1024 and below the model's maximum output (128000)"
+        )
+      )
+    }
+  }
+
+  it should "send a Thinking.Budget above 2048 as asked when maxTokens is unset, and fit it under a set maxTokens" in {
+    val asked = Thinking.budget(10000).toOption.get
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 200, openAICompletion("ok"))) { baseUrl =>
+      val client = new OpenRouterClient(config("anthropic/claude-3.5-sonnet", baseUrl))
+      val unset  = CompletionOptions().withThinking(asked)
+      client.createRequestBody(Conversation(Seq(hi)), unset)("thinking")("budget_tokens").num shouldBe 10000
+      client.complete(Conversation(Seq(hi)), unset).value.adjustments shouldBe empty
+
+      val set = CompletionOptions(maxTokens = Some(4096)).withThinking(asked)
+      client.createRequestBody(Conversation(Seq(hi)), set)("thinking")("budget_tokens").num shouldBe 4095
+      client.complete(Conversation(Seq(hi)), set).value.adjustments shouldBe List(
+        RequestAdjustment.Adjusted(
+          RequestOption.Thinking,
+          "Budget(10000)",
+          "Budget(4095)",
+          "Anthropic takes a budget of at least 1024 and below max_tokens (4096)"
+        )
+      )
+    }
+  }
+
   it should "ask o-series models for a reasoning effort" in {
     body("openai/o3-mini", CompletionOptions().withReasoning(ReasoningEffort.Medium), hi)("reasoning_effort") shouldBe
       ujson.Str(ReasoningEffort.Medium.name)
