@@ -18,7 +18,7 @@
 #
 # Every file of an sbt-published coordinate (the POM, and for an `artifact` the jar, sources jar and javadoc jar) must
 # have its .asc, .md5 and .sha1, and nothing more: no checksum of a signature (`.pom.asc.md5`) and no
-# `-cyclonedx.json` SBOM, which Sonatype's 1,000-files-a-month limit has no room for (project/CentralBundle.scala; the
+# `-cyclonedx.json` SBOM, which Sonatype's 1,100-files-a-month limit has no room for (project/CentralBundle.scala; the
 # SBOMs are on the GitHub Release). Only the POM's and the jar's extras are probed, not every file's.
 #
 # Those upload rules (the pointer javadoc jar, no checksum of a signature, no SBOM on Central; #2667) apply to every

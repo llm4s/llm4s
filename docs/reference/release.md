@@ -159,11 +159,10 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)): the
       `scalafixRules` project is in the root aggregate, so `sbt ci-release` publishes `llm4s-scalafix_2.13`, and the
       one-line command is in the [1.0 upgrade notes](../migrations/0x-to-1x#when-10-ships) (done).
-- [ ] Set `CentralBundle.MaxFiles` (`project/CentralBundle.scala`), and the limit this page states, to the monthly file
-      limit Sonatype now allows the organisation. With `llm4s-scalafix` a release uploads 1,004 files (984 in the sbt
-      bundle, 20 from `llm4s-kotlin-api`), over the 1,000 both still record, and `sonaBundle` warns of it
-      ([What is published to Maven Central](#what-is-published-to-maven-central)). If the limit is not raised, drop an
-      artifact from the release before tagging.
+- [x] Set `CentralBundle.MaxFiles` (`project/CentralBundle.scala`), and the limit this page states, to the monthly file
+      limit Sonatype allows the organisation: 1,100. With `llm4s-scalafix` a release uploads 1,004 files (984 in the
+      sbt bundle, 20 from `llm4s-kotlin-api`)
+      ([What is published to Maven Central](#what-is-published-to-maven-central)).
 - [ ] Once 1.0.0 is on Maven Central, run the documented command against it
       ([Running a migration rule](../reference/scalafix#running-a-migration-rule)) and propose `llm4s-scalafix` for
       Scala Steward's `scalafix-migrations` ([#2330](https://github.com/llm4s/llm4s/issues/2330)).
@@ -351,7 +350,7 @@ documentation and navigation. Packaging the pointer runs no Scaladoc, so `sbt ci
 
 Each of those files goes up with its `.asc` signature and its `.md5` and `.sha1` checksums, which is what Central
 requires, and nothing else: 16 files a module, 4 for the BOM and each relocation stub. Sonatype limits the organisation
-to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that used to go up no longer do:
+to **1,100 uploaded files a month** (1,000 until November 2026), and 0.6.0 uploaded 1,752. Two things that used to go up no longer do:
 
 - **Checksums of the signatures** (`.asc.md5`, `.asc.sha1`). sbt checksums every file it stages, the signatures
   included, and Central says "`.asc` files don't need checksum files"
@@ -364,7 +363,7 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
   every module's.
 
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
-than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
+than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,100
 in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
 signed with a throwaway key, never uploaded). What a release uploads follows from
 `sbt listPublishedArtifacts`: 16 files for each `artifact` line (the Scala 3 modules, and `llm4s-scalafix_2.13`, the

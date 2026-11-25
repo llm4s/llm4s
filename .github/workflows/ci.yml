@@ -2004,7 +2004,7 @@ jobs:
       # The Maven Central bundle `sbt ci-release` uploads, built as the release builds it but signed with a throwaway key
       # and never uploaded: `publishSigned` at a release version writes the local staging directory, and `sonaBundle`
       # (project/CentralBundle.scala) zips it, failing on a checksum of a signature, a CycloneDX SBOM, a file without its
-      # .asc, .md5 and .sha1, more than 16 files for one artifact, or more than Sonatype's 1,000 files a month in all.
+      # .asc, .md5 and .sha1, more than 16 files for one artifact, or more than Sonatype's 1,100 files a month in all.
       # The classes are already compiled by the step above.
       - name: Dry-run the Maven Central bundle
         if: ${{ !cancelled() && steps.publish.outcome == 'success' }}

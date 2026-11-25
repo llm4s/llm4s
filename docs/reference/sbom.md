@@ -19,7 +19,7 @@ dependencies are scanned for known vulnerabilities.
   It is a separate job, so a failure there turns the run red without touching Maven Central, the Release, the docs
   deploy or the container image. Attaching it re-uploads over an existing file, so re-running the job is safe.
 - **Not on Maven Central.** Up to 0.6.0 each module also published a `-cyclonedx.json` beside its jar. From the
-  next release it does not: Sonatype limits the organisation to 1,000 uploaded files a month, and the Release
+  next release it does not: Sonatype limits the organisation to 1,100 uploaded files a month, and the Release
   copies are the pruned, checked ones (see [What is published](../contribute/release#what-is-published-to-maven-central)).
 - **On every pull request.** CI builds and validates the same files and uploads them as the `sbom` workflow artifact
   for 14 days, so a change that breaks their generation is found before a release.

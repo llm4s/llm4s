@@ -6,7 +6,7 @@ import com.github.sbt.sbom.BomSbtPlugin
 /**
  * What a release uploads to Maven Central, and how many files that is.
  *
- * Sonatype limits an organisation to 1,000 uploaded files a month, and 0.6.0 uploaded 1,752: every module published
+ * Sonatype limits the organisation to 1,100 uploaded files a month, and 0.6.0 uploaded 1,752: every module published
  * five files (POM, jar, sources, javadoc, and sbt-sbom's `-cyclonedx.json`), and each of them came with six (the
  * file, its `.asc`, `.md5` and `.sha1`, and `.asc.md5` and `.asc.sha1`, because sbt checksums every file it publishes,
  * the signatures included). Central requires a signature, an MD5 and a SHA-1 of each file, and says that "`.asc` files
@@ -21,7 +21,7 @@ import com.github.sbt.sbom.BomSbtPlugin
 object CentralBundle {
 
   /** The most files one release may upload: Sonatype's monthly limit for the organisation. */
-  val MaxFiles = 1000
+  val MaxFiles = 1100
 
   /**
    * The files a release uploads outside this bundle: `llm4s-kotlin-api`'s 20 (five files, each with `.asc`, `.md5` and
