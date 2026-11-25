@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.schema.SchemaOf
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -112,7 +113,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "print a failure's kind and hint, without a stack trace, and keep the history unchanged" in {
-    val f = new Fixture(Session.offline(Reply.failure(AuthenticationError("openai", "Invalid API key"))))
+    val f = new Fixture(Session.offline(Reply.failure(AuthenticationError(ProviderId("openai"), "Invalid API key"))))
     import f.given
 
     val answer = ask("Hi")
@@ -137,7 +138,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("1", Some("partial")))
-        Left(AuthenticationError("openai", "revoked"))
+        Left(AuthenticationError(ProviderId("openai"), "revoked"))
       }
     }
     val f = new Fixture(Session.of(client))
@@ -281,7 +282,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     val f = new Fixture(
       Session.offline(
         Reply.text("Fine."),
-        Reply.failure(AuthenticationError("openai", "Invalid API key")),
+        Reply.failure(AuthenticationError(ProviderId("openai"), "Invalid API key")),
         Reply.text("""{"vendor":"ACME","amount":1.0,"currency":"USD"}""")
       )
     )
@@ -297,7 +298,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     Outcome.Done(1).getOrElse(0) shouldBe 1
     Outcome.Done(1).toOption shouldBe Some(1)
     Outcome.Done(1).failure shouldBe None
-    val failed: Outcome[Int] = Outcome.Failed(AuthenticationError("openai", "no"))
+    val failed: Outcome[Int] = Outcome.Failed(AuthenticationError(ProviderId("openai"), "no"))
     failed.getOrElse(0) shouldBe 0
     failed.toResult.isLeft shouldBe true
   }

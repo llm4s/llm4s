@@ -15,6 +15,7 @@ import org.llm4s.error.{
   UnknownError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -136,7 +137,7 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
         e.requestedTokens shouldBe Some(213462)
         e.httpStatus shouldBe Some(400)
         e.requestId shouldBe Some("req_011")
-        e.provider shouldBe "anthropic"
+        e.provider shouldBe ProviderId("anthropic")
         retryable(e) shouldBe false
       case other => fail(s"expected a ContextLengthError, got $other")
     }

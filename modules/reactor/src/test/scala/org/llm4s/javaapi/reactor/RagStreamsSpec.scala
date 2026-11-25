@@ -6,6 +6,7 @@ import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.javaapi.rag.{ JRag, RagFakes }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk, SystemMessage }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.reactivestreams.Subscription
 import org.scalatest.flatspec.AnyFlatSpec
@@ -111,7 +112,7 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "end with onError after the sources and the pieces already emitted" in
-    withPipeline(streaming(Seq("On "), Left(RateLimitError("openai")))) { rag =>
+    withPipeline(streaming(Seq("On "), Left(RateLimitError(ProviderId("openai"))))) { rag =>
       StepVerifier
         .create(RagStreams.toFlux(rag, Question).map(describe))
         .expectNext("sources:cats,dogs", "chunk:On ")

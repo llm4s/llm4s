@@ -9,6 +9,7 @@ import org.llm4s.error.RateLimitError
 import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.safeAgent
 import org.llm4s.samples.tutorial.supportassistant.Part6Testing.fakeModel
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -33,7 +34,7 @@ class SupportAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail, not answer, when the provider is down" in {
-    val model = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")))
+    val model = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))))
 
     val result = safeAgent(model).flatMap(_.run("Where is my order A-1001?"))
 

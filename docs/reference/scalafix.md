@@ -77,8 +77,8 @@ version to the current release, so you run one rule, once, and no rule runs twic
 | Your code is on | Run | Runs |
 |---|---|---|
 | 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
-| 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" below, and `PositionalPatternsGainFields` |
-| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules for the breaks since 0.7.0: none yet, so it changes nothing |
+| 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" or "Since 0.7.0" below, and `PositionalPatternsGainFields` |
+| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped` |
 
 A rule for a later break is added to every umbrella whose starting version is older than the break. Code on 0.4.x runs
 `Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
@@ -112,6 +112,7 @@ A rule for a later break is added to every umbrella whose starting version is ol
 | `ErrorIsRetryable` | Since 0.6.0: `LLMError.isRecoverable(error)` to `error.isRetryable`; `LLMError.recoverableErrors(errors)` to `errors.filter(_.isRetryable)` (and `nonRecoverableErrors` to `filterNot`); `serviceError.isRecoverableStatus` to `isRetryable`; `serviceError.httpStatus` to `status`; `circuitOpenError.retryAfter` to `remaining`. `isRetryable` is narrower than `isRecoverable` was, and a `with RecoverableError` on an error of your own is a hand edit ([note](migration#one-retry-rule-llmerrorisretryable-replaces-the-recoverable-markers-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916) |
 | `StreamedChunkDeltaNames` | Since 0.6.0: `chunk.content` to `chunk.contentDelta` and `chunk.toolCall` to `chunk.toolCallDelta`, with `withContent` and `withToolCall` and the named arguments of `StreamedChunk(...)` ([note](migration#streamedchunk-names-its-deltas-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916) |
 | `AccessorRenames` | Since 0.6.0: `client.getContextWindow()` to `client.contextWindow` and `getReserveCompletion()` to `reserveCompletion`, without the parentheses; `getContextBudget(...)` to `contextBudget(...)`; `ConversationTokenCounter.getTokenBreakdown` to `tokenBreakdown`; `ModelDimensionRegistry.getDimension` to `dimension`; `ToolBuilder`'s `buildSafe()` to `build()`. A `def getContextWindow(): Int` or `def getReserveCompletion(): Int` in a class that extends something, an `LLMClient` of your own, is renamed with the calls on it in the same file. A client whose constructor parameter has the new name then defines it twice: make the parameter `override val` and delete the method ([migration](migration#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) |
+| `ErrorProviderIdTyped` | Since 0.7.0: the provider of an error to a `ProviderId` - `RateLimitError("openai")` to `RateLimitError(ProviderId("openai"))`, and likewise `RateLimitError.local`, `AuthenticationError`, `ServiceError(status, provider, ...)`, `CircuitOpenError.open` and `probing`, `EmbeddingError(code, message, provider)`, `ContentFilteredError` and its `prompt` and `reply`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError`, by position or by name; a read of `error.provider` gets `.asString`, except inside a string interpolation. A literal provider in a pattern is left for the compiler to report ([note](migration#an-errors-provider-is-a-providerid-2936)) |
 
 A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
 (Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
@@ -124,8 +125,8 @@ Run the umbrella for the version your code compiles against, not an older one. `
 `ThinkingReplacesBudgetTokens`, `FinishReasonTyped`, `CompressionRuleTransform`, `AgentCopyToWithSetters`,
 `ResultSyntaxMoved`, `ProviderConfigNewtypes`, `ModelIdNewtypes`, `ToolFunctionOneTypeParameter`, `AgentStatusGainsTruncated`,
 `PositionalPatternsGainFields`, `SamplingOptionsOptional`, `CompletionFromMessage`,
-`MessageAndConversationShapes`, `ClientEntryPoints`, `ToolCallIdTyped`, `AccessorRenames`, `ErrorIsRetryable` and
-`StreamedChunkDeltaNames`.
+`MessageAndConversationShapes`, `ClientEntryPoints`, `ToolCallIdTyped`, `AccessorRenames`, `ErrorIsRetryable`,
+`StreamedChunkDeltaNames` and `ErrorProviderIdTyped`.
 
 The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
 Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred
@@ -143,9 +144,9 @@ the current sources. `scalafixTests05` does the same for the `Llm4sMigrateFrom_0
 compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`
 (`Llm4sMigrateFrom_0_6KeepsSecretsTest` pins that it leaves code already past the 0.5.1 breaks alone).
 `scalafixTests07` does the same for `Llm4sMigrateFrom_0_7`, with `modules/scalafix-rules/input-0.7` compiled against
-the 0.7.0 artifacts and its expected output under `output/.../fix/v07`. The rule has no rule to run yet:
-`Llm4sMigrateFrom_0_7ChangesNothingTest` pins that it is found by name and changes nothing. A rule for a break
-after 0.7.0 adds its fixtures there.
+the 0.7.0 artifacts and its expected output under `output/.../fix/v07`: `ErrorProviderIdTypedTest` for its one rule
+so far, and `Llm4sMigrateFrom_0_7Test`, which pins that the umbrella runs it and leaves alone what the older umbrellas
+would rewrite. A rule for a later break adds its fixtures there.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

@@ -1,6 +1,7 @@
 package org.llm4s.javaapi.rag
 
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.javaapi.{ LlmErrorKind, LlmException }
@@ -95,7 +96,7 @@ class JRagAnswerStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
   }
 
   it should "report a failure of the model once, after the sources and the pieces already delivered" in {
-    val rag = pipeline(streaming(Seq("On "), Left(RateLimitError("openai"))))
+    val rag = pipeline(streaming(Seq("On "), Left(RateLimitError(ProviderId("openai")))))
     try {
       val listener = new Recorder()
       val result   = stream(rag, listener).await()
@@ -109,7 +110,7 @@ class JRagAnswerStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     val asked = new AtomicBoolean(false)
     val rag = JRag
       .builder()
-      .embeddings(failingEmbeddings(RateLimitError("voyage")))
+      .embeddings(failingEmbeddings(RateLimitError(ProviderId("voyage"))))
       .llm(llm(new Scripted(_ => { asked.set(true); answerOf("x") }, () => answerOf("x"))))
       .build()
       .get()
@@ -299,7 +300,7 @@ class JRagAnswerStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       JRagCheck.streamPieces(rag, "Where did the cat sit?", pieces).await().get().answer shouldBe "ab"
       pieces.asScala.toList shouldBe List("a", "b")
     } finally rag.close()
-    val failing = pipeline(streaming(Seq("a"), Left(RateLimitError("openai"))))
+    val failing = pipeline(streaming(Seq("a"), Left(RateLimitError(ProviderId("openai")))))
     try {
       val pieces = new CopyOnWriteArrayList[String]()
       JRagCheck.streamPieces(failing, "Where did the cat sit?", pieces).await().getError().getKind shouldBe

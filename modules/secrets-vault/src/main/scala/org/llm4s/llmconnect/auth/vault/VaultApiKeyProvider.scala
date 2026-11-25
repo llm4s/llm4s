@@ -5,6 +5,7 @@ import org.llm4s.error.{ AuthenticationError, ConfigurationError, NotFoundError,
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.net.URLEncoder
@@ -137,7 +138,7 @@ final class VaultApiKeyProvider private (
 @Experimental
 object VaultApiKeyProvider:
 
-  private val Provider = "vault"
+  private val Provider = ProviderId("vault")
 
   final private case class Cached(key: ApiKey, expires: Instant)
 

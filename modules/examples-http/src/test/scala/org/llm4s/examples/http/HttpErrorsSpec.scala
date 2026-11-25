@@ -14,6 +14,7 @@ import org.llm4s.error.{
   TimeoutError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,36 +26,36 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
     HttpErrors.of(ValidationError("message", "must not be blank")).status shouldBe 400
     HttpErrors.of(InvalidInputError("message", "", "empty")).status shouldBe 400
     // a content filter stopped the prompt or reply: the caller must change it, the provider is not at fault
-    HttpErrors.of(ContentFilteredError.prompt("Gemini", "SAFETY")).status shouldBe 400
-    HttpErrors.of(ContentFilteredError.reply("Gemini", "SAFETY")).status shouldBe 400
+    HttpErrors.of(ContentFilteredError.prompt(ProviderId("gemini"), "SAFETY")).status shouldBe 400
+    HttpErrors.of(ContentFilteredError.reply(ProviderId("gemini"), "SAFETY")).status shouldBe 400
   }
 
   it should "answer 429 with the provider's Retry-After for a rate limit" in {
-    val failure = HttpErrors.of(RateLimitError("fake", 7.seconds))
+    val failure = HttpErrors.of(RateLimitError(ProviderId("fake"), 7.seconds))
     failure.status shouldBe 429
     failure.retryAfterSeconds shouldBe Some(7L)
   }
 
   it should "fall back to RateLimitError's default delay when the provider gave none" in {
-    HttpErrors.of(RateLimitError("fake")).retryAfterSeconds shouldBe Some(
+    HttpErrors.of(RateLimitError(ProviderId("fake"))).retryAfterSeconds shouldBe Some(
       org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay.toSeconds
     )
   }
 
   it should "answer 504 for a timeout, 502 for refused credentials and 500 for a misconfigured server" in {
     HttpErrors.of(TimeoutError("slow", 30.seconds, "complete")).status shouldBe 504
-    HttpErrors.of(AuthenticationError("fake", "bad key")).status shouldBe 502
+    HttpErrors.of(AuthenticationError(ProviderId("fake"), "bad key")).status shouldBe 502
     HttpErrors.of(ConfigurationError("no provider")).status shouldBe 500
   }
 
   it should "answer 503 for any other retryable error and 502 for any other error" in {
     HttpErrors.of(NetworkError("down", None, "http://x")).status shouldBe 503
-    HttpErrors.of(ServiceError(500, "fake", "oops")).status shouldBe 503
+    HttpErrors.of(ServiceError(500, ProviderId("fake"), "oops")).status shouldBe 503
     HttpErrors.of(ProcessingError("parse", "bad answer")).status shouldBe 502
   }
 
   it should "decide by the cause of the agent runtime's wrapping, not the wrapper" in {
-    val limited = RateLimitError("fake", 2.seconds)
+    val limited = RateLimitError(ProviderId("fake"), 2.seconds)
     HttpErrors.of(GraphError.NodeFailed(NodeId("model"), TaskId("t"), limited)).status shouldBe 429
     HttpErrors.of(GraphError.ToolFailed(ToolName("search"), ToolCallId("c"), limited)).status shouldBe 429
     HttpErrors
@@ -63,7 +64,7 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   "HttpFailure" should "round Retry-After up to whole seconds, at least one" in {
-    val error = RateLimitError("fake")
+    val error = RateLimitError(ProviderId("fake"))
     HttpFailure(429, Some(1500.millis), error).retryAfterSeconds shouldBe Some(2L)
     HttpFailure(429, Some(Duration.Zero), error).retryAfterSeconds shouldBe Some(1L)
     HttpFailure(429, None, error).retryAfterSeconds shouldBe None

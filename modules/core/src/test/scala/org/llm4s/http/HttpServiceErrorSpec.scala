@@ -2,6 +2,7 @@ package org.llm4s.http
 
 import org.llm4s.error.{ NetworkError, ServiceError }
 import org.llm4s.http.HttpResponse.*
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -61,7 +62,7 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
     val err      = serviceError(response.ensureSuccess("p"))
 
     err.status shouldBe 503
-    err.provider shouldBe "p"
+    err.provider shouldBe ProviderId("p")
     err.requestId shouldBe Some("req-9")
     err.retryAfter shouldBe Some(7.seconds)
     err.message should include("overloaded")
@@ -87,11 +88,11 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   "mapServiceError" should "keep the status, request id and retryAfter, with the new provider and message" in {
-    val original = ServiceError(503, "inner", "down", "req-1").withRetryAfter(9.seconds)
+    val original = ServiceError(503, ProviderId("inner"), "down", "req-1").withRetryAfter(9.seconds)
     val err      = serviceError((Left(original): Result[Int]).mapServiceError("outer", "Failed to discover models"))
 
     err.status shouldBe 503
-    err.provider shouldBe "outer"
+    err.provider shouldBe ProviderId("outer")
     err.requestId shouldBe Some("req-1")
     err.retryAfter shouldBe Some(9.seconds)
     err.message should include("Failed to discover models")
@@ -100,7 +101,8 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep an absent request id and retryAfter absent" in {
-    val err = serviceError((Left(ServiceError(500, "inner", "down")): Result[Int]).mapServiceError("outer", "m"))
+    val err =
+      serviceError((Left(ServiceError(500, ProviderId("inner"), "down")): Result[Int]).mapServiceError("outer", "m"))
     err.requestId shouldBe None
     err.retryAfter shouldBe None
   }
@@ -112,11 +114,11 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   "ServiceError" should "match with all five fields, retryAfter included" in {
-    ServiceError(503, "p", "d", "req").withRetryAfter(3.seconds) match {
+    ServiceError(503, ProviderId("p"), "d", "req").withRetryAfter(3.seconds) match {
       case ServiceError(message, status, provider, requestId, retryAfter) =>
         message should include("d")
         status shouldBe 503
-        provider shouldBe "p"
+        provider shouldBe ProviderId("p")
         requestId shouldBe Some("req")
         retryAfter shouldBe Some(3.seconds)
     }

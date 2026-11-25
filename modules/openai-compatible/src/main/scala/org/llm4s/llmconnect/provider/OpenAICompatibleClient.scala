@@ -273,7 +273,7 @@ class OpenAICompatibleClient private[provider] (
               // delivered stays delivered, and the event that stopped it is not. Reading goes on to the end,
               // since the usage the call was billed may come on an event of its own.
               ChatCompletionsFinishReason.filtered(
-                providerName,
+                provider,
                 chunks.flatMap(_.finishReason).headOption,
                 textLength + chunks.flatMap(_.contentDelta).map(_.length).sum,
                 None
@@ -286,7 +286,7 @@ class OpenAICompatibleClient private[provider] (
                     chunk.finishReason.foreach { reason =>
                       ended = true
                       if (reason == FinishReason.Other("error"))
-                        failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
+                        failure = Some(ServiceError(502, provider, "the stream ended with finish_reason 'error'"))
                     }
                     textLength += chunk.contentDelta.map(_.length).getOrElse(0)
                     accumulator.addChunk(chunk)
@@ -595,7 +595,7 @@ class OpenAICompatibleClient private[provider] (
    */
   private def filteredReply(c: Completion): Result[Completion] =
     ChatCompletionsFinishReason
-      .filtered(providerName, Some(c.finishReason), c.content.length, c.usage)
+      .filtered(provider, Some(c.finishReason), c.content.length, c.usage)
       .toLeft(c)
 
   /**
@@ -795,7 +795,7 @@ class OpenAICompatibleClient private[provider] (
       Left(
         TroubleshootingLinks.annotate(
           AuthenticationError(
-            providerName,
+            provider,
             HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, providerName),
             statusCode.toString
           ).withHttpStatus(statusCode)

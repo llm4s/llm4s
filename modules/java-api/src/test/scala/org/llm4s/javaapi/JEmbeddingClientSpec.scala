@@ -2,6 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
@@ -145,13 +146,17 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
   it should "map an embedding provider's error to a failed result whose kind is the one its status means" in {
     def failure(error: LLMError): LlmException = failingWith(error).embed(texts("a")).getError()
 
-    val unauthorised = failure(EmbeddingError(Some("401"), "Authentication failed: bad key", "voyage"))
+    val unauthorised = failure(EmbeddingError(Some("401"), "Authentication failed: bad key", ProviderId("voyage")))
     (unauthorised.getKind, unauthorised.getStatusCode, unauthorised.getMessage) shouldBe
       ((LlmErrorKind.AUTHENTICATION, OptionalInt.of(401), "Authentication failed: bad key"))
-    failure(EmbeddingError(Some("429"), "slow down", "jina")).getKind shouldBe LlmErrorKind.RATE_LIMIT
-    failure(EmbeddingError(Some("400"), "input too long", "openai")).getKind shouldBe LlmErrorKind.VALIDATION
-    failure(EmbeddingError(Some("503"), "overloaded", "cohere")).getKind shouldBe LlmErrorKind.SERVICE
-    failure(EmbeddingError(None, "HTTP request failed: refused", "ollama")).getKind shouldBe LlmErrorKind.OTHER
+    failure(EmbeddingError(Some("429"), "slow down", ProviderId("jina"))).getKind shouldBe LlmErrorKind.RATE_LIMIT
+    failure(
+      EmbeddingError(Some("400"), "input too long", ProviderId("openai"))
+    ).getKind shouldBe LlmErrorKind.VALIDATION
+    failure(EmbeddingError(Some("503"), "overloaded", ProviderId("cohere"))).getKind shouldBe LlmErrorKind.SERVICE
+    failure(
+      EmbeddingError(None, "HTTP request failed: refused", ProviderId("ollama"))
+    ).getKind shouldBe LlmErrorKind.OTHER
     failure(NetworkError("down", None, "http://x")).getKind shouldBe LlmErrorKind.NETWORK
   }
 

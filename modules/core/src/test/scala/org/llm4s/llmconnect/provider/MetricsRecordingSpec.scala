@@ -57,7 +57,7 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     val result = client.testWithMetrics(
       provider = "test-provider",
       model = "test-model",
-      f = Left(AuthenticationError("openai", "Invalid API key")),
+      f = Left(AuthenticationError(ProviderId("openai"), "Invalid API key")),
       extractUsage = (_: String) => None,
       extractCost = (_: String) => None
     )
@@ -99,14 +99,14 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     client.testWithMetrics(
       provider = "gemini",
       model = "gemini-2.0-flash",
-      f = Left(ContentFilteredError.reply("Gemini", "SAFETY").withUsage(usage)),
+      f = Left(ContentFilteredError.reply(ProviderId("gemini"), "SAFETY").withUsage(usage)),
       extractUsage = (_: String) => None,
       extractCost = (_: String) => None
     )
     client.testWithMetrics(
       provider = "gemini",
       model = "gemini-2.0-flash",
-      f = Left(ContentFilteredError.reply("Gemini", "SAFETY")),
+      f = Left(ContentFilteredError.reply(ProviderId("gemini"), "SAFETY")),
       extractUsage = (_: String) => None,
       extractCost = (_: String) => None
     )
@@ -183,7 +183,7 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     client.testWithMetrics(
       provider = "provider1",
       model = "model1",
-      f = Left(AuthenticationError("openai", "Auth failed")),
+      f = Left(AuthenticationError(ProviderId("openai"), "Auth failed")),
       extractUsage = (_: Nothing) => None,
       extractCost = (_: Nothing) => None
     )
@@ -192,7 +192,7 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     client.testWithMetrics(
       provider = "provider2",
       model = "model2",
-      f = Left(RateLimitError("anthropic")),
+      f = Left(RateLimitError(ProviderId("anthropic"))),
       extractUsage = (_: Nothing) => None,
       extractCost = (_: Nothing) => None
     )

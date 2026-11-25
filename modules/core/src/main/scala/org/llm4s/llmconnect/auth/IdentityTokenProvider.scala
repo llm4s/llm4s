@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.auth
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.AuthenticationError
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
@@ -43,7 +44,7 @@ trait IdentityTokenProvider:
 @Experimental
 object IdentityTokenProvider:
 
-  private val Provider = "workload-identity"
+  private val Provider = ProviderId("workload-identity")
 
   /**
    * The most bytes an identity token file may hold. A JWT-SVID or a projected service-account token is a few

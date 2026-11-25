@@ -448,12 +448,12 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
   it should "classify each kind of LLMError the way ErrorKind.fromLLMError does" in {
     val failures = Seq(
-      RateLimitError("probe", 1.second)                -> "rate_limit",
-      TimeoutError("timed out", 1.second, "probe-op")  -> "timeout",
-      AuthenticationError("probe", "bad key")          -> "authentication",
-      NetworkError("connection failed", None, "probe") -> "network",
-      ServiceError(500, "probe", "server error")       -> "service_error",
-      CancelledError("probe-op")                       -> "cancelled"
+      RateLimitError(ProviderId("probe"), 1.second)          -> "rate_limit",
+      TimeoutError("timed out", 1.second, "probe-op")        -> "timeout",
+      AuthenticationError(ProviderId("probe"), "bad key")    -> "authentication",
+      NetworkError("connection failed", None, "probe")       -> "network",
+      ServiceError(500, ProviderId("probe"), "server error") -> "service_error",
+      CancelledError("probe-op")                             -> "cancelled"
     )
     failures.foreach { case (error, label) =>
       val (registry, metrics) = fresh()
@@ -490,7 +490,7 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
   "With ReliableClient and the provider client on one collector" should "count each failed attempt once in llm4s.errors and the final failure once in llm4s.reliability.errors" in {
     val (registry, metrics) = fresh()
-    val provider            = new FailingClient(metrics, ServiceError(503, "probe", "unavailable"))
+    val provider            = new FailingClient(metrics, ServiceError(503, ProviderId("probe"), "unavailable"))
     val reliable = ReliableClient(
       provider,
       "probe",

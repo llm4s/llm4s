@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -12,7 +13,7 @@ import scala.concurrent.duration.*
  */
 class ErrorProviderTextSpec extends AnyFlatSpec with Matchers {
 
-  private val provider = "openai"
+  private val provider = ProviderId("openai")
 
   "An error's provider" should "read the same in the message and the context of every error that has one" in {
     val errors: List[(LLMError, String)] = List(

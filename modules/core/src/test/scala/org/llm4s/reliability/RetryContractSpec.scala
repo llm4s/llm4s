@@ -3,6 +3,7 @@ package org.llm4s.reliability
 import org.llm4s.error.*
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -29,7 +30,7 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
   private val rows: Seq[Row] = Seq(
     Row(
       "AuthenticationError",
-      AuthenticationError("openai", "invalid key", "401"),
+      AuthenticationError(ProviderId("openai"), "invalid key", "401"),
       retried = false
     ),
     Row("CancelledError", CancelledError("op", None), retried = false),
@@ -40,7 +41,7 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     ),
     Row(
       "ContentFilteredError",
-      ContentFilteredError.reply("Gemini", "SAFETY"),
+      ContentFilteredError.reply(ProviderId("gemini"), "SAFETY"),
       retried = false
     ),
     Row(
@@ -48,30 +49,30 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       ContextError.artifactStoreFailed("store", "key", "disk full"),
       retried = false
     ),
-    Row("EmbeddingError 503", EmbeddingError(Some("503"), "unavailable", "voyage"), retried = true),
-    Row("EmbeddingError 401", EmbeddingError(Some("401"), "bad key", "voyage"), retried = false),
-    Row("EmbeddingError, no status", EmbeddingError(None, "unparseable", "voyage"), retried = false),
-    Row("ContextLengthError", ContextLengthError("openai", "too long"), retried = false),
-    Row("ModelNotFoundError", ModelNotFoundError("openai", "no such model"), retried = false),
+    Row("EmbeddingError 503", EmbeddingError(Some("503"), "unavailable", ProviderId("voyage")), retried = true),
+    Row("EmbeddingError 401", EmbeddingError(Some("401"), "bad key", ProviderId("voyage")), retried = false),
+    Row("EmbeddingError, no status", EmbeddingError(None, "unparseable", ProviderId("voyage")), retried = false),
+    Row("ContextLengthError", ContextLengthError(ProviderId("openai"), "too long"), retried = false),
+    Row("ModelNotFoundError", ModelNotFoundError(ProviderId("openai"), "no such model"), retried = false),
     Row("ExecutionError", ExecutionError("failed", "run", Some(2)), retried = true),
     Row("InvalidInputError", InvalidInputError("field", "value", "reason"), retried = false),
     Row(
       "UnsupportedContentPartError",
-      UnsupportedContentPartError("ollama", "image (url, image/png)", "user"),
+      UnsupportedContentPartError(ProviderId("ollama"), "image (url, image/png)", "user"),
       retried = false
     ),
-    Row("CircuitOpenError", CircuitOpenError.open("anthropic", 30.seconds), retried = false),
+    Row("CircuitOpenError", CircuitOpenError.open(ProviderId("anthropic"), 30.seconds), retried = false),
     Row("NetworkError", NetworkError("refused", None, "https://llm.example/v1"), retried = true),
     Row("NotFoundError", NotFoundError("missing", "key-1"), retried = false),
     Row("OptimisticLockFailure", OptimisticLockFailure("conflict", "mem-1", 3L), retried = false),
     Row("ProcessingError", ProcessingError("op", "failed"), retried = false),
-    Row("RateLimitError", RateLimitError("anthropic", 60.seconds), retried = true),
-    Row("ServiceError 503", ServiceError(503, "p", "unavailable"), retried = true),
-    Row("ServiceError 500", ServiceError(500, "p", "internal"), retried = true),
-    Row("ServiceError 429", ServiceError(429, "p", "slow down"), retried = true),
-    Row("ServiceError 408", ServiceError(408, "p", "request timeout"), retried = true),
-    Row("ServiceError 400", ServiceError(400, "p", "bad request"), retried = false),
-    Row("ServiceError 404", ServiceError(404, "p", "not found"), retried = false),
+    Row("RateLimitError", RateLimitError(ProviderId("anthropic"), 60.seconds), retried = true),
+    Row("ServiceError 503", ServiceError(503, ProviderId("p"), "unavailable"), retried = true),
+    Row("ServiceError 500", ServiceError(500, ProviderId("p"), "internal"), retried = true),
+    Row("ServiceError 429", ServiceError(429, ProviderId("p"), "slow down"), retried = true),
+    Row("ServiceError 408", ServiceError(408, ProviderId("p"), "request timeout"), retried = true),
+    Row("ServiceError 400", ServiceError(400, ProviderId("p"), "bad request"), retried = false),
+    Row("ServiceError 404", ServiceError(404, ProviderId("p"), "not found"), retried = false),
     Row("SimpleError", SimpleError("plain"), retried = false),
     Row("TimeoutError", TimeoutError("slow", 5.seconds, "complete"), retried = true),
     Row("TokenizerError", TokenizerError.notAvailable("tok"), retried = false),
@@ -154,22 +155,26 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
   "The HTTP status rule" should "retry a ServiceError for 408, 429 and 5xx only, for every status" in {
     (0 to 699).foreach { status =>
       withClue(s"status $status") {
-        ServiceError(status, "p", "m").isRetryable shouldBe isRetryableStatus(status)
-        RetryPolicy.exponentialBackoff().isRetryable(ServiceError(status, "p", "m")) shouldBe isRetryableStatus(status)
+        ServiceError(status, ProviderId("p"), "m").isRetryable shouldBe isRetryableStatus(status)
+        RetryPolicy
+          .exponentialBackoff()
+          .isRetryable(ServiceError(status, ProviderId("p"), "m")) shouldBe isRetryableStatus(status)
       }
     }
   }
 
   "A backoff policy's delay" should "be the server's retryAfter when it gave one, whatever the error" in {
     val policy = RetryPolicy.fixedDelay(3, 1.millis)
-    policy.delayFor(1, ServiceError(503, "p", "m").withRetryAfter(7.seconds)) shouldBe 7.seconds
-    policy.delayFor(1, RateLimitError("p", 9.seconds)) shouldBe 9.seconds
-    policy.delayFor(1, ServiceError(503, "p", "m")) shouldBe 1.millis
+    policy.delayFor(1, ServiceError(503, ProviderId("p"), "m").withRetryAfter(7.seconds)) shouldBe 7.seconds
+    policy.delayFor(1, RateLimitError(ProviderId("p"), 9.seconds)) shouldBe 9.seconds
+    policy.delayFor(1, ServiceError(503, ProviderId("p"), "m")) shouldBe 1.millis
   }
 
   it should "be the policy's rate-limit default for a rate limit the server gave no delay for" in {
-    RetryPolicy.fixedDelay(3, 1.millis).delayFor(1, RateLimitError("p")) shouldBe RetryPolicy.DefaultRateLimitDelay
-    RateLimitError("p").retryAfter shouldBe None
+    RetryPolicy
+      .fixedDelay(3, 1.millis)
+      .delayFor(1, RateLimitError(ProviderId("p"))) shouldBe RetryPolicy.DefaultRateLimitDelay
+    RateLimitError(ProviderId("p")).retryAfter shouldBe None
   }
 
   "ReliableClient" should "retry exactly the errors the default policy retries, and return the last one unchanged" in {

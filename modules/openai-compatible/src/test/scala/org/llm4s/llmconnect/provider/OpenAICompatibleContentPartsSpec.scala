@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -72,7 +73,7 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
   it should "refuse a document, a provider file and media in a tool result, before sending anything" in {
     def refused(conversation: Conversation, part: ContentPart, role: String) =
       client.complete(conversation, CompletionOptions()).left.value shouldBe
-        UnsupportedContentPartError("openai-compatible", part.kind, role)
+        UnsupportedContentPartError(ProviderId("openai-compatible"), part.kind, role)
     refused(Conversation(Seq(UserMessage(Vector(ContentPart.Text("x"), pdfUrl)))), pdfUrl, "user")
     val file = ContentPart.image(MediaSource.ProviderFile("openai-compatible", "f-1"), MediaType.Png).value
     refused(Conversation(Seq(UserMessage(Vector(file)))), file, "user")

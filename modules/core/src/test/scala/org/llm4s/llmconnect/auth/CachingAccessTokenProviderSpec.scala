@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.auth
 import org.llm4s.error.{ AuthenticationError, CancelledError, NetworkError }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -81,7 +82,7 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val clock = MutableClock(start)
       val calls = new AtomicInteger(0)
       val fetch = () =>
-        if calls.incrementAndGet() == 1 then Left(AuthenticationError("token-exchange", "nope"))
+        if calls.incrementAndGet() == 1 then Left(AuthenticationError(ProviderId("token-exchange"), "nope"))
         else Right(AccessToken(Secret.unregistered("t2"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       provider.current().isLeft shouldBe true
@@ -98,7 +99,7 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val fetch = () => {
         calls.incrementAndGet()
         Thread.sleep(50) // an endpoint that takes its time to fail: the others queue behind the lock
-        Left(AuthenticationError("token-exchange", "down"))
+        Left(AuthenticationError(ProviderId("token-exchange"), "down"))
       }
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       val pool     = Executors.newVirtualThreadPerTaskExecutor()
@@ -114,7 +115,7 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       val calls = new AtomicInteger(0)
       val fetch = () =>
         calls.incrementAndGet() match
-          case 1 => Left(AuthenticationError("token-exchange", "nope"))
+          case 1 => Left(AuthenticationError(ProviderId("token-exchange"), "nope"))
           case n => Right(AccessToken(Secret.unregistered(s"t${n - 1}"), clock.instant().plusSeconds(600)))
       val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
       provider.current().isLeft shouldBe true

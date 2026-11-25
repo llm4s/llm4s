@@ -10,7 +10,7 @@ object ErrorIsRetryableTest {
 
   def handleResult(result: Result[String]): Boolean = result.left.exists(e => e.isRetryable)
 
-  def wrapped(result: Result[String]): Boolean = result.left.getOrElse(RateLimitError("p")).isRetryable
+  def wrapped(result: Result[String], fallback: RateLimitError): Boolean = result.left.getOrElse(fallback).isRetryable
 
   def worthRetrying(errors: List[LLMError]): List[LLMError] = errors.filter(_.isRetryable)
 

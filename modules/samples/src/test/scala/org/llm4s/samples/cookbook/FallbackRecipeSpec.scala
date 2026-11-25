@@ -2,6 +2,7 @@ package org.llm4s.samples.cookbook
 
 import org.llm4s.error.{ AuthenticationError, ServiceError }
 import org.llm4s.llmconnect.model.AssistantMessage
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +35,7 @@ class FallbackRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "stay on the primary when a retry succeeds" in {
     val flaky = new ScriptedClient((_, call) =>
-      if (call == 1) Left(ServiceError(503, "primary", "busy")) else Right(AssistantMessage("second try"))
+      if (call == 1) Left(ServiceError(503, ProviderId("primary"), "busy")) else Right(AssistantMessage("second try"))
     )
     val fallback = answering("from fallback")
 
@@ -43,7 +44,7 @@ class FallbackRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "not retry an error a retry cannot fix, and go straight to the fallback" in {
-    val badKey   = new ScriptedClient((_, _) => Left(AuthenticationError("primary", "invalid API key")))
+    val badKey   = new ScriptedClient((_, _) => Left(AuthenticationError(ProviderId("primary"), "invalid API key")))
     val fallback = answering("from fallback")
 
     new FallbackClients(badKey, fallback, FallbackRecipe.config).ask("q").value.by shouldBe "fallback"
@@ -51,7 +52,7 @@ class FallbackRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "return the fallback's error when both providers fail" in {
-    val down = new ScriptedClient((_, _) => Left(ServiceError(502, "fallback", "bad gateway")))
+    val down = new ScriptedClient((_, _) => Left(ServiceError(502, ProviderId("fallback"), "bad gateway")))
 
     val error = new FallbackClients(FallbackRecipe.outage, down, FallbackRecipe.config).ask("q").left.value
 

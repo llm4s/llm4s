@@ -4,6 +4,7 @@ import org.llm4s.error.{ LLMError, RateLimitError, ServiceError }
 import org.llm4s.http.{ HttpHeaders, HttpResponse }
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.BoundedJson
 
 import java.net.URLEncoder
@@ -30,7 +31,7 @@ import scala.concurrent.duration.*
  */
 private[jev] object JevErrors {
 
-  private val Provider = "jev"
+  private val Provider = ProviderId("jev")
 
   private val MaxDelayMillis = Long.MaxValue / 1000000L
 
@@ -113,7 +114,7 @@ private[jev] object JevErrors {
     // The mapper handles 400 as a validation error; Jev's 422 is the same thing.
     val status = if (response.statusCode == 422) 400 else response.statusCode
     val mapped: LLMError =
-      Left(HttpErrorMapper.toError(status, body, Provider, response.headers)).fold(identity, identity)
+      Left(HttpErrorMapper.toError(status, body, Provider.asString, response.headers)).fold(identity, identity)
     // `retry-after-ms` is the more precise of the two headers the SDKs honour, so it wins when both are sent.
     (mapped, retryAfterMs(response.headers)) match {
       case (_: RateLimitError, Some(delay))     => RateLimitError(Provider, delay)

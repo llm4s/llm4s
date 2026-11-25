@@ -5,6 +5,7 @@ import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +35,8 @@ object Llm4sStreamingWebSpec {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       streamComplete(c, o)(_ => ())
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
-      if (c.messages.lastOption.exists(_.content == "fail")) Left(ServiceError(503, "scripted", "the model is down"))
+      if (c.messages.lastOption.exists(_.content == "fail"))
+        Left(ServiceError(503, ProviderId("scripted"), "the model is down"))
       else {
         Pieces.foreach(p => f(StreamedChunk(id = "c", contentDelta = Some(p))))
         Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(Pieces.mkString)))

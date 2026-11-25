@@ -33,6 +33,7 @@ import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, UserMessage }
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import scala.concurrent.duration._
@@ -73,7 +74,7 @@ object FallbackRecipe extends RecipeApp {
 
   /** A provider that is down: every call fails with a 503, which `ReliableClient` treats as worth retrying. */
   def outage: ScriptedClient =
-    new ScriptedClient((_, _) => Left(ServiceError(503, "primary", "service unavailable")))
+    new ScriptedClient((_, _) => Left(ServiceError(503, ProviderId("primary"), "service unavailable")))
 
   /** The provider that is up. */
   def script: ScriptedClient =

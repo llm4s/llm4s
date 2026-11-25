@@ -5,6 +5,7 @@ import org.llm4s.error.{ LLMError, RateLimitError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, CompletionOptions, Message, UserMessage }
 import org.llm4s.rag.loader.CrawlerConfig
 import org.llm4s.config.ToolsConfigLoader
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import scala.concurrent.duration.*
 
 // The example of #2330 and the snippets of docs/migrations/0-4-1-to-0-5-0.md sections 6 and 7, as 0.4.1 code.
@@ -15,7 +16,7 @@ object Llm4sMigrate_0_5Test {
   val cfg  = CrawlerConfig(delay = 500.millis, timeout = 30.seconds)
   def handle(err: LLMError): Unit = if (err.isRetryable) retry()
 
-  val rateLimited = Left(RateLimitError("openai", 1.second))
+  val rateLimited = Left(RateLimitError(ProviderId("openai"), 1.second))
 
   def answer(message: AssistantMessage, text: String): AssistantMessage = message.withContent(text)
 

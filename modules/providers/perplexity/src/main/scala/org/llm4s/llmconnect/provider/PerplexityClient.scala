@@ -214,7 +214,7 @@ final class PerplexityClient private[provider] (
           if (data.nonEmpty && data != "[DONE]")
             BoundedJson.read(data) match {
               case Left(_) =>
-                failure = Some(ServiceError(502, providerName, "malformed stream event: the data is not JSON"))
+                failure = Some(ServiceError(502, provider, "malformed stream event: the data is not JSON"))
               case Right(event) =>
                 val fields = event.objOpt
                 fields.flatMap(_.get("type")).flatMap(_.strOpt).getOrElse("") match {
@@ -243,7 +243,7 @@ final class PerplexityClient private[provider] (
       _ <- read
       _ <- failure.toLeft(())
       response <- completed.toRight(
-        ServiceError(502, providerName, "stream ended without response.completed; the response is incomplete")
+        ServiceError(502, provider, "stream ended without response.completed; the response is incomplete")
       )
       reply <- parseReply(response)
       whole = if (reply.text.nonEmpty) reply else reply.copy(text = streamed.result())
@@ -555,7 +555,7 @@ object PerplexityClient {
     val detail  = Seq(code, message).flatten.mkString(": ")
     ServiceError(
       502,
-      ProviderName,
+      ProviderId(ProviderName),
       Redaction.safeBody(if (detail.isEmpty) "the response failed" else s"the response failed: $detail", 512)
     )
   }
@@ -569,7 +569,7 @@ object PerplexityClient {
         case None | Some("completed") | Some("incomplete") => Right(())
         case Some("failed")                                => Left(failed(fields.get("error")))
         case Some(other) =>
-          Left(ServiceError(502, ProviderName, s"the response ended with status '$other', not completed"))
+          Left(ServiceError(502, ProviderId(ProviderName), s"the response ended with status '$other', not completed"))
       }
       output <- fields
         .get("output")

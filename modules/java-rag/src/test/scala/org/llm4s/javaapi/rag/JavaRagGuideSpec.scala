@@ -1,6 +1,7 @@
 package org.llm4s.javaapi.rag
 
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.RateLimitError
 import org.llm4s.javaapi.GuideDocs
@@ -125,7 +126,8 @@ class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     }
 
     "react to each kind of failure" in {
-      val limited = JRag.builder().embeddings(embeddings()).llm(llm(new EchoingLlm(Some(RateLimitError("openai")))))
+      val limited =
+        JRag.builder().embeddings(embeddings()).llm(llm(new EchoingLlm(Some(RateLimitError(ProviderId("openai"))))))
       val noModel = JRag.builder().embeddings(embeddings())
       Seq(limited -> "Try again later", noModel -> "Fix the setup: JRag.ask needs a chat client").foreach {
         case (builder, expected) =>

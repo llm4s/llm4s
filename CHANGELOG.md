@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 0.7.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`); the Scalafix rule `ErrorProviderIdTyped` rewrites both
+  ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936).
+
+### Core
+
+- **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 0.7.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 0.7.0 artifacts, with no filter, and a binary break to one now fails CI ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

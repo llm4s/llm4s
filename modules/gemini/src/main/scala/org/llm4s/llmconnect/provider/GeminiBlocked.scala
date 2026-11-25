@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ ContentFilteredError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ Completion, FinishReason }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * How a Gemini or Vertex AI reply that did not finish normally ends, the same way for `complete` and for a stream:
@@ -73,11 +74,11 @@ private[provider] object GeminiBlocked {
    * The error for a reply a content filter stopped, or for a blocked prompt, with the usage the response reported
    * (#2676); `None` for any other response. `priorText` is the answer text a stream delivered before this chunk.
    */
-  def filtered(json: ujson.Value, service: String, priorText: Int = 0): Option[ContentFilteredError] =
+  def filtered(json: ujson.Value, provider: ProviderId, priorText: Int = 0): Option[ContentFilteredError] =
     (candidate(json) match {
       case Some(c) =>
         finishReason(json).filter(FilterFinishes.contains).map { reason =>
-          ContentFilteredError.reply(service, reason, cutAfterChars = priorText + answerText(c))
+          ContentFilteredError.reply(provider, reason, cutAfterChars = priorText + answerText(c))
         }
       case None =>
         json.objOpt
@@ -85,7 +86,7 @@ private[provider] object GeminiBlocked {
           .flatMap(_.objOpt)
           .flatMap(_.get("blockReason"))
           .flatMap(_.strOpt)
-          .map(reason => ContentFilteredError.prompt(service, reason))
+          .map(reason => ContentFilteredError.prompt(provider, reason))
     }).map(_.withUsage(GeminiUsage.fromResponse(json)))
 
   /** The error for a reply Gemini ended `MALFORMED_FUNCTION_CALL`, having dropped the call the model wrote. */

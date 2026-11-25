@@ -6,6 +6,7 @@ import org.llm4s.pekko.{ AgentPekko, LLMClientPekko }
 import org.llm4s.examples.http.ChatAgent
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import play.api.test.FakeRequest
@@ -75,11 +76,11 @@ class ChatControllerSpec extends AnyFlatSpec with Matchers {
 
   it should "map the provider's error to a status" in {
     val cases: Seq[(LLMError, Int)] = Seq(
-      RateLimitError("fake", 7.seconds)            -> TOO_MANY_REQUESTS,
-      TimeoutError("slow", 30.seconds, "complete") -> GATEWAY_TIMEOUT,
-      AuthenticationError("fake", "bad key")       -> BAD_GATEWAY,
-      ConfigurationError("no model")               -> INTERNAL_SERVER_ERROR,
-      NetworkError("down", None, "http://x")       -> SERVICE_UNAVAILABLE
+      RateLimitError(ProviderId("fake"), 7.seconds)      -> TOO_MANY_REQUESTS,
+      TimeoutError("slow", 30.seconds, "complete")       -> GATEWAY_TIMEOUT,
+      AuthenticationError(ProviderId("fake"), "bad key") -> BAD_GATEWAY,
+      ConfigurationError("no model")                     -> INTERNAL_SERVER_ERROR,
+      NetworkError("down", None, "http://x")             -> SERVICE_UNAVAILABLE
     )
     cases.foreach { case (error, expected) =>
       val response = post(agentOver(ScriptedLLMClient.always(Reply.failure(error))), "/chat", """{"message": "hi"}""")
@@ -89,7 +90,7 @@ class ChatControllerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send Retry-After with a rate limit" in {
-    val limited = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     post(agentOver(limited), "/chat", """{"message": "hi"}""").headers.get(RETRY_AFTER) shouldBe Some("7")
   }
 
@@ -125,7 +126,7 @@ class ChatControllerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "end with an error event carrying the status the error maps to" in {
-    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     val received = post(agentOver(limited), "/chat/stream", """{"message": "hi"}""").events
     received.map(_._1) shouldBe Vector("error")
     val error = received.head._2

@@ -10,6 +10,7 @@ import org.llm4s.examples.http.http4s.Http4sChatServer
 import org.llm4s.examples.http.http4s.TestAgents.{ agentOver, Failing, Slow }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.typelevel.ci.CIString
@@ -75,11 +76,11 @@ class TapirChatRoutesSpec extends AnyFlatSpec with Matchers {
 
   it should "map the provider's error to a status through HttpErrors" in {
     val cases: Seq[(LLMError, Status)] = Seq(
-      RateLimitError("fake", 7.seconds)            -> Status.TooManyRequests,
-      TimeoutError("slow", 30.seconds, "complete") -> Status.GatewayTimeout,
-      AuthenticationError("fake", "bad key")       -> Status.BadGateway,
-      ConfigurationError("no model")               -> Status.InternalServerError,
-      NetworkError("down", None, "http://x")       -> Status.ServiceUnavailable
+      RateLimitError(ProviderId("fake"), 7.seconds)      -> Status.TooManyRequests,
+      TimeoutError("slow", 30.seconds, "complete")       -> Status.GatewayTimeout,
+      AuthenticationError(ProviderId("fake"), "bad key") -> Status.BadGateway,
+      ConfigurationError("no model")                     -> Status.InternalServerError,
+      NetworkError("down", None, "http://x")             -> Status.ServiceUnavailable
     )
     cases.foreach { case (error, status) =>
       val response = post(agentOver(ScriptedLLMClient.always(Reply.failure(error))), "/chat", """{"message": "hi"}""")
@@ -91,7 +92,7 @@ class TapirChatRoutesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send Retry-After with a rate limit, and only then" in {
-    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     val response = post(agentOver(limited), "/chat", """{"message": "hi"}""")
     header(response, "Retry-After") shouldBe Some("7")
     val timedOut = ScriptedLLMClient.always(Reply.failure(TimeoutError("slow", 30.seconds, "complete")))
@@ -132,7 +133,7 @@ class TapirChatRoutesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "end with an error event carrying the status the error maps to" in {
-    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     val received = events(post(agentOver(limited), "/chat/stream", """{"message": "hi"}"""))
     received.map(_._1) shouldBe Vector("error")
     val error = received.head._2

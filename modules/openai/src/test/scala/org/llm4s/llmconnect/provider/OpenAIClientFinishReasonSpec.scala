@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, FinishReason, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, completion => completionOf, stream, transport }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -59,7 +60,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     ).left.value
     error shouldBe a[ContentFilteredError]
     val filtered = error.asInstanceOf[ContentFilteredError]
-    filtered.provider shouldBe "OpenAI"
+    filtered.provider shouldBe ProviderId("openai")
     filtered.reason shouldBe "content_filter"
     filtered.message should include("after 3 characters")
     filtered.usage.map(_.promptTokens) shouldBe Some(5)

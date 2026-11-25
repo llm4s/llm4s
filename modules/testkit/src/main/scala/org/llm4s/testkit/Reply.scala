@@ -14,7 +14,7 @@ import scala.util.Try
  * {{{
  * Reply.text("Paris").withUsage(TokenUsage(promptTokens = 12, completionTokens = 1, totalTokens = 13))
  * Reply.toolCall("get_weather", """{"city": "Paris"}""")
- * Reply.failure(RateLimitError("openai"))
+ * Reply.failure(RateLimitError(ProviderId("openai")))
  * }}}
  *
  * A reply that carries a failure is returned as a `Left`; every other reply becomes a `Completion`.

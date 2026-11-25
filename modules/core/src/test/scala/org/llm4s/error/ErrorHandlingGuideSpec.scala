@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.testutil.GuideMirror
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
@@ -156,9 +157,9 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   "handling specific error types" should {
     "route each error to its own handling" in {
       describe(Right("hi")) shouldBe "ok: hi"
-      describe(Left(RateLimitError("openai", 5.seconds))) shouldBe "wait 5 seconds, then retry"
-      describe(Left(RateLimitError("openai"))) shouldBe "wait 30 seconds, then retry"
-      describe(Left(AuthenticationError("openai", "bad key"))) shouldBe "fix the credentials for openai"
+      describe(Left(RateLimitError(ProviderId("openai"), 5.seconds))) shouldBe "wait 5 seconds, then retry"
+      describe(Left(RateLimitError(ProviderId("openai")))) shouldBe "wait 30 seconds, then retry"
+      describe(Left(AuthenticationError(ProviderId("openai"), "bad key"))) shouldBe "fix the credentials for openai"
       describe(Left(NetworkError("down", None, "https://x"))) should startWith("transient")
       describe(Left(ValidationError("model", "must not be empty"))) should startWith("not retried")
     }
@@ -176,14 +177,14 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "route an embedding error by its status, as the guide's table of other modules' errors says" in {
-      describe(Left(EmbeddingError(Some("500"), "provider failed", "openai"))) shouldBe
+      describe(Left(EmbeddingError(Some("500"), "provider failed", ProviderId("openai")))) shouldBe
         "transient, may succeed on retry: provider failed"
-      describe(Left(EmbeddingError(Some("401"), "bad key", "openai"))) shouldBe "not retried: bad key"
-      describe(Left(EmbeddingError(None, "unparseable", "openai"))) shouldBe "not retried: unparseable"
+      describe(Left(EmbeddingError(Some("401"), "bad key", ProviderId("openai")))) shouldBe "not retried: bad key"
+      describe(Left(EmbeddingError(None, "unparseable", ProviderId("openai")))) shouldBe "not retried: unparseable"
     }
 
     "tell a context-length overflow apart by its type" in {
-      describe(Left(ContextLengthError("openai", "too long"))) should startWith("shorten the conversation")
+      describe(Left(ContextLengthError(ProviderId("openai"), "too long"))) should startWith("shorten the conversation")
     }
   }
 
@@ -199,39 +200,39 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     "be what the guide's table says for each error type" in {
       val retryable: List[LLMError] = List(
         NetworkError("m", None, "u"),
-        RateLimitError("p"),
+        RateLimitError(ProviderId("p")),
         TimeoutError("m", 1.second, "op"),
-        ServiceError(503, "p", "d"),
+        ServiceError(503, ProviderId("p"), "d"),
         ExecutionError("m", "op", None, None)
       )
       val not: List[LLMError] = List(
-        AuthenticationError("p", "d"),
+        AuthenticationError(ProviderId("p"), "d"),
         ConfigurationError("m", List("k")),
         ValidationError("f", "r"),
-        ContextLengthError("p", "d"),
-        ModelNotFoundError("p", "d"),
+        ContextLengthError(ProviderId("p"), "d"),
+        ModelNotFoundError(ProviderId("p"), "d"),
         InvalidInputError("f", "v", "r"),
         ProcessingError("op", "m"),
         NotFoundError("m", "k"),
         CancelledError("op"),
         SimpleError("m"),
         OptimisticLockFailure("m", "id", 1L),
-        CircuitOpenError.open("p", 1.second)
+        CircuitOpenError.open(ProviderId("p"), 1.second)
       )
       retryable.map(_.isRetryable).distinct shouldBe List(true)
       not.map(_.isRetryable).distinct shouldBe List(false)
     }
 
     "follow a ServiceError's status" in {
-      ServiceError(503, "p", "d").isRetryable shouldBe true
-      ServiceError(429, "p", "d").isRetryable shouldBe true
-      ServiceError(408, "p", "d").isRetryable shouldBe true
-      ServiceError(404, "p", "d").isRetryable shouldBe false
+      ServiceError(503, ProviderId("p"), "d").isRetryable shouldBe true
+      ServiceError(429, ProviderId("p"), "d").isRetryable shouldBe true
+      ServiceError(408, ProviderId("p"), "d").isRetryable shouldBe true
+      ServiceError(404, ProviderId("p"), "d").isRetryable shouldBe false
     }
 
     "report only the provider's own delay as retryAfter, the 30-second default being the retry policy's" in {
-      RateLimitError("p", 7.seconds).retryAfter shouldBe Some(7.seconds)
-      RateLimitError("p").retryAfter shouldBe None
+      RateLimitError(ProviderId("p"), 7.seconds).retryAfter shouldBe Some(7.seconds)
+      RateLimitError(ProviderId("p")).retryAfter shouldBe None
       RetryPolicy.DefaultRateLimitDelay shouldBe 30.seconds
     }
 
@@ -307,7 +308,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   "retrying" should {
     "retry a rate limit, give up with the last error unchanged, and not retry a permanent error" in {
-      val limited = RateLimitError("p", 1.millisecond)
+      val limited = RateLimitError(ProviderId("p"), 1.millisecond)
       val flaky   = new Scripted(call => if (call < 3) Left(limited) else new SimpleMock("done").complete(conversation))
       reliably(flaky, retrying(5)).complete(conversation).map(_.content) shouldBe Right("done")
       flaky.calls.get() shouldBe 3
@@ -328,16 +329,17 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
         failing.calls.get()
       }
       callsFor(NetworkError("down", None, "https://x")) shouldBe 3
-      callsFor(ServiceError(404, "p", "d")) shouldBe 1
+      callsFor(ServiceError(404, ProviderId("p"), "d")) shouldBe 1
       callsFor(OptimisticLockFailure("m", "id", 1L)) shouldBe 1
     }
 
     "wait a rate limit's own delay and a service error's hint, and the policy's delay otherwise" in {
       val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 3.seconds)
-      policy.delayFor(1, RateLimitError("p", 7.seconds)) shouldBe 7.seconds
-      policy.delayFor(1, RateLimitError("p")) shouldBe RetryPolicy.DefaultRateLimitDelay
-      policy.delayFor(1, ServiceError(503, "p", "d").withRetryAfter(9.seconds)) shouldBe 9.seconds
-      Seq(1, 2, 3).map(policy.delayFor(_, ServiceError(503, "p", "d"))) shouldBe Seq(1.second, 2.seconds, 3.seconds)
+      policy.delayFor(1, RateLimitError(ProviderId("p"), 7.seconds)) shouldBe 7.seconds
+      policy.delayFor(1, RateLimitError(ProviderId("p"))) shouldBe RetryPolicy.DefaultRateLimitDelay
+      policy.delayFor(1, ServiceError(503, ProviderId("p"), "d").withRetryAfter(9.seconds)) shouldBe 9.seconds
+      Seq(1, 2, 3)
+        .map(policy.delayFor(_, ServiceError(503, ProviderId("p"), "d"))) shouldBe Seq(1.second, 2.seconds, 3.seconds)
       policy.isRetryable(NetworkError("down", None, "https://x")) shouldBe true
       policy.isRetryable(ValidationError("f", "r")) shouldBe false
     }

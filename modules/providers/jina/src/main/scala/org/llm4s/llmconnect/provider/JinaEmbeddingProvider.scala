@@ -151,7 +151,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
           code = None,
           message = s"Jina task '${task.wireName}' is not supported by $model " +
             "(supported: retrieval.query, retrieval.passage, text-matching)",
-          provider = "jina"
+          provider = ProviderId("jina")
         )
       )
     else Right(Some(task))
@@ -211,7 +211,11 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
                   case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
                   case err =>
-                    EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
+                    EmbeddingError(
+                      code = None,
+                      message = s"HTTP request failed: ${err.message}",
+                      provider = ProviderId("jina")
+                    )
                 }
             )
 
@@ -230,20 +234,36 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
               }.toEither.left
                 .map { ex =>
                   logger.error(s"[JinaEmbeddingProvider] Parse error: ${ex.getMessage}")
-                  EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "jina")
+                  EmbeddingError(
+                    code = None,
+                    message = s"Parsing error: ${ex.getMessage}",
+                    provider = ProviderId("jina")
+                  )
                 }
             case 401 =>
               val body = Redaction.safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] Auth error (401): $body")
-              Left(EmbeddingError(code = Some("401"), message = s"Authentication failed: $body", provider = "jina"))
+              Left(
+                EmbeddingError(
+                  code = Some("401"),
+                  message = s"Authentication failed: $body",
+                  provider = ProviderId("jina")
+                )
+              )
             case 429 =>
               val body = Redaction.safeBody(response.body)
               logger.warn(s"[JinaEmbeddingProvider] Rate limit (429): $body")
-              Left(EmbeddingError(code = Some("429"), message = s"Rate limit exceeded: $body", provider = "jina"))
+              Left(
+                EmbeddingError(
+                  code = Some("429"),
+                  message = s"Rate limit exceeded: $body",
+                  provider = ProviderId("jina")
+                )
+              )
             case status =>
               val body = Redaction.safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] HTTP error $status: $body")
-              Left(EmbeddingError(code = Some(status.toString), message = body, provider = "jina"))
+              Left(EmbeddingError(code = Some(status.toString), message = body, provider = ProviderId("jina")))
           }
         }
       }

@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels 
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.MultimodalEmbeddingProvider
 import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -122,7 +123,7 @@ object FileEmbedder {
     multimodal: Option[MultimodalEmbeddingProvider] = None
   ): Result[Seq[EmbeddingVector]] = {
     val f = path.toFile
-    if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", "extractor"))
+    if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", ProviderId("extractor")))
 
     val mime = TikaDocumentExtractor.detectMimeType(f)
     logger.debug(s"[FileEmbedder] MIME detected: $mime")
@@ -131,7 +132,7 @@ object FileEmbedder {
     else if (mime.startsWith("image/")) encodeMediaFile(f, mime, Modality.Image, multimodal, config, seedXor = 0L)
     else if (mime.startsWith("audio/")) encodeMediaFile(f, mime, Modality.Audio, multimodal, config, AudioSeedXor)
     else if (mime.startsWith("video/")) encodeMediaFile(f, mime, Modality.Video, multimodal, config, VideoSeedXor)
-    else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", "encoder"))
+    else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", ProviderId("encoder")))
   }
 
   private def encodeTextFile(
@@ -141,7 +142,7 @@ object FileEmbedder {
     config: FileEmbeddingConfig
   ): Result[Seq[EmbeddingVector]] =
     TikaDocumentExtractor.extractFromPath(file.getAbsolutePath) match {
-      case Left(e) => Left(EmbeddingError(None, e.message, "extractor"))
+      case Left(e) => Left(EmbeddingError(None, e.message, ProviderId("extractor")))
       case Right(document) =>
         val chunking = config.chunking
         val chunked: Result[Seq[String]] =
@@ -212,7 +213,11 @@ object FileEmbedder {
       val sizeMB           = maxMediaFileSize / (1024 * 1024)
       if (file.length() > maxMediaFileSize) {
         Left(
-          EmbeddingError(None, s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}", "encoder")
+          EmbeddingError(
+            None,
+            s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}",
+            ProviderId("encoder")
+          )
         )
       } else {
         for {
@@ -221,7 +226,7 @@ object FileEmbedder {
               None,
               s"No multimodal embedding provider for the ${modality.toString.toLowerCase} file ${file.getName}: " +
                 "pass one to encodeFromPath, or set experimentalStubs",
-              "encoder"
+              ProviderId("encoder")
             )
           )
           model <- modelResult
@@ -268,7 +273,7 @@ object FileEmbedder {
         }
         out.toByteArray
       } finally is.close()
-    }.toEither.left.map(e => EmbeddingError(None, s"Failed to read media file: ${e.getMessage}", "encoder"))
+    }.toEither.left.map(e => EmbeddingError(None, s"Failed to read media file: ${e.getMessage}", ProviderId("encoder")))
 
   private def l2(v: Seq[Double]): Seq[Double] = {
     val n = math.sqrt(v.foldLeft(0.0)((s, x) => s + x * x))

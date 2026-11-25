@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,7 +37,7 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
         PartEncoding.textOnly
       )
       .left
-      .value shouldBe UnsupportedContentPartError("p", image.kind, "tool")
+      .value shouldBe UnsupportedContentPartError(ProviderId("p"), image.kind, "tool")
   }
 
   "withoutBlankText" should "drop blank text parts and keep everything else in order" in {

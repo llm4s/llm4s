@@ -1,5 +1,5 @@
 /*
-rule = Llm4sMigrate_0_5
+rules = [Llm4sMigrate_0_5, ErrorProviderIdTyped]
 */
 package fix
 

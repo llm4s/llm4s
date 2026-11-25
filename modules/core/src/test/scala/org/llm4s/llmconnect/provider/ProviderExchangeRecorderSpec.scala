@@ -204,7 +204,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
 
   it should "record a Left result as an Error carrying that error's message" in {
     val sink  = new CollectingSink
-    val error = ServiceError(503, "openai", "upstream overloaded, marker-7f3a")
+    val error = ServiceError(503, ProviderId("openai"), "upstream overloaded, marker-7f3a")
 
     recordInto(sink, result = Left(error))
 
@@ -219,7 +219,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
 
     recordInto(
       sink,
-      result = Left(ServiceError(429, "openai", "rate limited")),
+      result = Left(ServiceError(429, ProviderId("openai"), "rate limited")),
       responseBody = Some("""{"error":"slow down"}""")
     )
 
@@ -371,7 +371,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
           model = Some(ModelName("gpt-4o")),
           responseBody = Some("""{"token":"response-secret-456"}""")
         ),
-        Left(ServiceError(401, "openai", "Authorization: Bearer error-secret-789"))
+        Left(ServiceError(401, ProviderId("openai"), "Authorization: Bearer error-secret-789"))
       )
 
       val lines = Files.readAllLines(file).asScala.toList

@@ -10,6 +10,7 @@ import org.llm4s.error.{
   ServiceError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.reliability.RetryPolicy as LlmRetryPolicy
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -102,9 +103,9 @@ class RetryPolicySpec extends AnyFlatSpec with Matchers with EitherValues {
       ExecutionError("failed", "run"),
       NetworkError("down", None, "https://example.test"),
       OptimisticLockFailure("conflict", "m", 1L),
-      RateLimitError("p", 5.seconds),
-      ServiceError(400, "p", "bad request"),
-      ServiceError(503, "p", "unavailable"),
+      RateLimitError(ProviderId("p"), 5.seconds),
+      ServiceError(400, ProviderId("p"), "bad request"),
+      ServiceError(503, ProviderId("p"), "unavailable"),
       ValidationError("field", "bad"),
       CancelledError("op", None)
     )
@@ -119,9 +120,9 @@ class RetryPolicySpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "not retry a recoverable client-error response or an optimistic-lock failure" in {
     val policy = RetryPolicy(maxAttempts = 3)
 
-    policy.retries(ServiceError(400, "p", "bad request"), failedAttempts = 1) shouldBe false
+    policy.retries(ServiceError(400, ProviderId("p"), "bad request"), failedAttempts = 1) shouldBe false
     policy.retries(OptimisticLockFailure("conflict", "m", 1L), failedAttempts = 1) shouldBe false
-    policy.retries(ServiceError(503, "p", "unavailable"), failedAttempts = 1) shouldBe true
+    policy.retries(ServiceError(503, ProviderId("p"), "unavailable"), failedAttempts = 1) shouldBe true
   }
 
   it should "follow a custom predicate" in {

@@ -91,7 +91,7 @@ class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
   it should "report a request the HTTP client cannot send, a malformed base URL, as an EmbeddingError with no status" in {
     val error = embeddingError(provider("http://local host:1").embed(request))
     error.code shouldBe None
-    error.provider shouldBe "ollama"
+    error.provider shouldBe ProviderId("ollama")
     error.message should startWith("HTTP request failed")
   }
 

@@ -6,6 +6,7 @@ import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import ujson.read
 
@@ -233,7 +234,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
       }
 
   private def visionFailed(statusCode: Int, detail: String): LLMError =
-    ServiceError(statusCode, "OpenAI", s"OpenAI Vision API call failed: $detail")
+    ServiceError(statusCode, ProviderId("openai"), s"OpenAI Vision API call failed: $detail")
 
   private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption

@@ -2,6 +2,7 @@ package org.llm4s.samples.cookbook
 
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -56,7 +57,7 @@ class SummariseRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "fail, without the reduce call, when a part cannot be summarised" in {
     val client = new ScriptedClient((_, call) =>
-      if (call == 2) Left(ServiceError(503, "scripted", "unavailable")) else Right(AssistantMessage("ok"))
+      if (call == 2) Left(ServiceError(503, ProviderId("scripted"), "unavailable")) else Right(AssistantMessage("ok"))
     )
 
     SummariseRecipe.summarise(client, SummariseRecipe.report).left.value shouldBe a[ServiceError]

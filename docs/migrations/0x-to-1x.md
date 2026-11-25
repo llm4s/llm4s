@@ -35,9 +35,18 @@ the baseline and 1.0 then promise is in the [Compatibility and Deprecation Polic
 ([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are first published at 1.0, as
 `org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
 change by hand. Run the one umbrella rule for the version you start from: `Llm4sMigrateFrom_0_5` from 0.5.x,
-`Llm4sMigrateFrom_0_6` from 0.6.x, `Llm4sMigrateFrom_0_7` from 0.7.x (it has no rule yet: nothing has broken since 0.7.0).
+`Llm4sMigrateFrom_0_6` from 0.6.x, `Llm4sMigrateFrom_0_7` from 0.7.x.
 
 ---
+
+## From 0.7.0 to 1.0
+
+0.7.0 is the baseline, so a break after it is a frozen API found wrong and fixed before 1.0, each with a MiMa filter
+where the binary changes. The Scalafix rule `Llm4sMigrateFrom_0_7` rewrites the mechanical part
+([Scalafix: migration rules](../reference/scalafix#migration-rules)).
+
+- [An error's `provider` is a `ProviderId`](../reference/migration#an-errors-provider-is-a-providerid-2936):
+  `RateLimitError(ProviderId("openai"))`, and `error.provider.asString` where a `String` is wanted.
 
 ## From 0.6.0 to 0.7.0
 

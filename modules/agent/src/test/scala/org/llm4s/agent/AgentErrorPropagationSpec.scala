@@ -1,6 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -73,21 +74,21 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   it should "return the exact RateLimitError, keeping provider and retryAfter" in {
-    val original = RateLimitError("anthropic", 60.seconds)
+    val original = RateLimitError(ProviderId("anthropic"), 60.seconds)
     val error    = runError(new FailingLLMClient(original))
     error shouldBe original
     error.asInstanceOf[RateLimitError].retryAfter shouldBe Some(60.seconds)
   }
 
   it should "return the exact AuthenticationError and ServiceError" in {
-    val auth    = AuthenticationError("openai", "invalid key", "401")
-    val service = ServiceError(503, "openai", "unavailable")
+    val auth    = AuthenticationError(ProviderId("openai"), "invalid key", "401")
+    val service = ServiceError(503, ProviderId("openai"), "unavailable")
     runError(new FailingLLMClient(auth)) shouldBe auth
     runError(new FailingLLMClient(service)) shouldBe service
   }
 
   it should "return the provider error unchanged when it occurs after a successful tool step" in {
-    val original = ServiceError(502, "provider-x", "bad gateway")
+    val original = ServiceError(502, ProviderId("provider-x"), "bad gateway")
     val calls    = new AtomicInteger(0)
     val failSecond = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
@@ -104,7 +105,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   "Agent over ReliableClient" should "retry a recoverable RateLimitError maxAttempts times, then return it unchanged" in {
-    val original = RateLimitError("retry-provider", 5.seconds)
+    val original = RateLimitError(ProviderId("retry-provider"), 5.seconds)
     val inner    = new CountingFailingClient(original)
 
     runError(reliable(inner, "retry-provider")) shouldBe original
@@ -112,7 +113,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   it should "not retry a non-recoverable AuthenticationError and return it unchanged" in {
-    val original = AuthenticationError("openai", "invalid key", "401")
+    val original = AuthenticationError(ProviderId("openai"), "invalid key", "401")
     val inner    = new CountingFailingClient(original)
 
     runError(reliable(inner, "openai")) shouldBe original
@@ -121,7 +122,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
 
   /** Every concrete `LLMError` the library defines, with whether the default `RetryPolicy` retries it. */
   private def allErrors: Seq[(String, LLMError, Boolean)] = Seq(
-    ("AuthenticationError", AuthenticationError("openai", "invalid key", "401"), false),
+    ("AuthenticationError", AuthenticationError(ProviderId("openai"), "invalid key", "401"), false),
     ("CancelledError", CancelledError("op", None), false),
     ("ConfigurationError", ConfigurationError("missing key", List("OPENAI_API_KEY")), false),
     ("ContextError", ContextError.artifactStoreFailed("store", "key", "disk full"), false),
@@ -131,11 +132,11 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     ("NotFoundError", NotFoundError("missing", "key-1"), false),
     ("OptimisticLockFailure", OptimisticLockFailure("conflict", "mem-1", 3L), false),
     ("ProcessingError", ProcessingError("op", "failed"), false),
-    ("RateLimitError", RateLimitError("anthropic", 60.seconds), true),
-    ("ServiceError 503", ServiceError(503, "p", "unavailable"), true),
-    ("ServiceError 429", ServiceError(429, "p", "slow down"), true),
-    ("ServiceError 408", ServiceError(408, "p", "request timeout"), true),
-    ("ServiceError 400", ServiceError(400, "p", "bad request"), false),
+    ("RateLimitError", RateLimitError(ProviderId("anthropic"), 60.seconds), true),
+    ("ServiceError 503", ServiceError(503, ProviderId("p"), "unavailable"), true),
+    ("ServiceError 429", ServiceError(429, ProviderId("p"), "slow down"), true),
+    ("ServiceError 408", ServiceError(408, ProviderId("p"), "request timeout"), true),
+    ("ServiceError 400", ServiceError(400, ProviderId("p"), "bad request"), false),
     ("SimpleError", SimpleError("plain"), false),
     ("TimeoutError", TimeoutError("slow", 5.seconds, "complete"), true),
     ("TokenizerError", TokenizerError.notAvailable("tok"), false),
@@ -204,7 +205,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   "Agent over ReliableClient" should "complete when a retry succeeds on the last attempt" in {
-    val inner = new FlakyClient(failures = 2, ServiceError(503, "p", "unavailable"))
+    val inner = new FlakyClient(failures = 2, ServiceError(503, ProviderId("p"), "unavailable"))
 
     val result = plain(reliable(inner, "p")).run("hello").value
 
@@ -213,7 +214,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   it should "return the last error once every attempt has failed" in {
-    val error = ServiceError(503, "p", "still down")
+    val error = ServiceError(503, ProviderId("p"), "still down")
     val inner = new FlakyClient(failures = 3, error)
 
     runError(reliable(inner, "p")) shouldBe error
@@ -221,7 +222,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   it should "fail fast with a CircuitOpenError, without calling the model, once the circuit is open" in {
-    val provider = ServiceError(503, "provider-x", "down")
+    val provider = ServiceError(503, ProviderId("provider-x"), "down")
     val inner    = new CountingFailingClient(provider)
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.noRetry)
@@ -234,7 +235,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
 
     val open = runError(client)
     open shouldBe a[org.llm4s.error.CircuitOpenError]
-    open.asInstanceOf[org.llm4s.error.CircuitOpenError].provider shouldBe "provider-x"
+    open.asInstanceOf[org.llm4s.error.CircuitOpenError].provider shouldBe ProviderId("provider-x")
     inner.calls.get() shouldBe 2
   }
 

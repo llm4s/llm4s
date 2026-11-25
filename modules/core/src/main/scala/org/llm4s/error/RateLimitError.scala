@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.FiniteDuration
@@ -27,7 +28,7 @@ enum RateLimitOrigin {
  * @param message human-readable description of the rate limit
  * @param retryAfter optional delay the provider asked for before retrying (e.g. an HTTP
  *                   `Retry-After` header)
- * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
+ * @param provider the id of the LLM provider (e.g. `openai`, `anthropic`)
  * @param origin whether this was rejected locally (never reached the provider) or by the
  *               provider itself; defaults to [[RateLimitOrigin.UpstreamProvider]] since every
  *               existing constructor call maps a provider-side rejection
@@ -39,7 +40,7 @@ enum RateLimitOrigin {
 final case class RateLimitError private (
   override val message: String,
   override val retryAfter: Option[FiniteDuration],
-  provider: String,
+  provider: ProviderId,
   origin: RateLimitOrigin,
   override val httpStatus: Option[Int],
   override val requestId: Option[String]
@@ -62,7 +63,7 @@ final case class RateLimitError private (
     if (detail.trim.isEmpty) this else copy(message = s"$message: $detail")
 
   override val context: Map[String, String] = Map(
-    "provider" -> provider
+    "provider" -> provider.asString
   ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d)) ++
     httpStatus.map("httpStatus" -> _.toString) ++ requestId.map("requestId" -> _)
 }
@@ -70,11 +71,11 @@ final case class RateLimitError private (
 object RateLimitError {
 
   /** Create basic rate limit error */
-  def apply(provider: String): RateLimitError =
+  def apply(provider: ProviderId): RateLimitError =
     new RateLimitError(s"Rate limited by $provider", None, provider, RateLimitOrigin.UpstreamProvider, None, None)
 
   /** Create rate limit error with the delay the provider asked for before retrying */
-  def apply(provider: String, retryAfter: FiniteDuration): RateLimitError =
+  def apply(provider: ProviderId, retryAfter: FiniteDuration): RateLimitError =
     new RateLimitError(
       s"Rate limited by $provider. Retry after ${DurationText(retryAfter)}",
       Some(retryAfter),
@@ -90,13 +91,13 @@ object RateLimitError {
    * that `ReliableClient` keeps it out of the circuit breaker and does not record its metrics
    * event twice.
    */
-  def local(provider: String): RateLimitError =
+  def local(provider: ProviderId): RateLimitError =
     new RateLimitError("Local rate limit exceeded.", None, provider, RateLimitOrigin.LocalThrottle, None, None)
 
   /**
    * Extracts the message, `retryAfter` and the provider. The arity is fixed: `origin`, `httpStatus` and `requestId`, added
    * later, are read by name.
    */
-  def unapply(error: RateLimitError): Option[(String, Option[FiniteDuration], String)] =
+  def unapply(error: RateLimitError): Option[(String, Option[FiniteDuration], ProviderId)] =
     Some((error.message, error.retryAfter, error.provider))
 }

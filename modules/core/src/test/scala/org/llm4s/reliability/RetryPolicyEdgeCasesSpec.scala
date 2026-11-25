@@ -1,6 +1,7 @@
 package org.llm4s.reliability
 
 import org.llm4s.error._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
@@ -13,7 +14,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "linearBackoff" should "use server-provided Retry-After when available" in {
     val policy         = RetryPolicy.linearBackoff(maxAttempts = 3, baseDelay = 2.seconds)
-    val rateLimitError = RateLimitError("test", 5.seconds)
+    val rateLimitError = RateLimitError(ProviderId("test"), 5.seconds)
 
     // Should use server delay (5 seconds) instead of linear calculation
     policy.delayFor(1, rateLimitError) shouldBe 5.seconds
@@ -35,7 +36,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "fixedDelay" should "use server-provided Retry-After when available" in {
     val policy         = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 2.seconds)
-    val rateLimitError = RateLimitError("test", 10.seconds)
+    val rateLimitError = RateLimitError(ProviderId("test"), 10.seconds)
 
     policy.delayFor(1, rateLimitError) shouldBe 10.seconds
   }
@@ -63,11 +64,11 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "report nothing as retryable" in {
     val policy = RetryPolicy.noRetry
 
-    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
+    policy.isRetryable(RateLimitError(ProviderId("test"), 60.seconds)) shouldBe false
     policy.isRetryable(TimeoutError("test", 1.second, "test")) shouldBe false
-    policy.isRetryable(ServiceError(500, "test", "error")) shouldBe false
+    policy.isRetryable(ServiceError(500, ProviderId("test"), "error")) shouldBe false
     policy.isRetryable(NetworkError("test", None, "test")) shouldBe false
-    policy.isRetryable(AuthenticationError("test", "test")) shouldBe false
+    policy.isRetryable(AuthenticationError(ProviderId("test"), "test")) shouldBe false
   }
 
   // ==========================================================================
@@ -78,7 +79,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 32.seconds)
     // RateLimitError without a retryAfter waits the policy's rate-limit default
     // so this will use the server-provided delay
-    val rateLimitError = RateLimitError("test", 3.seconds)
+    val rateLimitError = RateLimitError(ProviderId("test"), 3.seconds)
     policy.delayFor(1, rateLimitError) shouldBe 3.seconds
   }
 
@@ -96,9 +97,9 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
       }
     )
 
-    policy.isRetryable(AuthenticationError("test", "test")) shouldBe true
+    policy.isRetryable(AuthenticationError(ProviderId("test"), "test")) shouldBe true
     policy.isRetryable(TimeoutError("timeout", 1.second, "test")) shouldBe false
-    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
+    policy.isRetryable(RateLimitError(ProviderId("test"), 60.seconds)) shouldBe false
   }
 
   it should "use custom delay function" in {

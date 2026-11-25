@@ -16,6 +16,7 @@ import org.llm4s.llmconnect.model.{
   ToolMessage,
   UserMessage
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.SafeParameterExtractor
@@ -288,10 +289,10 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "throw an LlmException carrying the llm4s error" in {
-    val (_, chat) = model(Reply.failure(AuthenticationError("fixture", "bad key")))
+    val (_, chat) = model(Reply.failure(AuthenticationError(ProviderId("fixture"), "bad key")))
     val error     = intercept[LlmException](chat.call("hi"))
     error.getKind shouldBe LlmErrorKind.AUTHENTICATION
-    error.error shouldBe AuthenticationError("fixture", "bad key")
+    error.error shouldBe AuthenticationError(ProviderId("fixture"), "bad key")
   }
 
   "stream" should "emit each streamed piece of text, then the finish reason, model and usage" in {
@@ -315,7 +316,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "signal the llm4s error as the Flux's error" in {
-    val (_, chat) = model(Reply.failure(RateLimitError("fixture")))
+    val (_, chat) = model(Reply.failure(RateLimitError(ProviderId("fixture"))))
     intercept[LlmException](chat.stream(new Prompt("hi")).blockLast()).getKind shouldBe LlmErrorKind.RATE_LIMIT
   }
 

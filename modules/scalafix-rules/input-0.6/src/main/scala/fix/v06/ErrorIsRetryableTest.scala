@@ -13,7 +13,7 @@ object ErrorIsRetryableTest {
 
   def handleResult(result: Result[String]): Boolean = result.left.exists(e => LLMError.isRecoverable(e))
 
-  def wrapped(result: Result[String]): Boolean = LLMError.isRecoverable(result.left.getOrElse(RateLimitError("p")))
+  def wrapped(result: Result[String], fallback: RateLimitError): Boolean = LLMError.isRecoverable(result.left.getOrElse(fallback))
 
   def worthRetrying(errors: List[LLMError]): List[LLMError] = LLMError.recoverableErrors(errors)
 

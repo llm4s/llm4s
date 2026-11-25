@@ -344,7 +344,7 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
         startedAt = Instant.now(),
         requestBody = "{}"
       ),
-      Left(org.llm4s.error.AuthenticationError("provider", "bad key"))
+      Left(org.llm4s.error.AuthenticationError(ProviderId("provider"), "bad key"))
     )
 
     seen.head.outcome shouldBe ProviderExchangeOutcome.Error

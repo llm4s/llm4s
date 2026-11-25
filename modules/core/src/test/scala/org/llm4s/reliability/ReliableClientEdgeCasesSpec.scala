@@ -5,6 +5,7 @@ import org.llm4s.error._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -267,7 +268,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ReliableClient without deadline" should "exhaust all retry attempts" in {
-    val mockClient = new MockClient(() => Left(RateLimitError("test", 1.milli)))
+    val mockClient = new MockClient(() => Left(RateLimitError(ProviderId("test"), 1.milli)))
 
     val config = ReliabilityConfig(
       retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 10.millis),
@@ -333,7 +334,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     var attempt = 0
     val mockClient = new MockClient(() => {
       attempt += 1
-      if (attempt < 2) Left(RateLimitError("test", 100.millis))
+      if (attempt < 2) Left(RateLimitError(ProviderId("test"), 100.millis))
       else Right(testCompletion)
     })
 

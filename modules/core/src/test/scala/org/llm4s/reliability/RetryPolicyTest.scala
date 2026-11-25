@@ -1,6 +1,7 @@
 package org.llm4s.reliability
 
 import org.llm4s.error._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
@@ -32,7 +33,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
   test("exponentialBackoff respects server-provided Retry-After header") {
     val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second)
     val rateLimitError = RateLimitError(
-      provider = "test",
+      provider = ProviderId("test"),
       retryAfter = 5.seconds
     )
 
@@ -66,7 +67,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     val policy = RetryPolicy.noRetry
 
     policy.maxAttempts shouldBe 1
-    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
+    policy.isRetryable(RateLimitError(ProviderId("test"), 60.seconds)) shouldBe false
     policy.isRetryable(TimeoutError("test", 1.second, "test")) shouldBe false
     policy.isRetryable(NetworkError("test", None, "test")) shouldBe false
   }
@@ -82,7 +83,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     )
 
     val timeoutError = TimeoutError("test", 1.second, "test")
-    val authError    = AuthenticationError("test", "test")
+    val authError    = AuthenticationError(ProviderId("test"), "test")
 
     policy.maxAttempts shouldBe 3
     policy.delayFor(1, timeoutError) shouldBe 500.millis
@@ -93,7 +94,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
   test("isRetryable returns true for RateLimitError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = RateLimitError("test", 60.seconds)
+    val error  = RateLimitError(ProviderId("test"), 60.seconds)
 
     policy.isRetryable(error) shouldBe true
   }
@@ -115,21 +116,21 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
   test("isRetryable returns true for ServiceError with 5xx status") {
     val policy = RetryPolicy.exponentialBackoff()
 
-    policy.isRetryable(ServiceError(500, "test", "Internal server error")) shouldBe true
-    policy.isRetryable(ServiceError(502, "test", "Bad gateway")) shouldBe true
-    policy.isRetryable(ServiceError(503, "test", "Service unavailable")) shouldBe true
+    policy.isRetryable(ServiceError(500, ProviderId("test"), "Internal server error")) shouldBe true
+    policy.isRetryable(ServiceError(502, ProviderId("test"), "Bad gateway")) shouldBe true
+    policy.isRetryable(ServiceError(503, ProviderId("test"), "Service unavailable")) shouldBe true
   }
 
   test("isRetryable returns true for ServiceError with 429 (rate limit)") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = ServiceError(429, "test", "Too many requests")
+    val error  = ServiceError(429, ProviderId("test"), "Too many requests")
 
     policy.isRetryable(error) shouldBe true
   }
 
   test("isRetryable returns true for ServiceError with 408 (timeout)") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = ServiceError(408, "test", "Request timeout")
+    val error  = ServiceError(408, ProviderId("test"), "Request timeout")
 
     policy.isRetryable(error) shouldBe true
   }
@@ -137,15 +138,15 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
   test("isRetryable returns false for ServiceError with 4xx status (except 408/429)") {
     val policy = RetryPolicy.exponentialBackoff()
 
-    policy.isRetryable(ServiceError(400, "test", "Bad request")) shouldBe false
-    policy.isRetryable(ServiceError(401, "test", "Unauthorized")) shouldBe false
-    policy.isRetryable(ServiceError(403, "test", "Forbidden")) shouldBe false
-    policy.isRetryable(ServiceError(404, "test", "Not found")) shouldBe false
+    policy.isRetryable(ServiceError(400, ProviderId("test"), "Bad request")) shouldBe false
+    policy.isRetryable(ServiceError(401, ProviderId("test"), "Unauthorized")) shouldBe false
+    policy.isRetryable(ServiceError(403, ProviderId("test"), "Forbidden")) shouldBe false
+    policy.isRetryable(ServiceError(404, ProviderId("test"), "Not found")) shouldBe false
   }
 
   test("isRetryable returns false for AuthenticationError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = AuthenticationError("Invalid API key", "test")
+    val error  = AuthenticationError(ProviderId("test"), "Invalid API key")
 
     policy.isRetryable(error) shouldBe false
   }
@@ -165,7 +166,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
   }
 
   test("every policy waits as long as a service error's Retry-After asks") {
-    val hinted = ServiceError(503, "test", "unavailable").withRetryAfter(7.seconds)
+    val hinted = ServiceError(503, ProviderId("test"), "unavailable").withRetryAfter(7.seconds)
     Seq(
       RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second),
       RetryPolicy.linearBackoff(maxAttempts = 3, baseDelay = 1.second),
@@ -174,7 +175,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
   }
 
   test("a service error without Retry-After gets the policy's own backoff, not its 2s default") {
-    val unhinted = ServiceError(503, "test", "unavailable")
+    val unhinted = ServiceError(503, ProviderId("test"), "unavailable")
     RetryPolicy.exponentialBackoff(maxAttempts = 4, baseDelay = 1.second).delayFor(3, unhinted) shouldBe 4.seconds
     RetryPolicy.fixedDelay(maxAttempts = 3, delay = 5.seconds).delayFor(1, unhinted) shouldBe 5.seconds
   }

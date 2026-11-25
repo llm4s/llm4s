@@ -5,6 +5,7 @@ import org.llm4s.javaapi.{ GuideDocs, JLlmClient, Llm4s }
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.javaapi.rag.{ JRag, RagFakes }
 import org.llm4s.llmconnect.model.StreamedChunk
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -113,8 +114,8 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
 
     "react to each kind of failure" in {
       ReactorGuideSnippets.handle(streaming("Hi")) shouldBe "Hi"
-      ReactorGuideSnippets.handle(failing(RateLimitError("openai"))) shouldBe "Busy, try again later"
-      ReactorGuideSnippets.handle(failing(ServiceError(500, "openai", "boom"))) should startWith("Failed: ")
+      ReactorGuideSnippets.handle(failing(RateLimitError(ProviderId("openai")))) shouldBe "Busy, try again later"
+      ReactorGuideSnippets.handle(failing(ServiceError(500, ProviderId("openai"), "boom"))) should startWith("Failed: ")
     }
   }
 

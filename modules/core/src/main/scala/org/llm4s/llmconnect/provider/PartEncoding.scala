@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.{ UnsupportedContentPartError, ValidationError }
 import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.Base64
@@ -21,7 +22,7 @@ object PartEncoding {
 
   /** The error for `part` in a `role` message sent to `provider`. */
   private[llm4s] def unsupported(provider: String, part: ContentPart, role: MessageRole): UnsupportedContentPartError =
-    UnsupportedContentPartError(provider, part.kind, role.name)
+    UnsupportedContentPartError(ProviderId(provider), part.kind, role.name)
 
   /** `parts`, each encoded with `encode`; the first part `encode` does not cover fails the whole. */
   def encodeAll[A](provider: String, role: MessageRole, parts: Seq[ContentPart])(

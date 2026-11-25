@@ -3,6 +3,7 @@ package org.llm4s.error
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.testutil.TroubleshootingPage
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -127,30 +128,30 @@ class TroubleshootingLinksSpec extends AnyWordSpec with Matchers:
 
   "annotate" should {
     "add the next step once, however often it is applied" in {
-      val once = TroubleshootingLinks.annotate(AuthenticationError("anthropic", "invalid x-api-key"))
+      val once = TroubleshootingLinks.annotate(AuthenticationError(ProviderId("anthropic"), "invalid x-api-key"))
       TroubleshootingLinks.annotate(once) shouldBe once
       once.message.split(java.util.regex.Pattern.quote(Page), -1).length shouldBe 2
     }
 
     "treat a ServiceError with 401 or 403 as an authentication failure" in {
-      TroubleshootingLinks.annotate(ServiceError(403, "anthropic", "forbidden")).message should include(
+      TroubleshootingLinks.annotate(ServiceError(403, ProviderId("anthropic"), "forbidden")).message should include(
         s"${TroubleshootingLinks.AuthenticationAction} See $Page#authentication-failed"
       )
     }
 
     "leave a local throttle and other errors alone" in {
-      val local = RateLimitError.local("p")
+      val local = RateLimitError.local(ProviderId("p"))
       TroubleshootingLinks.annotate(local) shouldBe local
       val validation = ValidationError("request", "bad")
       TroubleshootingLinks.annotate(validation) shouldBe validation
     }
 
     "keep each error's type and fields" in {
-      val auth = TroubleshootingLinks.annotate(AuthenticationError("openai", "nope", "401"))
+      val auth = TroubleshootingLinks.annotate(AuthenticationError(ProviderId("openai"), "nope", "401"))
       auth.code shouldBe Some("401")
-      val service = TroubleshootingLinks.annotate(ServiceError(404, "openai", "missing"))
+      val service = TroubleshootingLinks.annotate(ServiceError(404, ProviderId("openai"), "missing"))
       service.asInstanceOf[ServiceError].status shouldBe 404
-      service.isRetryable shouldBe ServiceError(404, "openai", "missing").isRetryable
+      service.isRetryable shouldBe ServiceError(404, ProviderId("openai"), "missing").isRetryable
     }
   }
 

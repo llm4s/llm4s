@@ -1764,7 +1764,7 @@ final class RAG private (
             EmbeddingError(
               None,
               "Embedding provider returned empty embeddings list",
-              embeddingModelConfig.name.asString
+              ProviderId(embeddingModelConfig.name.asString)
             )
           )
           .map(_.map(_.toFloat).toArray)
@@ -1779,7 +1779,7 @@ final class RAG private (
           EmbeddingError(
             None,
             "Embedding provider returned empty embeddings list",
-            embeddingModelConfig.name.asString
+            ProviderId(embeddingModelConfig.name.asString)
           )
         )
       } else if (response.embeddings.length != texts.length) {
@@ -1789,7 +1789,7 @@ final class RAG private (
             s"Embedding provider returned ${response.embeddings.length} ${
                 if (response.embeddings.length == 1) "embedding" else "embeddings"
               } for batch of ${texts.length} texts",
-            embeddingModelConfig.name.asString
+            ProviderId(embeddingModelConfig.name.asString)
           )
         )
       } else {

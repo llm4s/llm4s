@@ -6,6 +6,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -106,7 +107,7 @@ object TokenExchange:
    */
   val DefaultLifetime: FiniteDuration = 5.minutes
 
-  private val Provider     = "token-exchange"
+  private val Provider     = ProviderId("token-exchange")
   private val Ipv4Loopback = """127(?:\.\d{1,3}){3}""".r
 
   /**
@@ -291,7 +292,7 @@ object TokenExchange:
         Left(AuthenticationError(Provider, s"token endpoint rejected the identity token (HTTP $status): $errorBody"))
       case status =>
         // Scrubbed of the exact values before HttpErrorMapper extracts and redacts its detail.
-        Left(HttpErrorMapper.toError(status, Redaction.scrubRemote(response.body), Provider, response.headers))
+        Left(HttpErrorMapper.toError(status, Redaction.scrubRemote(response.body), Provider.asString, response.headers))
 
   /** The `exp` claim of `token`, if it is a JWT with a numeric one; the signature is not checked. */
   private def jwtExpiry(token: String): Option[Instant] =

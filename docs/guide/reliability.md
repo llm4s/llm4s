@@ -799,6 +799,7 @@ import org.llm4s.error.RateLimitError
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient } // llm4s-testkit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
@@ -807,8 +808,8 @@ class ReliabilityIntegrationTest extends AnyFlatSpec with Matchers {
   "ReliableClient" should "retry on rate limits" in {
     // Two rate-limit failures, then an answer
     val scripted = ScriptedLLMClient.sequence(
-      Reply.failure(RateLimitError("test")),
-      Reply.failure(RateLimitError("test")),
+      Reply.failure(RateLimitError(ProviderId("test"))),
+      Reply.failure(RateLimitError(ProviderId("test"))),
       Reply.text("Recovered")
     )
     // A short fixed delay keeps the test fast

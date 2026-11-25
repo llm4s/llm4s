@@ -5,6 +5,7 @@ import org.llm4s.error.{ LLMError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -91,7 +92,8 @@ object ErrorRecoveryExample {
     println("=== 1. Flaky client: two 503s, then success ===")
     val attempts = new AtomicInteger(0)
     val flaky = new Scripted(() =>
-      if (attempts.incrementAndGet() <= 2) Left(ServiceError(503, "demo-service", "temporarily unavailable"))
+      if (attempts.incrementAndGet() <= 2)
+        Left(ServiceError(503, ProviderId("demo-service"), "temporarily unavailable"))
       else Right("payload from demo-service")
     )
 
@@ -116,7 +118,7 @@ object ErrorRecoveryExample {
 
   private def alwaysFails(): Unit = {
     println("=== 3. Client that always fails ===")
-    val down = new Scripted(() => Left(ServiceError(503, "demo-service", "down for maintenance")))
+    val down = new Scripted(() => Left(ServiceError(503, ProviderId("demo-service"), "down for maintenance")))
 
     val (result, delays) = run(down, maxAttempts = 3)
     println(s"Attempts: ${down.calls.get()}")
@@ -129,7 +131,7 @@ object ErrorRecoveryExample {
     println("=== 4. Circuit breaker ===")
     val healthy = new AtomicBoolean(false)
     val service = new Scripted(() =>
-      if (healthy.get()) Right("ok") else Left(ServiceError(503, "demo-service", "unavailable"))
+      if (healthy.get()) Right("ok") else Left(ServiceError(503, ProviderId("demo-service"), "unavailable"))
     )
     val breaker = ReliableClient(
       service,

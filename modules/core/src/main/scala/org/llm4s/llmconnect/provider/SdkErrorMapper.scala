@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.Redaction
 
 import java.util.regex.Pattern
@@ -102,9 +103,11 @@ private[llm4s] object SdkErrorMapper {
       val message  = Option(t.getMessage)
       val statuses = message.map(statusesIn).getOrElse(Set.empty)
       if (statuses.contains(Unauthorized))
-        AuthenticationError(provider, Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
+        AuthenticationError(ProviderId(provider), Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
       else if (statuses.contains(TooManyRequests))
-        RateLimitError(provider).withHttpStatus(TooManyRequests).withDetail(Redaction.safeBody(message.getOrElse("")))
+        RateLimitError(ProviderId(provider))
+          .withHttpStatus(TooManyRequests)
+          .withDetail(Redaction.safeBody(message.getOrElse("")))
       else unknown
     case classified => classified
   }

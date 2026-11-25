@@ -4,6 +4,7 @@ package org.llm4s.reliability
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, Completion, CompletionOptions, StreamedChunk }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.error._
 import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
@@ -94,7 +95,7 @@ final class ReliableClient private (
           if (bucket.tryAcquire()) operation()
           else {
             collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.RateLimit))
-            Left(RateLimitError.local(providerName))
+            Left(RateLimitError.local(ProviderId(providerName)))
           }
     }
 
@@ -453,8 +454,8 @@ final class ReliableClient private (
       case CircuitState.Open =>
         val remaining = config.circuitBreaker.recoveryTimeout.toMillis - (nowMillis() - lastFailureTime.get())
         if (remaining >= 0)
-          Left(CircuitOpenError.open(providerName, FiniteDuration(math.max(remaining, 1L), MILLISECONDS)))
-        else if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(providerName))
+          Left(CircuitOpenError.open(ProviderId(providerName), FiniteDuration(math.max(remaining, 1L), MILLISECONDS)))
+        else if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(ProviderId(providerName)))
         else if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
           successCount.set(0)
           collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.HalfOpen))
@@ -467,7 +468,7 @@ final class ReliableClient private (
 
       case CircuitState.HalfOpen =>
         // Only allow one probe request through at a time to avoid flooding a recovering service
-        if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(providerName))
+        if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(ProviderId(providerName)))
         else if (circuitState.get() == CircuitState.HalfOpen) Right(true)
         else {
           probePermit.set(false)
@@ -561,7 +562,9 @@ object ReliableClient {
    * @param underlying the client to wrap
    * @param providerName the `provider` label of this client's metrics and the provider its own errors name. It
    *                     is a label, not a vendor id: often the provider's id, but any stable name the caller
-   *                     chooses (a configuration section, a pipeline)
+   *                     chooses (a configuration section, a pipeline). The metrics carry it as given; the
+   *                     client's own `CircuitOpenError` and local `RateLimitError` carry it as a `ProviderId`,
+   *                     so trimmed and in lower case
    * @param config what to retry, when to open the circuit, the deadline and the rate limit
    */
   def apply(

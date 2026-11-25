@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, TimeoutError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -79,9 +80,9 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "return the error of a failure reply, exactly as given" in {
-    val rateLimit = RateLimitError("openai")
+    val rateLimit = RateLimitError(ProviderId("openai"))
     val timeout   = TimeoutError("slow", 30.seconds, "complete")
-    val auth      = AuthenticationError("openai", "bad key")
+    val auth      = AuthenticationError(ProviderId("openai"), "bad key")
     val client    = ScriptedLLMClient.sequence(Reply.failure(rateLimit), Reply.failure(timeout), Reply.failure(auth))
     List("a", "b", "c").map(q => ask(client, q).left.value) shouldBe List(rateLimit, timeout, auth)
   }
@@ -273,9 +274,9 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "send no chunk for a failure reply" in {
-    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("p")))
+    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("p"))))
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation("q"), options)(chunks += _).left.value shouldBe RateLimitError("p")
+    client.streamComplete(conversation("q"), options)(chunks += _).left.value shouldBe RateLimitError(ProviderId("p"))
     chunks shouldBe empty
   }
 
@@ -323,14 +324,15 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "a ScriptedLLMClient under ReliableClient" should "be retried after a rate limit and then succeed" in {
-    val scripted = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("p")), Reply.text("recovered"))
+    val scripted = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("p"))), Reply.text("recovered"))
     val reliable = ReliableClient(scripted, "p", ReliabilityConfig.default).withSleep(_ => ())
     reliable.complete(conversation("q"), options).value.content shouldBe "recovered"
     scripted.callCount shouldBe 2
   }
 
   it should "not retry an authentication error" in {
-    val scripted = ScriptedLLMClient.sequence(Reply.failure(AuthenticationError("p", "bad key")), Reply.text("unused"))
+    val scripted =
+      ScriptedLLMClient.sequence(Reply.failure(AuthenticationError(ProviderId("p"), "bad key")), Reply.text("unused"))
     val reliable = ReliableClient(scripted, "p", ReliabilityConfig.default).withSleep(_ => ())
     reliable.complete(conversation("q"), options).left.value shouldBe an[AuthenticationError]
     scripted.callCount shouldBe 1
@@ -392,7 +394,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "count a streamed call and a call that returned a scripted failure as using their reply" in {
-    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("streamed"))
+    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))), Reply.text("streamed"))
     ask(client, "a").isLeft shouldBe true
     client.streamComplete(conversation("b"), options)(_ => ()).value.content shouldBe "streamed"
     client.remaining shouldBe 0
@@ -449,7 +451,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.sequence(
       Reply.text("used"),
       Reply.text("used"),
-      Reply.failure(RateLimitError("openai")),
+      Reply.failure(RateLimitError(ProviderId("openai"))),
       Reply(),
       Reply.text("Checking.").withToolCall("get_weather", """{"city": "Oslo"}""").withToolCall("get_time")
     )
@@ -458,7 +460,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val message = client.assertExhausted().left.value
     message should startWith("3 of 5 scripted replies were not used (the code under test made 2 calls):")
     message should include(
-      s"  reply 3: failure RateLimitError: ${ScriptedLLMClient.preview(RateLimitError("openai").message)}"
+      s"  reply 3: failure RateLimitError: ${ScriptedLLMClient.preview(RateLimitError(ProviderId("openai")).message)}"
     )
     message should include("""  reply 4: text """"")
     message should include(

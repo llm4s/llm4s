@@ -3,6 +3,7 @@ package org.llm4s.samples.tutorial.supportassistant
 import org.llm4s.error.RateLimitError
 import org.llm4s.samples.tutorial.supportassistant.solutions.Part6Solution
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -49,9 +50,9 @@ class Part6Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   }
 
   it should "stop with the judge's error when the judge's provider fails" in {
-    val judge = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")))
+    val judge = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))))
 
-    evaluate(fakeModel(), judge, evalCases) shouldBe Left(RateLimitError("openai"))
+    evaluate(fakeModel(), judge, evalCases) shouldBe Left(RateLimitError(ProviderId("openai")))
   }
 
   it should "report every case in its demo" in {

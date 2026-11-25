@@ -6,6 +6,7 @@ import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.media.{ ImageMediaType, MediaType }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import ujson.read
 
 import java.nio.file.{ Files, Paths }
@@ -144,7 +145,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
           Redaction.safeBody(response.body)
         )
         Left(
-          ServiceError(response.statusCode, "Gemini", s"Gemini Vision API call failed - $errorMessage")
+          ServiceError(response.statusCode, ProviderId("gemini"), s"Gemini Vision API call failed - $errorMessage")
         )
       }
     }
@@ -175,7 +176,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
    */
   private def extractContentFromResponse(jsonResponse: String): Either[LLMError, String] = {
     def fail(why: String): Either[LLMError, String] =
-      Left(ServiceError(200, "Gemini", s"Gemini Vision API returned no text: $why"))
+      Left(ServiceError(200, ProviderId("gemini"), s"Gemini Vision API returned no text: $why"))
 
     Try(read(jsonResponse)).toOption.flatMap(_.objOpt) match {
       case None => fail("response body is not a JSON object")

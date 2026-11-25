@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -171,7 +172,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return provider errors untouched and not attempt to parse" in {
-    val err = AuthenticationError("p", "nope")
+    val err = AuthenticationError(ProviderId("p"), "nope")
     val c   = new RecordingClient((_, _) => Left(err))
     c.completeStructured[Person](conv, personSchema) shouldBe Left(err)
     c.recorded should have size 1L

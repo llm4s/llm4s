@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.FiniteDuration
@@ -19,7 +20,7 @@ import scala.concurrent.duration.FiniteDuration
 final case class ServiceError private (
   override val message: String,
   status: Int,
-  provider: String,
+  provider: ProviderId,
   override val requestId: Option[String],
   override val retryAfter: Option[FiniteDuration]
 ) extends LLMError {
@@ -42,7 +43,7 @@ final case class ServiceError private (
 
   override val context: Map[String, String] = Map(
     "httpStatus" -> status.toString,
-    "provider"   -> provider
+    "provider"   -> provider.asString
   ) ++ requestId.map("requestId" -> _).toMap ++ retryAfter.map(d => "retryAfter" -> DurationText(d))
 }
 
@@ -52,10 +53,10 @@ object ServiceError {
   private[llm4s] def isRetryableStatus(status: Int): Boolean =
     status >= 500 || status == 429 || status == 408
 
-  def apply(status: Int, provider: String, details: String): ServiceError =
+  def apply(status: Int, provider: ProviderId, details: String): ServiceError =
     new ServiceError(s"Service error from $provider: $details (HTTP $status)", status, provider, None, None)
 
-  def apply(status: Int, provider: String, details: String, requestId: String): ServiceError =
+  def apply(status: Int, provider: ProviderId, details: String, requestId: String): ServiceError =
     new ServiceError(
       s"Service error from $provider: $details (HTTP $status) (Request ID $requestId)",
       status,
@@ -68,7 +69,7 @@ object ServiceError {
    * `error` with `details` as its message and `provider` as its provider, keeping its status, request id and
    * `retryAfter` (the message does not repeat the request id, which `details` usually already holds).
    */
-  private[llm4s] def rewrapped(error: ServiceError, provider: String, details: String): ServiceError =
+  private[llm4s] def rewrapped(error: ServiceError, provider: ProviderId, details: String): ServiceError =
     new ServiceError(
       s"Service error from $provider: $details (HTTP ${error.status})",
       error.status,
@@ -81,6 +82,6 @@ object ServiceError {
    * Extracts the message, HTTP status, provider, request id and `retryAfter`; the arity is fixed. It always
    * matches, as the synthesized extractor it replaces did.
    */
-  def unapply(error: ServiceError): Some[(String, Int, String, Option[String], Option[FiniteDuration])] =
+  def unapply(error: ServiceError): Some[(String, Int, ProviderId, Option[String], Option[FiniteDuration])] =
     Some((error.message, error.status, error.provider, error.requestId, error.retryAfter))
 }

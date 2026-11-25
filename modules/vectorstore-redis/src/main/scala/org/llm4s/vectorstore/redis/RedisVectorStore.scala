@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore.redis
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.Redaction
 import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
@@ -324,7 +325,7 @@ final class RedisVectorStore private (
 
   private def refused(operation: String, message: String): LLMError =
     if (AuthErrors.exists(p => message.startsWith(p)))
-      AuthenticationError("redis", s"Redis $operation refused: $message")
+      AuthenticationError(ProviderId("redis"), s"Redis $operation refused: $message")
     else ProcessingError("redis-store", s"Redis $operation failed: $message")
 
   private def unexpected(operation: String, detail: String): LLMError =

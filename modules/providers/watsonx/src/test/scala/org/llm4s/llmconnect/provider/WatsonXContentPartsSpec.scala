@@ -4,6 +4,7 @@ import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -42,7 +43,11 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
     val file = ContentPart.image(MediaSource.ProviderFile("watsonx", "f"), MediaType.Png).value
     val pdf  = ContentPart.document(MediaSource.Inline(bytes), MediaType.Pdf).value
     Seq(url, file, pdf).foreach { part =>
-      body(UserMessage(Vector(part))).left.value shouldBe UnsupportedContentPartError("watsonx", part.kind, "user")
+      body(UserMessage(Vector(part))).left.value shouldBe UnsupportedContentPartError(
+        ProviderId("watsonx"),
+        part.kind,
+        "user"
+      )
     }
   }
 
@@ -55,7 +60,7 @@ class WatsonXContentPartsSpec extends AnyFunSuite with Matchers with EitherValue
     )
       .value("messages")(2)("content") shouldBe ujson.Str("a\nb")
     body(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c1"))).left.value shouldBe
-      UnsupportedContentPartError("watsonx", image.kind, "tool")
+      UnsupportedContentPartError(ProviderId("watsonx"), image.kind, "tool")
   }
 
   test("complete refuses the conversation before any request") {

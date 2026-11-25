@@ -10,6 +10,7 @@ import org.llm4s.error.{
   UnknownError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.examples.http.HttpErrors
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -79,9 +80,9 @@ class ChatEndpointsSpec extends AnyFlatSpec with Matchers {
     val errors = Seq(
       ValidationError("message", "blank"),
       InvalidInputError("x", "y", "z"),
-      RateLimitError("fake", 1.second),
+      RateLimitError(ProviderId("fake"), 1.second),
       TimeoutError("slow", 1.second, "complete"),
-      AuthenticationError("fake", "bad key"),
+      AuthenticationError(ProviderId("fake"), "bad key"),
       ConfigurationError("no model"),
       NetworkError("down", None, "http://x"),
       UnknownError("?", new RuntimeException())

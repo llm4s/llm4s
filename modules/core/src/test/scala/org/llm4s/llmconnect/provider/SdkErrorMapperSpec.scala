@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, RateLimitError, Safety, UnknownError }
 import org.llm4s.testutil.{ EchoedCredentials, LinearTime, PerformanceTest, SmallStack }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -133,7 +134,7 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
     unauthorized.foreach { message =>
       mapSdk(new RuntimeException(message)) match {
         case e: AuthenticationError =>
-          e.provider shouldBe "unknown"
+          e.provider shouldBe ProviderId("unknown")
           e.code shouldBe Some("401")
           e.message should startWith("Authentication failed for unknown: ")
           e.isRetryable shouldBe false
@@ -177,7 +178,7 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
     rateLimited.foreach { message =>
       mapSdk(new RuntimeException(message)) match {
         case e: RateLimitError =>
-          e.provider shouldBe "unknown"
+          e.provider shouldBe ProviderId("unknown")
           e.message shouldBe s"Rate limited by unknown: $message"
           e.isRetryable shouldBe true
         case other => fail(s"expected a RateLimitError for '$message', got $other")

@@ -2,6 +2,7 @@ package org.llm4s.repl
 
 import org.llm4s.error.AuthenticationError
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -57,7 +58,8 @@ class ReplChatSpec extends AnyFlatSpec with Matchers {
 
   it should "print a failed line's error and carry on" in {
     val transcript = run(
-      Session.offline(Reply.failure(AuthenticationError("openai", "Invalid API key")), Reply.text("Recovered.")),
+      Session
+        .offline(Reply.failure(AuthenticationError(ProviderId("openai"), "Invalid API key")), Reply.text("Recovered.")),
       "first",
       "second"
     )

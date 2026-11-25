@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.model.{ FinishReason, TokenUsage }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * The chat-completions `finish_reason` as a [[FinishReason]] (RFC 0009), for this module's client and `llm4s-openai`.
@@ -38,7 +39,7 @@ private[llm4s] object ChatCompletionsFinishReason {
    * text, with the usage the provider reported; `None` for any other reason.
    */
   def filtered(
-    provider: String,
+    provider: ProviderId,
     reason: Option[FinishReason],
     cutAfterChars: Int,
     usage: Option[TokenUsage]

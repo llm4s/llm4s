@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.BedrockTestSupport.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -89,7 +90,7 @@ class BedrockFinishReasonSpec extends AnyWordSpec with Matchers {
           val (streamed, chunks) = stream(raw)
           Seq(complete(raw), streamed).foreach {
             case Left(e: ContentFilteredError) =>
-              e.provider shouldBe "Bedrock"
+              e.provider shouldBe ProviderId("bedrock")
               e.reason shouldBe raw
               e.message should include("after 3 characters")
               e.usage.map(_.totalTokens) shouldBe Some(12)

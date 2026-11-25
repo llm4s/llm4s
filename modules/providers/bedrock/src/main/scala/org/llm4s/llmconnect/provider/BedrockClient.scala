@@ -728,23 +728,23 @@ final class BedrockClient private[provider] (
 
   private def mapException(throwable: Throwable): LLMError =
     unwrap(throwable) match {
-      case _: ThrottlingException           => RateLimitError("bedrock")
-      case _: ServiceQuotaExceededException => RateLimitError("bedrock")
+      case _: ThrottlingException           => RateLimitError(ProviderId("bedrock"))
+      case _: ServiceQuotaExceededException => RateLimitError(ProviderId("bedrock"))
       case e: ValidationException           =>
         // "Input is too long for requested model" is the typed context-length error
         HttpErrorMapper
           .typed(400, Set.empty, safeMessage(e), "bedrock")
           .getOrElse(ValidationError("request", safeMessage(e)).withHttpStatus(400))
-      case e: AccessDeniedException => AuthenticationError("bedrock", safeMessage(e))
+      case e: AccessDeniedException => AuthenticationError(ProviderId("bedrock"), safeMessage(e))
       case e: ApiCallTimeoutException =>
         val timeout = requestTimeout.getOrElse(FiniteDuration(0, TimeUnit.SECONDS))
         TimeoutError(safeMessage(e), timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)
       case e: BedrockRuntimeException if e.statusCode() == 401 || e.statusCode() == 403 =>
-        AuthenticationError("bedrock", safeMessage(e))
-      case e: BedrockRuntimeException => ServiceError(e.statusCode(), "bedrock", safeMessage(e))
+        AuthenticationError(ProviderId("bedrock"), safeMessage(e))
+      case e: BedrockRuntimeException => ServiceError(e.statusCode(), ProviderId("bedrock"), safeMessage(e))
       // The SDK reports "no credentials" as a client exception; retrying cannot fix it.
       case e: SdkClientException if Option(e.getMessage).exists(_.toLowerCase.contains("credentials")) =>
-        AuthenticationError("bedrock", safeMessage(e))
+        AuthenticationError(ProviderId("bedrock"), safeMessage(e))
       case e: SdkClientException =>
         NetworkError(safeMessage(e), Some(e), endpointLabel)
       case e => SdkErrorMapper(e, "bedrock")
@@ -912,7 +912,7 @@ object BedrockClient {
     usage: Option[TokenUsage]
   ): Option[ContentFilteredError] =
     Option.when(FilterStops.contains(stopReason))(
-      ContentFilteredError.reply("Bedrock", stopReason, cutAfterChars).withUsage(usage)
+      ContentFilteredError.reply(ProviderId("bedrock"), stopReason, cutAfterChars).withUsage(usage)
     )
 
   // ---- content parts ----

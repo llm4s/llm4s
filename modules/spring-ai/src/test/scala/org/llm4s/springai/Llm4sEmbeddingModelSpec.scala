@@ -61,7 +61,7 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
   }
 
   "a failure" should "throw the LlmException the client's result holds" in {
-    val failing: EmbeddingProvider = _ => Left(AuthenticationError("fixtureembedding", "bad key"))
+    val failing: EmbeddingProvider = _ => Left(AuthenticationError(ProviderId("fixtureembedding"), "bad key"))
     val m = new Llm4sEmbeddingModel(
       Llm4s.wrapEmbeddingClient(EmbeddingClient(failing), EmbeddingModelConfig(ModelName("fixture-embed-small"), 256))
     )

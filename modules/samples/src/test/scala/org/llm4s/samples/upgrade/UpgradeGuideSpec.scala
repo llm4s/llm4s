@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.provider.{ BedrockProvider, Llm4sOpenAIModule }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.toolapi.builtin.http.HttpConfig
 import org.llm4s.trace.spi.TracingBackends
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -210,11 +211,11 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "The error model" should "have a total isRetryable and a typed retry delay" in {
     // `error.isRetryable` is the one retry rule, a member of every error.
-    RateLimitError("openai", 1.second).isRetryable shouldBe true
+    RateLimitError(ProviderId("openai"), 1.second).isRetryable shouldBe true
     CancelledError("a call").isRetryable shouldBe false
 
     // The delay is a `FiniteDuration`, not a number of milliseconds.
-    RateLimitError("openai", 1500.millis).retryAfter shouldBe Some(1500.millis)
+    RateLimitError(ProviderId("openai"), 1500.millis).retryAfter shouldBe Some(1500.millis)
   }
 
   "Growth-prone types" should "be changed with with* setters, not copy" in {

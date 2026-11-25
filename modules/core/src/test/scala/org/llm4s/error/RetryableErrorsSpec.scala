@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -59,16 +60,16 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
   // ============ ServiceError ============
 
   "ServiceError" should "create with HTTP status" in {
-    val error = ServiceError(503, "openai", "Service unavailable")
+    val error = ServiceError(503, ProviderId("openai"), "Service unavailable")
 
     error.status shouldBe 503
-    error.provider shouldBe "openai"
+    error.provider shouldBe ProviderId("openai")
     error.code shouldBe Some("503")
     error.message should include("Service error from openai")
   }
 
   it should "create with request ID" in {
-    val error = ServiceError(500, "anthropic", "Internal error", "req-12345")
+    val error = ServiceError(500, ProviderId("anthropic"), "Internal error", "req-12345")
 
     error.requestId shouldBe Some("req-12345")
     error.context should contain("requestId" -> "req-12345")
@@ -76,41 +77,41 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be retryable" in {
-    val error = ServiceError(502, "provider", "Bad gateway")
+    val error = ServiceError(502, ProviderId("provider"), "Bad gateway")
 
     error.isRetryable shouldBe true
   }
 
   it should "report no retryAfter unless the provider gave one" in {
-    val error = ServiceError(503, "provider", "unavailable")
+    val error = ServiceError(503, ProviderId("provider"), "unavailable")
 
     error.retryAfter shouldBe None
     error.withRetryAfter(7.seconds).retryAfter shouldBe Some(7.seconds)
   }
 
   it should "report its status as httpStatus" in {
-    ServiceError(503, "provider", "unavailable").httpStatus shouldBe Some(503)
+    ServiceError(503, ProviderId("provider"), "unavailable").httpStatus shouldBe Some(503)
   }
 
   it should "identify recoverable HTTP status codes" in {
-    ServiceError(500, "p", "d").isRetryable shouldBe true
-    ServiceError(502, "p", "d").isRetryable shouldBe true
-    ServiceError(503, "p", "d").isRetryable shouldBe true
-    ServiceError(429, "p", "d").isRetryable shouldBe true
-    ServiceError(408, "p", "d").isRetryable shouldBe true
-    ServiceError(400, "p", "d").isRetryable shouldBe false
-    ServiceError(401, "p", "d").isRetryable shouldBe false
-    ServiceError(404, "p", "d").isRetryable shouldBe false
+    ServiceError(500, ProviderId("p"), "d").isRetryable shouldBe true
+    ServiceError(502, ProviderId("p"), "d").isRetryable shouldBe true
+    ServiceError(503, ProviderId("p"), "d").isRetryable shouldBe true
+    ServiceError(429, ProviderId("p"), "d").isRetryable shouldBe true
+    ServiceError(408, ProviderId("p"), "d").isRetryable shouldBe true
+    ServiceError(400, ProviderId("p"), "d").isRetryable shouldBe false
+    ServiceError(401, ProviderId("p"), "d").isRetryable shouldBe false
+    ServiceError(404, ProviderId("p"), "d").isRetryable shouldBe false
   }
 
   it should "support pattern matching" in {
-    val error = ServiceError(503, "openai", "unavailable", "req-123")
+    val error = ServiceError(503, ProviderId("openai"), "unavailable", "req-123")
 
     error match {
       case ServiceError(msg, status, provider, requestId, retryAfter) =>
         msg should include("Service error")
         status shouldBe 503
-        provider shouldBe "openai"
+        provider shouldBe ProviderId("openai")
         requestId shouldBe Some("req-123")
         retryAfter shouldBe None
     }
@@ -220,25 +221,25 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
   // ============ RateLimitError ============
 
   "RateLimitError" should "create basic error" in {
-    val error = RateLimitError("openai")
+    val error = RateLimitError(ProviderId("openai"))
 
-    error.provider shouldBe "openai"
+    error.provider shouldBe ProviderId("openai")
     error.retryAfter shouldBe None
     error.message should include("Rate limited by openai")
   }
 
   it should "take its retry delay as a duration, as retryAfter reports it" in {
-    val error = RateLimitError("anthropic", 1500.millis)
+    val error = RateLimitError(ProviderId("anthropic"), 1500.millis)
     error.retryAfter shouldBe Some(1500.millis)
     error.message should include("Retry after 1.5s")
   }
 
   it should "render a sub-second retry delay in milliseconds" in {
-    RateLimitError("anthropic", 250.millis).message should include("Retry after 250ms")
+    RateLimitError(ProviderId("anthropic"), 250.millis).message should include("Retry after 250ms")
   }
 
   it should "create with retry delay" in {
-    val error = RateLimitError("anthropic", 60.seconds)
+    val error = RateLimitError(ProviderId("anthropic"), 60.seconds)
 
     error.retryAfter shouldBe Some(60.seconds)
     error.context should contain("retryAfter" -> "60s")
@@ -246,21 +247,21 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be retryable" in {
-    val error = RateLimitError("provider")
+    val error = RateLimitError(ProviderId("provider"))
 
     error.isRetryable shouldBe true
   }
 
   it should "report only the delay the provider gave as retryAfter" in {
-    RateLimitError("p", 30.millis).retryAfter shouldBe Some(30.millis)
+    RateLimitError(ProviderId("p"), 30.millis).retryAfter shouldBe Some(30.millis)
 
     // Without a provider hint there is none: the wait is the retry policy's decision
-    RateLimitError("p").retryAfter shouldBe None
+    RateLimitError(ProviderId("p")).retryAfter shouldBe None
     org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay shouldBe 30.seconds
   }
 
   it should "carry the HTTP status and request id it is given, and none otherwise" in {
-    val bare = RateLimitError("p")
+    val bare = RateLimitError(ProviderId("p"))
     bare.httpStatus shouldBe None
     bare.requestId shouldBe None
 
@@ -268,17 +269,17 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
     full.httpStatus shouldBe Some(429)
     full.requestId shouldBe Some("req-1")
     full.context should contain("requestId" -> "req-1")
-    RateLimitError.local("p").httpStatus shouldBe None
+    RateLimitError.local(ProviderId("p")).httpStatus shouldBe None
   }
 
   it should "support pattern matching" in {
-    val error = RateLimitError("openai", 60.seconds)
+    val error = RateLimitError(ProviderId("openai"), 60.seconds)
 
     error match {
       case RateLimitError(msg, retryAfter, provider) =>
         msg should include("Rate limited")
         retryAfter shouldBe Some(60.seconds)
-        provider shouldBe "openai"
+        provider shouldBe ProviderId("openai")
       case _ => fail("Pattern matching failed")
     }
   }
@@ -288,10 +289,10 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
   "A transient error" should "be retryable" in {
     val errors: Seq[LLMError] = Seq(
       NetworkError("m", None, "e"),
-      ServiceError(500, "p", "m"),
+      ServiceError(500, ProviderId("p"), "m"),
       TimeoutError("m", 1.second, "o"),
       ExecutionError("m", "o"),
-      RateLimitError("p"),
+      RateLimitError(ProviderId("p")),
     )
 
     errors.foreach(error => error.isRetryable shouldBe true)
@@ -343,9 +344,9 @@ class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
 
   "LLMError.recoverableErrors" should "filter only recoverable errors" in {
     val errors: List[LLMError] = List(
-      AuthenticationError("p", "m"),
-      RateLimitError("p"),
-      ServiceError(503, "p", "m"),
+      AuthenticationError(ProviderId("p"), "m"),
+      RateLimitError(ProviderId("p")),
+      ServiceError(503, ProviderId("p"), "m"),
       ValidationError("f", "r")
     )
 

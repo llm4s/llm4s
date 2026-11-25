@@ -230,11 +230,11 @@ final class OllamaClient private[provider] (
       Left(
         // `model "x" not found` is the typed error; any other 404 (a wrong path) keeps its status
         if (ProviderErrorSignals.isModelNotFound(status, HttpErrorMapper.errorCodes(body), details))
-          ModelNotFoundError(providerName, details)
+          ModelNotFoundError(provider, details)
             .withModel(config.model.asString)
             .withHttpStatus(status)
             .withHint(action, entry)
-        else ServiceError(404, providerName, details).withHint(action, entry)
+        else ServiceError(404, provider, details).withHint(action, entry)
       )
     } else
       Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, providerName, headers), config.model.asString))

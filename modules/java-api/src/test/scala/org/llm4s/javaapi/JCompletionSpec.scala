@@ -2,6 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.{ CancelledError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -185,7 +186,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "pass the client's failure through" in {
-    val down   = ServiceError(503, "openai", "overloaded")
+    val down   = ServiceError(503, ProviderId("openai"), "overloaded")
     val result = Llm4s.wrapClient(new Recording(Left(down))).completion("q")
     result.getError().error shouldBe down
   }

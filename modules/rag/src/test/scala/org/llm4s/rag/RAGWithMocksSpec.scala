@@ -637,7 +637,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
         case embErr: EmbeddingError =>
           embErr.message should include("empty embeddings")
           embErr.provider should not be "unknown"
-          embErr.provider shouldBe "text-embedding-3-small"
+          embErr.provider shouldBe ProviderId("text-embedding-3-small")
         case other =>
           fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
       },
@@ -664,7 +664,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
           embErr.message should include("2 texts")
           embErr.message should include("1 embedding")
           embErr.provider should not be "unknown"
-          embErr.provider shouldBe "text-embedding-3-small"
+          embErr.provider shouldBe ProviderId("text-embedding-3-small")
         case other =>
           fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
       },
@@ -992,7 +992,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
         case embErr: EmbeddingError =>
           embErr.message should include("empty embeddings")
           embErr.provider should not be "unknown"
-          embErr.provider shouldBe "text-embedding-3-small"
+          embErr.provider shouldBe ProviderId("text-embedding-3-small")
         case other =>
           fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
       },

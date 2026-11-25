@@ -139,7 +139,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "trace a failed call as an error naming the operation, model, provider and error type" in {
       val tracing = new Recording
-      TracingLLMClient(new Stub(Left(RateLimitError("openai"))), tracing, config)
+      TracingLLMClient(new Stub(Left(RateLimitError(ProviderId("openai")))), tracing, config)
         .complete(conversation, options)
         .isLeft shouldBe true
 
@@ -156,7 +156,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
     }
 
     "trace a content-filtered reply's billed usage on its error, on both paths (#2676)" in {
-      val filtered = ContentFilteredError.reply("Gemini", "SAFETY").withUsage(TokenUsage(7, 4, 11))
+      val filtered = ContentFilteredError.reply(ProviderId("gemini"), "SAFETY").withUsage(TokenUsage(7, 4, 11))
       val tracing  = new Recording
       val client   = TracingLLMClient(new Stub(Left(filtered)), tracing, config)
       client.complete(conversation, options).isLeft shouldBe true
@@ -248,7 +248,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "trace a failed call as an embeddings error" in {
       val tracing = new Recording
-      EmbeddingClient(provider(Left(RateLimitError("voyage"))))
+      EmbeddingClient(provider(Left(RateLimitError(ProviderId("voyage")))))
         .withProviderId(ProviderId("voyage"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq("text"), model = model))

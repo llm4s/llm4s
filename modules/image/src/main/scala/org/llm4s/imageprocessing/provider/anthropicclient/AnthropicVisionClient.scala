@@ -6,6 +6,7 @@ import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import ujson.read
 
@@ -244,7 +245,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
       }
 
   private def visionFailed(statusCode: Int, detail: String): LLMError =
-    ServiceError(statusCode, "Anthropic", s"Anthropic Vision API call failed: $detail")
+    ServiceError(statusCode, ProviderId("anthropic"), s"Anthropic Vision API call failed: $detail")
 
   private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption

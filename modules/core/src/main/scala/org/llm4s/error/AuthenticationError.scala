@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * Raised when the LLM provider rejects the request due to authentication failures.
@@ -10,7 +11,7 @@ import org.llm4s.annotation.Stable
  * Examples include invalid API keys, expired tokens, or unauthorized access to a model.
  *
  * @param message human-readable description of the authentication failure
- * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
+ * @param provider the id of the LLM provider (e.g. `openai`, `anthropic`)
  * @param code optional error code returned by the provider (e.g., "401", "INVALID_KEY")
  * @param httpStatus the HTTP status of the provider's response (401 or 403), when the error was mapped from one
  * @param requestId the provider's id for the refused request, when the response carried one
@@ -18,7 +19,7 @@ import org.llm4s.annotation.Stable
 @Stable
 final case class AuthenticationError private (
   override val message: String,
-  provider: String,
+  provider: ProviderId,
   override val code: Option[String],
   override val httpStatus: Option[Int],
   override val requestId: Option[String]
@@ -34,25 +35,25 @@ final case class AuthenticationError private (
   private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): AuthenticationError =
     copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
 
-  override val context: Map[String, String] = Map("provider" -> provider) ++
+  override val context: Map[String, String] = Map("provider" -> provider.asString) ++
     code.map("code" -> _).toMap ++ requestId.map("requestId" -> _)
 }
 
 object AuthenticationError {
 
   /** Create authentication error with auto-generated message */
-  def apply(provider: String, details: String): AuthenticationError =
+  def apply(provider: ProviderId, details: String): AuthenticationError =
     new AuthenticationError(s"Authentication failed for $provider: $details", provider, None, None, None)
 
   /** Extracts the message, provider and code; the arity is fixed, and the fields added later are read by name. */
-  def unapply(error: AuthenticationError): Option[(String, String, Option[String])] =
+  def unapply(error: AuthenticationError): Option[(String, ProviderId, Option[String])] =
     Some((error.message, error.provider, error.code))
 
   /**
    * Create authentication error with specific code. A `code` that is an HTTP status of a refused credential
    * (`"401"`, `"403"`) is also the error's `httpStatus`.
    */
-  def apply(provider: String, details: String, code: String): AuthenticationError =
+  def apply(provider: ProviderId, details: String, code: String): AuthenticationError =
     new AuthenticationError(
       s"Authentication failed for $provider: $details",
       provider,

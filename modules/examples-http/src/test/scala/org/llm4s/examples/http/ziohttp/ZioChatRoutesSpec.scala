@@ -11,6 +11,7 @@ import org.llm4s.error.{
   TimeoutError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.examples.http.ChatAgent
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -88,11 +89,11 @@ class ZioChatRoutesSpec extends AnyFlatSpec with Matchers {
 
   it should "map the provider's error to a status" in {
     val cases: Seq[(LLMError, Status)] = Seq(
-      RateLimitError("fake", 7.seconds)            -> Status.TooManyRequests,
-      TimeoutError("slow", 30.seconds, "complete") -> Status.GatewayTimeout,
-      AuthenticationError("fake", "bad key")       -> Status.BadGateway,
-      ConfigurationError("no model")               -> Status.InternalServerError,
-      NetworkError("down", None, "http://x")       -> Status.ServiceUnavailable
+      RateLimitError(ProviderId("fake"), 7.seconds)      -> Status.TooManyRequests,
+      TimeoutError("slow", 30.seconds, "complete")       -> Status.GatewayTimeout,
+      AuthenticationError(ProviderId("fake"), "bad key") -> Status.BadGateway,
+      ConfigurationError("no model")                     -> Status.InternalServerError,
+      NetworkError("down", None, "http://x")             -> Status.ServiceUnavailable
     )
     cases.foreach { case (error, status) =>
       val client           = ScriptedLLMClient.always(Reply.failure(error))
@@ -103,7 +104,7 @@ class ZioChatRoutesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send Retry-After with a rate limit" in {
-    val limited       = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited       = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     val (response, _) = post(agentOver(limited), "/chat", """{"message": "hi"}""")
     response.rawHeader("Retry-After") shouldBe Some("7")
   }
@@ -144,7 +145,7 @@ class ZioChatRoutesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "end with an error event carrying the status the error maps to" in {
-    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError("fake", 7.seconds)))
+    val limited  = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("fake"), 7.seconds)))
     val received = events(post(agentOver(limited), "/chat/stream", """{"message": "hi"}""")._2)
     received.map(_._1) shouldBe Vector("error")
     val error = received.head._2

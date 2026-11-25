@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -161,7 +162,8 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
         case other => Conversation(Seq(other))
       }
       client.complete(conversation, CompletionOptions()).left.value match {
-        case UnsupportedContentPartError(_, "anthropic", `kind`, role) => role shouldBe message.role.name
+        case UnsupportedContentPartError(_, p, `kind`, role) if p == ProviderId("anthropic") =>
+          role shouldBe message.role.name
         case other => fail(s"expected UnsupportedContentPartError for $kind, got $other")
       }
       client

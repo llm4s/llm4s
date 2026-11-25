@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * The provider refused the request because the conversation, with the reply it was asked to leave room for, does
@@ -21,7 +22,7 @@ import org.llm4s.annotation.Stable
 @Stable
 final case class ContextLengthError private (
   override val message: String,
-  provider: String,
+  provider: ProviderId,
   limit: Option[Int],
   requestedTokens: Option[Int],
   override val httpStatus: Option[Int],
@@ -40,7 +41,7 @@ final case class ContextLengthError private (
   /** This error, carrying the provider's id for the refused request. */
   def withRequestId(id: String): ContextLengthError = copy(requestId = Some(id))
 
-  override val context: Map[String, String] = Map("provider" -> provider) ++
+  override val context: Map[String, String] = Map("provider" -> provider.asString) ++
     limit.map("limit" -> _.toString) ++ requestedTokens.map("requestedTokens" -> _.toString) ++
     requestId.map("requestId" -> _)
 }
@@ -51,7 +52,7 @@ object ContextLengthError {
   val Code: String = "context_length_exceeded"
 
   /** `provider` refused the request as too long for the model, explaining it with `details`. */
-  def apply(provider: String, details: String): ContextLengthError =
+  def apply(provider: ProviderId, details: String): ContextLengthError =
     new ContextLengthError(
       s"$provider refused the request: it does not fit the model's context window: $details",
       provider,
@@ -62,6 +63,6 @@ object ContextLengthError {
     )
 
   /** Extracts the message, provider, limit and requested tokens; the arity is fixed. */
-  def unapply(error: ContextLengthError): Some[(String, String, Option[Int], Option[Int])] =
+  def unapply(error: ContextLengthError): Some[(String, ProviderId, Option[Int], Option[Int])] =
     Some((error.message, error.provider, error.limit, error.requestedTokens))
 }

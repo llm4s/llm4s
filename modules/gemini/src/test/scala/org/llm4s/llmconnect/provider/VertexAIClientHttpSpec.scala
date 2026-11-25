@@ -640,9 +640,9 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     val chunks      = ListBuffer.empty[StreamedChunk]
     noContentMessage(
       completeOf(body)
-    ) shouldBe "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
+    ) shouldBe "vertexai stopped the reply after 3 characters of text: finishReason SAFETY"
     noContentMessage(streamOf(sse, chunks += _)) shouldBe
-      "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
+      "vertexai stopped the reply after 3 characters of text: finishReason SAFETY"
     chunks.flatMap(_.contentDelta) shouldBe List("Hel") // what was delivered stays delivered
   }
 

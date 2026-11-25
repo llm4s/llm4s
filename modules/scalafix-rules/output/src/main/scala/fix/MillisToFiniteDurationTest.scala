@@ -5,12 +5,13 @@ import org.llm4s.rag.loader.{ CrawlerConfig, UrlLoader }
 import org.llm4s.toolapi.builtin.http.HttpConfig
 import org.llm4s.toolapi.builtin.search.BraveSearchConfig
 import org.llm4s.toolapi.builtin.shell.ShellConfig
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import scala.concurrent.duration.*
 
 object MillisToFiniteDurationTest {
   val crawler = CrawlerConfig(delay = 500.millis, timeout = 30.seconds)
 
-  val limited = Left(RateLimitError("openai", 1.second))
+  val limited = Left(RateLimitError(ProviderId("openai"), 1.second))
 
   val http = HttpConfig(timeout = 2500.millis)
 

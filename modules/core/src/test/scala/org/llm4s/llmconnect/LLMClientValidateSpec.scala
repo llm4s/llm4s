@@ -2,6 +2,7 @@ package org.llm4s.llmconnect
 
 import org.llm4s.error.{ AuthenticationError, ValidationUnsupportedError }
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,7 +17,7 @@ class LLMClientValidateSpec extends AnyFlatSpec with Matchers {
   /** A client that implements only what `LLMClient` leaves abstract. */
   private class Bare extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Left(AuthenticationError("bare", "not used"))
+      Left(AuthenticationError(ProviderId("bare"), "not used"))
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)

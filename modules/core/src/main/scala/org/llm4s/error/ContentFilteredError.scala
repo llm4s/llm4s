@@ -2,6 +2,7 @@ package org.llm4s.error
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * The provider's content filter stopped the call: it blocked the prompt, or stopped the reply, before or after some
@@ -16,7 +17,7 @@ import org.llm4s.llmconnect.model.TokenUsage
  * It is not [[LLMError.isRetryable retryable]]: sending the same request again would be filtered the same way: the conversation
  * must change before a retry.
  *
- * @param provider      the client's provider name, e.g. `Gemini`
+ * @param provider      the client's provider id, e.g. `gemini`
  * @param reason        the provider's reason, as it named it, e.g. `SAFETY`
  * @param promptBlocked whether the prompt itself was blocked (`blockReason`), rather than the reply (`finishReason`)
  * @param usage         the tokens the provider reported for the filtered call, which it bills, when it reported them
@@ -24,13 +25,13 @@ import org.llm4s.llmconnect.model.TokenUsage
 @Stable
 final case class ContentFilteredError private (
   override val message: String,
-  provider: String,
+  provider: ProviderId,
   reason: String,
   promptBlocked: Boolean,
   usage: Option[TokenUsage]
 ) extends LLMError {
   override val context: Map[String, String] =
-    Map("provider" -> provider, "reason" -> reason, "promptBlocked" -> promptBlocked.toString)
+    Map("provider" -> provider.asString, "reason" -> reason, "promptBlocked" -> promptBlocked.toString)
 
   /** This error with the token usage the provider reported for the call. */
   def withUsage(usage: Option[TokenUsage]): ContentFilteredError =
@@ -43,7 +44,7 @@ final case class ContentFilteredError private (
 object ContentFilteredError {
 
   /** The error for a filtered call; [[prompt]] and [[reply]] name each case. */
-  def apply(provider: String, reason: String, promptBlocked: Boolean): ContentFilteredError = {
+  def apply(provider: ProviderId, reason: String, promptBlocked: Boolean): ContentFilteredError = {
     val message =
       if (promptBlocked) s"$provider blocked the prompt: blockReason $reason"
       else s"$provider returned no content: finishReason $reason"
@@ -51,18 +52,18 @@ object ContentFilteredError {
   }
 
   /** `provider` blocked the prompt for `blockReason`. */
-  def prompt(provider: String, blockReason: String): ContentFilteredError =
+  def prompt(provider: ProviderId, blockReason: String): ContentFilteredError =
     apply(provider, blockReason, promptBlocked = true)
 
   /** `provider` withheld the reply and sent no content, finishing for `finishReason`. */
-  def reply(provider: String, finishReason: String): ContentFilteredError =
+  def reply(provider: ProviderId, finishReason: String): ContentFilteredError =
     apply(provider, finishReason, promptBlocked = false)
 
   /**
    * `provider`'s filter stopped the reply for `finishReason` after `cutAfterChars` characters of answer text; the
    * message says how many, and is [[reply]]'s when there were none. A stream has already delivered that text.
    */
-  def reply(provider: String, finishReason: String, cutAfterChars: Int): ContentFilteredError =
+  def reply(provider: ProviderId, finishReason: String, cutAfterChars: Int): ContentFilteredError =
     if (cutAfterChars <= 0) reply(provider, finishReason)
     else
       new ContentFilteredError(
@@ -77,6 +78,6 @@ object ContentFilteredError {
    * Extracts the message, provider, reason and whether the prompt was blocked. The arity is fixed: `usage`, added
    * later, is read by name.
    */
-  def unapply(error: ContentFilteredError): Option[(String, String, String, Boolean)] =
+  def unapply(error: ContentFilteredError): Option[(String, ProviderId, String, Boolean)] =
     Some((error.message, error.provider, error.reason, error.promptBlocked))
 }

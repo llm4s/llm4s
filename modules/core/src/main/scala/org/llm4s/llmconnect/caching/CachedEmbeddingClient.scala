@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -80,7 +81,7 @@ final class CachedEmbeddingClient private (
             EmbeddingError(
               code = None,
               message = s"Base client returned ${response.embeddings.size} embeddings for ${missTexts.size} inputs",
-              provider = "cached-embedding-client"
+              provider = ProviderId("cached-embedding-client")
             )
           )
         } else {
