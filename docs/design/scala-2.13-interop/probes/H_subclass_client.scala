@@ -9,8 +9,8 @@ final class CannedClient extends LLMClient {
     Right(Completion(id = "1", created = java.time.Instant.EPOCH, model = ModelName("fake"), message = AssistantMessage("canned")))
   def streamComplete(conversation: Conversation, options: CompletionOptions)(onChunk: StreamedChunk => Unit): Either[LLMError, Completion] =
     complete(conversation, options)
-  def getContextWindow(): Int     = 8192
-  def getReserveCompletion(): Int = 1024
+  def contextWindow: Int     = 8192
+  def reserveCompletion: Int = 1024
 }
 
 object Probe extends App {
