@@ -94,6 +94,7 @@ The sidebar groups the guides as [Core](core), [Agents](agents/), [RAG and Data]
 ### Images, Speech and Decisions
 
 - **[Image Generation](image-generation)** - Generate images with OpenAI GPT Image, Stability AI, Hugging Face or a Stable Diffusion server
+- **[Image Processing and Vision](image-processing)** - Resize, crop and convert images locally, or ask an OpenAI, Anthropic or Gemini vision model about them
 - **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS), local and cloud
 - **[STT Domain Model](stt-domain-model)** - `STTOptions`, `WordTimestamp`, `Transcription` and the `STTError` cases
 - **[Jev decision model](jev)** - Ask TypeSafe's Jev typed questions (Noul, Choice, Score) and get typed answers: a decision client, not a chat model
