@@ -78,7 +78,7 @@ version to the current release, so you run one rule, once, and no rule runs twic
 |---|---|---|
 | 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
 | 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" below, and `PositionalPatternsGainFields` |
-| 0.7.x | `Llm4sMigrateFrom_0_7` | added at 0.7.0: the rules for the breaks since 0.7.0 |
+| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules for the breaks since 0.7.0: none yet, so it changes nothing |
 
 A rule for a later break is added to every umbrella whose starting version is older than the break. Code on 0.4.x runs
 `Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
@@ -142,6 +142,9 @@ the current sources. `scalafixTests05` does the same for the `Llm4sMigrateFrom_0
 `output/.../fix/v1`, and `scalafixTests06` for `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0, with `modules/scalafix-rules/input-0.6`
 compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`
 (`Llm4sMigrateFrom_0_6KeepsSecretsTest` pins that it leaves code already past the 0.5.1 breaks alone).
+`Llm4sMigrateFrom_0_7` has no rule to test yet: `Llm4sMigrateFrom_0_7ChangesNothingTest`, in the same suite, pins
+that it is found by name and changes nothing. Its first rule comes with an input compiled against the 0.7.0
+artifacts, as `input-0.6` is against 0.6.0.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

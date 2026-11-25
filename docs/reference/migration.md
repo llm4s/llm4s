@@ -35,7 +35,7 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`completionTokens` no longer includes thinking tokens](#completiontokens-no-longer-includes-thinking-tokens-2564);
 [a Gemini reply a content filter stopped is an error](#a-gemini-reply-a-content-filter-stopped-is-an-error-2563); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
-Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
+From 0.6.0 to 0.7.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
 [finish reasons are typed](#finish-reasons-are-typed-2613),
 [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
 [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
@@ -100,13 +100,33 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the OpenAI image client's default model](#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884),
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
-[`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
-[`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
+[`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804),
+[`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805),
 [`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835),
 [message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809),
 [`LLMClient` accessors are named for their values, and `ToolBuilder.build`](#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908),
 [`ThinkingBlock.Opaque` and `BaseLifecycleLLMClient` take a `ProviderId`](#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908),
-[errors, `Result` helpers and `AgentResult.messages` are `Seq`s](#errors-result-helpers-and-agentresultmessages-are-seqs-2908)
+[errors, `Result` helpers and `AgentResult.messages` are `Seq`s](#errors-result-helpers-and-agentresultmessages-are-seqs-2908),
+[one retry rule: `LLMError.isRetryable` replaces the recoverable markers](#one-retry-rule-llmerrorisretryable-replaces-the-recoverable-markers-2916),
+[every `LLMError` reports `httpStatus`, `retryAfter` and `requestId`](#every-llmerror-reports-httpstatus-retryafter-and-requestid-2916),
+[a context-length overflow and an unknown model are typed errors](#a-context-length-overflow-and-an-unknown-model-are-typed-errors-2916),
+[`AgentBuilder` tools are additive](#agentbuilder-tools-are-additive-2916),
+[`StreamedChunk` names its deltas](#streamedchunk-names-its-deltas-2916),
+[`LlmException.isRetryable`, and three new `LlmErrorKind`s](#llmexceptionisretryable-and-three-new-llmerrorkinds-2916),
+[`AgentResult.runUsage`, and tighter `PromptInjectionDetector` defaults](#agentresultrunusage-and-tighter-promptinjectiondetector-defaults-2922-2923),
+[model ids are `ModelName`, provider ids `ProviderId`, and provider configs' base URLs `BaseUrl`](#model-ids-are-modelname-provider-ids-providerid-and-provider-configs-base-urls-baseurl-2822),
+[provider ids are `ProviderId`](#provider-ids-are-providerid),
+[`CompletionOptions`' sampling parameters are optional, and unset ones are not sent](#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807),
+[`Completion` reads `content` and `toolCalls` from its message](#completion-reads-content-and-toolcalls-from-its-message-2807),
+[a `Completion` without a finish reason is `FinishReason.Unknown`](#a-completion-without-a-finish-reason-is-finishreasonunknown-2807),
+[`Completion.estimatedCost` is a `BigDecimal`; `UsageSummary` counts cache tokens](#completionestimatedcost-is-a-bigdecimal-usagesummary-counts-cache-tokens-2807),
+[`AssistantMessage.text`, and a flat stored assistant message](#assistantmessagetext-and-a-flat-stored-assistant-message-2809),
+[one `Conversation.create`; `Conversation.empty` is a value](#one-conversationcreate-conversationempty-is-a-value-2809),
+[`ProviderExchange` and `ProviderExchangeRecorder`](#providerexchange-and-providerexchangerecorder-2809),
+[`MessageRole` is a Scala 3 `enum`](#messagerole-is-a-scala-3-enum-2809),
+[`LLMConnect.getClient` is the one way to get a client](#llmconnectgetclient-is-the-one-way-to-get-a-client-2810),
+[`LLMClient.streamComplete` takes its callback in a second parameter list](#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810),
+[a tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey`](#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)
 and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingclients-key-function-takes-the-request-2908).
 
 ## `LLMClient` accessors are named for their values, and `ToolBuilder.build` (#2908)
@@ -382,6 +402,19 @@ holds them.
 
 Code that reads one of these as a `List` or `Vector` (`val parts: Vector[ContentPart] = message.parts`, a
 `case Vector(...)` or `::` pattern) calls `.toVector` / `.toList`, or uses `Seq` and `case Seq(...)`.
+
+## `MessageRole` is a Scala 3 `enum` (#2809)
+
+`MessageRole` was a sealed trait with four case objects and is now an `enum` with the same four cases, `System`,
+`User`, `Assistant` and `Tool`. A value, a comparison and a `match` on the cases compile unchanged, `role.name` and
+`toString` are still the lowercase string sent to the provider, and stored JSON is unchanged. What changes is code
+that named a case as a type or reached it from Java:
+
+| Before | After |
+|---|---|
+| `MessageRole.User.type` as a type | `MessageRole`: an `enum` case without fields has no type of its own to name |
+| Java: `MessageRole.User$.MODULE$` | `MessageRole.User` (a static field); `MessageRole.valueOf("User")` and `MessageRole.values()` |
+| A `case _: MessageRole.User.type =>` type pattern | `case MessageRole.User =>` |
 
 ## `withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost (#2835)
 
@@ -3080,7 +3113,8 @@ below: `.copy` on the newly growth-safe types, `String` API keys of the provider
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
-on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)). These need a hand edit:
+on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)), which rewrites the renames
+of 0.7.0 that its [rule table](scalafix#migration-rules) lists. These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
@@ -3104,6 +3138,21 @@ on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rule
   call does.
 - Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
   `llm4s-rag` (#2358).
+- Renames and new shapes of 0.7.0 that no rule rewrites; the compiler names each, and its note has the replacement:
+  a tool handler's `Left("message")`, now `Left(ToolHandlerError.failed("message"))` (#2815); `new ToolRegistry(...)`,
+  now `ToolRegistry.of` (#2816); `new` on a provider client, `ReliableClient`, `CachingLLMClient` or
+  `CachedEmbeddingClient`, now the companion's factory (#2910, #2797); `ProviderDescriptor.buildClient`, now `build`,
+  and the context arguments of `buildConfig` (#2811); `IdentityTokenSource`, now `IdentityTokenProvider`, with
+  `token()` and `fetch()` now `current()` (#2811); `HeadroomPercent.None`, now `Zero`, and its `value`, now `asRatio`
+  (#2822); `ContextManager.withDefaults`, now `create`, `ContextStep.name`, now `stage`, and
+  `ConversationTokenCounter.openAI()` and `forModel`, now `cl100k()` and `OpenAITokenizers.counterFor` (#2818); the
+  nested `Modality` cases (#2808); `ModelMetadata.inputCostPerToken` and `outputCostPerToken`, now `pricing` (#2823);
+  `OptimisticLockFailure.memoryId`, now `recordId` (#2819); a middleware's `runsBefore`/`runsAfter`, now
+  `Set[MiddlewareRef]`, and `withUpdate`, now `addUpdate` (#2795); `MessageRole.User.type` as a type (#2809);
+  `MetricsRecording.withMetrics`' two arguments that had defaults (#2810); and `Tracing.create` (#2799).
+- 0.7.0 changes outside Scala sources: the configuration key `llm4s.providers.provider`, now `llm4s.defaultProvider`
+  (#2806); Java's `LlmException.isRecoverable()`, now `isRetryable()` (#2916); and `AgentBuilder.withTools` and
+  `withToolSet`, which now append and refuse a duplicate tool name where a second call replaced the first (#2916).
 
 ## `completionTokens` no longer includes thinking tokens (#2564)
 

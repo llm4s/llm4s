@@ -14,11 +14,17 @@
 #   ended_on        YYYY-MM-DD, the day the line stopped getting fixes: required for superseded and eol
 #   note            free text
 lines:
+  - line: "0.7"
+    version: "0.7.0"
+    released: "2026-11-25"
+    status: "latest"
+    note: "The baseline release: the only line that gets fixes until 1.0."
   - line: "0.6"
     version: "0.6.0"
     released: "2026-11-21"
-    status: "latest"
-    note: "Pre-baseline: the only line that gets fixes."
+    status: "superseded"
+    ended_on: "2026-11-25"
+    note: "Pre-baseline: not patched; upgrade to the latest release."
   - line: "0.5"
     version: "0.5.1"
     released: "2026-10-15"

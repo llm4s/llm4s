@@ -7,6 +7,7 @@ org.llm4s.scalafix.MessageExtractorToTypePattern
 org.llm4s.scalafix.RemovedApis
 org.llm4s.scalafix.Llm4sMigrateFrom_0_5
 org.llm4s.scalafix.Llm4sMigrateFrom_0_6
+org.llm4s.scalafix.Llm4sMigrateFrom_0_7
 org.llm4s.scalafix.CopyToWithSetters_1_0
 org.llm4s.scalafix.CredentialsToSecret
 org.llm4s.scalafix.FromValuesKeyFirst

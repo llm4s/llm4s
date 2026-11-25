@@ -35,13 +35,16 @@ the baseline and 1.0 then promise is in the [Compatibility and Deprecation Polic
 ([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are first published at 1.0, as
 `org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
 change by hand. Run the one umbrella rule for the version you start from: `Llm4sMigrateFrom_0_5` from 0.5.x,
-`Llm4sMigrateFrom_0_6` from 0.6.x.
+`Llm4sMigrateFrom_0_6` from 0.6.x, `Llm4sMigrateFrom_0_7` from 0.7.x (it has no rule yet: nothing has broken since 0.7.0).
 
 ---
 
-## From 0.6.0
+## From 0.6.0 to 0.7.0
 
-The breaking changes since 0.6.0, in the CHANGELOG's `[Unreleased]` section:
+0.7.0 is the last release that breaks freely: the API review finished here, so that the baseline it sets holds the
+designs 1.0 keeps. The Scalafix rule `Llm4sMigrateFrom_0_6` rewrites the mechanical part
+([Scalafix: migration rules](../reference/scalafix#migration-rules)). The breaking changes of 0.7.0, each under
+*Breaking changes* in its CHANGELOG section:
 
 - Generation and model calls:
   [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](../reference/migration#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
@@ -72,7 +75,84 @@ The breaking changes since 0.6.0, in the CHANGELOG's `[Unreleased]` section:
 - Configuration:
   [the legacy embedding provider selector is removed](../reference/migration#the-legacy-embedding-provider-selector-is-removed),
   [Vertex AI no longer reads `endpoint` and `organization`](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
-
+- Errors and retries:
+  [one retry rule: `LLMError.isRetryable` replaces the recoverable markers](../reference/migration#one-retry-rule-llmerrorisretryable-replaces-the-recoverable-markers-2916),
+  [every `LLMError` reports `httpStatus`, `retryAfter` and `requestId`](../reference/migration#every-llmerror-reports-httpstatus-retryafter-and-requestid-2916),
+  [a context-length overflow and an unknown model are typed errors](../reference/migration#a-context-length-overflow-and-an-unknown-model-are-typed-errors-2916),
+  [`StreamedChunk` names its deltas](../reference/migration#streamedchunk-names-its-deltas-2916),
+  [`LlmException.isRetryable`, and three new `LlmErrorKind`s](../reference/migration#llmexceptionisretryable-and-three-new-llmerrorkinds-2916),
+  [one retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed](../reference/migration#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798),
+  [`Result` helpers and conversions move, and `ErrorMapper` is removed](../reference/migration#result-helpers-and-conversions-move-and-errormapper-is-removed-2821),
+  [error hierarchy cleanup](../reference/migration#error-hierarchy-cleanup-2819),
+  [`NetworkSecurity` returns the addresses it vetted, and a refusal is not retryable](../reference/migration#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826),
+  [an open circuit is a `CircuitOpenError`](../reference/migration#an-open-circuit-is-a-circuitopenerror-2797),
+  [`ReliableClient` has a private constructor](../reference/migration#reliableclient-has-a-private-constructor-2797).
+- Messages, completions and streaming:
+  [message parts, citations and adjustments are `Seq`s](../reference/migration#message-parts-citations-and-adjustments-are-seqs-2809),
+  [`CompletionOptions`' sampling parameters are optional, and unset ones are not sent](../reference/migration#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807),
+  [`Completion` reads `content` and `toolCalls` from its message](../reference/migration#completion-reads-content-and-toolcalls-from-its-message-2807),
+  [a `Completion` without a finish reason is `FinishReason.Unknown`](../reference/migration#a-completion-without-a-finish-reason-is-finishreasonunknown-2807),
+  [`Completion.estimatedCost` is a `BigDecimal`; `UsageSummary` counts cache tokens](../reference/migration#completionestimatedcost-is-a-bigdecimal-usagesummary-counts-cache-tokens-2807),
+  [`AssistantMessage.text`, and a flat stored assistant message](../reference/migration#assistantmessagetext-and-a-flat-stored-assistant-message-2809),
+  [one `Conversation.create`; `Conversation.empty` is a value](../reference/migration#one-conversationcreate-conversationempty-is-a-value-2809),
+  [`ProviderExchange` and `ProviderExchangeRecorder`](../reference/migration#providerexchange-and-providerexchangerecorder-2809),
+  [`MessageRole` is a Scala 3 `enum`](../reference/migration#messagerole-is-a-scala-3-enum-2809),
+  [`LLMConnect.getClient` is the one way to get a client](../reference/migration#llmconnectgetclient-is-the-one-way-to-get-a-client-2810),
+  [`LLMClient.streamComplete` takes its callback in a second parameter list](../reference/migration#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810),
+  [`StreamingAccumulator` takes the model and reports usage one way](../reference/migration#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+- Newtypes and names:
+  [model ids are `ModelName`, provider ids `ProviderId`, and provider configs' base URLs `BaseUrl`](../reference/migration#model-ids-are-modelname-provider-ids-providerid-and-provider-configs-base-urls-baseurl-2822),
+  [provider ids are `ProviderId`](../reference/migration#provider-ids-are-providerid),
+  [newtypes in `org.llm4s.types` are opaque, and `HeadroomPercent` is always valid](../reference/migration#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
+  [a tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey`](../reference/migration#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815).
+- Configuration:
+  [`Llm4sConfig.providerConfigs()` returns each section's `Result`; `providers()` and `ProvidersConfig` are internal](../reference/migration#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804),
+  [`llm4s.providers.provider` is now `llm4s.defaultProvider`](../reference/migration#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
+  [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](../reference/migration#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804),
+  [the config-policy `prod` preset allows model generations](../reference/migration#the-config-policy-prod-preset-allows-model-generations-2885).
+- Providers and the provider SPI:
+  [`Modality` is an enum, multimodal embedding lives in `llm4s-rag`, and `EmbeddingClient` is final](../reference/migration#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
+  [provider SPI: one shape for both descriptors, typed embedding sections, credential suppliers](../reference/migration#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811),
+  [provider SPI: error mapping, published helpers, report types](../reference/migration#provider-spi-error-mapping-published-helpers-report-types-2811),
+  [`Llm4sHttpClient` has one method to implement, `send`](../reference/migration#llm4shttpclient-has-one-method-to-implement-send-2802),
+  [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](../reference/migration#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805),
+  [the caching types report failure, and tool loops bypass the cache](../reference/migration#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803),
+  [model registry sources, exact lookup and a sealed `RequestTransformer`](../reference/migration#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823),
+  [`LLMClient.validate()` checks the provider](../reference/migration#llmclientvalidate-checks-the-provider-2830),
+  [`ProviderRegistry` lookups accept aliases](../reference/migration#providerregistry-lookups-accept-aliases-2812),
+  [provider clients are final, with one factory](../reference/migration#provider-clients-are-final-with-one-factory-2910),
+  [`CachingLLMClient` and `CachedEmbeddingClient` have private constructors](../reference/migration#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910).
+- Tools:
+  [`ToolRegistry` is a trait built with `ToolRegistry.of`](../reference/migration#toolregistry-is-a-trait-built-with-toolregistryof-2816),
+  [`SchemaDefinition` gains a union and a raw JSON Schema case](../reference/migration#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814),
+  [a tool handler has one error type](../reference/migration#a-tool-handler-has-one-error-type-2815).
+- Context management:
+  [the context pipeline is Experimental, and token counters are built over a tokenizer](../reference/migration#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818),
+  [context trimming fails when nothing fits, and externalizes only into a store](../reference/migration#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
+- Agents:
+  [`AgentBuilder` tools are additive](../reference/migration#agentbuilder-tools-are-additive-2916),
+  [`AgentResult.runUsage`, and tighter `PromptInjectionDetector` defaults](../reference/migration#agentresultrunusage-and-tighter-promptinjectiondetector-defaults-2922-2923),
+  [`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](../reference/migration#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835),
+  [a guardrail's reason is never stored](../reference/migration#a-guardrails-reason-is-never-stored-2853),
+  [a turn's query is admitted before the turn is stored](../reference/migration#a-turns-query-is-admitted-before-the-turn-is-stored-2854),
+  [an agent run's trace and metrics report one status](../reference/migration#an-agent-runs-trace-and-metrics-report-one-status-2829),
+  [`AssistantError` and the assistant's newtypes live in `llm4s-agent`](../reference/migration#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820),
+  [a guardrail block's message names only the guardrail](../reference/migration#a-guardrail-blocks-message-names-only-the-guardrail-2793),
+  [`RegexSafetyManager` returns `Result`](../reference/migration#regexsafetymanager-returns-result-2825),
+  [`SecretPatterns` is in `llm4s-agent`](../reference/migration#secretpatterns-is-in-llm4s-agent-2824),
+  [`llm4s-agent` types are tiered and growth-safe](../reference/migration#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+  [the middleware SPI is consistent and testable](../reference/migration#the-middleware-spi-is-consistent-and-testable-2795),
+  [`Secret` or `Secret.token`: which one stays registered](../reference/migration#secret-or-secrettoken-which-one-stays-registered-2824).
+- Tracing, metrics and images:
+  [the Langfuse backend sends OpenTelemetry spans](../reference/migration#the-langfuse-backend-sends-opentelemetry-spans-2883),
+  [`TraceEvent` carries an error as it is, and `AgentInitialized` is removed](../reference/migration#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800),
+  [`ReliableClient`'s metrics are generic metrics](../reference/migration#reliableclients-metrics-are-generic-metrics-2801),
+  [the Hugging Face image client calls Inference Providers](../reference/migration#the-hugging-face-image-client-calls-inference-providers-2832),
+  [the OpenAI image client defaults to `gpt-image-2.6-sunburst`](../reference/migration#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884),
+  [image metrics are `ImageMetrics` in `llm4s-image`](../reference/migration#image-metrics-are-imagemetrics-in-llm4s-image-2801),
+  [`Tracing` has one abstract method](../reference/migration#tracing-has-one-abstract-method-2799),
+  [a tracing backend declares its aliases, and `Tracing.create` is removed](../reference/migration#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
+  [Langfuse traces are private and name the run's user](../reference/migration#langfuse-traces-are-private-and-name-the-runs-user-2828).
 ---
 
 ## From 0.5.1 to 0.6.0
