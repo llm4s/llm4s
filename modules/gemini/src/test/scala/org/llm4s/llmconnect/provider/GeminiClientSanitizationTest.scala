@@ -52,7 +52,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
   ): Result[ToolFunction[String]] =
     ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
-      .buildSafe()
+      .build()
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tests via convertToolToGeminiFormat (full pipeline)

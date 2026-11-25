@@ -113,7 +113,7 @@ class ChatControllerSpec extends AnyFlatSpec with Matchers {
   it should "send a tool call as an event" in {
     val clock = ToolBuilder[String]("clock", "the time", Schema.`object`[Map[String, Any]]("none"))
       .withHandler(_ => Right("noon"))
-      .buildSafe()
+      .build()
       .fold(e => fail(s"could not build the tool: $e"), identity)
     val client = ScriptedLLMClient.sequence(Reply.toolCall("clock", "{}", Some("call-1")), Reply.text("It is noon."))
     val agent = LLMClientPekko(client)

@@ -128,13 +128,13 @@ object ToolFunction {
  * Obtained via the companion [[ToolBuilder]] object:
  * {{{ToolBuilder[MyResult]("my_tool", "Does something", schema)
  *   .withHandler(extractor => Right(MyResult(...)))
- *   .buildSafe()
+ *   .build()
  * }}}
  *
  * @param name        Tool name
  * @param description Natural-language description for the LLM
  * @param schema      Parameter schema
- * @param handler     Optional handler; must be set before calling [[buildSafe]]
+ * @param handler     Optional handler; must be set before calling [[build]]
  */
 @Stable
 class ToolBuilder[R: ReadWriter] private (
@@ -158,9 +158,9 @@ class ToolBuilder[R: ReadWriter] private (
    *
    * @return Right(ToolFunction) if handler is defined, Left(ValidationError) otherwise
    */
-  def buildSafe(): Result[ToolFunction[R]] = handler match {
+  def build(): Result[ToolFunction[R]] = handler match {
     case Some(h) => Right(ToolFunction(name, description, schema, h))
-    case None    => Left(ValidationError("handler", "must be defined before calling buildSafe()"))
+    case None    => Left(ValidationError("handler", "must be defined before calling build()"))
   }
 }
 

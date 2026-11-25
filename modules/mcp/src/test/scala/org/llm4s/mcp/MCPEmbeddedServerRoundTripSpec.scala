@@ -27,7 +27,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
   ): ToolFunction[_] =
     ToolBuilder[String](name, description, schema)
       .withHandler(handler)
-      .buildSafe()
+      .build()
       .fold(e => fail(s"could not build tool $name: ${e.formatted}"), identity)
 
   override def beforeAll(): Unit = {

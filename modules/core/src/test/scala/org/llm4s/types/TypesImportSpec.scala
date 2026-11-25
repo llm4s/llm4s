@@ -19,7 +19,7 @@ class TypesImportSpec extends AnyFlatSpec with Matchers {
   it should "bring the Result type and its helper object" in {
     assertCompiles("""
       import org.llm4s.types.*
-      val r: Result[List[Int]] = Result.traverse(List(1, 2))(n => Result.success(n))
+      val r: Result[Seq[Int]] = Result.traverse(List(1, 2))(n => Result.success(n))
     """)
   }
 

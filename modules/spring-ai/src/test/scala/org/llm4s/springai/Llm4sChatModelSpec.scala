@@ -334,8 +334,8 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
       override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = throw new IllegalStateException("client bug")
-      override def getContextWindow(): Int     = 1000
-      override def getReserveCompletion(): Int = 100
+      override def contextWindow: Int     = 1000
+      override def reserveCompletion: Int = 100
     }
     val error = intercept[IllegalStateException](
       new Llm4sChatModel(throwing).stream(new Prompt("hi")).blockLast(java.time.Duration.ofSeconds(30))
@@ -357,8 +357,8 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
         interrupted.countDown()
         Left(ValidationError("x", "interrupted"))
       }
-      override def getContextWindow(): Int     = 1000
-      override def getReserveCompletion(): Int = 100
+      override def contextWindow: Int     = 1000
+      override def reserveCompletion: Int = 100
     }
     val first = new Llm4sChatModel(blocking).stream(new Prompt("hi")).take(1).collectList().block().asScala
     first.map(_.getResult.getOutput.getText) shouldBe Seq("first")

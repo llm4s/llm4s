@@ -41,8 +41,8 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, opts: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, opts)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private val history: Seq[Message] = Seq(

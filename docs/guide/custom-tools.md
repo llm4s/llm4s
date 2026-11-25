@@ -79,14 +79,14 @@ def temperatureTool: Result[ToolFunction[String]] = {
     "Converts a temperature between Celsius and Fahrenheit. Use it whenever the user asks for a temperature " +
       "in the other unit; it does not convert any other quantity.",
     schema
-  ).withHandler(handler).buildSafe()
+  ).withHandler(handler).build()
 }
 ```
 
 `ToolBuilder[R]` takes the result type `R`, which needs a upickle `ReadWriter`, because the result is written to
 JSON for the model:
 `String`, numbers and `Seq`s have one, and for your own case class you add `given ReadWriter[Result] = macroRW`.
-`buildSafe()` returns a `Result`, a `Left(ValidationError)` if you forgot `withHandler`, so building a tool never
+`build()` returns a `Result`, a `Left(ValidationError)` if you forgot `withHandler`, so building a tool never
 throws.
 
 ## 2. Declaring parameters with `Schema`
@@ -238,7 +238,7 @@ def checkTemperatureTool(tool: ToolFunction[String]): Unit = {
 
   // a missing argument is InvalidArguments: the parameter error names it
   tool.execute(ujson.Obj("unit" -> "celsius")) match {
-    case Left(error @ ToolCallError.InvalidArguments(name, List(parameter))) =>
+    case Left(error @ ToolCallError.InvalidArguments(name, Seq(parameter))) =>
       assert(name == "convert_temperature")
       assert(parameter.parameterName == "value")
       assert(error.message.contains("'value'") && error.message.contains("missing"))
@@ -276,7 +276,7 @@ def vagueTool =
     "tool1",
     "Does stuff",
     Schema.`object`[Map[String, Any]]("Params").withRequiredField("input", Schema.string("the input"))
-  ).withHandler(params => params.getString("input")).buildSafe()
+  ).withHandler(params => params.getString("input")).build()
 ```
 
 **An undeclared parameter.** The model only sends arguments the schema declares. A handler that reads
@@ -292,7 +292,7 @@ def declaredParameters: Either[org.llm4s.error.LLMError, List[String]] =
     "Converts a temperature",
     Schema.`object`[Map[String, Any]]("Temperature").withRequiredField("value", Schema.number("The temperature"))
   ).withHandler(params => params.getString("unit")) // reads `unit`, which the schema never declares
-    .buildSafe()
+    .build()
     .map(tool => tool.toolDefinition(strict = true)("function")("parameters")("properties").obj.keys.toList)
 ```
 

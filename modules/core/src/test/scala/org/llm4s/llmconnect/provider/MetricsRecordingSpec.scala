@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ AuthenticationError, ContentFilteredError, RateLimitError }
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.metrics.{ ErrorKind, MockMetricsCollector }
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,8 +25,8 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
       extractCost: A => Option[Double]
     ): Result[A] =
       withMetrics(
-        provider = provider,
-        model = model,
+        provider = ProviderId(provider),
+        model = ModelName(model),
         operation = f,
         extractUsage = extractUsage,
         extractCost = extractCost

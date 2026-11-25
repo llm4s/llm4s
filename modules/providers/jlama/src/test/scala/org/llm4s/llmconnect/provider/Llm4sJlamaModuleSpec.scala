@@ -59,8 +59,8 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
     "build a JlamaClient from a config section without loading the model" in {
       val client = assertBuildsClient(JlamaProvider, section)
       client.getClass.getSimpleName shouldBe "JlamaClient"
-      client.getContextWindow() shouldBe JlamaConfig.DEFAULT_CONTEXT_WINDOW
-      client.getReserveCompletion() shouldBe JlamaConfig.DEFAULT_RESERVE_COMPLETION
+      client.contextWindow shouldBe JlamaConfig.DEFAULT_CONTEXT_WINDOW
+      client.reserveCompletion shouldBe JlamaConfig.DEFAULT_RESERVE_COMPLETION
       client.close()
     }
 

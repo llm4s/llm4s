@@ -960,7 +960,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val schema = Schema.`object`[Map[String, Any]]("Echo").withRequiredField("message", Schema.string("Message"))
     val function = ToolBuilder[Echoed]("say", "Echoes", schema)
       .withHandler(extractor => extractor.getString("message").map(Echoed(_)))
-      .buildSafe()
+      .build()
       .value
     val model = ScriptedModel(
       calls(("t1", "say", ujson.Obj("message" -> "hi")), ("t2", "say", ujson.Obj("message" -> 3))),
@@ -978,7 +978,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .withHandler { extractor =>
         seenByCore.add(extractor.params.render()); Right("ok")
       }
-      .buildSafe()
+      .build()
       .value
     val seenByTyped = new CopyOnWriteArrayList[String]()
     val typed = tool[ujson.Value]("typed_none") { (args, _) =>
@@ -1248,7 +1248,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
         Thread.currentThread().interrupt()
         Left(org.llm4s.toolapi.ToolHandlerError.failed("cancelled"))
       }
-      .buildSafe()
+      .build()
       .value
     val model = ScriptedModel(calls(("h1", "halting", ujson.Obj())), summarise)
     val l =
@@ -1886,8 +1886,8 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
     val tools  = Tools()
     val l      = buildSingle(ModelStep.fromClient(client), set(tools.all*)).value

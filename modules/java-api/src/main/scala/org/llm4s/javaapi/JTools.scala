@@ -33,7 +33,7 @@ private[javaapi] object JTools {
         .withHandler(extractor =>
           call(name, spec.params, handler, extractor.params, extractor.call).left.map(ToolHandlerError.failed)
         )
-        .buildSafe()
+        .build()
     } yield new JTool(FacadeToken.INSTANCE, function)
 
   private def schemaOf(tool: String, spec: Spec): Result[ObjectSchema[Map[String, Any]]] =

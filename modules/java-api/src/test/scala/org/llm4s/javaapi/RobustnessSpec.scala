@@ -28,9 +28,9 @@ class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete(c, o)
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-    override def close(): Unit               = onClose()
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
+    override def close(): Unit          = onClose()
   }
 
   private def ok(text: String): Result[Completion] =

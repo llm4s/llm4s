@@ -44,8 +44,8 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
 
   private def open: CountDownLatch = new CountDownLatch(0)
 
@@ -80,7 +80,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+  ).withHandler(_.getString("message").map(EchoResult(_))).build().fold(e => fail(e.formatted), identity)
 
   private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
 

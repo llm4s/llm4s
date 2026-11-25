@@ -124,6 +124,6 @@ private object OllamaToolCallingIntegrationSpec {
         .`object`[Map[String, Any]]("Weather parameters")
         .withProperty(Schema.property("location", Schema.string("City or location name")))
     ).withHandler(extractor => extractor.getString("location").map(location => Weather(s"Sunny in $location")))
-      .buildSafe()
+      .build()
       .fold(error => throw new IllegalStateException(error.message), identity)
 }

@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - `completeWithMetrics` — combines lifecycle validation with metrics recording for
  *    [[org.llm4s.llmconnect.model.Completion Completion]] results, eliminating boilerplate in `complete` / `streamComplete`.
  *
- * Concrete clients mix in this trait, supply `providerName` and `modelName`,
+ * Concrete clients mix in this trait, supply `provider` and `modelName`,
  * and optionally override `releaseResources()` to free provider-specific
  * resources (HTTP clients, SDK connections, etc.).
  */
@@ -30,8 +30,11 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
   /** Human-readable label used in the "already closed" error message. */
   protected def clientDescription: String
 
-  /** Metrics label for this provider (e.g. `"openai"`, `"anthropic"`). */
-  protected def providerName: String
+  /**
+   * The provider this client calls (e.g. `ProviderId("openai")`): the provider id tracing reports, the metrics
+   * label, as its string, and the provider a cancellation names.
+   */
+  protected def provider: ProviderId
 
   /** The model identifier forwarded to the metrics collector. */
   protected def modelName: ModelName
@@ -42,8 +45,8 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
    */
   protected def releaseResources(): Unit = ()
 
-  /** This client's [[providerName]], as the provider id tracing reports. */
-  override def providerId: Option[ProviderId] = Some(ProviderId(providerName))
+  /** This client's [[provider]]. */
+  override def providerId: Option[ProviderId] = Some(provider)
 
   private val closed: AtomicBoolean = new AtomicBoolean(false)
 
@@ -73,11 +76,11 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
    */
   protected def completeWithMetrics(operation: => Result[Completion]): Result[Completion] =
     withMetrics(
-      provider = providerName,
-      model = modelName.asString,
+      provider = provider,
+      model = modelName,
       operation =
-        if (Thread.currentThread().isInterrupted) Left(CancelledError(s"$providerName.complete"))
-        else CancelledError.attempt(s"$providerName.complete")(validateNotClosed.flatMap(_ => operation)),
+        if (Thread.currentThread().isInterrupted) Left(CancelledError(s"${provider.asString}.complete"))
+        else CancelledError.attempt(s"${provider.asString}.complete")(validateNotClosed.flatMap(_ => operation)),
       extractUsage = (c: Completion) => c.usage,
       // the metrics contract counts cost as a Double
       extractCost = (c: Completion) => c.estimatedCost.map(_.toDouble)

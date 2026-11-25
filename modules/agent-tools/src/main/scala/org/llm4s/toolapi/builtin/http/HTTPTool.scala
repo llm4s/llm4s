@@ -128,7 +128,7 @@ object HTTPTool {
           ToolHandlerError.failed
         )
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))

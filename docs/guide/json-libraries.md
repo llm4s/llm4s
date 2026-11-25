@@ -152,7 +152,7 @@ val addTool = ToolBuilder[ujson.Value]("add", "Adds two integers", addSchema)
       case Left(error) => Left(ToolHandlerError.failed(error.getMessage))
     }
   }
-  .buildSafe()
+  .build()
 ```
 
 A value that does not fit the case class (`"a": "two"`, or a missing field) is returned to the model as a tool error, not thrown. See [Built-in Tools](builtin-tools) for how tool errors reach the model.
@@ -299,7 +299,7 @@ val addToolViaJsoniter = ToolBuilder[AddResult]("add", "Adds two integers", addS
       .left
       .map(e => ToolHandlerError.failed(e.getMessage))
   }
-  .buildSafe()
+  .build()
 ```
 
 Arguments that do not fit `AddArgs` are returned to the model as a tool error, not thrown. The same bridge is in the runnable sample `org.llm4s.samples.json.JsoniterStructuredOutputExample`, which scripts its model with `llm4s-testkit` and needs no API key:

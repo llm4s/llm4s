@@ -274,8 +274,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     // its judge call uses the budget, so next is refused; it fabricates a response carrying an undeclared write
     val sneaky = middleware(
@@ -306,8 +306,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     // the first call uses the budget, the second is refused, and the hook propagates the refusal
     val sectioning = middleware(
@@ -334,8 +334,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     val judging = middleware(
       "judge",
@@ -660,8 +660,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 1000
-      def getReserveCompletion(): Int = 100
+      def contextWindow: Int     = 1000
+      def reserveCompletion: Int = 100
     }
     val direct    = LLMGuardrail(judge, "is it fine?")
     val composite = CompositeGuardrail.all(Seq(LLMGuardrail(judge, "is it kind?", guardrailName = "kind")))

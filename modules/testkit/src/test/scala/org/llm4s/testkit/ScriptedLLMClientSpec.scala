@@ -293,8 +293,8 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "the configuration" should "report a 128000-token context window and reserve 4096 by default" in {
     val client = ScriptedLLMClient.sequence()
-    client.getContextWindow() shouldBe 128000
-    client.getReserveCompletion() shouldBe 4096
+    client.contextWindow shouldBe 128000
+    client.reserveCompletion shouldBe 4096
     client.chunkSize shouldBe 16
   }
 
@@ -302,12 +302,12 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.sequence(Reply.text("one"), Reply.text("two"))
     ask(client, "q").value
     val changed = client.withContextWindow(1000)
-    changed.getContextWindow() shouldBe 1000
-    changed.getReserveCompletion() shouldBe 4096
+    changed.contextWindow shouldBe 1000
+    changed.reserveCompletion shouldBe 4096
     changed.callCount shouldBe 0
     ask(changed, "q").value.content shouldBe "one"
-    client.withReserveCompletion(50).getReserveCompletion() shouldBe 50
-    client.withReserveCompletion(50).getContextWindow() shouldBe 128000
+    client.withReserveCompletion(50).reserveCompletion shouldBe 50
+    client.withReserveCompletion(50).contextWindow shouldBe 128000
     client.withChunkSize(5).chunkSize shouldBe 5
     client.callCount shouldBe 1
   }
@@ -319,7 +319,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "compute the context budget from the window and the reserve" in {
     val client = ScriptedLLMClient.sequence().withContextWindow(10000).withReserveCompletion(1000)
-    client.getContextWindow() - client.getReserveCompletion() shouldBe 9000
+    client.contextWindow - client.reserveCompletion shouldBe 9000
   }
 
   "a ScriptedLLMClient under ReliableClient" should "be retried after a rate limit and then succeed" in {

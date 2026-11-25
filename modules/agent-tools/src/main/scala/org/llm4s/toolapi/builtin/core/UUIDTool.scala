@@ -110,6 +110,6 @@ object UUIDTool {
 
         UUIDsResult(uuids)
       }
-    }.buildSafe()
+    }.build()
 
 }

@@ -219,7 +219,7 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
 
     ToolBuilder[String]("ping", "Echoes a message", schema)
       .withHandler((params: SafeParameterExtractor) => params.getString("message").map(m => s"Echo: $m"))
-      .buildSafe()
+      .build()
       .fold(e => throw new RuntimeException(s"Tool build failed: ${e.formatted}"), identity)
   }
 

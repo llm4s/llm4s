@@ -66,7 +66,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
       "Weather for a city",
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))
     ).withHandler(_ => Right("sunny"))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
     val schema = ujson.Obj("type" -> "object", "properties" -> ujson.Obj("a" -> ujson.Obj("type" -> "string")))
 

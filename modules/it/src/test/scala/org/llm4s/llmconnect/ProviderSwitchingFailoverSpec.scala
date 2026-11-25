@@ -214,9 +214,9 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       withThreeProviders() { providers =>
         providers.all.foreach { p =>
           withClue(p.id) {
-            p.client.getContextWindow() should be > 0
-            p.client.getReserveCompletion() should be > 0
-            p.client.getReserveCompletion() should be <= p.client.getContextWindow()
+            p.client.contextWindow should be > 0
+            p.client.reserveCompletion should be > 0
+            p.client.reserveCompletion should be <= p.client.contextWindow
           }
         }
       }

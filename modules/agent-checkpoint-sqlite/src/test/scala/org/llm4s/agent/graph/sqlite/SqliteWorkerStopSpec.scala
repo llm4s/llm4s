@@ -43,8 +43,8 @@ class SqliteWorkerStopSpec extends AnyFlatSpec with Matchers with EitherValues w
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 8192
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 8192
+    override def reserveCompletion: Int = 1024
   }
 
   private def running(test: (SqliteCheckpointer, Semaphore) => Unit): Unit = {

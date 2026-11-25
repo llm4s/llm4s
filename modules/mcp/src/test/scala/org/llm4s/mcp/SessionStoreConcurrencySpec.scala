@@ -22,7 +22,7 @@ class SessionStoreConcurrencySpec extends AnyFunSpec with Matchers with BeforeAn
     // Define a simple tool
     val pingTool = ToolBuilder[String]("ping", "Echo", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => Right("pong"))
-      .buildSafe()
+      .build()
 
     pingTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),

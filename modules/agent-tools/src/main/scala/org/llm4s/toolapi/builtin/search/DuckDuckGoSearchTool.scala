@@ -162,7 +162,7 @@ object DuckDuckGoSearchTool {
           ToolHandlerError.failed
         )
       } yield result
-    }.buildSafe()
+    }.build()
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"

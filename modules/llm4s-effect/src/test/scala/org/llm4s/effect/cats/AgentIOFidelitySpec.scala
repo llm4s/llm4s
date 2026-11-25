@@ -33,7 +33,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))
-  ).withHandler(ex => ex.getString("v").map(EchoResult(_))).buildSafe() match {
+  ).withHandler(ex => ex.getString("v").map(EchoResult(_))).build() match {
     case Right(t) => t
     case Left(e)  => fail(s"could not build tool: $e")
   }
@@ -51,8 +51,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   private def text(s: String): Completion =
@@ -125,8 +125,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         throw failure
-      def getContextWindow(): Int     = 1
-      def getReserveCompletion(): Int = 1
+      def contextWindow: Int     = 1
+      def reserveCompletion: Int = 1
     }
     val raised = io(client)().run("q").attempt.unsafeRunSync().left.toOption.get
     raised shouldBe a[LLMException]
@@ -173,8 +173,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 1
-      def getReserveCompletion(): Int = 1
+      def contextWindow: Int     = 1
+      def reserveCompletion: Int = 1
     }
     val agent = io(client)()
     val first = agent.run("q1").unsafeRunSync()
@@ -236,8 +236,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         }
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 8192
-      def getReserveCompletion(): Int = 512
+      def contextWindow: Int     = 8192
+      def reserveCompletion: Int = 512
     }
     val (capture, thread) = Fixtures.threadCapture()
     val agent             = io(client)(_.withTools(tools).withMiddleware(capture))
@@ -256,8 +256,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         }
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 8192
-      def getReserveCompletion(): Int = 512
+      def contextWindow: Int     = 8192
+      def reserveCompletion: Int = 512
     }
     val (capture, thread) = Fixtures.threadCapture()
     val agent             = io(client)(_.withTools(tools).withMiddleware(capture))

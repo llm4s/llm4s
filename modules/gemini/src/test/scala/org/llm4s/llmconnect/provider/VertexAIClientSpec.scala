@@ -36,13 +36,13 @@ class VertexAIClientSpec extends AnyFunSuite {
   test("vertex ai client returns correct context window") {
     val client = new VertexAIClient(testConfig)
 
-    assert(client.getContextWindow() == 1048576)
+    assert(client.contextWindow == 1048576)
   }
 
   test("vertex ai client returns correct reserve completion") {
     val client = new VertexAIClient(testConfig)
 
-    assert(client.getReserveCompletion() == 8192)
+    assert(client.reserveCompletion == 8192)
   }
 
   test("vertex ai client computes correct base URL from location") {

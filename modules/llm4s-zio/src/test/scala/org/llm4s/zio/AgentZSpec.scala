@@ -26,8 +26,8 @@ object AgentZSpec extends ZIOSpecDefault {
       Right(completion(text))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Right(completion(text))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   private val failingClient: LLMClient = new LLMClient {
@@ -35,8 +35,8 @@ object AgentZSpec extends ZIOSpecDefault {
       Left(SimpleError("agent-fail"))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("agent-fail"))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   val spec = suite("AgentZ")(
@@ -82,8 +82,8 @@ object AgentZSpec extends ZIOSpecDefault {
           if (calls.getAndIncrement() == 0) Right(completion("4")) else Left(SimpleError("agent-fail"))
         def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
           complete(c, o)
-        def getContextWindow(): Int     = 4096
-        def getReserveCompletion(): Int = 256
+        def contextWindow: Int     = 4096
+        def reserveCompletion: Int = 256
       }
       val agent = AgentZ(Fixtures.agentOf(client)())
       for {

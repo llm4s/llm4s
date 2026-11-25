@@ -60,8 +60,8 @@ final class TracingLLMClient private (
     traced(conversation, options, result, elapsed(startedAt), streamed = true, finishReason.get)
   }
 
-  def getContextWindow(): Int                 = underlying.getContextWindow()
-  def getReserveCompletion(): Int             = underlying.getReserveCompletion()
+  def contextWindow: Int                      = underlying.contextWindow
+  def reserveCompletion: Int                  = underlying.reserveCompletion
   override def validate(): Result[Unit]       = underlying.validate()
   override def close(): Unit                  = underlying.close()
   override def providerId: Option[ProviderId] = underlying.providerId

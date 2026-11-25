@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -79,7 +79,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "Paris"))))
       .withThinking(
         ThinkingBlock.Text("Thinking.") +: details.arr.toSeq.map(item =>
-          ThinkingBlock.Opaque("openrouter", item.render())
+          ThinkingBlock.Opaque(ProviderId("openrouter"), item.render())
         )
       )
 
@@ -101,7 +101,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     withReplies(toolCallReply) { (baseUrl, _) =>
       val message = client(baseUrl).complete(Conversation(history), CompletionOptions()).value.message
       message.thinking shouldBe ThinkingBlock.Text("The user wants Paris weather.") +:
-        details.arr.toSeq.map(item => ThinkingBlock.Opaque("openrouter", item.render()))
+        details.arr.toSeq.map(item => ThinkingBlock.Opaque(ProviderId("openrouter"), item.render()))
       message.thinkingText shouldBe Some("The user wants Paris weather.")
       message.hasSealedThinking shouldBe true
       message.thinkingBinding shouldBe defined
@@ -248,8 +248,8 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
 
       streamed.message.thinking shouldBe Seq(
         ThinkingBlock.Text("Paris weather."),
-        ThinkingBlock.Opaque("openrouter", joinedText.render()),
-        ThinkingBlock.Opaque("openrouter", encrypted.render())
+        ThinkingBlock.Opaque(ProviderId("openrouter"), joinedText.render()),
+        ThinkingBlock.Opaque(ProviderId("openrouter"), encrypted.render())
       )
       streamed.message.thinkingBinding shouldBe defined
 
@@ -286,9 +286,9 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       )
     )
     blocks shouldBe Seq(
-      ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.text","text":"a","index":0}"""),
-      ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.summary","summary":"st","index":0}"""),
-      ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.encrypted","data":"x"}""")
+      ThinkingBlock.Opaque(ProviderId("openrouter"), """{"type":"reasoning.text","text":"a","index":0}"""),
+      ThinkingBlock.Opaque(ProviderId("openrouter"), """{"type":"reasoning.summary","summary":"st","index":0}"""),
+      ThinkingBlock.Opaque(ProviderId("openrouter"), """{"type":"reasoning.encrypted","data":"x"}""")
     )
   }
 
@@ -311,8 +311,9 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
   }
 
   "OpenRouter" should "ignore opaque blocks another provider produced" in {
-    val foreign = withDetails.withThinking(Seq(ThinkingBlock.Text("Thinking."), ThinkingBlock.Opaque("other", "{}")))
-    val turn    = encoded(OpenRouterDialect, foreign)
+    val foreign =
+      withDetails.withThinking(Seq(ThinkingBlock.Text("Thinking."), ThinkingBlock.Opaque(ProviderId("other"), "{}")))
+    val turn = encoded(OpenRouterDialect, foreign)
     turn.obj.keySet should not contain "reasoning_details"
     turn("reasoning").str shouldBe "Thinking."
   }

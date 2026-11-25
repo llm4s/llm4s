@@ -439,7 +439,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .withProperty(Schema.property("message", Schema.string("Msg")))
     ToolBuilder[String]("ping", "Echoes", schema)
       .withHandler((p: SafeParameterExtractor) => p.getString("message").map(m => s"Echo: $m"))
-      .buildSafe()
+      .build()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }
 
@@ -451,7 +451,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .withHandler((_: SafeParameterExtractor) =>
         Left(org.llm4s.toolapi.ToolHandlerError.failed("intentional failure"))
       )
-      .buildSafe()
+      .build()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }
 
@@ -459,7 +459,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val schema = Schema.`object`[Map[String, Any]]("Params")
     ToolBuilder[Int]("int_tool", "Returns integer 42", schema)
       .withHandler((_: SafeParameterExtractor) => Right(42))
-      .buildSafe()
+      .build()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }
 
@@ -467,7 +467,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val schema = Schema.`object`[Map[String, Any]]("Params")
     ToolBuilder[Map[String, Int]]("obj_tool", "Returns an object", schema)
       .withHandler((_: SafeParameterExtractor) => Right(Map("answer" -> 42)))
-      .buildSafe()
+      .build()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }
 

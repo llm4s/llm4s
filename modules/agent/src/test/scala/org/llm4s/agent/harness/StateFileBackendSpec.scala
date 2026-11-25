@@ -350,7 +350,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     SpecTools.set(write, edit, delete, read)
   }
 
-  private def toolResults(result: AgentResult): Vector[String] =
+  private def toolResults(result: AgentResult): Seq[String] =
     result.messages.collect { case t: ToolMessage => t.content }.toVector
 
   "Two edits of one path in one batch" should "both apply, the second against the first's result" in {

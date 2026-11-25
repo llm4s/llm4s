@@ -115,21 +115,21 @@ InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(CachedEmbeddingClie
 
 ### What the key contains
 
-The key function is given three things: the text, the model name and the request's `InputPurpose`. Some providers (Voyage, Jina and Cohere among them) embed a query and a document with the same text differently, so the purpose has to be part of the key.
+The key function is given two things: one input text and the `EmbeddingRequest` it came in, which carries the model (`request.model.name`) and the `InputPurpose` (`request.purpose`). Some providers (Voyage, Jina and Cohere among them) embed a query and a document with the same text differently, so the purpose has to be part of the key.
 
-The default, `CacheKeyGenerator.embeddingKey`, is the SHA-256 of those three as 64 hex characters. Each part is prefixed with its length before hashing, so the encoding is unambiguous: no text or model name, whatever characters it contains, can produce another request's key. The text `a:b` with model `c` and the text `a` with model `b:c` have different keys, and so do a query for model `m` and a document for a model named `m#query`.
+The default, `CacheKeyGenerator.embeddingKey`, is the SHA-256 of the text, the model name and the purpose as 64 hex characters. Each part is prefixed with its length before hashing, so the encoding is unambiguous: no text or model name, whatever characters it contains, can produce another request's key. The text `a:b` with model `c` and the text `a` with model `b:c` have different keys, and so do a query for model `m` and a document for a model named `m#query`.
 
 The key holds the model *name* only. It does not include the embedding dimension or the provider, so one cache shared by clients that use the same model name for different things would mix their vectors. If that matters to you, or you want to keep tenants apart in one cache, pass your own key function as the third argument. `CacheKeyGenerator.sha256` takes any number of parts and encodes them the same unambiguous way, so a tenant can simply be one more part:
 
 ```scala
 import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 // The tenant is one more part of the key; sha256 keeps every part apart from the others.
-def tenantKey(tenant: String)(text: String, model: ModelName, purpose: InputPurpose): String =
-  CacheKeyGenerator.sha256(tenant, model.asString, purpose.toString, text)
+def tenantKey(tenant: String)(text: String, request: EmbeddingRequest): String =
+  CacheKeyGenerator.sha256(tenant, request.model.name.asString, request.purpose.toString, text)
 
 val cached =
   InMemoryEmbeddingCache.create().map(cache => CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))

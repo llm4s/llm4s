@@ -111,8 +111,8 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
   ): Result[Completion] =
     complete(conversation, options)
 
-  override def getContextWindow(): Int     = config.contextWindow
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def contextWindow: Int     = config.contextWindow
+  override def reserveCompletion: Int = config.reserveCompletion
 
 object FixtureChatClient:
   val Reply: String = "fixture reply"

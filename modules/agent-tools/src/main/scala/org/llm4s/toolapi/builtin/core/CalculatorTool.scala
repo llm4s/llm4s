@@ -83,7 +83,7 @@ object CalculatorTool {
         bOpt = extractor.getDouble("b").toOption
         result <- calculate(operation, a, bOpt).left.map(ToolHandlerError.failed)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def calculate(operation: String, a: Double, bOpt: Option[Double]): Either[String, CalculatorResult] = {
     def requireB: Either[String, Double] =

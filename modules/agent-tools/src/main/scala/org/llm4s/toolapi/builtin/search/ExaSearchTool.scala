@@ -373,7 +373,7 @@ object ExaSearchTool {
             ToolHandlerError.failed
           )
         } yield result
-      }.buildSafe()
+      }.build()
     } yield tool
 
   /**

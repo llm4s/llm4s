@@ -73,7 +73,7 @@ val temperatureTool: Result[ToolFunction[Temperature]] =
     Schema
       .`object`[Map[String, Any]]("Parameters")
       .withProperty(Schema.property("city", Schema.string("City name")))
-  ).withHandler(params => params.getString("city").map(city => Temperature(city, 21.0))).buildSafe()
+  ).withHandler(params => params.getString("city").map(city => Temperature(city, 21.0))).build()
 
 def packingAdvice(client: LLMClient, city: String): Result[String] =
   for {

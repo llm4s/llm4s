@@ -1044,7 +1044,7 @@ import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.types.HeadroomPercent
 
 // Get available tokens considering model limits and safety margin
-val budget = client.getContextBudget(HeadroomPercent.Standard)
+val budget = client.contextBudget(HeadroomPercent.Standard)
 val config = ContextWindowConfig(maxTokens = Some(budget))
 
 // ContextWindowMiddleware counts tokens with cl100k_base by default

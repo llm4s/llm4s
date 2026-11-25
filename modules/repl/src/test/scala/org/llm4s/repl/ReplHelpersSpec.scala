@@ -39,7 +39,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
       "The weather in a city",
       Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))
     ).withHandler(args => args.getString("city").map(city => ujson.Obj("city" -> city, "temperature" -> 21)))
-      .buildSafe()
+      .build()
       .fold(error => fail(error.message), identity)
 
   "ask" should "stream the answer, return it and record the exchange" in {
@@ -327,8 +327,8 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     val session = Session.of(client)
     val wrapped = session.client.fold(error => fail(error.message), identity)
 
-    wrapped.getContextWindow() shouldBe 1000
-    wrapped.getReserveCompletion() shouldBe 100
+    wrapped.contextWindow shouldBe 1000
+    wrapped.reserveCompletion shouldBe 100
     wrapped.validate() shouldBe Right(())
     wrapped.providerId shouldBe None
     wrapped.complete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions()).map(_.content) shouldBe Right("ok")
@@ -362,9 +362,9 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(answer)
-    override def getContextWindow(): Int     = 1000
-    override def getReserveCompletion(): Int = 100
-    override def validate(): Result[Unit]    = Right(())
-    override def close(): Unit               = closed = true
+    override def contextWindow: Int       = 1000
+    override def reserveCompletion: Int   = 100
+    override def validate(): Result[Unit] = Right(())
+    override def close(): Unit            = closed = true
   }
 }

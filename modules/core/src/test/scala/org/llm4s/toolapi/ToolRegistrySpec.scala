@@ -40,7 +40,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         a <- extractor.getDouble("a")
         b <- extractor.getDouble("b")
       } yield MathResult(a + b)
-    }.buildSafe()
+    }.build()
   }
 
   def createMultiplyTool(): Result[ToolFunction[MathResult]] = {
@@ -58,7 +58,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         a <- extractor.getDouble("a")
         b <- extractor.getDouble("b")
       } yield MathResult(a * b)
-    }.buildSafe()
+    }.build()
   }
 
   def createEchoTool(): Result[ToolFunction[StringResult]] = {
@@ -71,7 +71,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       "Echoes the message",
       schema
     ).withHandler(extractor => extractor.getString("message").map(msg => StringResult(s"Echo: $msg")))
-      .buildSafe()
+      .build()
   }
 
   /** Tool that sleeps for a given number of milliseconds then returns. Used for timeout tests. */
@@ -91,7 +91,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         Thread.sleep(ms.toLong)
         MathResult(0.0)
       }
-    }.buildSafe()
+    }.build()
   }
 
   /** Tool that fails with IOException the first N times then succeeds. Used for retry tests. */
@@ -113,7 +113,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         }
         MathResult(x)
       }
-    }.buildSafe()
+    }.build()
   }
 
   /** Tool that always returns Left (handler error). Not retryable. */
@@ -125,7 +125,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       "fail",
       "Always fails",
       schema
-    ).withHandler(_ => Left(ToolHandlerError.failed("validation error"))).buildSafe()
+    ).withHandler(_ => Left(ToolHandlerError.failed("validation error"))).build()
   }
 
   // ============ ToolRegistry.empty ============
@@ -492,7 +492,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         case _: InterruptedException => interruptReceived.set(true)
       }
       Right(MathResult(0.0))
-    }.buildSafe()
+    }.build()
 
     hangingTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
@@ -528,7 +528,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       try Thread.sleep(500)
       catch { case _: InterruptedException => () }
       Right(MathResult(0.0))
-    }.buildSafe()
+    }.build()
 
     interruptSafeSleepTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
@@ -574,7 +574,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         case _: InterruptedException => interruptReceived.set(true)
       }
       Right(MathResult(42.0))
-    }.buildSafe()
+    }.build()
 
     fastTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
@@ -629,7 +629,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         }
         MathResult(x)
       }
-    }.buildSafe()
+    }.build()
 
     slowFirstTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
@@ -662,7 +662,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       try Thread.sleep(30_000)
       catch { case _: InterruptedException => () }
       Right(MathResult(0.0))
-    }.buildSafe()
+    }.build()
 
     hangingTool.fold(
       e => fail(s"Hanging tool creation failed: ${e.formatted}"),
@@ -751,7 +751,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         if (callCount.getAndIncrement() < 3) throw new java.io.IOException("transient")
         MathResult(x)
       }
-    }.buildSafe()
+    }.build()
 
     trackedTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
@@ -870,7 +870,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       catch { case _: InterruptedException => workerInterrupted.set(true) }
       // scalafix:on
       Right(MathResult(0.0))
-    }.buildSafe()
+    }.build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val registry = ToolRegistry.of(Seq(blocking)).toOption.get
     @volatile var outcome: Option[(Either[ToolCallError, ujson.Value], Boolean)] = None
@@ -894,7 +894,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       "Throws",
       Schema.`object`[Map[String, Any]]("p")
     ).withHandler(_ => throw new InterruptedException("stop"))
-      .buildSafe()
+      .build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val registry = ToolRegistry.of(Seq(thrower)).toOption.get
     val result   = registry.execute(ToolCallRequest("thrower", ujson.Obj()))
@@ -911,7 +911,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     ).withHandler { _ =>
       attempts.incrementAndGet()
       throw new java.io.IOException("read aborted", new InterruptedException("stop"))
-    }.buildSafe()
+    }.build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val registry = ToolRegistry.of(Seq(wrapping)).toOption.get
     val config =
@@ -931,7 +931,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     ).withHandler { _ =>
       attempts.incrementAndGet()
       throw new java.io.IOException("transient")
-    }.buildSafe()
+    }.build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val registry = ToolRegistry.of(Seq(failing)).toOption.get
     val config = ToolExecutionConfig(
@@ -956,7 +956,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       "Throws",
       Schema.`object`[Map[String, Any]]("p")
     ).withHandler(_ => throw new InterruptedException("stop"))
-      .buildSafe()
+      .build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val sleeper = ToolBuilder[MathResult](
       "sleeper",
@@ -965,7 +965,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     ).withHandler { _ =>
       Thread.sleep(10) // throws at once if a leaked flag is still set
       Right(MathResult(1.0))
-    }.buildSafe()
+    }.build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
     val registry = ToolRegistry.of(Seq(thrower, sleeper)).toOption.get
     // One fork-join worker, so the second call runs on the thread the first was cancelled on. Unlike

@@ -21,9 +21,9 @@ final private[repl] class RecordingClient(underlying: LLMClient, session: Sessio
   ): Result[Completion] =
     timed(underlying.streamComplete(conversation, options)(onChunk))
 
-  override def getContextWindow(): Int = underlying.getContextWindow()
+  override def contextWindow: Int = underlying.contextWindow
 
-  override def getReserveCompletion(): Int = underlying.getReserveCompletion()
+  override def reserveCompletion: Int = underlying.reserveCompletion
 
   override def validate(): Result[Unit] = underlying.validate()
 

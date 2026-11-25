@@ -21,7 +21,7 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
   private val tool: ToolFunction[Pong] =
     ToolBuilder[Pong]("ping", "ping", Schema.`object`[Map[String, Any]]("none"))
       .withHandler(_ => Right(Pong(true)))
-      .buildSafe()
+      .build()
       .getOrElse(fail("tool"))
 
   private val hi = Conversation(Seq(UserMessage("Hi")))

@@ -45,8 +45,8 @@ private[javaapi] object StreamFixtures {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete()
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       onStream(onChunk)
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   def answering(text: String): LLMClient = new Scripted(_ => Right(completion(text)), () => Right(completion(text)))

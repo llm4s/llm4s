@@ -96,7 +96,7 @@ object ToolRegistryShapeSpec {
   def tool(name: String, reply: String): ToolFunction[String] =
     ToolBuilder[String](name, s"Replies $reply", Schema.`object`[Map[String, Any]]("No arguments"))
       .withHandler(_ => Right(reply))
-      .buildSafe()
+      .build()
       .toOption
       .get
 

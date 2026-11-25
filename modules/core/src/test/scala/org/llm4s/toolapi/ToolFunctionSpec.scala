@@ -33,7 +33,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "Creates a greeting message",
       schema
     ).withHandler(extractor => extractor.getString("name").map(name => GreetingResult(s"Hello, $name!")))
-      .buildSafe()
+      .build()
   }
 
   def createZeroParamTool(): Result[ToolFunction[EmptyResult]] = {
@@ -43,7 +43,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "ping",
       "Returns success without parameters",
       schema
-    ).withHandler(_ => Right(EmptyResult(success = true))).buildSafe()
+    ).withHandler(_ => Right(EmptyResult(success = true))).build()
   }
 
   // ============ ToolFunction.toolDefinition ============
@@ -116,7 +116,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       schema
     ).withHandler(extractor =>
       extractor.getDouble("value").flatMap(_ => Left(ToolHandlerError.failed("intentional failure")))
-    ).buildSafe()
+    ).build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
@@ -174,7 +174,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
         .`object`[Map[String, Any]]("Params")
         .withProperty(Schema.property("a", Schema.number("First number")))
         .withProperty(Schema.property("b", Schema.number("Second number")))
-    ).withHandler(handler).buildSafe().fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    ).withHandler(handler).build().fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def sum = adder { args =>
     for {
@@ -292,7 +292,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "Doubles a number",
       schema
     ).withHandler(extractor => extractor.getDouble("value").map(v => MathResult(v * 2)))
-      .buildSafe()
+      .build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
@@ -314,7 +314,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       schema
     )
 
-    val result = builder.buildSafe()
+    val result = builder.build()
     result.isLeft shouldBe true
   }
 
@@ -330,7 +330,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     val builder2 = builder1.withHandler(_ => Right(EmptyResult(success = true)))
 
     builder2
-      .buildSafe()
+      .build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {

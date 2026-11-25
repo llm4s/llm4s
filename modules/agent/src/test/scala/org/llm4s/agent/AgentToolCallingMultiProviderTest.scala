@@ -28,7 +28,7 @@ class AgentToolCallingMultiProviderTest extends AnyFlatSpec with Matchers {
         val item = params.getString("item").getOrElse("unknown")
         Right(ToolResult(success = true, message = s"Added '$item' to inventory", item = item))
       }
-      .buildSafe()
+      .build()
   }
 
   private def agentWith(client: ScriptedLLMClient): Agent = {

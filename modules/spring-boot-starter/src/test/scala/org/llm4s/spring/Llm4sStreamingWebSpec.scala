@@ -39,8 +39,8 @@ object Llm4sStreamingWebSpec {
         Pieces.foreach(p => f(StreamedChunk(id = "c", content = Some(p))))
         Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(Pieces.mkString)))
       }
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   @Configuration

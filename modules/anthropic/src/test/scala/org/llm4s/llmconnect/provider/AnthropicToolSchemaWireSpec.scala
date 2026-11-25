@@ -25,7 +25,7 @@ class AnthropicToolSchemaWireSpec extends AnyFlatSpec with Matchers {
   private def tool(schema: SchemaDefinition[?]): ToolFunction[String] =
     ToolBuilder[String]("get_weather", "The weather in a city", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .toOption
       .get
 

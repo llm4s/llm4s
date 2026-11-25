@@ -92,7 +92,7 @@ object GraphQueryTool {
         )
         result <- pipeline.ask(question).left.map(e => ToolHandlerError.failed(e.formatted))
       } yield toToolResult(result)
-    }.buildSafe()
+    }.build()
 
   /**
    * Converts a GraphQAResult into the tool result format.

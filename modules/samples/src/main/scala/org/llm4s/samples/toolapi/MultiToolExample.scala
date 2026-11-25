@@ -93,12 +93,12 @@ object MultiToolExample {
         "calculator",
         "Performs basic arithmetic operations",
         calculatorSchema
-      ).withHandler(calculatorHandler).buildSafe()
+      ).withHandler(calculatorHandler).build()
       searchTool <- ToolBuilder[SearchResult](
         "search",
         "Searches for information",
         searchSchema
-      ).withHandler(searchHandler).buildSafe()
+      ).withHandler(searchHandler).build()
       toolRegistry <- ToolRegistry.of(Seq(calculatorTool, searchTool))
     } yield {
 

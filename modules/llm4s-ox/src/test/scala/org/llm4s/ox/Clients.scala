@@ -41,8 +41,8 @@ object Clients {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       recorded(delegate.streamComplete(conversation, options)(onChunk))
-    def getContextWindow(): Int     = delegate.getContextWindow()
-    def getReserveCompletion(): Int = delegate.getReserveCompletion()
+    def contextWindow: Int     = delegate.contextWindow
+    def reserveCompletion: Int = delegate.reserveCompletion
   }
 
   /**
@@ -68,8 +68,8 @@ object Clients {
       first.foreach(onChunk)
       park()
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   /** Answers every call with `answer`, after `delay` milliseconds; counts the calls running at once. */
@@ -87,8 +87,8 @@ object Clients {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   /** Fails every `streamComplete` call by throwing `thrown` after `first`, as a buggy provider might. */
@@ -100,8 +100,8 @@ object Clients {
       first.foreach(onChunk)
       throw thrown
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   /**
@@ -125,8 +125,8 @@ object Clients {
       Thread.interrupted(): Unit
       complete(conversation, options)
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   /** Streams `chunks`, then returns `Left(error)`. */
@@ -138,7 +138,7 @@ object Clients {
       chunks.foreach(onChunk)
       Left(error)
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 }

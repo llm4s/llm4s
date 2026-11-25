@@ -129,7 +129,7 @@ object DateTimeTool {
           ToolHandlerError.failed(s"Invalid timezone '$timezone': ${e.getMessage}")
         )
       } yield describe(ZonedDateTime.ofInstant(clock.instant(), zoneId), timezone, format)
-    }.buildSafe()
+    }.build()
 
   private def describe(now: ZonedDateTime, timezone: String, format: Format): DateTimeResult = {
     val iso = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)

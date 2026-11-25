@@ -30,10 +30,10 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       behavior()
     }
 
-    override def getContextWindow(): Int     = 8192
-    override def getReserveCompletion(): Int = 1024
-    override def validate(): Result[Unit]    = Right(())
-    override def close(): Unit               = ()
+    override def contextWindow: Int       = 8192
+    override def reserveCompletion: Int   = 1024
+    override def validate(): Result[Unit] = Right(())
+    override def close(): Unit            = ()
   }
 
   class SequentialMockClient(responses: Seq[() => Result[Completion]]) extends LLMClient {
@@ -48,10 +48,10 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-    override def validate(): Result[Unit]    = Right(())
-    override def close(): Unit               = ()
+    override def contextWindow: Int       = 4096
+    override def reserveCompletion: Int   = 512
+    override def validate(): Result[Unit] = Right(())
+    override def close(): Unit            = ()
   }
 
   class TestMetricsCollector extends MetricsCollector with ReliabilityRecordings {
@@ -156,16 +156,16 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     closed shouldBe true
   }
 
-  "ReliableClient.getContextWindow" should "delegate to underlying" in {
+  "ReliableClient.contextWindow" should "delegate to underlying" in {
     val mockClient = new MockClient(() => Right(testCompletion))
     val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.default)
-    reliable.getContextWindow() shouldBe 8192
+    reliable.contextWindow shouldBe 8192
   }
 
-  "ReliableClient.getReserveCompletion" should "delegate to underlying" in {
+  "ReliableClient.reserveCompletion" should "delegate to underlying" in {
     val mockClient = new MockClient(() => Right(testCompletion))
     val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.default)
-    reliable.getReserveCompletion() shouldBe 1024
+    reliable.reserveCompletion shouldBe 1024
   }
 
   // ==========================================================================

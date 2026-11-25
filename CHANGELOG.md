@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `LLMClient.getContextWindow()`, `getReserveCompletion()` and `getContextBudget(...)` are `contextWindow`, `reserveCompletion` and `contextBudget(...)`; `ConversationTokenCounter.getTokenBreakdown` is `tokenBreakdown`, `ModelDimensionRegistry.getDimension` is `dimension`, and `ToolBuilder.buildSafe()` is `build()`
+  ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `ThinkingBlock.Opaque.provider` is a `ProviderId`, `BaseLifecycleLLMClient.providerName: String` is `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `ValidationError.violations`, `ConfigurationError.missingKeys`, the `ToolParameterError` and `ToolCallError.InvalidArguments` error lists, `LLMError.recoverableErrors`, `Result.sequence`, `traverse` and `validateAll`, `AgentResult.messages` and `OpenAICompatibleClient.parseCitations` are `Seq`s
+  ([migration](docs/reference/migration.md#errors-result-helpers-and-agentresultmessages-are-seqs-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `CachedEmbeddingClient`'s key function is `(String, EmbeddingRequest) => String`, the text and its request; the default keys are unchanged
+  ([migration](docs/reference/migration.md#cachedembeddingclients-key-function-takes-the-request-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - `UserMessage.parts` and `ToolMessage.parts` are `Seq[ContentPart]`, and `Completion.citations`, the `RequestAdjustment` lists (`Completion`, `TransformationResult`, `OpenAICompatibleDialect.addReasoning`, `ModelCallCompleted`) are `Seq`s; stored JSON is unchanged
   ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
@@ -266,6 +274,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** A `temperature` or thinking budget set for Claude Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, Fable or Mythos was sent and answered 400: no sampling parameter and no `budget_tokens` goes to these models (Anthropic, Bedrock, an OpenAI-compatible gateway), by the catalog's `supports_sampling_params` (new `ModelCapabilities.supportsSamplingParams`) or the model's name, and each drop is a `RequestAdjustment`. [#2909](https://github.com/llm4s/llm4s/issues/2909)
 - **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception. The six vendor clients on `OpenAICompatibleClient` are private classes, built by `DeepSeekClient(config, options)` and its siblings as an `OpenAICompatibleClient`
   ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
@@ -377,6 +386,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** Accessors are named for their values: `LLMClient.contextWindow`, `reserveCompletion` and `contextBudget(...)`, `ConversationTokenCounter.tokenBreakdown`, `ModelDimensionRegistry.dimension`; `ToolBuilder.build()` replaces `buildSafe()`. The scalafix rule `AccessorRenames` rewrites callers and overriders ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** `ThinkingBlock.Opaque` holds a `ProviderId`, a `BaseLifecycleLLMClient` declares `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; `ThinkingBlockWireFormatSpec` pins the stored JSON, which is unchanged ([migration](docs/reference/migration.md#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** The error types' lists (`ValidationError.violations`, `ConfigurationError.missingKeys`, `ToolParameterError`, `ToolCallError.InvalidArguments`), `LLMError.recoverableErrors`, `Result.sequence`, `traverse` and `validateAll`, `AgentResult.messages` and `OpenAICompatibleClient.parseCitations` are `Seq`s ([migration](docs/reference/migration.md#errors-result-helpers-and-agentresultmessages-are-seqs-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** `CachedEmbeddingClient`'s key function takes the text and its `EmbeddingRequest`, so a key can use anything a request carries; `CacheKeyGenerator.embeddingKey(text, request)` is the default ([migration](docs/reference/migration.md#cachedembeddingclients-key-function-takes-the-request-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - **Changed** the model's public collections are `Seq`s: message parts (were `Vector`), `Completion.citations` and the request adjustments (were `List`); `MessagePartsWireFormatSpec` pins the stored JSON, which is unchanged [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
 - **Changed** Model ids are `ModelName` and provider configs' base URLs `BaseUrl` across the public API, from `Completion` and `UsageSummary` to the registry, embeddings, trace events, the provider SPI and every `fromValues`; the scalafix rule `ModelIdNewtypes` wraps the common call sites ([migration](docs/reference/migration.md#model-ids-are-modelname-and-provider-configs-base-urls-are-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
@@ -663,6 +676,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Added** The compatibility policy names the Stable sealed types and enums that may gain a case in a minor release (`LLMError`, `ContentPart`, `TraceEvent`, `AgentStatus`, `StreamEvent` and the others listed there), so a match on one needs a default case; removing or renaming a case stays a break ([compatibility policy](docs/reference/compatibility-policy.md#sealed-types-that-may-gain-a-case)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md)'s parts 6 (testing: `llm4s-testkit` fakes, a judged evaluation) and 7 (an HTTP endpoint, tracing, Prometheus metrics, deployment), with exercises that `Part6Spec` and `Part7Spec` check offline ([#2879](https://github.com/llm4s/llm4s/issues/2879)).
 - **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
   `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`), as do the enterprise deploy overlay, its LiteLLM gateway config and the Kotlin KDoc; the watsonx pages say it ships unverified, the

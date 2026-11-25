@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.model
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import upickle.default.{ readwriter, ReadWriter => RW }
 
 /**
@@ -48,12 +49,13 @@ enum ThinkingBlock:
    * message is unsealed. The reasoning text, when the provider returns it, is carried beside it as
    * a [[Text]] block, so it survives unsealing and is what [[ThinkingBlock.text]] reports.
    *
-   * @param provider The id of the provider that produced it, as its client names itself
+   * @param provider The id of the provider that produced it, as its client names itself: canonical, as every
+   *                 `ProviderId` is
    *                 (`"openrouter"` for OpenRouter's `reasoning_details`).
    * @param data     The provider's own encoding, opaque to everything but that client - for
    *                 OpenRouter, one `reasoning_details` item rendered as JSON.
    */
-  case Opaque(provider: String, data: String)
+  case Opaque(provider: ProviderId, data: String)
 
 object ThinkingBlock:
 
@@ -81,13 +83,13 @@ object ThinkingBlock:
         signature.foreach(s => obj("signature") = s)
         obj
       case Redacted(data)         => ujson.Obj("type" -> "redacted", "data" -> data)
-      case Opaque(provider, data) => ujson.Obj("type" -> "opaque", "provider" -> provider, "data" -> data)
+      case Opaque(provider, data) => ujson.Obj("type" -> "opaque", "provider" -> provider.asString, "data" -> data)
     },
     json => {
       val obj = json.obj
       obj.get("type").flatMap(_.strOpt) match {
         case Some("redacted") => Redacted(obj("data").str)
-        case Some("opaque")   => Opaque(obj("provider").str, obj("data").str)
+        case Some("opaque")   => Opaque(ProviderId(obj("provider").str), obj("data").str)
         case _                => Text(obj("text").str, obj.get("signature").flatMap(_.strOpt))
       }
     }

@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.caching
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.InputPurpose
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 
 import java.security.MessageDigest
 
@@ -27,6 +27,19 @@ object CacheKeyGenerator {
    */
   def embeddingKey(text: String, model: ModelName, purpose: InputPurpose): String =
     sha256(text, model.asString, purposeTag(purpose))
+
+  /**
+   * The default embedding cache key for one input text of `request`: [[embeddingKey(text:String,model* embeddingKey]]
+   * of the text, the request's model name and its purpose. This is the shape of
+   * [[CachedEmbeddingClient]]'s key function, which is given the whole request so that a key of your own can use
+   * anything the request carries.
+   *
+   * @param text    One of the request's input texts
+   * @param request The request the text is embedded by
+   * @return A 64-character hex string representing the hash
+   */
+  def embeddingKey(text: String, request: EmbeddingRequest): String =
+    embeddingKey(text, request.model.name, request.purpose)
 
   /**
    * The SHA-256 of the given parts, each prefixed with its length and a colon (`5:hello`), so the

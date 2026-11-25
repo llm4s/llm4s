@@ -105,7 +105,7 @@ object ListDirectoryTool {
         includeHidden = extractor.getBoolean("include_hidden").fold(_ => false, identity)
         result <- listDirectory(pathStr, maxEntries, includeHidden, config).left.map(ToolHandlerError.failed)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Default list directory tool instance, returning a Result for safe error handling.

@@ -91,8 +91,8 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /** Runs the agent over the real workspace tools and returns the final state's tool messages. */

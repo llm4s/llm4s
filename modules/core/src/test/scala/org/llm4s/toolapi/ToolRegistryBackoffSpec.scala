@@ -27,7 +27,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   private def toolOf(name: String)(body: => Either[ToolHandlerError, Ok]): ToolFunction[Ok] =
     ToolBuilder[Ok](name, s"test tool $name", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => body)
-      .buildSafe()
+      .build()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   /** Fails with a retryable IOException `failures` times, then succeeds; counts every attempt. */

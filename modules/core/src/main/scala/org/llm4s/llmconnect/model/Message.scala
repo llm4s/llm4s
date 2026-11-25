@@ -544,7 +544,7 @@ final case class AssistantMessage private (
       thinking.exists {
         case ThinkingBlock.Text(text, signature)  => text.isEmpty && !signature.exists(_.nonEmpty)
         case ThinkingBlock.Redacted(data)         => data.isEmpty
-        case ThinkingBlock.Opaque(provider, data) => provider.isEmpty || data.isEmpty
+        case ThinkingBlock.Opaque(provider, data) => provider.asString.isEmpty || data.isEmpty
       }
     ) {
       Left(ValidationError("thinking", "an assistant message's thinking block must not be empty"))

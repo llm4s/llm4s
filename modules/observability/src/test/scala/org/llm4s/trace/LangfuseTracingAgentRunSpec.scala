@@ -64,8 +64,8 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private case class EchoResult(echo: String)
@@ -77,7 +77,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
+  ).withHandler(_.getString("message").map(EchoResult(_))).build()
 
   private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
 

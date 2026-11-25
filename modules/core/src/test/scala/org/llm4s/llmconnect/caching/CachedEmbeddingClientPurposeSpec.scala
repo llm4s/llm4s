@@ -107,13 +107,16 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
     provider.requests should have size 2
   }
 
-  it should "hand a custom key generator the text, the model name and the purpose" in {
+  it should "hand a custom key generator the text and its request, with the model name and the purpose" in {
     val seen  = ListBuffer.empty[(String, String, InputPurpose)]
     val cache = InMemoryEmbeddingCache.create().toOption.get
     val client = CachedEmbeddingClient(
       EmbeddingClient(new PurposeEchoProvider),
       cache,
-      (text, modelName, purpose) => { seen += ((text, modelName.asString, purpose)); s"$purpose|$modelName|$text" }
+      (text, request) => {
+        seen += ((text, request.model.name.asString, request.purpose));
+        s"${request.purpose}|${request.model.name}|$text"
+      }
     )
 
     client.embed(EmbeddingRequest(Seq("t"), model))
