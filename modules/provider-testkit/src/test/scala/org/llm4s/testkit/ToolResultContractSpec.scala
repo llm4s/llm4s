@@ -201,8 +201,8 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
             .map(_ => Completion("id", Instant.EPOCH, ModelName("test"), AssistantMessage("done")))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   "assertOneToolResultPerCall" should "pass for a client that sends every call and result, paired" in {
     assertOneToolResultPerCall(OpenAIChat, LocalProviderTestServer.openAICompletion("done"))(base =>

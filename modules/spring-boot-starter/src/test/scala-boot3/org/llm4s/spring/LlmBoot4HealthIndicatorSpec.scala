@@ -25,8 +25,8 @@ class LlmBoot4HealthIndicatorSpec extends AnyFlatSpec with Matchers {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       reply
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   })
 
   private val ok     = Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))

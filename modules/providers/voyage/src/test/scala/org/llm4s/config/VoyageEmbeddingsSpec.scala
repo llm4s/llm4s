@@ -147,21 +147,21 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
   "ModelDimensionRegistry" should {
 
     "know the documented Voyage models" in {
-      ModelDimensionRegistry.getDimension(ProviderId("voyage"), ModelName("voyage-3")).value shouldBe 1024
+      ModelDimensionRegistry.dimension(ProviderId("voyage"), ModelName("voyage-3")).value shouldBe 1024
     }
 
     "give voyage-3-large its default size, not 1536" in {
-      ModelDimensionRegistry.getDimension(ProviderId("voyage"), ModelName("voyage-3-large")).value shouldBe 1024
+      ModelDimensionRegistry.dimension(ProviderId("voyage"), ModelName("voyage-3-large")).value shouldBe 1024
     }
 
     "resolve the voyageai alias and ignore the provider's case" in {
-      ModelDimensionRegistry.getDimension(ProviderId("voyageai"), ModelName("voyage-3")).value shouldBe 1024
-      ModelDimensionRegistry.getDimension(ProviderId("Voyage"), ModelName("voyage-3")).value shouldBe 1024
+      ModelDimensionRegistry.dimension(ProviderId("voyageai"), ModelName("voyage-3")).value shouldBe 1024
+      ModelDimensionRegistry.dimension(ProviderId("Voyage"), ModelName("voyage-3")).value shouldBe 1024
     }
 
     "name the model and provider when Voyage does not declare the model" in {
       ModelDimensionRegistry
-        .getDimension(ProviderId("voyage"), ModelName("gpt-4o"))
+        .dimension(ProviderId("voyage"), ModelName("gpt-4o"))
         .left
         .value
         .formatted should include(

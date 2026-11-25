@@ -54,7 +54,7 @@ object ToolParameterError {
   final case class MissingParameter private (
     parameterName: String,
     expectedType: String,
-    availableParameters: List[String]
+    availableParameters: Seq[String]
   ) extends ToolParameterError {
     def message: String = {
       val available = if (availableParameters.nonEmpty) {
@@ -70,7 +70,7 @@ object ToolParameterError {
     def withExpectedType(expectedType: String): MissingParameter = copy(expectedType = expectedType)
 
     /** Replace the names of the parameters that were provided (a hint for self-correction). */
-    def withAvailableParameters(availableParameters: List[String]): MissingParameter =
+    def withAvailableParameters(availableParameters: Seq[String]): MissingParameter =
       copy(availableParameters = availableParameters)
   }
 
@@ -80,7 +80,7 @@ object ToolParameterError {
     def apply(
       parameterName: String,
       expectedType: String,
-      availableParameters: List[String] = Nil
+      availableParameters: Seq[String] = Nil
     ): MissingParameter =
       new MissingParameter(parameterName, expectedType, availableParameters)
   }
@@ -137,7 +137,7 @@ object ToolParameterError {
    * @param errors the individual parameter errors
    */
   case class MultipleErrors(
-    errors: List[ToolParameterError]
+    errors: Seq[ToolParameterError]
   ) extends ToolParameterError {
     def parameterName: String = errors.map(_.parameterName).mkString(", ")
     def message: String =
@@ -224,11 +224,11 @@ object ToolCallError {
    */
   case class InvalidArguments(
     toolName: String,
-    parameterErrors: List[ToolParameterError]
+    parameterErrors: Seq[ToolParameterError]
   ) extends ToolCallError {
     def message: String = {
       val errorMessages = parameterErrors match {
-        case single :: Nil => single.message
+        case Seq(single) => single.message
         case multiple =>
           s"has parameter issues:\n${multiple.map(e => s"  - ${e.message}").mkString("\n")}"
       }
@@ -355,10 +355,10 @@ object ToolCallErrorJson {
   /**
    * Flatten MultipleErrors into a list of individual errors
    */
-  def flattenErrors(errors: List[ToolParameterError]): List[ToolParameterError] =
+  def flattenErrors(errors: Seq[ToolParameterError]): Seq[ToolParameterError] =
     errors.flatMap {
       case ToolParameterError.MultipleErrors(nested) => flattenErrors(nested)
-      case single                                    => List(single)
+      case single                                    => Seq(single)
     }
 
   /**

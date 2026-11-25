@@ -191,13 +191,13 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     medium should be < large
   }
 
-  // ============ getTokenBreakdown ============
+  // ============ tokenBreakdown ============
 
-  "ConversationTokenCounter.getTokenBreakdown" should "return per-message counts" in {
+  "ConversationTokenCounter.tokenBreakdown" should "return per-message counts" in {
     val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.smallConversation
 
-    val breakdown = counter.getTokenBreakdown(conversation)
+    val breakdown = counter.tokenBreakdown(conversation)
 
     breakdown.messages.length shouldBe conversation.messages.length
     breakdown.overhead shouldBe 10
@@ -213,7 +213,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    val breakdown = counter.getTokenBreakdown(conversation)
+    val breakdown = counter.tokenBreakdown(conversation)
 
     breakdown.messages(0).role shouldBe MessageRole.User
     breakdown.messages(1).role shouldBe MessageRole.Assistant
@@ -224,7 +224,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     val longContent  = "A" * 100
     val conversation = Conversation(Seq(UserMessage(longContent)))
 
-    val breakdown = counter.getTokenBreakdown(conversation)
+    val breakdown = counter.tokenBreakdown(conversation)
 
     // Preview should be truncated to 50 chars
     breakdown.messages(0).preview.length shouldBe 50
@@ -234,7 +234,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.smallConversation
 
-    val breakdown = counter.getTokenBreakdown(conversation)
+    val breakdown = counter.tokenBreakdown(conversation)
     val output    = breakdown.prettyPrint()
 
     output should include("Token Breakdown")

@@ -200,7 +200,7 @@ def searchDatabase: Result[ToolFunction[String]] = {
     "search_database",
     "Search the customer database for records matching the query.",
     schema
-  ).withHandler(handler).buildSafe()
+  ).withHandler(handler).build()
 }
 ```
 

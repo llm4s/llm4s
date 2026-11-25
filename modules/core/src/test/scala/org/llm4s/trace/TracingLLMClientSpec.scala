@@ -46,8 +46,8 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       onChunk(StreamedChunk("c-1", None, finishReason = Some(FinishReason.Length)))
       result
     }
-    def getContextWindow(): Int                 = 1000
-    def getReserveCompletion(): Int             = 100
+    def contextWindow: Int                      = 1000
+    def reserveCompletion: Int                  = 100
     override def validate(): Result[Unit]       = Left(UnknownError("invalid", new RuntimeException("x")))
     override def close(): Unit                  = closed = true
     override def providerId: Option[ProviderId] = Some(ProviderId("OpenAI"))
@@ -180,8 +180,8 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
     "forward the rest to the wrapped client" in {
       val stub   = new Stub(Right(completion))
       val client = TracingLLMClient(stub, new Recording)
-      client.getContextWindow() shouldBe 1000
-      client.getReserveCompletion() shouldBe 100
+      client.contextWindow shouldBe 1000
+      client.reserveCompletion shouldBe 100
       client.validate().isLeft shouldBe true
       client.providerId shouldBe Some(ProviderId("openai"))
       client.close()

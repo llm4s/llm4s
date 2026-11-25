@@ -48,14 +48,14 @@ import java.time.Instant
  * tools).
  *
  * The client is thread-safe: calls from several threads are recorded one at a time and each gets its own position
- * in the script. It reports a context window of [[getContextWindow]] tokens and reserves [[getReserveCompletion]]
+ * in the script. It reports a context window of [[contextWindow]] tokens and reserves [[reserveCompletion]]
  * for the answer, which [[withContextWindow]] and [[withReserveCompletion]] change.
  */
 final class ScriptedLLMClient private (
   respond: (Int, Conversation) => Either[String, Reply],
   script: Vector[Reply],
-  contextWindow: Int,
-  reserveCompletion: Int,
+  override val contextWindow: Int,
+  override val reserveCompletion: Int,
   val chunkSize: Int
 ) extends LLMClient {
 
@@ -129,10 +129,6 @@ final class ScriptedLLMClient private (
       chunksOf(index, completion).foreach(onChunk)
       completion
     }
-
-  override def getContextWindow(): Int = contextWindow
-
-  override def getReserveCompletion(): Int = reserveCompletion
 
   /** Records the request and picks its reply under one lock, so concurrent callers never share a position. */
   private def answer(

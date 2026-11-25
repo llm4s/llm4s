@@ -510,6 +510,19 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     baseCapabilities shouldBe ModelCapabilities()
   }
 
+  it should "set, replace and clear supportsSamplingParams" in {
+    val enabled  = ModelCapabilities(supportsSamplingParams = Some(true))
+    val disabled = ModelCapabilities(supportsSamplingParams = Some(false))
+
+    baseCapabilities.withSupportsSamplingParams(true) shouldBe enabled
+    baseCapabilities.withSupportsSamplingParams(Some(true)) shouldBe enabled
+    baseCapabilities.withSupportsSamplingParams(false) shouldBe disabled
+    enabled.withSupportsSamplingParams(false) shouldBe disabled
+    disabled.withSupportsSamplingParams(Some(true)) shouldBe enabled
+    enabled.withSupportsSamplingParams(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
+  }
+
   it should "set, replace and clear supportedReasoningEfforts" in {
     val populated   = ModelCapabilities(supportedReasoningEfforts = Some(Set(ReasoningEffort.Low)))
     val replacement = ModelCapabilities(supportedReasoningEfforts = Some(Set(ReasoningEffort.High)))

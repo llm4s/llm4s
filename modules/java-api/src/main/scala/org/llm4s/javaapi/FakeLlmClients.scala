@@ -80,8 +80,8 @@ private[javaapi] object FakeLlmClients {
         completion
       }
 
-    override def getContextWindow(): Int     = 128000
-    override def getReserveCompletion(): Int = 4096
+    override def contextWindow: Int     = 128000
+    override def reserveCompletion: Int = 4096
 
     def callCount: Int                  = lock.synchronized(recorded.size)
     def prompts: java.util.List[String] = java.util.List.copyOf(lock.synchronized(recorded).asJava)

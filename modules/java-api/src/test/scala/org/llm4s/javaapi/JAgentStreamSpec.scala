@@ -58,7 +58,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+  ).withHandler(_.getString("message").map(EchoResult(_))).build().fold(e => fail(e.formatted), identity)
 
   "JAgent.stream" should "deliver the run's events, then its result, on one thread that is not the caller's" in {
     val recorder = Recorder()

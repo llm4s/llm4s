@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -40,14 +40,14 @@ final class JlamaClient private[provider] (
   import JlamaClient.*
 
   protected def clientDescription: String = s"Jlama client for model ${config.model}"
-  protected def providerName: String      = ProviderName
+  protected def provider: ProviderId      = ProviderId(ProviderName)
   protected def modelName: ModelName      = config.model
 
   private val lock                        = new ReentrantLock()
   private var engine: Option[JlamaEngine] = None // guarded by lock
 
-  override def getContextWindow(): Int     = config.contextWindow
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def contextWindow: Int     = config.contextWindow
+  override def reserveCompletion: Int = config.reserveCompletion
 
   // what the engine is not given goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(ProviderName)

@@ -138,7 +138,7 @@ object ParallelToolExecutionExample {
           requestedAt = System.currentTimeMillis()
         )
       }
-    }.buildSafe()
+    }.build()
   }
 
   private def logResults(results: Seq[Either[ToolCallError, ujson.Value]]): Unit =

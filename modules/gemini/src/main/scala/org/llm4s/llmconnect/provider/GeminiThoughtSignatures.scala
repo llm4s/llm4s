@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.model.{ AssistantMessage, FinishReason, StreamedChunk, ThinkingBlock, ToolCall, ToolCallId }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
@@ -86,7 +87,7 @@ private[provider] object GeminiThoughtSignatures {
    *                   response, the text streamed so far for a stream chunk
    * @param newId      makes the id of a function call that arrives without `functionCall.id`
    */
-  def parse(provider: String, parts: Seq[ujson.Value], textOffset: Int, newId: () => String): Parsed = {
+  def parse(provider: ProviderId, parts: Seq[ujson.Value], textOffset: Int, newId: () => String): Parsed = {
     val text       = new StringBuilder
     val thought    = new StringBuilder
     val calls      = ArrayBuffer.empty[ToolCall]
@@ -122,7 +123,7 @@ private[provider] object GeminiThoughtSignatures {
    * The messages given here have already been through [[ThinkingReplay.replayable]], so any signature that
    * is still on a message is valid for this request.
    */
-  def parts(provider: String, message: AssistantMessage): Seq[ujson.Value] = {
+  def parts(provider: ProviderId, message: AssistantMessage): Seq[ujson.Value] = {
     val signed = Replay.from(provider, message.thinking)
     val text   = message.text.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
     val calls = message.toolCalls.map { tc =>
@@ -182,10 +183,10 @@ private[provider] object GeminiThoughtSignatures {
 
   // `fc` is the functionCall object exactly as Gemini returned it (its optional `id`, `args` present
   // or absent), so the signed part can be replayed exactly as received, as Google requires.
-  private def callBlock(provider: String, callId: String, fc: ujson.Value, signature: String): ThinkingBlock =
+  private def callBlock(provider: ProviderId, callId: String, fc: ujson.Value, signature: String): ThinkingBlock =
     ThinkingBlock.Opaque(provider, ujson.Obj("call" -> callId, "fc" -> fc, "sig" -> signature).render())
 
-  private def textBlock(provider: String, at: Int, text: String, signature: String): ThinkingBlock =
+  private def textBlock(provider: ProviderId, at: Int, text: String, signature: String): ThinkingBlock =
     ThinkingBlock.Opaque(provider, ujson.Obj("at" -> at, "text" -> text, "sig" -> signature).render())
 
   /**
@@ -214,7 +215,7 @@ private[provider] object GeminiThoughtSignatures {
   final private case class Replay(calls: Map[String, SignedCall], text: Seq[(Int, String, String)])
 
   private object Replay {
-    def from(provider: String, thinking: Seq[ThinkingBlock]): Replay = {
+    def from(provider: ProviderId, thinking: Seq[ThinkingBlock]): Replay = {
       val parsed = thinking.flatMap {
         case ThinkingBlock.Opaque(p, data) if p == provider => Try(ujson.read(data)).toOption.flatMap(_.objOpt)
         case _                                              => None

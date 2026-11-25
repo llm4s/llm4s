@@ -209,8 +209,8 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
   test("context window and completion reserve come from the config") {
     val c = client(new MockHttpClient(iam))
-    c.getContextWindow() shouldBe 8192
-    c.getReserveCompletion() shouldBe 1024
+    c.contextWindow shouldBe 8192
+    c.reserveCompletion shouldBe 1024
   }
 
   test("the version query parameter is IBM's current SDK date by default, and a configured apiVersion overrides it") {

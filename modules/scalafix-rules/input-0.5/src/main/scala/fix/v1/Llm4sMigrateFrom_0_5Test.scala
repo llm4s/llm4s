@@ -30,4 +30,6 @@ object Llm4sMigrateFrom_0_5Test {
   def unbounded(config: ToolExecutionConfig): ToolExecutionConfig = config.copy(timeout = None)
 
   def header(config: OpenAIConfig): String = "Bearer " + config.apiKey
+
+  def promptBudget(client: org.llm4s.llmconnect.LLMClient): Int = client.getContextWindow() - client.getReserveCompletion()
 }

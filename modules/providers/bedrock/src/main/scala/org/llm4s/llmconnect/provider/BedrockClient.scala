@@ -21,14 +21,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaType }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.model.{
-  AdjustmentLog,
-  ModelRegistryService,
-  RequestTransformer,
-  PromptCacheReport,
-  TransformationResult,
-  UnmappedOptions
-}
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, PromptCacheReport, TransformationResult, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -181,7 +174,8 @@ final class BedrockClient private[provider] (
   @volatile private var asyncClientStarted = false
 
   protected def clientDescription: String = s"Bedrock client for model ${config.model}"
-  protected def providerName: String      = "bedrock"
+  protected def provider: ProviderId      = ProviderId("bedrock")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
@@ -265,8 +259,8 @@ final class BedrockClient private[provider] (
     }
   }
 
-  override def getContextWindow(): Int     = providerConfig.contextWindow
-  override def getReserveCompletion(): Int = providerConfig.reserveCompletion
+  override def contextWindow: Int     = providerConfig.contextWindow
+  override def reserveCompletion: Int = providerConfig.reserveCompletion
 
   override protected def releaseResources(): Unit = {
     sdkClient.close()
@@ -282,7 +276,8 @@ final class BedrockClient private[provider] (
         config.model,
         options,
         conversation.messages,
-        RequestTransformer.default(registryService),
+        // the registry's capabilities, and the Claude models it does not know by name (BedrockClaudeRules)
+        BedrockClaudeRules.transformer(registryService),
         dropUnsupported = true
       )
       .map { t =>
@@ -484,7 +479,7 @@ final class BedrockClient private[provider] (
 
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
     // Only what the caller set is sent: unset, the model's own default applies, and some models reject
-    // temperature and top-p together.
+    // temperature and top-p together. A model that takes neither has had them dropped (see `transformed`).
     val cfg = InferenceConfiguration.builder()
     options.temperature.foreach(t => cfg.temperature(t.floatValue()))
     options.maxTokens.foreach(m => cfg.maxTokens(m))
@@ -800,7 +795,7 @@ final class BedrockClient private[provider] (
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),

@@ -363,7 +363,9 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
           .mkString
       )
       .obj
-    val family = """.*claude-(opus-4[-.][78]|fable-5([-.][12])?)([-.]fast)?(@default)?""".r
+    // every model Anthropic's API answers `thinking.type.enabled` with a 400: Opus from 4.7 and the Claude 5 models
+    val family =
+      """.*claude-(opus-(4[-.][78]|5([-.]5)?)|sonnet-5([-.]5)?|haiku-5[-.]5|(fable|mythos)-5([-.][12])?)([-.]fast)?(@default)?""".r
     val routes = Set("anthropic", "bedrock_converse", "azure_ai", "vertex_ai-anthropic_models", "openrouter")
     val members = raw.collect {
       case (id, entry)
@@ -373,11 +375,37 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         id
     }.toList
     members should not be empty
-    (members should contain).allOf("apac.anthropic.claude-opus-4-8", "us-gov.anthropic.claude-fable-5-2")
+    (members should contain).allOf(
+      "apac.anthropic.claude-opus-4-8",
+      "us-gov.anthropic.claude-fable-5-2",
+      "claude-sonnet-5-5",
+      "claude-sonnet-5",
+      "claude-haiku-5-5",
+      "claude-opus-5",
+      "claude-opus-5-5",
+      "us.anthropic.claude-sonnet-5-5",
+      "vertex_ai/claude-sonnet-5-5"
+    )
     for id <- members do
       val caps = service.lookup(ModelName(id)).toOption.get.capabilities
       withClue(id)(caps.supportsBudgetThinking shouldBe Some(false))
       if id.contains("fable-5") then withClue(id)(caps.supportsThinkingOff shouldBe Some(false))
+
+  it should "read the catalog's sampling flag: false for Opus 4.7 and the Claude 5 models, unknown before them" in:
+    val service = defaultService()
+    for id <- List("claude-opus-4-7", "claude-sonnet-5-5", "claude-haiku-5-5", "us.anthropic.claude-sonnet-5-5") do
+      withClue(id)(service.lookup(ModelName(id)).toOption.get.capabilities.supportsSamplingParams shouldBe Some(false))
+    for id <- List("claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5") do
+      withClue(id)(service.lookup(ModelName(id)).toOption.get.capabilities.supportsSamplingParams shouldBe None)
+
+  it should "know from the catalog which Claude models cannot turn thinking off" in:
+    val service = defaultService()
+    for id <- List("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2") do
+      withClue(id)(service.lookup(ModelName(id)).toOption.get.capabilities.supportsThinkingOff shouldBe Some(false))
+    for id <- List("claude-haiku-5-5", "claude-opus-5", "claude-sonnet-4-6") do
+      withClue(id)(
+        service.lookup(ModelName(id)).toOption.get.capabilities.supportsThinkingOff should not be Some(false)
+      )
 
   it should "leave a model that still takes a thinking budget unknown" in:
     val service = defaultService()

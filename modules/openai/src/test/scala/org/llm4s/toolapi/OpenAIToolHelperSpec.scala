@@ -28,7 +28,7 @@ class OpenAIToolHelperSpec extends AnyFlatSpec with Matchers {
         .withProperty(Schema.property("a", Schema.number("First number")))
         .withProperty(Schema.property("b", Schema.number("Second number")))
     ).withHandler(extractor => extractor.getDouble("a").flatMap(a => extractor.getDouble("b").map(b => Sum(a + b))))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
 
   "OpenAIToolHelper.chatCompletionTools" should "produce one function definition per tool" in {

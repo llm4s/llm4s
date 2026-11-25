@@ -20,7 +20,7 @@ import org.llm4s.annotation.Stable
 final case class ValidationError private (
   override val message: String,
   field: String,
-  violations: List[String],
+  violations: Seq[String],
   override val httpStatus: Option[Int],
   override val requestId: Option[String]
 ) extends LLMError {
@@ -55,7 +55,7 @@ final case class ValidationError private (
    * @param newViolations the violated rules to append
    * @return a new error whose `violations` end with `newViolations`
    */
-  def withViolations(newViolations: List[String]): ValidationError =
+  def withViolations(newViolations: Seq[String]): ValidationError =
     copy(violations = violations ++ newViolations)
 }
 
@@ -64,7 +64,7 @@ object ValidationError {
   /**
    * Creates an error for a single violated rule.
    *
-   * The message is `Invalid <field>: <reason>`, `violations` is `List(reason)`, and `context` holds
+   * The message is `Invalid <field>: <reason>`, `violations` is `Seq(reason)`, and `context` holds
    * `field` and `violations`.
    *
    * @param field the name of the field that failed validation
@@ -85,20 +85,20 @@ object ValidationError {
    * @param violations the rules that were violated, in the order given
    * @return the validation error
    */
-  def apply(field: String, violations: List[String]): ValidationError =
+  def apply(field: String, violations: Seq[String]): ValidationError =
     new ValidationError(s"Invalid $field: ${violations.mkString(", ")}", field, violations, None, None)
 
   /**
    * Creates an error for a missing required field.
    *
    * The message is `Field '<field>' is required` (it does not use the `Invalid <field>:` form) and
-   * `violations` is `List("required")`.
+   * `violations` is `Seq("required")`.
    *
    * @example
    * {{{
    * val error = ValidationError.required("name")
    * error.message    // "Field 'name' is required"
-   * error.violations // List("required")
+   * error.violations // Seq("required")
    * }}}
    *
    * @param field the name of the missing field
@@ -111,7 +111,7 @@ object ValidationError {
    * Creates an error for a field whose value is not acceptable.
    *
    * The message is `Field '<field>' is invalid: <reason>` (it does not use the `Invalid <field>:` form)
-   * and `violations` is `List(reason)`.
+   * and `violations` is `Seq(reason)`.
    *
    * @param field the name of the field that failed validation
    * @param reason why the value was rejected
@@ -121,6 +121,6 @@ object ValidationError {
     new ValidationError(s"Field '$field' is invalid: $reason", field, List(reason), None, None)
 
   /** Unapply extractor for pattern matching */
-  def unapply(error: ValidationError): Option[(String, String, List[String])] =
+  def unapply(error: ValidationError): Option[(String, String, Seq[String])] =
     Some((error.message, error.field, error.violations))
 }

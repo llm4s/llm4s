@@ -213,8 +213,8 @@ private[rag] object RAGTracing {
       result
     }
 
-    def getContextWindow(): Int                 = underlying.getContextWindow()
-    def getReserveCompletion(): Int             = underlying.getReserveCompletion()
+    def contextWindow: Int                      = underlying.contextWindow
+    def reserveCompletion: Int                  = underlying.reserveCompletion
     override def validate(): Result[Unit]       = underlying.validate()
     override def close(): Unit                  = underlying.close()
     override def providerId: Option[ProviderId] = underlying.providerId

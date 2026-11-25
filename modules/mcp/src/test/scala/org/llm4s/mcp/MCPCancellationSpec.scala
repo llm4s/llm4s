@@ -35,7 +35,7 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
         release.await(60, TimeUnit.SECONDS): Unit
         Right("late")
       }
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
     server = new MCPServer(MCPServerOptions(0, "/mcp", "CancellationServer", "1.0.0"), Seq(hang))
     server.start().fold(e => throw e, _ => ())

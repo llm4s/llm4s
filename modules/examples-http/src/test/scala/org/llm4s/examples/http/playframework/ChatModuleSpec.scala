@@ -67,9 +67,9 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = Left(ConfigurationError("unused"))
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
-      override def close(): Unit      = closed.set(true)
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
+      override def close(): Unit = closed.set(true)
     }
     val lifecycle = new DefaultApplicationLifecycle
     ChatModule.closedOnStop(client, lifecycle) shouldBe client

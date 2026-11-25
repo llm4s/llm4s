@@ -34,7 +34,7 @@ case class SessionState(
 ) {
 
   /** The conversation so far: the latest turn's messages, or the loaded history before any turn. */
-  def messages: Vector[Message] = last.fold(history)(_.messages)
+  def messages: Vector[Message] = last.fold(history)(_.messages.toVector)
 
   /** The state after `result`, a turn on its thread: the loaded history is now part of the thread. */
   def withResult(result: AgentResult): SessionState =

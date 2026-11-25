@@ -106,8 +106,8 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(reply)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   "The agent snippet" should "build an agent, run a query and read an AgentResult instead of an AgentState" in {

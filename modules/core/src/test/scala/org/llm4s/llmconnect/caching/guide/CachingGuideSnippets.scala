@@ -73,12 +73,12 @@ object CachingGuideSnippets {
     // guide-block
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
-    import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+    import org.llm4s.llmconnect.model.EmbeddingRequest
     import org.llm4s.types.ProviderModelTypes.ModelName
 
     // The tenant is one more part of the key; sha256 keeps every part apart from the others.
-    def tenantKey(tenant: String)(text: String, model: ModelName, purpose: InputPurpose): String =
-      CacheKeyGenerator.sha256(tenant, model.asString, purpose.toString, text)
+    def tenantKey(tenant: String)(text: String, request: EmbeddingRequest): String =
+      CacheKeyGenerator.sha256(tenant, request.model.name.asString, request.purpose.toString, text)
 
     val cached =
       InMemoryEmbeddingCache.create().map(cache => CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))

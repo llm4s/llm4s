@@ -40,8 +40,8 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): org.llm4s.types.Result[Completion] =
       stubResponse
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 512
   }
 
   "completeStructured" should "parse valid JSON into the target type" in {

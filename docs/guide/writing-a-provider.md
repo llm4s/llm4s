@@ -407,7 +407,7 @@ an idempotent `close()`, a closed-state check, and metrics around each call. You
 ```scala
 protected def metrics: MetricsCollector       // from MetricsRecording; use options.metrics
 protected def clientDescription: String        // "Acme client for model x", for the closed error
-protected def providerName: String             // metrics label, e.g. "acme"
+protected def provider: ProviderId             // the provider id tracing reports and the metrics label, e.g. ProviderId("acme")
 protected def modelName: ModelName
 protected def releaseResources(): Unit = ()    // called once, from close()
 ```
@@ -416,7 +416,8 @@ Wrap `complete` and `streamComplete` bodies in
 `completeWithMetrics(operation: => Result[Completion]): Result[Completion]`, which fails a closed
 client, times the call, and records tokens and `Completion.estimatedCost` on success. For
 non-`Completion` calls, `MetricsRecording.withMetrics(provider, model, operation, extractUsage,
-extractCost)` does the same.
+extractCost)` does the same; `provider` is a `ProviderId` and `model` a `ModelName`, and the collector receives
+their strings.
 
 ### `ProviderExchangeRecorder` and `ProviderExchangeLogging`
 
@@ -428,7 +429,7 @@ once per request:
 ProviderExchangeRecorder.record(
   options.exchangeLogging,
   ProviderExchangeCall(
-    provider     = ProviderId(providerName),
+    provider     = provider,
     startedAt    = startedAt,            // java.time.Instant taken before the call
     requestBody  = requestText,
     model        = Some(config.model),
@@ -700,7 +701,7 @@ final class AcmeClient(
 
   protected val metrics: MetricsCollector  = clientOptions.metrics
   protected def clientDescription: String = s"Acme client for model ${config.model}"
-  protected def providerName: String      = "acme"
+  protected def provider: ProviderId      = ProviderId("acme")
   protected def modelName: ModelName      = config.model
 
   private val transformer = RequestTransformer.default(registry)
@@ -720,20 +721,20 @@ final class AcmeClient(
     options: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
     completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
-  def getContextWindow(): Int     = config.contextWindow
-  def getReserveCompletion(): Int = config.reserveCompletion
+  def contextWindow: Int     = config.contextWindow
+  def reserveCompletion: Int = config.reserveCompletion
 
   private def send(requestText: String): Result[Completion] =
     val startedAt = Instant.now()
     val response  = http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120.seconds)
     val result = response.flatMap { r =>
       if r.statusCode / 100 == 2 then AcmeWire.decode(r.body).map(withCost)
-      else Left(HttpErrorMapper.toError(r.statusCode, r.body, providerName, r.headers))
+      else Left(HttpErrorMapper.toError(r.statusCode, r.body, provider.asString, r.headers))
     }
     ProviderExchangeRecorder.record(
       clientOptions.exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestText,
         model = Some(config.model),
@@ -754,7 +755,7 @@ final class AcmeClient(
 A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`: `Text`, `Image` and `Document`, each image
 or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
 encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
-`UnsupportedContentPartError(providerName, part.kind, role.name)` for any other: never drop a part, and never turn
+`UnsupportedContentPartError(provider.asString, part.kind, role.name)` for any other: never drop a part, and never turn
 one into text. Send a `ProviderFile` only when its `provider` is your provider id. A message with exactly one text
 part should encode as your API's plain text form, as before; `message.content` is the text view. The matrix of what
 each llm4s provider sends is in [Multimodal content](multimodal).

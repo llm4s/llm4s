@@ -27,7 +27,7 @@ object EffectSystemsGuide {
       "get_temperature",
       "Current temperature in a city, in Celsius.",
       Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("city", Schema.string("City name")))
-    ).withHandler(params => params.getString("city").map(_ => 21.0)).buildSafe()
+    ).withHandler(params => params.getString("city").map(_ => 21.0)).build()
   // end snippet
 
   object Plain {

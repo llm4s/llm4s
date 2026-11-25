@@ -80,8 +80,8 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { sent.add(c); Right(completion("x")) }
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
     val history = java.util.List.of(JMessage.user("Which animal?"), JMessage.assistant("The cat."))
     withPipeline(model) { rag =>

@@ -28,7 +28,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         num <- extractor.getDouble("requiredNumber")
         bool = extractor.getBoolean("optionalBool").toOption
       } yield TestResult(s"Got string: $str, number: $num, bool: $bool")
-    }.buildSafe()
+    }.build()
   }
 
   "ToolFunction" should "provide clear error message for null arguments" in {
@@ -262,7 +262,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
       schema
     ).withHandler { extractor =>
       extractor.getString("user.profile.settings.theme").map(theme => TestResult(s"Theme: $theme"))
-    }.buildSafe()
+    }.build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {

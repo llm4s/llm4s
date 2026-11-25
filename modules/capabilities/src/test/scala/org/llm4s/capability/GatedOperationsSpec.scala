@@ -22,7 +22,7 @@ class GatedOperationsSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private def tool(name: String): ToolFunction[?] =
     ToolBuilder[String](name, s"The $name tool", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right(name))
-      .buildSafe()
+      .build()
       .value
 
   "describe" should "send the image and then the question as one user message, through complete" in {

@@ -20,8 +20,8 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   "createAgent" should "return a JAgent wrapping the given client" in {
@@ -121,9 +121,9 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("mine")))
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
-      override def close(): Unit               = closed.set(true)
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
+      override def close(): Unit          = closed.set(true)
     }
     val client = Llm4s.wrapClient(own)
     client.underlying shouldBe theSameInstanceAs(own)

@@ -159,7 +159,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     val schema = Schema.`object`[Map[String, Any]]("Echo").withRequiredField("message", Schema.string("Message"))
     val function = ToolBuilder[Search]("echo", "Echoes", schema)
       .withHandler(extractor => extractor.getString("message").map(Search(_)))
-      .buildSafe()
+      .build()
       .value
     val tool = AgentTool.fromToolFunction(function)
     tool.spec.name shouldBe "echo"

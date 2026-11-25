@@ -138,7 +138,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         // And explicitly via the registry as an extra safety check
         val expectedDims =
           ModelDimensionRegistry
-            .getDimension(ProviderId("openai"), pure.name)
+            .dimension(ProviderId("openai"), pure.name)
             .fold(err => fail(err.formatted), identity)
         pure.dimensions shouldBe expectedDims
       }
@@ -221,9 +221,9 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "declare the documented model dimensions" in {
       given ProviderRegistry = ProviderRegistry.default
 
-      ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small")).value shouldBe 1536
-      ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-large")).value shouldBe 3072
-      ModelDimensionRegistry.getDimension(ProviderId("OpenAI"), ModelName("text-embedding-3-small")).value shouldBe 1536
+      ModelDimensionRegistry.dimension(ProviderId("openai"), ModelName("text-embedding-3-small")).value shouldBe 1536
+      ModelDimensionRegistry.dimension(ProviderId("openai"), ModelName("text-embedding-3-large")).value shouldBe 3072
+      ModelDimensionRegistry.dimension(ProviderId("OpenAI"), ModelName("text-embedding-3-small")).value shouldBe 1536
       OpenAIEmbeddingProvider.modelDimensions should not be empty
     }
 
@@ -231,7 +231,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       given ProviderRegistry = ProviderRegistry.default
 
       ModelDimensionRegistry
-        .getDimension(ProviderId("openai"), ModelName("gpt-4o"))
+        .dimension(ProviderId("openai"), ModelName("gpt-4o"))
         .left
         .value
         .formatted should include(

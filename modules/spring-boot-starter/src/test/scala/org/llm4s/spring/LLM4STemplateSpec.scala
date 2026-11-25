@@ -18,8 +18,8 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = response
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       response
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   private def successTemplate(text: String) = StarterTestSupport.template(

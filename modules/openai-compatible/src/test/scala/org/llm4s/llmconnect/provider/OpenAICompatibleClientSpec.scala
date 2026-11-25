@@ -120,7 +120,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "report the configured context window and reserve" in {
     val c = client(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None, 32768, 4096))
-    (c.getContextWindow(), c.getReserveCompletion()) shouldBe (32768, 4096)
+    (c.contextWindow, c.reserveCompletion) shouldBe (32768, 4096)
   }
 
   // ==========================================================================

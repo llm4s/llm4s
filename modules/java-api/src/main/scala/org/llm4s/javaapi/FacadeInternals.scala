@@ -72,7 +72,7 @@ private[llm4s] object FacadeInternals {
    */
   private def declaredDimensions(provider: String, model: String): OptionalInt =
     ModelDimensionRegistry
-      .getDimension(ProviderId(provider), ModelName(model))
+      .dimension(ProviderId(provider), ModelName(model))
       .fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**

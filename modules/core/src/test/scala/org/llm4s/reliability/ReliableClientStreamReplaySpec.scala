@@ -42,8 +42,8 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
         .map(e => NetworkError(s"onChunk failed: ${e.getMessage}", Some(e), "test"))
         .flatMap(_ => end)
     }
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 1024
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 1024
   }
 
   private def reliable(inner: LLMClient, deadline: Option[FiniteDuration]) =

@@ -1274,7 +1274,7 @@ object DelegationSpec {
 
   def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
 
-  def toolResults(messages: Vector[Message]): Vector[String] = messages.collect { case t: ToolMessage => t.content }
+  def toolResults(messages: Seq[Message]): Seq[String] = messages.collect { case t: ToolMessage => t.content }
 
   /** A conversation sent with the lead's system prompt. */
   object Lead {
@@ -1314,7 +1314,7 @@ object DelegationSpec {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 128000
-    override def getReserveCompletion(): Int = 4096
+    override def contextWindow: Int     = 128000
+    override def reserveCompletion: Int = 4096
   }
 }

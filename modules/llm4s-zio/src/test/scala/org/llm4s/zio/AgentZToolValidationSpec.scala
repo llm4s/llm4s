@@ -40,7 +40,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
       executed.incrementAndGet()
       EchoResult(v)
     }
-  ).buildSafe() match {
+  ).build() match {
     case Right(t) => t
     case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
   }
@@ -57,8 +57,8 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
     }
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 512
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 512
   }
 
   private def text(s: String): Completion =
@@ -143,8 +143,8 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
-          def getContextWindow(): Int     = 1
-          def getReserveCompletion(): Int = 1
+          def contextWindow: Int     = 1
+          def reserveCompletion: Int = 1
         }
         val agent = z(client)()
         for {

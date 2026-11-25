@@ -7,7 +7,8 @@ import scalafix.v1._
  * breaking changes since 0.6.0, [[ThinkingReplacesBudgetTokens]], [[FinishReasonTyped]], [[CompressionRuleTransform]],
  * [[AgentCopyToWithSetters]], [[ResultSyntaxMoved]], [[ProviderConfigNewtypes]], [[ModelIdNewtypes]],
  * [[ToolFunctionOneTypeParameter]], [[PositionalPatternsGainFields]], [[SamplingOptionsOptional]],
- * [[CompletionFromMessage]], [[MessageAndConversationShapes]], [[ClientEntryPoints]], [[ToolCallIdTyped]] and the
+ * [[CompletionFromMessage]], [[MessageAndConversationShapes]], [[ClientEntryPoints]], [[ToolCallIdTyped]],
+ * [[AccessorRenames]] and the
  * [[AgentStatusGainsTruncated]] lint. It grows as the 1.0 breaks land (#1281).
  *
  * It leaves out the rules for the 0.5.1 breaks that 0.6.x code is already past (`CredentialsToSecret`,
@@ -36,6 +37,7 @@ class Llm4sMigrateFrom_0_6 extends SemanticRule("Llm4sMigrateFrom_0_6") {
     new ClientEntryPoints,
     new ToolFunctionOneTypeParameter,
     new ToolCallIdTyped,
+    new AccessorRenames,
     new ErrorIsRetryable,
     new StreamedChunkDeltaNames
   )

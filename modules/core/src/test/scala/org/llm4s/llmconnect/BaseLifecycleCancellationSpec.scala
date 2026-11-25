@@ -15,7 +15,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
   /** A client whose every call runs `behaviour`. */
   final private class Stub(behaviour: () => Result[Completion]) extends BaseLifecycleLLMClient {
     protected def clientDescription = "stub client"
-    protected def providerName      = "stub"
+    protected def provider          = ProviderId("stub")
     protected def modelName         = ModelName("stub-model")
     protected def metrics           = MetricsCollector.noop
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
@@ -23,8 +23,8 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = completeWithMetrics(behaviour())
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
   }
 
   private val conversation = Conversation(Seq(UserMessage("hi")))

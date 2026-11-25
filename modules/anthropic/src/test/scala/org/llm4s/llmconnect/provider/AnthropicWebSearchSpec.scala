@@ -130,7 +130,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
             .withProperty(org.llm4s.toolapi.Schema.property("q", org.llm4s.toolapi.Schema.string("Query")))
         )
         .withHandler(_ => Right("x"))
-        .buildSafe()
+        .build()
         .fold(e => fail(e.toString), identity)
       new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)).withWebSearch(true))
         .complete(conversation, CompletionOptions().withTools(Seq(tool)))

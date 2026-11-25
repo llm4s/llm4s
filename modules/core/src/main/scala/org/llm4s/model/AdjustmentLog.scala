@@ -111,6 +111,29 @@ private[llm4s] object UnmappedOptions {
       )
     )
 
+  /**
+   * `options` without the sampling parameters `capabilities` rules out (`supports_sampling_params: false`, or
+   * `disallowed_params`), and a `Dropped` for each the caller had set: what the [[RequestTransformer]] does, for a
+   * client that does not run one. Unknown capabilities (`None`) change nothing.
+   */
+  def sampling(
+    model: String,
+    options: CompletionOptions,
+    capabilities: Option[ModelCapabilities]
+  ): (CompletionOptions, List[RequestAdjustment]) = {
+    def rejected(param: String, set: Boolean) = set && capabilities.exists(_.rejectsParam(param))
+    val temperature                           = rejected("temperature", options.temperature.isDefined)
+    val topP                                  = rejected("top_p", options.topP.isDefined)
+    val kept = options
+      .withTemperature(options.temperature.filterNot(_ => temperature))
+      .withTopP(options.topP.filterNot(_ => topP))
+    val report =
+      Option.when(temperature)(
+        RequestAdjustment.Dropped(RequestOption.Temperature, s"temperature not supported for $model")
+      ) ++ Option.when(topP)(RequestAdjustment.Dropped(RequestOption.TopP, s"top_p not supported for $model"))
+    (kept, report.toList)
+  }
+
   /** [[reasoning]] and [[thinking]]: the report of a client that maps neither. */
   def reasoningAndThinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
     reasoning(model, options) ++ thinking(model, options)

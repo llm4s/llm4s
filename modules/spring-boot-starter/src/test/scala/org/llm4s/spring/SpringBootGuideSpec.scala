@@ -35,8 +35,8 @@ object SpringBootGuideSpec {
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   val recording: Recording = new Recording("summary")
@@ -46,8 +46,8 @@ object SpringBootGuideSpec {
       Left(NetworkError("the network is down", None, "mock://test"))
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   /** The user's own client, the way a test configuration supplies one. */

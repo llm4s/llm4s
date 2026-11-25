@@ -43,7 +43,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       "Deploys",
       Schema.`object`[Map[String, Any]]("Deploy parameters")
     ).withHandler(_ => Right(ujson.Str("deployed")))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
     val client = ScriptedLLMClient.of(CompletionFixture.withToolCall("deploy", ujson.Obj()))
     val agent = built(

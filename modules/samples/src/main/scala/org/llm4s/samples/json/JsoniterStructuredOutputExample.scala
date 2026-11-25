@@ -82,7 +82,7 @@ object JsoniterStructuredOutputExample extends App {
         .left
         .map(_.getMessage)
     }
-    .buildSafe()
+    .build()
 
   println(s"Tool:      ${addTool.flatMap(_.execute(ujson.Obj("a" -> 2, "b" -> 40)))}")
 }

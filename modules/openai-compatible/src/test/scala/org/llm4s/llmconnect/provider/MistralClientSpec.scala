@@ -561,7 +561,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       reserveCompletion = 4096
     )
     val client = new MistralClient(cfg)
-    client.getContextWindow() shouldBe 128000
+    client.contextWindow shouldBe 128000
   }
 
   it should "return correct reserve completion from config" in {
@@ -573,7 +573,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       reserveCompletion = 4096
     )
     val client = new MistralClient(cfg)
-    client.getReserveCompletion() shouldBe 4096
+    client.reserveCompletion shouldBe 4096
   }
 
   it should "handle assistant message with empty content by skipping it" in withServer { exchange =>

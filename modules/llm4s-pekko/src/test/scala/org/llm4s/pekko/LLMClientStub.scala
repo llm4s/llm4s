@@ -12,6 +12,6 @@ final private[pekko] class LLMClientStub(
   def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = onStream(conversation, options, onChunk)
-  def getContextWindow(): Int     = 4096
-  def getReserveCompletion(): Int = 256
+  def contextWindow: Int     = 4096
+  def reserveCompletion: Int = 256
 }

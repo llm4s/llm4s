@@ -83,7 +83,7 @@ object FileInfoTool {
         pathStr <- extractor.getString("path")
         result  <- getFileInfo(pathStr, config)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Default file info tool instance, returning a Result for safe error handling.

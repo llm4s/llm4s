@@ -24,7 +24,7 @@ class EndpointSchemaSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def schemaOf(tool: EndpointTool, strict: Boolean = false): ujson.Value =
     built(tool).head.schema.toJsonSchema(strict)
 
-  private def failure(tools: EndpointTool*): List[String] =
+  private def failure(tools: EndpointTool*): Seq[String] =
     EndpointTools.registry(base, new Recording().backend, tools*).left.value match {
       case v: ValidationError => v.violations
       case other              => fail(s"expected a ValidationError, got $other")

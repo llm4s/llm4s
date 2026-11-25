@@ -79,6 +79,10 @@ thinking budget ([RFC 0008](../rfcs/0008-generation-controls)):
 }
 ```
 
+The overrides patch every Claude model that rejects a budget: Opus 4.7 and 4.8 and the Claude 5 models, on
+Anthropic's API, Bedrock, Vertex AI and Azure AI. A test fails when a refreshed snapshot has a member of those
+families without its patch.
+
 An override can also carry a whole entry for a current model the snapshot predates, copied from LiteLLM's upstream
 file and checked against the vendor's pricing page; the next refresh of the snapshot makes it redundant. Two whole
 entries remain because upstream no longer lists those ids at all: `gemini/gemini-1.5-flash` and
@@ -213,6 +217,22 @@ val fromFile: Result[ModelRegistryService] = ModelRegistryService.fromFile("/etc
 
 `fromFile`, `fromUrl` and `fromJsonString` apply no overrides; entries that cannot be read are logged and skipped. For
 duplicate ids in `fromModels` the last one wins.
+
+### Keys that change what is sent
+
+Most capability keys only describe a model. These decide what a client sends, and each change is reported on
+`Completion.adjustments`:
+
+| Key | `ModelCapabilities` | Effect |
+|-----|---------------------|--------|
+| `supports_sampling_params: false` | `supportsSamplingParams` | The model takes no `temperature`, `top_p` or `top_k` (Claude Opus 4.7 and later, the Claude 5 models, some Gemini 3 models). The Anthropic, Bedrock, OpenAI, Gemini, Vertex AI and OpenAI-compatible clients send none, and one you set is reported `Dropped`. The bundled snapshot carries it; absent means unknown, and the parameters are sent as set. |
+| `disallowed_params: ["temperature", ...]` | `disallowedParams` | The same for the parameters listed (`temperature`, `top_p`, `presence_penalty`, `frequency_penalty`). No entry of the bundled snapshot has this key: it is for an entry of your own, such as a deployment name the snapshot does not know. |
+| `temperature_constraint: [min, max]` | `temperatureConstraint` | A temperature outside the range is moved to `min`, reported `Adjusted`. |
+| `supports_budget_thinking: false` | `supportsBudgetThinking` | The model rejects a manual thinking budget; see [Embedded overrides](#embedded-overrides). An llm4s key, set only in the overrides. |
+| `thinking_always_on: true`, `supports_none_reasoning_effort: false` | `supportsThinkingOff = Some(false)` | The model cannot be asked not to think: `Thinking.Off` is not sent, reported `Adjusted`. |
+
+`llm4s-anthropic` and `llm4s-bedrock` also know the Claude models by name, for an id no entry describes; what an
+entry states wins over the name.
 
 To correct one model's context window without replacing the catalogue, set it on the provider section instead:
 `contextWindow` and `reserveCompletion` are keys of the generic `openai-compatible` and Perplexity sections, among

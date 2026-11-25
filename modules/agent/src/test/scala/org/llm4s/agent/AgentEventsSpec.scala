@@ -45,8 +45,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
 
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
@@ -68,7 +68,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+  ).withHandler(_.getString("message").map(EchoResult(_))).build().fold(e => fail(e.formatted), identity)
 
   private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?]*): AgentBuilder =
     Agent.builder("assistant", client).withTools(ToolRegistry.of(tools).toOption.get)
@@ -507,8 +507,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       ): Result[Completion] =
         onChunk(StreamedChunk(id = "s", contentDelta = Some("cut"), finishReason = Some(FinishReason.Length)))
         Right(answer("cut").withFinishReason(FinishReason.Length))
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     val (result, c) = collect(agentWith(streamed).withStreaming(), "go")
     result.map(_.status) shouldBe Right(AgentStatus.Truncated("cut"))
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe

@@ -59,8 +59,8 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   /**

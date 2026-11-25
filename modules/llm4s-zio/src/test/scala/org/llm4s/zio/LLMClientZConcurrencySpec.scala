@@ -205,8 +205,8 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
             (0 until perStream).foreach(i => onChunk(StreamedChunk(id = s"$key-$i", contentDelta = Some(key))))
             Right(completion)
           }
-          def getContextWindow(): Int     = 4096
-          def getReserveCompletion(): Int = 256
+          def contextWindow: Int     = 4096
+          def reserveCompletion: Int = 256
         }
         val z = LLMClientZ(client)
         ZIO

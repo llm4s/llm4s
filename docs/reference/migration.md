@@ -102,8 +102,118 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
 [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)
-[`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)
-and [message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809).
+[`withToolSet` and `validateIn`, and the Java facade's guardrails sit innermost](#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835),
+[message parts, citations and adjustments are `Seq`s](#message-parts-citations-and-adjustments-are-seqs-2809),
+[`LLMClient` accessors are named for their values, and `ToolBuilder.build`](#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908),
+[`ThinkingBlock.Opaque` and `BaseLifecycleLLMClient` take a `ProviderId`](#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908),
+[errors, `Result` helpers and `AgentResult.messages` are `Seq`s](#errors-result-helpers-and-agentresultmessages-are-seqs-2908)
+and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingclients-key-function-takes-the-request-2908).
+
+## `LLMClient` accessors are named for their values, and `ToolBuilder.build` (#2908)
+
+A method that returns a value is named for the value. The last `getX` accessors of the Stable API lose the `get`, and
+the two that take no argument lose their parentheses with it. `ToolBuilder` has one method that builds, so it is
+`build`; it still returns a `Result`.
+
+| Before | After |
+|---|---|
+| `client.getContextWindow()` | `client.contextWindow` |
+| `client.getReserveCompletion()` | `client.reserveCompletion` |
+| `client.getContextBudget(headroom)` | `client.contextBudget(headroom)` |
+| `counter.getTokenBreakdown(conversation)` (`ConversationTokenCounter`) | `counter.tokenBreakdown(conversation)` |
+| `ModelDimensionRegistry.getDimension(provider, model)` | `ModelDimensionRegistry.dimension(provider, model)` |
+| `ToolBuilder(...).withHandler(...).buildSafe()` | `.build()` |
+
+An `LLMClient` of your own renames its two definitions:
+
+```scala
+// before
+override def getContextWindow(): Int     = 128000
+override def getReserveCompletion(): Int = 4096
+
+// after
+override def contextWindow: Int     = 128000
+override def reserveCompletion: Int = 4096
+```
+
+A client whose constructor has a parameter of the new name defines it twice: make the parameter the member
+(`class MyClient(override val contextWindow: Int, ...) extends LLMClient`) and delete the method. From Java and
+Kotlin the calls are `client.contextWindow()` and `client.reserveCompletion()`, and a Kotlin client overrides
+`fun contextWindow(): Int`. The Java facade's own getters are unchanged.
+
+The Scalafix rule `AccessorRenames` ([Scalafix](scalafix#migration-rules)) rewrites the calls, and the definitions
+in a class that extends something; `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` run it.
+
+## `ThinkingBlock.Opaque` and `BaseLifecycleLLMClient` take a `ProviderId` (#2908)
+
+The last provider ids that were raw strings in the Stable API are `ProviderId`s.
+
+| Before | After |
+|---|---|
+| `ThinkingBlock.Opaque(provider: String, data)` | `ThinkingBlock.Opaque(provider: ProviderId, data)`: `ThinkingBlock.Opaque(ProviderId("openrouter"), data)` |
+| `case ThinkingBlock.Opaque("openrouter", data)` | `case ThinkingBlock.Opaque(p, data) if p == ProviderId("openrouter")`, or match a `val` that holds the id |
+| `BaseLifecycleLLMClient`: `protected def providerName: String` | `protected def provider: ProviderId` |
+| `MetricsRecording.withMetrics(provider: String, model: String, ...)` | `withMetrics(provider: ProviderId, model: ModelName, ...)` |
+
+Stored JSON is unchanged: an opaque block is still `{"type":"opaque","provider":"openrouter","data":"..."}`, pinned
+by `ThinkingBlockWireFormatSpec`, which was written against the old code. A `ProviderId` is canonical (trimmed and
+lower-cased), so a block stored with a provider spelt otherwise reads back with the canonical spelling; every llm4s
+client already writes its id that way.
+
+A provider client built on `BaseLifecycleLLMClient` replaces its `providerName`:
+
+```scala
+// before
+protected def providerName: String = "acme"
+
+// after
+protected def provider: ProviderId = ProviderId("acme")
+```
+
+The client's `providerId`, its metrics label and the provider a `CancelledError` names all come from it; the label a
+`MetricsCollector` receives is still a `String`, `provider.asString`. Where the client passes its name to an
+error builder (`HttpErrorMapper.toError`, `ServiceError`), pass `provider.asString`.
+
+## Errors, `Result` helpers and `AgentResult.messages` are `Seq`s (#2908)
+
+The collections that [message parts, citations and adjustments](#message-parts-citations-and-adjustments-are-seqs-2809)
+left as `List` or `Vector` in Stable signatures are `Seq`s too.
+
+| Before | After |
+|---|---|
+| `ValidationError.violations: List[String]`; `ValidationError(field, violations: List[String])`, `withViolations(List[...])` | `Seq[String]` |
+| `ConfigurationError.missingKeys: List[String]`; `ConfigurationError(message, missingKeys: List[String])` | `Seq[String]` |
+| `ToolParameterError.MissingParameter.availableParameters`, `ToolParameterError.MultipleErrors.errors`, `ToolCallError.InvalidArguments.parameterErrors`: `List` | `Seq` |
+| `ToolCallErrorJson.flattenErrors(List[...]): List[...]` | `Seq[...]` in and out |
+| `Result.sequence(List[Result[A]]): Result[List[A]]`, `Result.traverse(List[A])(f): Result[List[B]]` | `Seq` in, `Result[Seq[...]]` out |
+| `Result.validateAll(List[A])(v): Either[List[LLMError], List[A]]` | `Either[Seq[LLMError], Seq[A]]` |
+| `AgentResult.messages: Vector[Message]` | `Seq[Message]` |
+| `OpenAICompatibleClient.parseCitations(...): List[Citation]` | `Seq[Citation]`: change the return type of an override |
+
+Code that passes a `List` or `Vector` compiles unchanged. Code that reads one of these as a `List` or `Vector`
+(`val all: Result[List[Int]] = Result.traverse(...)`, `case ConfigurationError(_, List(key))`, a `::` pattern on
+`parameterErrors`) declares `Seq`, matches `case Seq(key)`, or calls `.toList` / `.toVector`. None of these types is
+stored, so no wire format changes.
+
+## `CachedEmbeddingClient`'s key function takes the request (#2908)
+
+`CachedEmbeddingClient`'s `keyGenerator` was a `(String, ModelName, InputPurpose) => String`, a shape that could not
+be given anything more of the request without breaking every key function. It is now
+`(String, EmbeddingRequest) => String`: one input text and the request it came in.
+
+```scala
+// before
+def tenantKey(tenant: String)(text: String, model: ModelName, purpose: InputPurpose): String =
+  CacheKeyGenerator.sha256(tenant, model.asString, purpose.toString, text)
+
+// after
+def tenantKey(tenant: String)(text: String, request: EmbeddingRequest): String =
+  CacheKeyGenerator.sha256(tenant, request.model.name.asString, request.purpose.toString, text)
+```
+
+The default is still `CacheKeyGenerator.embeddingKey`, which gains an overload of that shape,
+`embeddingKey(text, request)`, and produces the same keys as before: an existing cache stays valid.
+`embeddingKey(text, model, purpose)` is unchanged.
 
 ## One retry rule: `LLMError.isRetryable` replaces the recoverable markers (#2916)
 

@@ -1,9 +1,8 @@
 package org.llm4s.llmconnect.caching
 
-import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.EmbeddingError
-import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -30,9 +29,10 @@ import org.slf4j.LoggerFactory
  *
  * @param baseClient   The underlying client used to generate embeddings on cache misses.
  * @param cache        The storage backend for the embedding vectors.
- * @param keyGenerator Function that maps (text, model name, purpose) to a cache key; defaults to
- *                     [[CacheKeyGenerator.embeddingKey]]. The purpose is an argument so that a query and a
- *                     document with the same text never share an entry.
+ * @param keyGenerator Function that maps one input text and the request it came in to a cache key; defaults to
+ *                     [[CacheKeyGenerator.embeddingKey]], which keys by the text, the request's model name and its
+ *                     purpose, so that a query and a document with the same text never share an entry. It takes
+ *                     the request, not its fields, so a key can use whatever a request carries.
  *
  * Build one with the companion's `apply`. The constructor is private, so that a setting can be added without
  * breaking a caller, and the class is final: wrap it to change what it does.
@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory
 final class CachedEmbeddingClient private (
   baseClient: EmbeddingProvider,
   cache: EmbeddingCache,
-  keyGenerator: (String, ModelName, InputPurpose) => String
+  keyGenerator: (String, EmbeddingRequest) => String
 ) extends EmbeddingProvider {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -60,7 +60,7 @@ final class CachedEmbeddingClient private (
     // Pair each input with its cache key and cached value (if any).
     val keysAndHits: Seq[(String, Option[Seq[Double]])] =
       request.input.map { text =>
-        val key = keyGenerator(text, request.model.name, request.purpose)
+        val key = keyGenerator(text, request)
         (key, lookup(key))
       }
 
@@ -134,7 +134,7 @@ object CachedEmbeddingClient {
   def apply(
     baseClient: EmbeddingProvider,
     cache: EmbeddingCache,
-    keyGenerator: (String, ModelName, InputPurpose) => String = CacheKeyGenerator.embeddingKey
+    keyGenerator: (String, EmbeddingRequest) => String = CacheKeyGenerator.embeddingKey
   ): CachedEmbeddingClient =
     new CachedEmbeddingClient(baseClient, cache, keyGenerator)
 }

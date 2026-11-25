@@ -69,7 +69,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
     ToolBuilder[String]("get_secret_code", "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => "ZX-4417"))
-      .buildSafe()
+      .build()
       .value
   }
 

@@ -69,8 +69,8 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
       onChunk(StreamedChunk(id = "c", contentDelta = Some("42")))
       route(conversation)
     }
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private class Recording extends Tracing {

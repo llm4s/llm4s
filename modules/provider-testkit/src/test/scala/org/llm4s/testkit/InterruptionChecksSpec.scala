@@ -47,8 +47,8 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
         .left
         .map(e => if Thread.currentThread().isInterrupted then CancelledError("stub.stream") else e)
 
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   "assertCancelsWhenInterrupted" should "pass for a client that honours interruption" in {
     LocalProviderTestServer.withServer("/x")(LocalProviderTestServer.holdOpen) { base =>
@@ -78,8 +78,8 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = waitThen()
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       waitThen()
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   private def failureOf(check: => Any): String =
     intercept[TestFailedException](check).getMessage

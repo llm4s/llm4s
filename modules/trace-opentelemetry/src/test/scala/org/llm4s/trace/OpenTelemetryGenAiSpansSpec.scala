@@ -75,8 +75,8 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       onChunk(StreamedChunk("chatcmpl-1", Some(Answer)))
       onChunk(StreamedChunk("chatcmpl-1", None, finishReason = Some(FinishReason.Stop)))
       answer
-    def getContextWindow(): Int                 = 128000
-    def getReserveCompletion(): Int             = 4096
+    def contextWindow: Int                      = 128000
+    def reserveCompletion: Int                  = 4096
     override def providerId: Option[ProviderId] = Some(ProviderId(provider))
 
   private def str(span: SpanData, key: String): String = span.getAttributes.get(AttributeKey.stringKey(key))

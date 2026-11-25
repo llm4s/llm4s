@@ -39,7 +39,11 @@ import scala.util.Try
  * @param reserveCompletion the tokens kept free for the reply
  */
 @Experimental
-final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveCompletion: Int) extends LLMClient {
+final class SpringAiLlmClient(
+  chatModel: ChatModel,
+  override val contextWindow: Int,
+  override val reserveCompletion: Int
+) extends LLMClient {
 
   Objects.requireNonNull(chatModel, "chatModel must not be null")
 
@@ -65,8 +69,6 @@ final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveC
       .map(_ => acc.completion)
   }
 
-  override def getContextWindow(): Int     = contextWindow
-  override def getReserveCompletion(): Int = reserveCompletion
 }
 
 @Experimental

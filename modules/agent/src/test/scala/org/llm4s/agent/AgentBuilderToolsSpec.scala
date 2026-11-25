@@ -24,7 +24,7 @@ class AgentBuilderToolsSpec extends AnyFlatSpec with Matchers with EitherValues 
       "Echoes its text",
       Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("text", Schema.string("Text to echo"))
     ).withHandler(extractor => extractor.getString("text").map(Echoed(_)))
-      .buildSafe()
+      .build()
       .fold(e => fail(s"tool did not build: $e"), identity)
 
   private def registry(names: String*): ToolRegistry =

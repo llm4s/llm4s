@@ -33,7 +33,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
+import org.llm4s.model.{ AdjustmentLog, ModelCapabilities, ModelRegistryService, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
@@ -123,7 +123,8 @@ class OpenAICompatibleClient private[provider] (
   private val endpoint                              = s"${settings.baseUrl.asUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
-  protected def providerName: String      = settings.providerName
+  protected def provider: ProviderId      = ProviderId(settings.providerName)
+  private def providerName: String        = settings.providerName
   protected def modelName: ModelName      = settings.model
 
   // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
@@ -132,6 +133,13 @@ class OpenAICompatibleClient private[provider] (
 
   // what the dialect could not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
+
+  /** This client's model's registry capabilities, looked up once: under the provider's own ids first. */
+  private lazy val capabilities: Option[ModelCapabilities] =
+    registryService
+      .lookup(ProviderId(settings.providerName), settings.model)
+      .toOption
+      .map(_.capabilities)
 
   override def complete(
     conversation: Conversation,
@@ -560,9 +568,11 @@ class OpenAICompatibleClient private[provider] (
       "messages" -> ujson.Arr.from(messages)
     )
 
-    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply
-    options.temperature.foreach(t => body("temperature") = t)
-    options.topP.foreach(p => body("top_p") = p)
+    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply.
+    // One the registry says the model rejects (`supports_sampling_params: false`) is not sent either (#2909).
+    val (sampled, samplingAdjustments) = UnmappedOptions.sampling(settings.model.asString, options, capabilities)
+    sampled.temperature.foreach(t => body("temperature") = t)
+    sampled.topP.foreach(p => body("top_p") = p)
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
     options.presencePenalty.foreach(p => body("presence_penalty") = p)
     options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
@@ -571,7 +581,7 @@ class OpenAICompatibleClient private[provider] (
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     val adjustments =
-      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
+      samplingAdjustments ++ dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
         settings.model.asString,
         options
       ) ++
@@ -653,7 +663,7 @@ class OpenAICompatibleClient private[provider] (
    * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
    * are not read: neither provider documents where a stream carries them (#1216).
    */
-  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+  protected[provider] def parseCitations(message: ujson.Value): Seq[Citation] =
     message.objOpt
       .flatMap(_.get("annotations"))
       .flatMap(_.arrOpt)
@@ -760,7 +770,7 @@ class OpenAICompatibleClient private[provider] (
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(settings.model),
@@ -769,9 +779,9 @@ class OpenAICompatibleClient private[provider] (
       result
     )
 
-  override def getContextWindow(): Int = settings.contextWindow
+  override def contextWindow: Int = settings.contextWindow
 
-  override def getReserveCompletion(): Int = settings.reserveCompletion
+  override def reserveCompletion: Int = settings.reserveCompletion
 
   /**
    * The error a response that is not 2xx maps to, its body scrubbed of registered credentials first: what

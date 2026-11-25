@@ -49,8 +49,8 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       chunks.foreach(c => onChunk(StreamedChunk("c", Some(c))))
       toolCalls.foreach(tc => onChunk(StreamedChunk("c", None, toolCallDelta = Some(tc))))
       Right(completion)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
 
   final private class Seen:
     val events = new CopyOnWriteArrayList[StreamEvent]()
@@ -109,8 +109,8 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
         f(StreamedChunk("c", Some("partial")))
         if failures.getAndIncrement() == 0 then Left(NetworkError("dropped", None, "test"))
         else inner.streamComplete(c, o)(f)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     val retry = new AgentMiddleware:
       val id = MiddlewareId("retry")
       override def wrapModelCall(request: ModelRequest, context: ModelContext)(
@@ -140,8 +140,8 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
         if i == 0 then f(StreamedChunk("c", None, toolCallDelta = Some(call)))
         else f(StreamedChunk("c", Some("done")))
         Right(answer(i))
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     val (result, c) = streamed(Agent.builder("assistant", ToolThenText()).withStreaming(), "hi")
     result.map(_.answer) shouldBe Right(Some("done"))
     c.all.collect { case AgentEvents.TextDelta(d) => d.text } shouldBe Vector("done")
@@ -177,8 +177,8 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
         Right(Completion("c", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call)), usage))
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     val (_, c)    = streamed(Agent.builder("triage", root).withHandoffs(Handoff.to("physics", target, "physics")), "q")
     val handedOff = c.all.collect { case AgentEvents.HandedOff(h) => h }
     handedOff shouldBe Vector(org.llm4s.agent.events.HandedOff("triage", "physics"))

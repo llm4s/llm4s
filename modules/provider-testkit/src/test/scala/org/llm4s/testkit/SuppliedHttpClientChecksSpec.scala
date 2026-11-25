@@ -88,8 +88,8 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
     ): Result[Completion] =
       if streamSends then send("stream")
       Right(answer)
-    def getContextWindow(): Int     = 8192
-    def getReserveCompletion(): Int = 1024
+    def contextWindow: Int     = 8192
+    def reserveCompletion: Int = 1024
     override def close(): Unit =
       closedFlag.set(true)
       if closesSupplied then http.foreach(_.close())

@@ -29,22 +29,22 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
 
     "know the models a registered provider declares" in {
       ModelDimensionRegistry
-        .getDimension(ProviderId("fixtureembedding"), ModelName("fixture-embed-small"))
+        .dimension(ProviderId("fixtureembedding"), ModelName("fixture-embed-small"))
         .value shouldBe 256
     }
 
     "answer each of a provider's models with its own size" in {
       ModelDimensionRegistry
-        .getDimension(ProviderId("fixtureembedding"), ModelName("fixture-embed-large"))
+        .dimension(ProviderId("fixtureembedding"), ModelName("fixture-embed-large"))
         .value shouldBe 1024
     }
 
     "resolve a provider alias and ignore the provider's case" in {
       ModelDimensionRegistry
-        .getDimension(ProviderId(FixtureEmbeddingProvider.Alias), ModelName("fixture-embed-small"))
+        .dimension(ProviderId(FixtureEmbeddingProvider.Alias), ModelName("fixture-embed-small"))
         .value shouldBe 256
       ModelDimensionRegistry
-        .getDimension(ProviderId("FixtureEmbedding"), ModelName("fixture-embed-small"))
+        .dimension(ProviderId("FixtureEmbedding"), ModelName("fixture-embed-small"))
         .value shouldBe 256
     }
 
@@ -52,7 +52,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
       given ProviderRegistry = ProviderRegistry.ofEmbeddings()
 
       // Their table moved to llm4s-rag with its only consumer (`LocalEmbeddingModels.dimension`).
-      ModelDimensionRegistry.getDimension(ProviderId("local"), ModelName("openclip-vit-b32")).isLeft shouldBe true
+      ModelDimensionRegistry.dimension(ProviderId("local"), ModelName("openclip-vit-b32")).isLeft shouldBe true
     }
 
     "answer for a registered provider called local as for any other" in {
@@ -61,12 +61,12 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegisteredLocalEmbeddings)
 
       // A model only the registered provider knows.
-      ModelDimensionRegistry.getDimension(ProviderId("local"), ModelName("my-local-embedder")).value shouldBe 384
+      ModelDimensionRegistry.dimension(ProviderId("local"), ModelName("my-local-embedder")).value shouldBe 384
       // A name the local encoders also use: only the provider answers.
-      ModelDimensionRegistry.getDimension(ProviderId("local"), ModelName("openclip-vit-b32")).value shouldBe 1024
+      ModelDimensionRegistry.dimension(ProviderId("local"), ModelName("openclip-vit-b32")).value shouldBe 1024
       // And nothing stands in for the provider's own gaps.
       ModelDimensionRegistry
-        .getDimension(ProviderId("local"), ModelName("wav2vec2-base"))
+        .dimension(ProviderId("local"), ModelName("wav2vec2-base"))
         .left
         .value
         .formatted should include(
@@ -76,7 +76,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
 
     "name the model and provider when a registered provider does not declare the model" in {
       ModelDimensionRegistry
-        .getDimension(ProviderId("fixtureembedding"), ModelName("gpt-4o"))
+        .dimension(ProviderId("fixtureembedding"), ModelName("gpt-4o"))
         .left
         .value
         .formatted should include(
@@ -85,7 +85,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
     }
 
     "report an unregistered provider with the registry's error" in {
-      val error = ModelDimensionRegistry.getDimension(ProviderId("anthropic"), ModelName("claude")).left.value.formatted
+      val error = ModelDimensionRegistry.dimension(ProviderId("anthropic"), ModelName("claude")).left.value.formatted
 
       error should include("Embedding provider 'anthropic'")
       error should include("is not registered")
@@ -94,14 +94,14 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
     "answer from a provider registered only by the caller" in {
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(FixtureEmbeddings)
 
-      ModelDimensionRegistry.getDimension(ProviderId("fixturecloud"), ModelName("fixture-small")).value shouldBe 256
+      ModelDimensionRegistry.dimension(ProviderId("fixturecloud"), ModelName("fixture-small")).value shouldBe 256
     }
 
     "not answer from a provider the caller's registry lacks" in {
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(FixtureEmbeddings)
 
       ModelDimensionRegistry
-        .getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
+        .dimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
         .left
         .value
         .formatted should include(
@@ -137,7 +137,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
       UndeclaredEmbeddings.modelDimensions shouldBe empty
       UndeclaredEmbeddings.dimensionsOf(ModelName("anything")) shouldBe None
       ModelDimensionRegistry
-        .getDimension(ProviderId("undeclared"), ModelName("anything"))
+        .dimension(ProviderId("undeclared"), ModelName("anything"))
         .left
         .value
         .formatted should include(

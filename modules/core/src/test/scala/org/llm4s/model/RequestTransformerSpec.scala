@@ -294,7 +294,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   private def withPingTool: Either[String, CompletionOptions] =
     ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right("pong"))
-      .buildSafe()
+      .build()
       .left
       .map(_.message)
       .map(tool => CompletionOptions().withTools(Seq(tool)))
@@ -522,5 +522,91 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
         }
         t.requiresFakeStreaming(ModelName("some-model"))
         seen.map(_._1) shouldBe Some(ModelName("some-model"))
+  }
+
+  // ============================================
+  // Models that take no sampling parameter (#2909)
+  // ============================================
+
+  private def noSampling(service: ModelRegistryService, capabilities: ModelCapabilities): RequestTransformer =
+    RequestTransformer.adjusted(service)((_, _) => capabilities)
+
+  private val unsampled = List(
+    "supports_sampling_params: false" -> ModelCapabilities(supportsSamplingParams = Some(false)),
+    "disallowed_params"               -> ModelCapabilities(disallowedParams = Some(Set("temperature", "top_p")))
+  )
+
+  test("a temperature and a top_p the model does not take are dropped and reported, whatever their value") {
+    import org.llm4s.llmconnect.model.{ RequestAdjustment, RequestOption }
+    val service = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    for {
+      (label, capabilities) <- unsampled
+      temperature           <- List(0.2, 1.0)
+    }
+      withClue(s"$label, temperature $temperature: ") {
+        val options = CompletionOptions(temperature = Some(temperature), topP = Some(0.9), maxTokens = Some(100))
+        val (sent, adjustments) =
+          noSampling(service, capabilities).adjustOptions(ModelName("some-model"), options).value
+        sent.temperature shouldBe None
+        sent.topP shouldBe None
+        sent.maxTokens shouldBe Some(100)
+        adjustments shouldBe Seq(
+          RequestAdjustment.Dropped(RequestOption.Temperature, "temperature not supported for some-model"),
+          RequestAdjustment.Dropped(RequestOption.TopP, "top_p not supported for some-model")
+        )
+      }
+  }
+
+  test("a temperature the model does not take is an error when unsupported options may not be dropped") {
+    val service = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    for ((label, capabilities) <- unsampled)
+      withClue(s"$label: ") {
+        val result = noSampling(service, capabilities)
+          .transformOptions(
+            ModelName("some-model"),
+            CompletionOptions(temperature = Some(0.2)),
+            dropUnsupported = false
+          )
+        result.left.value.message should include("temperature parameter not supported for some-model")
+      }
+  }
+
+  test("a model that takes no sampling parameter has nothing dropped when none was set") {
+    val service = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    val (sent, adjustments) = noSampling(service, ModelCapabilities(supportsSamplingParams = Some(false)))
+      .adjustOptions(ModelName("some-model"), CompletionOptions())
+      .value
+    sent shouldBe CompletionOptions()
+    adjustments shouldBe empty
+  }
+
+  test("the bundled catalog's supports_sampling_params is obeyed, and a model without the flag is sent what was set") {
+    val service     = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    val transformer = RequestTransformer.default(service)
+    val options     = CompletionOptions(temperature = Some(0.2))
+    for (
+      id <- List("claude-sonnet-5-5", "us.anthropic.claude-sonnet-5-5", "vertex_ai/claude-opus-5-5", "gemini-3.6-flash")
+    )
+      withClue(s"$id: ")(transformer.adjustOptions(ModelName(id), options).value._1.temperature shouldBe None)
+    for (id <- List("claude-sonnet-4-6", "claude-haiku-4-5", "gpt-4o"))
+      withClue(s"$id: ")(transformer.adjustOptions(ModelName(id), options).value._1.temperature shouldBe Some(0.2))
+  }
+
+  test("UnmappedOptions.sampling drops what the capabilities rule out, and nothing for unknown capabilities") {
+    import org.llm4s.llmconnect.model.RequestOption
+    val options = CompletionOptions(temperature = Some(0.2), topP = Some(0.9))
+    val (kept, report) =
+      UnmappedOptions.sampling("m", options, Some(ModelCapabilities(supportsSamplingParams = Some(false))))
+    kept.temperature shouldBe None
+    kept.topP shouldBe None
+    report.map(_.option) shouldBe List(RequestOption.Temperature, RequestOption.TopP)
+    UnmappedOptions.sampling("m", options, None) shouldBe (options, Nil)
+    UnmappedOptions.sampling("m", options, Some(ModelCapabilities())) shouldBe (options, Nil)
+    UnmappedOptions.sampling(
+      "m",
+      CompletionOptions(),
+      Some(ModelCapabilities(supportsSamplingParams = Some(false)))
+    ) shouldBe
+      (CompletionOptions(), Nil)
   }
 }

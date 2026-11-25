@@ -14,7 +14,7 @@ import org.llm4s.trace.model.TraceId
 object ResultSyntaxMovedTest {
   def parse(raw: String): Result[Int] = Try(raw.toInt).toResult
 
-  def all(raw: List[String]): Result[List[Int]] = Result.traverse(raw)(parse)
+  def all(raw: List[String]): Result[Seq[Int]] = Result.traverse(raw)(parse)
 
   def mapped(t: Throwable): LLMError = t.toLLMError
 

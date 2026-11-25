@@ -190,7 +190,7 @@ val searchSchema = Schema
 
 val tool = ToolBuilder[String]("search", "Search the web", searchSchema)
   .withHandler(params => params.getString("query").map(search))
-  .buildSafe()   // Result[ToolFunction[String]]
+  .build()   // Result[ToolFunction[String]]
 ```
 
 [Learn more →](/guide/builtin-tools)
@@ -376,7 +376,7 @@ val result = for {
                 "get_time",
                 "Get current date and time",
                 Schema.`object`[Map[String, Any]]("No parameters")
-              ).withHandler(_ => Right(getCurrentTime())).buildSafe()
+              ).withHandler(_ => Right(getCurrentTime())).build()
   providerConfig <- Llm4sConfig.defaultProvider()
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry

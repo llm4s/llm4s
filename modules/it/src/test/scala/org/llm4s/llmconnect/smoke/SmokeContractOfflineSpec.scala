@@ -290,8 +290,8 @@ class SmokeContractOfflineSpec
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = onStream(conversation, options, onChunk)
-    override def getContextWindow(): Int     = 8192
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 8192
+    override def reserveCompletion: Int = 1024
   }
 
   private val vaultCall = ujson.Obj("topic" -> "vault")

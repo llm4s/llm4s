@@ -195,7 +195,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
       )
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
 
   it should "send gpt-6-luna a request with tools at reasoning_effort none, and report it (#2886)" in {

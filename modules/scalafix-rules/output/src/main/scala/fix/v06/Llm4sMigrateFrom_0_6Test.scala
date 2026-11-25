@@ -15,4 +15,6 @@ object Llm4sMigrateFrom_0_6Test {
     client.streamComplete(conversation, options)(chunk => if (chunk.finishReason.contains(FinishReason.Stop)) println("done"))
 
   def toolNames(tools: Seq[org.llm4s.toolapi.ToolFunction[_]]): Seq[String] = tools.map(_.name)
+
+  def promptBudget(client: LLMClient): Int = client.contextWindow - client.reserveCompletion
 }

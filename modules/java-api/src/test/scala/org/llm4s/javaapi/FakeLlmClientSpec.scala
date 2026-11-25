@@ -70,8 +70,8 @@ class FakeLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       case Left(e)  => fail(e.message)
     }
     chunks.result().flatMap(_.contentDelta) shouldBe List("streamed")
-    fake.client().underlying.getContextWindow() should be > 0
-    fake.client().underlying.getReserveCompletion() should be > 0
+    fake.client().underlying.contextWindow should be > 0
+    fake.client().underlying.reserveCompletion should be > 0
   }
 
   it should "give each of several concurrent calls its own reply" in {

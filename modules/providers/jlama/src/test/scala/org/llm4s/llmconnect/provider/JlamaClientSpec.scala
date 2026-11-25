@@ -55,7 +55,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
       val local  = client(loader)
       val tool = ToolBuilder[String]("echo", "Echoes", Schema.`object`[Map[String, Any]]("args"))
         .withHandler(_ => Right("ok"))
-        .buildSafe()
+        .build()
         .fold(e => fail(e.toString), identity)
       val call = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj())
 

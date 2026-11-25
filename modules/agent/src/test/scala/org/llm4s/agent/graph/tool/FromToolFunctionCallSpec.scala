@@ -12,7 +12,7 @@ class FromToolFunctionCallSpec extends AnyFlatSpec with Matchers {
 
   private val function = ToolBuilder[String]("echo", "Echoes the call", Schema.`object`("args"))
     .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
-    .buildSafe()
+    .build()
     .fold(e => fail(e.formatted), identity)
 
   private def context(key: String) =

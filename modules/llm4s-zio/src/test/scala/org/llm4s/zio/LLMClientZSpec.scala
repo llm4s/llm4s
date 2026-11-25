@@ -36,8 +36,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
         chunks.foreach(onChunk)
         Right(completion)
       }
-      def getContextWindow(): Int     = 4096
-      def getReserveCompletion(): Int = 256
+      def contextWindow: Int     = 4096
+      def reserveCompletion: Int = 256
     }
 
   private val failingClient: LLMClient = new LLMClient {
@@ -45,8 +45,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
       Left(SimpleError("boom"))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("boom"))
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   val spec =
@@ -94,8 +94,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
               Right(testCompletion)
             } else Left(SimpleError("first chunk was not delivered incrementally"))
           }
-          def getContextWindow(): Int     = 4096
-          def getReserveCompletion(): Int = 256
+          def contextWindow: Int     = 4096
+          def reserveCompletion: Int = 256
         }
         LLMClientZ(client)
           .streamComplete(testConversation)
@@ -113,8 +113,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
             onChunk(StreamedChunk(id = "c2", contentDelta = Some("b")))
             Left(SimpleError("mid-stream"))
           }
-          def getContextWindow(): Int     = 4096
-          def getReserveCompletion(): Int = 256
+          def contextWindow: Int     = 4096
+          def reserveCompletion: Int = 256
         }
         for {
           seen <- Ref.make(Chunk.empty[String])
@@ -142,8 +142,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
             interrupted.countDown()
             Left(SimpleError("interrupted"))
           }
-          def getContextWindow(): Int     = 4096
-          def getReserveCompletion(): Int = 256
+          def contextWindow: Int     = 4096
+          def reserveCompletion: Int = 256
         }
         for {
           taken <- LLMClientZ(client).streamComplete(testConversation).take(1).runCollect

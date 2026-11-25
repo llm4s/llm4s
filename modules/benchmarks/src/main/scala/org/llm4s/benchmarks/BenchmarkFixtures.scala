@@ -47,7 +47,7 @@ object BenchmarkFixtures {
         s"Echoes a message (tool $i)",
         schema
       ).withHandler(extractor => extractor.getString("message").map(msg => s"echo-$i: $msg"))
-        .buildSafe()
+        .build()
         .toOption
     }
 

@@ -38,6 +38,7 @@ class Llm4sMigrateFrom_0_5 extends SemanticRule("Llm4sMigrateFrom_0_5") {
     new ClientEntryPoints,
     new ToolFunctionOneTypeParameter,
     new ToolCallIdTyped,
+    new AccessorRenames,
     new ErrorIsRetryable,
     new StreamedChunkDeltaNames
   )

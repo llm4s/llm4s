@@ -79,8 +79,8 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
           chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
         )
 
-    def getContextWindow(): Int     = 1000
-    def getReserveCompletion(): Int = 100
+    def contextWindow: Int     = 1000
+    def reserveCompletion: Int = 100
 
   private object Reference:
     def finish(raw: String): FinishReason = raw match

@@ -58,13 +58,13 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
   test("anthropic client returns correct context window") {
     val client = new AnthropicClient(testConfig)
 
-    assert(client.getContextWindow() == 200000)
+    assert(client.contextWindow == 200000)
   }
 
   test("anthropic client returns correct reserve completion") {
     val client = new AnthropicClient(testConfig)
 
-    assert(client.getReserveCompletion() == 4096)
+    assert(client.reserveCompletion == 4096)
   }
 
   test("anthropic client records provider exchanges when logging is enabled") {

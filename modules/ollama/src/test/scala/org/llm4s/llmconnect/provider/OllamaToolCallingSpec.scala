@@ -839,7 +839,7 @@ private object OllamaToolCallingSpec {
         .`object`[Map[String, Any]]("Weather parameters")
         .withProperty(Schema.property("location", Schema.string("City or location name")))
     ).withHandler(extractor => extractor.getString("location").map(location => Weather(s"Sunny in $location")))
-      .buildSafe()
+      .build()
       .fold(error => throw new IllegalStateException(error.message), identity)
 
   /** The shape of an id the client synthesizes: `call_<12 hex>_<index>`. */

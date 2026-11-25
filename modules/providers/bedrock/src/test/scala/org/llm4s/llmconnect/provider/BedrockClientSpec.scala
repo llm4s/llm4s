@@ -161,7 +161,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
           Schema
             .`object`[Map[String, Any]]("Weather params")
             .withProperty(Schema.property("location", Schema.string("City name")))
-        ).withHandler(_ => Right("sunny")).buildSafe().toOption.get
+        ).withHandler(_ => Right("sunny")).build().toOption.get
         val conv = Conversation(
           Seq(
             UserMessage("What is the weather in London?"),
@@ -402,8 +402,8 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
 
     "report its context window and completion reserve from the config" in {
       val client = new BedrockClient(config("http://localhost:1"))
-      client.getContextWindow() shouldBe 32000
-      client.getReserveCompletion() shouldBe 4096
+      client.contextWindow shouldBe 32000
+      client.reserveCompletion shouldBe 4096
     }
 
     "build with the default credential chain when the config names no credentials" in {
