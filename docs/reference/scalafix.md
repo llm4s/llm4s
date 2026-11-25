@@ -67,7 +67,7 @@ sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:1.0.0
 ```
 
 `Llm4sMigrateFrom_0_7` is for code on 0.7.x; the [table below](#one-umbrella-rule-per-starting-version) names the rule
-for 0.5.x and 0.6.x. The same in the build, for a rule you run more than once:
+for 0.5.x, 0.6.x and 1.0.x. The same in the build, for a rule you run more than once:
 
 ```scala
 // build.sbt: a build-tool dependency, resolved by Scalafix; never a libraryDependency.
@@ -112,6 +112,7 @@ version to the current release, so you run one rule, once, and no rule runs twic
 | 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
 | 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" or "Since 0.7.0" below, and `PositionalPatternsGainFields` |
 | 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped` |
+| 1.0.x | `Llm4sMigrateFrom_1_0` | nothing yet: no API has broken since 1.0.0. It is published from the release after 1.0.0 |
 
 A rule for a later break is added to every umbrella whose starting version is older than the break. Code on 0.4.x runs
 `Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
@@ -179,7 +180,10 @@ compiled against the 0.6.0 artifacts and its expected output under `output/.../f
 `scalafixTests07` does the same for `Llm4sMigrateFrom_0_7`, with `modules/scalafix-rules/input-0.7` compiled against
 the 0.7.0 artifacts and its expected output under `output/.../fix/v07`: `ErrorProviderIdTypedTest` for its one rule
 so far, and `Llm4sMigrateFrom_0_7Test`, which pins that the umbrella runs it and leaves alone what the older umbrellas
-would rewrite. A rule for a later break adds its fixtures there.
+would rewrite. `scalafixTests10` is the same for `Llm4sMigrateFrom_1_0`, with `modules/scalafix-rules/input-1.0`
+compiled against the 1.0.0 artifacts and its expected output under `output/.../fix/v10`. That umbrella has no rule to
+run yet: `Llm4sMigrateFrom_1_0ChangesNothingTest` pins that it is found by name and changes nothing, including what
+`Llm4sMigrateFrom_0_7` would rewrite. A rule for a break after 1.0.0 adds its fixtures there.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

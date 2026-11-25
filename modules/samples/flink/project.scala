@@ -9,10 +9,10 @@
 //> using jvm 21
 //> using dep org.apache.flink:flink-streaming-java:2.3.0
 //> using dep org.apache.flink:flink-clients:2.3.0
-//> using dep org.llm4s::llm4s-core:0.7.0
-//> using dep org.llm4s::llm4s-ollama:0.7.0
+//> using dep org.llm4s::llm4s-core:1.0.0
+//> using dep org.llm4s::llm4s-ollama:1.0.0
 // The scripted model behind `--scripted` and the test; a real job leaves this out.
-//> using dep org.llm4s::llm4s-testkit:0.7.0
+//> using dep org.llm4s::llm4s-testkit:1.0.0
 //> using test.dep org.apache.flink:flink-test-utils:2.3.0
 //> using test.dep org.scalameta::munit:1.3.6
 //> using resourceDir resources

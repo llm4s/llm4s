@@ -52,8 +52,8 @@ version number:
 visible, because MiMa reported it and it needed a reviewed filter, but between 0.7.0 and 1.0.0 an API that was wrong
 was still fixed outright. The release sequence was 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then
 1.0.0 with no release in between ([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set
-no baseline. The build compares every frozen module with its baseline artifact on each pull request: 0.7.0, with no
-filter, until the baseline moves to 1.0.0 once that is on Maven Central. See
+no baseline. The build compares every frozen module with its baseline artifact on each pull request: 1.0.0, with no
+filter (it was 0.7.0 until 1.0.0 was on Maven Central). See
 [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number

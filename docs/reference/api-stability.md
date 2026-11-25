@@ -29,7 +29,8 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 | **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0.0 was the next release after 0.7.0. A frozen API found wrong in between was fixed in 1.0.0, with a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member (a binary break would also have needed a MiMa filter; there was none); a 0.7.x patch release makes no binary-breaking change in a frozen module ([After the baseline](#after-the-baseline)) |
 | **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes, after a deprecation |
 
-The 0.7.0 baseline made every break visible and reviewed; the compatibility promise started at 1.0.0, which is released.
+The 0.7.0 baseline made every break visible and reviewed; the compatibility promise started at 1.0.0, which is released
+and is the baseline now.
 
 One kind of change is not a break in any of those rows: a Stable sealed type or enum that the compatibility policy
 lists under [Sealed types that may gain a case](compatibility-policy#sealed-types-that-may-gain-a-case) (`ContentPart`,
@@ -186,7 +187,7 @@ Every other module is Beta or Experimental, or is not published (`llm4s-samples`
 no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Experimental is `@Experimental`, which MiMa skips (see
 [Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
 Experimental needs a `ProblemFilters.exclude` entry that says why. There are none: the 0.7.0 baseline was set
-without a filter (see [The Baseline](#the-baseline)).
+without a filter, and so was the 1.0.0 one (see [The Baseline](#the-baseline)).
 
 An `@Experimental` *member* of a Stable type is skipped only partly, because MiMa 1.1 reads a Scala 3 member's
 annotations from TASTy, for methods alone, and by name ([#2785](https://github.com/llm4s/llm4s/issues/2785)):
@@ -221,10 +222,10 @@ declares it or reaches it transitively. The list, and where each group belongs i
 The baseline is per module. `mimaBaselineVersion` in `build.sbt` names the release the frozen modules
 are compared with, and `mimaBaselineOverrides` gives a module a different one: `"llm4s-<name>" -> Some("X.Y.Z")`
 compares it with its own release, `"llm4s-<name>" -> None` holds it back with no baseline while the others
-have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `Some("0.7.0")` and the
-map is empty, so every frozen module is compared with its 0.7.0 artifact: `sbt mimaReportBinaryIssues`, which CI
-runs on every pull request, fails on a binary-incompatible change to one. There is no filter: 1.0.0 is binary
-compatible with 0.7.0 in the frozen modules. The baseline moves to `Some("1.0.0")` once 1.0.0 is on Maven Central
+have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `Some("1.0.0")` and the
+map is empty, so every frozen module is compared with its 1.0.0 artifact: `sbt mimaReportBinaryIssues`, which CI
+runs on every pull request, fails on a binary-incompatible change to one. There is no filter. The baseline was 0.7.0
+until 1.0.0 was on Maven Central, and 1.0.0 is binary compatible with 0.7.0 in the frozen modules
 ([Setting and bumping the baseline](#setting-and-bumping-the-baseline)).
 
 No earlier release is a baseline. 0.5.0, 0.5.1 and 0.6.0, the first releases with the split coordinates, were
@@ -248,8 +249,8 @@ breaks source only: `ProviderId` is an opaque type over `String`. A 0.7.x patch 
 security fix, makes no binary-breaking change in a frozen module.
 
 From 1.0.0 a binary break to a Stable API waits for a major release
-([Adding a Binary-Incompatible Change](#adding-a-binary-incompatible-change)). Once 1.0.0 is on Maven Central the
-baseline moves to it, so every 1.x release is compared with 1.0.0.
+([Adding a Binary-Incompatible Change](#adding-a-binary-incompatible-change)). The baseline moved to 1.0.0 once
+that was on Maven Central, so every 1.x release is compared with 1.0.0.
 
 ### Setting and bumping the baseline
 
@@ -276,7 +277,7 @@ the file; they cannot be changed with `set`:
    silently hide a real break in the same class. Then re-run the check and re-add only what the new baseline needs.
 5. Update this page and the CHANGELOG entry if the covered module list changes.
 
-The Beta parts that ship inside frozen modules are left out of the 0.7.0 baseline, because [1.0 Scope](v1-scope)
+The Beta parts that ship inside frozen modules are left out of the baseline, because [1.0 Scope](v1-scope)
 does not freeze them ([#2835](https://github.com/llm4s/llm4s/issues/2835)): `org.llm4s.assistant.*` (`llm4s-agent`)
 and the Mistral, Cohere and xAI dialects (`llm4s-openai-compatible`). No filter lists them. Every one of their
 top-level types is `@Experimental`, which `stabilityTierCheck` enforces for the files `stabilityExperimentalFiles` in
@@ -326,8 +327,7 @@ Use the narrowest problem type and the narrowest name that matches, not `[Proble
 sbt mimaReportBinaryIssues
 ```
 
-This reports binary incompatibilities between the current code and the baseline release (0.7.0 until it moves to
-1.0.0). A module
+This reports binary incompatibilities between the current code and the baseline release (1.0.0). A module
 with no baseline (every module outside the frozen set) logs `mimaPreviousArtifacts not set` (or `is empty`)
 and is skipped. For a frozen module, success means its API is compatible with the baseline, and failure lists each
 problem with the `ProblemFilters.exclude` line that would silence it. To check one module, run

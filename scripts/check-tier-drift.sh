@@ -10,7 +10,7 @@
 # compares them. It reads text only (no sbt, no compilation), so it runs in the `quick-checks` job first.
 #
 # The build's frozen set is the `mimaFrozen("llm4s-...")` call sites in build.sbt: the modules whose binary
-# compatibility MiMa checks against the 0.7.0 baseline. Everything else is compared with it:
+# compatibility MiMa checks against the 1.0.0 baseline. Everything else is compared with it:
 #
 #   1. build.sbt, against itself
 #        - a frozen module is a published project (not `publish / skip`);

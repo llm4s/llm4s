@@ -16,6 +16,7 @@ import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessa
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 final case class Ticket(id: Int, text: String)
@@ -143,7 +144,7 @@ object EnrichTickets {
     Right(ScriptedLLMClient.respondingTo { conversation =>
       val text = conversation.messages.last.content
       if (text.contains("boom"))
-        Reply.failure(org.llm4s.error.ServiceError(500, "scripted", "the scripted model failed"))
+        Reply.failure(org.llm4s.error.ServiceError(500, ProviderId("scripted"), "the scripted model failed"))
       else if (text.contains("charged")) Reply.text("billing")
       else if (text.contains("crash")) Reply.text("bug")
       else if (text.contains("password")) Reply.text("account")

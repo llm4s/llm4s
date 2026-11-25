@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Build & tooling
+
+- **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
+- **Added** the umbrella Scalafix rule `Llm4sMigrateFrom_1_0`, for code on 1.0.x; it runs no rule yet, since nothing has broken since 1.0.0 ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#one-umbrella-rule-per-starting-version)).
+
 ## [1.0.0] - 2026-11-25
 
 ### Highlights

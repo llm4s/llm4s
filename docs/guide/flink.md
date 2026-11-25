@@ -23,8 +23,7 @@ instead of failing the job.
 
 **Verified: 2026-11-25**, with llm4s 1.0.0, for the MiniCluster test and the `--scripted` run, with the one change
 1.0.0 needs: the scripted model's `ServiceError` takes `ProviderId("scripted")`
-([migration note](../reference/migration#an-errors-provider-is-a-providerid-2936)); the example in the repository
-compiles against 0.7.0 until 1.0.0 is on Maven Central. The two cluster rows were last run on 2026-11-05, with llm4s
+([migration note](../reference/migration#an-errors-provider-is-a-providerid-2936)). The two cluster rows were last run on 2026-11-05, with llm4s
 0.5.1. The example job in
 [`modules/samples/flink`](https://github.com/llm4s/llm4s/tree/main/modules/samples/flink) was run with its scripted
 model (no key, no network) and, on a cluster, with its configured provider:
