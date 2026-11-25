@@ -56,8 +56,9 @@ Nothing in the frozen modules changed binary-incompatibly. The Scalafix rule `Ll
 mechanical part ([Scalafix: migration rules](../reference/scalafix#migration-rules)).
 
 - [An error's `provider` is a `ProviderId`](../reference/migration#an-errors-provider-is-a-providerid-2936):
-  `RateLimitError(ProviderId("openai"))`, and `error.provider.asString` where a `String` is wanted. The one source
-  break; the rule `ErrorProviderIdTyped` rewrites both.
+  `RateLimitError(ProviderId("openai"))`, and `error.provider.asString` where a `String` is wanted; a provider
+  module passes its `ProviderId` to `HttpErrorMapper`, `PartEncoding`, `ensureSuccess` and `mapServiceError` too. The
+  one source break; the rule `ErrorProviderIdTyped` rewrites it.
 - [A cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](../reference/migration#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933):
   behaviour, not signatures. An agent with `withOutput` whose answer is cut off ends `AgentStatus.Truncated` where
   0.7.0 returned a `Left`, and `llm4s-anthropic` no longer sends `max_tokens = 2048` when `maxTokens` is unset;

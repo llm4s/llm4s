@@ -33,9 +33,9 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
           acc.flatMap { done =>
             m match
               case u: UserMessage =>
-                PartEncoding.encodeAll("reference", u.role, u.parts)(user).map(done :+ ujson.Arr.from(_))
+                PartEncoding.encodeAll(ProviderId("reference"), u.role, u.parts)(user).map(done :+ ujson.Arr.from(_))
               case t: ToolMessage =>
-                PartEncoding.encodeAll("reference", t.role, t.parts)(tool).map(done :+ ujson.Arr.from(_))
+                PartEncoding.encodeAll(ProviderId("reference"), t.role, t.parts)(tool).map(done :+ ujson.Arr.from(_))
               case other => Right(done :+ ujson.Str(other.content))
           }
         }
@@ -129,7 +129,8 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
     assertProviderRejectionIsTyped(openAIError) { url =>
       new Rejected(
         url,
-        (status, body) => Left(HttpErrorMapper.toError(status, body, "reference", Map.empty)).left.toOption.get
+        (status, body) =>
+          Left(HttpErrorMapper.toError(status, body, ProviderId("reference"), Map.empty)).left.toOption.get
       )
     }
   }

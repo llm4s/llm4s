@@ -192,13 +192,13 @@ object HttpResponse:
    */
   private[llm4s] def serviceError(
     response: HttpResponse,
-    provider: String,
+    provider: ProviderId,
     details: String,
     clock: Clock = Clock.systemUTC()
   ): ServiceError =
     val error = HttpHeaders.requestId(response.headers) match
-      case Some(id) => ServiceError(response.statusCode, ProviderId(provider), details, id)
-      case None     => ServiceError(response.statusCode, ProviderId(provider), details)
+      case Some(id) => ServiceError(response.statusCode, provider, details, id)
+      case None     => ServiceError(response.statusCode, provider, details)
     HttpHeaders.retryAfter(response.headers, clock).fold(error)(error.withRetryAfter)
 
   extension (response: HttpResponse)
@@ -209,7 +209,7 @@ object HttpResponse:
      * `x-amzn-requestid` or `apim-request-id`) and its `Retry-After` delay (delta-seconds or an HTTP-date), when
      * it sent them.
      */
-    def ensureSuccess(provider: String): Result[HttpResponse] =
+    def ensureSuccess(provider: ProviderId): Result[HttpResponse] =
       if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
       else Left(HttpResponse.serviceError(response, provider, Redaction.safeBody(response.body)))
 
@@ -220,12 +220,12 @@ object HttpResponse:
 
   extension [A](result: Result[A])
     def mapServiceError(
-      provider: String,
+      provider: ProviderId,
       message: String
     ): Result[A] =
       result.left.map:
         case service: ServiceError =>
-          ServiceError.rewrapped(service, ProviderId(provider), s"$message: ${service.message}")
+          ServiceError.rewrapped(service, provider, s"$message: ${service.message}")
         case other =>
           other
 

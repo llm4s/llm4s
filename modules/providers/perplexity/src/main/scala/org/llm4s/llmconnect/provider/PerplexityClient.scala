@@ -150,7 +150,7 @@ final class PerplexityClient private[provider] (
                     HttpErrorMapper.toError(
                       response.statusCode,
                       Redaction.scrubRemote(response.body),
-                      providerName,
+                      provider,
                       response.headers
                     )
                   )
@@ -180,7 +180,7 @@ final class PerplexityClient private[provider] (
               raw.append(err)
               Left(
                 HttpErrorMapper
-                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+                  .toError(response.statusCode, Redaction.scrubRemote(err), provider, response.headers)
               )
             }
           }
@@ -295,7 +295,7 @@ final class PerplexityClient private[provider] (
     stream: Boolean
   ): Result[ujson.Obj] =
     for {
-      _ <- PartEncoding.check(providerName, conversation.messages, PartEncoding.textOnly, PartEncoding.textOnly)
+      _ <- PartEncoding.check(provider, conversation.messages, PartEncoding.textOnly, PartEncoding.textOnly)
       format <- (options.responseFormat match {
         case None                               => Right(None)
         case Some(ResponseFormat.Json)          => Left(JsonModeUnsupported)
@@ -400,7 +400,7 @@ final class PerplexityClient private[provider] (
               HttpErrorMapper.toError(
                 response.statusCode,
                 Redaction.scrubRemote(response.body),
-                providerName,
+                provider,
                 response.headers
               )
             )

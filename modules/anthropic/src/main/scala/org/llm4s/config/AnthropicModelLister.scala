@@ -6,6 +6,7 @@ import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.AnthropicConfig
+import org.llm4s.llmconnect.provider.AnthropicProvider
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
@@ -61,8 +62,8 @@ object AnthropicModelLister extends ProviderModelLister:
           params = Map("limit" -> DefaultLimit) ++ afterId.map("after_id" -> _),
           timeout = 10.seconds
         )
-        .mapServiceError("anthropic", "Failed to discover models")
-      okResponse <- response.ensureSuccess("anthropic")
+        .mapServiceError(AnthropicProvider.id, "Failed to discover models")
+      okResponse <- response.ensureSuccess(AnthropicProvider.id)
       json       <- readBody(okResponse.body)
       page       <- parseAnthropicPage(json)
       all = acc ++ page.models

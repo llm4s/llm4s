@@ -239,7 +239,7 @@ final class AnthropicClient private[provider] (
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
-      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
+      .flatMap(t => AnthropicClient.checkParts(provider, t.messages).map(_ => t))
       // a tool schema Anthropic cannot take fails the request here too (#2903)
       .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
       .flatMap { (transformed, tools) =>
@@ -339,7 +339,7 @@ curl https://api.anthropic.com/v1/messages \
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
-      .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
+      .flatMap(t => AnthropicClient.checkParts(provider, t.messages).map(_ => t))
       // a tool schema Anthropic cannot take fails the request here too (#2903)
       .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
       .flatMap { (transformed, tools) =>
@@ -1076,7 +1076,7 @@ object AnthropicClient {
 
   /** The error for a reply Anthropic refused after `cutAfterChars` characters of text, with the usage it billed. */
   private[provider] def filtered(reason: String, cutAfterChars: Int, usage: Option[TokenUsage]): ContentFilteredError =
-    ContentFilteredError.reply(ProviderId("anthropic"), reason, cutAfterChars).withUsage(usage)
+    ContentFilteredError.reply(AnthropicProvider.id, reason, cutAfterChars).withUsage(usage)
 
   /** A reply whose `stop_reason` is `refusal` as a `ContentFilteredError`; any other reply unchanged. */
   private[provider] def refused(c: Completion): Result[Completion] =
@@ -1265,7 +1265,7 @@ object AnthropicClient {
 
   /** `Right` when every part of `messages` is one Anthropic takes, else the error naming the first that is not. */
   private[provider] def checkParts(
-    provider: String,
+    provider: ProviderId,
     messages: Seq[org.llm4s.llmconnect.model.Message]
   ): Result[Unit] =
     PartEncoding
@@ -1334,29 +1334,29 @@ object AnthropicClient {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
     e match {
       case e: com.anthropic.errors.UnauthorizedException =>
-        AuthenticationError(ProviderId("anthropic"), safe(e.getMessage)).withHttpStatus(401)
+        AuthenticationError(AnthropicProvider.id, safe(e.getMessage)).withHttpStatus(401)
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
       case e: com.anthropic.errors.RateLimitException =>
         Left(
           HttpErrorMapper
-            .toError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
+            .toError(429, "", AnthropicProvider.id, Try(headerMap(e.headers())).getOrElse(Map.empty))
         ).left
-          .getOrElse(RateLimitError(ProviderId("anthropic")))
+          .getOrElse(RateLimitError(AnthropicProvider.id))
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
       // except "prompt is too long", which is the typed context-length error a caller reacts to
       case e: com.anthropic.errors.BadRequestException =>
         HttpErrorMapper
-          .typed(400, errorCodes(e), safe(e.getMessage), "anthropic")
+          .typed(400, errorCodes(e), safe(e.getMessage), AnthropicProvider.id)
           .getOrElse(ValidationError("request", safe(e.getMessage)).withHttpStatus(400))
       // an `error` event in a stream, after the 200 status: the status its error type stands for, and its message
       case e: com.anthropic.errors.SseException => streamError(e.body())
       // a 404 `not_found_error` naming the model is the typed model-not-found error; any other reply keeps its
       // status, with the Retry-After a 529 or 503 may carry
       case e: com.anthropic.errors.AnthropicServiceException =>
-        HttpErrorMapper.typed(e.statusCode(), errorCodes(e), safe(e.getMessage), "anthropic").getOrElse {
-          val error = ServiceError(e.statusCode(), ProviderId("anthropic"), safe(e.getMessage))
+        HttpErrorMapper.typed(e.statusCode(), errorCodes(e), safe(e.getMessage), AnthropicProvider.id).getOrElse {
+          val error = ServiceError(e.statusCode(), AnthropicProvider.id, safe(e.getMessage))
           Try(headerMap(e.headers())).toOption
             .flatMap(org.llm4s.http.HttpHeaders.retryAfter(_, java.time.Clock.systemUTC()))
             .fold(error)(error.withRetryAfter)
@@ -1365,7 +1365,7 @@ object AnthropicClient {
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
       case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapException(io.getCause)
       case e =>
-        SdkErrorMapper(e, "anthropic") match {
+        SdkErrorMapper(e, AnthropicProvider.id) match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
           case other                 => other
         }
@@ -1384,7 +1384,7 @@ object AnthropicClient {
       .map(event => event.get("error").flatMap(_.objOpt).getOrElse(event))
     val message = error.flatMap(_.get("message")).flatMap(_.strOpt).getOrElse("the stream reported an error")
     val status  = error.flatMap(_.get("type")).flatMap(_.strOpt).flatMap(StreamErrorStatus.get).getOrElse(502)
-    HttpErrorMapper.mapStreamError(status, message, "anthropic")
+    HttpErrorMapper.mapStreamError(status, message, AnthropicProvider.id)
   }
 
   /** The HTTP status each of Anthropic's documented error types stands for. */

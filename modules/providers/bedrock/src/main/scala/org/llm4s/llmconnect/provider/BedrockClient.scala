@@ -465,7 +465,7 @@ final class BedrockClient private[provider] (
     // any other is unsealed here, before the system messages are lifted out (see ThinkingReplay)
     val replayable = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
     // a part Converse cannot take fails the request here, before anything is sent
-    BedrockClient.checkParts(providerName, replayable).flatMap { _ =>
+    BedrockClient.checkParts(provider, replayable).flatMap { _ =>
       val messages = mergeAdjacentRoles(convertMessages(replayable.filterNot(_.isInstanceOf[SystemMessage])))
       if (messages.isEmpty)
         Left(
@@ -730,26 +730,26 @@ final class BedrockClient private[provider] (
 
   private def mapException(throwable: Throwable): LLMError =
     unwrap(throwable) match {
-      case _: ThrottlingException           => RateLimitError(ProviderId("bedrock"))
-      case _: ServiceQuotaExceededException => RateLimitError(ProviderId("bedrock"))
+      case _: ThrottlingException           => RateLimitError(BedrockProvider.id)
+      case _: ServiceQuotaExceededException => RateLimitError(BedrockProvider.id)
       case e: ValidationException           =>
         // "Input is too long for requested model" is the typed context-length error
         HttpErrorMapper
-          .typed(400, Set.empty, safeMessage(e), "bedrock")
+          .typed(400, Set.empty, safeMessage(e), BedrockProvider.id)
           .getOrElse(ValidationError("request", safeMessage(e)).withHttpStatus(400))
-      case e: AccessDeniedException => AuthenticationError(ProviderId("bedrock"), safeMessage(e))
+      case e: AccessDeniedException => AuthenticationError(BedrockProvider.id, safeMessage(e))
       case e: ApiCallTimeoutException =>
         val timeout = requestTimeout.getOrElse(FiniteDuration(0, TimeUnit.SECONDS))
         TimeoutError(safeMessage(e), timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)
       case e: BedrockRuntimeException if e.statusCode() == 401 || e.statusCode() == 403 =>
-        AuthenticationError(ProviderId("bedrock"), safeMessage(e))
-      case e: BedrockRuntimeException => ServiceError(e.statusCode(), ProviderId("bedrock"), safeMessage(e))
+        AuthenticationError(BedrockProvider.id, safeMessage(e))
+      case e: BedrockRuntimeException => ServiceError(e.statusCode(), BedrockProvider.id, safeMessage(e))
       // The SDK reports "no credentials" as a client exception; retrying cannot fix it.
       case e: SdkClientException if Option(e.getMessage).exists(_.toLowerCase.contains("credentials")) =>
-        AuthenticationError(ProviderId("bedrock"), safeMessage(e))
+        AuthenticationError(BedrockProvider.id, safeMessage(e))
       case e: SdkClientException =>
         NetworkError(safeMessage(e), Some(e), endpointLabel)
-      case e => SdkErrorMapper(e, "bedrock")
+      case e => SdkErrorMapper(e, BedrockProvider.id)
     }
 
   /** The async client reports failures wrapped in `CompletionException`. */
@@ -914,7 +914,7 @@ object BedrockClient {
     usage: Option[TokenUsage]
   ): Option[ContentFilteredError] =
     Option.when(FilterStops.contains(stopReason))(
-      ContentFilteredError.reply(ProviderId("bedrock"), stopReason, cutAfterChars).withUsage(usage)
+      ContentFilteredError.reply(BedrockProvider.id, stopReason, cutAfterChars).withUsage(usage)
     )
 
   // ---- content parts ----
@@ -983,7 +983,7 @@ object BedrockClient {
   }
 
   /** `Right` when every part of `messages` is one Converse takes, else the error naming the first that is not. */
-  private[provider] def checkParts(provider: String, messages: Seq[Message]): Result[Unit] =
+  private[provider] def checkParts(provider: ProviderId, messages: Seq[Message]): Result[Unit] =
     PartEncoding
       .check(provider, messages, userPart("document"), toolPart("document"))
 

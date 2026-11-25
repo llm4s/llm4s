@@ -59,7 +59,7 @@ object ProviderModelListers:
           headers = requestHeaders(normalized, apiKey, sectionHeaders(normalized), extraHeaders)
           response <- httpClient
             .get(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10.seconds)
-            .mapServiceError(provider.asString, "Failed to discover models")
+            .mapServiceError(provider, "Failed to discover models")
           // The body of a rejection may echo the bearer (an exchanged access token, or the key) back.
           okResponse <-
             if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
@@ -67,7 +67,7 @@ object ProviderModelListers:
               Left(
                 HttpResponse.serviceError(
                   response,
-                  provider.asString,
+                  provider,
                   Redaction.remoteBody(response.body)
                 )
               )

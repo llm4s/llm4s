@@ -31,14 +31,14 @@ supported line; 0.7.x gets critical security fixes until 2027-02-25, and older 0
 
 ### Breaking changes
 
-- An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`); the Scalafix rule `ErrorProviderIdTyped` rewrites both
-  ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936).
+- An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`), and on the helpers that build one (`HttpErrorMapper.toError` and `mapStreamError`, `PartEncoding.check` and `encodeAll`, `HttpResponse`'s `ensureSuccess` and `mapServiceError`); the Scalafix rule `ErrorProviderIdTyped` rewrites them
+  ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936), [#2939](https://github.com/llm4s/llm4s/pull/2939).
 - Behaviour, no signature: a `withOutput` agent's cut-off answer ends `AgentStatus.Truncated` where 0.7.0 returned `Left(GraphError.OutputInvalid)`, and `llm4s-anthropic`'s default `max_tokens` follows the model where it was 2048, so a call can return and cost more
   ([migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)) [#2933](https://github.com/llm4s/llm4s/issues/2933).
 
 ### Core
 
-- **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
+- **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`, and `HttpErrorMapper`, `PartEncoding` and `HttpResponse.ensureSuccess` / `mapServiceError` take it as one; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
 
 ### Agent runtime
 

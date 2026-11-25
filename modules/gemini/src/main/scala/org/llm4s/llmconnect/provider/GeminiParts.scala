@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.model.{ ContentPart, Message }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.types.Result
@@ -28,7 +29,7 @@ private[provider] object GeminiParts {
   }
 
   /** `Right` when a client with `fileUri` can send every part of `messages`. */
-  def check(provider: String, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
+  def check(provider: ProviderId, messages: Seq[Message], fileUri: FileUri): Result[Unit] =
     PartEncoding.check(provider, messages, user(fileUri), PartEncoding.textOnly)
 
   /**
@@ -37,9 +38,9 @@ private[provider] object GeminiParts {
    * (`<baseUrl>/files/abc`) - or a `Url` that is such a `uri`. `generateContent` does not fetch an arbitrary web
    * URL, so any other is refused: upload it, or send its bytes inline.
    */
-  def geminiFileUri(provider: String, baseUrl: String): FileUri = {
+  def geminiFileUri(provider: ProviderId, baseUrl: String): FileUri = {
     case MediaSource.Url(uri) if uri.toString.startsWith(s"${baseUrl.stripSuffix("/")}/files/") => Some(uri.toString)
-    case MediaSource.ProviderFile(owner, id) if owner == provider =>
+    case MediaSource.ProviderFile(owner, id) if owner == provider.asString =>
       if (id.startsWith("https://")) Some(id)
       else Some(s"${baseUrl.stripSuffix("/")}/${if (id.startsWith("files/")) id else s"files/$id"}")
     case _ => None

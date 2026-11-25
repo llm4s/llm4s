@@ -21,7 +21,12 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
       case p if p.isInstanceOf[ContentPart.Image] => encoded.incrementAndGet(); "x"
       case ContentPart.Text(t)                    => t
     }
-    PartEncoding.check("p", Seq(UserMessage(Vector(ContentPart.Text("a"), image))), counting, counting) shouldBe Right(
+    PartEncoding.check(
+      ProviderId("p"),
+      Seq(UserMessage(Vector(ContentPart.Text("a"), image))),
+      counting,
+      counting
+    ) shouldBe Right(
       ()
     )
     encoded.get shouldBe 0
@@ -31,7 +36,7 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
     val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c"), "t", ujson.Obj())))
     PartEncoding
       .check(
-        "p",
+        ProviderId("p"),
         Seq(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c"))),
         { case _ => 1 },
         PartEncoding.textOnly
@@ -49,13 +54,13 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "check and encodeAll" should "refuse a null part as invalid, not throw" in {
     PartEncoding
-      .check("p", Seq(UserMessage(Vector(null, image))), { case _ => 1 }, PartEncoding.textOnly)
+      .check(ProviderId("p"), Seq(UserMessage(Vector(null, image))), { case _ => 1 }, PartEncoding.textOnly)
       .left
       .value
       .message should
       include("null part")
     PartEncoding
-      .encodeAll("p", MessageRole.User, Vector(ContentPart.Text("a"), null)) { case _ => 1 }
+      .encodeAll(ProviderId("p"), MessageRole.User, Vector(ContentPart.Text("a"), null)) { case _ => 1 }
       .isLeft shouldBe true
   }
 

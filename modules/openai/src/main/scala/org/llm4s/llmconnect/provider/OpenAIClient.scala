@@ -300,7 +300,7 @@ final class OpenAIClient private[provider] (
   /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      val error = OpenAIClient.mapError(e, providerName)
+      val error = OpenAIClient.mapError(e, provider)
       e match {
         // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
         // may repeat a credential: only the redacted error is logged, not the exception.
@@ -770,7 +770,7 @@ final class OpenAIClient private[provider] (
    */
   private def convertToOpenAIMessages(conversation: Conversation): Result[Seq[ChatCompletionMessageParam]] =
     PartEncoding
-      .check(providerName, conversation.messages, userPart, PartEncoding.textOnly)
+      .check(provider, conversation.messages, userPart, PartEncoding.textOnly)
       // the SDK builders throw on malformed content (a null text): inside the Result, as buildParams is
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
@@ -1052,7 +1052,7 @@ object OpenAIClient {
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
    */
-  private[provider] def mapError(e: Throwable, provider: String): LLMError =
+  private[provider] def mapError(e: Throwable, provider: ProviderId): LLMError =
     OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider))
 
   /**
@@ -1060,12 +1060,12 @@ object OpenAIClient {
    * extracts (and redacts) its detail; any other SDK exception's message - the workload-identity token
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
-  private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
+  private def mapSdkError(e: Throwable, provider: ProviderId): LLMError = e match {
     // an `error` event in a stream, after the 200 status: read as OpenAICompatibleClient reads one
     case sse: SseException => streamError(sse, provider)
     case service: OpenAIServiceException if service.statusCode() == 400 && promptFiltered(service) =>
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
-      ContentFilteredError.prompt(ProviderId(provider), ChatCompletionsFinishReason.ContentFilter)
+      ContentFilteredError.prompt(provider, ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
       Left(
         HttpErrorMapper
@@ -1089,12 +1089,12 @@ object OpenAIClient {
    * the whole event); [[OpenAICompatibleClient.streamedError]] maps it, keeping an HTTP failure status the error
    * states and otherwise making it a 502.
    */
-  private def streamError(sse: SseException, provider: String): LLMError =
+  private def streamError(sse: SseException, provider: ProviderId): LLMError =
     Try(ObjectMappers.jsonMapper().writeValueAsString(sse.body())).toOption
       .flatMap(body => BoundedJson.read(body).toOption)
       .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
       .flatMap(OpenAICompatibleClient.streamedError(_, provider))
-      .getOrElse(ServiceError(502, ProviderId(provider), "the stream reported an error"))
+      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
 
   /**
    * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,

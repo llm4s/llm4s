@@ -59,7 +59,7 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
 
   "ensureSuccess" should "put the response's request id and Retry-After on the ServiceError" in {
     val response = HttpResponse(503, "overloaded", Map("x-request-id" -> Seq("req-9"), "retry-after" -> Seq("7")))
-    val err      = serviceError(response.ensureSuccess("p"))
+    val err      = serviceError(response.ensureSuccess(ProviderId("p")))
 
     err.status shouldBe 503
     err.provider shouldBe ProviderId("p")
@@ -71,25 +71,28 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
 
   it should "read an HTTP-date Retry-After (one already past is zero)" in {
     val response = HttpResponse(503, "x", Map("Retry-After" -> Seq("Thu, 01 Jan 2015 00:00:00 GMT")))
-    serviceError(response.ensureSuccess("p")).retryAfter shouldBe Some(Duration.Zero)
+    serviceError(response.ensureSuccess(ProviderId("p"))).retryAfter shouldBe Some(Duration.Zero)
   }
 
   it should "leave both unset when the response sent neither, or a malformed Retry-After" in {
-    val bare = serviceError(HttpResponse(500, "boom").ensureSuccess("p"))
+    val bare = serviceError(HttpResponse(500, "boom").ensureSuccess(ProviderId("p")))
     bare.requestId shouldBe None
     bare.retryAfter shouldBe None
 
-    serviceError(HttpResponse(502, "x", Map("Retry-After" -> Seq("later"))).ensureSuccess("p")).retryAfter shouldBe None
+    serviceError(
+      HttpResponse(502, "x", Map("Retry-After" -> Seq("later"))).ensureSuccess(ProviderId("p"))
+    ).retryAfter shouldBe None
   }
 
   "HttpResponse.serviceError" should "measure an HTTP-date against the given clock" in {
     val response = HttpResponse(503, "x", Map("Retry-After" -> Seq("Thu, 01 Oct 2026 12:01:00 GMT")))
-    HttpResponse.serviceError(response, "p", "details", clock).retryAfter shouldBe Some(1.minute)
+    HttpResponse.serviceError(response, ProviderId("p"), "details", clock).retryAfter shouldBe Some(1.minute)
   }
 
   "mapServiceError" should "keep the status, request id and retryAfter, with the new provider and message" in {
     val original = ServiceError(503, ProviderId("inner"), "down", "req-1").withRetryAfter(9.seconds)
-    val err      = serviceError((Left(original): Result[Int]).mapServiceError("outer", "Failed to discover models"))
+    val err =
+      serviceError((Left(original): Result[Int]).mapServiceError(ProviderId("outer"), "Failed to discover models"))
 
     err.status shouldBe 503
     err.provider shouldBe ProviderId("outer")
@@ -102,15 +105,17 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
 
   it should "keep an absent request id and retryAfter absent" in {
     val err =
-      serviceError((Left(ServiceError(500, ProviderId("inner"), "down")): Result[Int]).mapServiceError("outer", "m"))
+      serviceError(
+        (Left(ServiceError(500, ProviderId("inner"), "down")): Result[Int]).mapServiceError(ProviderId("outer"), "m")
+      )
     err.requestId shouldBe None
     err.retryAfter shouldBe None
   }
 
   it should "pass other errors and successes through" in {
     val network = NetworkError("unreachable", None, "http://x")
-    (Left(network): Result[Int]).mapServiceError("p", "m") shouldBe Left(network)
-    (Right(1): Result[Int]).mapServiceError("p", "m") shouldBe Right(1)
+    (Left(network): Result[Int]).mapServiceError(ProviderId("p"), "m") shouldBe Left(network)
+    (Right(1): Result[Int]).mapServiceError(ProviderId("p"), "m") shouldBe Right(1)
   }
 
   "ServiceError" should "match with all five fields, retryAfter included" in {
