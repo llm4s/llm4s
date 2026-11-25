@@ -43,6 +43,9 @@ BASE="${MAVEN_CENTRAL_URL:-https://repo1.maven.org/maven2}/org/llm4s"
 
 REPO=llm4s/llm4s
 SIGNER_WORKFLOW="$REPO/.github/workflows/release.yml"
+# `llm4s-kotlin-api` is attested in the job that builds it, which runs in the reusable workflow release.yml calls: the
+# certificate names that workflow, not release.yml.
+KOTLIN_SIGNER_WORKFLOW="$REPO/.github/workflows/publish-kotlin.yml"
 GH="${GH:-gh}"
 IMAGE="${IMAGE:-ghcr.io/llm4s/workspace-runner}"
 
@@ -88,10 +91,10 @@ if [ "$ATTEST" = 1 ]; then
   command -v "$GH" >/dev/null 2>&1 || { echo "--attestations needs the GitHub CLI ('$GH' not found)." >&2; exit 2; }
 fi
 
-# attested <file or oci:// reference>: does `gh attestation verify` accept it as built by this repository's release
-# workflow? The reason is left in ATTEST_ERR.
+# attested <file or oci:// reference> [signer workflow]: does `gh attestation verify` accept it as built by this
+# repository's release workflow (or the workflow given)? The reason is left in ATTEST_ERR.
 attested() {
-  ATTEST_ERR="$("$GH" attestation verify "$1" -R "$REPO" --signer-workflow "$SIGNER_WORKFLOW" 2>&1 >/dev/null)" && return 0
+  ATTEST_ERR="$("$GH" attestation verify "$1" -R "$REPO" --signer-workflow "${2:-$SIGNER_WORKFLOW}" 2>&1 >/dev/null)" && return 0
   ATTEST_ERR="$(printf '%s' "$ATTEST_ERR" | tail -1)"
   return 1
 }
@@ -161,7 +164,7 @@ while read -r kind id; do
     case "$kind" in artifact | gradle) file="$id-$VERSION.jar" ;; *) file="$id-$VERSION.pom" ;; esac
     if ! curl -s --max-time 120 "$BASE/$id/$VERSION/$file" > "$TMP/$file"; then
       problems="could not download $file"
-    elif ! attested "$TMP/$file"; then
+    elif ! { if [ "$kind" = gradle ]; then attested "$TMP/$file" "$KOTLIN_SIGNER_WORKFLOW"; else attested "$TMP/$file"; fi; }; then
       problems="no build provenance for $file: $ATTEST_ERR"
     fi
   fi
@@ -194,7 +197,7 @@ if [ "$missing" -gt 0 ]; then
   exit 1
 fi
 if [ "$ATTEST" = 1 ]; then
-  echo "All $checked coordinates resolve at $VERSION, each with build provenance from $SIGNER_WORKFLOW."
+  echo "All $checked coordinates resolve at $VERSION, each with build provenance from $SIGNER_WORKFLOW (llm4s-kotlin-api: $KOTLIN_SIGNER_WORKFLOW)."
 else
   echo "All $checked coordinates resolve at $VERSION."
 fi
