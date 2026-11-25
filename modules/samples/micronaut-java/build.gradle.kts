@@ -2,7 +2,7 @@
 // JLlmClient, configured from application.yml, a controller at /chat and /chat/stream, and an llm4s health indicator.
 // See README.md and docs/guide/micronaut.md.
 //
-// Build against a release with `-Pllm4sVersion=0.6.0` (or later). The default is the locally built snapshot that
+// Build against a release with `-Pllm4sVersion=0.7.0` (or later). The default is the locally built snapshot that
 // `sbt publishM2` puts in your local Maven repository; CI builds and tests the sample against it, so the sample cannot
 // drift from the API on main.
 plugins {

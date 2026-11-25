@@ -29,7 +29,7 @@ The carves, all published from 0.5.0:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
-**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 is the next release after it ([#1281](https://github.com/llm4s/llm4s/issues/1281); [After the baseline](api-stability#after-the-baseline)). Until 1.0 nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 is the next release after it ([#1281](https://github.com/llm4s/llm4s/issues/1281); [After the baseline](api-stability#after-the-baseline)). The baseline is set: the build compares each frozen module with its 0.7.0 artifact. Until 1.0 a frozen API that is wrong is still fixed: "Frozen at 1.0" is the tier a module will hold. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
 
 ## Maturity Legend
 
@@ -186,4 +186,4 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 ## Programme status
 
-The modularisation ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is complete. What remains before 1.0 is the 0.7.0 baseline and the release itself, tracked in [#1281](https://github.com/llm4s/llm4s/issues/1281).
+The modularisation ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is complete. The 0.7.0 baseline is set. What remains before 1.0 is the release itself, tracked in [#1281](https://github.com/llm4s/llm4s/issues/1281).

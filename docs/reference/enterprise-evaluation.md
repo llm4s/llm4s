@@ -44,7 +44,7 @@ linked to its open issue.
 |---|---|
 | How are versions numbered? | Semantic versioning, with `versionScheme := early-semver` in the published POMs. Before the compatibility baseline (0.7.0) any release may break compatibility, each break listed in the CHANGELOG with a migration note. See the [Compatibility and Deprecation Policy](compatibility-policy#versions). |
 | Which APIs are stable? | Each module is Frozen, Beta or Experimental: [1.0 Scope](v1-scope), with the promise per tier in the [Compatibility and Deprecation Policy](compatibility-policy). Every top-level public type of a Frozen module carries `@Stable` or `@Experimental`: [Tiers in the Code](api-stability#tiers-in-the-code). |
-| Is binary compatibility checked? | MiMa runs in the build, against a baseline that is not set yet, so it checks nothing until then: [API Stability](api-stability#the-baseline) and [Known gaps](#known-gaps). |
+| Is binary compatibility checked? | Yes, for the seven frozen modules: MiMa compares each with its 0.7.0 artifact on every pull request. The compatibility promise itself starts at 1.0: [API Stability](api-stability#the-baseline) and [Known gaps](#known-gaps). |
 | How are releases made, and where are the notes? | From a tag, by CI, to Maven Central: [Release Process](../contribute/release). Notes are the [GitHub Releases](https://github.com/llm4s/llm4s/releases) and the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md); upgrades are in the [Migration Guide](migration). |
 | Which versions get fixes, and for how long? | Before 1.0, fixes ship in the latest release only. From 1.0, the latest 1.x minor gets bug and security fixes and the previous minor security fixes for three months after its successor; 0.7.x gets critical security fixes for three months after 1.0. No LTS line before 2.0; minor releases at most about quarterly. See the [Support Policy](support-policy) and [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions). |
 
@@ -113,7 +113,7 @@ closes, so this list is updated when the gap is.
 
 | Gap | Issue |
 |---|---|
-| No binary-compatibility baseline yet: MiMa checks nothing until 0.7.0 sets one; 1.0 follows it | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
+| No compatibility promise yet: the 0.7.0 baseline makes each break to a frozen module visible and reviewed, and the promise starts at 1.0, the next release | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
 
@@ -133,9 +133,10 @@ Dependency licences: per-module licence report on each GitHub Release; CI fails 
 Governance: GOVERNANCE.md (lazy consensus; maintainer majority for larger decisions; RFCs for
   Frozen API changes). Two maintainers (MAINTAINERS.md). Stewarded by the LLM4S Foundation
   (https://llm4s.org/foundation/).
-Versioning: semantic versioning (early-semver). Until the 0.7.0 baseline any release may break
-  compatibility, with a migration note (https://llm4s.org/reference/compatibility-policy).
-  No binary-compatibility baseline yet (https://github.com/llm4s/llm4s/issues/1281).
+Versioning: semantic versioning (early-semver). Binary compatibility of the frozen
+  modules is checked against the 0.7.0 baseline (MiMa); a break before 1.0 needs a reviewed filter
+  and a migration note (https://llm4s.org/reference/compatibility-policy). The compatibility
+  promise starts at 1.0 (https://github.com/llm4s/llm4s/issues/1281).
 Support policy: before 1.0, fixes ship in the latest release only. From 1.0, the latest 1.x minor gets
   bug and security fixes, the previous minor security fixes for three months; no LTS before 2.0
   (https://llm4s.org/reference/support-policy). Volunteer-maintained, best effort,

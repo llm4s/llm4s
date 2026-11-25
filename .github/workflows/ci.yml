@@ -380,10 +380,9 @@ jobs:
       - name: Compile
         run: sbt --client compile
 
-      # Binary compatibility (MiMa). Only the frozen modules (`mimaFrozen` in build.sbt) have a baseline, and none until
-      # #1281 sets one (`mimaBaselineVersion`, per module through `mimaBaselineOverrides`), so this checks nothing yet.
-      # It used to be a job of its own, four runner minutes a PR to compile the build again and compare it with nothing;
-      # here it reuses the compile above, and it starts checking by itself when #1281 sets the baseline. The build is
+      # Binary compatibility (MiMa). Only the frozen modules (`mimaFrozen` in build.sbt) have a baseline: 0.7.0
+      # (`mimaBaselineVersion`, per module through `mimaBaselineOverrides`; #1281). It reuses the compile above rather
+      # than compiling the build again in a job of its own. The build is
       # Scala 3 only, so a bare `mimaReportBinaryIssues` covers every artifact; `+mimaReportBinaryIssues` if a second
       # Scala version returns (#1126). Its baselines were resolved by `resolveAll` above.
       - name: Check binary compatibility
@@ -1457,6 +1456,7 @@ jobs:
         samples configPolicy it springBootStarterBoot4 knowledgegraphNeo4j benchmarks
         workspaceShared workspaceRunner workspaceClient workspaceSamples
         scalafixRules scalafixInput scalafixOutput scalafixTests scalafixInput05 scalafixTests05 scalafixInput06 scalafixTests06
+        scalafixInput07 scalafixTests07
         bom relocationCore relocationWorkspaceClient relocationWorkspaceShared relocationTraceOpentelemetry
         relocationKnowledgegraphNeo4j
 

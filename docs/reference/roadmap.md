@@ -94,7 +94,7 @@ Target: **0.7.0** for the baseline; **1.0** for the release.
 | Modularisation: `modules/core` split into per-concern artifacts ([#1126](https://github.com/llm4s/llm4s/issues/1126); slices [#1127](https://github.com/llm4s/llm4s/issues/1127)–[#1133](https://github.com/llm4s/llm4s/issues/1133), [#1242](https://github.com/llm4s/llm4s/issues/1242)) | **Landed** | Published as separate artifacts with 0.5.0 ([#1281](https://github.com/llm4s/llm4s/issues/1281)). |
 | Name stable module boundaries for v1.0 | **Landed** | [1.0 Scope](v1-scope) names each package's tier (Frozen at 1.0, Beta or Experimental). |
 | Stability tiers in code; compatibility and deprecation policy | **Landed** | `@Stable`/`@Experimental`; [policy](compatibility-policy) published. |
-| MiMa binary-compatibility checks | **In progress** | Wired in the build; the baseline is set at **0.7.0** for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none). |
+| MiMa binary-compatibility checks | **Done** | The baseline is **0.7.0** for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none): CI compares each with its 0.7.0 artifact. |
 | Package-level Scaladoc | **In progress** | Public API intent documented; the published Scaladoc covers every module. |
 | Deferred Scala 2.13 support for the frozen spine | **Deferred** | After 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); 1.0 is Scala 3 only. |
 

@@ -2,7 +2,7 @@
 // application.yaml, an HttpService at /chat and /chat/stream that closes the client when the server stops, and an
 // llm4s health check at /observe/health. See README.md and docs/guide/helidon.md.
 //
-// Build against a release with `-Pllm4sVersion=0.6.0` (or later). The default is the locally built snapshot that
+// Build against a release with `-Pllm4sVersion=0.7.0` (or later). The default is the locally built snapshot that
 // `sbt publishM2` puts in your local Maven repository; CI builds and tests the sample against it, so the sample cannot
 // drift from the API on main.
 plugins {

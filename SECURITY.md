@@ -12,9 +12,9 @@ slot ahead of any planned release. The current lines and their status are in the
 
 How a fix may change the API follows the [compatibility policy](docs/reference/compatibility-policy.md):
 
-- **Before the compatibility baseline (0.7.0)**, any release may break source or binary compatibility, so a
-  security fix may too. The break is listed under the CHANGELOG's *Breaking changes* with a migration note.
-- **After the baseline**, a fix to a Frozen module ships in a patch release without a binary-breaking change wherever
+- **Up to 0.7.0**, the compatibility baseline, any release could break source or binary compatibility, so a
+  security fix could too.
+- **From the baseline (0.7.0)**, which is where the project is now, a fix to a Frozen module ships in a patch release without a binary-breaking change wherever
   that is possible. If closing the vulnerability needs a breaking change, it ships in the next minor (before 1.0) or
   major (from 1.0) release, with a migration note.
 - **Beta and Experimental** modules (see [1.0 Scope](docs/reference/v1-scope.md)) are fixed in the same way, but a

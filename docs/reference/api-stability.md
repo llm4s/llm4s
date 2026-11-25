@@ -121,9 +121,10 @@ object Limits:
   def apply(maxTokens: Int = 1024, timeout: FiniteDuration = 30.seconds): Limits = new Limits(maxTokens, timeout)
 ```
 
-To add a field, add it to the constructor and, with a default, to `apply`, and add a `withX` setter. After the
-baseline, also keep the previous `apply` as an overload without defaults that forwards to the new one; before it,
-there is one `apply` per type, so the baseline freezes no overload. Never re-expose
+To add a field, add it to the constructor and, with a default, to `apply`, and add a `withX` setter. Also keep the
+previous `apply` as an overload without defaults that forwards to the new one: the 0.7.0 baseline holds its
+signature, and MiMa reports its removal. (Up to 0.7.0 there was one `apply` per type, so the baseline froze no
+overload.) Never re-expose
 `copy`. A case class with no fields is exempt. A type that is deliberately closed (a single-value wrapper, a fixed
 record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
 one-line reason. Every type that predated the check has been converted or given its reason (#2377 to #2384).
@@ -184,8 +185,8 @@ Every other module is Beta or Experimental, or is not published (`llm4s-samples`
 `org.llm4s.samples.*` (`llm4s-samples`, `llm4s-workspace-samples`): none ships in a frozen module, so
 no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Experimental is `@Experimental`, which MiMa skips (see
 [Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
-Experimental needs a `ProblemFilters.exclude` entry that says why. There are none yet because no baseline is
-set (see [The Baseline](#the-baseline)).
+Experimental needs a `ProblemFilters.exclude` entry that says why. There are none: the 0.7.0 baseline was set
+without a filter (see [The Baseline](#the-baseline)).
 
 An `@Experimental` *member* of a Stable type is skipped only partly, because MiMa 1.1 reads a Scala 3 member's
 annotations from TASTy, for methods alone, and by name ([#2785](https://github.com/llm4s/llm4s/issues/2785)):
@@ -220,21 +221,22 @@ declares it or reaches it transitively. The list, and where each group belongs i
 The baseline is per module. `mimaBaselineVersion` in `build.sbt` names the release the frozen modules
 are compared with, and `mimaBaselineOverrides` gives a module a different one: `"llm4s-<name>" -> Some("X.Y.Z")`
 compares it with its own release, `"llm4s-<name>" -> None` holds it back with no baseline while the others
-have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `None` and the
-map is empty, so no frozen module has a baseline, `sbt mimaReportBinaryIssues` checks nothing and CI passes.
+have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `Some("0.7.0")` and the
+map is empty, so every frozen module is compared with its 0.7.0 artifact: `sbt mimaReportBinaryIssues`, which CI
+runs on every pull request, fails on a binary-incompatible change to one.
 
-No release so far has set one. 0.5.0, 0.5.1 and 0.6.0 are the releases with the split coordinates so far, and were
-published without a baseline. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
+No earlier release is a baseline. 0.5.0, 0.5.1 and 0.6.0, the first releases with the split coordinates, were
+published without one, while the designs were still changing. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
 they are not usable baselines for the split modules: the packages they hold have since moved to other
 artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is **0.7.0**, for every
-frozen module ([#1281](https://github.com/llm4s/llm4s/issues/1281)); until it is set nothing is frozen.
+frozen module ([#1281](https://github.com/llm4s/llm4s/issues/1281)); it was set once 0.7.0 was on Maven Central.
 `llm4s-agent` takes the same baseline as the other frozen modules: [RFC 0001](../rfcs/0001-agent-baseline), which
 proposed a later one, was rejected once the graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) was complete.
 
 ### After the baseline
 
 The release after 0.7.0 is 1.0. No minor release is planned between them, and 1.0 does not wait for the baseline to
-survive a number of releases. Once `mimaBaselineVersion` is `Some("0.7.0")`, CI compares every frozen module on `main`
+survive a number of releases. `mimaBaselineVersion` is `Some("0.7.0")`, so CI compares every frozen module on `main`
 with 0.7.0, so a break in the baselined surface is reported on the pull request that makes it. A break found
 necessary before 1.0 is still made: the API is fixed outright, and the break is recorded as a narrow MiMa filter with
 its reason, a line under the CHANGELOG's *Breaking changes* and a note in the [Migration Guide](migration)
@@ -285,7 +287,7 @@ version returns, CI must run it cross-built (with sbt's `+` prefix) to check eac
 
 ## Adding a Binary-Incompatible Change
 
-Once a baseline is set, a change to a frozen module that breaks binary compatibility needs:
+A change to a frozen module that breaks binary compatibility with the baseline needs:
 
 1. A `ProblemFilters.exclude` entry in the module's `mimaBinaryIssueFilters`, with a comment saying why the break is intentional
 2. A line under `### Breaking changes` in `CHANGELOG.md`'s `[Unreleased]`, and a note in the [Migration Guide](migration)
@@ -313,9 +315,9 @@ Use the narrowest problem type and the narrowest name that matches, not `[Proble
 sbt mimaReportBinaryIssues
 ```
 
-This reports binary incompatibilities between the current code and the baseline release. With no
-baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) and the task succeeds.
-With a baseline set, success means the frozen API is compatible, and failure lists each problem with
-the `ProblemFilters.exclude` line that would silence it. To check one module, run
-`sbt agent/mimaReportBinaryIssues`. Until a baseline is set, `scripts/mima-dry-run.sh` checks that this wiring
-works (see [Release readiness](../contribute/release#release-readiness-a-mima-dry-run)).
+This reports binary incompatibilities between the current code and the baseline release, 0.7.0. A module
+with no baseline (every module outside the frozen set) logs `mimaPreviousArtifacts not set` (or `is empty`)
+and is skipped. For a frozen module, success means its API is compatible with 0.7.0, and failure lists each
+problem with the `ProblemFilters.exclude` line that would silence it. To check one module, run
+`sbt agent/mimaReportBinaryIssues`. `scripts/mima-dry-run.sh` checks the wiring itself, against a throwaway
+baseline: that a baseline resolves, that the check can fail and that `@Experimental` types are skipped (see [Release readiness](../contribute/release#release-readiness-a-mima-dry-run)).
