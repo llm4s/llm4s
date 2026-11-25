@@ -35,9 +35,9 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int = 4096
+    override def contextWindow: Int = 4096
 
-    override def getReserveCompletion(): Int = 1024
+    override def reserveCompletion: Int = 1024
   }
 
   // Mock LLM client that returns an error
@@ -52,9 +52,9 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int = 4096
+    override def contextWindow: Int = 4096
 
-    override def getReserveCompletion(): Int = 1024
+    override def reserveCompletion: Int = 1024
   }
 
   "LLMReranker" should "have correct default values" in {
@@ -322,9 +322,9 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int = 4096
+    override def contextWindow: Int = 4096
 
-    override def getReserveCompletion(): Int = 1024
+    override def reserveCompletion: Int = 1024
   }
 
   private def threeBatchRequest = RerankRequest(query = "q", documents = Seq("a", "b", "c"))

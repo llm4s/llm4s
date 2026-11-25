@@ -16,7 +16,7 @@ class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
     val schema = if (required) base.withProperty(Schema.property("q", Schema.string("q"))) else base
     ToolBuilder[String]("echo", "Echoes the call", schema)
       .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
   }
 

@@ -33,8 +33,8 @@ object MemoryTestSupport:
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    def getContextWindow(): Int     = 128000
-    def getReserveCompletion(): Int = 4096
+    def contextWindow: Int     = 128000
+    def reserveCompletion: Int = 4096
 
   /** Where [[Crashing]] goes down: at a commit, before or after writing it. */
   enum Crash:

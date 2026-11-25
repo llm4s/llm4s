@@ -92,7 +92,7 @@ object JSONTool {
         pathOpt = extractor.getString("path").toOption
         result <- processJSON(operation, json, pathOpt)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def processJSON(
     operation: String,

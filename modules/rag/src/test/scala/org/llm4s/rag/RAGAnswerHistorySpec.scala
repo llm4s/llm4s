@@ -48,8 +48,8 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
       onChunk(StreamedChunk(id = "a", content = Some("42")))
       Right(answer)
     }
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private object OneChunkIndex extends SearchIndex {

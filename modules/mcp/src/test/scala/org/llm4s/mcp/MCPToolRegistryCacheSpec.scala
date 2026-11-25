@@ -36,7 +36,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       "test_tool",
       "A test tool",
       schema
-    ).withHandler(_ => Right(TestResult("result"))).buildSafe()
+    ).withHandler(_ => Right(TestResult("result"))).build()
   }
 
   private val testTool = createTestTool()
@@ -143,7 +143,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       "failing_tool",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
-    ).withHandler(_ => Left("the local tool said no")).buildSafe().toOption.get
+    ).withHandler(_ => Left("the local tool said no")).build().toOption.get
     val registry = new MCPToolRegistry(Seq.empty, Seq(failing), 1.minute, initializeOnStartup = false)
 
     registry.execute(ToolCallRequest("failing_tool", ujson.Obj())) shouldBe
@@ -155,7 +155,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       "twice",
       s"Replies $reply",
       Schema.`object`[Map[String, Any]]("No parameters")
-    ).withHandler(_ => Right(TestResult(reply))).buildSafe().toOption.get
+    ).withHandler(_ => Right(TestResult(reply))).build().toOption.get
     val registry = new MCPToolRegistry(Seq.empty, Seq(named("first"), named("second")), 1.minute, false)
 
     registry.tools.map(_.description) shouldBe Seq("Replies first")

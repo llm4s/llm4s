@@ -413,7 +413,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
       )
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
 
   private lazy val withTool = CompletionOptions().withTools(Seq(noopTool))

@@ -39,7 +39,7 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
     } yield client
 
   private def contextWindowOf(client: LLMClient): Int = {
-    val window = client.getContextWindow()
+    val window = client.contextWindow
     client.close()
     window
   }

@@ -43,8 +43,8 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
 
   case class EchoResult(echoed: String)
@@ -56,7 +56,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       .withProperty(Schema.property("input", Schema.string("The input to echo")))
     val tool = ToolBuilder[EchoResult]("echo_tool", "Echoes the input", schema)
       .withHandler(ext => ext.getString("input").map(s => EchoResult(s"echoed: $s")))
-      .buildSafe()
+      .build()
     tool match {
       case Right(t) => ToolRegistry.of(Seq(t)).toOption.get
       case Left(e)  => fail(s"Failed to build echo tool: $e")
@@ -121,8 +121,8 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
     val client = Llm4s.wrapClient(underlying)
     val agent  = Llm4s.createAgent(client)
@@ -169,8 +169,8 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 512
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 512
     }
     val client = Llm4s.wrapClient(capturing)
     client.complete(ConversationBuilder.create().system("S").user("U").assistant("A").user("U2").build()).get()

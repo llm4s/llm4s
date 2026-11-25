@@ -153,8 +153,8 @@ class StreamStructuredSpec extends AnyFlatSpec with Matchers with ScalaCheckProp
         onChunk(StreamedChunk("s", Some(invoiceJson)))
         Right(Completion("s", Instant.EPOCH, ModelName("m"), AssistantMessage(invoiceJson)))
       }
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     }
     val seen = ListBuffer.empty[invoices.Out]
     client.streamStructuredOf[Invoice](conversation)(seen += _) shouldBe Right(invoice)

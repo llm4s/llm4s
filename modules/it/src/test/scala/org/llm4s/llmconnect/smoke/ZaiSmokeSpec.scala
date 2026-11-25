@@ -99,9 +99,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = underlying.streamComplete(conversation, off(options))(onChunk)
-    override def getContextWindow(): Int     = underlying.getContextWindow()
-    override def getReserveCompletion(): Int = underlying.getReserveCompletion()
-    override def close(): Unit               = underlying.close()
+    override def contextWindow: Int     = underlying.contextWindow
+    override def reserveCompletion: Int = underlying.reserveCompletion
+    override def close(): Unit          = underlying.close()
   }
 
   override protected def providerLabel: String       = "Z.ai"

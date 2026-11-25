@@ -593,8 +593,8 @@ object NestedStreamSpec {
         completion
       }
 
-    override def getContextWindow(): Int     = 128000
-    override def getReserveCompletion(): Int = 4096
+    override def contextWindow: Int     = 128000
+    override def reserveCompletion: Int = 4096
   }
 
   /** A middleware that fails the task of the first call of `tool` once the call has run, then lets every call by. */

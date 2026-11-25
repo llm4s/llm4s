@@ -89,9 +89,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    def getContextWindow(): Int = 4096
+    def contextWindow: Int = 4096
 
-    def getReserveCompletion(): Int = 1024
+    def reserveCompletion: Int = 1024
   }
 
   /**
@@ -122,9 +122,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    def getContextWindow(): Int = 4096
+    def contextWindow: Int = 4096
 
-    def getReserveCompletion(): Int = 1024
+    def reserveCompletion: Int = 1024
   }
 
   /**
@@ -154,9 +154,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    def getContextWindow(): Int = 4096
+    def contextWindow: Int = 4096
 
-    def getReserveCompletion(): Int = 1024
+    def reserveCompletion: Int = 1024
   }
 
   /**
@@ -174,9 +174,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    def getContextWindow(): Int = 4096
+    def contextWindow: Int = 4096
 
-    def getReserveCompletion(): Int = 1024
+    def reserveCompletion: Int = 1024
   }
 
   // ============================================================
@@ -415,7 +415,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
   it should "limit consolidation groups dynamically based on token budget" in {
     // MockLLMClient returns contextWindow=4096, reserveCompletion=1024
-    // getContextBudget() with Standard headroom (8%) = (4096 - 1024) * 0.92 = 2826 tokens
+    // contextBudget() with Standard headroom (8%) = (4096 - 1024) * 0.92 = 2826 tokens
     val manager = createManager()
 
     // Each string ~8000 chars ≈ 2000 tokens. Two would exceed ~2826 token budget.
@@ -571,8 +571,8 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Left(org.llm4s.error.CancelledError("model"))
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      def getContextWindow(): Int     = 128000
-      def getReserveCompletion(): Int = 4096
+      def contextWindow: Int     = 128000
+      def reserveCompletion: Int = 4096
     }
     val manager = LLMMemoryManager(MemoryManagerConfig.default, InMemoryStore.empty, cancelling)
     val populated = manager

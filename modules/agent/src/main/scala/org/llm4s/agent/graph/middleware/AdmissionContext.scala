@@ -131,8 +131,8 @@ object AdmissionContext:
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = counted(conversation, options, client.streamComplete(conversation, options)(onChunk))
 
-      def getContextWindow(): Int                 = client.getContextWindow()
-      def getReserveCompletion(): Int             = client.getReserveCompletion()
+      def contextWindow: Int                      = client.contextWindow
+      def reserveCompletion: Int                  = client.reserveCompletion
       override def validate(): Result[Unit]       = client.validate()
       override def providerId: Option[ProviderId] = client.providerId
 

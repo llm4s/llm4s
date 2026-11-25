@@ -33,7 +33,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
     Schema
       .`object`[Map[String, Any]]("Weather params")
       .withProperty(Schema.property("location", Schema.string("City name")))
-  ).withHandler(_ => Right("sunny")).buildSafe().toOption.get
+  ).withHandler(_ => Right("sunny")).build().toOption.get
 
   private val conv = Conversation(Seq(SystemMessage("Be brief."), UserMessage("Hi"), UserMessage("Weather?")))
 

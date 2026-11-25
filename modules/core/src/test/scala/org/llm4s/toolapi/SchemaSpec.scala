@@ -39,7 +39,7 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   private def tool(schema: SchemaDefinition[Params]): ToolFunction[String] =
     ToolBuilder[String]("everything", "Takes every kind of parameter", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
       .fold(error => fail(error.formatted), identity)
 
   /**

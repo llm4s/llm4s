@@ -49,8 +49,8 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1000
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1000
   }
 
   // ============ squeezeDigest - Skip Cases ============

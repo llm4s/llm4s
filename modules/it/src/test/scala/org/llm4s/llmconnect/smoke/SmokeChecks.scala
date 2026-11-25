@@ -208,7 +208,7 @@ object SmokeChecks {
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
     ToolBuilder[String](ToolName, "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => SecretCode))
-      .buildSafe()
+      .build()
       .left
       .map(e => s"the contract could not build its own tool: ${e.formatted}")
   }

@@ -98,7 +98,7 @@ object WriteFileTool {
         encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
         result <- writeFile(pathStr, content, append, encoding, config)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def writeFile(
     pathStr: String,

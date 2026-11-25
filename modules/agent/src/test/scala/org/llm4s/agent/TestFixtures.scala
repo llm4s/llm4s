@@ -32,9 +32,9 @@ final private[agent] class DeterministicFakeLLMClient(
   ): Result[Completion] =
     complete(conversation, options)
 
-  override def getContextWindow(): Int = 128000
+  override def contextWindow: Int = 128000
 
-  override def getReserveCompletion(): Int = 4096
+  override def reserveCompletion: Int = 4096
 }
 
 /**
@@ -70,9 +70,9 @@ final private[agent] class TwoTurnDeterministicFakeLLMClient(
   ): Result[Completion] =
     complete(conversation, options)
 
-  override def getContextWindow(): Int = 128000
+  override def contextWindow: Int = 128000
 
-  override def getReserveCompletion(): Int = 4096
+  override def reserveCompletion: Int = 4096
 }
 
 /**
@@ -99,9 +99,9 @@ final private[agent] class FailingLLMClient(error: LLMError) extends LLMClient {
   ): Result[Completion] =
     Left(error)
 
-  override def getContextWindow(): Int = 128000
+  override def contextWindow: Int = 128000
 
-  override def getReserveCompletion(): Int = 4096
+  override def reserveCompletion: Int = 4096
 }
 
 /**
@@ -132,9 +132,9 @@ final private[agent] class NTurnFakeLLMClient(responses: Completion*) extends LL
   ): Result[Completion] =
     complete(conversation, options)
 
-  override def getContextWindow(): Int = 128000
+  override def contextWindow: Int = 128000
 
-  override def getReserveCompletion(): Int = 4096
+  override def reserveCompletion: Int = 4096
 }
 
 /**
@@ -246,9 +246,9 @@ final private[agent] class ScriptedLLMClient(responses: Result[Completion]*) ext
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 
-  override def getContextWindow(): Int = 128000
+  override def contextWindow: Int = 128000
 
-  override def getReserveCompletion(): Int = 4096
+  override def reserveCompletion: Int = 4096
 }
 
 private[agent] object ScriptedLLMClient {

@@ -281,8 +281,8 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
       def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
-      def getContextWindow(): Int     = 128000
-      def getReserveCompletion(): Int = 4096
+      def contextWindow: Int     = 128000
+      def reserveCompletion: Int = 4096
     }
     val agent = built(
       Agent

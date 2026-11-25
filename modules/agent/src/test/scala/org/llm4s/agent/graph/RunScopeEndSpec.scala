@@ -33,8 +33,8 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
 
   /**
    * A store that refuses (`Left`) or throws on the first `failing` commits carrying a `RunCompleted`,

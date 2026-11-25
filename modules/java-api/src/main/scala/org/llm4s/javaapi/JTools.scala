@@ -31,7 +31,7 @@ private[javaapi] object JTools {
       schema <- schemaOf(name, spec)
       function <- ToolBuilder[ujson.Value](name, Option(spec.description).getOrElse(""), schema)
         .withHandler(extractor => call(name, spec.params, handler, extractor.params, extractor.call))
-        .buildSafe()
+        .build()
     } yield new JTool(FacadeToken.INSTANCE, function)
 
   private def schemaOf(tool: String, spec: Spec): Result[ObjectSchema[Map[String, Any]]] =

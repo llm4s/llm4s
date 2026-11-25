@@ -30,7 +30,7 @@ object ModelIdNewtypesTest {
 
   def moved(metadata: ModelMetadata): ModelMetadata = metadata.withProvider(ProviderId("acme"))
 
-  def dimensions(using ProviderRegistry): Result[Int] = ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
+  def dimensions(using ProviderRegistry): Result[Int] = ModelDimensionRegistry.dimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
 
   def cost(usage: TokenUsage)(using ModelRegistryService) = CostEstimator.estimate(ModelName("gpt-4o"), usage)
 

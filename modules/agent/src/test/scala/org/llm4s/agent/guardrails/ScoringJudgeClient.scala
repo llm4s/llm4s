@@ -31,6 +31,6 @@ final class ScoringJudgeClient(reply: String) extends LLMClient {
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 
-  override def getContextWindow(): Int     = 4096
-  override def getReserveCompletion(): Int = 1024
+  override def contextWindow: Int     = 4096
+  override def reserveCompletion: Int = 1024
 }

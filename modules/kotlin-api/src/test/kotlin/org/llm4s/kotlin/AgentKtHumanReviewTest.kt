@@ -112,8 +112,8 @@ class AgentKtHumanReviewTest {
             options: CompletionOptions,
             onChunk: Function1<StreamedChunk, BoxedUnit>,
         ): Either<LLMError, Completion> = reply()
-        override fun getContextWindow(): Int = 4096
-        override fun getReserveCompletion(): Int = 256
+        override fun contextWindow(): Int = 4096
+        override fun reserveCompletion(): Int = 256
     }
 
     private fun agentOf(configure: (org.llm4s.agent.AgentBuilder) -> org.llm4s.agent.AgentBuilder): AgentKt {

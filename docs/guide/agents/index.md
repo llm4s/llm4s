@@ -101,7 +101,7 @@ val result = for {
     "get_weather",
     "Get current weather for a location",
     weatherSchema
-  ).withHandler(getWeather).buildSafe()
+  ).withHandler(getWeather).build()
   providerConfig <- Llm4sConfig.defaultProvider()
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
@@ -603,7 +603,7 @@ val charge = ToolBuilder[String]("charge", "Charges a card", chargeSchema)
       receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey.asString))
     yield receipt.id
   }
-  .buildSafe()
+  .build()
 ```
 
 Two tools pass it on by themselves. `HTTPTool` adds `Idempotency-Key: <key>` to a POST, PUT, PATCH or DELETE it

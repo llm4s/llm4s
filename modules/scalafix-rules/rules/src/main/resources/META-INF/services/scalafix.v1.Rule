@@ -28,3 +28,4 @@ org.llm4s.scalafix.ClientEntryPoints
 org.llm4s.scalafix.ToolFunctionOneTypeParameter
 org.llm4s.scalafix.ToolCallIdTyped
 org.llm4s.scalafix.ModelIdNewtypes
+org.llm4s.scalafix.AccessorRenames

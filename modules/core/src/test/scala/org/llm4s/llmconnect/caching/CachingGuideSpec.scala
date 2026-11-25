@@ -47,6 +47,9 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
   private val ModelA = EmbeddingModelConfig(ModelName("test-embedding"), 3)
 
+  private def request(model: String, purpose: InputPurpose): EmbeddingRequest =
+    EmbeddingRequest(Seq("unused"), EmbeddingModelConfig(ModelName(model), 3), purpose)
+
   private def conversation(text: String): Conversation = Conversation.userOnly(text).value
 
   private def cacheConfig(threshold: Double, ttl: FiniteDuration = 1.hour, maxSize: Int = 1000): CacheConfig =
@@ -77,13 +80,13 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       stats.misses shouldBe 2
     }
 
-    "give the key function the text, the model name and the purpose" in {
+    "give the key function the text and its request, with the model name and the purpose" in {
       val seen = ListBuffer.empty[(String, String, InputPurpose)]
       val cached = CachedEmbeddingClient(
         new FakeEmbeddingClient,
         InMemoryEmbeddingCache.create().value,
-        (text, model, purpose) => {
-          seen += ((text, model.asString, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
+        (text, request) => {
+          seen += ((text, request.model.name.asString, request.purpose)); CacheKeyGenerator.embeddingKey(text, request)
         }
       )
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
@@ -118,11 +121,11 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       val snippet = new CachingGuideSnippets.TenantKey(new FakeEmbeddingClient)
       import snippet.tenantKey
       val doc = InputPurpose.Document
-      tenantKey("b:c")("a", ModelName("m"), doc) should not be tenantKey("c")("a:b", ModelName("m"), doc)
-      tenantKey("t")("a:b", ModelName("c"), doc) should not be tenantKey("t")("a", ModelName("b:c"), doc)
-      tenantKey("t")("x", ModelName("m"), doc) shouldBe tenantKey("t")("x", ModelName("m"), doc)
-      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("u")("x", ModelName("m"), doc)
-      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("t")("x", ModelName("m"), InputPurpose.Query)
+      tenantKey("b:c")("a", request("m", doc)) should not be tenantKey("c")("a:b", request("m", doc))
+      tenantKey("t")("a:b", request("c", doc)) should not be tenantKey("t")("a", request("b:c", doc))
+      tenantKey("t")("x", request("m", doc)) shouldBe tenantKey("t")("x", request("m", doc))
+      tenantKey("t")("x", request("m", doc)) should not be tenantKey("u")("x", request("m", doc))
+      tenantKey("t")("x", request("m", doc)) should not be tenantKey("t")("x", request("m", InputPurpose.Query))
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {
@@ -449,10 +452,10 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = answer()
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 100
-    override def validate(): Result[Unit]    = Right(())
-    override def close(): Unit               = ()
+    override def contextWindow: Int       = 4096
+    override def reserveCompletion: Int   = 100
+    override def validate(): Result[Unit] = Right(())
+    override def close(): Unit            = ()
   }
 
   private class MovableClock extends Clock {

@@ -51,6 +51,11 @@ The breaking changes since 0.6.0, in the CHANGELOG's `[Unreleased]` section:
   [a broken or cut tool call is an error](../reference/migration#a-broken-or-cut-tool-call-is-an-error-2613),
   [`TokenUsage` and `ModelPricing` gain a prompt-cache field](../reference/migration#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
   [the forwarding `apply` overloads are removed](../reference/migration#the-forwarding-apply-overloads-are-removed-1281).
+- Names and types, the last renames before the 0.7.0 baseline:
+  [`LLMClient` accessors are named for their values, and `ToolBuilder.build`](../reference/migration#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908),
+  [`ThinkingBlock.Opaque` and `BaseLifecycleLLMClient` take a `ProviderId`](../reference/migration#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908),
+  [errors, `Result` helpers and `AgentResult.messages` are `Seq`s](../reference/migration#errors-result-helpers-and-agentresultmessages-are-seqs-2908),
+  [`CachedEmbeddingClient`'s key function takes the request](../reference/migration#cachedembeddingclients-key-function-takes-the-request-2908).
 - Agents:
   [a cut-off answer ends `Truncated`, not `Completed`](../reference/migration#a-cut-off-answer-ends-truncated-not-completed-2613),
   [`CompressionRule`'s `apply` field is `transform`](../reference/migration#compressionrules-apply-field-is-transform-1281),

@@ -574,7 +574,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     val toolResult = ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
 
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
@@ -604,7 +604,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     val toolResult = ToolBuilder[String]("my_tool", "My tool description", schema)
       .withHandler(_ => Right("ok"))
-      .buildSafe()
+      .build()
 
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))

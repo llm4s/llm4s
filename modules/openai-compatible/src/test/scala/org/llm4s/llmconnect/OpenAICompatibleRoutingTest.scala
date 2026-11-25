@@ -100,7 +100,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
     LLMConnect.getClient(cfg).map(_.getClass.getSimpleName) shouldBe Right("OpenAICompatibleClient")
     LLMConnect
       .getClient(ProviderId("openai-compatible"), cfg, LlmClientOptions.default)
-      .map(_.getContextWindow()) shouldBe Right(
+      .map(_.contextWindow) shouldBe Right(
       OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
     )
   }

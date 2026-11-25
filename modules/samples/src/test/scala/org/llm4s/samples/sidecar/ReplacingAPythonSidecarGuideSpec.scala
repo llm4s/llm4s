@@ -85,7 +85,7 @@ class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
           given ModelRegistryService = registry
           client <- LLMConnect.getClient(config)
         } yield client
-      client.map(_.getContextWindow()) shouldBe Right(window)
+      client.map(_.contextWindow) shouldBe Right(window)
     }
   }
 

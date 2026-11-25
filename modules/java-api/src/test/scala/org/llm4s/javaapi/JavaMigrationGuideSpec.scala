@@ -77,8 +77,8 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   "The guide's Java blocks" should {
@@ -168,8 +168,8 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
         }
         override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) =
           complete(c, o)
-        override def getContextWindow(): Int     = 4096
-        override def getReserveCompletion(): Int = 512
+        override def contextWindow: Int     = 4096
+        override def reserveCompletion: Int = 512
       }
       val second = MigrationSnippets.thread(Llm4s.wrapClient(model))
       second.answer().orElseThrow() shouldBe "ok"

@@ -81,7 +81,7 @@ def embedTexts(texts: Seq[String]): Result[EmbeddingResponse] =
     config    <- Llm4sConfig.embeddings()
     registry  <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    dimensions <- ModelDimensionRegistry.getDimension(config.providerId, config.model)
+    dimensions <- ModelDimensionRegistry.dimension(config.providerId, config.model)
     client     <- EmbeddingClient.from(config)
     response   <- client.embed(EmbeddingRequest(texts, EmbeddingModelConfig(config.model, dimensions)))
   } yield response
@@ -147,7 +147,7 @@ import org.llm4s.types.Result
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 
 def dimensionsOf(provider: ProviderId, model: ModelName): Result[Int] =
-  ModelDimensionRegistry.getDimension(provider, model)
+  ModelDimensionRegistry.dimension(provider, model)
 ```
 
 For a provider or model it does not know, the result is a `Left(ConfigurationError)`, not a guess. When a store

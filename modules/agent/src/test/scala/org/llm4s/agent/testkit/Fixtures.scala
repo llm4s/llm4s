@@ -80,8 +80,8 @@ object Fixtures {
       streamCalls.incrementAndGet()
       onStream(onChunk)
     }
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
+    def contextWindow: Int     = 4096
+    def reserveCompletion: Int = 256
   }
 
   /** Emits `n` chunks, counting entries to and returns from `onChunk`, then finishes with `end`. */

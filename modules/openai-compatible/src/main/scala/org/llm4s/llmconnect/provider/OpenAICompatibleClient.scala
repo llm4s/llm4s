@@ -123,7 +123,8 @@ class OpenAICompatibleClient private[provider] (
   private val endpoint                              = s"${settings.baseUrl.asUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
-  protected def providerName: String      = settings.providerName
+  protected def provider: ProviderId      = ProviderId(settings.providerName)
+  private def providerName: String        = settings.providerName
   protected def modelName: ModelName      = settings.model
 
   // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
@@ -662,7 +663,7 @@ class OpenAICompatibleClient private[provider] (
    * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
    * are not read: neither provider documents where a stream carries them (#1216).
    */
-  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+  protected[provider] def parseCitations(message: ujson.Value): Seq[Citation] =
     message.objOpt
       .flatMap(_.get("annotations"))
       .flatMap(_.arrOpt)
@@ -769,7 +770,7 @@ class OpenAICompatibleClient private[provider] (
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(settings.model),
@@ -778,9 +779,9 @@ class OpenAICompatibleClient private[provider] (
       result
     )
 
-  override def getContextWindow(): Int = settings.contextWindow
+  override def contextWindow: Int = settings.contextWindow
 
-  override def getReserveCompletion(): Int = settings.reserveCompletion
+  override def reserveCompletion: Int = settings.reserveCompletion
 
   /**
    * The error a response that is not 2xx maps to, its body scrubbed of registered credentials first: what

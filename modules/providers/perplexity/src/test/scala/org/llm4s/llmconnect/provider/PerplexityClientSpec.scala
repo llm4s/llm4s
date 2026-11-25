@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
@@ -30,7 +30,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     "get_weather",
     "Weather for a city",
     Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("the city")))
-  ).withHandler(_ => Right("sunny")).buildSafe().fold(e => fail(e.toString), identity)
+  ).withHandler(_ => Right("sunny")).build().fold(e => fail(e.toString), identity)
 
   "the request" should {
 
@@ -279,7 +279,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       )
       completion.message.toolCalls shouldBe completion.toolCalls
       completion.message.thinking shouldBe Seq(
-        ThinkingBlock.Opaque("perplexity", """{"call":"call_a","sig":"c2lnbmF0dXJl"}""")
+        ThinkingBlock.Opaque(ProviderId("perplexity"), """{"call":"call_a","sig":"c2lnbmF0dXJl"}""")
       )
       completion.message.thinkingBinding should not be empty
     }
@@ -372,8 +372,8 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     "report its config's context window and reserve, and close its HTTP client" in {
       val http = new StubHttp()
       val c    = client(http)
-      c.getContextWindow() shouldBe 128000
-      c.getReserveCompletion() shouldBe 4096
+      c.contextWindow shouldBe 128000
+      c.reserveCompletion shouldBe 4096
       c.close()
       http.closed shouldBe true
     }

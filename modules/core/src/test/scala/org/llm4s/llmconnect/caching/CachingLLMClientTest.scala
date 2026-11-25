@@ -50,10 +50,10 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       Left(org.llm4s.error.ProcessingError("mock", "streamComplete not implemented in mock"))
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 100
-    override def validate(): Result[Unit]    = Right(())
-    override def close(): Unit               = ()
+    override def contextWindow: Int       = 4096
+    override def reserveCompletion: Int   = 100
+    override def validate(): Result[Unit] = Right(())
+    override def close(): Unit            = ()
   }
 
   class MockEmbeddingClient(responses: Map[String, Seq[Double]]) extends EmbeddingProvider {

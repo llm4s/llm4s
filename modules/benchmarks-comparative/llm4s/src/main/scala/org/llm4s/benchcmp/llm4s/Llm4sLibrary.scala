@@ -27,7 +27,7 @@ final class Llm4sLibrary(baseUrl: String) extends ChatLibrary:
         Schema
           .`object`[Map[String, Any]]("Lookup parameters")
           .withProperty(Schema.property("key", Schema.string("The key to look up")))
-      ).withHandler(args => args.getString("key").map(key => s"value-$key")).buildSafe()
+      ).withHandler(args => args.getString("key").map(key => s"value-$key")).build()
       toolRegistry <- ToolRegistry.of(Seq(lookup))
       agent <- Agent.builder("bench", client).withTools(toolRegistry).build()
     yield agent
