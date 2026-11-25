@@ -6,7 +6,7 @@ import com.github.sbt.sbom.BomSbtPlugin
 /**
  * What a release uploads to Maven Central, and how many files that is.
  *
- * Sonatype limits an organisation to 1,000 uploaded files a month, and 0.6.0 uploaded 1,752: every module published
+ * Sonatype limits the organisation to 1,100 uploaded files a month, and 0.6.0 uploaded 1,752: every module published
  * five files (POM, jar, sources, javadoc, and sbt-sbom's `-cyclonedx.json`), and each of them came with six (the
  * file, its `.asc`, `.md5` and `.sha1`, and `.asc.md5` and `.asc.sha1`, because sbt checksums every file it publishes,
  * the signatures included). Central requires a signature, an MD5 and a SHA-1 of each file, and says that "`.asc` files
@@ -21,7 +21,29 @@ import com.github.sbt.sbom.BomSbtPlugin
 object CentralBundle {
 
   /** The most files one release may upload: Sonatype's monthly limit for the organisation. */
-  val MaxFiles = 1000
+  val MaxFiles = 1100
+
+  /**
+   * The files a release uploads outside this bundle: `llm4s-kotlin-api`'s 20 (five files, each with `.asc`, `.md5` and
+   * `.sha1`), which release.yml publishes from the Gradle build with `scripts/publish-kotlin-api.sh`. They count
+   * towards the same monthly limit.
+   */
+  val FilesOutsideBundle = 20
+
+  /**
+   * What to say when the release as a whole, this bundle and the files uploaded outside it, is over [[MaxFiles]]
+   * although the bundle alone is not ([[problems]] refuses a bundle that is).
+   */
+  def releaseOverLimit(bundleFiles: Int): Option[String] = {
+    val total = bundleFiles + FilesOutsideBundle
+    if (bundleFiles <= MaxFiles && total > MaxFiles)
+      Some(
+        s"The release uploads $total files ($bundleFiles in this bundle and $FilesOutsideBundle from " +
+          s"llm4s-kotlin-api), over Sonatype's monthly limit of $MaxFiles for the organisation as " +
+          "CentralBundle.MaxFiles records it: confirm the limit Sonatype allows and set MaxFiles to it before tagging"
+      )
+    else None
+  }
 
   /** A module's POM, jar, sources jar and javadoc jar, each with `.asc`, `.md5` and `.sha1`. */
   val MaxFilesPerArtifact = 16
@@ -79,6 +101,7 @@ object CentralBundle {
       found.foreach(p => log.error(p))
       throw new MessageOnlyException(s"${found.size} problem(s) with the Maven Central bundle of $staging: see above")
     }
+    releaseOverLimit(kept.size).foreach(m => log.warn(m))
     IO.delete(bundle)
     IO.zip(kept.sortBy(_._2), bundle, Some(0L))
     val dirs  = kept.map(_._2).map(p => p.substring(0, p.lastIndexOf('/').max(0))).distinct.size

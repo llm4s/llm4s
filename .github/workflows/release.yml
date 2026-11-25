@@ -91,7 +91,7 @@ jobs:
       # `sbt ci-release` on a tag runs `clean`, `publishSigned` into the local staging directory (target/sona-staging,
       # build.sbt's `publishTo`) and then the command in CI_SONATYPE_RELEASE, by default `sonaRelease`, which uploads
       # the bundle the build's `sonaBundle` makes: no checksums of the signatures and no SBOMs, checked file by file and
-      # capped at Sonatype's 1,000 files a month (project/CentralBundle.scala). Here it runs `sonaBundle` instead, which
+      # capped at Sonatype's 1,100 files a month (project/CentralBundle.scala). Here it runs `sonaBundle` instead, which
       # only checks and zips it, so the staged files can be attested before anything irreversible happens; `sonaRelease`
       # below then uploads the same directory (#2305). What reaches Central is unchanged: the same signed files, by the
       # same route. The SBOMs go on the GitHub Release, and are attested there (the `sbom` job).

@@ -219,6 +219,12 @@ expect_fail "the TASTy-reader exemption is for Scala 2.13 only" "$d" "documents 
 d="$(fresh_copy scala-213-tasty-artifact)"; say "$d" "$INSTALL" 'Through the TASTy reader, add `"org.llm4s" % "llm4s-core_2.13"`.'
 expect_fail "the TASTy reader does not make a _2.13 artifact" "$d" "_2.13"
 
+d="$(fresh_copy scala-213-scalafix)"; say "$d" "$INSTALL" 'The Scalafix rules are a Scala 2.13 artifact, `llm4s-scalafix_2.13`.'
+expect_pass "the Scalafix rules' Scala 2.13 artifact (#2330)" "$d"
+
+d="$(fresh_copy scala-213-scalafix-other)"; say "$d" "$INSTALL" 'With Scalafix, add `"org.llm4s" % "llm4s-core_2.13"`.'
+expect_fail "naming Scalafix does not make another _2.13 artifact" "$d" "_2.13"
+
 d="$(fresh_copy scala-build-moved)"; edit_model "$d" 'for p in m["projects"]: p["scalaVersion"] = "3.8.0"; p["crossScalaVersions"] = ["3.8.0"]'
 expect_fail "the build moved on, the docs did not" "$d" "but the build is Scala 3.8.0"
 

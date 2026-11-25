@@ -14,7 +14,7 @@
 #
 # Left out of the bundle: maven-metadata.xml, which Central writes itself, and what Gradle writes that Central does not
 # require - checksums of the .asc signatures and the .sha256 and .sha512 checksums. Sonatype limits the organisation to
-# 1,000 uploaded files a month (docs/reference/release.md), and this keeps the artifact to 20: five files, each with its
+# 1,100 uploaded files a month (docs/reference/release.md), and this keeps the artifact to 20: five files, each with its
 # .asc, .md5 and .sha1, as project/CentralBundle.scala keeps the sbt artifacts.
 #
 # It is safe to re-run. Before uploading it asks, in this order, whether the version is already out, and uploads only

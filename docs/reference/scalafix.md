@@ -50,10 +50,41 @@ cites_issues: [2804, 2805, 2809]
 ## Migration rules
 
 `modules/scalafix-rules` holds semantic Scalafix rules that rewrite *user* code across llm4s's breaking changes
-([#2330](https://github.com/llm4s/llm4s/issues/2330)). They are first published at **1.0**, as
-`org.llm4s::llm4s-scalafix`, with a one-line command in the 1.0 upgrade notes; 0.7.0 does not publish them. Until then
-they exist only as source in this repository (the `scalafixRules` project); the rewrites each rule makes, listed below,
-can also be applied by hand.
+([#2330](https://github.com/llm4s/llm4s/issues/2330)). They are published with every release from **1.0.0**, as
+`org.llm4s::llm4s-scalafix`. 0.7.0 and the releases before it do not publish them: for those they exist only as source
+in this repository (the `scalafixRules` project), and the rewrites each rule makes, listed below, can also be applied
+by hand.
+
+### Running a migration rule
+
+The rules need [sbt-scalafix](https://scalacenter.github.io/scalafix/docs/users/installation.html) in
+`project/plugins.sbt` and `semanticdbEnabled := true` in the build. With your code still compiling against the llm4s
+version you are on, run the umbrella rule for that version from the release you are moving to, then change the llm4s
+version and compile:
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:1.0.0"
+```
+
+`Llm4sMigrateFrom_0_7` is for code on 0.7.x; the [table below](#one-umbrella-rule-per-starting-version) names the rule
+for 0.5.x and 0.6.x. The same in the build, for a rule you run more than once:
+
+```scala
+// build.sbt: a build-tool dependency, resolved by Scalafix; never a libraryDependency.
+// llm4sVersion is the release you are moving to: the rules are published from 1.0.0
+ThisBuild / scalafixDependencies += "org.llm4s" %% "llm4s-scalafix" % llm4sVersion
+```
+
+and then `sbt "scalafixAll Llm4sMigrateFrom_0_7"`. Review the diff: a rule reports a lint, with a link to the migration
+note, where it cannot rewrite safely.
+
+The Maven artifact is `llm4s-scalafix_2.13`, whatever Scala your code is written in: Scalafix loads rules into the
+build and they compile against `scalafix-core`, which Scalafix publishes for Scala 2.13 only. sbt-scalafix picks that suffix
+for `%%` and `::`, and nothing of it reaches your application's classpath. For that reason it is not in the
+[BOM](../getting-started/installation#align-versions-with-the-bom), which pins what your build's own dependency resolution
+brings in: Scalafix resolves its rules itself and reads no `dependencyManagement` block.
+
+### The rules
 
 `Llm4sMigrate_0_5` runs every rule for the [0.4.1 to 0.5.0 guide](../migrations/0-4-1-to-0-5-0):
 
@@ -70,6 +101,8 @@ Where a rewrite cannot be made safely, the rule reports a lint instead: a `copy`
 that has no setter any more (`Completion.thinking`, `NamedProviderConfig.organization`), or a message extractor
 nested inside another pattern. These 0.5 rules change names, not types; the `Secret` keys and the `Instant` of
 `Completion.created` are `Llm4sMigrateFrom_0_5`'s.
+
+#### One umbrella rule per starting version
 
 From 0.5.x on there is one umbrella rule per starting version. Each runs every rule needed to bring code from that
 version to the current release, so you run one rule, once, and no rule runs twice:

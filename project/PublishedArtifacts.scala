@@ -22,10 +22,42 @@ object PublishedArtifacts {
 
   /**
    * Published artifacts that contain no Scala code and so carry no Scala binary suffix: the BOM
-   * (`org.llm4s:llm4s-bom`). Every other `llm4s-*` project is a Scala 3 artifact published as `<name>_3`.
+   * (`org.llm4s:llm4s-bom`). Every other `llm4s-*` project is a Scala 3 artifact published as `<name>_3`, except
+   * the [[BuildTools]].
    * The BOM is listed apart from them (`boms`), because a release must find its POM but no jar.
    */
   val Unsuffixed: Set[String] = Set("llm4s-bom")
+
+  /**
+   * Published build-tool artifacts, with the Scala binary version each is built for: the Scalafix migration rules
+   * (`org.llm4s:llm4s-scalafix_2.13`, #2330). Scalafix loads rules into the build tool and compiles them against
+   * `scalafix-core`, which is Scala 2.13 only, so the artifact is `<name>_2.13` whatever Scala the user's code is.
+   *
+   * A build tool is released and verified like any other artifact ([[coordinates]]) but is not in the BOM
+   * ([[managed]]): a BOM pins what a project's own dependency resolution brings in, and Scalafix resolves its rules
+   * itself (`scalafixDependencies`, `dependency:Rule@org.llm4s::llm4s-scalafix:<version>`), never reading a
+   * `dependencyManagement` block. An entry would pin nothing and would offer a Scala 2.13 jar, with `scalafix-core`
+   * behind it, as something to put on a Scala 3 application's classpath.
+   */
+  val BuildTools: Map[String, String] = Map("llm4s-scalafix" -> "2.13")
+
+  /** The artifact's Maven artifactId: its name and the Scala binary version it is built for. */
+  private def suffixed(name: String, scalaBinaryVersion: String): String =
+    s"${name}_${BuildTools.getOrElse(name, scalaBinaryVersion)}"
+
+  /**
+   * The published projects whose Scala binary version is not the one [[coordinates]] gives them, one line each:
+   * a build tool not built for the version [[BuildTools]] declares, or a 2.13 module that is not declared there.
+   *
+   * @param projects
+   *   (name, `publish / skip`, `crossPaths`, the project's `scalaBinaryVersion`) of every project in the build
+   */
+  def suffixProblems(projects: Seq[(String, Boolean, Boolean, String)], scalaBinaryVersion: String): Seq[String] =
+    projects.collect {
+      case (name, false, true, actual) if BuildTools.getOrElse(name, scalaBinaryVersion) != actual =>
+        s"$name is built for Scala $actual but listed as ${suffixed(name, scalaBinaryVersion)}: " +
+          "declare it in PublishedArtifacts.BuildTools, or build it for the declared version"
+    }.sorted
 
   /**
    * Artifacts the release publishes from a Gradle build rather than from sbt, by Maven artifactId:
@@ -53,13 +85,13 @@ object PublishedArtifacts {
    *
    * A relocation stub redirects a pre-0.4.0 coordinate (`core`, `workspaceclient`, ...) to its `llm4s-*`
    * successor; it is a published project whose name does not start with `llm4s-`. Both get the Scala
-   * binary suffix, since every module here is a Scala 3 artifact.
+   * binary suffix: the build's (`_3`), except for a [[BuildTools]] artifact, which has its own.
    */
   def coordinates(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): (Seq[String], Seq[String]) = {
     val published     = projects.collect { case (name, false) => name }.distinct.sorted
     val (real, stubs) = published.partition(_.startsWith("llm4s-"))
     (
-      real.filterNot(Unsuffixed).map(n => s"${n}_$scalaBinaryVersion"),
+      real.filterNot(Unsuffixed).map(suffixed(_, scalaBinaryVersion)),
       stubs.map(n => s"${n}_$scalaBinaryVersion")
     )
   }
@@ -71,10 +103,10 @@ object PublishedArtifacts {
   /**
    * What a BOM must manage: every real artifact of the release, as its full Maven artifactId. It is the
    * `real` half of [[coordinates]], so a module added to the build is in the BOM the day it is added, and the
-   * [[Gradle]] artifacts, which are released at the same version.
+   * [[Gradle]] artifacts, which are released at the same version. The [[BuildTools]] are left out: see there.
    */
   def managed(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): Seq[String] =
-    (coordinates(projects, scalaBinaryVersion)._1 ++ Gradle).sorted
+    (coordinates(projects.filterNot(p => BuildTools.contains(p._1)), scalaBinaryVersion)._1 ++ Gradle).sorted
 
   /** The ways a generated BOM POM disagrees with what the release publishes, empty when it agrees. */
   def bomProblems(expected: Seq[String], bom: scala.xml.Elem, version: String): Seq[String] = {
@@ -108,14 +140,18 @@ object PublishedArtifacts {
    * Published projects that ship a jar, by Maven artifactId, decided without looking at their names: `publish / skip`
    * off and `Compile / packageBin / publishArtifact` on. Relocation stubs and the BOM ship a POM only, so they are not
    * here. [[managed]] decides by name (`llm4s-*`), so comparing the two catches a code-carrying module that would be
-   * left out of the BOM because its name does not follow the convention.
+   * left out of the BOM because its name does not follow the convention. The [[BuildTools]] are not here either,
+   * because the BOM does not manage them.
    *
    * @param projects
    *   (name, publish / skip, Compile / packageBin / publishArtifact, crossPaths) of every project in the build
    */
   def jarPublishers(projects: Seq[(String, Boolean, Boolean, Boolean)], scalaBinaryVersion: String): Seq[String] =
     projects
-      .collect { case (name, false, true, cross) => if (cross) s"${name}_$scalaBinaryVersion" else name }
+      .collect {
+        case (name, false, true, cross) if !BuildTools.contains(name) =>
+          if (cross) s"${name}_$scalaBinaryVersion" else name
+      }
       .distinct
       .sorted
 
