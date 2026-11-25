@@ -10,7 +10,7 @@ cites_issues: all
 
 # RFC 0009: The model call contract
 
-- **Status:** Implemented, in the release after 0.6.0 (PRs #2681, #2688, #2700, #2691, #2702, #2687)
+- **Status:** Implemented, in 0.7.0 (PRs #2681, #2688, #2700, #2691, #2702, #2687)
 - **Author(s):** @Somay-kousis
 - **Tracking issue:** [#2613](https://github.com/llm4s/llm4s/issues/2613)
 - **Pull request:** [#2614](https://github.com/llm4s/llm4s/pull/2614)

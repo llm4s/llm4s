@@ -90,5 +90,5 @@ CRITICAL advisory fails. See [Software Bill of Materials](docs/reference/sbom.md
 
 The Maven Central artifacts are PGP-signed with the release key
 `2246 615C FDEA D8F4 50C0 8555 2550 305A 740B C5E3` (on keyserver.ubuntu.com and keys.openpgp.org). The release
-workflow also attests, from the first release after 0.6.0, the build provenance of the jars and POMs, the SBOMs on
+workflow also attests, from 0.7.0, the build provenance of the jars and POMs, the SBOMs on
 the GitHub Release and the `workspace-runner` image, checked with `gh attestation verify <file> -R llm4s/llm4s`. See [Verifying Releases](docs/reference/verifying-releases.md).

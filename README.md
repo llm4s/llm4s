@@ -79,7 +79,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Current Status
 
-LLM4S is under active pre-1.0 development. The latest published release is [v0.6.0](https://github.com/llm4s/llm4s/releases/tag/v0.6.0); [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
+LLM4S is under active pre-1.0 development. The latest published release is [v0.7.0](https://github.com/llm4s/llm4s/releases/tag/v0.7.0), which sets the binary-compatibility baseline for 1.0; [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
@@ -167,14 +167,14 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 
 ### Use LLM4S in your project
 
-LLM4S is on Maven Central; the current release is **0.6.0**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
+LLM4S is on Maven Central; the current release is **0.7.0**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
 `llm4s-core` holds no provider client, so add the module of the provider you call next to it:
 
 ```scala
 // build.sbt
 ThisBuild / scalaVersion := "3.7.1"
 
-val llm4sVersion = "0.6.0"
+val llm4sVersion = "0.7.0"
 
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-core"   % llm4sVersion,
@@ -456,7 +456,7 @@ sbt new llm4s/llm4s.g8 \
 --name=<your.project.name> \
 --package=<your.organization> \
 --version=<your.project.version> \
---llm4s_version=0.6.0 \
+--llm4s_version=0.7.0 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --force

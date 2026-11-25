@@ -53,9 +53,9 @@ object FakeOllama {
     finally server.stop(0)
   }
 
-  /** Points `llm4s.providers` at the fake server, as an application.conf section would. */
+  /** Points `llm4s.defaultProvider` and its `llm4s.providers` section at the fake server, as an application.conf section would. */
   def configure(port: Int): Unit = {
-    System.setProperty("llm4s.providers.provider", "local")
+    System.setProperty("llm4s.defaultProvider", "local")
     System.setProperty("llm4s.providers.local.provider", "ollama")
     System.setProperty("llm4s.providers.local.model", "llama3")
     System.setProperty("llm4s.providers.local.baseUrl", s"http://localhost:$port")

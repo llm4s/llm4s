@@ -2,14 +2,15 @@
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk}
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 final class CannedClient extends LLMClient {
   def complete(conversation: Conversation, options: CompletionOptions): Either[LLMError, Completion] =
-    Right(Completion(id = "1", created = java.time.Instant.EPOCH, content = "canned", model = "fake", message = AssistantMessage("canned")))
-  def streamComplete(conversation: Conversation, options: CompletionOptions, onChunk: StreamedChunk => Unit): Either[LLMError, Completion] =
+    Right(Completion(id = "1", created = java.time.Instant.EPOCH, model = ModelName("fake"), message = AssistantMessage("canned")))
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(onChunk: StreamedChunk => Unit): Either[LLMError, Completion] =
     complete(conversation, options)
-  def getContextWindow(): Int     = 8192
-  def getReserveCompletion(): Int = 1024
+  def contextWindow: Int     = 8192
+  def reserveCompletion: Int = 1024
 }
 
 object Probe extends App {

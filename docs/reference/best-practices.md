@@ -49,7 +49,7 @@ The unmet criteria and the other things to fix are in [Follow-ups](#follow-ups).
 | `sites_https` | MUST | Met | llm4s.org serves HTTPS and redirects HTTP to it (301); GitHub and Maven Central are HTTPS only. |
 | `discussion` | MUST | Met | GitHub issues and pull requests are public, searchable and need only a browser; the [Discord](https://discord.gg/4uvTPn6qww) server also has a browser client. |
 | `english` | SHOULD | Met | All documentation, issues and code comments are in English. |
-| `maintained` | MUST | Met | Commits land on `main` most days, and 0.5.0 and 0.5.1 were released in October 2026 and 0.6.0 in November 2026 ([releases](https://github.com/llm4s/llm4s/releases)). |
+| `maintained` | MUST | Met | Commits land on `main` most days, and 0.5.0 and 0.5.1 were released in October 2026 and 0.6.0 and 0.7.0 in November 2026 ([releases](https://github.com/llm4s/llm4s/releases)). |
 
 ## Change control
 

@@ -10,7 +10,7 @@ cites_issues: all
 
 # RFC 0008: Generation controls and reported adjustments
 
-- **Status:** Implemented, in the release after 0.6.0 (PRs #2532, #2617, #2666, #2706, and the follow-ups #2699
+- **Status:** Implemented, in 0.7.0 (PRs #2532, #2617, #2666, #2706, and the follow-ups #2699
   and #2710); three follow-ups remain open (see [Delivery](#delivery))
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)

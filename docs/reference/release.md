@@ -103,7 +103,7 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       [Migrations](../migrations/) table.
 - [ ] [Update the support table](#update-the-support-table) and [write the News post](#write-the-news-post).
 - [ ] Set the RFCs implemented in this release to their version: the index in [RFCs](../rfcs/) and each RFC's
-      **Status** line ("release after 0.6.0" today in RFC 0008 and RFC 0009).
+      **Status** line (an RFC implemented since the previous release says "release after X.Y.Z" until then).
 - [ ] Update "Current documented version series" under [Version Numbering](#version-numbering) and the Quick Status
       table of the [Roadmap](../reference/roadmap).
 - [ ] Check that everything the release is for is on the commit you will tag
@@ -129,8 +129,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 - [ ] Check that every mechanical rename since the previous release has a Scalafix rule
       ([Scalafix](../reference/scalafix#migration-rules)) or is listed in the Migration Guide's
       [changes no rule automates](../reference/migration#changes-since-051-that-no-rule-automates).
-- [ ] Confirm that the month's Sonatype window has room for the release before tagging: the limit is 1,000 files a
-      month and a release uploads nearly all of it, so one already uploaded in the window leaves none
+- [ ] Confirm that the month's Sonatype window has room for the release before tagging: `sbt listPublishedArtifacts`
+      lists what a release uploads, and the bundle is checked against `CentralBundle.MaxFiles`
       ([What is published to Maven Central](#what-is-published-to-maven-central)).
 
 **0.7.0, the baseline release, in addition:**
@@ -360,9 +360,11 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
 than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
 in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
-signed with a throwaway key, never uploaded). A release is then 968 files and about 27 MB from sbt (59 modules, the BOM
-and 5 relocation stubs) plus 20 files from `llm4s-kotlin-api`, so **one release a month fits under the limit, and two do
-not**: a second release in a month (a patch release included) needs the limit raised by Sonatype first.
+signed with a throwaway key, never uploaded). What a release uploads follows from
+`sbt listPublishedArtifacts`: 16 files for each `artifact` line, 4 for the BOM and for each relocation stub, plus 20 files
+from `llm4s-kotlin-api`. The limit the bundle is checked against is `CentralBundle.MaxFiles`
+(`project/CentralBundle.scala`); check a second release in a month (a patch release included) against what the first
+uploaded.
 `scripts/verify-release.sh` checks the published result: each file's `.asc`, `.md5` and `.sha1`, and no `.asc.md5` or
 `-cyclonedx.json`.
 
@@ -597,6 +599,6 @@ help.
 Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
 before and after the baseline, is in the [Compatibility Policy](../reference/compatibility-policy#versions).
 
-Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set at 0.7.0, any
-release, patch included, may carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
+Current documented version series: 0.7.x (pre-1.0 development). Up to 0.7.0, which sets the MiMa baseline, any
+release, patch included, could carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
 1.0 a minor release still may, with a MiMa filter as well, and a patch release may not; from 1.0, semantic versioning.
