@@ -160,8 +160,9 @@ below `max_tokens`, is no longer cut to 2047. Set `withMaxTokens(2048)` to keep 
 
 The OpenRouter client sends no `max_tokens` when `maxTokens` is unset, but fitted a Claude model's thinking budget
 as if it had sent 2048: `ReasoningEffort.High` asked for 2,047 thinking tokens, not 32,768. The budget is now fitted
-below the model's maximum output tokens when the registry states them and otherwise sent as asked, so a `reasoning`
-level or a `Thinking.Budget` above 2,047 thinks, and can cost, more. `withThinking` with a budget of 2,047 keeps the
+below the model's maximum output tokens when the registry states them, and otherwise below 32,000, the smallest
+maximum output of a Claude model that thinks (`High`, `XHigh` and `Max` then send 31,999, reported `Adjusted`; set
+`maxTokens` to send more). So a `reasoning` level or a `Thinking.Budget` above 2,047 thinks, and can cost, more. `withThinking` with a budget of 2,047 keeps the
 old one; `withMaxTokens(2048)` does too, and also sends `max_tokens: 2048`.
 
 **A penalty a provider does not take is reported.** `presencePenalty` and `frequencyPenalty` were left out without a

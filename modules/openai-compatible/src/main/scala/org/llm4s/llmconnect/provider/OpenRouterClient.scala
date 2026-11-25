@@ -55,8 +55,8 @@ import scala.util.Try
  *
  * The thinking budget of an Anthropic model is at least 1024, the Anthropic API's minimum, and below
  * `CompletionOptions.maxTokens` when that is set. When it is not, the request carries no `max_tokens`, and the
- * budget is fitted below the model's maximum output tokens if the model registry states them, and otherwise sent
- * as asked.
+ * budget is fitted below the model's maximum output tokens if the model registry states them, and otherwise below
+ * [[OpenRouterThinkingBudget.UnknownModelMaxOutput]].
  *
  * == Thinking content ==
  *
@@ -231,20 +231,30 @@ private[provider] class OpenRouterModelDialect(modelMaxOutput: => Option[Int]) e
    *
    * A budget is at least 1024 and below the request's output limit: `CompletionOptions.maxTokens` when the caller
    * set it. When they did not, the request carries no `max_tokens`, so the only limit there is to fit under is the
-   * model's own maximum output, when the registry states it; for a model it does not know the budget is sent as
-   * asked. (Until 0.7.0 an unset `maxTokens` counted as 2048, which cut every level above `Low` down to 2047.)
+   * model's own maximum output: the registry's figure, or [[OpenRouterThinkingBudget.UnknownModelMaxOutput]] for
+   * a model it states none for. A budget fitted under that assumed figure is reported `Adjusted`, a `reasoning`
+   * level's too, with what lifts it. (Until 0.7.0 an unset `maxTokens` counted as 2048, which cut every level
+   * above `Low` down to 2047.)
    */
   override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
     val modelLower       = model.asString.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
       modelLower.contains("o1") || modelLower.contains("o3") || modelLower.contains("o4")
-    // the limit a budget must stay below, and what to call it
-    val limit: Option[(Int, String)] =
-      options.maxTokens.map(_ -> "max_tokens").orElse(maxOutput.map(_ -> "the model's maximum output"))
+    // the limit a budget must stay below, and why
+    val assumedLimit = options.maxTokens.isEmpty && maxOutput.isEmpty
+    val (limit, limitReason) = options.maxTokens
+      .map(tokens => tokens -> s"Anthropic takes a budget of at least 1024 and below max_tokens ($tokens)")
+      .orElse(
+        maxOutput.map(tokens =>
+          tokens -> s"Anthropic takes a budget of at least 1024 and below the model's maximum output ($tokens)"
+        )
+      )
+      .getOrElse(
+        OpenRouterThinkingBudget.UnknownModelMaxOutput -> OpenRouterThinkingBudget.unknownModelReason(model)
+      )
 
-    def fitted(budgetTokens: Int): Int =
-      math.max(1024, limit.fold(budgetTokens)((tokens, _) => math.min(budgetTokens, tokens - 1)))
+    def fitted(budgetTokens: Int): Int = math.max(1024, math.min(budgetTokens, limit - 1))
 
     if (isAnthropicModel) {
       val fromReasoning = options.reasoning.map(ReasoningEffort.defaultBudgetTokens)
@@ -259,9 +269,7 @@ private[provider] class OpenRouterModelDialect(modelMaxOutput: => Option[Int]) e
                 RequestOption.Thinking,
                 s"Budget($tokens)",
                 s"Budget($sent)",
-                limit.fold("Anthropic takes a budget of at least 1024")((tokens, name) =>
-                  s"Anthropic takes a budget of at least 1024 and below $name ($tokens)"
-                )
+                limitReason
               )
             )
         case Some(Thinking.Off) => EffortMapping.overriddenByOff(options, "no thinking")
@@ -269,7 +277,18 @@ private[provider] class OpenRouterModelDialect(modelMaxOutput: => Option[Int]) e
           fromReasoning.foreach(budget =>
             body("thinking") = ujson.Obj("type" -> "enabled", "budget_tokens" -> fitted(budget))
           )
-          other.toList.map(_ =>
+          // a level fitted under a limit the caller set, or the model's own, is not reported, as before; one
+          // fitted under a limit this client assumed is
+          val assumed = fromReasoning.toList.collect {
+            case budget if assumedLimit && fitted(budget) != budget =>
+              RequestAdjustment.Adjusted(
+                RequestOption.Reasoning,
+                s"budget_tokens $budget",
+                s"budget_tokens ${fitted(budget)}",
+                limitReason
+              )
+          }
+          assumed ++ other.toList.map(_ =>
             RequestAdjustment.Dropped(
               RequestOption.Thinking,
               "OpenRouter sends Anthropic models a thinking budget only"
@@ -364,6 +383,31 @@ private[provider] class OpenRouterModelDialect(modelMaxOutput: => Option[Int]) e
           arguments <- OpenAICompatibleDialect.toolArguments(name, function.obj.get("arguments"))
         } yield calls :+ ToolCall(ToolCallId(id), name, arguments)
       })
+
+/**
+ * The limit a Claude model's thinking budget is fitted under when nothing states one: the caller set no
+ * `CompletionOptions.maxTokens`, so the request carries no `max_tokens`, and the model registry states no maximum
+ * output for the model.
+ *
+ * Anthropic refuses a `budget_tokens` that is not below the request's output limit, and OpenRouter repeats the rule
+ * (https://openrouter.ai/docs/use-cases/reasoning-tokens) without saying what the limit is when no `max_tokens` is
+ * sent. The most it can be is the model's maximum output, so a budget at or above that risks a 400. Most of
+ * OpenRouter's Claude ids are unknown to the registry, which spells them differently (`anthropic/claude-sonnet-4.5`
+ * against `claude-sonnet-4-5`), so the budget of such a model is kept below the smallest maximum output of any
+ * Claude model that thinks: [[UnknownModelMaxOutput]], Claude Opus 4 and 4.1's. That costs a larger model its
+ * `High` (32,768), `XHigh` and `Max` levels until `maxTokens` is set or the registry knows the model, which is why
+ * the fitted budget is reported `Adjusted`, saying so.
+ */
+private[provider] object OpenRouterThinkingBudget:
+
+  /** The maximum output assumed for a model the registry states none for: a budget is sent below it. */
+  val UnknownModelMaxOutput: Int = 32000
+
+  /** Why a budget was fitted under [[UnknownModelMaxOutput]], and what lifts it. */
+  def unknownModelReason(model: ModelName): String =
+    s"The model registry states no maximum output for ${model.asString}, so the thinking budget is kept below " +
+      s"$UnknownModelMaxOutput, the smallest maximum output of a Claude model that thinks: set maxTokens, or give " +
+      "the model a max_output_tokens in the model registry, to send a larger one"
 
 /**
  * [[OpenRouterModelDialect]] for no model in particular: what `OpenRouterClient` sends for a model the registry
