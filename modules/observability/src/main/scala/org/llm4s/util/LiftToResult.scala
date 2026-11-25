@@ -36,7 +36,7 @@ object LiftToResult {
   /**
    * Lifts `Either[Throwable, A]` into `Result[A]` by converting any `Left` throwable
    * into an [[org.llm4s.error.LLMError]] using
-   * [[org.llm4s.error.Safety.fromThrowable]].
+   * `org.llm4s.error.Safety.fromThrowable`.
    *
    *  This instance is useful when integrating with Java or Try-based code that surfaces
    *  failures as `Throwable` rather than a typed error.
@@ -48,7 +48,7 @@ object LiftToResult {
   /**
    * Lifts `scala.util.Try[A]` into `Result[A]`: `Success(a)` becomes `Right(a)`;
    * `Failure(t)` converts the throwable to an [[org.llm4s.error.LLMError]] using
-   * [[org.llm4s.error.Safety.fromThrowable]].
+   * `org.llm4s.error.Safety.fromThrowable`.
    */
   implicit val tryInstance: LiftToResult[Try] = new LiftToResult[Try] {
     def apply[A](fa: Try[A]): Result[A] = fa match {

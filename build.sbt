@@ -3286,8 +3286,12 @@ lazy val scalafix06Llm4s  = "0.6.0"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
   publish / skip       := true,
   mimaFailOnNoPrevious := false,
+  // The fixtures keep `ToolFunction[_, _]` on purpose (the rules must rewrite it), and the release's publish job
+  // reads the log of `sbt doc`, which compiles them, for warnings: scripts/check-scaladoc-warnings.sh.
   Compile / scalacOptions ++= {
-    if (scalaVersion.value.startsWith("3.")) Seq("-java-output-version", javaRelease) else Seq("-release", javaRelease)
+    if (scalaVersion.value.startsWith("3."))
+      Seq("-java-output-version", javaRelease, "-Wconf:msg=is deprecated for wildcard arguments of types:s")
+    else Seq("-release", javaRelease)
   },
   Compile / doc / sources         := Seq.empty,
   Compile / mainClass             := None,
