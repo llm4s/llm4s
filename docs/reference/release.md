@@ -182,8 +182,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       changes with its pin: `ServiceError(500, ProviderId("scripted"), ...)` in
       `modules/samples/flink/EnrichTickets.scala` (done; `Llm4sMigrateFrom_1_0`, with `scalafixInput10` and
       `scalafixTests10`, was added with it).
-- [ ] Move the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template to 1.0.0: its default `llm4s_version`, and
-      `RateLimitError(ProviderId("openai"))` in its `PromptExecutorSpec`, which 1.0.0 does not compile with a `String`.
+- [x] Move the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template to 1.0.0: its default `llm4s_version`, and
+      `RateLimitError(ProviderId("openai"))` in its `PromptExecutorSpec`, which 1.0.0 does not compile with a `String` (done).
 - [x] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
       `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
       `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to

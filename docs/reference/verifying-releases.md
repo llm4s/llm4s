@@ -94,6 +94,10 @@ log entry, and checks that the certificate was issued to a workflow of `llm4s/ll
 additionally requires that the release workflow, not some other workflow of the repository, built it. The
 output names the source commit and the tag the run was started from; `--format json` prints the full statement.
 
+`llm4s-kotlin-api` is the one exception: it is built and attested by the reusable workflow the release workflow
+calls, so its certificate names that workflow. Verify it with
+`--signer-workflow llm4s/llm4s/.github/workflows/publish-kotlin.yml`.
+
 To check every artifact of a release at once, use the release script's attestation mode:
 
 ```bash

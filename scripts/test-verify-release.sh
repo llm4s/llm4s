@@ -13,7 +13,8 @@
 #
 # `--attestations` (#2305) is tested against a fake `gh` that accepts `gh attestation verify <target> -R llm4s/llm4s
 # --signer-workflow llm4s/llm4s/.github/workflows/release.yml` for a target named in a fixture list and refuses any
-# other target, repository or signer.
+# other target, repository or signer; for the llm4s-kotlin-api jar the signer it accepts is publish-kotlin.yml, the
+# reusable workflow that attests it.
 #
 # Usage: scripts/test-verify-release.sh
 set -uo pipefail
@@ -53,8 +54,10 @@ cat > "$WORK/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 [ "$1 $2" = "attestation verify" ] || { echo "unexpected: gh $*" >&2; exit 2; }
 target="$3"; shift 3
-[ "$*" = "-R llm4s/llm4s --signer-workflow llm4s/llm4s/.github/workflows/release.yml" ] ||
-  { echo "unexpected flags: $*" >&2; exit 2; }
+# The Kotlin artifact's certificate names the reusable workflow that built it; everything else names release.yml.
+case "$target" in *llm4s-kotlin-api-*) signer=publish-kotlin.yml ;; *) signer=release.yml ;; esac
+[ "$*" = "-R llm4s/llm4s --signer-workflow llm4s/llm4s/.github/workflows/$signer" ] ||
+  { echo "Error: verifying with issuer \"sigstore.dev\" (flags: $*)" >&2; exit 1; }
 case "$target" in oci://*) name="$target" ;; *) [ -s "$target" ] || { echo "empty file" >&2; exit 1; }; name="$(basename "$target")" ;; esac
 grep -qxF -- "$name" "$FAKE_ATTESTED" && exit 0
 echo "Error: no attestations found for subject" >&2
