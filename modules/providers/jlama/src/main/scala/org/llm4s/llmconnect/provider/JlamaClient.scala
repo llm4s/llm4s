@@ -210,7 +210,12 @@ object JlamaClient:
   private[provider] def turns(conversation: Conversation, options: CompletionOptions): Result[Seq[JlamaTurn]] =
     for
       _ <- Either.cond(options.tools.isEmpty, (), ValidationError("tools", ToolsUnsupported))
-      _ <- PartEncoding.check(ProviderName, conversation.messages, PartEncoding.textOnly, PartEncoding.textOnly)
+      _ <- PartEncoding.check(
+        ProviderId(ProviderName),
+        conversation.messages,
+        PartEncoding.textOnly,
+        PartEncoding.textOnly
+      )
       turns <- conversation.messages.foldLeft[Result[Vector[JlamaTurn]]](Right(Vector.empty)) { (acc, message) =>
         acc.flatMap(done => turn(message).map(done :+ _))
       }

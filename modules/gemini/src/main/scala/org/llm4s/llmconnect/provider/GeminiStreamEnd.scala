@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ LLMError, NetworkError }
 
 /**
@@ -23,7 +24,7 @@ private[provider] object GeminiStreamEnd {
    * 429 is a `RateLimitError` and a 503 a retryable `ServiceError`. A `code` that is not an HTTP failure status is a
    * 502, retried like a bad gateway.
    */
-  def streamError(json: ujson.Value, provider: String): Option[LLMError] =
+  def streamError(json: ujson.Value, provider: ProviderId): Option[LLMError] =
     json.objOpt
       .flatMap(_.get("error"))
       .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
@@ -44,7 +45,7 @@ private[provider] object GeminiStreamEnd {
    * to be whole. A 502, as a bad gateway is, so `ReliableClient` may retry it while no chunk has been delivered.
    * `reason` is the parser's, never the line itself.
    */
-  def unreadable(reason: String, provider: String): LLMError =
+  def unreadable(reason: String, provider: ProviderId): LLMError =
     HttpErrorMapper.mapStreamError(502, s"the stream sent a data line that is not JSON: $reason", provider)
 
   /** A stream whose candidate stated no `finishReason`: cut off, so a retry may succeed. */

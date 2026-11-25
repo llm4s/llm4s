@@ -12,12 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`); the Scalafix rule `ErrorProviderIdTyped` rewrites both
-  ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936).
+- An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`), and on the helpers that build one (`HttpErrorMapper.toError` and `mapStreamError`, `PartEncoding.check` and `encodeAll`, `HttpResponse`'s `ensureSuccess` and `mapServiceError`); the Scalafix rule `ErrorProviderIdTyped` rewrites them
+  ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936), [#2939](https://github.com/llm4s/llm4s/pull/2939).
 
 ### Core
 
-- **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
+- **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`, and `HttpErrorMapper`, `PartEncoding` and `HttpResponse.ensureSuccess` / `mapServiceError` take it as one; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
 ### Agent runtime
 
 - **Fixed** an agent with `withOutput` (or `withOutputCheck` / `withOutputJsonCheck`) whose answer is cut off at the output limit ends the turn `AgentStatus.Truncated`, as any agent does: the cut-off answer is not checked against the schema and no corrective retry is spent on it, where 0.7.0 returned `Left(GraphError.OutputInvalid)`. A reply cut off before any text (all output spent on thinking) is `Truncated("")` for every agent, not a `ValidationError`; `decodeOutput` and a WARN log say the output limit was the cause, with the token counts ([#2933](https://github.com/llm4s/llm4s/issues/2933); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)).

@@ -96,16 +96,16 @@ private[llm4s] object SdkErrorMapper {
   /**
    * The error for `t`, an exception from `provider`'s SDK.
    *
-   * @param provider the provider name the `AuthenticationError` or `RateLimitError` carries
+   * @param provider the id of the provider, which the `AuthenticationError` or `RateLimitError` carries
    */
-  def apply(t: Throwable, provider: String): LLMError = Safety.fromThrowable(t) match {
+  def apply(t: Throwable, provider: ProviderId): LLMError = Safety.fromThrowable(t) match {
     case unknown: UnknownError =>
       val message  = Option(t.getMessage)
       val statuses = message.map(statusesIn).getOrElse(Set.empty)
       if (statuses.contains(Unauthorized))
-        AuthenticationError(ProviderId(provider), Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
+        AuthenticationError(provider, Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
       else if (statuses.contains(TooManyRequests))
-        RateLimitError(ProviderId(provider))
+        RateLimitError(provider)
           .withHttpStatus(TooManyRequests)
           .withDetail(Redaction.safeBody(message.getOrElse("")))
       else unknown

@@ -6,6 +6,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.GeminiConfig
+import org.llm4s.llmconnect.provider.GeminiProvider
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
@@ -46,8 +47,8 @@ object GeminiModelLister extends ProviderModelLister:
           params = Map("pageSize" -> "1000") ++ pageToken.map("pageToken" -> _),
           timeout = 10.seconds
         )
-        .mapServiceError("gemini", "Failed to discover models")
-      okResponse <- response.ensureSuccess("gemini")
+        .mapServiceError(GeminiProvider.id, "Failed to discover models")
+      okResponse <- response.ensureSuccess(GeminiProvider.id)
       json       <- readBody(okResponse.body)
       page       <- parseGeminiPage(json)
       all = acc ++ page.models

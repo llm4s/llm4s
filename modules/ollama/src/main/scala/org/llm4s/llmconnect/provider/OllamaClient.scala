@@ -224,7 +224,7 @@ final class OllamaClient private[provider] (
       )
     else if (status == 404) {
       // Ollama answers 404 for a model it has not pulled: say which command fetches it (#2285).
-      val details = HttpErrorMapper.extractErrorDetails(body, status, providerName)
+      val details = HttpErrorMapper.extractErrorDetails(body, status, provider)
       val action  = TroubleshootingLinks.ollamaModelMissingAction(config.model.asString)
       val entry   = TroubleshootingLinks.Entry.OllamaModelMissing
       Left(
@@ -237,7 +237,7 @@ final class OllamaClient private[provider] (
         else ServiceError(404, provider, details).withHint(action, entry)
       )
     } else
-      Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, providerName, headers), config.model.asString))
+      Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, provider, headers), config.model.asString))
 
   private def recordExchange(
     startedAt: Instant,
@@ -328,7 +328,7 @@ final class OllamaClient private[provider] (
                   val id          = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
                   // an error after the 200 status, `{"error":"..."}`, ends the stream with it (RFC 0009, rule 2)
-                  OllamaClient.streamError(json, providerName).foreach(error => failure = Some(error))
+                  OllamaClient.streamError(json, provider).foreach(error => failure = Some(error))
                   if (failure.isEmpty) OllamaClient.parseToolCalls(json.obj.get("message"), ids) match {
                     case Left(error) => failure = Some(error)
                     case Right(calls) =>
@@ -401,7 +401,7 @@ final class OllamaClient private[provider] (
     think: OllamaThink.Plan
   ): Result[ujson.Obj] =
     PartEncoding
-      .check(providerName, conversation.messages, OllamaClient.userPart, PartEncoding.textOnly)
+      .check(provider, conversation.messages, OllamaClient.userPart, PartEncoding.textOnly)
       .map(_ => encode(conversation, options, stream, think))
 
   private def encode(
@@ -535,7 +535,7 @@ object OllamaClient {
    * The failure a streamed line reports, `{"error":"..."}`, which Ollama sends once the 200 status is out (a model
    * that fails to load, a runner that crashes). It states no status, so it is a 502, retried like a bad gateway.
    */
-  private[provider] def streamError(json: ujson.Value, provider: String): Option[LLMError] =
+  private[provider] def streamError(json: ujson.Value, provider: ProviderId): Option[LLMError] =
     json.objOpt
       .flatMap(_.get("error"))
       .filter(error => error != ujson.Null && error != ujson.Str(""))

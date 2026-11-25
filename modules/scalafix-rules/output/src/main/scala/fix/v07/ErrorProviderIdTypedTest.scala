@@ -1,9 +1,13 @@
 package fix.v07
 
 import org.llm4s.error._
+import org.llm4s.http.HttpResponse
+import org.llm4s.llmconnect.model.{ ContentPart, Message, MessageRole }
+import org.llm4s.llmconnect.provider.{ HttpErrorMapper, PartEncoding }
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 
 import scala.concurrent.duration._
-import org.llm4s.types.ProviderModelTypes.ProviderId
 
 object ErrorProviderIdTypedTest {
   private val name = "openai"
@@ -44,4 +48,26 @@ object ErrorProviderIdTypedTest {
 
   // a read in a string prints as it did
   def describe(error: CircuitOpenError): String = s"${error.provider} is open; ${error.message}"
+
+  // the helpers that build those errors take the provider the same way
+  def mapped(status: Int, body: String): LLMError = HttpErrorMapper.toError(status, body, ProviderId("acme"), Map.empty)
+
+  def streamed(message: String): LLMError = HttpErrorMapper.mapStreamError(502, message, ProviderId(name))
+
+  private val text: PartialFunction[ContentPart, Any] = { case _: ContentPart.Text => () }
+
+  def checked(messages: Seq[Message]): Result[Unit] =
+    PartEncoding.check(ProviderId("acme"), messages, text, text)
+
+  def encoded(parts: Seq[ContentPart]): Result[Vector[String]] =
+    PartEncoding.encodeAll(ProviderId(name), MessageRole.User, parts) { case t: ContentPart.Text => t.text }
+
+  def ok(response: HttpResponse): Result[HttpResponse] = response.ensureSuccess(ProviderId("acme"))
+
+  def listed(result: Result[HttpResponse]): Result[HttpResponse] =
+    result.mapServiceError(ProviderId("acme"), "Failed to discover models")
+
+  // a ProviderId unwrapped for the call is passed as it is
+  def own(id: ProviderId, status: Int, body: String): LLMError =
+    HttpErrorMapper.toError(status, body, id, Map.empty)
 }

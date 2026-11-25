@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.{
   ProviderExchangeLogging,
   ProviderExchangeSink
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, UserMessage }
 import org.llm4s.metrics.MockMetricsCollector
@@ -525,7 +526,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       .builder()
       .headers(com.openai.core.http.Headers.builder().put("Retry-After", "5").build())
       .build()
-    OpenAIClient.mapError(limited, "openai") match {
+    OpenAIClient.mapError(limited, ProviderId("openai")) match {
       case err: org.llm4s.error.RateLimitError => err.retryAfter shouldBe Some(5.seconds)
       case other                               => fail(s"Expected RateLimitError, got: $other")
     }

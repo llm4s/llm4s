@@ -33,7 +33,7 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   private val gcs    = ContentPart.document(MediaSource.Url(URI.create("gs://bucket/r.pdf")), MediaType.Pdf).value
   private val s3     = ContentPart.document(MediaSource.Url(URI.create("s3://bucket/r.pdf")), MediaType.Pdf).value
   private val base   = "https://generativelanguage.googleapis.com/v1beta"
-  private val gemini = GeminiParts.geminiFileUri("gemini", base)
+  private val gemini = GeminiParts.geminiFileUri(ProviderId("gemini"), base)
   private val file   = ContentPart.image(MediaSource.ProviderFile("gemini", "files/abc"), MediaType.Jpeg).value
   private val csv    = ContentPart.document(MediaSource.Inline(bytes), MediaType.Csv).value
 
@@ -72,12 +72,12 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     uri("files/abc") shouldBe Some(s"$base/files/abc")
     uri("abc") shouldBe Some(s"$base/files/abc")
     uri(s"$base/files/abc") shouldBe Some(s"$base/files/abc")
-    GeminiParts.geminiFileUri("gemini", s"$base/")(MediaSource.ProviderFile("gemini", "abc")) shouldBe
+    GeminiParts.geminiFileUri(ProviderId("gemini"), s"$base/")(MediaSource.ProviderFile("gemini", "abc")) shouldBe
       Some(s"$base/files/abc")
   }
 
   it should "not cover a file uploaded to another provider, or a URL the API cannot fetch" in {
-    GeminiParts.user(GeminiParts.geminiFileUri("vertexai", base)).isDefinedAt(file) shouldBe false
+    GeminiParts.user(GeminiParts.geminiFileUri(ProviderId("vertexai"), base)).isDefinedAt(file) shouldBe false
     GeminiParts.user(gemini).isDefinedAt(gcs) shouldBe false
     GeminiParts.user(gemini).isDefinedAt(s3) shouldBe false
   }
@@ -98,17 +98,21 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   "GeminiParts.check" should "refuse media in a tool result and another provider's file, naming the part" in {
     val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())))
     GeminiParts
-      .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), ToolCallId("c1"))), gemini)
+      .check(
+        ProviderId("gemini"),
+        Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), ToolCallId("c1"))),
+        gemini
+      )
       .left
       .value shouldBe
       UnsupportedContentPartError(ProviderId("gemini"), inline.kind, "tool")
     GeminiParts
-      .check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri)
+      .check(ProviderId("vertexai"), Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri)
       .left
       .value shouldBe
       UnsupportedContentPartError(ProviderId("vertexai"), url.kind, "user")
     GeminiParts.check(
-      "gemini",
+      ProviderId("gemini"),
       Seq(UserMessage(Vector(ContentPart.Text("a"), inline, filesUri, file))),
       gemini
     ) shouldBe

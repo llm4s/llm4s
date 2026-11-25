@@ -205,7 +205,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   it should "reject non-success responses via ensureSuccess" in {
     val response = HttpResponse(404, "missing")
 
-    val result = response.ensureSuccess("test-provider")
+    val result = response.ensureSuccess(ProviderId("test-provider"))
 
     result match
       case Left(err: ServiceError) =>
@@ -220,7 +220,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   it should "redact credentials echoed in the body it puts into the ServiceError (#1674)" in {
     val message =
       HttpResponse(401, org.llm4s.testutil.EchoedCredentials.Text)
-        .ensureSuccess("test-provider")
+        .ensureSuccess(ProviderId("test-provider"))
         .left
         .toOption
         .get

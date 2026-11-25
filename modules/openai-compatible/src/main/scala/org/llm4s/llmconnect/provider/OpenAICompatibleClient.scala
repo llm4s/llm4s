@@ -124,7 +124,6 @@ class OpenAICompatibleClient private[provider] (
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
   protected def provider: ProviderId      = ProviderId(settings.providerName)
-  private def providerName: String        = settings.providerName
   protected def modelName: ModelName      = settings.model
 
   // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
@@ -332,7 +331,7 @@ class OpenAICompatibleClient private[provider] (
 
   /** The failure an event reports in an `error` field; see [[OpenAICompatibleClient.streamedError]]. */
   private def streamedError(json: ujson.Value): Option[LLMError] =
-    json.objOpt.flatMap(_.get("error")).flatMap(OpenAICompatibleClient.streamedError(_, providerName))
+    json.objOpt.flatMap(_.get("error")).flatMap(OpenAICompatibleClient.streamedError(_, provider))
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -379,7 +378,7 @@ class OpenAICompatibleClient private[provider] (
       // a part the dialect cannot send fails here, typed, before anything is built or sent
       .flatMap(_ =>
         PartEncoding.check(
-          providerName,
+          provider,
           sendableMessages(conversation, options),
           dialect.encodeUserPart,
           PartEncoding.textOnly
@@ -796,7 +795,7 @@ class OpenAICompatibleClient private[provider] (
         TroubleshootingLinks.annotate(
           AuthenticationError(
             provider,
-            HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, providerName),
+            HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, provider),
             statusCode.toString
           ).withHttpStatus(statusCode)
         )
@@ -804,7 +803,7 @@ class OpenAICompatibleClient private[provider] (
     else
       Left(
         HttpErrorMapper.naming(
-          HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers),
+          HttpErrorMapper.toError(statusCode, scrubbed, provider, headers),
           settings.model.asString
         )
       )
@@ -853,7 +852,7 @@ object OpenAICompatibleClient {
    * token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a bad
    * gateway. `OpenAIClient` reads the SDK's stream error with it too.
    */
-  private[provider] def streamedError(error: ujson.Value, providerName: String): Option[LLMError] =
+  private[provider] def streamedError(error: ujson.Value, provider: ProviderId): Option[LLMError] =
     Some(error)
       .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
       .map { error =>
@@ -865,7 +864,7 @@ object OpenAICompatibleClient {
           .map(_.toInt)
           .find(code => code >= 400 && code <= 599)
           .getOrElse(502)
-        HttpErrorMapper.mapStreamError(status, message, providerName)
+        HttpErrorMapper.mapStreamError(status, message, provider)
       }
 
   private[provider] val AuthorizationHeaderRefusal: String =

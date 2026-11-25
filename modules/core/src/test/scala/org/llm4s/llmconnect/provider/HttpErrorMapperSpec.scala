@@ -8,7 +8,7 @@ import scala.concurrent.duration._
 
 class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
 
-  private val provider = "test-provider"
+  private val provider = ProviderId("test-provider")
   private val clock = java.time.Clock.fixed(java.time.Instant.parse("2026-10-01T12:00:00Z"), java.time.ZoneOffset.UTC)
 
   // ── Status code mapping ──────────────────────────────────────────
@@ -214,17 +214,18 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   // ── Integration: provider name in error ──────────────────────────
 
   it should "include provider name in AuthenticationError" in {
-    val Left(err) = Left(HttpErrorMapper.toError(401, """{"message":"denied"}""", "gemini", Map.empty)): @unchecked
+    val Left(err) =
+      Left(HttpErrorMapper.toError(401, """{"message":"denied"}""", ProviderId("gemini"), Map.empty)): @unchecked
     err.asInstanceOf[AuthenticationError].provider shouldBe ProviderId("gemini")
   }
 
   it should "include provider name in RateLimitError" in {
-    val Left(err) = Left(HttpErrorMapper.toError(429, "{}", "deepseek", Map.empty)): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(429, "{}", ProviderId("deepseek"), Map.empty)): @unchecked
     err.asInstanceOf[RateLimitError].provider shouldBe ProviderId("deepseek")
   }
 
   it should "include provider name in ServiceError" in {
-    val Left(err) = Left(HttpErrorMapper.toError(503, "{}", "ollama", Map.empty)): @unchecked
+    val Left(err) = Left(HttpErrorMapper.toError(503, "{}", ProviderId("ollama"), Map.empty)): @unchecked
     err.asInstanceOf[ServiceError].provider shouldBe ProviderId("ollama")
   }
 
@@ -313,23 +314,25 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   "extractErrorDetails" should "read IBM watsonx's errors array, and keep a 413's message" in {
     val watsonx = ujson.Obj("errors" -> ujson.Arr(ujson.Obj("code" -> "bad", "message" -> "too many images"))).render()
-    HttpErrorMapper.extractErrorDetails(watsonx, 400, "watsonx") shouldBe "too many images"
+    HttpErrorMapper.extractErrorDetails(watsonx, 400, ProviderId("watsonx")) shouldBe "too many images"
     Left(
       HttpErrorMapper
-        .toError(413, """{"error":{"message":"request too large"}}""", "gemini", Map.empty)
+        .toError(413, """{"error":{"message":"request too large"}}""", ProviderId("gemini"), Map.empty)
     ).left.toOption.get.message should
       include("request too large")
   }
 
   "mapStreamError" should "map a mid-stream error by its status, keeping the provider's message in every error" in {
-    val limited = HttpErrorMapper.mapStreamError(429, "quota exceeded for this minute", "gemini")
+    val limited = HttpErrorMapper.mapStreamError(429, "quota exceeded for this minute", ProviderId("gemini"))
     limited shouldBe a[RateLimitError]
     limited.message should include("quota exceeded for this minute")
-    val unavailable = HttpErrorMapper.mapStreamError(503, "overloaded", "gemini")
+    val unavailable = HttpErrorMapper.mapStreamError(503, "overloaded", ProviderId("gemini"))
     unavailable shouldBe a[ServiceError]
     unavailable.asInstanceOf[ServiceError].status shouldBe 503
     unavailable.message should include("overloaded")
-    (HttpErrorMapper.mapStreamError(502, "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "x").message should not)
+    (HttpErrorMapper
+      .mapStreamError(502, "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", ProviderId("x"))
+      .message should not)
       .include("abcdefghijklmnopqrstuvwxyz0123456789")
   }
 }

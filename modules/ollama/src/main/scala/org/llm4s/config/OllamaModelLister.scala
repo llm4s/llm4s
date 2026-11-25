@@ -36,8 +36,8 @@ object OllamaModelLister extends ProviderModelLister:
     for
       response <- httpClient
         .get(s"${baseUrl.asUrl}/api/tags", timeout = 10.seconds)
-        .mapServiceError("ollama", "Failed to discover models")
-      okResponse <- response.ensureSuccess("ollama")
+        .mapServiceError(OllamaProvider.id, "Failed to discover models")
+      okResponse <- response.ensureSuccess(OllamaProvider.id)
       json       <- readBody(okResponse.body)
       models     <- parseOllamaModels(json)
     yield models

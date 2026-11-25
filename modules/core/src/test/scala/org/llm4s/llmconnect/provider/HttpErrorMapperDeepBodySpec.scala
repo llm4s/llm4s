@@ -17,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
  */
 class HttpErrorMapperDeepBodySpec extends AnyFlatSpec with Matchers {
 
-  private val provider   = "test-provider"
+  private val provider   = ProviderId("test-provider")
   private val StackBytes = 256L * 1024L
   private val Depth      = 100000
 
@@ -59,13 +59,13 @@ class HttpErrorMapperDeepBodySpec extends AnyFlatSpec with Matchers {
     onSmallStack(Left(HttpErrorMapper.toError(400, deepArray, provider, Map.empty))) shouldBe
       Left(ValidationError("request", default(400)).withHttpStatus(400))
     onSmallStack(Left(HttpErrorMapper.toError(500, deepArray, provider, Map.empty))) shouldBe
-      Left(ServiceError(500, ProviderId(provider), default(500)))
+      Left(ServiceError(500, provider, default(500)))
   }
 
   it should "return a Left with the default message for a deep object or a deep value under error" in {
     Seq(deepObject, deepError).foreach { body =>
       onSmallStack(Left(HttpErrorMapper.toError(503, body, provider, Map.empty))) shouldBe
-        Left(ServiceError(503, ProviderId(provider), default(503)))
+        Left(ServiceError(503, provider, default(503)))
     }
   }
 }

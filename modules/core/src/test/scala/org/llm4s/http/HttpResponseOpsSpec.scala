@@ -33,13 +33,15 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
   "ensureSuccess" should "return the same response for every status from 200 to 299" in {
     Seq(200, 201, 204, 299).foreach { status =>
       val response = HttpResponse(status, s"body-$status", headers)
-      withClue(s"status $status: ")(response.ensureSuccess("acme").value shouldBe theSameInstanceAs(response))
+      withClue(s"status $status: ")(
+        response.ensureSuccess(ProviderId("acme")).value shouldBe theSameInstanceAs(response)
+      )
     }
   }
 
   it should "refuse every status outside 200 to 299 with a ServiceError naming the status and provider" in {
     Seq(199, 300, 302, 404, 500).foreach { status =>
-      val error = failure(HttpResponse(status, "upstream said no").ensureSuccess("acme"))
+      val error = failure(HttpResponse(status, "upstream said no").ensureSuccess(ProviderId("acme")))
       withClue(s"status $status: ") {
         error.status shouldBe status
         error.provider shouldBe ProviderId("acme")
@@ -81,7 +83,7 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "mapServiceError" should "rewrap a ServiceError as \"<message>: <original message>\" with its status" in {
     val original = ServiceError(503, ProviderId("x"), "down")
-    val error    = failure((Left(original): Result[Int]).mapServiceError("acme", "Listing models"))
+    val error    = failure((Left(original): Result[Int]).mapServiceError(ProviderId("acme"), "Listing models"))
 
     error.status shouldBe 503
     error.provider shouldBe ProviderId("acme")
@@ -90,8 +92,8 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "return the very same error when it is not a ServiceError, and a success unchanged" in {
     val network  = NetworkError("unreachable", None, "http://acme.example")
-    val returned = (Left(network): Result[Int]).mapServiceError("acme", "Listing models").left.value
+    val returned = (Left(network): Result[Int]).mapServiceError(ProviderId("acme"), "Listing models").left.value
     returned shouldBe theSameInstanceAs(network)
-    (Right(42): Result[Int]).mapServiceError("acme", "Listing models") shouldBe Right(42)
+    (Right(42): Result[Int]).mapServiceError(ProviderId("acme"), "Listing models") shouldBe Right(42)
   }
 }
