@@ -185,7 +185,7 @@ SCOPE_AXES = {"ThisBuild", "Global", "Zero"}
 
 # The Scalafix migration rules (#2330) compile against scalafix-core, which is Scala 2.13 only: a build-tool module
 # that never enters a user's classpath, so its Scala version is not the one the docs document.
-SCALAFIX_213_PROJECTS = {"scalafixRules", "scalafixTests", "scalafixTests05", "scalafixTests06"}
+SCALAFIX_213_PROJECTS = {"scalafixRules", "scalafixTests", "scalafixTests05", "scalafixTests06", "scalafixTests07"}
 scala_versions = sorted({p.scala for p in PROJECTS.values() if p.scala and p.id not in SCALAFIX_213_PROJECTS})
 SCALA = scala_versions[0] if len(scala_versions) == 1 else None
 if SCALA is None:

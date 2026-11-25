@@ -153,6 +153,8 @@ map_file_to_project() {
     modules/scalafix-rules/output/src/main/scala/fix/v1/*) echo "scalafixTests05" ;;
     modules/scalafix-rules/input-0.6/*|modules/scalafix-rules/tests-0.6/*) echo "scalafixTests06" ;;
     modules/scalafix-rules/output/src/main/scala/fix/v06/*) echo "scalafixTests06" ;;
+    modules/scalafix-rules/input-0.7/*|modules/scalafix-rules/tests-0.7/*) echo "scalafixTests07" ;;
+    modules/scalafix-rules/output/src/main/scala/fix/v07/*) echo "scalafixTests07" ;;
     modules/scalafix-rules/*)             echo "scalafixTests" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -648,6 +650,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE scalafixTests
       set_add DOWNSTREAM_COMPILE scalafixTests05
       set_add DOWNSTREAM_COMPILE scalafixTests06
+      set_add DOWNSTREAM_COMPILE scalafixTests07
       ;;
     repl)
       set_add DOWNSTREAM_COMPILE samples

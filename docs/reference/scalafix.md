@@ -142,9 +142,10 @@ the current sources. `scalafixTests05` does the same for the `Llm4sMigrateFrom_0
 `output/.../fix/v1`, and `scalafixTests06` for `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0, with `modules/scalafix-rules/input-0.6`
 compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`
 (`Llm4sMigrateFrom_0_6KeepsSecretsTest` pins that it leaves code already past the 0.5.1 breaks alone).
-`Llm4sMigrateFrom_0_7` has no rule to test yet: `Llm4sMigrateFrom_0_7ChangesNothingTest`, in the same suite, pins
-that it is found by name and changes nothing. Its first rule comes with an input compiled against the 0.7.0
-artifacts, as `input-0.6` is against 0.6.0.
+`scalafixTests07` does the same for `Llm4sMigrateFrom_0_7`, with `modules/scalafix-rules/input-0.7` compiled against
+the 0.7.0 artifacts and its expected output under `output/.../fix/v07`. The rule has no rule to run yet:
+`Llm4sMigrateFrom_0_7ChangesNothingTest` pins that it is found by name and changes nothing. A rule for a break
+after 0.7.0 adds its fixtures there.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

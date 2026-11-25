@@ -51,8 +51,8 @@ version number:
 1.0 is the compatibility promise. The 0.7.0 baseline is not: it makes every break visible, because MiMa reports it
 and it needs a reviewed filter, but between 0.7.0 and 1.0 an API that is wrong is still fixed outright. The release
 sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 1.0 with no release in between
-([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set no baseline, and until 0.7.0
-the check passes without checking anything. See [The Baseline](api-stability#the-baseline).
+([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set no baseline. The baseline is
+set: the build compares every frozen module with its 0.7.0 artifact on each pull request. See [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
 follows the release it ships in, and `llm4s-bom` pins that one version for every artifact.
@@ -80,7 +80,7 @@ What it does **not** cover:
 
 - Beta and Experimental modules, and anything in a Frozen module that [1.0 Scope](v1-scope) marks Beta or
   Experimental. Such a type inside a Frozen module is `@Experimental`, which MiMa skips (`mimaExcludeAnnotations`);
-  anything else gets a documented MiMa filter when the baseline is set.
+  anything else gets a documented MiMa filter (the 0.7.0 baseline needed none).
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
 - `llm4s-provider-testkit` and `llm4s-agent-testkit` (Beta; they require JDK 21, see below), `llm4s-testkit` (Beta), the

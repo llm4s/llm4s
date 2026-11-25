@@ -147,8 +147,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       `Llm4sMigrateFrom_0_6` is built: each rule for a break after 0.7.0 joins it and every older umbrella
       ([Scalafix](../reference/scalafix#migration-rules)).
 - [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
-      ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)), and change the pages that
-      say no baseline is set yet ([API Stability](../reference/api-stability), [Compatibility and Deprecation Policy](../reference/compatibility-policy),
+      ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline); done), and change the pages that
+      said no baseline was set yet ([API Stability](../reference/api-stability), [Compatibility and Deprecation Policy](../reference/compatibility-policy),
       [1.0 Scope](../reference/v1-scope), [Enterprise Evaluation](../reference/enterprise-evaluation), `SECURITY.md`, this page).
 
 **1.0, in addition:**
@@ -485,9 +485,9 @@ need a maintainer:
 
 ## Release readiness: a MiMa dry run
 
-`mimaBaselineVersion` in `build.sbt` is `None` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](../reference/api-stability#the-baseline)). It is set at **0.7.0**, for every frozen module
-([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
+`mimaBaselineVersion` in `build.sbt` is `Some("0.7.0")` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compares every frozen
+module with its 0.7.0 artifact ([The Baseline](../reference/api-stability#the-baseline);
+[#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` was written to do those steps before 0.7.0 existed, against a throwaway version, and still checks the wiring itself (before the baseline moves, or after a change to the MiMa settings):
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -513,11 +513,12 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 
 It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
-**not** prove that any API is compatible with anything: there is no baseline yet. It is a manual script,
+**not** prove that any API is compatible with anything: it compares the build with a copy of itself, and the real
+check against 0.7.0 is `sbt mimaReportBinaryIssues`. It is a manual script,
 not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself
 without sbt.
 
-At the baseline release: publish it, confirm the frozen artifacts are on Central
+When the baseline moves to a later release: publish it, confirm the frozen artifacts are on Central
 ([Verify Release](#5-verify-release)), then follow
 [Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline).
 
@@ -599,6 +600,6 @@ help.
 Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
 before and after the baseline, is in the [Compatibility Policy](../reference/compatibility-policy#versions).
 
-Current documented version series: 0.7.x (pre-1.0 development). Up to 0.7.0, which sets the MiMa baseline, any
+Current documented version series: 0.7.x (pre-1.0 development). Up to 0.7.0, the MiMa baseline, any
 release, patch included, could carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
 1.0 a minor release still may, with a MiMa filter as well, and a patch release may not; from 1.0, semantic versioning.
