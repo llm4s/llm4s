@@ -18,9 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
+### Agent runtime
+
+- **Fixed** an agent with `withOutput` (or `withOutputCheck` / `withOutputJsonCheck`) whose answer is cut off at the output limit ends the turn `AgentStatus.Truncated`, as any agent does: the cut-off answer is not checked against the schema and no corrective retry is spent on it, where 0.7.0 returned `Left(GraphError.OutputInvalid)`. A reply cut off before any text (all output spent on thinking) is `Truncated("")` for every agent, not a `ValidationError`; `decodeOutput` and a WARN log say the output limit was the cause, with the token counts ([#2933](https://github.com/llm4s/llm4s/issues/2933); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)).
+
+### Providers
+
+- **Changed** `llm4s-anthropic`'s default `max_tokens`, sent when `CompletionOptions.maxTokens` is unset, follows the model instead of being 2048: its maximum output tokens from the model registry on a streamed call, the same capped at 16,000 on a non-streamed call, 8,192 for an unknown model. An explicit `maxTokens` is sent unchanged ([#2933](https://github.com/llm4s/llm4s/issues/2933); [Anthropic](docs/guide/providers.md#sampling-parameters-thinking-and-output-length)).
+- **Fixed** `presencePenalty` and `frequencyPenalty` are no longer dropped silently: the Anthropic, Gemini, Vertex AI and Bedrock clients report each as `RequestAdjustment.Dropped` on `Completion.adjustments`, Ollama sends them, and `llm4s-provider-testkit`'s `assertModelCallContract` fails a client that neither sends nor reports them ([RFC 0008](docs/rfcs/0008-generation-controls.md); [#2933](https://github.com/llm4s/llm4s/issues/2933)).
 
 ### Build & tooling
 
+- **Added** `llm4s-scalafix`: the Scalafix migration rules are published with each release, as `org.llm4s::llm4s-scalafix` (`llm4s-scalafix_2.13`, a build-tool artifact outside the BOM), so `sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:<version>"` migrates code on 0.7.x ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#running-a-migration-rule)).
 - **Changed** the MiMa baseline is 0.7.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 0.7.0 artifacts, with no filter, and a binary break to one now fails CI ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
 
 ## [0.7.0] - 2026-11-25

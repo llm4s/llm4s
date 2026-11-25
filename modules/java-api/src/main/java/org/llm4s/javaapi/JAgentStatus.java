@@ -64,7 +64,9 @@ public final class JAgentStatus {
   }
 
   /**
-   * What the agent wrote before the model's output limit cut it off, for {@code TRUNCATED}; empty otherwise.
+   * What the agent wrote before the model's output limit cut it off, for {@code TRUNCATED}; empty otherwise. A
+   * {@code TRUNCATED} status always has one: it is the empty string when the model was cut off before it wrote any
+   * text, its whole output allowance spent on thinking (raise {@code maxTokens} or lower the reasoning effort).
    */
   public Optional<String> partialAnswer() {
     return partialAnswer;

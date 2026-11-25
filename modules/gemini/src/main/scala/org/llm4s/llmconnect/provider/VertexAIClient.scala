@@ -129,7 +129,8 @@ final class VertexAIClient private[provider] (
         val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
+          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments ++
+          UnmappedOptions.penalties(GeminiUnsent.Penalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -187,7 +188,8 @@ final class VertexAIClient private[provider] (
         val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
+          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments ++
+          UnmappedOptions.penalties(GeminiUnsent.Penalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)

@@ -116,6 +116,9 @@ from a `LocalProviderTestServer`, runs `complete` and `streamComplete`, and chec
   non-blank reason when the provider cannot produce it. A case left out fails the check.
 - `CleanText` must apply: its stream is what proves the client really streams. A successful stream's chunks must add
   up to its `Completion` (text, last finish reason, tool call ids).
+- The `CleanText` reply is also asked for with `presencePenalty` and `frequencyPenalty` set, on `complete` and on
+  `streamComplete`: each must be in the request the client sent, or be reported on `Completion.adjustments`
+  (`RequestAdjustment.Dropped`). A client that leaves an option out without a report fails.
 - The `complete` path's tool-call rules (a tool call in a `Length` reply, arguments that are not a JSON object) are
   the client's own to apply; see [Writing a provider](../../docs/guide/writing-a-provider.md#the-model-call-contract).
 

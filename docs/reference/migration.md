@@ -175,6 +175,41 @@ A `ProviderId` is canonical: trimmed and in lower case. Two things read differen
   `CircuitOpenError` and local `RateLimitError` carry `ProviderId(providerName)`, so a name with capitals or
   surrounding spaces is lower-cased and trimmed in those two errors and their messages.
 
+## A cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties (#2933)
+
+Three behaviour changes after 0.7.0. No signature changed.
+
+**A `withOutput` agent's cut-off answer is `Truncated`, not `OutputInvalid`.** An answer the output limit cut off
+(`FinishReason.Length`) is no longer checked against the schema or retried: the turn ends
+`Right(AgentStatus.Truncated(partialAnswer))`, with the partial text stored in the thread, where 0.7.0 spent the
+corrective call on it and returned `Left(GraphError.OutputInvalid(...))` with the turn removed. Code that handled
+truncation by matching `OutputInvalid` matches the status instead:
+
+```scala
+agent.run(query).map(_.status) match
+  case Right(AgentStatus.Truncated(partial)) => // cut off: raise maxTokens, or lower the reasoning effort
+  case Left(GraphError.OutputInvalid(errors)) => // a complete answer that did not match the schema, twice
+  case other                                  => // ...
+```
+
+**A reply cut off before any text is `Truncated("")`.** Any agent, with or without `withOutput`, whose model spent
+its whole output allowance on thinking ends the turn `Truncated` with an empty `partialAnswer`, and stores nothing
+for the reply; 0.7.0 failed the run with `Left(ValidationError)` ("assistant message content cannot be empty"). The
+Java facade's `partialAnswer()` is then present and empty.
+
+**Anthropic's default `max_tokens` follows the model.** With no `CompletionOptions.maxTokens`, `llm4s-anthropic`
+sent `max_tokens: 2048`. It now sends the model's maximum output tokens on a streamed call (128,000 for the current
+models), the same capped at 16,000 on a non-streamed call, and 8,192 for a model the registry does not know
+([Anthropic](../guide/providers#sampling-parameters-thinking-and-output-length)). Answers that were cut off at 2048
+now complete, so a call can cost and take more than it did; a `reasoning` level's thinking budget, which is fitted
+below `max_tokens`, is no longer cut to 2047. Set `withMaxTokens(2048)` to keep the old limit.
+
+**A penalty a provider does not take is reported.** `presencePenalty` and `frequencyPenalty` were left out without a
+word by the Anthropic, Gemini, Vertex AI, Bedrock and Ollama clients. The first four now report each one set as
+`RequestAdjustment.Dropped` on `Completion.adjustments` (and so on `ModelCallCompleted.adjustments` and in the
+adjustment log); Ollama sends them, as `options.presence_penalty` and `options.frequency_penalty`. A provider module
+of your own that drops them silently now fails `assertModelCallContract`: report them, or send them.
+
 ## `LLMClient` accessors are named for their values, and `ToolBuilder.build` (#2908)
 
 A method that returns a value is named for the value. The last `getX` accessors of the Stable API lose the `get`, and
@@ -3154,14 +3189,22 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
-source in this repository) rewrites the mechanical source breaks
+The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published from 1.0.0 as
+`org.llm4s::llm4s-scalafix`, before that only as source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
 on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)), which rewrites the renames
-of 0.7.0 that its [rule table](scalafix#migration-rules) lists. These need a hand edit:
+of 0.7.0 that its [rule table](scalafix#migration-rules) lists. Either runs with one command, from the 1.0.0 rules
+and on code that still compiles against the release it is on
+([Running a migration rule](scalafix#running-a-migration-rule)):
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_0_6@org.llm4s::llm4s-scalafix:1.0.0"
+```
+
+These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and

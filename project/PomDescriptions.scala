@@ -102,6 +102,8 @@ object PomDescriptions {
       "Retrieval-augmented generation for LLM4S: vector stores, chunking, reranking, evaluation and extraction.",
     "llm4s-repl" ->
       "One-import helpers for trying LLM4S in the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat and pretty-printed history and usage.",
+    "llm4s-scalafix" ->
+      "Scalafix rules for LLM4S: semantic rewrites that migrate application code across the library's breaking changes, one umbrella rule per release.",
     "llm4s-schema-derivation" ->
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
     "llm4s-schema-iron" ->

@@ -52,7 +52,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
-import org.llm4s.model.{ AdjustmentLog, ModelCapabilities, ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelCapabilities, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ RawJsonSchema, ToolFunction }
 import org.llm4s.types.Result
@@ -134,8 +134,13 @@ import scala.util.{ Failure, Success, Try, Using }
  * the returned message's [[org.llm4s.llmconnect.model.AssistantMessage.thinking]],
  * each thinking block with its `signature`, so that a later request can send them back.
  *
- * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
- * the Anthropic API requires the field.
+ * == Output limit ==
+ *
+ * The Anthropic API requires `max_tokens`. An explicit `CompletionOptions.maxTokens` is sent as given. With none,
+ * the default follows the model (`AnthropicMaxTokens`): a streamed request asks for the model's maximum output
+ * tokens, from the model registry; a non-streamed one for the same capped at 16,000, which a reply can be
+ * generated within the SDK's 10-minute request timeout; a model the registry does not know gets 8,192. It was 2048
+ * for every model until 0.7.0.
  *
  * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
  * @param metrics Receives per-call latency and token-usage events.
@@ -245,9 +250,8 @@ final class AnthropicClient private[provider] (
           .builder()
           .model(config.model.asString)
 
-        // Add max tokens if specified
-        // max tokens is required by the api
-        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        // max_tokens is required by the API: the caller's, or the model's default (AnthropicMaxTokens)
+        val maxTokens = transformed.options.maxTokens.getOrElse(defaultMaxTokens(streaming = false))
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
@@ -258,7 +262,8 @@ final class AnthropicClient private[provider] (
         serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
           transformed.adjustments ++ samplingAdjustments ++ thinkingPlan.adjustments ++
-            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments
+            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments ++
+            UnmappedOptions.penalties(AnthropicClient.NoPenalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
@@ -345,8 +350,8 @@ curl https://api.anthropic.com/v1/messages \
           .builder()
           .model(config.model.asString)
 
-        // Add max tokens if specified (required by the API)
-        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        // max_tokens is required by the API: the caller's, or the model's default (AnthropicMaxTokens)
+        val maxTokens = transformed.options.maxTokens.getOrElse(defaultMaxTokens(streaming = true))
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
@@ -357,7 +362,8 @@ curl https://api.anthropic.com/v1/messages \
         serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
           transformed.adjustments ++ samplingAdjustments ++ thinkingPlan.adjustments ++
-            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments
+            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments ++
+            UnmappedOptions.penalties(AnthropicClient.NoPenalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
@@ -619,6 +625,14 @@ curl https://api.anthropic.com/v1/messages \
       config.model.asString,
       registryService.lookup(config.model).toOption.map(_.capabilities)
     )
+
+  /** The registry's maximum output tokens for this client's model, looked up once; `None` for a model it does not know. */
+  private lazy val modelMaxOutput: Option[Int] =
+    registryService.lookup(config.model).toOption.flatMap(_.maxOutputTokens)
+
+  /** The `max_tokens` of a request whose caller set none: see [[AnthropicMaxTokens]]. */
+  private def defaultMaxTokens(streaming: Boolean): Int =
+    AnthropicMaxTokens.default(modelMaxOutput, streaming)
 
   /** Puts `plan`'s `thinking` and `output_config.effort` on the request. */
   private def applyThinking(builder: MessageCreateParams.Builder, plan: AnthropicThinking.Plan): Unit = {
@@ -1035,6 +1049,9 @@ object AnthropicClient {
 
   /** The `stop_reason` of a reply Anthropic's safety classifiers stopped: a `ContentFilteredError` (RFC 0009). */
   private[provider] val Refusal = "refusal"
+
+  /** Why a penalty is reported `Dropped`: the Messages API has no such parameter. */
+  private val NoPenalties = "Anthropic's Messages API has no penalty parameters"
 
   /** `validate()`'s request waits ten seconds at most. */
   private val ValidationOptions: RequestOptions =

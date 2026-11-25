@@ -102,6 +102,19 @@ private[llm4s] object UnmappedOptions {
       RequestAdjustment.NotNeeded(RequestOption.PromptCache, s"$provider caches a repeated prompt prefix on its own")
     )
 
+  /**
+   * A `Dropped` for each of `presencePenalty` and `frequencyPenalty` the caller set, from a client that sends neither:
+   * `why` is the reason, a clause about the provider (`"Anthropic's Messages API has no penalty parameters"`). A client
+   * that maps no penalty reports this rather than leaving the option out without a word (RFC 0008; the provider
+   * testkit's `assertModelCallContract` checks that each penalty is either sent or reported).
+   */
+  def penalties(why: String, options: CompletionOptions): List[RequestAdjustment] =
+    options.presencePenalty.toList.map(_ =>
+      RequestAdjustment.Dropped(RequestOption.PresencePenalty, s"presence_penalty is not sent: $why")
+    ) ++ options.frequencyPenalty.toList.map(_ =>
+      RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, s"frequency_penalty is not sent: $why")
+    )
+
   /** A `Dropped` for `serviceTier` when the caller set it, from a provider that has no service tier to choose. */
   def serviceTier(provider: String, options: CompletionOptions): List[RequestAdjustment] =
     options.serviceTier.toList.map(tier =>

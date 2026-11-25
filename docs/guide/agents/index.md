@@ -169,7 +169,10 @@ agent.run("Deploy the release").map { r =>
 An answer the model's output limit cut off - its reply ended `FinishReason.Length`, at `maxTokens` or the model's own
 cap - is `Truncated(partialAnswer)`, never `Completed`: `r.answer` is `None`, and the partial text stays in the
 thread, so `agent.continueConversation(r, "Please go on")` lets the model finish it. Raise `maxTokens`
-(`withCompletionOptions`) if it happens often.
+(`withCompletionOptions`) if it happens often. When the model was cut off before it wrote any text - a model that
+thinks can spend its whole output allowance on thinking - `partialAnswer` is empty and nothing is stored for the
+reply: raise `maxTokens` or lower the reasoning effort. Each cut-off answer is logged at WARN with the output and
+thinking token counts the provider reported.
 
 {% include api.html t="org.llm4s.agent.AgentResult" %} also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
 history, never a system prompt), `usage` and `runUsage`. `r.answer` is the `Completed` answer, and `None` for every other status.
@@ -216,6 +219,11 @@ A second invalid answer ends the turn with `Left(GraphError.OutputInvalid(errors
 from the thread, as an output guardrail's block removes it, both calls stay in `usage`, `recover` has
 nothing to continue, and the next turn runs from before it. The format is the agent's own: a handoff
 target answers in its own format, or freely.
+
+An answer cut off at the output limit (`FinishReason.Length`) is incomplete, not invalid: it is not checked against
+the schema, no retry is spent on it - the same limit would cut the second answer too - and the turn ends
+`AgentStatus.Truncated(partialAnswer)` as any agent's does, never `OutputInvalid`. `decodeOutput` on such a result is
+a `Left` saying the output limit cut the answer off. The same holds for `withOutputCheck` and `withOutputJsonCheck`.
 
 A rule the schema cannot express - an id that must name another element of the same document, a total that must
 match its lines - is an application check, `withOutputCheck`. It runs on the decoded answer once the schema accepts

@@ -14,7 +14,9 @@
 #               deferred`, `no Scala 2.13 artifact`), or the version is a Scala 2.13 and the line names the TASTy
 #               reader (`Scala 2.13: call-only, via the TASTy reader`, #2301) or the page's front matter declares
 #               `scala_2_13: tasty-reader` (a page about that route): a 2.13 project calls the Scala 3 artifacts
-#               with `-Ytasty-reader`, which docs/design/scala-2.13-interop/run-probes.sh checks in CI.
+#               with `-Ytasty-reader`, which docs/design/scala-2.13-interop/run-probes.sh checks in CI. A line that
+#               names Scalafix may also name Scala 2.13, and `llm4s-scalafix_2.13` is the one `_2.13` artifact: the
+#               migration rules are a Scala 2.13 build-tool artifact (#2330).
 #               A Markdown link's target (`](scala-2-13)`) is a path, not a claim.
 #               `scalaVersion := "..."` in a snippet must equal it (or be a 2.13 on such a line), an
 #               `llm4s-*_<binary>` artifact must be the build's binary version, and `crossScalaVersions` or
@@ -204,6 +206,16 @@ TASTY_READER = re.compile(r"TASTy reader|-Ytasty-reader|for2_13Use3", re.I)
 TASTY_READER_PAGE = re.compile(r"\A---\n(?:(?!---\n).*\n)*?scala_2_13:\s*tasty-reader\s*\n")
 
 
+# The Scalafix migration rules are published as `llm4s-scalafix_2.13` (#2330): a line that names Scalafix may say the
+# rules are Scala 2.13, and that one artifact may carry the suffix. Nothing else may.
+SCALAFIX_LINE = re.compile(r"scalafix", re.I)
+SCALAFIX_ARTIFACT = "llm4s-scalafix_2.13"
+
+
+def scalafix_rules(text, start, version):
+    return re.match(r"2\.13(\.|$)", version) is not None and SCALAFIX_LINE.search(line_at(text, start)[0]) is not None
+
+
 def in_link_target(text, start):
     """[start] is inside a Markdown link's target, `](scala-2-13)`: a page's path, not a claim."""
     line, ls = line_at(text, start)
@@ -236,14 +248,15 @@ for p, text in TEXTS.items() if SCALA else ():
         parts = m.group(1).split(".")
         agrees = all(x == "x" or (i < len(PARTS) and x == PARTS[i]) for i, x in enumerate(parts))
         if (not agrees and not denied(text, m.start(), m.end()) and not via_tasty_reader(text, m.start(), m.group(1))
-                and not in_link_target(text, m.start())):
+                and not scalafix_rules(text, m.start(), m.group(1)) and not in_link_target(text, m.start())):
             fail(rel, line_of(text, m.start()), f"documents Scala {m.group(1)}, but the build is Scala {SCALA}")
     for m in re.finditer(r'\bscalaVersion\s*:=\s*"([^"]+)"', text):
         if (m.group(1) != SCALA and not exempt(line_at(text, m.start())[0])
                 and not via_tasty_reader(text, m.start(), m.group(1))):
             fail(rel, line_of(text, m.start()), f"pins Scala {m.group(1)}, but the build is Scala {SCALA}")
     for m in re.finditer(r"\bllm4s[\w-]*_(\d+(?:\.\d+)?)(?![\w.])", text):
-        if m.group(1) != BINARY and not exempt(line_at(text, m.start())[0]) and not denied(text, m.start(), m.end()):
+        if (m.group(1) != BINARY and m.group(0) != SCALAFIX_ARTIFACT and not exempt(line_at(text, m.start())[0])
+                and not denied(text, m.start(), m.end())):
             fail(rel, line_of(text, m.start()), f"documents a `_{m.group(1)}` artifact, but the build publishes `_{BINARY}`")
     if not CROSS_BUILDS:
         for m in re.finditer(r"\bcrossScalaVersions\b", text):

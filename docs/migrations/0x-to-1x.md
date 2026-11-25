@@ -32,10 +32,11 @@ break listed under the CHANGELOG's *Breaking changes* with a note in the [Migrat
 the baseline and 1.0 then promise is in the [Compatibility and Deprecation Policy](../reference/compatibility-policy).
 
 **Scalafix.** The mechanical source breaks since 0.4.1 have Scalafix rules
-([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are first published at 1.0, as
+([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are published from 1.0.0, as
 `org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
 change by hand. Run the one umbrella rule for the version you start from: `Llm4sMigrateFrom_0_5` from 0.5.x,
 `Llm4sMigrateFrom_0_6` from 0.6.x, `Llm4sMigrateFrom_0_7` from 0.7.x.
+The command, once 1.0.0 is out, is under [When 1.0 ships](#when-10-ships).
 
 ---
 
@@ -266,6 +267,15 @@ coordinates did not change in 0.1.13; they changed in 0.4.0, above.
 
 ## When 1.0 ships
 
-The 1.0 release adds its own section here, with the one-line Scalafix command. Follow the
+The 1.0 release adds its own section here. Its Scalafix rules are run with one command, while your code still
+compiles against the 0.x release you are on, with [sbt-scalafix](../reference/scalafix#running-a-migration-rule) and
+`semanticdbEnabled := true` in the build:
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_0_7@org.llm4s::llm4s-scalafix:1.0.0"
+```
+
+That is the rule for 0.7.x; from 0.6.x it is `Llm4sMigrateFrom_0_6`, and from 0.5.x `Llm4sMigrateFrom_0_5`. Then set
+the llm4s version to 1.0.0 and compile. Follow the
 [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) and the
 [GitHub releases](https://github.com/llm4s/llm4s/releases) for announcements.

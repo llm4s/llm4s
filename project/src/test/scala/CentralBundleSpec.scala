@@ -4,7 +4,7 @@ import org.scalatest.matchers.should.Matchers
 import CentralBundle._
 
 /** Tests of `project/CentralBundle.scala`, run with `sbt "reload plugins" test` (CI's quick checks). */
-class CentralBundleSpec extends AnyFlatSpec with Matchers {
+class CentralBundleSpec extends AnyFlatSpec with Matchers with org.scalatest.OptionValues {
 
   private def signed(path: String): Seq[String] = path +: Companions.map(path + _)
 
@@ -35,6 +35,13 @@ class CentralBundleSpec extends AnyFlatSpec with Matchers {
   it should "refuse a bundle over Sonatype's monthly limit" in {
     val many = (1 to MaxFiles / MaxFilesPerArtifact + 1).flatMap(i => module(s"llm4s-m${i}_3"))
     problems(many).last should include(s"over Sonatype's monthly limit of $MaxFiles")
+  }
+
+  "releaseOverLimit" should "say when the bundle fits but the release with the Kotlin artifact does not" in {
+    releaseOverLimit(MaxFiles - FilesOutsideBundle) shouldBe None
+    releaseOverLimit(MaxFiles - FilesOutsideBundle + 4).value should include(s"uploads ${MaxFiles + 4} files")
+    // a bundle over the limit by itself is `problems`' to refuse
+    releaseOverLimit(MaxFiles + 1) shouldBe None
   }
 
   "leftOut" should "leave out the signatures' checksums only" in {
