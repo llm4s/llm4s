@@ -22,7 +22,8 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
    * `deliver` decides whether a stream chunk reaches `onChunk`; `early` and `errorEvent` are the errors it returns for
    * a stream that ended early and for an error event, `None` to return the `Completion` anyway. With `toolRules` it
    * fails a call whose `args` is not an object, or any call in a `length` reply, as RFC 0009 says; without, it
-   * returns them.
+   * returns them. `penalties` is what it does with the two penalty options: `"report"` them as dropped, leave them out
+   * and say nothing (`"silent"`), `"send"` them in a request body, or send them and report them dropped (`"both"`).
    */
   private class Reference(
     baseUrl: String,
@@ -30,34 +31,59 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
     deliver: StreamedChunk => Boolean = _ => true,
     early: Option[LLMError] = Some(NetworkError("the stream ended early", None, "reference")),
     errorEvent: String => Option[LLMError] = message => Some(ServiceError(502, "reference", message)),
-    toolRules: Boolean = true
+    toolRules: Boolean = true,
+    penalties: String = "report"
   ) extends LLMClient:
-    private def fetch(): String =
-      HttpClient
-        .newHttpClient()
-        .send(HttpRequest.newBuilder(URI.create(baseUrl)).GET().build(), HttpResponse.BodyHandlers.ofString())
-        .body()
+    private val sends   = penalties == "send" || penalties == "both"
+    private val reports = penalties == "report" || penalties == "both"
+
+    private def fetch(options: CompletionOptions): String =
+      val body = ujson.Obj()
+      if sends then
+        options.presencePenalty.foreach(p => body("presence") = p)
+        options.frequencyPenalty.foreach(p => body("nested") = ujson.Obj("frequency" -> ujson.Arr(p)))
+      val request = HttpRequest.newBuilder(URI.create(baseUrl))
+      val built =
+        if body.value.isEmpty then request.GET().build()
+        else request.POST(HttpRequest.BodyPublishers.ofString(body.render())).build()
+      HttpClient.newHttpClient().send(built, HttpResponse.BodyHandlers.ofString()).body()
+
+    private def adjustments(options: CompletionOptions): List[RequestAdjustment] =
+      if !reports then Nil
+      else
+        options.presencePenalty.toList.map(_ =>
+          RequestAdjustment.Dropped(RequestOption.PresencePenalty, "no penalties")
+        ) ++
+          options.frequencyPenalty.toList.map(_ =>
+            RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "no penalties")
+          )
 
     private def callsOf(json: ujson.Value): List[ToolCall] =
       json.obj.get("calls").toList.flatMap(_.arr).map(c => ToolCall(ToolCallId(c("id").str), c("name").str, c("args")))
 
-    private def completion(text: String, calls: List[ToolCall], finish: FinishReason): Result[Completion] =
+    private def completion(
+      text: String,
+      calls: List[ToolCall],
+      finish: FinishReason,
+      options: CompletionOptions
+    ): Result[Completion] =
       val broken = calls.exists(_.arguments.objOpt.isEmpty) || (calls.nonEmpty && finish == FinishReason.Length)
       if toolRules && broken then Left(ProcessingError("reference-tool-calls", "malformed tool call"))
       else
         Right(
           Completion("r", Instant.EPOCH, ModelName("m"), AssistantMessage(Option(text).filter(_.nonEmpty), calls))
             .withFinishReason(finish)
+            .withAdjustments(adjustments(options))
         )
 
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      val json = ujson.read(fetch())
+      val json = ujson.read(fetch(options))
       json("finish").str match
         case "filter" => Left(ContentFilteredError.reply("Reference", "filter"))
-        case finish   => completion(json("text").str, callsOf(json), mapFinish(finish))
+        case finish   => completion(json("text").str, callsOf(json), mapFinish(finish), options)
 
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
-      val events = fetch().linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
+      val events = fetch(o).linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
       val errors = events.flatMap(_.obj.get("error")).flatMap(e => errorEvent(e.str))
       if events.exists(_.obj.get("finish").exists(_.str == "filter")) then
         Left(ContentFilteredError.reply("Reference", "filter"))
@@ -76,7 +102,8 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         completion(
           chunks.flatMap(_.contentDelta).mkString,
           chunks.flatMap(_.toolCallDelta),
-          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
+          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown),
+          o
         )
 
     def contextWindow: Int     = 1000
@@ -157,6 +184,23 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
 
   "assertModelCallContract" should "pass a client that reports each ending as RFC 0009 says" in {
     assertModelCallContract(cases)(new Reference(_))
+  }
+
+  it should "pass a client that sends the penalties it was given, wherever its request carries them" in {
+    assertModelCallContract(cases)(new Reference(_, penalties = "send"))
+  }
+
+  it should "fail a client that leaves a penalty out of its request without reporting it" in {
+    val silent = failure(assertModelCallContract(cases)(new Reference(_, penalties = "silent")))
+    silent should include("penalties, complete")
+    silent should include("dropped silently")
+    silent should include("RequestOption.PresencePenalty")
+  }
+
+  it should "fail a client that reports a penalty Dropped and sends it all the same" in {
+    failure(assertModelCallContract(cases)(new Reference(_, penalties = "both"))) should include(
+      "is reported Dropped, but the request carries"
+    )
   }
 
   it should "accept a case declared NotApplicable with a reason, without running it" in {

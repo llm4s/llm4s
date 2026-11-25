@@ -144,7 +144,8 @@ final class GeminiClient private[provider] (
         val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
-          GeminiServiceTier.gemini(transformed.options)._2
+          GeminiServiceTier.gemini(transformed.options)._2 ++
+          UnmappedOptions.penalties(GeminiUnsent.Penalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -201,7 +202,8 @@ final class GeminiClient private[provider] (
         val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
-          GeminiServiceTier.gemini(transformed.options)._2
+          GeminiServiceTier.gemini(transformed.options)._2 ++
+          UnmappedOptions.penalties(GeminiUnsent.Penalties, transformed.options)
         adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)

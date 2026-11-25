@@ -164,3 +164,16 @@ private[provider] object GeminiThinking {
     }
   }
 }
+
+/** Why the Gemini and Vertex AI clients report an option `Dropped` that their request mapping does not send. */
+private[provider] object GeminiUnsent {
+
+  /**
+   * The penalties. `generationConfig` documents `presencePenalty` and `frequencyPenalty`, but which models accept
+   * them is not in the model registry and has not been checked against the live API. So neither client sends them,
+   * and each reports them dropped rather than risk a 400 over an option that was ignored until now. Sending them,
+   * per model, is a change for when that support is known.
+   */
+  val Penalties: String =
+    "this client does not send penalties to Gemini models: which models accept them is not in the model registry"
+}

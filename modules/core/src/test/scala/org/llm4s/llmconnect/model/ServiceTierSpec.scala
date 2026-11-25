@@ -39,4 +39,15 @@ class ServiceTierSpec extends AnyFlatSpec with Matchers {
     )
     UnmappedOptions.serviceTier("Ollama", CompletionOptions()) shouldBe empty
   }
+
+  "UnmappedOptions.penalties" should "report each penalty that was set as dropped, with the reason, and nothing without one" in {
+    val both = CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.25)
+    UnmappedOptions.penalties("Acme has none", both) shouldBe List(
+      RequestAdjustment.Dropped(RequestOption.PresencePenalty, "presence_penalty is not sent: Acme has none"),
+      RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "frequency_penalty is not sent: Acme has none")
+    )
+    UnmappedOptions.penalties("Acme has none", CompletionOptions().withFrequencyPenalty(0.25)).map(_.option) shouldBe
+      List(RequestOption.FrequencyPenalty)
+    UnmappedOptions.penalties("Acme has none", CompletionOptions()) shouldBe empty
+  }
 }

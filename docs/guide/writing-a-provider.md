@@ -955,6 +955,13 @@ until you declare it.
 | `StreamEndsEarly` | stream only: some text, then the stream ends without the end marker | `Left(NetworkError)`, or `Left(ServiceError)` with status 502 |
 | `ErrorEvent` | stream only: some text, then an error event stating `ContractCase.ProviderErrorMessage` | a `Left` whose message carries `ContractCase.ProviderErrorMessage` |
 
+The check also asks for the `CleanText` reply with `CompletionOptions.presencePenalty` and `frequencyPenalty` set,
+on `complete` and on `streamComplete`. Each penalty must be in the request your client sent, or be reported on
+the returned `Completion.adjustments` (a `RequestAdjustment.Dropped` naming the option, with the reason): an option
+your provider cannot honour is never left out without a word. A client that maps no penalty reports
+`Dropped(RequestOption.PresencePenalty, ...)` and `Dropped(RequestOption.FrequencyPenalty, ...)` for the ones the
+caller set. You declare nothing for this: every chat client takes `CompletionOptions`.
+
 The check runs `complete` with the reply's `complete` handler and `streamComplete` with its
 `stream` handler, each against a fresh local server. The two stream-only cases run
 `streamComplete` alone; build them with `RecordedReply.streamOnly(stream)`. A stream that

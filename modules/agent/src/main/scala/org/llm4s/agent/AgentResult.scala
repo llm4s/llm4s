@@ -50,7 +50,11 @@ enum AgentStatus:
   /**
    * The active agent's final answer was cut off: the model stopped at its output limit (`FinishReason.Length`,
    * `CompletionOptions.maxTokens` or the model's own cap) before it finished. `partialAnswer` is what it wrote, stored
-   * in the thread as any answer is; it is not an [[AgentResult.answer]], since it is incomplete. Like
+   * in the thread as any answer is; it is not an [[AgentResult.answer]], since it is incomplete. It is empty, and
+   * nothing is stored, when the model was cut off before it wrote any text: its whole output allowance went on
+   * thinking, so raise `maxTokens` or lower the reasoning effort. An agent with a response format
+   * (`AgentBuilder.withOutput`) ends `Truncated` too: a cut-off answer is not checked against the schema, and no
+   * corrective retry is spent on it (#2933). Like
    * `StepLimitReached`, a completed turn: the next turn runs normally, so a caller can ask the agent to go on, or
    * run again with a higher limit (RFC 0009, open question 6).
    */
@@ -176,7 +180,7 @@ final case class AgentResult private (
    */
   def decodeOutput[O: ReadWriter]: Result[O] =
     answer
-      .toRight(ValidationError("output", s"the turn has no answer: it ended ${status.productPrefix}"))
+      .toRight(ValidationError("output", AgentResult.noAnswer(status)))
       .flatMap(OutputFormat.decode[O])
 
   /** Approves the pending tool call `id`, for [[Agent.resume]]. */
@@ -205,6 +209,20 @@ final case class AgentResult private (
     id -> upickle.default.writeJs(decision)
 
 object AgentResult:
+
+  /**
+   * Why a turn that ended `status` has no answer to decode. A `Truncated` one says the output limit cut it off, and
+   * what to change, so a cut-off answer is not mistaken for a malformed one (#2933).
+   */
+  private def noAnswer(status: AgentStatus): String = status match
+    case AgentStatus.Truncated(partial) if partial.trim.isEmpty =>
+      "the turn has no answer: it ended Truncated with no text, the model having used its whole output allowance " +
+        "on thinking; raise CompletionOptions.maxTokens or lower the reasoning effort"
+    case AgentStatus.Truncated(_) =>
+      "the turn has no answer: it ended Truncated, its answer cut off at the model's output limit, so the partial " +
+        "answer is not decoded; raise CompletionOptions.maxTokens"
+    case other => s"the turn has no answer: it ended ${other.productPrefix}"
+
   private[agent] def apply(
     threadId: ThreadId,
     runId: RunId,

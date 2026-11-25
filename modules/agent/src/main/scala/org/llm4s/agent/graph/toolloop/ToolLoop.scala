@@ -625,6 +625,30 @@ final class ToolLoop private (
 @Experimental
 object ToolLoop:
 
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[ToolLoop])
+
+  /** Whether the model stopped at its output limit, so the reply is incomplete (`FinishReason.Length`). */
+  private def cutOff(completion: Completion): Boolean = completion.finishReason == FinishReason.Length
+
+  /**
+   * What is logged for a final answer cut off at the output limit (#2933): the output and thinking token counts when
+   * the provider reported them, and - for a reply with no text at all - that the allowance went on thinking. Never
+   * the answer's content.
+   */
+  private[toolloop] def cutOffWarning(agent: AgentId, completion: Completion): String =
+    val counts = completion.usage.fold("") { usage =>
+      val thinking = usage.thinkingTokens.fold("")(n => s", $n of them thinking")
+      s" after ${usage.totalOutputTokens} output tokens$thinking"
+    }
+    val advice =
+      if completion.content.trim.nonEmpty then
+        "the turn ends Truncated with the partial answer, which is not checked against a response format; " +
+          "raise CompletionOptions.maxTokens for a complete one"
+      else
+        "it has no text: the model used its whole output allowance on thinking, so the turn ends Truncated with " +
+          "an empty partial answer; raise CompletionOptions.maxTokens or lower the reasoning effort"
+    s"Agent '${agent.value}': the model's answer was cut off at its output limit$counts (FinishReason.Length); $advice"
+
   /**
    * A turn's input after admission ([[ToolLoop.admit]]), and the block that refused its query, if one did: the
    * reason, which the input does not hold.
@@ -1682,10 +1706,27 @@ object ToolLoop:
             case None if context.usage.refused => Left(ToolLoop.TokenLimitStop)
             case None                          => result
         // an answer (no tool calls) checked against the response format; None when there is nothing to check
+        // An answer cut off at the output limit is incomplete, not malformed (#2933): it is not checked, so no
+        // corrective call - which the same limit would cut off again - is spent on it, and the turn ends Truncated.
         def checked(response: ModelResponse): Option[Either[Vector[String], ujson.Value]] =
           agent.output
-            .filter(_ => response.completion.message.toolCalls.isEmpty)
+            .filter(_ => response.completion.message.toolCalls.isEmpty && !ToolLoop.cutOff(response.completion))
             .map(_.check(response.completion.message.content, tools.validator))
+        // A cut-off reply with no text and no tool call - every output token went to thinking - ends the turn
+        // Truncated here, with nothing of it stored: a blank assistant message is not a valid one, and there is no
+        // answer for afterAgent to guard. The call is counted, as one refused at the token budget is.
+        def cutBlank(response: ModelResponse): Option[NodeResult] =
+          val completion = response.completion
+          Option.when(
+            ToolLoop.cutOff(completion) && completion.message.toolCalls.isEmpty && completion.content.trim.isEmpty
+          ) {
+            NodeResult.Continue(
+              Command(usageOf(context), Nil).update(
+                LoopKeys.turn,
+                turn.withOutcome(Some(TurnOutcome.Truncated)).withPriorValues(Map.empty).withCut(false)
+              )
+            )
+          }
         // a blank answer without tool calls is refused before it is stored, so the history stays valid
         // and recover asks the model again; so are calls whose ids could not each be given one result.
         // A validated answer is stored as its JSON alone.
@@ -1714,8 +1755,10 @@ object ToolLoop:
               askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
             case Left(error) => NodeResult.Fail(error)
             case Right(response) =>
+              if ToolLoop.cutOff(response.completion) && response.completion.message.toolCalls.isEmpty then
+                ToolLoop.logger.warn(ToolLoop.cutOffWarning(agent.id, response.completion))
               checked(response) match
-                case None                 => accepted(response, None)
+                case None                 => cutBlank(response).getOrElse(accepted(response, None))
                 case Some(Right(json))    => accepted(response, Some(json))
                 case Some(Left(problems)) => invalid(response, problems)
         answered(call(request)) { (first, problems) =>

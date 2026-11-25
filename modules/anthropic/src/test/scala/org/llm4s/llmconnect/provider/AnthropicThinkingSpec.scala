@@ -259,6 +259,23 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
     adjustments shouldBe Nil
   }
 
+  it should "report the penalties dropped, which the Messages API has no parameter for, and send neither" in {
+    val options =
+      CompletionOptions(maxTokens = Some(4096)).withPresencePenalty(0.5).withFrequencyPenalty(0.25)
+    val (body, adjustments) = sent("claude-opus-4-6", options)
+    body.obj.keySet.filter(_.contains("penalty")) shouldBe empty
+    adjustments shouldBe List(
+      RequestAdjustment.Dropped(
+        RequestOption.PresencePenalty,
+        "presence_penalty is not sent: Anthropic's Messages API has no penalty parameters"
+      ),
+      RequestAdjustment.Dropped(
+        RequestOption.FrequencyPenalty,
+        "frequency_penalty is not sent: Anthropic's Messages API has no penalty parameters"
+      )
+    )
+  }
+
   it should "send a reasoning-only request to a model that takes a budget exactly as before" in {
     val (body, adjustments) =
       sent("claude-sonnet-4-5", CompletionOptions(maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low))

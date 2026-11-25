@@ -321,6 +321,16 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(opts("num_predict").num.toInt == 256)
   }
 
+  test("request body sends the penalties in options, under Ollama's names, and neither when unset") {
+    val options = CompletionOptions().withPresencePenalty(0.4).withFrequencyPenalty(0.3)
+    val conv    = Conversation(messages = Seq(UserMessage("Hello")))
+    val opts    = OllamaRequestBodyTestHelper.createRequestBody(conv, options, stream = false)("options")
+    assert(opts("presence_penalty").num == 0.4)
+    assert(opts("frequency_penalty").num == 0.3)
+    val unset = OllamaRequestBodyTestHelper.createRequestBody(conv, CompletionOptions(), stream = false)("options")
+    assert(!unset.obj.contains("presence_penalty") && !unset.obj.contains("frequency_penalty"))
+  }
+
   test("request body includes temperature and topP in options") {
     val options = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
     val conv    = Conversation(messages = Seq(UserMessage("Hello")))

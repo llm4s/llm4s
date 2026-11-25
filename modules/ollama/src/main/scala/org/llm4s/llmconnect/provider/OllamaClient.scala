@@ -452,6 +452,10 @@ final class OllamaClient private[provider] (
     options.temperature.foreach(t => opts("temperature") = t)
     options.topP.foreach(p => opts("top_p") = p)
     options.maxTokens.foreach(t => opts("num_predict") = t)
+    // Ollama's runtime options take both penalties under these names; a model whose runner has no use for one
+    // ignores it, as it does any option
+    options.presencePenalty.foreach(p => opts("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => opts("frequency_penalty") = p)
 
     val body = ujson.Obj(
       "model"    -> config.model.asString,
