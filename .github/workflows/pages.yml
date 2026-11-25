@@ -171,6 +171,10 @@ jobs:
 
           sed -i "s/^version:.*/version: \"$VERSION\"/" docs/_data/project.yml
           sed -i "s/^latest_release:.*/latest_release: \"$LATEST\"/" docs/_data/project.yml
+          # sbt-dynver reads a modified tracked file as a dirty tree, and a dirty tag is a snapshot: the Scaladoc built
+          # below would then link its sources at `main`, not at the tag, and check-scaladoc-crosslinks.sh would
+          # fail the deploy of a release (as it did for v0.7.0). Hide this one edit from git.
+          git update-index --assume-unchanged docs/_data/project.yml
 
           echo "Updated docs/_data/project.yml:"
           cat docs/_data/project.yml
@@ -184,6 +188,8 @@ jobs:
           # moved rag, knowledgegraph, memory, memory-postgres and mcp out of it, and a
           # core-only build silently dropped their API pages. See the `docs` project in
           # build.sbt for what it spans and how to keep it current.
+          # Anything listed here makes the build a snapshot (see the version step above).
+          git status --short
           sbt "docs/doc"
 
           SCALADOC_DIR=$(find modules/docs/target -name "api" -type d | grep "scala-3" | head -1)
