@@ -43,11 +43,15 @@ trait LLMError extends Product with Serializable {
    * retrying, which [[org.llm4s.reliability.RetryPolicy]], [[org.llm4s.reliability.ReliableClient]] and the agent
    * graph's node retries all apply.
    *
-   * It is `true` for a [[RateLimitError]], a [[TimeoutError]], a [[NetworkError]], an [[ExecutionError]] and a
-   * [[ServiceError]] whose status is 408, 429 or 5xx, and `false` for everything else: a request the provider
-   * refused as wrong (any other 4xx, a [[ValidationError]], a [[ContextLengthError]], a [[ModelNotFoundError]]), a
-   * rejected credential, a cancellation, and the two errors that need something to happen first - an
-   * [[OptimisticLockFailure]] (re-read the record) and a [[CircuitOpenError]] (wait for the circuit).
+   * It is `true` for a [[org.llm4s.error.RateLimitError RateLimitError]], a
+   * [[org.llm4s.error.TimeoutError TimeoutError]], a [[org.llm4s.error.NetworkError NetworkError]], an
+   * [[org.llm4s.error.ExecutionError ExecutionError]] and a [[org.llm4s.error.ServiceError ServiceError]] whose
+   * status is 408, 429 or 5xx, and `false` for everything else: a request the provider refused as wrong (any other
+   * 4xx, a [[org.llm4s.error.ValidationError ValidationError]], a
+   * [[org.llm4s.error.ContextLengthError ContextLengthError]], a
+   * [[org.llm4s.error.ModelNotFoundError ModelNotFoundError]]), a rejected credential, a cancellation, and the two
+   * errors that need something to happen first - an [[org.llm4s.error.OptimisticLockFailure OptimisticLockFailure]]
+   * (re-read the record) and a [[org.llm4s.error.CircuitOpenError CircuitOpenError]] (wait for the circuit).
    *
    * An error type of your own is not retried unless it overrides this member.
    */
