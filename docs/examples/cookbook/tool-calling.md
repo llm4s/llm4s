@@ -19,7 +19,7 @@ Give an agent an exchange-rate tool of its own and the built-in calculator, and 
 The model cannot know today's exchange rate, and is unreliable at arithmetic. Give it tools: it asks for the
 rate, the agent runs the tool and shows the model the result, then the model asks the calculator to multiply, and
 answers from that. {% include api.html t="org.llm4s.toolapi.ToolBuilder" %} defines a tool from a name, a description, a parameter schema and a handler that
-returns `Either[String, A]`; the calculator comes from `llm4s-agent-tools`. The agent loops until the model answers
+returns `Either[ToolHandlerError, A]`; the calculator comes from `llm4s-agent-tools`. The agent loops until the model answers
 without asking for a tool.
 
 ## The program
@@ -35,7 +35,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall, ToolCallId }
 import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.builtin.core.CalculatorTool
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolHandlerError, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -67,7 +67,7 @@ object ToolCallingRecipe extends RecipeApp {
       for {
         from <- params.getString("from").map(_.toUpperCase)
         to   <- params.getString("to").map(_.toUpperCase)
-        rate <- rates.get((from, to)).toRight(s"no rate from $from to $to")
+        rate <- rates.get((from, to)).toRight(ToolHandlerError.failed(s"no rate from $from to $to"))
       } yield ExchangeRate(from, to, rate)
     }.build()
 

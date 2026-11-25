@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall, ToolCallId }
 import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.builtin.core.CalculatorTool
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolHandlerError, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -37,7 +37,7 @@ object ToolCallingRecipe extends RecipeApp {
       for {
         from <- params.getString("from").map(_.toUpperCase)
         to   <- params.getString("to").map(_.toUpperCase)
-        rate <- rates.get((from, to)).toRight(s"no rate from $from to $to")
+        rate <- rates.get((from, to)).toRight(ToolHandlerError.failed(s"no rate from $from to $to"))
       } yield ExchangeRate(from, to, rate)
     }.build()
 

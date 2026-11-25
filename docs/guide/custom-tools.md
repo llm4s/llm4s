@@ -37,8 +37,8 @@ A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four 
 - a **description**, which is the model's only guide to when to call it;
 - a **parameter schema**, built with the `Schema` DSL, which tells the model the arguments it may send;
 - a **handler**, a function from a `SafeParameterExtractor` to `Either[ToolHandlerError, R]`: `Right` is the
-  result, `Left` is an error: the one a getter returned for a missing or mistyped argument, or a message of your
-  own.
+  result, `Left` is an error: the one a getter returned for a missing or mistyped argument, or a
+  `ToolHandlerError.failed(message)` of your own.
 
 ```scala
 import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
@@ -70,7 +70,7 @@ def temperatureTool: Result[ToolFunction[String]] = {
       converted <- unit match {
         case "celsius"    => Right(value * 9 / 5 + 32)
         case "fahrenheit" => Right((value - 32) * 5 / 9)
-        case other        => Left(s"unit must be 'celsius' or 'fahrenheit', not '$other'")
+        case other        => Left(ToolHandlerError.failed(s"unit must be 'celsius' or 'fahrenheit', not '$other'"))
       }
     } yield BigDecimal(converted).setScale(precision.getOrElse(1), BigDecimal.RoundingMode.HALF_UP).toString
 
@@ -143,9 +143,11 @@ the first problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` an
 `validateRequired("value" -> ToolParameterType.Number, "unit" -> ToolParameterType.String)` checks several at once
 and reports every problem rather than the first.
 
-A handler's `Left` is a `ToolHandlerError`, which is `String | ToolParameterError`: return a getter's error as it
-is, and write a message for a failure of your own, as the handler above does for an unknown unit. Give a handler
-written as a `def` its return type, `Either[ToolHandlerError, R]`.
+A handler's `Left` is a `ToolHandlerError`: a getter's `ToolParameterError`, returned as it is, or
+`ToolHandlerError.failed(message)` for a failure of your own, as the handler above has for an unknown unit. A helper
+that returns an `Either[String, A]` joins the `for` with `.left.map(ToolHandlerError.failed)`, and
+`lookup(key).toRight(ToolHandlerError.failed("no such key"))` turns an `Option` into one. Either error has a
+`message`.
 
 A missing or mistyped argument does not throw; it is a `Left` whose `message` is written for the model to act on:
 

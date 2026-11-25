@@ -31,7 +31,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
         loc  <- params.getString("location")
       } yield TestResult(s"Success: $item, $qty, $loc")
 
-      result.left.map(_.message)
+      result.left.map(e => ToolHandlerError.failed(e.message))
     }.build()
   }
 
@@ -128,9 +128,9 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       schema
     ).withHandler { params =>
       params.getDouble("value") match {
-        case Right(0)  => Left("cannot divide by zero")
+        case Right(0)  => Left(ToolHandlerError.failed("cannot divide by zero"))
         case Right(v)  => Right(TestResult(s"Result: ${10.0 / v}"))
-        case Left(err) => Left(err.message)
+        case Left(err) => Left(ToolHandlerError.failed(err.message))
       }
     }.build()
       .fold(

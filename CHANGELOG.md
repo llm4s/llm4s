@@ -158,7 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SchemaDefinition` gains `AnyOfSchema` and `RawJsonSchema` (an exhaustive match needs both); `withRange`,
   `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
   properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
-- A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
+- A tool handler returns `Either[ToolHandlerError, R]` (its own failure is `Left(ToolHandlerError.failed("message"))`,
+  not a `String`) and `SafeParameterExtractor`'s getters return
   `Either[ToolParameterError, A]`; `ToolFunction` and `ToolBuilder` have one type parameter, the result's
   (`ToolBuilder[String](...)`); `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
   `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
@@ -572,8 +573,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AnyOfSchema`, so a typed tool's arguments may hold one. **Fixed** a strict schema renders an optional property as
   nullable instead of dropping `required = false`
   ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
-- **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
-  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`; `ToolFunction[R]`
+- **Changed** a tool handler returns `Either[ToolHandlerError, R]`, a sealed trait Java and Scala 2.13 callers can read:
+  a getter's `ToolParameterError` is reported as `ToolCallError.InvalidArguments` with each parameter listed, the tool's
+  own `ToolHandlerError.failed(message)` as `HandlerError`; `ToolFunction[R]`
   and `ToolBuilder[R]` drop the arguments type parameter nothing read (Scalafix rule `ToolFunctionOneTypeParameter`)
   ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive

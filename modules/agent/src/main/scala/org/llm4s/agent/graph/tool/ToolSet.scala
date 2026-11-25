@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.tool
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.ToolFunction
+import org.llm4s.toolapi.{ ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
 /**
@@ -49,7 +49,7 @@ object ToolSet:
       spec.name,
       spec.description,
       spec.schema,
-      _ => Left(s"Tool '${spec.name}' is executed by ToolLoop, not directly")
+      _ => Left(ToolHandlerError.failed(s"Tool '${spec.name}' is executed by ToolLoop, not directly"))
     )
 
   val empty: ToolSet = new ToolSet(Vector.empty, ToolArgumentValidator.default)

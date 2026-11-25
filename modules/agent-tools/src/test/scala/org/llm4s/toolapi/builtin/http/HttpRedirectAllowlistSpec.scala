@@ -131,7 +131,7 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
         .fold(e => fail(e.formatted), identity)
         .handler(SafeParameterExtractor(params))
         .left
-        .map(org.llm4s.toolapi.ToolHandlerError.message)
+        .map(_.message)
     val json = ujson.read(result.fold(e => fail(e), _.body))
     (json("headers").obj.map { case (k, v) => k -> v.str }.toMap, json("body").str)
   }
@@ -390,7 +390,7 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       .fold(e => fail(e.formatted), identity)
       .handler(SafeParameterExtractor(params))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
     result.map(_.method) shouldBe Right("OPTIONS")
   }
 }

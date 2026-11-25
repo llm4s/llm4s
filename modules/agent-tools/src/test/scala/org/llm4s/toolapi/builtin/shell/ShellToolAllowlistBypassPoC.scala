@@ -28,7 +28,7 @@ object ShellToolAllowlistBypassPoC {
           tool
             .handler(SafeParameterExtractor(ujson.Obj("command" -> payload)))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .map(_.toString())
       )
 

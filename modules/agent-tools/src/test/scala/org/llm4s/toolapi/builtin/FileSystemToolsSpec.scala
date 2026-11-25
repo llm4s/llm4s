@@ -117,7 +117,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               readResult => {
@@ -144,7 +144,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
       .createSafe(config)
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
-        _.handler(SafeParameterExtractor(params)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+        _.handler(SafeParameterExtractor(params)).left.map(_.message)
       )
   }
 
@@ -176,7 +176,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("Access denied"),
               result => fail(s"Expected Left but got Right: $result")
@@ -196,7 +196,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("not found"),
               result => fail(s"Expected Left but got Right: $result")
@@ -219,7 +219,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               readResult => {
@@ -250,7 +250,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -285,7 +285,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -317,7 +317,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -346,7 +346,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               infoResult => {
@@ -374,7 +374,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               infoResult => {
@@ -399,7 +399,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               writeResult => {
@@ -427,7 +427,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
       .createSafe(config)
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
-        _.handler(SafeParameterExtractor(params)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+        _.handler(SafeParameterExtractor(params)).left.map(_.message)
       )
     (result, target)
   }
@@ -471,7 +471,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("Access denied"),
               result => fail(s"Expected Left but got Right: $result")
@@ -494,7 +494,7 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               _ => {

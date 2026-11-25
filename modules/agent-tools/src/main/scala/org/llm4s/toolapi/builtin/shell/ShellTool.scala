@@ -133,7 +133,7 @@ object ShellTool {
     ).withHandler { extractor =>
       for {
         command <- extractor.getString("command")
-        result  <- executeCommand(command, config)
+        result  <- executeCommand(command, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
 

@@ -26,7 +26,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("quantity", Schema.number("Quantity")))
 
     ToolBuilder[ToolResult](name, "Test tool that fails", schema)
-      .withHandler(_ => Left(errorMessage))
+      .withHandler(_ => Left(ToolHandlerError.failed(errorMessage)))
       .build()
   }
 

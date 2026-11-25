@@ -322,7 +322,9 @@ object BraveSearchTool {
             safeSearch = SafeSearch.fromString(toolConfig.safeSearch)
           )
         )
-        result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
+        result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt).left.map(
+          ToolHandlerError.failed
+        )
       } yield result
     }.build()
 

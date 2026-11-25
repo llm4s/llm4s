@@ -149,7 +149,7 @@ val addTool = ToolBuilder[ujson.Value]("add", "Adds two integers", addSchema)
   .withHandler { extractor =>
     toCirce(extractor.params).as[AddArgs] match {
       case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
-      case Left(error) => Left(error.getMessage)
+      case Left(error) => Left(ToolHandlerError.failed(error.getMessage))
     }
   }
   .build()
@@ -297,7 +297,7 @@ val addToolViaJsoniter = ToolBuilder[AddResult]("add", "Adds two integers", addS
     Try(readJsoniter[AddArgs](extractor.params)).toEither
       .map(args => AddResult(args.a.toLong + args.b))
       .left
-      .map(_.getMessage)
+      .map(e => ToolHandlerError.failed(e.getMessage))
   }
   .build()
 ```

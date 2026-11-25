@@ -143,7 +143,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       "failing_tool",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
-    ).withHandler(_ => Left("the local tool said no")).build().toOption.get
+    ).withHandler(_ => Left(ToolHandlerError.failed("the local tool said no"))).build().toOption.get
     val registry = new MCPToolRegistry(Seq.empty, Seq(failing), 1.minute, initializeOnStartup = false)
 
     registry.execute(ToolCallRequest("failing_tool", ujson.Obj())) shouldBe

@@ -115,7 +115,7 @@ object CancellationSpec extends ZIOSpecDefault {
             CancelledError.catchInterrupt(new CountDownLatch(1).await()) match {
               case Left(e) =>
                 sawInterrupt.set(CancelledError.fromThrowable(e, "tool").isDefined)
-                Left("interrupted")
+                Left(org.llm4s.toolapi.ToolHandlerError.failed("interrupted"))
               case Right(_) => Right("unblocked")
             }
           } else Right("done")

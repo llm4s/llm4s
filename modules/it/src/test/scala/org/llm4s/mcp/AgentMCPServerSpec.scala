@@ -47,7 +47,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       "explode",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
-    ).withHandler(_ => Left("kaboom-from-handler"))
+    ).withHandler(_ => Left(ToolHandlerError.failed("kaboom-from-handler")))
       .build()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
