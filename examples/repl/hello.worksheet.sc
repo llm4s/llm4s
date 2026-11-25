@@ -7,10 +7,11 @@
 import org.llm4s.error.AuthenticationError
 import org.llm4s.repl.*
 import org.llm4s.testkit.Reply
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 given Session = Session.offline(
   Reply.text("A monad is a type with flatMap and pure that obey three laws."),
-  Reply.failure(AuthenticationError("openai", "Invalid API key"))
+  Reply.failure(AuthenticationError(ProviderId("openai"), "Invalid API key"))
 )
 
 val answer = ask("What is a monad, in one sentence?")

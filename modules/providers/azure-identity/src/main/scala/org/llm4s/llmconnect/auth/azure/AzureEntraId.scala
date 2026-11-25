@@ -95,7 +95,7 @@ object AzureEntraId:
       .flatMap(_.toRight(AuthenticationError(Provider, s"Microsoft Entra ID returned no token for $scope")))
       .map(token => AccessToken(Secret.unregistered(token.getToken), token.getExpiresAt.toInstant))
 
-  private val Provider = ProviderId("azure")
+  private[azure] val Provider = ProviderId("azure")
 
 /**
  * Not part of the API: the implementation `llm4s-openai` finds through `META-INF/services` for a section with
@@ -105,7 +105,7 @@ final private[llm4s] class DefaultAzureEntraIdSupport extends AzureEntraIdSuppor
   override def tokenProvider(clientId: Option[String]): Result[AccessTokenProvider] =
     Try(AzureEntraId.tokenProvider(AzureEntraId.defaultAzureCredential(clientId))).toEither.left.map(e =>
       AuthenticationError(
-        ProviderId("azure"),
+        AzureEntraId.Provider,
         s"DefaultAzureCredential could not be built: ${e.getClass.getSimpleName}"
       )
     )
