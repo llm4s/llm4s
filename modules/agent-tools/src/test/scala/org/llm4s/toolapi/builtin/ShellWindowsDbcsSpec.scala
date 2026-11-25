@@ -116,7 +116,7 @@ class ShellWindowsDbcsSpec extends AnyFlatSpec with Matchers {
     val result = tool
       .handler(SafeParameterExtractor(ujson.Obj("command" -> s"findstr x 'a ${char.get}.txt'")))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
     result.left.toOption.getOrElse(fail(s"expected a refusal, got $result")) should include("0x5C")
   }
 }

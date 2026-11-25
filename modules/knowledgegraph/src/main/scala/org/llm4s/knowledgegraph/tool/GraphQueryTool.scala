@@ -90,7 +90,7 @@ object GraphQueryTool {
           graphStore,
           maxHops.map(h => config.copy(maxHops = h)).getOrElse(config)
         )
-        result <- pipeline.ask(question).left.map(e => e.formatted)
+        result <- pipeline.ask(question).left.map(e => ToolHandlerError.failed(e.formatted))
       } yield toToolResult(result)
     }.buildSafe()
 

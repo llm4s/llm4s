@@ -31,7 +31,12 @@ private[schema] object MethodTools {
         name,
         description,
         parameters,
-        extractor => Tool.decodeFields(parameters, extractor.params, readers).left.map(Tool.refused).flatMap(invoke)
+        extractor =>
+          Tool
+            .decodeFields(parameters, extractor.params, readers)
+            .left
+            .map(Tool.refused)
+            .flatMap(arguments => invoke(arguments).left.map(org.llm4s.toolapi.ToolHandlerError.failed))
       )
     }
   }

@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder }
+import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder, ToolHandlerError }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -124,7 +124,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     .withHandler { extractor =>
       toCirce(extractor.params).as[AddArgs] match {
         case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
-        case Left(error) => Left(error.getMessage)
+        case Left(error) => Left(ToolHandlerError.failed(error.getMessage))
       }
     }
     .buildSafe()
@@ -234,7 +234,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Try(readJsoniter[AddArgs](extractor.params)).toEither
         .map(args => AddResult(args.a.toLong + args.b))
         .left
-        .map(_.getMessage)
+        .map(e => ToolHandlerError.failed(e.getMessage))
     }
     .buildSafe()
   // end snippet

@@ -81,7 +81,7 @@ object CalculatorTool {
         operation <- extractor.getString("operation")
         a         <- extractor.getDouble("a")
         bOpt = extractor.getDouble("b").toOption
-        result <- calculate(operation, a, bOpt)
+        result <- calculate(operation, a, bOpt).left.map(ToolHandlerError.failed)
       } yield result
     }.buildSafe()
 

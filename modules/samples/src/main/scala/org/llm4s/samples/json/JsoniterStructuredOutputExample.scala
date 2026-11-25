@@ -4,7 +4,7 @@ import com.github.plokhotnyuk.jsoniter_scala.core.{ readFromArray, writeToArray,
 import com.github.plokhotnyuk.jsoniter_scala.macros.JsonCodecMaker
 import org.llm4s.llmconnect.model.Conversation
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
-import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder }
+import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder, ToolHandlerError }
 import org.llm4s.types.Result
 import upickle.default.{ reader, readwriter, ReadWriter, Reader }
 
@@ -80,7 +80,7 @@ object JsoniterStructuredOutputExample extends App {
       Try(readJsoniter[AddArgs](extractor.params)).toEither
         .map(args => AddResult(args.a.toLong + args.b))
         .left
-        .map(_.getMessage)
+        .map(e => ToolHandlerError.failed(e.getMessage))
     }
     .buildSafe()
 

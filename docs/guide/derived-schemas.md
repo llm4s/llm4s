@@ -118,7 +118,7 @@ A tool's parameters are a schema too. `SchemaOf[A].definition` is the derived sc
 
 ```scala
 import org.llm4s.schema.*
-import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 import upickle.default.{ read, ReadWriter }
 
@@ -137,7 +137,9 @@ enum TemperatureUnit derives SchemaOf, ReadWriter {
 val weatherTool: Result[ToolFunction[String]] =
   ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
     .withHandler { args =>
-      Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+      Try(read[WeatherQuery](args.params)).toEither.left
+        .map(e => ToolHandlerError.failed(e.getMessage))
+        .map(query => s"Sunny in ${query.city}")
     }
     .buildSafe()
 ```

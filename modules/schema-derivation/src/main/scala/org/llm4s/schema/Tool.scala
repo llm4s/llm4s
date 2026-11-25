@@ -14,6 +14,7 @@ import org.llm4s.toolapi.{
   SchemaDefinition,
   StringSchema,
   ToolFunction,
+  ToolHandlerError,
   ToolParameterError
 }
 import org.llm4s.types.Result
@@ -71,7 +72,10 @@ object Tool {
         name,
         description,
         parameters,
-        extractor => decode[A](parameters, extractor.params).left.map(refused).flatMap(handler)
+        extractor =>
+          decode[A](parameters, extractor.params).left
+            .map(refused)
+            .flatMap(arguments => handler(arguments).left.map(ToolHandlerError.failed))
       )
     }
 
@@ -114,7 +118,7 @@ object Tool {
             boundary[Either[String, R]] {
               given ToolScope = new ToolScope(extractor.call, key, summon[boundary.Label[Either[String, R]]])
               Right(handler(arguments))
-            }
+            }.left.map(ToolHandlerError.failed)
           }
       )
     }

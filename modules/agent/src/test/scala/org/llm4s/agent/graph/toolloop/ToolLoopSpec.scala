@@ -1246,7 +1246,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .withHandler { _ =>
         runs.incrementAndGet()
         Thread.currentThread().interrupt()
-        Left("cancelled")
+        Left(org.llm4s.toolapi.ToolHandlerError.failed("cancelled"))
       }
       .buildSafe()
       .value

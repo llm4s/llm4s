@@ -120,7 +120,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   object ToolParameters {
     import org.llm4s.schema.*
-    import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+    import org.llm4s.toolapi.{ ToolBuilder, ToolFunction, ToolHandlerError }
     import org.llm4s.types.Result
     import upickle.default.{ read, ReadWriter }
 
@@ -140,7 +140,9 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     val weatherTool: Result[ToolFunction[String]] =
       ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
         .withHandler { args =>
-          Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+          Try(read[WeatherQuery](args.params)).toEither.left
+            .map(e => ToolHandlerError.failed(e.getMessage))
+            .map(query => s"Sunny in ${query.city}")
         }
         .buildSafe()
   }

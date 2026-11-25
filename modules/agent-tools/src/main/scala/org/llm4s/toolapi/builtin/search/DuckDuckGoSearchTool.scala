@@ -157,8 +157,10 @@ object DuckDuckGoSearchTool {
     ).withHandler { extractor =>
       for {
         searchQuery <- extractor.getString("search_query")
-        _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
-        result      <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt)
+        _ <- if (searchQuery.trim.isEmpty) Left(ToolHandlerError.failed("search_query cannot be empty")) else Right(())
+        result <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt).left.map(
+          ToolHandlerError.failed
+        )
       } yield result
     }.buildSafe()
 

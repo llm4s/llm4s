@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.{ ObjectSchema, Schema, SchemaDefinition, ToolBuilder, ToolCallInfo }
+import org.llm4s.toolapi.{ ObjectSchema, Schema, SchemaDefinition, ToolBuilder, ToolCallInfo, ToolHandlerError }
 import org.llm4s.types.Result
 
 import java.lang.reflect.{ InvocationTargetException, Method, Modifier }
@@ -30,7 +30,9 @@ private[javaapi] object JTools {
         .map(n => ValidationError("param", s"tool '$name' declares parameter '$n' twice"))
       schema <- schemaOf(name, spec)
       function <- ToolBuilder[ujson.Value](name, Option(spec.description).getOrElse(""), schema)
-        .withHandler(extractor => call(name, spec.params, handler, extractor.params, extractor.call))
+        .withHandler(extractor =>
+          call(name, spec.params, handler, extractor.params, extractor.call).left.map(ToolHandlerError.failed)
+        )
         .buildSafe()
     } yield new JTool(FacadeToken.INSTANCE, function)
 

@@ -241,7 +241,7 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       .createSafe(config)
       .fold(
         e => Left(s"Tool creation failed: ${e.formatted}"),
-        tool => tool.handler(SafeParameterExtractor(params)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+        tool => tool.handler(SafeParameterExtractor(params)).left.map(_.message)
       )
   }
 

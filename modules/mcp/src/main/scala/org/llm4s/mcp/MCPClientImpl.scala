@@ -328,7 +328,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       name = name,
       description = description,
       schema = schema,
-      handler = createMCPToolHandler(name)
+      handler = createMCPToolHandler(name).andThen(_.left.map(ToolHandlerError.failed))
     )
   }
 

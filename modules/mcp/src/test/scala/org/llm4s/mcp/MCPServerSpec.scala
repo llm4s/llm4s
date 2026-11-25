@@ -51,12 +51,12 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       .fold(e => fail(s"ping tool failed: ${e.formatted}"), identity)
 
     val failTool = ToolBuilder[String]("fail_tool", "Always fails", failSchema)
-      .withHandler(failHandler)
+      .withHandler(params => failHandler(params).left.map(org.llm4s.toolapi.ToolHandlerError.failed))
       .buildSafe()
       .fold(e => fail(s"fail tool failed: ${e.formatted}"), identity)
 
     val intTool = ToolBuilder[Int]("int_tool", "Returns integer", intSchema)
-      .withHandler(intHandler)
+      .withHandler(params => intHandler(params).left.map(org.llm4s.toolapi.ToolHandlerError.failed))
       .buildSafe()
       .fold(e => fail(s"int tool failed: ${e.formatted}"), identity)
 

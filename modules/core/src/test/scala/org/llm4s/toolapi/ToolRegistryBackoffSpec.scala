@@ -24,7 +24,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   implicit val okRW: ReadWriter[Ok] = macroRW
 
   /** A tool whose handler body runs on every call; a throw becomes an ExecutionError (retryable when it is an IO error). */
-  private def toolOf(name: String)(body: => Either[String, Ok]): ToolFunction[Ok] =
+  private def toolOf(name: String)(body: => Either[ToolHandlerError, Ok]): ToolFunction[Ok] =
     ToolBuilder[Ok](name, s"test tool $name", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => body)
       .buildSafe()
@@ -227,7 +227,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
 
   it should "not retry, and not wait, on an error that is not retryable" in {
     val attempts = new AtomicInteger(0)
-    val failing  = toolOf("failing") { attempts.incrementAndGet(); Left("validation error") }
+    val failing  = toolOf("failing") { attempts.incrementAndGet(); Left(ToolHandlerError.failed("validation error")) }
     val registry = ToolRegistry.of(Seq(failing)).toOption.get
     withPool(2) { pool =>
       val (result, elapsedMs) =

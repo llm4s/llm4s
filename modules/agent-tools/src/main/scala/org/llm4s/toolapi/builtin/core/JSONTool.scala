@@ -90,7 +90,7 @@ object JSONTool {
         operation <- extractor.getString("operation")
         json      <- extractor.getString("json")
         pathOpt = extractor.getString("path").toOption
-        result <- processJSON(operation, json, pathOpt)
+        result <- processJSON(operation, json, pathOpt).left.map(ToolHandlerError.failed)
       } yield result
     }.buildSafe()
 

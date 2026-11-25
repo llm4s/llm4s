@@ -81,7 +81,7 @@ object FileInfoTool {
     ).withHandler { extractor =>
       for {
         pathStr <- extractor.getString("path")
-        result  <- getFileInfo(pathStr, config)
+        result  <- getFileInfo(pathStr, config).left.map(ToolHandlerError.failed)
       } yield result
     }.buildSafe()
 

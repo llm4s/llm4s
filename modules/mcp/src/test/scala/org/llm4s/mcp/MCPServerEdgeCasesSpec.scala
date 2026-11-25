@@ -448,7 +448,9 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .`object`[Map[String, Any]]("Params")
       .withProperty(Schema.property("input", Schema.string("Input")))
     ToolBuilder[String]("fail_tool", "Always fails", schema)
-      .withHandler((_: SafeParameterExtractor) => Left("intentional failure"))
+      .withHandler((_: SafeParameterExtractor) =>
+        Left(org.llm4s.toolapi.ToolHandlerError.failed("intentional failure"))
+      )
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }

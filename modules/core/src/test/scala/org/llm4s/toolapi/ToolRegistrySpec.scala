@@ -125,7 +125,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       "fail",
       "Always fails",
       schema
-    ).withHandler(_ => Left("validation error")).buildSafe()
+    ).withHandler(_ => Left(ToolHandlerError.failed("validation error"))).buildSafe()
   }
 
   // ============ ToolRegistry.empty ============
