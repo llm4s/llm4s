@@ -38,7 +38,9 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
   it should "report nothing from the dialects that map reasoning themselves" in {
     ZaiDialect.addReasoning(ujson.Obj(), ModelName("glm-5.2"), reasoning) shouldBe empty
     XaiDialect.addReasoning(ujson.Obj(), ModelName("grok-4.6"), reasoning) shouldBe empty
-    OpenRouterDialect.addReasoning(ujson.Obj(), ModelName("anthropic/claude-sonnet-4"), reasoning) shouldBe empty
+    // a level whose budget fits the limit; one cut to a limit the dialect assumed is reported (OpenRouterDialectSpec)
+    val fitting = CompletionOptions().withReasoning(ReasoningEffort.Medium)
+    OpenRouterDialect.addReasoning(ujson.Obj(), ModelName("anthropic/claude-sonnet-4"), fitting) shouldBe empty
   }
 
   "OpenAICompatibleClient" should "put the dialect's report on the completion, from complete and from a stream" in {
