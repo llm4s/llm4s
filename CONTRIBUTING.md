@@ -195,8 +195,8 @@ def buildConfig(providerName: String, section: NamedProviderConfig)(using Contex
 
 Validation does the rest before `buildConfig` runs: a missing required key fails with its name,
 the section and your `description`; `default`s are filled in; undeclared keys are dropped with a
-warning. Before 1.0 a key is renamed outright, with a migration note
-([compatibility policy](docs/reference/compatibility-policy.md)). Values are strings - parse and reject a malformed one in `buildConfig`.
+warning. A documented key of a frozen module is not renamed within a major version without keeping its old name as an alias
+([compatibility policy](docs/reference/compatibility-policy.md#what-the-promise-covers)). Values are strings - parse and reject a malformed one in `buildConfig`.
 Set `env` (or `baseUrlEnv`) to the key's conventional environment variable, if it has one: a
 section's extra keys and `baseUrl` read no variable by themselves, so the missing-key error shows
 the `key = ${?VAR}` binding that would read it, never a bare "set VAR". The API key is different:

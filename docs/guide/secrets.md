@@ -290,7 +290,7 @@ one, and a small class implementing `current()` can count calls or fail on deman
   `SecretBinary`, selected by a version stage, not a version id, and the key must be one line.
 - Neither sets a retry, backoff or circuit breaker around a read, and neither refreshes in the background.
 - One provider reads one key. For several providers, make one per secret.
-- Both are `@Experimental`: their signatures can still change before 1.0.
+- Both are `@Experimental`: their signatures can still change in a 1.x minor release.
 
 ## See also
 

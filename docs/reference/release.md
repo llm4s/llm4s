@@ -47,7 +47,7 @@ prepares the release:
 | Release | Change |
 |---|---|
 | A patch (X.Y.Z) | The line's `version` and `released`. Nothing else. |
-| A minor before 1.0 (0.7.0) | Add the new line first: `line`, `version`, `released`, `status: "latest"`. The line it replaces becomes `superseded`, with `ended_on` the release date. |
+| A minor before 1.0 (0.7.0; none is left) | Add the new line first: `line`, `version`, `released`, `status: "latest"`. The line it replaces becomes `superseded`, with `ended_on` the release date. |
 | 1.0.0 | Add the `1.0` line as `latest`. `0.7` becomes `security-only`, with `security_until` three months after the release date. Every older 0.x line becomes `eol`, keeping its `ended_on`. |
 | A minor from 1.1 | Add the new line as `latest`. The previous 1.x minor becomes `security-only`, with `security_until` three months after the release date. |
 | Any release | A `security-only` line whose `security_until` has passed becomes `eol`, with `ended_on` that date. |
@@ -75,7 +75,9 @@ The draft carries the front matter (`title`, `description`, the share `image`, `
 section's highlights or entries, its breaking changes, the dependency line and the links to the CHANGELOG section and
 the GitHub release. Rewrite the summary into a sentence or two on what is new and why it matters, cut the lists to what
 a user acts on, link upgrade notes to `docs/migrations/` or the migration guide, and set `date:` to the release's time
-if you want two posts of one day in order. A post carries no Scala code: link to the compile-checked guide pages
+if you want two posts of one day in order. That time must already be past when the docs deploy runs: Jekyll leaves
+out a post dated in the future, which is how the 0.7.0 post, dated noon on its release day, was missing from the site
+that morning. A post carries no Scala code: link to the compile-checked guide pages
 instead. `scripts/check-docs-site-links.sh` checks its links.
 
 The release workflow's `docs` job warns (`scripts/new-release-post.sh --check`) when the tag has no post; it does not
@@ -89,9 +91,9 @@ original). Each tag gets its own feed at `/feed/by_tag/<tag>.xml` once a post us
 
 Everything below goes in the pull request that prepares the release, and is merged before the tag is pushed. Each
 release costs part of the organisation's monthly Sonatype quota ([What is published](#what-is-published-to-maven-central)),
-so there are few of them: 0.6.0, then 0.7.0, which sets the compatibility baseline, then 1.0, with no release in
+so there are few of them: 0.6.0, then 0.7.0, which set the compatibility baseline, then 1.0.0, with no release in
 between ([After the baseline](../reference/api-stability#after-the-baseline)). Roughly one release a month fits; a
-security patch takes that slot ahead of a planned release, and from 1.0 minor releases come at most about once a
+security patch takes that slot ahead of a planned release, and minor releases come at most about once a
 quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **Every release:**
@@ -153,12 +155,12 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **1.0, in addition:**
 
-- [ ] In the support table, mark 0.7.x `security-only` with `security_until` three months after 1.0 (critical fixes),
-      and every older 0.x line `eol` ([Update the support table](#update-the-support-table)).
+- [x] In the support table, mark 0.7.x `security-only` with `security_until` three months after 1.0 (critical fixes),
+      and every older 0.x line `eol` ([Update the support table](#update-the-support-table)) (done: 2027-02-25).
 - [x] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
       ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)): the
       `scalafixRules` project is in the root aggregate, so `sbt ci-release` publishes `llm4s-scalafix_2.13`, and the
-      one-line command is in the [1.0 upgrade notes](../migrations/0x-to-1x#when-10-ships) (done).
+      one-line command is in the [1.0 upgrade notes](../migrations/0x-to-1x#upgrading-to-100) (done).
 - [x] Set `CentralBundle.MaxFiles` (`project/CentralBundle.scala`), and the limit this page states, to the monthly file
       limit Sonatype allows the organisation: 1,100. With `llm4s-scalafix` a release uploads 1,004 files (984 in the
       sbt bundle, 20 from `llm4s-kotlin-api`)
@@ -166,15 +168,25 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 - [ ] Once 1.0.0 is on Maven Central, run the documented command against it
       ([Running a migration rule](../reference/scalafix#running-a-migration-rule)) and propose `llm4s-scalafix` for
       Scala Steward's `scalafix-migrations` ([#2330](https://github.com/llm4s/llm4s/issues/2330)).
-- [ ] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
+- [ ] Once 1.0.0 is on Maven Central, in one follow-up pull request: set `mimaBaselineVersion = Some("1.0.0")`
+      ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)) and change the
+      pages that say the baseline is still 0.7.0, and move the pins that resolve the release from Central:
+      `docs/_data/project.yml`, `modules/gradle-demo`, the notebooks, and the Mill, Scala CLI, Flink, JBang, Maven,
+      Helidon and Micronaut samples. Two of them build an error with a `String` provider, which 1.0.0 does not
+      compile ([migration note](../reference/migration#an-errors-provider-is-a-providerid-2936)), so each changes
+      with its pin: `ServiceError(500, ProviderId("scripted"), ...)` in `modules/samples/flink/EnrichTickets.scala`,
+      and `RateLimitError(ProviderId("openai"))` in the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template's
+      `PromptExecutorSpec`, with its default `llm4s_version`.
+- [x] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
       `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
       `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to
       the [Production Deployment](../guide/production-deployment) guide; and "Real-World Application Patterns" in the
-      sidebar under User Guide.
-- [ ] Run `WatsonXAssumptionProbeSpec` (`modules/it`, `@Cloud`) against a real watsonx.ai account and record which
+      sidebar under User Guide (done for 1.0.0, in a Ruby 3.2 container; both release posts of the day built).
+- [x] Run `WatsonXAssumptionProbeSpec` (`modules/it`, `@Cloud`) against a real watsonx.ai account and record which
       assumptions held on the [IBM watsonx.ai](../guide/providers#ibm-watsonxai) section; without an account, keep
-      every page's statement that `llm4s-watsonx` ships unverified against the live service.
-- [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
+      every page's statement that `llm4s-watsonx` ships unverified against the live service (no account at 1.0.0: the
+      probe was not run and the statements stay).
+- [x] Release-day wording pass (done for 1.0.0; the quotations below are what each page said before it): the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
       In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
       `docs/why-llm4s.md` ("LLM4S is pre-1.0 and Scala 3 only", "Frozen modules will be binary compatible across 1.x");
       `docs/index.md` ("Latest release, on the road to 1.0", and "The road to 1.0" timeline with its "0.7.0" step);
@@ -495,7 +507,7 @@ need a maintainer:
 
 `mimaBaselineVersion` in `build.sbt` is `Some("0.7.0")` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compares every frozen
 module with its 0.7.0 artifact ([The Baseline](../reference/api-stability#the-baseline);
-[#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` was written to do those steps before 0.7.0 existed, against a throwaway version, and still checks the wiring itself (before the baseline moves, or after a change to the MiMa settings):
+[#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. It moves to `Some("1.0.0")` in a follow-up pull request once 1.0.0 is on Maven Central. `scripts/mima-dry-run.sh` was written to do those steps before 0.7.0 existed, against a throwaway version, and still checks the wiring itself (before the baseline moves, or after a change to the MiMa settings):
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -608,6 +620,7 @@ help.
 Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
 before and after the baseline, is in the [Compatibility Policy](../reference/compatibility-policy#versions).
 
-Current documented version series: 0.7.x (pre-1.0 development). Up to 0.7.0, the MiMa baseline, any
-release, patch included, could carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
-1.0 a minor release still may, with a MiMa filter as well, and a patch release may not; from 1.0, semantic versioning.
+Current documented version series: 1.0.x. From 1.0.0, semantic versioning: a breaking change to a frozen module
+needs a new major version, after a deprecation; a minor release adds, and may change Beta and Experimental APIs with
+a migration note; a patch release fixes. Up to 0.7.0, the MiMa baseline, any release, patch included, could carry a
+breaking change, listed in the CHANGELOG with a migration note, and 1.0.0 itself still could.

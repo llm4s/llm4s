@@ -117,7 +117,7 @@ A rule for a later break is added to every umbrella whose starting version is ol
 `Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
 
 `Llm4sMigrateFrom_0_5` runs every rule for the breaking changes since 0.5.1 (the notes in the
-[Migration Guide](migration)), those since 0.6.0 among them, and grows as the 1.0 breaks land:
+[Migration Guide](migration)), those since 0.6.0 and 0.7.0 among them:
 
 | Rule | Rewrites |
 |---|---|

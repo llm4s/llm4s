@@ -10,7 +10,7 @@ permalink: /
 <section class="lp-hero" aria-labelledby="hero-heading">
   <div class="lp-wrap lp-hero__grid">
     <div class="lp-hero__copy">
-      <p class="lp-pill"><a href="{{ '/reference/roadmap' | relative_url }}"><span>v{{ site.data.project.latest_release }}</span> Latest release, on the road to 1.0</a></p>
+      <p class="lp-pill"><a href="{{ '/reference/roadmap' | relative_url }}"><span>v{{ site.data.project.latest_release }}</span> Latest release: see the roadmap</a></p>
       <h1 id="hero-heading">Build reliable LLM applications in <em>Scala</em>, on the JVM you already run</h1>
       <p class="lp-lead">LLM4S is an open-source framework for agents, tool calling, RAG and multi-provider LLM calls, with errors as values, typed schemas and production observability. Community-built and stewarded by the LLM4S Foundation.</p>
       <p class="lp-actions">
@@ -296,8 +296,8 @@ val ticket: Result[Ticket] = for {
   <div class="lp-wrap">
     <header class="lp-section__head">
       <p class="lp-eyebrow">Roadmap</p>
-      <h2 id="roadmap-heading">The road to 1.0</h2>
-      <p>1.0 freezes a stable spine with a binary-compatibility promise. The date is intentionally not fixed: 0.7.0 set the compatibility baseline, and 1.0 is the next release after it.</p>
+      <h2 id="roadmap-heading">The road to 1.0, completed</h2>
+      <p>1.0 freezes a stable spine with a binary-compatibility promise: seven modules, source and binary compatible across 1.x. 0.7.0 set the compatibility baseline, and 1.0.0 was the next release after it.</p>
     </header>
     <ol class="lp-timeline">
       <li class="is-done"><strong>0.4.x</strong><span>Artifacts renamed to <code>llm4s-*</code></span></li>
@@ -305,7 +305,7 @@ val ticket: Result[Ticket] = for {
       <li class="is-done"><strong>0.5.1</strong><span>Multimodal messages, agent harness SPIs, Agent Skills</span></li>
       <li class="is-done"><strong>0.6.0</strong><span>Subagents, durable multi-machine agents, Secret credentials, Kotlin API</span></li>
       <li class="is-done"><strong>0.7.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
-      <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
+      <li class="is-done"><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>
     <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/reference/roadmap' | relative_url }}">Read the roadmap</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/v1-scope' | relative_url }}">What 1.0 freezes</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/enterprise-evaluation' | relative_url }}">Evaluating for your organisation?</a></p>
   </div>

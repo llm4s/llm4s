@@ -1,8 +1,8 @@
 ---
 layout: page
 title: Roadmap
-description: "The LLM4S roadmap to 1.0 as of November 2026: current status, maturity of each capability, the production-readiness pillars and phases."
-search_title: "LLM4S roadmap: the path to 1.0"
+description: "The LLM4S roadmap as of November 2026, with 1.0 released: current status, maturity of each capability, the production-readiness pillars and phases."
+search_title: "LLM4S roadmap: 1.0 and what comes after"
 parent: Reference
 nav_order: 5
 cites_open_issues: [874, 1281]
@@ -11,23 +11,23 @@ cites_closed_issues: [1126, 1127, 1133, 1242, 1266, 2273, 2290]
 
 # LLM4S Roadmap
 
-This page reflects the pre-1.0 roadmap as of **November 2026**: the latest release is **v0.7.0**, which sets the compatibility baseline; v0.5.0 was the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan for getting there.
+This page reflects the roadmap as of **November 2026**: the latest release is **v1.0.0**, which starts the compatibility promise; v0.7.0 set the compatibility baseline, and v0.5.0 was the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan that led there and the work still open.
 
-LLM4S has broad, working framework functionality today: multi-provider clients (including Vertex AI and AWS Bedrock), agents, tool calling, RAG/vector stores, GraphRAG/Neo4j, memory, guardrails (including prompt-injection detection), tracing, metrics, JMH benchmarks, reliability wrappers, workspace isolation, MCP transports with auth hardening, multimodal APIs (vision, image generation, speech), and Java, Kotlin, Spring Boot, cats-effect and ZIO integrations. The code that used to ship as one `core` artifact is split into per-concern modules ([#1126](https://github.com/llm4s/llm4s/issues/1126)); that split shipped in 0.5.0. The remaining v1.0 work is productization: a binary-compatibility baseline, provider capability parity, default-deny tool/MCP security, unified cost telemetry, deterministic CI, runnable docs, and polished reference applications.
+LLM4S has broad, working framework functionality today: multi-provider clients (including Vertex AI and AWS Bedrock), agents, tool calling, RAG/vector stores, GraphRAG/Neo4j, memory, guardrails (including prompt-injection detection), tracing, metrics, JMH benchmarks, reliability wrappers, workspace isolation, MCP transports with auth hardening, multimodal APIs (vision, image generation, speech), and Java, Kotlin, Spring Boot, cats-effect and ZIO integrations. The code that used to ship as one `core` artifact is split into per-concern modules ([#1126](https://github.com/llm4s/llm4s/issues/1126)); that split shipped in 0.5.0. The binary-compatibility baseline and the 1.0 release are done. The remaining work is productization: provider capability parity, default-deny tool/MCP security, unified cost telemetry, deterministic CI, runnable docs, and polished reference applications.
 
 ## Quick Status
 
 | | |
 |---|---|
-| **Latest release tag** | v0.7.0 (2026-11-25) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
-| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), → **0.6.0**: subagents, production agent adapters, the Kotlin API (**done**) → **0.7.0**: designs final, the release the MiMa baseline is set at for the seven frozen modules (**done**) → **1.0**. Releases are few: each one costs part of the Sonatype quota |
-| **Main branch** | Work after 0.7.0; see the CHANGELOG's `Unreleased` section |
+| **Latest release tag** | v1.0.0 (2026-11-25) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
+| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), → **0.6.0**: subagents, production agent adapters, the Kotlin API (**done**) → **0.7.0**: designs final, the release the MiMa baseline is set at for the seven frozen modules (**done**) → **1.0.0**: the compatibility promise, semantic versioning from here (**done**). Releases are few: each one costs part of the Sonatype quota |
+| **Main branch** | Work after 1.0.0; see the CHANGELOG's `Unreleased` section |
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |
-| **Stability** | Pre-1.0, API stabilizing; each package's tier is on [1.0 Scope](v1-scope) |
+| **Stability** | 1.0: the seven frozen modules are source and binary compatible across 1.x; each package's tier is on [1.0 Scope](v1-scope) |
 | **Scala support** | Scala 3.7.1 only. Scala 2.13 builds are deferred to after 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); Calling LLM4S from Scala 2.13 through the TASTy reader is best effort: CI probes it, but it is not a supported configuration and there are no 2.13 artifacts ([the TASTy reader guide](../getting-started/scala-2-13)). |
 | **Java support** | JDK 21 is required (and the only JDK CI runs); see [1.0 Scope](v1-scope#scala-and-jdk-support) |
-| **Target** | v1.0 production-ready stable modules |
-| **Timeline** | 2026 H2 stabilization phases; the v1.0 date is intentionally not fixed |
+| **Target** | The stable modules of v1.0, hardened further in 1.x minors |
+| **Timeline** | 2026 H2 stabilization phases; v1.0.0 was released on 2026-11-25 |
 | **Mentorship** | LFX Mentorship 2026 · European Summer of Code 2026 · GSoC 2026 |
 
 ## Maturity Legend
@@ -36,8 +36,8 @@ These tiers match [1.0 Scope](v1-scope), so the two pages agree.
 
 | Maturity | Meaning |
 |----------|---------|
-| **Frozen at 1.0** | Source and binary compatible within the 1.x series once published under its target module. |
-| **Beta** | Implemented and usable, but API, provider behavior, or docs still need hardening before v1.0. |
+| **Frozen at 1.0** | Source and binary compatible within the 1.x series. |
+| **Beta** | Implemented and usable, but API, provider behavior, or docs still need hardening before it is frozen. |
 | **Experimental** | Useful prototype or advanced feature; expect changes. |
 | **Planned** | Roadmap item, design, issue, mentorship track, or PR queue item; not a stable user contract. |
 
@@ -45,7 +45,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 
 ## Current Capability Map
 
-| Area | Current state | v1.0 gap |
+| Area | Current state | Gap |
 |------|---------------|----------|
 | **Provider clients** | Chat: OpenAI, Anthropic, Azure OpenAI, Gemini, **Vertex AI**, **AWS Bedrock**, IBM watsonx.ai (Beta, unverified against the live service), DeepSeek, Cohere, Mistral, xAI (Beta), Perplexity (Beta), OpenRouter, Requesty, Z.ai, Ollama, and a generic `openai-compatible` provider configured from a named section. Embeddings: OpenAI, Voyage, Jina, Cohere, Ollama. Every provider is a module found on the classpath through the `ProviderDescriptor` SPI, and `llm4s-provider-testkit` lets an external author prove one. | Grow the generated [capability matrix](compatibility-matrix) with facts the descriptors declare (structured output, vision, reasoning, stream usage), and grow the testkit into fake-provider contract tests for chat, streaming, tools, structured output, embeddings, image/audio, timeouts, retries, cost, and raw exchange logging. *(ESoC track)* |
 | **Agents** | `llm4s-agent`: core agents, tool calling, handoffs, guardrails (incl. prompt-injection detector), streaming events, async tools, reasoning modes, and state serialization; memory (incl. LLM entity extraction) in `llm4s-memory`. `Agent` runs on the typed graph runtime (middleware, approval barriers, checkpoints, cancellation, subagents; [#1266](https://github.com/llm4s/llm4s/issues/1266), complete), with durable SQLite and PostgreSQL checkpointers, a run queue and `AgentWorker`. | Settle which agent types are `@Stable`; Temporal workflows; A2A interop; voice agent loop; replay/debug; compile-test reference apps. *(LFX + ESoC tracks)* |
@@ -62,7 +62,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 | Pillar | Current status | Next deliverable |
 |--------|----------------|------------------|
 | **Testing and CI** | Broad suite, Ubuntu/Windows CI, integration suites in tiers (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud`) enforced by `it/itTierCheck`, per-module coverage floors, DCO, config-policy check. | Suite timeouts / hang isolation; split fast/integration/Docker/provider/benchmark jobs. |
-| **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa is wired into the build. | Set the MiMa baseline at 0.7.0, then release 1.0. |
+| **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa compares the frozen modules with their baseline on every pull request, and 1.0.0 is released. | Move the MiMa baseline to 1.0.0 once it is on Maven Central. |
 | **Provider parity** | Broad coverage, one SPI, a provider testkit; uneven feature parity. | Fake-provider contracts; more declared facts in the generated capability matrix. |
 | **JVM adoption** | Strong Scala-native design; Java, Spring Boot, cats-effect and ZIO modules, published from 0.5.0, and Kotlin from 0.6.0. | Maven and Gradle paths with CI-tested runnable samples. |
 | **Security** | Threat model, Dependabot, MCP auth/bind, redaction, config-policy, prompt-injection detector, per-module SBOMs. | Default-deny tool/MCP, allowlists, audit logs, release-gate tests. |
@@ -87,14 +87,14 @@ Priority: immediate · partially advanced.
 
 ### Phase 1: Define The Stable Spine
 
-Target: **0.7.0** for the baseline; **1.0** for the release.
+Target: **0.7.0** for the baseline; **1.0** for the release. Both are released.
 
 | Deliverable | Status | Outcome |
 |-------------|--------|---------|
 | Modularisation: `modules/core` split into per-concern artifacts ([#1126](https://github.com/llm4s/llm4s/issues/1126); slices [#1127](https://github.com/llm4s/llm4s/issues/1127)–[#1133](https://github.com/llm4s/llm4s/issues/1133), [#1242](https://github.com/llm4s/llm4s/issues/1242)) | **Landed** | Published as separate artifacts with 0.5.0 ([#1281](https://github.com/llm4s/llm4s/issues/1281)). |
 | Name stable module boundaries for v1.0 | **Landed** | [1.0 Scope](v1-scope) names each package's tier (Frozen at 1.0, Beta or Experimental). |
 | Stability tiers in code; compatibility and deprecation policy | **Landed** | `@Stable`/`@Experimental`; [policy](compatibility-policy) published. |
-| MiMa binary-compatibility checks | **Done** | The baseline is **0.7.0** for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none): CI compares each with its 0.7.0 artifact. |
+| MiMa binary-compatibility checks | **Done** | The baseline is **0.7.0** for all seven frozen modules (0.5.0, 0.5.1 and 0.6.0 set none): CI compares each with its 0.7.0 artifact, until the baseline moves to 1.0.0. |
 | Package-level Scaladoc | **In progress** | Public API intent documented; the published Scaladoc covers every module. |
 | Deferred Scala 2.13 support for the frozen spine | **Deferred** | After 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); 1.0 is Scala 3 only. |
 
@@ -112,7 +112,7 @@ Target: after the stable spine · **ESoC mentorship track**.
 
 ### Phase 3: JVM Interop And Adoption
 
-Target: before v1.0.
+Target: 1.x; what was not done by v1.0.0 stays open.
 
 | Deliverable | Status | Outcome |
 |-------------|--------|---------|
@@ -164,6 +164,7 @@ Target: before or after v1.0, as each lands · **LFX + ESoC tracks**.
 | **v0.5.1** | Multimodal content parts in user messages and tool results; the agent harness's backend SPIs (`FileBackend`, `SandboxBackend`, `LongTermStore`), filesystem tools, context management (summarisation, tool-output offload), Agent Skills, instruction memory (`AGENTS.md`) and the harness profile (`HarnessProfile`). |
 | **v0.6.0** | Typed subagents (child threads, budgets, supervision, nested streams); `PostgresCheckpointer`, the durable run queue and `AgentWorker`; `Secret` credentials, `apiKeyFile` and `ApiKeyProvider`; content-free tracing by default and the OpenTelemetry GenAI conventions; xAI, Perplexity and Entra ID for Azure; the Java agent, streaming, tools and RAG facades; the first published `llm4s-kotlin-api`; `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-tapir`, `llm4s-repl` and `llm4s-doctor`; Elasticsearch/OpenSearch and Redis vector stores. |
 | **v0.7.0** | The API review of the seven frozen modules, finished: one model call contract (typed `FinishReason`; content-filter stops, cut streams and broken tool calls are errors), one retry rule and typed errors, `thinking`, `promptCache` and `serviceTier`, `ModelName`/`ProviderId` newtypes, final provider clients, a tiered `llm4s-agent` with admission-time guardrails and checkpoint encryption, streaming RAG answers, SLSA build provenance. The release the MiMa baseline is set at. |
+| **v1.0.0** | The stability release: the compatibility promise for the seven frozen modules, and semantic versioning from here. Since 0.7.0: an error's provider is a `ProviderId`, a cut-off `withOutput` answer ends `Truncated`, Anthropic's `max_tokens` default follows the model, penalties are sent or reported, and the Scalafix rules are published as `org.llm4s::llm4s-scalafix`. |
 
 ## Community Mentorship Tracks (2026)
 
@@ -213,9 +214,9 @@ Broader idea list (agents, RAG, data pipelines, hardware design, demos): [GSoC P
 
 | Area | Direction |
 |------|-----------|
-| **Pre-1.0 releases** | Regular previews while APIs stabilize. 0.4.x was the artifact rename and fixes; **0.5.0** completes the modularisation and publishes the separate artifacts; **0.6.0** adds subagents and production agent adapters; **0.7.0** sets the MiMa baseline. Releases are few, since each costs part of the Sonatype quota. |
-| **v1.0** | The release after the 0.7.0 baseline, with none in between ([After the baseline](api-stability#after-the-baseline)): the frozen modules are binary compatible across 1.x, the Scalafix migration rules are published, known limitations are documented. Scala 3 only. |
-| **Post-1.0** | Semantic Versioning with binary compatibility checks for stable modules; deferred Scala 2.13 support for the frozen spine is considered then ([#874](https://github.com/llm4s/llm4s/issues/874)). Experimental modules may retain separate compatibility notes. |
+| **Pre-1.0 releases** | Previews while the APIs stabilized. 0.4.x was the artifact rename and fixes; **0.5.0** completed the modularisation and published the separate artifacts; **0.6.0** added subagents and production agent adapters; **0.7.0** set the MiMa baseline. |
+| **v1.0** | Released 2026-11-25, the release after the 0.7.0 baseline, with none in between ([After the baseline](api-stability#after-the-baseline)): the frozen modules are binary compatible across 1.x, the Scalafix migration rules are published, known limitations are documented. Scala 3 only. |
+| **1.x** | Semantic Versioning with binary compatibility checks for stable modules, minor releases at most about once a quarter, since each release costs part of the Sonatype quota; deferred Scala 2.13 support for the frozen spine is considered then ([#874](https://github.com/llm4s/llm4s/issues/874)). Experimental modules may retain separate compatibility notes. |
 
 ## Design Documents
 

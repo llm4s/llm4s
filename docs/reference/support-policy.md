@@ -10,7 +10,7 @@ nav_order: 26
 # Support Policy
 
 Which releases of LLM4S get fixes, which platforms they run on, and how you find out when that changes. This page
-states what the project does today, before 1.0, and what it will do from 1.0. The compatibility promise (what an upgrade may break) is in the
+states what the project does from 1.0. The compatibility promise (what an upgrade may break) is in the
 [Compatibility and Deprecation Policy](compatibility-policy); this page covers the support lifecycle.
 
 LLM4S is maintained by volunteers ([MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md)), so
@@ -28,8 +28,8 @@ see [SUPPORT.md](https://github.com/llm4s/llm4s/blob/main/SUPPORT.md).
 {% endif %}| {{ l.line }}.x | {{ l.version }} | {{ l.released }} | {{ l.status }} | {{ l.security_until | default: "-" }} | {{ l.ended_on | default: "-" }} | {{ l.note }} |
 {% endfor %}
 
-*Status*: `latest` gets every fix; `security-only` gets security fixes until the date shown; `superseded` (before 1.0)
-and `eol` get none, from the date in *Ended*.
+*Status*: `latest` gets every fix; `security-only` gets security fixes until the date shown; `eol` gets none, from
+the date in *Ended*. (`superseded` was the status of a replaced 0.x line before 1.0; those lines are now `eol`.)
 
 Every published `llm4s-*` module has the same version, so a line means the same version for every module. The list of
 published releases is on [GitHub](https://github.com/llm4s/llm4s/releases).
@@ -38,18 +38,15 @@ published releases is on [GitHub](https://github.com/llm4s/llm4s/releases).
 
 ## Supported lines
 
-**Today, before 1.0:** only the latest published release gets fixes, bug fixes and security fixes alike.
-Older releases are not patched. Any release may break compatibility, each break listed in the CHANGELOG with a
-migration note. This is also stated in [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions).
-
-**From 1.0:**
-
 | Line | Gets |
 |---|---|
 | The latest 1.x minor | Bug fixes and security fixes |
 | The previous 1.x minor | Security fixes only, for three months after its successor is released |
-| 0.7.x | Critical security fixes only, for three months after 1.0 is released, to cover the migration |
-| Every other 0.x release | Nothing: unsupported once 1.0 ships |
+| 0.7.x | Critical security fixes only, until 2027-02-25 (three months after 1.0.0), to cover the migration |
+| Every other 0.x release | Nothing: end of life since 1.0.0 |
+
+This is also stated in [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions).
+Before 1.0 only the latest published release got fixes, and any release could break compatibility.
 
 There is no long-term-support line before a 2.0 exists.
 
@@ -59,8 +56,8 @@ There is no long-term-support line before a 2.0 exists.
 
 Releases are cut from a tag by CI ([Release Process](../contribute/release)). There is no fixed schedule: releases happen when the
 maintainers have a set of changes ready, and the date of each is in the table above and on the GitHub Releases page.
-Before 1.0 they are closer together: 0.5.0, 0.5.1 and 0.6.0 came within two months, and 0.7.0 and 1.0 follow as each
-is ready. From 1.0, minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one
+Before 1.0 they were closer together: 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 1.0.0 came within two months.
+From 1.0, minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one
 release a month at any time, and a security patch takes that slot ahead of a planned release.
 
 ---
@@ -87,16 +84,17 @@ for the older Scala or JDK; the raise itself is listed under *Changed* with a mi
 
 Provider endpoints and models are outside the project's control. When a vendor deprecates or changes one, the fix is
 made in the provider's module and shipped in the next release, as a patch where it does not change the module's API.
-A change that does is listed under *Breaking changes* in the CHANGELOG with a migration note. A fix to a
-Beta or Experimental module may change its API in a minor release ([1.0 Scope](v1-scope)).
+A fix to a Beta or Experimental module may change its API in a minor release, with a migration note in the
+CHANGELOG ([1.0 Scope](v1-scope)); a Frozen module's API changes only as the
+[Compatibility and Deprecation Policy](compatibility-policy#deprecating-and-removing) allows.
 
 ---
 
 ## End of support
 
-Today a release stops getting fixes when a newer one is published, and nothing more is announced: the table above shows
-it as superseded. From 1.0, a line's end of support follows from [Supported lines](#supported-lines): the previous minor's
-security window ends three months after its successor ships, and 0.7.x's three months after 1.0. Each end date is
+A line's end of support follows from [Supported lines](#supported-lines): the previous minor's
+security window ends three months after its successor ships, and 0.7.x's on 2027-02-25, three months after 1.0.0.
+(Before 1.0 a release stopped getting fixes when a newer one was published.) Each end date is
 shown in the table above and stated in the release notes of the release that starts the window. A Scala or JDK floor
 is raised only after a notice one minor release ahead ([Platform support](#platform-support)).
 

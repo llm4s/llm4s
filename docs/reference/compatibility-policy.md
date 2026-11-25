@@ -44,15 +44,17 @@ version number:
 
 | Release | Frozen modules |
 |---|---|
-| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and ships with no `@deprecated` shim. |
-| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0 is the next release after 0.7.0. A frozen API found wrong in between is still fixed, in 1.0: each break has a narrow MiMa filter, a line under the CHANGELOG's *Breaking changes* and a migration note, and ships with no shim and no `@deprecated` member. A 0.7.x patch release makes no binary-breaking change. |
+| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, could break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and shipped with no `@deprecated` shim. |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | 1.0.0 was the next release after 0.7.0. A frozen API found wrong in between was fixed in 1.0.0, with a line under the CHANGELOG's *Breaking changes* and a migration note, and no shim or `@deprecated` member; a binary break would also have needed a narrow MiMa filter, and there was none. A 0.7.x patch release makes no binary-breaking change. |
 | **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version, after a deprecation ([Deprecating and removing](#deprecating-and-removing)). |
 
-1.0 is the compatibility promise. The 0.7.0 baseline is not: it makes every break visible, because MiMa reports it
-and it needs a reviewed filter, but between 0.7.0 and 1.0 an API that is wrong is still fixed outright. The release
-sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 1.0 with no release in between
-([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set no baseline. The baseline is
-set: the build compares every frozen module with its 0.7.0 artifact on each pull request. See [The Baseline](api-stability#the-baseline).
+1.0.0 is the compatibility promise, and it is released. The 0.7.0 baseline was not the promise: it made every break
+visible, because MiMa reported it and it needed a reviewed filter, but between 0.7.0 and 1.0.0 an API that was wrong
+was still fixed outright. The release sequence was 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then
+1.0.0 with no release in between ([After the baseline](api-stability#after-the-baseline)); 0.5.0, 0.5.1 and 0.6.0 set
+no baseline. The build compares every frozen module with its baseline artifact on each pull request: 0.7.0, with no
+filter, until the baseline moves to 1.0.0 once that is on Maven Central. See
+[The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
 follows the release it ships in, and `llm4s-bom` pins that one version for every artifact.
@@ -73,14 +75,14 @@ For a Frozen module:
   of the promise, and neither is a log line. New error types are added
   ([Sealed types that may gain a case](#sealed-types-that-may-gain-a-case)).
 - **Configuration.** The documented `application.conf` keys and the environment variables bound to them.
-  Before 1.0 a key is renamed outright, with a migration note. From 1.0 a renamed key keeps its old name as an
-  alias for the rest of the major version, with a warning that names the key to rename it to.
+  A renamed key keeps its old name as an alias for the rest of the major version, with a warning that names the key
+  to rename it to. (Before 1.0 a key was renamed outright, with a migration note.)
 
 What it does **not** cover:
 
 - Beta and Experimental modules, and anything in a Frozen module that [1.0 Scope](v1-scope) marks Beta or
   Experimental. Such a type inside a Frozen module is `@Experimental`, which MiMa skips (`mimaExcludeAnnotations`);
-  anything else gets a documented MiMa filter (the 0.7.0 baseline needed none).
+  anything else gets a documented MiMa filter (none has been needed).
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
 - `llm4s-provider-testkit` and `llm4s-agent-testkit` (Beta; they require JDK 21, see below), `llm4s-testkit` (Beta), the
@@ -96,14 +98,12 @@ These are the rules the codebase follows so a minor release does not break anyon
 
 - **Add a field to a data type** (`CompletionOptions`, `Completion`, `ModelCapabilities`, and the other
   growth-prone types, which are `final case class X private (...)` with a public companion `apply`):
-  add it to the constructor and, with a default, to `apply`; add a `withX` setter. From the baseline on, also keep
-  the previous `apply` as an overload *without* defaults that forwards to the new one; before it, each type has one
-  `apply`. Never re-expose `copy`.
+  add it to the constructor and, with a default, to `apply`; add a `withX` setter. Also keep the previous `apply`
+  as an overload *without* defaults that forwards to the new one. Never re-expose `copy`.
 - **Add a member to a trait that others implement** (the SPI traits, `LLMClient`, `TracingBackend`):
   give it a default implementation. An abstract one breaks every implementer.
-- **Add a parameter to a method:** from 1.0 on, add an overload and deprecate the old one; do not change the
-  signature in place. Before 1.0, change the signature, with a migration note (and, from the baseline on, a MiMa
-  filter); see [Deprecating and removing](#deprecating-and-removing).
+- **Add a parameter to a method:** add an overload and deprecate the old one; do not change the signature in
+  place. See [Deprecating and removing](#deprecating-and-removing).
 - **Express a duration** as a `FiniteDuration` and a point in time as an `Instant`, never a raw number
   with its unit in the name; a wire format keeps its units and converts at the boundary.
 - **Keep a helper only llm4s modules use `private[llm4s]`.** Public is a promise.
@@ -112,9 +112,9 @@ These are the rules the codebase follows so a minor release does not break anyon
   `final case class X private` with a companion `apply`, so the case itself can grow.
 
 A change that cannot avoid breaking binary compatibility follows
-[Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change). Between the baseline and 1.0
-it ships in 1.0: a narrow `ProblemFilters.exclude` entry that says why, a CHANGELOG *Breaking changes*
-line and a migration note, with no `@deprecated` shim. From 1.0 it is a major-release change, after a deprecation.
+[Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change): it is a major-release
+change, after a deprecation. (Between the baseline and 1.0.0 such a change would have shipped in 1.0.0, with a narrow
+`ProblemFilters.exclude` entry that says why; none was needed.)
 
 ---
 
@@ -130,7 +130,7 @@ value of the new case throws a `MatchError`. Removing or renaming a case is a br
 | Area | Types that may gain a case |
 |---|---|
 | Messages and requests | `ContentPart`, `ThinkingBlock`, `Thinking`, `ReasoningEffort`, `ResponseFormat`, `Modality`, `InputPurpose`, `RequestAdjustment`, `RequestOption` |
-| Errors | `LLMError`'s hierarchy (the trait is open: a new error type can appear in any minor release, and the `RecoverableError` / `NonRecoverableError` markers say how to treat one you do not know), `ToolCallError`, `ToolParameterError`, `RateLimitOrigin` |
+| Errors | `LLMError`'s hierarchy (the trait is open: a new error type can appear in any minor release, and `LLMError.isRetryable` says how to treat one you do not know), `ToolCallError`, `ToolParameterError`, `RateLimitOrigin` |
 | Tools | `SchemaDefinition`, `ToolParameterType` |
 | Tracing and metrics | `TraceEvent`, `ErrorKind`, `ProviderExchangeOutcome` |
 | Models and configuration | `ModelMode`, `ModelRegistrySource`, `ApiKeySource`, `IdentitySource`, `ProviderCollisionKind` |
@@ -153,13 +153,11 @@ those is a breaking change.
 
 ## Deprecating and removing
 
-**Before 1.0**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed outright, with a CHANGELOG entry
-and a migration note, not kept for compatibility. A Frozen module gains no speculative public types and no
-`@deprecated` members: an API that should not be frozen is deleted, with a migration note, not deprecated. From the
-0.7.0 baseline each such break also needs a MiMa filter, so it is visible and reviewed. The
-[migration guide](migration) records each one.
+**Before 1.0** nothing was frozen: a Frozen-at-1.0 API that was wrong was fixed outright, with a CHANGELOG entry
+and a migration note, and no `@deprecated` member; from the 0.7.0 baseline each such break also needed a MiMa
+filter. The [migration guide](migration) records each one. A Frozen module still gains no speculative public types.
 
-**From 1.0:**
+**From 1.0**, a Frozen API changes this way:
 
 1. **Deprecate** with `@deprecated("use <replacement>", since = "<version>")`. The message names the
    replacement and the `since` names the release that introduced the deprecation, so a compiler warning

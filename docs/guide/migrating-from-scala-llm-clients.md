@@ -337,7 +337,8 @@ Stay where you are, or keep the client next to LLM4S, when:
 - **You want a thin, request-level API.** Both clients mirror the provider's request and response types, so every
   parameter the API has is in reach. LLM4S puts one `LLMClient` over all providers, and a parameter it does not model
   is not available through it.
-- **You need a stable API today.** LLM4S is pre-1.0 ([comparison](comparison#what-llm4s-has-not-got-yet)).
+- **You need a frozen API outside the core.** The 1.x compatibility promise covers seven modules; RAG, memory and
+  most of the agent runtime are Beta or Experimental ([comparison](comparison#what-llm4s-has-not-got-yet)).
 - **Your feature is one call.** If you do not need tools, agents, RAG, memory or tracing, a client is the smaller
   dependency.
 

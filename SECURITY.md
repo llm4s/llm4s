@@ -3,20 +3,18 @@
 ## Supported versions
 
 Security fixes are made on the `main` branch and shipped in the **latest published release** of LLM4S (see
-[Releases](https://github.com/llm4s/llm4s/releases)). Before 1.0, older releases are not patched, so please upgrade to
-the latest release before reporting, and say in your report which version you tested. From 1.0, the previous 1.x minor
-also gets security fixes for three months after its successor is released, and 0.7.x gets critical security fixes for
-three months after 1.0; other 0.x releases are unsupported once 1.0 ships. A security patch takes the next release
+[Releases](https://github.com/llm4s/llm4s/releases)), so please upgrade to the latest release before reporting, and
+say in your report which version you tested. The latest line is 1.0. The previous 1.x minor also gets security fixes
+for three months after its successor is released, and 0.7.x gets critical security fixes until 2027-02-25, three
+months after 1.0.0; every other 0.x release is unsupported. A security patch takes the next release
 slot ahead of any planned release. The current lines and their status are in the
 [support policy](docs/reference/support-policy.md).
 
 How a fix may change the API follows the [compatibility policy](docs/reference/compatibility-policy.md):
 
-- **Up to 0.7.0**, the compatibility baseline, any release could break source or binary compatibility, so a
-  security fix could too.
-- **From the baseline (0.7.0)**, which is where the project is now, a fix to a Frozen module ships in a patch release without a binary-breaking change wherever
-  that is possible. If closing the vulnerability needs a breaking change, it ships in the next minor (before 1.0) or
-  major (from 1.0) release, with a migration note.
+- **A Frozen module** is fixed in a patch release without a binary-breaking change wherever that is possible. If
+  closing the vulnerability needs a breaking change, it ships in the next major release, with a migration note.
+- **0.7.x** gets critical fixes only, in a patch release that makes no binary-breaking change to a Frozen module.
 - **Beta and Experimental** modules (see [1.0 Scope](docs/reference/v1-scope.md)) are fixed in the same way, but a
   fix may change their API in a minor release.
 

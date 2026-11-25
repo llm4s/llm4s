@@ -7,17 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 0.7.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
+<!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+
+## [1.0.0] - 2026-11-25
+
+### Highlights
+
+1.0.0 is the stability release. From here llm4s follows semantic versioning, and the seven frozen modules
+(`llm4s-core`, `llm4s-agent`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and
+`llm4s-ollama`) are source and binary compatible across 1.x: a `@Stable` API is removed only in a major release, and
+only after a release that deprecated it
+([Compatibility and Deprecation Policy](docs/reference/compatibility-policy.md); [1.0 Scope](docs/reference/v1-scope.md)).
+Every other module is Beta or Experimental and may change in a minor release, with a migration note; in `llm4s-agent`
+the `@Stable` core is building and running an agent, and the graph runtime, middleware and checkpointers are
+`@Experimental`. The API is the one 0.7.0 set the baseline at, with the fixes below: an error's `provider` is a
+`ProviderId`, an answer cut off at the output limit ends `AgentStatus.Truncated` for an agent with `withOutput` too,
+Anthropic's default `max_tokens` follows the model, and a penalty a provider cannot take is reported instead of
+dropped. The Scalafix migration rules are published from this release, as `org.llm4s::llm4s-scalafix`, so one command
+migrates code from 0.5.x, 0.6.x or 0.7.x ([Migrating from 0.x to 1.0](docs/migrations/0x-to-1x.md)). 1.0.x is the
+supported line; 0.7.x gets critical security fixes until 2027-02-25, and older 0.x lines are end of life
+([Support Policy](docs/reference/support-policy.md)).
 
 ### Breaking changes
 
 - An error's `provider` is a `ProviderId`, not a `String`, on the nine errors that name one (`RateLimitError(ProviderId("openai"))`, `error.provider.asString`), and on the helpers that build one (`HttpErrorMapper.toError` and `mapStreamError`, `PartEncoding.check` and `encodeAll`, `HttpResponse`'s `ensureSuccess` and `mapServiceError`); the Scalafix rule `ErrorProviderIdTyped` rewrites them
   ([migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)) [#2936](https://github.com/llm4s/llm4s/pull/2936), [#2939](https://github.com/llm4s/llm4s/pull/2939).
+- Behaviour, no signature: a `withOutput` agent's cut-off answer ends `AgentStatus.Truncated` where 0.7.0 returned `Left(GraphError.OutputInvalid)`, and `llm4s-anthropic`'s default `max_tokens` follows the model where it was 2048, so a call can return and cost more
+  ([migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)) [#2933](https://github.com/llm4s/llm4s/issues/2933).
 
 ### Core
 
 - **Changed** `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`, `EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and `UnsupportedContentPartError` take and return their provider as a `ProviderId`, and `HttpErrorMapper`, `PartEncoding` and `HttpResponse.ensureSuccess` / `mapServiceError` take it as one; messages and `context` keep their text, except that a `ContentFilteredError` now names the provider's id (`gemini`, `vertexai`) rather than a display name ([#2936](https://github.com/llm4s/llm4s/pull/2936); [migration](docs/reference/migration.md#an-errors-provider-is-a-providerid-2936)).
+
 ### Agent runtime
 
 - **Fixed** an agent with `withOutput` (or `withOutputCheck` / `withOutputJsonCheck`) whose answer is cut off at the output limit ends the turn `AgentStatus.Truncated`, as any agent does: the cut-off answer is not checked against the schema and no corrective retry is spent on it, where 0.7.0 returned `Left(GraphError.OutputInvalid)`. A reply cut off before any text (all output spent on thinking) is `Truncated("")` for every agent, not a `ValidationError`; `decodeOutput` and a WARN log say the output limit was the cause, with the token counts ([#2933](https://github.com/llm4s/llm4s/issues/2933); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933)).
@@ -2405,7 +2427,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/llm4s/llm4s/compare/v0.7.0...v1.0.0
 [0.7.0]: https://github.com/llm4s/llm4s/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/llm4s/llm4s/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/llm4s/llm4s/compare/v0.5.0...v0.5.1

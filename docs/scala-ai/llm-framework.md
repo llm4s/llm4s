@@ -31,8 +31,9 @@ LLM4S runs inside your JVM application, in the same build, tests and deployment 
 - **Retrieval**: chunking, embeddings, vector stores, hybrid search, reranking and evaluation ([RAG](rag)).
 - **Java and Kotlin entry points** for mixed codebases ([Java and Kotlin](java-kotlin)).
 
-It requires Scala 3 and JDK 21, and it is pre-1.0: the API can still change between releases, and the
-[v1 scope](../reference/v1-scope) says what will be stable at 1.0.
+It requires Scala 3 and JDK 21. From 1.0 it follows semantic versioning: seven modules are frozen, source and binary
+compatible across 1.x, and the others are Beta or Experimental and can change in a minor release. The
+[v1 scope](../reference/v1-scope) says which is which.
 
 ## Is it "LangChain for Scala"?
 
