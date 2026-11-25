@@ -9,7 +9,3 @@ org.json:json | LicenseRef-Public-Domain | JSON-java (via Jedis, llm4s-vectorsto
 com.hubspot.jinjava:jinjava | Apache-2.0 | Jinjava (via jlama-core, llm4s-jlama; Jlama renders models' chat templates with it) is Apache-2.0 by its repository's LICENSE (github.com/HubSpot/jinjava); its POM declares none
 com.google.re2j:re2j | BSD-3-Clause | RE2/J (via jinjava, llm4s-jlama) carries the Go licence, which is the BSD-3-Clause text (github.com/google/re2j LICENSE); its POM names it "Go License"
 com.hubspot.immutables:immutables-exceptions | Apache-2.0 | HubSpot Immutables' exceptions (via jinjava 2.7.7, llm4s-jlama) are Apache-2.0 by the repository's LICENSE (github.com/HubSpot/immutables); its POM declares none
-org.scalameta:scalameta_2.13 | BSD-3-Clause | Scalameta (via scalafix-core, llm4s-scalafix: the Scalafix rules are a Scala 2.13 build-tool artifact, never on an application's classpath) is BSD-3-Clause by its repository's LICENSE.md (the scalameta/scalameta repository on GitHub); its POM names it "BSD"
-org.scalameta:parsers_2.13 | BSD-3-Clause | Scalameta's parsers (via scalafix-core, llm4s-scalafix): the same repository and LICENSE.md as scalameta; its POM names it "BSD"
-org.scalameta:trees_2.13 | BSD-3-Clause | Scalameta's trees (via scalafix-core, llm4s-scalafix): the same repository and LICENSE.md as scalameta; its POM names it "BSD"
-org.scalameta:common_2.13 | BSD-3-Clause | Scalameta's common (via scalafix-core, llm4s-scalafix): the same repository and LICENSE.md as scalameta; its POM names it "BSD"

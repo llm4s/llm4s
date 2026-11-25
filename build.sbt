@@ -3328,7 +3328,10 @@ lazy val scalafixRules = (project in file("modules/scalafix-rules/rules"))
     // on these sources are syntactic, so neither 2.13 project emits SemanticDB.
     semanticdbEnabled := false,
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Xlint", "-Werror", "-release", javaRelease),
-    libraryDependencies += "ch.epfl.scala" %% "scalafix-core" % scalafixVersion,
+    // `Provided`: Scalafix loads a rule in a class loader whose parent is its own, so the `scalafix-core` (and the
+    // scalameta and protobuf-java behind it) that runs is the one of the user's Scalafix, never one this POM names.
+    // Declaring it would only make every user download a second, unused copy at the version this build compiles with.
+    libraryDependencies += "ch.epfl.scala" %% "scalafix-core" % scalafixVersion % Provided,
     // No Scaladoc of its own: the rules are documented in docs/reference/scalafix.md, and Scala 2.13 sources cannot
     // join the `docs` project's Scala 3 Scaladoc (`docsSourcesCheck` leaves this module out). Like every published
     // module its -javadoc.jar is the pointer (project/JavadocPointer.scala), which Maven Central requires.
