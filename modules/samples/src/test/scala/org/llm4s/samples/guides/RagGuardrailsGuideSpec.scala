@@ -205,7 +205,7 @@ object RagGuardrailsGuideSpec {
       "Searches the product documentation.",
       Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("query", Schema.string("The query")))
     ).withHandler(_ => Right[Nothing, Passages](Passages(Seq("Refunds are accepted within 30 days of purchase."))))
-      .buildSafe()
+      .build()
       .fold(error => throw new IllegalStateException(error.message), identity)
 
   val Grounded: String =

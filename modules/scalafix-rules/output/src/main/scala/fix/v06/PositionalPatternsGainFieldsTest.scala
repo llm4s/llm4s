@@ -1,5 +1,6 @@
 package fix.v06
 
+import org.llm4s.agent.AgentResult
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.agent.graph.toolloop.TurnState
@@ -12,7 +13,7 @@ import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
-    case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
+    case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
   }
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
@@ -54,5 +55,10 @@ object PositionalPatternsGainFieldsTest {
   // gained completionOptions since 0.6.0 (#2715)
   def topK(config: RAGConfig): Int = config match {
     case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
+  }
+
+  // gained runUsage since 0.6.0 (#2922)
+  def requests(result: AgentResult): Long = result match {
+    case AgentResult(_, _, _, _, _, usage, _) => usage.requestCount
   }
 }

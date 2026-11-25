@@ -29,7 +29,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
       name,
       "Searches the documents",
       Schema.`object`[Map[String, Any]]("Search parameters").withRequiredField("query", Schema.string("The query"))
-    ).withHandler(_ => Right(Found(Passage))).buildSafe().fold(e => fail(s"tool did not build: $e"), identity)
+    ).withHandler(_ => Right(Found(Passage))).build().fold(e => fail(s"tool did not build: $e"), identity)
 
   private def searching(tool: String = "search"): Completion =
     CompletionFixture.withToolCall(tool, ujson.Obj("query" -> "refund window"), callId = "c1")

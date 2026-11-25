@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `AgentResult` has a seventh field, `runUsage`, so a positional pattern on it takes one more binder (the `PositionalPatternsGainFields` Scalafix rule adds it), and `PromptInjectionDetector`'s default `dan_jailbreak`, `roleplay_evil`, `no_restrictions` and prompt-extraction patterns match fewer texts
+  ([migration](docs/reference/migration.md#agentresultrunusage-and-tighter-promptinjectiondetector-defaults-2922-2923)) [#2922](https://github.com/llm4s/llm4s/issues/2922), [#2923](https://github.com/llm4s/llm4s/issues/2923).
+- `LLMClient.getContextWindow()`, `getReserveCompletion()` and `getContextBudget(...)` are `contextWindow`, `reserveCompletion` and `contextBudget(...)`; `ConversationTokenCounter.getTokenBreakdown` is `tokenBreakdown`, `ModelDimensionRegistry.getDimension` is `dimension`, and `ToolBuilder.buildSafe()` is `build()`
+  ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `ThinkingBlock.Opaque.provider` is a `ProviderId`, `BaseLifecycleLLMClient.providerName: String` is `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `ValidationError.violations`, `ConfigurationError.missingKeys`, the `ToolParameterError` and `ToolCallError.InvalidArguments` error lists, `LLMError.recoverableErrors`, `Result.sequence`, `traverse` and `validateAll`, `AgentResult.messages` and `OpenAICompatibleClient.parseCitations` are `Seq`s
+  ([migration](docs/reference/migration.md#errors-result-helpers-and-agentresultmessages-are-seqs-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- `CachedEmbeddingClient`'s key function is `(String, EmbeddingRequest) => String`, the text and its request; the default keys are unchanged
+  ([migration](docs/reference/migration.md#cachedembeddingclients-key-function-takes-the-request-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - `UserMessage.parts` and `ToolMessage.parts` are `Seq[ContentPart]`, and `Completion.citations`, the `RequestAdjustment` lists (`Completion`, `TransformationResult`, `OpenAICompatibleDialect.addReasoning`, `ModelCallCompleted`) are `Seq`s; stored JSON is unchanged
   ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
@@ -148,7 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SchemaDefinition` gains `AnyOfSchema` and `RawJsonSchema` (an exhaustive match needs both); `withRange`,
   `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
   properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
-- A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
+- A tool handler returns `Either[ToolHandlerError, R]` (its own failure is `Left(ToolHandlerError.failed("message"))`,
+  not a `String`) and `SafeParameterExtractor`'s getters return
   `Either[ToolParameterError, A]`; `ToolFunction` and `ToolBuilder` have one type parameter, the result's
   (`ToolBuilder[String](...)`); `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
   `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
@@ -265,6 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** A `temperature` or thinking budget set for Claude Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, Fable or Mythos was sent and answered 400: no sampling parameter and no `budget_tokens` goes to these models (Anthropic, Bedrock, an OpenAI-compatible gateway), by the catalog's `supports_sampling_params` (new `ModelCapabilities.supportsSamplingParams`) or the model's name, and each drop is a `RequestAdjustment`. [#2909](https://github.com/llm4s/llm4s/issues/2909)
 - **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception. The six vendor clients on `OpenAICompatibleClient` are private classes, built by `DeepSeekClient(config, options)` and its siblings as an `OpenAICompatibleClient`
   ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
@@ -376,6 +388,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** Accessors are named for their values: `LLMClient.contextWindow`, `reserveCompletion` and `contextBudget(...)`, `ConversationTokenCounter.tokenBreakdown`, `ModelDimensionRegistry.dimension`; `ToolBuilder.build()` replaces `buildSafe()`. The scalafix rule `AccessorRenames` rewrites callers and overriders ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** `ThinkingBlock.Opaque` holds a `ProviderId`, a `BaseLifecycleLLMClient` declares `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; `ThinkingBlockWireFormatSpec` pins the stored JSON, which is unchanged ([migration](docs/reference/migration.md#thinkingblockopaque-and-baselifecyclellmclient-take-a-providerid-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** The error types' lists (`ValidationError.violations`, `ConfigurationError.missingKeys`, `ToolParameterError`, `ToolCallError.InvalidArguments`), `LLMError.recoverableErrors`, `Result.sequence`, `traverse` and `validateAll`, `AgentResult.messages` and `OpenAICompatibleClient.parseCitations` are `Seq`s ([migration](docs/reference/migration.md#errors-result-helpers-and-agentresultmessages-are-seqs-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
+- **Changed** `CachedEmbeddingClient`'s key function takes the text and its `EmbeddingRequest`, so a key can use anything a request carries; `CacheKeyGenerator.embeddingKey(text, request)` is the default ([migration](docs/reference/migration.md#cachedembeddingclients-key-function-takes-the-request-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - **Changed** the model's public collections are `Seq`s: message parts (were `Vector`), `Completion.citations` and the request adjustments (were `List`); `MessagePartsWireFormatSpec` pins the stored JSON, which is unchanged [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
 - **Changed** Model ids are `ModelName` and provider configs' base URLs `BaseUrl` across the public API, from `Completion` and `UsageSummary` to the registry, embeddings, trace events, the provider SPI and every `fromValues`; the scalafix rule `ModelIdNewtypes` wraps the common call sites ([migration](docs/reference/migration.md#model-ids-are-modelname-and-provider-configs-base-urls-are-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
@@ -488,9 +504,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 - **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
   logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
+- **Fixed** `ContextManager` no longer digests the leading system messages, so the system prompt survives history
+  compression; the digests it made are dropped when the newest turn fits only without them [#2918](https://github.com/llm4s/llm4s/issues/2918).
 
 ### Agent runtime
 
+- **Added** `AgentResult.runUsage` (`JAgentResult.runUsage()` for Java and Kotlin): what the run that just finished used, beside `usage`, the thread's total; a `resume`'s or `recover`'s is that run's alone [#2922](https://github.com/llm4s/llm4s/issues/2922).
+- **Added** `AgentBuilder.withOutputCheck[O](check)` and `withOutputJsonCheck`: an application check on a structured answer that shares `withOutput`'s corrective retry and ends `GraphError.OutputInvalid` with its problems ([Agents](docs/guide/agents/index.md#a-typed-answer)) [#2920](https://github.com/llm4s/llm4s/issues/2920).
+- **Changed** `PromptInjectionDetector`'s defaults no longer match ordinary narrative sentences ("ask Dan to act as lookout", "repeat the instructions"); `PromptInjectionDetector.defaults.without(names*)` drops default patterns by name and `defaultPatternNames` lists them ([Guardrails](docs/guide/agents/guardrails.md#prompt-injection-protection)) [#2923](https://github.com/llm4s/llm4s/issues/2923).
 - **Changed** `AgentBuilder.withTools(ToolSet)` is `withToolSet` and `Guardrail.validate(value, context)` is `validateIn`, so no `@Experimental` method shares a name with a `@Stable` one, which MiMa would skip with it ([What MiMa Covers](docs/reference/api-stability.md#what-mima-covers)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
   which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).
@@ -552,8 +573,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AnyOfSchema`, so a typed tool's arguments may hold one. **Fixed** a strict schema renders an optional property as
   nullable instead of dropping `required = false`
   ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
-- **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
-  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`; `ToolFunction[R]`
+- **Changed** a tool handler returns `Either[ToolHandlerError, R]`, a sealed trait Java and Scala 2.13 callers can read:
+  a getter's `ToolParameterError` is reported as `ToolCallError.InvalidArguments` with each parameter listed, the tool's
+  own `ToolHandlerError.failed(message)` as `HandlerError`; `ToolFunction[R]`
   and `ToolBuilder[R]` drop the arguments type parameter nothing read (Scalafix rule `ToolFunctionOneTypeParameter`)
   ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
@@ -659,6 +681,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Added** The compatibility policy names the Stable sealed types and enums that may gain a case in a minor release (`LLMError`, `ContentPart`, `TraceEvent`, `AgentStatus`, `StreamEvent` and the others listed there), so a match on one needs a default case; removing or renaming a case stays a break ([compatibility policy](docs/reference/compatibility-policy.md#sealed-types-that-may-gain-a-case)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md)'s parts 6 (testing: `llm4s-testkit` fakes, a judged evaluation) and 7 (an HTTP endpoint, tracing, Prometheus metrics, deployment), with exercises that `Part6Spec` and `Part7Spec` check offline ([#2879](https://github.com/llm4s/llm4s/issues/2879)).
 - **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
   `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`), as do the enterprise deploy overlay, its LiteLLM gateway config and the Kotlin KDoc; the watsonx pages say it ships unverified, the

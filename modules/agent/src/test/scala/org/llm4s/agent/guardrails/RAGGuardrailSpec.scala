@@ -47,8 +47,8 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /**
@@ -66,8 +66,8 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   // ==========================================================================

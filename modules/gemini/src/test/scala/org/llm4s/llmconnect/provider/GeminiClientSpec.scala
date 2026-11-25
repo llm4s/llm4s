@@ -37,12 +37,12 @@ class GeminiClientSpec extends AnyFunSuite {
   test("gemini client returns correct context window") {
     val client = new GeminiClient(testConfig)
 
-    assert(client.getContextWindow() == 1048576)
+    assert(client.contextWindow == 1048576)
   }
 
   test("gemini client returns correct reserve completion") {
     val client = new GeminiClient(testConfig)
 
-    assert(client.getReserveCompletion() == 8192)
+    assert(client.reserveCompletion == 8192)
   }
 }

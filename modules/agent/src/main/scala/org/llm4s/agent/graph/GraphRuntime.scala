@@ -2323,7 +2323,8 @@ final class GraphRuntime(
                   (afterSeq, capacity, nested, listener) =>
                     dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope, nested),
                   subscription,
-                  run.traceContext
+                  run.traceContext,
+                  run.admitted
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
                 // runtime's hold: once a caller sees the result, any runtime may claim the thread
@@ -3045,6 +3046,9 @@ final class GraphRuntime(
 
     /** The thread's state the claim continues from, for [[RunContext.admitted]]; set by the claim. */
     private var admittedState: Option[ThreadState] = None
+
+    /** The thread's state the claim continued from, for [[RunHandle.admitted]]. */
+    def admitted: Option[ThreadState] = admittedState
 
     /**
      * The earlier run's children that `start` admission's retention pass found busy (#2073): the only `Running` or

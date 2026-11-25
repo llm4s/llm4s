@@ -163,8 +163,8 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   it should "run an LLM-as-judge output guardrail: pass, then block" in {

@@ -322,9 +322,11 @@ object BraveSearchTool {
             safeSearch = SafeSearch.fromString(toolConfig.safeSearch)
           )
         )
-        result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
+        result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt).left.map(
+          ToolHandlerError.failed
+        )
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Create a Brave search tool with explicit API key and optional overrides.

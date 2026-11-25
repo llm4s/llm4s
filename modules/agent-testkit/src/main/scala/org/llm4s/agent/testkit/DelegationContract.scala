@@ -227,5 +227,5 @@ object DelegationContract:
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 128000
-    override def getReserveCompletion(): Int = 4096
+    override def contextWindow: Int     = 128000
+    override def reserveCompletion: Int = 4096

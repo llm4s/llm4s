@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ Conversation, Message }
+import org.llm4s.llmconnect.model.{ Conversation, Message, SystemMessage }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.{ HeadroomPercent, Result }
 import org.slf4j.LoggerFactory
@@ -35,8 +35,9 @@ import org.slf4j.LoggerFactory
  *  2. '''HistoryCompression''' ([[HistoryCompressor]]):
  *     Keeps the last `config.maxSemanticBlocks` semantic blocks verbatim and
  *     replaces older blocks with compact `[HISTORY_SUMMARY]` digests, capped to
- *     `config.summaryTokenTarget` tokens, and to at most half the budget left after headroom, so that the
- *     digests, which step 4 pins, leave room for the recent turns. No API calls.
+ *     `config.summaryTokenTarget` tokens, and to at most half the budget left after headroom and the leading
+ *     system messages, so that the digests, which step 4 pins, leave room for the recent turns. The leading
+ *     system messages are never digested. No API calls.
  *
  *  3. '''LLMHistorySqueeze''' ([[LLMCompressor]]):
  *     If still over budget and `config.enableLLMCompression` is `true`, compresses
@@ -44,8 +45,8 @@ import org.slf4j.LoggerFactory
  *
  *  4. '''FinalTokenTrim''' ([[TokenWindow]]):
  *     Hard-trims to `budget` tokens (with `config.headroomPercent`), pinning the leading system and
- *     `[HISTORY_SUMMARY]` messages and dropping older turns whole, a tool call with its results. Fails
- *     when not even the newest turn fits beside the pinned messages.
+ *     `[HISTORY_SUMMARY]` messages and dropping older turns whole, a tool call with its results. The digests of
+ *     step 2 are dropped too when the newest turn fits only without them; fails when it does not fit then either.
  *
  * ==Usage==
  *
@@ -95,12 +96,18 @@ final class ContextManager private (
       step1 <- applyToolDeterministicCompaction(conversation.messages)
       step2 <- applyHistoryCompression(step1.messages, budget)
       step3 <- applyLLMHistorySqueeze(step2.messages, budget)
-      step4 <- applyFinalTokenTrim(step3.messages, budget)
+      // The digests may be what leaves no room for the newest turn: they go before the call fails
+      trimmed <- applyFinalTokenTrim(step3.messages, budget) match {
+        case Left(_) if step3.messages != step1.messages =>
+          val undone = Seq(step2, step3).map(_.undone(step1))
+          applyFinalTokenTrim(step1.messages, budget).map(undone :+ _)
+        case result => result.map(Seq(step2, step3, _))
+      }
     } yield ManagedConversation(
-      conversation = Conversation(step4.messages),
+      conversation = Conversation(trimmed.last.messages),
       originalTokens = tokenCounter.countConversation(conversation),
-      finalTokens = tokenCounter.countConversation(Conversation(step4.messages)),
-      steps = Seq(step1.toContextStep, step2.toContextStep, step3.toContextStep, step4.toContextStep)
+      finalTokens = tokenCounter.countConversation(Conversation(trimmed.last.messages)),
+      steps = (step1 +: trimmed).map(_.toContextStep)
     )
   }
 
@@ -151,13 +158,20 @@ final class ContextManager private (
       Right(PipelineStep(ContextStage.HistoryCompression, messages, currentTokens, currentTokens, applied = false))
     } else {
       logger.info("Applying history compression with deterministic digest")
-      // Step 4 pins every digest, so they may take at most half the usable budget.
-      val usable    = (budget * (1.0 - config.headroomPercent.asRatio)).toInt
+      // The leading system messages are the instructions, not history: they stay as they are.
+      val (instructions, history) = messages.span {
+        case m: SystemMessage => !HistorySummaryMarker.isDigest(m)
+        case _                => false
+      }
+      // Step 4 pins them and every digest, so the digests may take at most half of what the instructions leave.
+      val usable = (budget * (1.0 - config.headroomPercent.asRatio)).toInt -
+        instructions.map(tokenCounter.countMessage).sum
       val digestCap = math.max(1, math.min(config.summaryTokenTarget, usable / 2))
       HistoryCompressor
-        .compressToDigest(messages, tokenCounter, digestCap, config.maxSemanticBlocks)
-        .map { compressedMessages =>
-          val finalTokens = tokenCounter.countConversation(Conversation(compressedMessages))
+        .compressToDigest(history, tokenCounter, digestCap, config.maxSemanticBlocks)
+        .map { compressedHistory =>
+          val compressedMessages = instructions ++ compressedHistory
+          val finalTokens        = tokenCounter.countConversation(Conversation(compressedMessages))
           PipelineStep(
             stage = ContextStage.HistoryCompression,
             messages = compressedMessages,
@@ -226,6 +240,16 @@ final private case class PipelineStep(
   tokensAfter: Int,
   applied: Boolean
 ) {
+
+  /** This stage as if it had done nothing to the outcome of `before`. */
+  def undone(before: PipelineStep): PipelineStep =
+    copy(
+      messages = before.messages,
+      tokensBefore = before.tokensAfter,
+      tokensAfter = before.tokensAfter,
+      applied = false
+    )
+
   def toContextStep: ContextStep = ContextStep(
     stage = stage,
     conversation = Conversation(messages),

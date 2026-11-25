@@ -120,7 +120,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   object ToolParameters {
     import org.llm4s.schema.*
-    import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+    import org.llm4s.toolapi.{ ToolBuilder, ToolFunction, ToolHandlerError }
     import org.llm4s.types.Result
     import upickle.default.{ read, ReadWriter }
 
@@ -140,9 +140,11 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     val weatherTool: Result[ToolFunction[String]] =
       ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
         .withHandler { args =>
-          Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+          Try(read[WeatherQuery](args.params)).toEither.left
+            .map(e => ToolHandlerError.failed(e.getMessage))
+            .map(query => s"Sunny in ${query.city}")
         }
-        .buildSafe()
+        .build()
   }
 
   // ---- Typed tools
@@ -328,8 +330,8 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {

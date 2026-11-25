@@ -101,7 +101,7 @@ val result = for {
     "get_weather",
     "Get current weather for a location",
     weatherSchema
-  ).withHandler(getWeather).buildSafe()
+  ).withHandler(getWeather).build()
   providerConfig <- Llm4sConfig.defaultProvider()
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
@@ -172,7 +172,20 @@ thread, so `agent.continueConversation(r, "Please go on")` lets the model finish
 (`withCompletionOptions`) if it happens often.
 
 {% include api.html t="org.llm4s.agent.AgentResult" %} also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
-history, never a system prompt) and `usage`. `r.answer` is the `Completed` answer, and `None` for every other status.
+history, never a system prompt), `usage` and `runUsage`. `r.answer` is the `Completed` answer, and `None` for every other status.
+
+`usage` is the thread's total: every run the thread has had, this one included. `runUsage` is what this run added to
+it - its model calls, tokens and cost, per model - so an application that meters or budgets per request reads it
+directly and keeps no previous total to subtract. It is the run's own on a thread seeded with `history`, after
+`continueConversation`, for a streamed run, and for `resume` and `recover`, where it is that run's alone, not the
+earlier runs of the same turn:
+
+```scala
+agent.run(threadId, query).foreach { r =>
+  println(s"turn: ${r.runUsage.requestCount} calls, ${r.runUsage.inputTokens} in, ${r.runUsage.outputTokens} out")
+  println(s"thread so far: ${r.usage.totalCost} USD")
+}
+```
 
 ### A Typed Answer
 
@@ -203,6 +216,36 @@ A second invalid answer ends the turn with `Left(GraphError.OutputInvalid(errors
 from the thread, as an output guardrail's block removes it, both calls stay in `usage`, `recover` has
 nothing to continue, and the next turn runs from before it. The format is the agent's own: a handoff
 target answers in its own format, or freely.
+
+A rule the schema cannot express - an id that must name another element of the same document, a total that must
+match its lines - is an application check, `withOutputCheck`. It runs on the decoded answer once the schema accepts
+it and returns the answer's problems, worded for the model; an empty result accepts the answer:
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.ObjectSchema
+import upickle.default.ReadWriter
+
+case class Order(customer: String, total: Double) derives ReadWriter
+val orderSchema: ObjectSchema[Order] = ??? // or SchemaOf[Order].definition
+val knownCustomers: Set[String]      = Set("Acme", "Beta")
+
+Agent.builder("extractor", client)
+  .withOutput(orderSchema)
+  .withOutputCheck[Order] { order =>
+    if (knownCustomers.contains(order.customer)) Nil
+    else Seq(s"customer '${order.customer}' is not a known customer: use one of ${knownCustomers.mkString(", ")}")
+  }
+  .build()
+```
+
+The problems go back to the model exactly as schema errors do, in the same single retry: a schema error and a
+check's problem share it, and a second answer with problems ends the turn with `Left(GraphError.OutputInvalid(errors))`
+carrying them. Several checks all run, and the model is told every problem at once. `withOutputJsonCheck` takes the
+answer as `ujson.Value` instead. An answer that does not read as the check's type is a problem too. `build()` refuses
+a check on an agent with no `withOutput`. A check has only the answer: one that depends on application state closes
+over it, and there is no variant that takes the run's context. Keep it fast and free of side effects, since `recover`
+may run it again; it must not throw.
 
 ---
 
@@ -241,8 +284,8 @@ which belong to the {% include api.html t="org.llm4s.agent.Agent" %}. `AgentResu
 ### Suspended turns from Java and Kotlin
 
 The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
-`answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
-`JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
+`answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` (the thread's total)
+and `runUsage()` (this run's own) each a `JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
 `COMPLETED`, `TRUNCATED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `TOKEN_LIMIT_REACHED` or `SUSPENDED` - with `answer()`,
 `partialAnswer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
@@ -560,7 +603,7 @@ val charge = ToolBuilder[String]("charge", "Charges a card", chargeSchema)
       receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey.asString))
     yield receipt.id
   }
-  .buildSafe()
+  .build()
 ```
 
 Two tools pass it on by themselves. `HTTPTool` adds `Idempotency-Key: <key>` to a POST, PUT, PATCH or DELETE it

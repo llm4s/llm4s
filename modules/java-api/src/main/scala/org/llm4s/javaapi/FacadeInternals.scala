@@ -72,7 +72,7 @@ private[llm4s] object FacadeInternals {
    */
   private def declaredDimensions(provider: String, model: String): OptionalInt =
     ModelDimensionRegistry
-      .getDimension(ProviderId(provider), ModelName(model))
+      .dimension(ProviderId(provider), ModelName(model))
       .fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**
@@ -98,7 +98,8 @@ private[llm4s] object FacadeInternals {
       agentResult.activeAgent.value,
       agentStatus(agentResult.status),
       java.util.List.copyOf(agentResult.messages.map(message).asJava),
-      usageSummary(agentResult.usage)
+      usageSummary(agentResult.usage),
+      usageSummary(agentResult.runUsage)
     )
 
   /** `status` as Java and Kotlin callers read it; a `Suspended` one's interrupts via [[pending]]. */

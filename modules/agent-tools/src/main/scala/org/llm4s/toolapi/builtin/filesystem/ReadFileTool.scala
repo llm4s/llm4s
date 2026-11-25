@@ -84,9 +84,9 @@ object ReadFileTool {
         pathStr <- extractor.getString("path")
         maxLines = extractor.getInt("max_lines").toOption
         encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
-        result <- readFile(pathStr, maxLines, encoding, config)
+        result <- readFile(pathStr, maxLines, encoding, config).left.map(ToolHandlerError.failed)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Default read file tool instance, returning a Result for safe error handling.

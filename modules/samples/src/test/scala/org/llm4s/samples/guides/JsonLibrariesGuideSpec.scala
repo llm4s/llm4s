@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder }
+import org.llm4s.toolapi.{ ObjectSchema, PropertyDefinition, Schema, ToolBuilder, ToolHandlerError }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -54,8 +54,8 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   // snippet: model
@@ -124,10 +124,10 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     .withHandler { extractor =>
       toCirce(extractor.params).as[AddArgs] match {
         case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
-        case Left(error) => Left(error.getMessage)
+        case Left(error) => Left(ToolHandlerError.failed(error.getMessage))
       }
     }
-    .buildSafe()
+    .build()
   // end snippet
 
   // snippet: circe-answers
@@ -234,9 +234,9 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Try(readJsoniter[AddArgs](extractor.params)).toEither
         .map(args => AddResult(args.a.toLong + args.b))
         .left
-        .map(_.getMessage)
+        .map(e => ToolHandlerError.failed(e.getMessage))
     }
-    .buildSafe()
+    .build()
   // end snippet
 
   // snippet: numbers

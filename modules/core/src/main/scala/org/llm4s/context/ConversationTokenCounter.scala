@@ -62,7 +62,7 @@ final class ConversationTokenCounter private (tokenizer: StringTokenizer) {
   /**
    * A per-message token breakdown, for debugging
    */
-  def getTokenBreakdown(conversation: Conversation): TokenBreakdown = {
+  def tokenBreakdown(conversation: Conversation): TokenBreakdown = {
     val messageInfos = conversation.messages.map(createMessageTokenInfo)
     TokenBreakdown(countConversation(conversation), messageInfos, conversationOverhead)
   }

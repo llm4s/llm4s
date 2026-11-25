@@ -155,7 +155,7 @@ val forecastTool = ToolBuilder[Forecast](
   name = "get_forecast",
   description = "Returns the forecast for a city",
   schema = forecastSchema
-).withHandler(extractor => extractor.getString("city").map(city => Forecast(city, "sunny"))).buildSafe()
+).withHandler(extractor => extractor.getString("city").map(city => Forecast(city, "sunny"))).build()
 ```
 
 ```scala

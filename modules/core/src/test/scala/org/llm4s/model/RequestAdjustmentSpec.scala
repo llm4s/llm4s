@@ -49,7 +49,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
   private def withPingTool(options: CompletionOptions): CompletionOptions =
     ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right("pong"))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.message), tool => options.withTools(Seq(tool)))
 
   // ---- the transformer reports what it drops ----

@@ -124,9 +124,11 @@ object HTTPTool {
         headersOpt  = withIdempotencyKey(extractHeaders(extractor), method, extractor.call)
         bodyOpt     = extractor.getString("body").toOption
         contentType = extractor.getString("content_type").toOption
-        result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config)
+        result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config).left.map(
+          ToolHandlerError.failed
+        )
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))

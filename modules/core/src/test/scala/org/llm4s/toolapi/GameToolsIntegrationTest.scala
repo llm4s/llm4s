@@ -48,7 +48,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     val listInventorySchema: ObjectSchema[Map[String, Any]] = Schema
       .`object`[Map[String, Any]]("Simple returns the list of items in your inventory")
 
-    def listInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryListResult] = {
+    def listInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryListResult] = {
       val _ = params // No parameters needed for list operation
 
       val result = if (playerInventory.isEmpty) {
@@ -73,7 +73,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         "list_inventory",
         "List all items currently in the player's inventory",
         listInventorySchema
-      ).withHandler(listInventoryHandler).buildSafe()
+      ).withHandler(listInventoryHandler).build()
 
     /** Tool to add an item to the player's inventory (required parameter: item) */
     val addInventorySchema: ObjectSchema[Map[String, Any]] = Schema
@@ -111,7 +111,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         "add_inventory_item",
         "Add a new item to the player's inventory",
         addInventorySchema
-      ).withHandler(addInventoryHandler).buildSafe()
+      ).withHandler(addInventoryHandler).build()
 
     /** Tool to remove an item from the player's inventory (required parameter: item) */
     val removeInventorySchema: ObjectSchema[Map[String, Any]] = Schema
@@ -149,7 +149,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         "remove_inventory_item",
         "Remove an item from the player's inventory",
         removeInventorySchema
-      ).withHandler(removeInventoryHandler).buildSafe()
+      ).withHandler(removeInventoryHandler).build()
 
     /** Get all game tools for the ToolRegistry */
     def allTools: Result[Seq[ToolFunction[_]]] = for {

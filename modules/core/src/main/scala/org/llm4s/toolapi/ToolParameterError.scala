@@ -4,30 +4,58 @@ import org.llm4s.annotation.Stable
 
 /**
  * What a tool's handler returns when it cannot do what was asked: a [[ToolParameterError]] when the call's arguments
- * are at fault, which is what [[SafeParameterExtractor]]'s getters return, or a message when the tool itself says
- * no. A handler reads its arguments and reports its own failures in one `for` comprehension:
+ * are at fault, which is what [[SafeParameterExtractor]]'s getters return, or a [[ToolHandlerError.Failed]] when the
+ * tool itself says no. A handler reads its arguments and reports its own failures in one `for` comprehension:
  * {{{
  * .withHandler { args =>
  *   for {
- *     city    <- args.getString("city")                 // Left(ToolParameterError) when missing or mistyped
- *     weather <- lookup(city).toRight(s"no such city: $city") // Left(String): the tool's own failure
+ *     city    <- args.getString("city")                    // Left(ToolParameterError) when missing or mistyped
+ *     _       <- Either.cond(city.nonEmpty, (), ToolHandlerError.failed("city is empty"))
+ *     weather <- lookup(city).toRight(ToolHandlerError.failed(s"no such city: $city")) // the tool's own failure
  *   } yield weather
  * }
  * }}}
  * [[ToolFunction.execute]] turns the first into [[ToolCallError.InvalidArguments]], with every parameter error in
  * its `parameterErrors`, and the second into [[ToolCallError.HandlerError]].
+ *
+ * A `String` is not a `ToolHandlerError`: write `Left(ToolHandlerError.failed("message"))`, and turn a helper's
+ * `Either[String, A]` into a handler's with `.left.map(ToolHandlerError.failed)`.
+ *
+ * It is a sealed trait and not a union of `String` and `ToolParameterError`, so that Java and Scala 2.13 callers can
+ * read the signatures that name it ([[ToolFunction]], and through it `CompletionOptions`).
  */
-type ToolHandlerError = String | ToolParameterError
-
-/** Reading a [[ToolHandlerError]]. */
 @Stable
+sealed trait ToolHandlerError {
+
+  /** The error as text: the handler's own message, or what is wrong with the arguments. */
+  def message: String
+}
+
 object ToolHandlerError {
 
-  /** The error as text: the handler's own message, or a parameter error's [[ToolParameterError.message]]. */
-  def message(error: ToolHandlerError): String = error match {
-    case text: String              => text
-    case error: ToolParameterError => error.message
+  /**
+   * The tool itself refused or failed, the arguments being readable: [[ToolFunction.execute]] reports it as a
+   * [[ToolCallError.HandlerError]] carrying `message`.
+   *
+   * @param message what went wrong, as the model is told it
+   */
+  final case class Failed private (message: String) extends ToolHandlerError {
+
+    /** Replace the message. */
+    def withMessage(message: String): Failed = copy(message = message)
   }
+
+  object Failed {
+
+    /** Creates a [[Failed]]. */
+    def apply(message: String): Failed = new Failed(message)
+  }
+
+  /**
+   * The tool's own failure, typed as a [[ToolHandlerError]] so that it sits beside a getter's
+   * [[ToolParameterError]] in one `for` comprehension without a type annotation.
+   */
+  def failed(message: String): ToolHandlerError = Failed(message)
 }
 
 /**
@@ -37,7 +65,7 @@ object ToolHandlerError {
  * including missing parameters, type mismatches, null values, and invalid nesting.
  */
 @Stable
-sealed trait ToolParameterError {
+sealed trait ToolParameterError extends ToolHandlerError {
   def parameterName: String
   def message: String
 }
@@ -54,7 +82,7 @@ object ToolParameterError {
   final case class MissingParameter private (
     parameterName: String,
     expectedType: String,
-    availableParameters: List[String]
+    availableParameters: Seq[String]
   ) extends ToolParameterError {
     def message: String = {
       val available = if (availableParameters.nonEmpty) {
@@ -70,7 +98,7 @@ object ToolParameterError {
     def withExpectedType(expectedType: String): MissingParameter = copy(expectedType = expectedType)
 
     /** Replace the names of the parameters that were provided (a hint for self-correction). */
-    def withAvailableParameters(availableParameters: List[String]): MissingParameter =
+    def withAvailableParameters(availableParameters: Seq[String]): MissingParameter =
       copy(availableParameters = availableParameters)
   }
 
@@ -80,7 +108,7 @@ object ToolParameterError {
     def apply(
       parameterName: String,
       expectedType: String,
-      availableParameters: List[String] = Nil
+      availableParameters: Seq[String] = Nil
     ): MissingParameter =
       new MissingParameter(parameterName, expectedType, availableParameters)
   }
@@ -137,7 +165,7 @@ object ToolParameterError {
    * @param errors the individual parameter errors
    */
   case class MultipleErrors(
-    errors: List[ToolParameterError]
+    errors: Seq[ToolParameterError]
   ) extends ToolParameterError {
     def parameterName: String = errors.map(_.parameterName).mkString(", ")
     def message: String =
@@ -224,11 +252,11 @@ object ToolCallError {
    */
   case class InvalidArguments(
     toolName: String,
-    parameterErrors: List[ToolParameterError]
+    parameterErrors: Seq[ToolParameterError]
   ) extends ToolCallError {
     def message: String = {
       val errorMessages = parameterErrors match {
-        case single :: Nil => single.message
+        case Seq(single) => single.message
         case multiple =>
           s"has parameter issues:\n${multiple.map(e => s"  - ${e.message}").mkString("\n")}"
       }
@@ -355,10 +383,10 @@ object ToolCallErrorJson {
   /**
    * Flatten MultipleErrors into a list of individual errors
    */
-  def flattenErrors(errors: List[ToolParameterError]): List[ToolParameterError] =
+  def flattenErrors(errors: Seq[ToolParameterError]): Seq[ToolParameterError] =
     errors.flatMap {
       case ToolParameterError.MultipleErrors(nested) => flattenErrors(nested)
-      case single                                    => List(single)
+      case single                                    => Seq(single)
     }
 
   /**

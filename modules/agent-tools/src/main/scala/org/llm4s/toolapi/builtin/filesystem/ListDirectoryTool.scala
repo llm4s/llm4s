@@ -103,9 +103,9 @@ object ListDirectoryTool {
         pathStr <- extractor.getString("path")
         maxEntries    = extractor.getInt("max_entries").fold(_ => MaxEntries, identity).min(MaxEntries)
         includeHidden = extractor.getBoolean("include_hidden").fold(_ => false, identity)
-        result <- listDirectory(pathStr, maxEntries, includeHidden, config)
+        result <- listDirectory(pathStr, maxEntries, includeHidden, config).left.map(ToolHandlerError.failed)
       } yield result
-    }.buildSafe()
+    }.build()
 
   /**
    * Default list directory tool instance, returning a Result for safe error handling.

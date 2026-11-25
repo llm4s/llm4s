@@ -40,15 +40,15 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
           b <- p.getInt("b")
         } yield (a + b).toString
       )
-      .buildSafe()
+      .build()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
     val explode = ToolBuilder[String](
       "explode",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
-    ).withHandler(_ => Left("kaboom-from-handler"))
-      .buildSafe()
+    ).withHandler(_ => Left(ToolHandlerError.failed("kaboom-from-handler")))
+      .build()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
     server = new MCPServer(MCPServerOptions(0, "/mcp", "AgentMCPServer", "1.0.0"), Seq(add, explode))
@@ -84,8 +84,8 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private def runAgent(toolName: String, args: ujson.Value): Seq[ToolMessage] = {

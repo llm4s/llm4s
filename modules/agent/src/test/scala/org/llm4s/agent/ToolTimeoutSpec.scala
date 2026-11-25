@@ -22,7 +22,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val written: StateKey[Int, Int] = StateKey.replace[Int]("written", 0)
 
-  private def toolResults(result: AgentResult): Vector[String] =
+  private def toolResults(result: AgentResult): Seq[String] =
     result.messages.collect { case t: ToolMessage => t.content }.toVector
 
   /** A tool that sleeps until interrupted, recording the interrupt; it writes a key if it ever finishes. */

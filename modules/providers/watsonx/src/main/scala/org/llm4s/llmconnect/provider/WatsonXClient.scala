@@ -166,7 +166,8 @@ final class WatsonXClient private[provider] (
   import WatsonXClient.*
 
   protected def clientDescription: String = s"watsonx client for model ${config.model}"
-  protected def providerName: String      = "watsonx"
+  protected def provider: ProviderId      = ProviderId("watsonx")
+  private def providerName: String        = provider.asString
   protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
@@ -652,7 +653,7 @@ final class WatsonXClient private[provider] (
     ProviderExchangeRecorder.record(
       exchangeLogging,
       ProviderExchangeCall(
-        provider = ProviderId(providerName),
+        provider = provider,
         startedAt = startedAt,
         requestBody = requestBody,
         model = Some(config.model),
@@ -661,8 +662,8 @@ final class WatsonXClient private[provider] (
       result
     )
 
-  override def getContextWindow(): Int     = config.contextWindow
-  override def getReserveCompletion(): Int = config.reserveCompletion
+  override def contextWindow: Int     = config.contextWindow
+  override def reserveCompletion: Int = config.reserveCompletion
 
   // A client the caller supplied is the caller's to close (#2341).
   override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)

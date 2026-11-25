@@ -41,7 +41,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(e.formatted), identity)
       .handler(params(path))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
 
   private def list(config: FileConfig, path: Path): Either[String, ListDirectoryResult] =
     ListDirectoryTool
@@ -49,7 +49,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(e.formatted), identity)
       .handler(params(path))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
 
   private def info(config: FileConfig, path: Path): Either[String, FileInfoResult] =
     FileInfoTool
@@ -57,7 +57,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(e.formatted), identity)
       .handler(params(path))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
 
   private def write(
     config: WriteConfig,
@@ -72,7 +72,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
         SafeParameterExtractor(ujson.Obj("path" -> path.toString, "content" -> text, "append" -> append))
       )
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
 
   private def params(path: Path): SafeParameterExtractor =
     SafeParameterExtractor(ujson.Obj("path" -> path.toString))

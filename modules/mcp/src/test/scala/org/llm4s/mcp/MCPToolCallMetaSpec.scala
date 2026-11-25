@@ -21,7 +21,7 @@ class MCPToolCallMetaSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   private val whoami = ToolBuilder[String]("whoami", "The call it runs", Schema.`object`("args"))
     .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
-    .buildSafe()
+    .build()
     .fold(e => fail(e.formatted), identity)
 
   private var server: MCPServer = _

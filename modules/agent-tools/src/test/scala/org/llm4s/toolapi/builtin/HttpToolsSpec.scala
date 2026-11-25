@@ -143,7 +143,7 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("not allowed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -165,7 +165,7 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
             tool
               .handler(SafeParameterExtractor(ujson.Obj("url" -> url)))
               .left
-              .map(org.llm4s.toolapi.ToolHandlerError.message)
+              .map(_.message)
               .fold(
                 err => err should include("SSRF_BLOCKED"),
                 result => fail(s"Expected $url to be blocked but got Right: $result")
@@ -185,7 +185,7 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("not allowed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -205,7 +205,7 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               err => err should include("Invalid URL"),
               result => fail(s"Expected Left but got Right: $result")
@@ -228,7 +228,7 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           tool
             .handler(SafeParameterExtractor(params))
             .left
-            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.message)
             .fold(
               // Will fail due to connection, but should not fail due to method
               err => (err should not).include("method"),

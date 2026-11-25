@@ -186,23 +186,35 @@ final private[model] class DefaultRequestTransformer(
   ): List[Violation] = {
     val disallowed = capabilities.disallowedParams.getOrElse(Set.empty)
 
-    // a sampling option the caller left unset is not sent, so there is nothing to adjust or drop
-    val temperature = for {
-      (min, max) <- capabilities.temperatureConstraint
-      requested  <- options.temperature
-      if requested < min || requested > max
-    } yield Violation(
-      _.withTemperature(min),
-      RequestAdjustment.Adjusted(
-        RequestOption.Temperature,
-        requested.toString,
-        min.toString,
-        s"allowed range for $modelId is $min-$max"
-      ),
-      Some(s"Temperature $requested not allowed for $modelId (must be between $min and $max)")
+    // a sampling option the caller left unset is not sent, so there is nothing to adjust or drop.
+    // A model that takes no temperature (`disallowed_params`, or `supports_sampling_params: false`) has it
+    // dropped whatever its value; one with a range has it moved into the range.
+    val noTemperature = Option.when(capabilities.rejectsParam("temperature") && options.temperature.isDefined)(
+      Violation(
+        _.withTemperature(None),
+        RequestAdjustment.Dropped(RequestOption.Temperature, s"temperature not supported for $modelId"),
+        Some(s"temperature parameter not supported for $modelId")
+      )
     )
 
-    val topP = Option.when(disallowed.contains("top_p") && options.topP.isDefined)(
+    val temperature = noTemperature.orElse(
+      for {
+        (min, max) <- capabilities.temperatureConstraint
+        requested  <- options.temperature
+        if requested < min || requested > max
+      } yield Violation(
+        _.withTemperature(min),
+        RequestAdjustment.Adjusted(
+          RequestOption.Temperature,
+          requested.toString,
+          min.toString,
+          s"allowed range for $modelId is $min-$max"
+        ),
+        Some(s"Temperature $requested not allowed for $modelId (must be between $min and $max)")
+      )
+    )
+
+    val topP = Option.when(capabilities.rejectsParam("top_p") && options.topP.isDefined)(
       Violation(
         _.withTopP(None),
         RequestAdjustment.Dropped(RequestOption.TopP, s"top_p not supported for $modelId"),

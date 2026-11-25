@@ -32,8 +32,8 @@ class MCPEmbeddedServerTimeoutSpec extends AnyFlatSpec with Matchers with Before
     val noArgs = Schema.`object`[Map[String, Any]]("No parameters")
     def tool(name: String)(handler: SafeParameterExtractor => Either[String, String]): ToolFunction[_] =
       ToolBuilder[String](name, name, noArgs)
-        .withHandler(handler)
-        .buildSafe()
+        .withHandler(handler.andThen(_.left.map(ToolHandlerError.failed)))
+        .build()
         .fold(e => fail(e.formatted), identity)
 
     val stall = tool("stall") { _ =>

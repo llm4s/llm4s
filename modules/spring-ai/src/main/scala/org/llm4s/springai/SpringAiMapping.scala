@@ -167,8 +167,9 @@ private[springai] object SpringAiMapping {
           name = definition.name,
           description = Option(definition.description).getOrElse(""),
           schema = objectSchema(definition.name, schema),
-          handler =
-            params => Try(callback.call(params.params.render())).toEither.left.map(e => String.valueOf(e.getMessage))
+          handler = params =>
+            Try(callback.call(params.params.render())).toEither.left
+              .map(e => org.llm4s.toolapi.ToolHandlerError.failed(String.valueOf(e.getMessage)))
         )
       }
   }

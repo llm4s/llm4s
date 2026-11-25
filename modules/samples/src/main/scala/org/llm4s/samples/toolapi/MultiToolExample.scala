@@ -53,9 +53,9 @@ object MultiToolExample {
           case "subtract" => Right(a - b)
           case "multiply" => Right(a * b)
           case "divide" =>
-            if (b == 0) Left("Division by zero")
+            if (b == 0) Left(ToolHandlerError.failed("Division by zero"))
             else Right(a / b)
-          case _ => Left(s"Unknown operation: $operation")
+          case _ => Left(ToolHandlerError.failed(s"Unknown operation: $operation"))
         }
       } yield CalculationResult(result)
 
@@ -93,12 +93,12 @@ object MultiToolExample {
         "calculator",
         "Performs basic arithmetic operations",
         calculatorSchema
-      ).withHandler(calculatorHandler).buildSafe()
+      ).withHandler(calculatorHandler).build()
       searchTool <- ToolBuilder[SearchResult](
         "search",
         "Searches for information",
         searchSchema
-      ).withHandler(searchHandler).buildSafe()
+      ).withHandler(searchHandler).build()
       toolRegistry <- ToolRegistry.of(Seq(calculatorTool, searchTool))
     } yield {
 

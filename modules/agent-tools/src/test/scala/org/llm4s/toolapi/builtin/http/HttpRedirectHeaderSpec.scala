@@ -101,7 +101,7 @@ class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAft
         .fold(e => fail(e.formatted), identity)
         .handler(SafeParameterExtractor(params))
         .left
-        .map(org.llm4s.toolapi.ToolHandlerError.message)
+        .map(_.message)
     val body = result.fold(e => fail(e), _.body)
     ujson.read(body).obj.map { case (k, v) => k -> v.str }.toMap
   }

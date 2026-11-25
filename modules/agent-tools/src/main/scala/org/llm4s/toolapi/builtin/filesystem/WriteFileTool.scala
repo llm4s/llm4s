@@ -96,9 +96,9 @@ object WriteFileTool {
         content <- extractor.getString("content")
         append   = extractor.getBoolean("append").fold(_ => false, identity)
         encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
-        result <- writeFile(pathStr, content, append, encoding, config)
+        result <- writeFile(pathStr, content, append, encoding, config).left.map(ToolHandlerError.failed)
       } yield result
-    }.buildSafe()
+    }.build()
 
   private def writeFile(
     pathStr: String,

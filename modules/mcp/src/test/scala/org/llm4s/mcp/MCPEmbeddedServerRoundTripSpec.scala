@@ -27,7 +27,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
   ): ToolFunction[_] =
     ToolBuilder[String](name, description, schema)
       .withHandler(handler)
-      .buildSafe()
+      .build()
       .fold(e => fail(s"could not build tool $name: ${e.formatted}"), identity)
 
   override def beforeAll(): Unit = {
@@ -46,7 +46,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
 
     val tools = Seq(
       tool("ping", "Returns pong without arguments", noArgSchema)(_ => Right("pong")),
-      tool("fail", "Always fails", noArgSchema)(_ => Left("kaboom-from-handler")),
+      tool("fail", "Always fails", noArgSchema)(_ => Left(ToolHandlerError.failed("kaboom-from-handler"))),
       tool("echo", "Echoes the text back", echoSchema)(p => p.getString("text")),
       tool("add", "Returns the sum of two integers", addSchema)(p =>
         for {

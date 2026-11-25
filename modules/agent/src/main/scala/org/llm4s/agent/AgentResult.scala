@@ -142,7 +142,13 @@ object Suspension:
  * @param activeAgent the agent the thread is with at the run's end: the next turn starts with it
  * @param status how the turn ended, or what it waits for
  * @param messages the thread's full history, without system prompts
- * @param usage token usage accumulated over the thread, per model
+ * @param usage the thread's total: token usage and cost accumulated over every run the thread has had, this one
+ *   included, per model. It is not what this run cost: that is `runUsage`
+ * @param runUsage what this run added to `usage`: the model calls it made and committed, per model - a `resume`'s or
+ *   a `recover`'s are that run's alone, not the turn's earlier runs'. Counted by the runtime from the thread's usage
+ *   as the run was admitted, so a first run on a thread with imported history, a continued conversation and a
+ *   streamed run all report their own; a subagent's usage counts in the run its `task` call committed in. Like
+ *   `usage`, it leaves out the calls of an attempt that committed nothing
  */
 @Stable
 final case class AgentResult private (
@@ -150,8 +156,9 @@ final case class AgentResult private (
   runId: RunId,
   activeAgent: AgentId,
   status: AgentStatus,
-  messages: Vector[Message],
-  usage: UsageSummary
+  messages: Seq[Message],
+  usage: UsageSummary,
+  runUsage: UsageSummary
 ):
 
   /**
@@ -203,6 +210,7 @@ object AgentResult:
     runId: RunId,
     activeAgent: AgentId,
     status: AgentStatus,
-    messages: Vector[Message],
-    usage: UsageSummary
-  ): AgentResult = new AgentResult(threadId, runId, activeAgent, status, messages, usage)
+    messages: Seq[Message],
+    usage: UsageSummary,
+    runUsage: UsageSummary
+  ): AgentResult = new AgentResult(threadId, runId, activeAgent, status, messages, usage, runUsage)

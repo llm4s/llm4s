@@ -42,7 +42,7 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a blank key or model, a non-https base URL and a bad window or reserve" in {
-      def field(result: Either[org.llm4s.error.LLMError, ?]): List[String] = result match
+      def field(result: Either[org.llm4s.error.LLMError, ?]): Seq[String] = result match
         case Left(ConfigurationError(_, fields)) => fields
         case other                               => fail(s"expected a ConfigurationError, got $other")
       field(build(key = " ")) shouldBe List("apiKey")

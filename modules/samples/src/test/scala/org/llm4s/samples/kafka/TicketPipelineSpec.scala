@@ -242,7 +242,7 @@ object TicketPipelineSpec {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = underlying.streamComplete(conversation, options)(onChunk)
-    def getContextWindow(): Int     = underlying.getContextWindow()
-    def getReserveCompletion(): Int = underlying.getReserveCompletion()
+    def contextWindow: Int     = underlying.contextWindow
+    def reserveCompletion: Int = underlying.reserveCompletion
   }
 }

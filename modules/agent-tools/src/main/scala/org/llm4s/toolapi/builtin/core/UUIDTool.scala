@@ -65,11 +65,11 @@ object UUIDTool {
    * whole number in the `Int` range (`3.5`, `"5"`, `null`) is an error, not the default, so a caller asking for several
    * UUIDs is never silently given one.
    */
-  private def requestedCount(extractor: SafeParameterExtractor): Either[String, Int] =
+  private def requestedCount(extractor: SafeParameterExtractor): Either[ToolHandlerError, Int] =
     extractor.getInt("count") match {
       case Right(count)                                 => Right(count.min(10).max(1))
       case Left(_: ToolParameterError.MissingParameter) => Right(1)
-      case Left(error)                                  => Left(error.message)
+      case Left(error)                                  => Left(ToolHandlerError.failed(error.message))
     }
 
   /** The name of a `java.util.UUID#variant` value. */
@@ -110,6 +110,6 @@ object UUIDTool {
 
         UUIDsResult(uuids)
       }
-    }.buildSafe()
+    }.build()
 
 }

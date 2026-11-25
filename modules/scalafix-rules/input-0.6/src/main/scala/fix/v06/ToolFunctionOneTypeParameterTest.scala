@@ -1,5 +1,5 @@
 /*
-rule = ToolFunctionOneTypeParameter
+rules = [ToolFunctionOneTypeParameter, AccessorRenames]
 */
 package fix.v06
 

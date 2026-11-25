@@ -46,8 +46,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /** The failed run's error: the model node's `NodeFailed`, whose cause is what the client returned. */
@@ -95,8 +95,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
         else Left(original)
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
-      override def getContextWindow(): Int     = 4096
-      override def getReserveCompletion(): Int = 1024
+      override def contextWindow: Int     = 4096
+      override def reserveCompletion: Int = 1024
     }
 
     runError(failSecond) shouldBe original
@@ -154,15 +154,15 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   private def failingTool(name: String, handler: => Either[String, EchoResult]) = {
     val schema = Schema.`object`[Map[String, Any]]("Parameters").withRequiredField("input", Schema.string("Value"))
     ToolBuilder[EchoResult](name, "A tool that fails", schema)
-      .withHandler(_ => handler)
-      .buildSafe()
+      .withHandler(_ => handler.left.map(org.llm4s.toolapi.ToolHandlerError.failed))
+      .build()
       .fold(e => fail(s"tool failed to build: $e"), identity)
   }
 

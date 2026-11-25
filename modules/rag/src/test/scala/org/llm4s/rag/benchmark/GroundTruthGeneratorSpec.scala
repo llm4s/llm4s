@@ -38,8 +38,8 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   /** Succeeds on all calls except the first. */
@@ -65,8 +65,8 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   /** Always returns Left. */
@@ -78,8 +78,8 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 512
   }
 
   // Sample JSON payloads the generator expects from the LLM

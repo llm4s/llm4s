@@ -43,7 +43,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
       // Handler doesn't extract any parameters
       // Just returns the inventory
       Right(InventoryResult(List("sword", "shield", "potion"), 3))
-    }.buildSafe()
+    }.build()
   }
 
   "Zero-parameter tool" should "work with empty object arguments" in {
@@ -99,13 +99,13 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
         "get_status",
         "Returns the player's current status",
         Schema.`object`[Map[String, Any]]("No parameters required")
-      ).withHandler(_ => Right(StatusResult(health = 100, mana = 50))).buildSafe()
+      ).withHandler(_ => Right(StatusResult(health = 100, mana = 50))).build()
 
       timeTool <- ToolBuilder[TimeResult](
         "get_game_time",
         "Returns the current in-game time",
         Schema.`object`[Map[String, Any]]("No parameters")
-      ).withHandler(_ => Right(TimeResult(hour = 14, minute = 30, dayOfWeek = "Monday"))).buildSafe()
+      ).withHandler(_ => Right(TimeResult(hour = 14, minute = 30, dayOfWeek = "Monday"))).build()
     } yield {
       // Both should work with empty objects
       (statusTool.execute(ujson.Obj()) should be).a(Symbol("right"))
@@ -123,7 +123,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
       // The handler should not try to extract anything
       // Just return a result directly
       Right(SimpleResult("Success"))
-    }.buildSafe()
+    }.build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
@@ -144,7 +144,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
         .`object`[Map[String, Any]]("Required parameters")
         .withProperty(Schema.property("name", Schema.string("Required name parameter")))
     ).withHandler(extractor => extractor.getString("name").map(name => TestResult(name)))
-      .buildSafe()
+      .build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {

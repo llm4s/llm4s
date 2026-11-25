@@ -368,10 +368,12 @@ object ExaSearchTool {
       ).withHandler { extractor =>
         for {
           rawQuery <- extractor.getString("query")
-          query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
-          result   <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt)
+          query    <- validateQuery(rawQuery).left.map(e => ToolHandlerError.failed(e.message))
+          result <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt).left.map(
+            ToolHandlerError.failed
+          )
         } yield result
-      }.buildSafe()
+      }.build()
     } yield tool
 
   /**

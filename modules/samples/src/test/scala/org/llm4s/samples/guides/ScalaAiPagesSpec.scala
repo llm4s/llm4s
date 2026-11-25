@@ -84,7 +84,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
       schema = Schema
         .`object`[Map[String, Any]]("Forecast parameters")
         .withProperty(Schema.property("city", Schema.string("The city to look up")))
-    ).withHandler(args => args.getString("city").map(city => s"Sunny and 18 C in $city")).buildSafe()
+    ).withHandler(args => args.getString("city").map(city => s"Sunny and 18 C in $city")).build()
     registry <- ToolRegistry.of(Seq(forecast))
     agent <- Agent
       .builder("weather", client)

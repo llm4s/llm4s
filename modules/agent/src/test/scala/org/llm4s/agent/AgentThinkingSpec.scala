@@ -23,7 +23,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
     "Reports the weather",
     Schema.`object`[Map[String, Any]]("Weather parameters")
   ).withHandler(_ => Right(ujson.Str("sunny")))
-    .buildSafe()
+    .build()
     .fold(e => fail(e.formatted), identity)
 
   private val call = ToolCall(ToolCallId("call-1"), "weather", ujson.Obj())

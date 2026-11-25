@@ -26,8 +26,8 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("quantity", Schema.number("Quantity")))
 
     ToolBuilder[ToolResult](name, "Test tool that fails", schema)
-      .withHandler(_ => Left(errorMessage))
-      .buildSafe()
+      .withHandler(_ => Left(ToolHandlerError.failed(errorMessage)))
+      .build()
   }
 
   /** Runs one call of `tool` with `arguments`, then a final answer; returns the turn's result. */
@@ -89,7 +89,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
     val schema = Schema.`object`[Map[String, Any]]("Tool parameters").withRequiredField("query", Schema.string("Query"))
     val search = ToolBuilder[ToolResult]("search_tool", "Search for items", schema)
       .withHandler(extractor => extractor.getString("query").map(q => ToolResult(s"Found: $q")))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.formatted), identity)
 
     val message = onlyToolMessage(runFailing(search, ujson.Obj()))

@@ -100,6 +100,15 @@ Not blockers, contrary to the issue's grep-based worries: Scala 3 `enum`-style A
 returned values, private constructors with companion `apply` and `with*` setters, extension methods on results, and
 `using` parameters passed explicitly all work.
 
+**A union type in a public signature is a blocker, and the frozen modules have none.** Between 0.6.0 and 0.7.0
+`ToolHandlerError` was `String | ToolParameterError` on `main`. The reader refuses any signature that reaches a
+union (`Unsupported Scala 3 union in bounds of type ToolHandlerError`), and `CompletionOptions` reaches it through
+`ToolFunction`, so the probes that name `CompletionOptions` stopped compiling. It is a sealed trait since, before any
+release carried the union. A scan of the main sources of the frozen modules (core, agent, openai, openai-compatible,
+anthropic, gemini, ollama; 2026-11-25) found no other union or intersection type, match type, context function
+type, polymorphic function type or `inline` method in a public signature. The unions that remain are private
+(`EventHub`'s queue items, `MermaidExport.joinId`), and no probe has failed on them.
+
 ## Recommendation
 
 **Document Scala 2.13 as supported with caveats**, for applications that *call* LLM4S: a Spark job, a Play

@@ -32,6 +32,21 @@ import scala.util.matching.Regex
  * tricks, not against every evasion; a custom [[InjectionPattern]] should be written in lower-case ASCII to
  * benefit from it.
  *
+ * '''Creative and role-play text.''' The default patterns are written for requests addressed to the model, and the
+ * ones that ask about a prompt or its rules, or lift restrictions, match only when the text says whose they are
+ * ("your instructions", "the system prompt", "your filters"), or - for the ones that ask for the text itself - where
+ * it is or how to give it ("the instructions above", "the previous instructions", "verbatim"); `dan_jailbreak` needs the jailbreak's own wording
+ * ("DAN mode", "do anything now", "you are now DAN"), not the name near a verb (#2923). Some defaults still match
+ * ordinary sentences of a story, a game or a technical question, because the words alone are the signal:
+ * `creative_writing` and `how_to_dangerous` (a story that mentions a weapon), `extract_data` ("steal the secrets"),
+ * `developer_mode` ("debug mode"), `you_are_now`, `opposite_day` and `no_guardrails_mode`. An application whose users
+ * write narrative text should start from the defaults and drop those it does not want, by name
+ * ([[PromptInjectionDetector.defaultPatternNames]] lists them):
+ * {{{
+ * val forStories: Result[PromptInjectionDetector] =
+ *   PromptInjectionDetector.defaults.without("creative_writing", "how_to_dangerous", "extract_data")
+ * }}}
+ *
  * Example usage:
  * {{{
  * // Default: Block on injection detection
@@ -58,6 +73,38 @@ class PromptInjectionDetector(
 ) extends InputGuardrail {
 
   private val logger = LoggerFactory.getLogger(getClass)
+
+  /** The names of this detector's patterns, in order: what [[without]] takes. */
+  def patternNames: Seq[String] = patterns.map(_.name)
+
+  /**
+   * This detector without the patterns named, its sensitivity and action kept (#2923): start from
+   * [[PromptInjectionDetector.defaults]] and drop the ones that do not suit the application's text, rather than
+   * copying the list. `Left(ValidationError)` for a name that is none of this detector's patterns - a misspelt name
+   * would otherwise leave its pattern on - listing the names it has.
+   */
+  def without(names: String*): Result[PromptInjectionDetector] = {
+    val known   = patternNames.toSet
+    val unknown = names.filterNot(known).distinct
+    if (unknown.isEmpty)
+      Right(new PromptInjectionDetector(patterns.filterNot(p => names.contains(p.name)), sensitivity, onFail))
+    else
+      Left(
+        ValidationError.invalid(
+          "names",
+          s"no injection pattern named ${unknown.map(n => s"'$n'").mkString(", ")}; " +
+            s"this detector's patterns are: ${patternNames.mkString(", ")}"
+        )
+      )
+  }
+
+  /** This detector with `value` as its sensitivity. */
+  def withSensitivity(value: InjectionSensitivity): PromptInjectionDetector =
+    new PromptInjectionDetector(patterns, value, onFail)
+
+  /** This detector with `value` as the action it takes on a match. */
+  def withOnFail(value: GuardrailAction): PromptInjectionDetector =
+    new PromptInjectionDetector(patterns, sensitivity, value)
 
   def validate(value: String): Result[String] = {
     val normalizedInput = MatchText.folded(value)
@@ -218,6 +265,27 @@ object InjectionPattern {
 
   import InjectionCategory._
 
+  // What makes a prompt, an instruction or a rule the model's own (#2923): "your instructions", "your system
+  // prompt", "the system prompt", "the initial instructions". "the rules" and "the instructions" alone are anyone's -
+  // a game's, a manual's - and do not match.
+  private val Own =
+    """your\s+(?:(?:own|system|initial|original|hidden|secret|internal|exact|full|complete|entire)\s+)*"""
+  private val Systems =
+    """the\s+(?:(?:exact|full|complete|entire)\s+)?(?:system|initial|original|hidden|secret|developer)\s+"""
+  private val ModelsOwn =
+    raw"""(?:$Own(?:prompts?|instructions?|rules|guidelines|directives?)|$Systems(?:prompts?|instructions?|messages?|rules|guidelines|directives?))\b"""
+
+  // The limits an attack asks the model to drop.
+  // A prompt or instructions named by where they are or how to give them, which is the conversation's own text:
+  // "the instructions above", "the previous instructions", "the prompt so far", "the instructions verbatim". For the
+  // patterns that ask for the text itself (reveal, repeat); "the instructions" alone still names nobody's.
+  private val Positional =
+    """the\s+(?:(?:above|previous|prior|preceding)\s+(?:prompts?|instructions?|rules|guidelines|messages?|text)""" +
+      """|(?:prompts?|instructions?|rules|guidelines)\s+""" +
+      """(?:(?:given\s+|written\s+|stated\s+)?(?:above|before\s+this|so\s+far)|verbatim|word\s+for\s+word))\b"""
+
+  private val Limits = """(?:restrictions?|limitations?|filters?|guardrails?|rules|guidelines|safeguards?|censorship)"""
+
   // Instruction Override patterns (attempts to make AI ignore its instructions)
   private val instructionOverridePatterns = Seq(
     InjectionPattern(
@@ -256,19 +324,33 @@ object InjectionPattern {
   private val roleManipulationPatterns = Seq(
     InjectionPattern(
       "dan_jailbreak",
-      """\bdan\b.*\b(mode|enabled?|act|pretend)\b|\b(act|pretend)\b.*\bdan\b""".r,
+      // the jailbreak's own wording, never the name near a verb: "ask Dan to act as lookout" is a sentence (#2923)
+      ("""\bdan\s+(mode|jailbreak)\b|\b(enable|activate)\s+dan\b|\bdo\s+anything\s+now\b""" +
+        """|\byou\s+are\s+(now|going\s+to\s+(be|act\s+as|pretend\s+to\s+be))\s+dan\b""" +
+        """|\bpretend\s+(that\s+)?you\s*('re|are)\s+dan\b""").r,
       RoleManipulation,
       3
     ),
     InjectionPattern(
       "roleplay_evil",
-      """(roleplay|pretend|act)\s+(as|like|to\s+be)\s+(an?\s+)?(evil|malicious|unethical|uncensored)\b""".r,
+      // an evil model, not an evil character: "pretend to be an evil cultist" is a disguise in a story (#2923)
+      ("""(roleplay|pretend|act)\s+(as|like|to\s+be)\s+(an?\s+)?(""" +
+        """(evil|malicious|unethical)\s+(ai|assistant|chatbot|bot|model|llm|language\s+model|version\s+of\s+yourself)""" +
+        """|(uncensored|unfiltered|unrestricted))\b""").r,
       RoleManipulation,
       3
     ),
     InjectionPattern(
       "no_restrictions",
-      """(without|no|remove)\s+(any\s+)?(all\s+)?(your\s+)?(restrictions?|limitations?|filters?|guardrails?)\b""".r,
+      // the assistant's own limits: "your filters", "safety guidelines", "you have no restrictions", "respond
+      // without restrictions". "remove filters from the pump" names nobody's (#2923)
+      (raw"""\b(without|remove|disable|bypass|drop|lift)\s+(any\s+of\s+|all\s+of\s+|any\s+|all\s+)?your\s+(\w+\s+)?$Limits\b""" +
+        raw"""|\b(without|no|remove|disable|bypass)\s+(any\s+|all\s+)?(safety|content|ethical|moral)\s+$Limits\b""" +
+        raw"""|\byou\s+(now\s+)?(have|are\s+under|are\s+bound\s+by)\s+no\s+$Limits\b""" +
+        raw"""|\b(answer|respond|reply|operate|act|behave)\s+without\s+(any\s+)?$Limits\b""" +
+        raw"""|\b(ai|assistant|chatbot|model)\s+(with|that\s+has)\s+no\s+$Limits\b""" +
+        // a mode is the assistant's: "no restrictions mode"
+        raw"""|\bno\s+$Limits\s+mode\b""").r,
       RoleManipulation,
       3
     ),
@@ -296,25 +378,25 @@ object InjectionPattern {
   private val systemPromptPatterns = Seq(
     InjectionPattern(
       "reveal_prompt",
-      """(reveal|show|display|output|print)\s+(\w+\s+)?(your|the)\s+(system\s+)?(prompt|instructions?)""".r,
+      raw"""\b(reveal|show|display|output|print)\s+(\w+\s+)?(?:$ModelsOwn|$Positional)""".r,
       SystemPromptExtraction,
       3
     ),
     InjectionPattern(
       "tell_me_prompt",
-      """tell\s+me\s+(your|the)\s+(system\s+)?(prompt|instructions?)""".r,
+      raw"""\btell\s+me\s+$ModelsOwn""".r,
       SystemPromptExtraction,
       3
     ),
     InjectionPattern(
       "what_is_prompt",
-      """what\s+(is|are)\s+(your|the)\s+(system\s+)?(prompt|instructions?|rules?)""".r,
+      raw"""\bwhat\s+(is|are|was|were)\s+$ModelsOwn""".r,
       SystemPromptExtraction,
       2
     ),
     InjectionPattern(
       "repeat_instructions",
-      """repeat\s+(your|the|all)\s+(system\s+)?(instructions?|prompt|rules?)""".r,
+      raw"""\brepeat\s+(all\s+(of\s+)?)?(?:$ModelsOwn|$Positional)""".r,
       SystemPromptExtraction,
       3
     ),
@@ -409,6 +491,9 @@ object InjectionPattern {
       codeInjectionPatterns ++
       dataExfiltrationPatterns
 
+  /** The names of the [[default]] patterns, in order: what `PromptInjectionDetector.without` takes. */
+  val defaultNames: Seq[String] = default.map(_.name)
+
   /**
    * Strict patterns (high severity only).
    */
@@ -432,6 +517,18 @@ object PromptInjectionDetector {
    * Create a detector with default settings (high sensitivity, block mode).
    */
   def apply(): PromptInjectionDetector = new PromptInjectionDetector()
+
+  /**
+   * The detector with every default pattern, high sensitivity and block mode, as the start of a chain: drop the
+   * patterns that do not suit the application's text with [[PromptInjectionDetector.without]], then set the rest.
+   * {{{
+   * PromptInjectionDetector.defaults.without("creative_writing").map(_.withSensitivity(InjectionSensitivity.Medium))
+   * }}}
+   */
+  def defaults: PromptInjectionDetector = new PromptInjectionDetector()
+
+  /** The names of the default patterns, in order (`InjectionPattern.defaultNames`). */
+  def defaultPatternNames: Seq[String] = InjectionPattern.defaultNames
 
   /**
    * Create a detector with custom sensitivity.

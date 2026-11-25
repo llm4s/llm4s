@@ -33,7 +33,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "Creates a greeting message",
       schema
     ).withHandler(extractor => extractor.getString("name").map(name => GreetingResult(s"Hello, $name!")))
-      .buildSafe()
+      .build()
   }
 
   def createZeroParamTool(): Result[ToolFunction[EmptyResult]] = {
@@ -43,7 +43,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "ping",
       "Returns success without parameters",
       schema
-    ).withHandler(_ => Right(EmptyResult(success = true))).buildSafe()
+    ).withHandler(_ => Right(EmptyResult(success = true))).build()
   }
 
   // ============ ToolFunction.toolDefinition ============
@@ -114,8 +114,9 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "fail_tool",
       "Always fails",
       schema
-    ).withHandler(extractor => extractor.getDouble("value").flatMap(_ => Left("intentional failure")))
-      .buildSafe()
+    ).withHandler(extractor =>
+      extractor.getDouble("value").flatMap(_ => Left(ToolHandlerError.failed("intentional failure")))
+    ).build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
@@ -173,13 +174,13 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
         .`object`[Map[String, Any]]("Params")
         .withProperty(Schema.property("a", Schema.number("First number")))
         .withProperty(Schema.property("b", Schema.number("Second number")))
-    ).withHandler(handler).buildSafe().fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    ).withHandler(handler).build().fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def sum = adder { args =>
     for {
       a <- args.getDouble("a")
       b <- args.getDouble("b")
-      _ <- Either.cond(a + b < 100, (), "the sum must stay below 100")
+      _ <- Either.cond(a + b < 100, (), ToolHandlerError.failed("the sum must stay below 100"))
     } yield MathResult(a + b)
   }
 
@@ -199,6 +200,43 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
   it should "have its own message reported as HandlerError" in {
     sum.execute(ujson.Obj("a" -> 60, "b" -> 60)) shouldBe
       Left(ToolCallError.HandlerError("add", "the sum must stay below 100"))
+  }
+
+  it should "send the model the same JSON for its own failure as when the error was a String" in {
+    val error = sum.execute(ujson.Obj("a" -> 60, "b" -> 60)).left.toOption.get
+    ToolCallErrorJson.toJson(error).render() shouldBe
+      """{"isError":true,"toolName":"add","message":"failed with error: the sum must stay below 100","errorType":"handler_error"}"""
+  }
+
+  it should "need no declared type when it mixes a getter's error, a helper's message and its own failure" in {
+    def halve(n: Double): Either[String, Double] = Either.cond(n % 2 == 0, n / 2, s"$n is odd")
+    val known                                    = Map(2.0 -> "two")
+    def handler(args: SafeParameterExtractor) =
+      for {
+        a    <- args.getDouble("a")
+        half <- halve(a).left.map(ToolHandlerError.failed)
+        _    <- known.get(half).toRight(ToolHandlerError.failed(s"$half is not known"))
+      } yield MathResult(half)
+    val tool = adder(handler)
+
+    tool.execute(ujson.Obj("a" -> 4)).map(_("result").num) shouldBe Right(2.0)
+    tool.execute(ujson.Obj("a" -> 3)) shouldBe Left(ToolCallError.HandlerError("add", "3.0 is odd"))
+    tool.execute(ujson.Obj("a" -> 8)) shouldBe Left(ToolCallError.HandlerError("add", "4.0 is not known"))
+    tool.execute(ujson.Obj()) shouldBe Left(
+      ToolCallError.InvalidArguments("add", List(ToolParameterError.MissingParameter("a", "number", Nil)))
+    )
+  }
+
+  "ToolHandlerError" should "have a message whichever case it is" in {
+    val errors: List[ToolHandlerError] =
+      List(ToolHandlerError.failed("no such city"), ToolParameterError.NullParameter("city", "string"))
+    errors.map(_.message) shouldBe
+      List("no such city", "parameter 'city' (type: string) is required but value was null")
+  }
+
+  it should "be a Failed that equals another of the same message and can replace it" in {
+    ToolHandlerError.failed("a") shouldBe ToolHandlerError.Failed("a")
+    ToolHandlerError.Failed("a").withMessage("b") shouldBe ToolHandlerError.Failed("b")
   }
 
   it should "have every error of validateRequired listed, one per parameter, in the JSON the model reads" in {
@@ -224,7 +262,11 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "be given the call it runs for, structured errors included" in {
     val keyed = adder(args =>
-      args.call.map(_.idempotencyKey).toRight("no call").flatMap(_ => args.getDouble("a")).map(MathResult(_))
+      args.call
+        .map(_.idempotencyKey)
+        .toRight(ToolHandlerError.failed("no call"))
+        .flatMap(_ => args.getDouble("a"))
+        .map(MathResult(_))
     )
     keyed.execute(ujson.Obj(), ToolCallInfo(ToolCallId("call-1"), IdempotencyKey("key-1"))) shouldBe Left(
       ToolCallError.InvalidArguments("add", List(ToolParameterError.MissingParameter("a", "number", Nil)))
@@ -250,7 +292,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       "Doubles a number",
       schema
     ).withHandler(extractor => extractor.getDouble("value").map(v => MathResult(v * 2)))
-      .buildSafe()
+      .build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
@@ -272,7 +314,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       schema
     )
 
-    val result = builder.buildSafe()
+    val result = builder.build()
     result.isLeft shouldBe true
   }
 
@@ -288,7 +330,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     val builder2 = builder1.withHandler(_ => Right(EmptyResult(success = true)))
 
     builder2
-      .buildSafe()
+      .build()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {

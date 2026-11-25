@@ -118,7 +118,7 @@ A tool's parameters are a schema too. `SchemaOf[A].definition` is the derived sc
 
 ```scala
 import org.llm4s.schema.*
-import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 import upickle.default.{ read, ReadWriter }
 
@@ -137,9 +137,11 @@ enum TemperatureUnit derives SchemaOf, ReadWriter {
 val weatherTool: Result[ToolFunction[String]] =
   ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
     .withHandler { args =>
-      Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
+      Try(read[WeatherQuery](args.params)).toEither.left
+        .map(e => ToolHandlerError.failed(e.getMessage))
+        .map(query => s"Sunny in ${query.city}")
     }
-    .buildSafe()
+    .build()
 ```
 
 The tool is sent in strict mode, so every parameter is required and `unit` is a property that may be `null`. The module's tests check that the parameters the tool sends are the derived schema, and that the handler reads a call.
@@ -171,7 +173,7 @@ val forecastTool: Result[ToolFunction[Forecast]] =
   }
 ```
 
-The result is the same `ToolFunction` that `ToolBuilder` builds, so it goes into a `ToolRegistry`, an agent or an MCP server like any other tool; nothing in `llm4s-core` changes. The function returns `Either[String, R]`, as a `ToolBuilder` handler does: a `Left` is the error the model sees. `Tool.of` itself returns a `Result`, as `buildSafe()` does, because the arguments must be a JSON object: an enum or another type that is not a case class is refused with a `Left`, as is a schema that cannot be built (see [Recursion](#recursion)). The result type needs a `ReadWriter`, not only a writer, because `ToolFunction` requires one.
+The result is the same `ToolFunction` that `ToolBuilder` builds, so it goes into a `ToolRegistry`, an agent or an MCP server like any other tool; nothing in `llm4s-core` changes. The function returns `Either[String, R]`, as a `ToolBuilder` handler does: a `Left` is the error the model sees. `Tool.of` itself returns a `Result`, as `build()` does, because the arguments must be a JSON object: an enum or another type that is not a case class is refused with a `Left`, as is a schema that cannot be built (see [Recursion](#recursion)). The result type needs a `ReadWriter`, not only a writer, because `ToolFunction` requires one.
 
 A call whose arguments do not match the type never reaches your function. Each problem is reported as the `ToolParameterError` that `SafeParameterExtractor` reports for a hand-written tool, and the module's tests compare the two:
 

@@ -1,6 +1,6 @@
 package org.llm4s.metrics
 
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.reliability.ReliabilityMetrics
 import com.typesafe.config.ConfigFactory
 import io.prometheus.metrics.model.registry.PrometheusRegistry
@@ -60,7 +60,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
   final private class Stub(collector: MetricsCollector, reply: () => Result[Completion])
       extends BaseLifecycleLLMClient {
     protected def clientDescription = "stub client"
-    protected def providerName      = "openai"
+    protected def provider          = ProviderId("openai")
     protected def modelName         = ModelName("gpt-4o")
     protected def metrics           = collector
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
@@ -68,8 +68,8 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = completeWithMetrics(reply())
-    def getContextWindow(): Int     = 128000
-    def getReserveCompletion(): Int = 4096
+    def contextWindow: Int     = 128000
+    def reserveCompletion: Int = 4096
   }
 
   private def conversation = Conversation(Seq(UserMessage("hi")))

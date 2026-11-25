@@ -96,8 +96,8 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
   }
 
   /** A `ReliableClient` over `scripted` that waits no time between attempts. */
@@ -117,7 +117,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   // ---- 8. Combining many Results
 
   // guide-block
-  def parseAll(inputs: List[String]): Result[List[Int]] =
+  def parseAll(inputs: List[String]): Result[Seq[Int]] =
     Result.traverse(inputs)(s => Try(s.toInt).toResult)
   // end-guide-block
 

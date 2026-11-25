@@ -149,10 +149,10 @@ final class ReliableClient private (
         )
       }
 
-  override def getContextWindow(): Int     = underlying.getContextWindow()
-  override def getReserveCompletion(): Int = underlying.getReserveCompletion()
-  override def validate(): Result[Unit]    = configError.toLeft(()).flatMap(_ => underlying.validate())
-  override def close(): Unit               = underlying.close()
+  override def contextWindow: Int       = underlying.contextWindow
+  override def reserveCompletion: Int   = underlying.reserveCompletion
+  override def validate(): Result[Unit] = configError.toLeft(()).flatMap(_ => underlying.validate())
+  override def close(): Unit            = underlying.close()
 
   override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = underlying.providerId
 

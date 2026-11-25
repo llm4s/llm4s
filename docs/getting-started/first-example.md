@@ -227,7 +227,7 @@ class ToolExample(client: LLMClient) {
                        "get_weather",
                        "Get current weather for a location",
                        weatherSchema
-                     ).withHandler(extractor => extractor.getString("location").map(getWeather)).buildSafe()
+                     ).withHandler(extractor => extractor.getString("location").map(getWeather)).build()
       toolRegistry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent.builder("weather-agent", client)
         .withTools(toolRegistry)
@@ -378,7 +378,7 @@ class ComprehensiveAgent(client: LLMClient) {
                     "calculate",
                     "Evaluate a mathematical expression",
                     calcSchema
-                  ).withHandler(extractor => extractor.getString("expression").map(calculate)).buildSafe()
+                  ).withHandler(extractor => extractor.getString("expression").map(calculate)).build()
       toolRegistry <- ToolRegistry.of(Seq(calcTool))
       agent <- Agent.builder("calc-agent", client)
         .withTools(toolRegistry)

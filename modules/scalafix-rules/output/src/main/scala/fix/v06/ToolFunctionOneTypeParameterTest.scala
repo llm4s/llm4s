@@ -8,7 +8,7 @@ object ToolFunctionOneTypeParameterTest {
 
   val built = ToolBuilder[String]("weather", "The weather in a city", schema)
     .withHandler(args => args.getString("city"))
-    .buildSafe()
+    .build()
 
   val builder: ToolBuilder[String] =
     ToolBuilder[String]("weather", "The weather in a city", schema)

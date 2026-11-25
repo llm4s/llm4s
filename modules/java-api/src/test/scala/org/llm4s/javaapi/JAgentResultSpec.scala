@@ -331,6 +331,18 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     first should not be agent.continueConversation(first, "two").get()
   }
 
+  it should "report the run's own usage beside the thread's total (#2922)" in {
+    val agent  = jAgentOf(new Scripted(_ => Right(costing("ok")), () => Right(costing("ok"))))()
+    val first  = agent.run("one").get()
+    val second = agent.continueConversation(first, "two").get()
+
+    first.runUsage shouldBe first.usage
+    second.usage.requestCount shouldBe 2L
+    second.runUsage.requestCount shouldBe 1L
+    second.runUsage.totalCost shouldBe new java.math.BigDecimal("0.01")
+    second.runUsage.byModel.keySet.asScala shouldBe Set("m")
+  }
+
   it should "read a turn a guardrail blocked" in {
     val agent = jAgentOf(answering("never"))(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Nil)))
     val r     = agent.run("far too long a query").get()
@@ -393,7 +405,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       "Echoes the input",
       Schema.`object`[Map[String, Any]]("Echo").withProperty(Schema.property("input", Schema.string("Input")))
     ).withHandler(ext => ext.getString("input").map(s => JAgentResultSpec.Echo(s"echoed: $s")))
-      .buildSafe()
+      .build()
       .fold(e => fail(e.message), t => ToolRegistry.of(Seq(t)).toOption.get)
 }
 

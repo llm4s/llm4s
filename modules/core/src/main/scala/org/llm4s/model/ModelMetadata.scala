@@ -240,10 +240,14 @@ object ModelMode {
  * @param supportedReasoningEfforts The [[org.llm4s.llmconnect.model.ReasoningEffort]] levels the model accepts; see
  *   litellm's `supports_<level>_reasoning_effort` keys, read as the parser in this file documents
  * @param supportsThinkingOff Whether the model accepts a request to not think (litellm
- *   `supports_none_reasoning_effort`)
+ *   `supports_none_reasoning_effort`, or `Some(false)` when it has `thinking_always_on`)
  * @param supportsBudgetThinking Whether the model accepts a manual thinking budget. `Some(false)` for a model that
  *   rejects one; litellm has no key for this, so it is set only in `llm4s_model_overrides.json`
  *   (`supports_budget_thinking`), and `None` means unknown
+ * @param supportsSamplingParams Whether the model takes the sampling parameters `temperature`, `top_p` and `top_k`
+ *   (litellm `supports_sampling_params`). `Some(false)` for a model that rejects them, such as Claude Opus 4.7 and
+ *   every Claude 5 model: no client then sends one, and one the caller set is reported dropped. `None` means unknown,
+ *   and the parameters are sent as set
  */
 @Stable
 final case class ModelCapabilities private (
@@ -269,7 +273,8 @@ final case class ModelCapabilities private (
   supportsOutputConfig: Option[Boolean] = None,
   supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
   supportsThinkingOff: Option[Boolean] = None,
-  supportsBudgetThinking: Option[Boolean] = None
+  supportsBudgetThinking: Option[Boolean] = None,
+  supportsSamplingParams: Option[Boolean] = None
 ) {
   def withSupportsFunctionCalling(supportsFunctionCalling: Boolean): ModelCapabilities =
     copy(supportsFunctionCalling = Some(supportsFunctionCalling))
@@ -361,9 +366,24 @@ final case class ModelCapabilities private (
     copy(supportsBudgetThinking = Some(supportsBudgetThinking))
   def withSupportsBudgetThinking(supportsBudgetThinking: Option[Boolean]): ModelCapabilities =
     copy(supportsBudgetThinking = supportsBudgetThinking)
+  def withSupportsSamplingParams(supportsSamplingParams: Boolean): ModelCapabilities =
+    copy(supportsSamplingParams = Some(supportsSamplingParams))
+  def withSupportsSamplingParams(supportsSamplingParams: Option[Boolean]): ModelCapabilities =
+    copy(supportsSamplingParams = supportsSamplingParams)
+
+  /**
+   * Whether the model is known to reject the request parameter `name` (`temperature`, `top_p`, ...): it is one of
+   * [[disallowedParams]], or a sampling parameter of a model that takes none ([[supportsSamplingParams]]).
+   */
+  private[llm4s] def rejectsParam(name: String): Boolean =
+    disallowedParams.exists(_.contains(name)) ||
+      (supportsSamplingParams.contains(false) && ModelCapabilities.SamplingParams.contains(name))
 }
 
 object ModelCapabilities {
+
+  /** The request parameters `supportsSamplingParams = Some(false)` rules out, by their wire names. */
+  private[llm4s] val SamplingParams: Set[String] = Set("temperature", "top_p", "top_k")
 
   /** Creates a [[ModelCapabilities]]. Named arguments are the supported way to construct one. */
   def apply(
@@ -389,7 +409,8 @@ object ModelCapabilities {
     supportsOutputConfig: Option[Boolean] = None,
     supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
     supportsThinkingOff: Option[Boolean] = None,
-    supportsBudgetThinking: Option[Boolean] = None
+    supportsBudgetThinking: Option[Boolean] = None,
+    supportsSamplingParams: Option[Boolean] = None
   ): ModelCapabilities =
     new ModelCapabilities(
       supportsFunctionCalling,
@@ -414,7 +435,8 @@ object ModelCapabilities {
       supportsOutputConfig,
       supportedReasoningEfforts,
       supportsThinkingOff,
-      supportsBudgetThinking
+      supportsBudgetThinking,
+      supportsSamplingParams
     )
 
   implicit val rw: ReadWriter[ModelCapabilities] = macroRW
@@ -477,8 +499,11 @@ object ModelCapabilities {
       supportsAdaptiveThinking = getBool("supports_adaptive_thinking"),
       supportsOutputConfig = getBool("supports_output_config"),
       supportedReasoningEfforts = reasoningEfforts(getBool("supports_reasoning"), getBool),
-      supportsThinkingOff = getBool("supports_none_reasoning_effort"),
-      supportsBudgetThinking = getBool("supports_budget_thinking")
+      // a model that always thinks cannot be asked not to, whether or not the entry also says so by effort level
+      supportsThinkingOff = getBool("supports_none_reasoning_effort")
+        .orElse(Option.when(getBool("thinking_always_on").contains(true))(false)),
+      supportsBudgetThinking = getBool("supports_budget_thinking"),
+      supportsSamplingParams = getBool("supports_sampling_params")
     )
   }
 

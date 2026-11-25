@@ -160,7 +160,7 @@ guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala sour
 guide/agents/middleware.md | 7316ca7315 | skip | sbt build definition, not Scala source
 guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
 guide/agents/index.md | 82582ede43 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
-guide/agents/index.md | 851d4f4d00 | skip | chargeSchema and payments stand for the reader's own schema and payment client
+guide/agents/index.md | f34868d54d | skip | chargeSchema and payments stand for the reader's own schema and payment client
 guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
 guide/agents/index.md | 3f06adc79e | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
 guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace
@@ -254,7 +254,7 @@ guide/agents/multiple-machines.md | cd981b6c6e | with | val registry: io.prometh
 guide/caching.md | 083446a869 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
 guide/caching.md | 5a5eacb3b7 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
 guide/caching.md | 51a461300f | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder; given org.llm4s.model.ModelRegistryService = ???
-guide/caching.md | 01750da568 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 6d6ab2c726 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
 guide/caching.md | f5ee5e39c7 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
 guide/caching.md | 674e919be2 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
 guide/jev.md | 975f60b158 | skip | sbt build definition, not Scala source
@@ -342,7 +342,7 @@ guide/observability/enhanced-tracing-use-cases.md | e152fbd359 | with | import o
 examples/index.md | 02c4ed82ae | with | val result1: org.llm4s.agent.AgentResult = ???
 examples/index.md | d94b0d4970 | with | import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
 examples/index.md | 13eebd740c | with | import java.nio.file.{ Files, Path }; import org.llm4s.agent.graph.{ RunConfig, ThreadId }; import upickle.default.write; val path: Path = ???; val result: org.llm4s.agent.AgentResult = ???; val newThreadId: ThreadId = ???; val loaded: Seq[org.llm4s.llmconnect.model.Message] = ???
-examples/index.md | b2213a1fa7 | with | import org.llm4s.toolapi._; import org.llm4s.types.Result; final case class WeatherResult(temperature: Double) derives upickle.default.ReadWriter; val schema: SchemaDefinition[?] = ???; def weatherHandler(params: SafeParameterExtractor): Either[ToolHandlerError, WeatherResult] = ???
+examples/index.md | fe347038a1 | with | import org.llm4s.toolapi._; import org.llm4s.types.Result; final case class WeatherResult(temperature: Double) derives upickle.default.ReadWriter; val schema: SchemaDefinition[?] = ???; def weatherHandler(params: SafeParameterExtractor): Either[ToolHandlerError, WeatherResult] = ???
 examples/index.md | f027a5e18a | with | import org.llm4s.toolapi._; import org.llm4s.types.Result; val calculatorTool: ToolFunction[?] = ???; val searchTool: ToolFunction[?] = ???
 examples/index.md | 64b82b3d67 | skip | the body of validate is elided with a comment; the guardrails guide shows complete custom guardrails
 examples/index.md | 9e63a7a023 | with | import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail }; import org.llm4s.agent.guardrails.builtin._; val customGuardrail: InputGuardrail = ???

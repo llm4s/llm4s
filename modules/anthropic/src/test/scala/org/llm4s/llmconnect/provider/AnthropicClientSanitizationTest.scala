@@ -52,7 +52,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
   ): Result[ToolFunction[String]] =
     ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
-      .buildSafe()
+      .build()
 
   /**
    * Convert via the real client method and return the input-schema as JSON string
