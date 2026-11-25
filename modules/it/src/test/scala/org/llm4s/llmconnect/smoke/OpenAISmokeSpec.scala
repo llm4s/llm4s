@@ -156,13 +156,15 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(config(key))
   // gpt-5.6-luna reasons. OpenAI reports reasoning tokens, not the reasoning text. max_completion_tokens counts the
-  // reasoning too, so the cap leaves room for the answer after it.
+  // reasoning too, so the cap leaves room for the answer after it. The model skips reasoning for a greeting
+  // (reasoning_tokens 0 at every effort, #2945), so the prompt is a calculation that needs some.
   override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
     OpenAIClient(config(key, ReasoningModel)).map { client =>
       ReasoningSetup(
         client,
-        CompletionOptions(maxTokens = Some(1024)).withReasoning(ReasoningEffort.Low),
-        expectsThinkingText = false
+        CompletionOptions(maxTokens = Some(2048)).withReasoning(ReasoningEffort.Low),
+        expectsThinkingText = false,
+        prompt = "What is the product of the decimal digits of 7^13?"
       )
     }
   }
