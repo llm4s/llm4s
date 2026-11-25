@@ -669,7 +669,8 @@ agent.flatMap(_.run(userInput))
 
 The default patterns are written for requests addressed to the model. Those that ask about a prompt or its rules, or
 that lift restrictions, match only when the text says whose they are - "your instructions", "the system prompt",
-"your filters" - and `dan_jailbreak` needs the jailbreak's own wording ("DAN mode", "do anything now"), so "ask Dan
+"your filters", or, when it asks for the text itself, where it is ("repeat the instructions above", "the previous
+instructions", "verbatim") - and `dan_jailbreak` needs the jailbreak's own wording ("DAN mode", "do anything now"), so "ask Dan
 to act as lookout", "repeat the instructions" and "remove filters from the pump" pass. Some defaults still match
 ordinary sentences of a story or a game, because the words alone are the signal:
 

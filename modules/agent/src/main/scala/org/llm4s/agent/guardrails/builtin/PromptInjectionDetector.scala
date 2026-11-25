@@ -34,7 +34,8 @@ import scala.util.matching.Regex
  *
  * '''Creative and role-play text.''' The default patterns are written for requests addressed to the model, and the
  * ones that ask about a prompt or its rules, or lift restrictions, match only when the text says whose they are
- * ("your instructions", "the system prompt", "your filters"); `dan_jailbreak` needs the jailbreak's own wording
+ * ("your instructions", "the system prompt", "your filters"), or - for the ones that ask for the text itself - where
+ * it is or how to give it ("the instructions above", "the previous instructions", "verbatim"); `dan_jailbreak` needs the jailbreak's own wording
  * ("DAN mode", "do anything now", "you are now DAN"), not the name near a verb (#2923). Some defaults still match
  * ordinary sentences of a story, a game or a technical question, because the words alone are the signal:
  * `creative_writing` and `how_to_dangerous` (a story that mentions a weapon), `extract_data` ("steal the secrets"),
@@ -275,6 +276,14 @@ object InjectionPattern {
     raw"""(?:$Own(?:prompts?|instructions?|rules|guidelines|directives?)|$Systems(?:prompts?|instructions?|messages?|rules|guidelines|directives?))\b"""
 
   // The limits an attack asks the model to drop.
+  // A prompt or instructions named by where they are or how to give them, which is the conversation's own text:
+  // "the instructions above", "the previous instructions", "the prompt so far", "the instructions verbatim". For the
+  // patterns that ask for the text itself (reveal, repeat); "the instructions" alone still names nobody's.
+  private val Positional =
+    """the\s+(?:(?:above|previous|prior|preceding)\s+(?:prompts?|instructions?|rules|guidelines|messages?|text)""" +
+      """|(?:prompts?|instructions?|rules|guidelines)\s+""" +
+      """(?:(?:given\s+|written\s+|stated\s+)?(?:above|before\s+this|so\s+far)|verbatim|word\s+for\s+word))\b"""
+
   private val Limits = """(?:restrictions?|limitations?|filters?|guardrails?|rules|guidelines|safeguards?|censorship)"""
 
   // Instruction Override patterns (attempts to make AI ignore its instructions)
@@ -369,7 +378,7 @@ object InjectionPattern {
   private val systemPromptPatterns = Seq(
     InjectionPattern(
       "reveal_prompt",
-      raw"""\b(reveal|show|display|output|print)\s+(\w+\s+)?$ModelsOwn""".r,
+      raw"""\b(reveal|show|display|output|print)\s+(\w+\s+)?(?:$ModelsOwn|$Positional)""".r,
       SystemPromptExtraction,
       3
     ),
@@ -387,7 +396,7 @@ object InjectionPattern {
     ),
     InjectionPattern(
       "repeat_instructions",
-      raw"""\brepeat\s+(all\s+(of\s+)?)?$ModelsOwn""".r,
+      raw"""\brepeat\s+(all\s+(of\s+)?)?(?:$ModelsOwn|$Positional)""".r,
       SystemPromptExtraction,
       3
     ),
