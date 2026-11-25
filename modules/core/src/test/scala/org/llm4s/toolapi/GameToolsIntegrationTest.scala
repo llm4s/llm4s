@@ -48,7 +48,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     val listInventorySchema: ObjectSchema[Map[String, Any]] = Schema
       .`object`[Map[String, Any]]("Simple returns the list of items in your inventory")
 
-    def listInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryListResult] = {
+    def listInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryListResult] = {
       val _ = params // No parameters needed for list operation
 
       val result = if (playerInventory.isEmpty) {

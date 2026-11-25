@@ -32,7 +32,7 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   private def tool = DateTimeTool.toolSafe.fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def call(params: (String, ujson.Value)*): Either[String, DateTimeResult] =
-    tool.handler(SafeParameterExtractor(ujson.Obj.from(params))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+    tool.handler(SafeParameterExtractor(ujson.Obj.from(params))).left.map(_.message)
 
   private def callOk(params: (String, ujson.Value)*): DateTimeResult =
     call(params: _*).fold(err => fail(s"Expected Right but got Left: $err"), identity)
@@ -381,7 +381,7 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
       .handler(SafeParameterExtractor(ujson.Obj.from(params)))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
       .fold(err => fail(s"Expected Right but got Left: $err"), identity)
 
   "DateTimeTool with a fixed clock" should "report exactly that instant, in UTC by default" in {
@@ -398,7 +398,7 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
       .handler(SafeParameterExtractor(ujson.Obj()))
       .left
-      .map(org.llm4s.toolapi.ToolHandlerError.message)
+      .map(_.message)
       .fold(err => fail(s"Expected Right but got Left: $err"), identity)
     result.iso8601 shouldBe "2026-07-04T00:05:09Z[UTC]"
   }

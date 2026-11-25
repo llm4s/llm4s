@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#streamedchunk-names-its-deltas-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - Java: `LlmException.isRecoverable()` is `isRetryable()`, and `LlmErrorKind` gains `CONTENT_FILTER`, `CONTEXT_LENGTH` and `MODEL_NOT_FOUND`, which an exhaustive `switch` or Kotlin `when` must handle
   ([migration](docs/reference/migration.md#llmexceptionisretryable-and-three-new-llmerrorkinds-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- `AgentResult` has a seventh field, `runUsage`, so a positional pattern on it takes one more binder (the `PositionalPatternsGainFields` Scalafix rule adds it), and `PromptInjectionDetector`'s default `dan_jailbreak`, `roleplay_evil`, `no_restrictions` and prompt-extraction patterns match fewer texts
+  ([migration](docs/reference/migration.md#agentresultrunusage-and-tighter-promptinjectiondetector-defaults-2922-2923)) [#2922](https://github.com/llm4s/llm4s/issues/2922), [#2923](https://github.com/llm4s/llm4s/issues/2923).
 - `LLMClient.getContextWindow()`, `getReserveCompletion()` and `getContextBudget(...)` are `contextWindow`, `reserveCompletion` and `contextBudget(...)`; `ConversationTokenCounter.getTokenBreakdown` is `tokenBreakdown`, `ModelDimensionRegistry.getDimension` is `dimension`, and `ToolBuilder.buildSafe()` is `build()`
   ([migration](docs/reference/migration.md#llmclient-accessors-are-named-for-their-values-and-toolbuilderbuild-2908)) [#2908](https://github.com/llm4s/llm4s/issues/2908).
 - `ThinkingBlock.Opaque.provider` is a `ProviderId`, `BaseLifecycleLLMClient.providerName: String` is `provider: ProviderId`, and `MetricsRecording.withMetrics` takes a `ProviderId` and a `ModelName`; stored JSON is unchanged
@@ -168,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SchemaDefinition` gains `AnyOfSchema` and `RawJsonSchema` (an exhaustive match needs both); `withRange`,
   `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
   properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
-- A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
+- A tool handler returns `Either[ToolHandlerError, R]` (its own failure is `Left(ToolHandlerError.failed("message"))`,
+  not a `String`) and `SafeParameterExtractor`'s getters return
   `Either[ToolParameterError, A]`; `ToolFunction` and `ToolBuilder` have one type parameter, the result's
   (`ToolBuilder[String](...)`); `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
   `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
@@ -525,6 +528,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent runtime
 
 - **Changed** `AgentBuilder.withTools` and `withToolSet` add to the agent's tools, as the middleware, handoff and guardrail setters do, and `build()` returns a `Left` naming a tool defined twice ([migration](docs/reference/migration.md#agentbuilder-tools-are-additive-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- **Added** `AgentResult.runUsage` (`JAgentResult.runUsage()` for Java and Kotlin): what the run that just finished used, beside `usage`, the thread's total; a `resume`'s or `recover`'s is that run's alone [#2922](https://github.com/llm4s/llm4s/issues/2922).
+- **Added** `AgentBuilder.withOutputCheck[O](check)` and `withOutputJsonCheck`: an application check on a structured answer that shares `withOutput`'s corrective retry and ends `GraphError.OutputInvalid` with its problems ([Agents](docs/guide/agents/index.md#a-typed-answer)) [#2920](https://github.com/llm4s/llm4s/issues/2920).
+- **Changed** `PromptInjectionDetector`'s defaults no longer match ordinary narrative sentences ("ask Dan to act as lookout", "repeat the instructions"); `PromptInjectionDetector.defaults.without(names*)` drops default patterns by name and `defaultPatternNames` lists them ([Guardrails](docs/guide/agents/guardrails.md#prompt-injection-protection)) [#2923](https://github.com/llm4s/llm4s/issues/2923).
 - **Changed** `AgentBuilder.withTools(ToolSet)` is `withToolSet` and `Guardrail.validate(value, context)` is `validateIn`, so no `@Experimental` method shares a name with a `@Stable` one, which MiMa would skip with it ([What MiMa Covers](docs/reference/api-stability.md#what-mima-covers)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
   which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).
@@ -586,8 +592,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AnyOfSchema`, so a typed tool's arguments may hold one. **Fixed** a strict schema renders an optional property as
   nullable instead of dropping `required = false`
   ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
-- **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
-  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`; `ToolFunction[R]`
+- **Changed** a tool handler returns `Either[ToolHandlerError, R]`, a sealed trait Java and Scala 2.13 callers can read:
+  a getter's `ToolParameterError` is reported as `ToolCallError.InvalidArguments` with each parameter listed, the tool's
+  own `ToolHandlerError.failed(message)` as `HandlerError`; `ToolFunction[R]`
   and `ToolBuilder[R]` drop the arguments type parameter nothing read (Scalafix rule `ToolFunctionOneTypeParameter`)
   ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive

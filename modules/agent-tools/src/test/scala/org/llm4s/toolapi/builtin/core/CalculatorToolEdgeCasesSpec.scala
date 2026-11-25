@@ -43,10 +43,10 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   private def calc(operation: String, a: Double, b: Option[Double] = None): Either[String, CalculatorResult] =
-    tool.handler(SafeParameterExtractor(params(operation, a, b))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+    tool.handler(SafeParameterExtractor(params(operation, a, b))).left.map(_.message)
 
   private def raw(p: ujson.Value): Either[String, CalculatorResult] =
-    tool.handler(SafeParameterExtractor(p)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+    tool.handler(SafeParameterExtractor(p)).left.map(_.message)
 
   private def ok(operation: String, a: Double, b: Option[Double] = None): CalculatorResult =
     calc(operation, a, b).fold(err => fail(s"Expected Right for $operation($a, $b) but got Left: $err"), identity)

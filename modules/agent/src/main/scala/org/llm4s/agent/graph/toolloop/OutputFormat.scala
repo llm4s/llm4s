@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.model.{ OutputCorrection, ResponseFormat }
 import org.llm4s.toolapi.SchemaDefinition
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
-import upickle.default.ReadWriter
+import upickle.default.{ ReadWriter, Reader }
 
 import scala.util.Try
 
@@ -19,9 +19,21 @@ import scala.util.Try
  * `responseFormat` (see `ModelStep.fromClient`), the system prompt always states it, and an answer is checked inside the model step: an invalid one is retried once,
  * and a second ends the turn with [[org.llm4s.agent.graph.GraphError.OutputInvalid]]. Build one with
  * [[OutputFormat.of]]; `AgentBuilder.withOutput` does.
+ *
+ * An answer that matches the schema and reads as the type then goes through the format's application checks
+ * (`AgentBuilder.withOutputCheck`, #2920), in the order they were added: each returns the answer's problems, and any
+ * problem makes the answer invalid exactly as a schema error does, in the same retry.
  */
 @Experimental
-final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value => Option[String]):
+final class OutputFormat private (
+  val schema: ujson.Value,
+  reads: ujson.Value => Option[String],
+  checks: Vector[ujson.Value => Seq[String]]
+):
+
+  /** This format with `more` added after its application checks. */
+  private[agent] def withChecks(more: Vector[ujson.Value => Seq[String]]): OutputFormat =
+    new OutputFormat(schema, reads, checks ++ more)
 
   /** The `responseFormat` a model call of the agent that offers no tools is made with. */
   def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(schema)
@@ -50,8 +62,9 @@ final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value =>
 
   /**
    * `answer` checked: its JSON - with a surrounding code fence or prose stripped - when it parses, is not
-   * `null`, matches the schema and reads as the output type; otherwise its problems, at most
-   * [[OutputFormat.MaxErrors]], each cut to [[OutputFormat.MaxErrorChars]].
+   * `null`, matches the schema, reads as the output type and passes every application check; otherwise its
+   * problems, at most [[OutputFormat.MaxErrors]], each cut to [[OutputFormat.MaxErrorChars]]. The application checks
+   * run only on an answer the schema and the type accept, all of them, so the model is told every problem at once.
    */
   private[toolloop] def check(answer: String, validator: ToolArgumentValidator): Either[Vector[String], ujson.Value] =
     OutputFormat
@@ -60,8 +73,12 @@ final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value =>
       .map(Vector(_))
       .flatMap { json =>
         val problems = validator.validate(schema, json) match
-          case none if none.isEmpty => reads(json).toVector
-          case some                 => some
+          case none if none.isEmpty =>
+            reads(json) match
+              case Some(unreadable) => Vector(unreadable)
+              // each check gets its own copy: ujson values are mutable, and the answer stored is the one validated
+              case None => checks.flatMap(check => check(ujson.copy(json)))
+          case some => some
         Either.cond(problems.isEmpty, json, problems)
       }
       .left
@@ -96,8 +113,21 @@ object OutputFormat:
       json =>
         Try(upickle.default.read[O](json)).failed.toOption.map(e =>
           s"$$: does not read as the output type: ${Option(e.getMessage).getOrElse(e.toString)}"
-        )
+        ),
+      Vector.empty
     )
+
+  /**
+   * An application check on the answer read as `O` (`AgentBuilder.withOutputCheck`): `check`'s problems, or - when
+   * the answer does not read as `O` - that as its one problem, so a check typed apart from the format's own type
+   * still sends the model a correction rather than failing the step.
+   */
+  private[agent] def typedCheck[O: Reader](check: O => Seq[String]): ujson.Value => Seq[String] =
+    json =>
+      Try(upickle.default.read[O](json)).toEither match
+        case Right(value) => check(value)
+        case Left(e) =>
+          Seq(s"$$: does not read as the type its check expects: ${Option(e.getMessage).getOrElse(e.toString)}")
 
   /** The JSON of `answer`, with a code fence or prose round it stripped; `null` and non-JSON are refused. */
   private[agent] def parse(answer: String): Either[String, ujson.Value] =

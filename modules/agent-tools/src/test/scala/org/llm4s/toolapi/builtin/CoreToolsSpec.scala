@@ -15,7 +15,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             dateTime => {
@@ -35,7 +35,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             dateTime => dateTime.timezone shouldBe "America/New_York"
@@ -51,7 +51,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => err should include("timezone"),
             result => fail(s"Expected Left but got Right: $result")
@@ -67,7 +67,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 8.0
@@ -83,7 +83,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 6.0
@@ -99,7 +99,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 42.0
@@ -115,7 +115,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 5.0
@@ -131,7 +131,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => err should include("zero"),
             result => fail(s"Expected Left but got Right: $result")
@@ -147,7 +147,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 4.0
@@ -163,7 +163,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => err should include("negative"),
             result => fail(s"Expected Left but got Right: $result")
@@ -179,7 +179,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 8.0
@@ -195,7 +195,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             calcResult => calcResult.result shouldBe 30.0
@@ -211,7 +211,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => err should include("Unknown operation"),
             result => fail(s"Expected Left but got Right: $result")
@@ -227,7 +227,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             uuidResult => {
@@ -247,7 +247,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             uuidResult => {
@@ -266,7 +266,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             uuidResult => {
@@ -285,7 +285,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             uuidResult => {
@@ -307,7 +307,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             jsonResult => {
@@ -329,7 +329,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => err should include("Invalid JSON"),
             result => fail(s"Expected Left but got Right: $result")
@@ -348,7 +348,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             jsonResult => {
@@ -371,7 +371,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             jsonResult => {
@@ -394,7 +394,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             jsonResult => {
@@ -416,7 +416,7 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
         tool
           .handler(SafeParameterExtractor(params))
           .left
-          .map(org.llm4s.toolapi.ToolHandlerError.message)
+          .map(_.message)
           .fold(
             err => fail(s"Expected Right but got Left: $err"),
             jsonResult => {

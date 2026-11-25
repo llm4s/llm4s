@@ -124,7 +124,9 @@ object HTTPTool {
         headersOpt  = withIdempotencyKey(extractHeaders(extractor), method, extractor.call)
         bodyOpt     = extractor.getString("body").toOption
         contentType = extractor.getString("content_type").toOption
-        result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config)
+        result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config).left.map(
+          ToolHandlerError.failed
+        )
       } yield result
     }.build()
 

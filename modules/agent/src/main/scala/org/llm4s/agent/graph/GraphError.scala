@@ -73,8 +73,9 @@ object GraphError:
   /**
    * An agent's answer did not match its response format (`AgentBuilder.withOutput`, design 4.26) after one
    * corrective retry: the turn ended as a Block, removed from the thread, with both model calls in its usage.
-   * `errors` are the second answer's problems, each prefixed with a JSON path - at most 20, each at most 300
-   * characters. They quote the answer, so `message`, which durable events record, gives only their count.
+   * `errors` are the second answer's problems - at most 20, each at most 300 characters: the schema's, each
+   * prefixed with a JSON path, or those an application check returned (`AgentBuilder.withOutputCheck`), as it worded
+   * them. They quote the answer, so `message`, which durable events record, gives only their count.
    */
   final case class OutputInvalid(errors: Vector[String]) extends GraphError:
     private val problems = if errors.size == 1 then "1 problem" else s"${errors.size} problems"

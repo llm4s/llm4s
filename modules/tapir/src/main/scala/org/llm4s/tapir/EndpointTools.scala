@@ -3,7 +3,7 @@ package org.llm4s.tapir
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.tapir.Inputs.Step
-import org.llm4s.toolapi.{ ObjectSchema, ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ ObjectSchema, ToolFunction, ToolHandlerError, ToolRegistry }
 import org.llm4s.types.Result
 import sttp.client3.{ asStringAlways, basicRequest, Identity, Response, SttpBackend }
 import sttp.model.{ Method, QueryParams, Uri }
@@ -78,7 +78,14 @@ object EndpointTools {
       case Right(steps) if nameError.isEmpty =>
         val schema = ObjectSchema[ujson.Value](description(tool), steps.collect(Inputs.paramOf).map(_.property))
         val call   = new Call(tool, steps, baseUri, backend)
-        Right(ToolFunction[ujson.Value](tool.name, description(tool), schema, args => call(args.params)))
+        Right(
+          ToolFunction[ujson.Value](
+            tool.name,
+            description(tool),
+            schema,
+            args => call(args.params).left.map(ToolHandlerError.failed)
+          )
+        )
       case Right(_)      => Left(nameError.map(e => s"${tool.name}: $e"))
       case Left(reasons) => Left((nameError ++ reasons).map(e => s"${tool.name}: $e"))
     }

@@ -1,6 +1,6 @@
 package org.llm4s.samples.chat.tui
 
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 import upickle.default.{ macroRW, ReadWriter => RW }
 
@@ -102,8 +102,8 @@ object ChatTuiTool:
       .withHandler { params =>
         for {
           rawPath <- params.getString("path")
-          target  <- safeResolve(workspaceRoot, rawPath)
-          result  <- readBounded(target, rawPath)
+          target  <- safeResolve(workspaceRoot, rawPath).left.map(ToolHandlerError.failed)
+          result  <- readBounded(target, rawPath).left.map(ToolHandlerError.failed)
         } yield result
       }
       .build()

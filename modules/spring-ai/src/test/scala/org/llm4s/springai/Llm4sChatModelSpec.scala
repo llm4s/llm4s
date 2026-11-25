@@ -205,7 +205,9 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
 
     function.execute(ujson.Obj("city" -> "Oslo")) shouldBe Right(ujson.Str("sunny"))
     tool.inputs shouldBe Vector("""{"city":"Oslo"}""")
-    function.handler(SafeParameterExtractor(ujson.Obj("city" -> "boom"))) shouldBe Left("tool failed")
+    function.handler(SafeParameterExtractor(ujson.Obj("city" -> "boom"))).left.map(_.message) shouldBe Left(
+      "tool failed"
+    )
   }
 
   it should "send no tools when the options carry none" in {

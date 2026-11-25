@@ -3,6 +3,7 @@ rule = PositionalPatternsGainFields
 */
 package fix.v06
 
+import org.llm4s.agent.AgentResult
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.agent.graph.toolloop.TurnState
@@ -57,5 +58,10 @@ object PositionalPatternsGainFieldsTest {
   // gained completionOptions since 0.6.0 (#2715)
   def topK(config: RAGConfig): Int = config match {
     case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
+  }
+
+  // gained runUsage since 0.6.0 (#2922)
+  def requests(result: AgentResult): Long = result match {
+    case AgentResult(_, _, _, _, _, usage) => usage.requestCount
   }
 }

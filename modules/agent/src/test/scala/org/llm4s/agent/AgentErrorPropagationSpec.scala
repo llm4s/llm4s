@@ -161,7 +161,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   private def failingTool(name: String, handler: => Either[String, EchoResult]) = {
     val schema = Schema.`object`[Map[String, Any]]("Parameters").withRequiredField("input", Schema.string("Value"))
     ToolBuilder[EchoResult](name, "A tool that fails", schema)
-      .withHandler(_ => handler)
+      .withHandler(_ => handler.left.map(org.llm4s.toolapi.ToolHandlerError.failed))
       .build()
       .fold(e => fail(s"tool failed to build: $e"), identity)
   }

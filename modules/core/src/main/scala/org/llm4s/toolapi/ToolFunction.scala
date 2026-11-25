@@ -19,7 +19,7 @@ import upickle.default._
  * @param schema      Parameter schema describing the expected JSON arguments
  * @param handler     Business logic; receives a [[SafeParameterExtractor]] and returns `Right(result)`, or
  *                    `Left` of a [[ToolHandlerError]]: a `ToolParameterError` from a getter when an argument is
- *                    at fault, or a message when the tool itself fails
+ *                    at fault, or a `ToolHandlerError.Failed` when the tool itself fails
  * @tparam R Return type, must have a uPickle `ReadWriter`
  */
 @Stable
@@ -95,8 +95,8 @@ final case class ToolFunction[R: ReadWriter] private (
   // An argument at fault is InvalidArguments, with each parameter error listed; the tool's own message HandlerError.
   private def handle(extractor: SafeParameterExtractor): Either[ToolCallError, ujson.Value] =
     handler(extractor) match {
-      case Right(result)         => Right(writeJs(result))
-      case Left(message: String) => Left(ToolCallError.HandlerError(name, message))
+      case Right(result)                         => Right(writeJs(result))
+      case Left(failed: ToolHandlerError.Failed) => Left(ToolCallError.HandlerError(name, failed.message))
       case Left(error: ToolParameterError) =>
         Left(ToolCallError.InvalidArguments(name, ToolCallErrorJson.flattenErrors(List(error))))
     }

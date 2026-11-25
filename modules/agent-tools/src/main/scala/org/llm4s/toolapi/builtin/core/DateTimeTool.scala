@@ -124,8 +124,10 @@ object DateTimeTool {
         timezoneParam <- extractor.getOptionalString("timezone")
         formatParam   <- extractor.getOptionalString("format")
         timezone = timezoneParam.getOrElse("UTC")
-        format <- parseFormat(formatParam.getOrElse("iso"))
-        zoneId <- Try(ZoneId.of(timezone)).toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
+        format <- parseFormat(formatParam.getOrElse("iso")).left.map(ToolHandlerError.failed)
+        zoneId <- Try(ZoneId.of(timezone)).toEither.left.map(e =>
+          ToolHandlerError.failed(s"Invalid timezone '$timezone': ${e.getMessage}")
+        )
       } yield describe(ZonedDateTime.ofInstant(clock.instant(), zoneId), timezone, format)
     }.build()
 

@@ -36,6 +36,7 @@ public final class JAgentResult {
   private final JAgentStatus status;
   private final List<JMessage> messages;
   private final JUsageSummary usage;
+  private final JUsageSummary runUsage;
 
   JAgentResult(
       String threadId,
@@ -43,13 +44,15 @@ public final class JAgentResult {
       String activeAgent,
       JAgentStatus status,
       List<JMessage> messages,
-      JUsageSummary usage) {
+      JUsageSummary usage,
+      JUsageSummary runUsage) {
     this.threadId = threadId;
     this.runId = runId;
     this.activeAgent = activeAgent;
     this.status = status;
     this.messages = messages;
     this.usage = usage;
+    this.runUsage = runUsage;
   }
 
   /** The conversation's thread. */
@@ -77,9 +80,20 @@ public final class JAgentResult {
     return messages;
   }
 
-  /** Token usage and cost accumulated over the thread, per model. */
+  /**
+   * The thread's total: token usage and cost accumulated over every run the thread has had, this one included,
+   * per model. What this run cost is {@link #runUsage()}.
+   */
   public JUsageSummary usage() {
     return usage;
+  }
+
+  /**
+   * What this run added to {@link #usage()}: the model calls it made and committed, per model. A
+   * {@code resume}'s or a {@code recover}'s are that run's alone, not the turn's earlier runs'.
+   */
+  public JUsageSummary runUsage() {
+    return runUsage;
   }
 
   /**
@@ -98,12 +112,13 @@ public final class JAgentResult {
         && Objects.equals(activeAgent, that.activeAgent)
         && status.equals(that.status)
         && messages.equals(that.messages)
-        && usage.equals(that.usage);
+        && usage.equals(that.usage)
+        && runUsage.equals(that.runUsage);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(threadId, runId, activeAgent, status, messages, usage);
+    return Objects.hash(threadId, runId, activeAgent, status, messages, usage, runUsage);
   }
 
   @Override
