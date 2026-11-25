@@ -1,6 +1,7 @@
 package org.llm4s.http
 
 import org.llm4s.error.{ NetworkError, ServiceError, TimeoutError, UnknownError, ValidationError }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.http.HttpResponse.*
 import org.scalatest.flatspec.AnyFlatSpec
@@ -209,7 +210,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     result match
       case Left(err: ServiceError) =>
         err.status shouldBe 404
-        err.provider shouldBe "test-provider"
+        err.provider shouldBe ProviderId("test-provider")
       case Left(err) =>
         fail(s"Expected ServiceError, got: ${err.message}")
       case Right(ok) =>

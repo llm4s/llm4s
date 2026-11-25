@@ -11,6 +11,7 @@ import org.llm4s.error.{
   TroubleshootingLinks,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.http.HttpHeaders
 import org.llm4s.util.BoundedJson
 
@@ -73,17 +74,17 @@ object HttpErrorMapper {
   ): LLMError = {
     val details = extractErrorDetails(body, statusCode, provider)
     val mapped: LLMError = statusCode match {
-      case 401 | 403 => AuthenticationError(provider, details, statusCode.toString)
+      case 401 | 403 => AuthenticationError(ProviderId(provider), details, statusCode.toString)
       case 429 =>
         (retryAfter(headers, clock) match {
-          case Some(delay) => RateLimitError(provider, delay)
-          case None        => RateLimitError(provider)
+          case Some(delay) => RateLimitError(ProviderId(provider), delay)
+          case None        => RateLimitError(ProviderId(provider))
         }).withHttpStatus(statusCode)
       case s =>
         typed(s, errorCodes(body), details, provider).getOrElse {
           if (s == 400) ValidationError("request", details).withHttpStatus(s)
           else {
-            val error = ServiceError(s, provider, details)
+            val error = ServiceError(s, ProviderId(provider), details)
             retryAfter(headers, clock).fold(error)(error.withRetryAfter)
           }
         }
@@ -103,9 +104,9 @@ object HttpErrorMapper {
   private[llm4s] def typed(status: Int, codes: Set[String], message: String, provider: String): Option[LLMError] =
     if (ProviderErrorSignals.isContextLength(status, codes, message)) {
       val (limit, requested) = ProviderErrorSignals.tokens(message)
-      Some(ContextLengthError(provider, message).withTokens(limit, requested).withHttpStatus(status))
+      Some(ContextLengthError(ProviderId(provider), message).withTokens(limit, requested).withHttpStatus(status))
     } else if (ProviderErrorSignals.isModelNotFound(status, codes, message))
-      Some(ModelNotFoundError(provider, message).withHttpStatus(status))
+      Some(ModelNotFoundError(ProviderId(provider), message).withHttpStatus(status))
     else None
 
   /** `error` naming `model` as the model the request asked for, when it is a [[org.llm4s.error.ModelNotFoundError]]. */

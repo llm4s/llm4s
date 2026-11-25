@@ -354,7 +354,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         ) match
           case Left(e: org.llm4s.error.ContentFilteredError) =>
             e.promptBlocked shouldBe true
-            e.provider shouldBe "Azure OpenAI"
+            e.provider shouldBe ProviderId("azure")
             e.reason shouldBe "content_filter"
           case other => fail(s"expected a ContentFilteredError, got $other")
       }

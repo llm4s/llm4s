@@ -10,6 +10,7 @@ import org.llm4s.error.{ EmbeddingError, Safety }
 import org.llm4s.security.NetworkSecurity
 import org.llm4s.syntax.{ toLLMError, toResult }
 import org.llm4s.trace.model.TraceId
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 object ResultSyntaxMovedTest {
   def parse(raw: String): Result[Int] = Try(raw.toInt).toResult
@@ -27,7 +28,7 @@ object ResultSyntaxMovedTest {
   def vocabulary: TokenizerId = TokenizerId.CL100K_BASE
 
   def refused(usage: EmbeddingUsage): EmbeddingError =
-    EmbeddingError(Some("401"), s"refused after ${usage.totalTokens} tokens", "openai")
+    EmbeddingError(Some("401"), s"refused after ${usage.totalTokens} tokens", ProviderId("openai"))
 
   def trace(raw: String): TraceId = TraceId(raw)
 }

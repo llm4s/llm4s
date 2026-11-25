@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -37,7 +38,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "print only text: not empty pieces, tool-call chunks, finish reasons or reasoning" in {
     val client = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Left(ServiceError(500, "test", "the recipe should stream"))
+        Left(ServiceError(500, ProviderId("test"), "the recipe should stream"))
       def streamComplete(conversation: Conversation, options: CompletionOptions)(onChunk: StreamedChunk => Unit) = {
         onChunk(StreamedChunk("s", None, thinkingDelta = Some("thinking...")))
         onChunk(StreamedChunk("s", Some("Hello")))
@@ -63,7 +64,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "return the client's error" in {
-    val failing = new ScriptedClient((_, _) => Left(ServiceError(503, "scripted", "unavailable")))
+    val failing = new ScriptedClient((_, _) => Left(ServiceError(503, ProviderId("scripted"), "unavailable")))
 
     StreamingRecipe.stream(failing, "Hi", _ => ()).left.value shouldBe a[ServiceError]
   }

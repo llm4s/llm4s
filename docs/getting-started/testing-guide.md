@@ -232,6 +232,7 @@ import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -242,14 +243,14 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   "Agent" should "handle rate limiting" in {
     // A provider error ends the run as GraphError.NodeFailed, carrying the client's error as its cause
-    runWith(Reply.failure(RateLimitError("Rate limit exceeded"))) match {
+    runWith(Reply.failure(RateLimitError(ProviderId("openai")))) match {
       case Left(GraphError.NodeFailed(_, _, _: RateLimitError)) => succeed
       case other                                               => fail(s"Expected RateLimitError but got: $other")
     }
   }
 
   it should "handle authentication errors" in {
-    runWith(Reply.failure(AuthenticationError("openai", "Invalid API key", "401"))) match {
+    runWith(Reply.failure(AuthenticationError(ProviderId("openai"), "Invalid API key", "401"))) match {
       case Left(GraphError.NodeFailed(_, _, _: AuthenticationError)) => succeed
       case other => fail(s"Expected AuthenticationError but got: $other")
     }

@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -91,17 +92,17 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
     val text    = ContentPart.document(MediaSource.Inline(bytes), MediaType.PlainText).value
     Seq(pdfUrl, foreign, text).foreach { part =>
       sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
-        UnsupportedContentPartError("openai", part.kind, "user")
+        UnsupportedContentPartError(ProviderId("openai"), part.kind, "user")
     }
     sent(toolResult(ToolMessage(Vector(imageInline), ToolCallId("c1")))).left.value shouldBe
-      UnsupportedContentPartError("openai", imageInline.kind, "tool")
+      UnsupportedContentPartError(ProviderId("openai"), imageInline.kind, "tool")
   }
 
   it should "refuse an image URL it cannot fetch, a gs:// or s3:// one, before sending" in {
     Seq("gs://bucket/a.png", "s3://bucket/a.png").foreach { u =>
       val part = ContentPart.image(MediaSource.Url(URI.create(u)), MediaType.Png).value
       sent(Conversation(Seq(UserMessage(Vector(part))))).left.value shouldBe
-        UnsupportedContentPartError("openai", part.kind, "user")
+        UnsupportedContentPartError(ProviderId("openai"), part.kind, "user")
     }
   }
 

@@ -2,6 +2,7 @@ package org.llm4s.testkit
 
 import org.llm4s.error.{ RateLimitError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, ToolCall, ToolCallId }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -65,7 +66,7 @@ class ReplySpec extends AnyFlatSpec with Matchers {
   }
 
   "Reply.failure" should "carry the error and report itself as a failure" in {
-    val error = RateLimitError("openai")
+    val error = RateLimitError(ProviderId("openai"))
     val reply = Reply.failure(error)
     reply.failure shouldBe Some(error)
     reply.isFailure shouldBe true

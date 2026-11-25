@@ -2,6 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
@@ -117,7 +118,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
   it should "wrap the run's failure, carrying the ServiceError, in LlmException" in {
     val underlying = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
-        Left(ServiceError(503, "test-provider", "rate limited"))
+        Left(ServiceError(503, ProviderId("test-provider"), "rate limited"))
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)

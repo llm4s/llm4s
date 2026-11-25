@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.{ HttpErrorMapper, PartEncoding }
 import org.llm4s.media.MediaSource
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.flatspec.AnyFlatSpec
@@ -141,7 +142,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
     }.getMessage should include("UnknownError")
     intercept[TestFailedException] {
       assertProviderRejectionIsTyped(openAIError)(url =>
-        new Rejected(url, (status, _) => org.llm4s.error.ServiceError(status, "reference", "failed"))
+        new Rejected(url, (status, _) => org.llm4s.error.ServiceError(status, ProviderId("reference"), "failed"))
       )
     }.getMessage should include("without the provider's message")
   }

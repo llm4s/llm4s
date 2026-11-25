@@ -166,7 +166,11 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
               // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
               case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
               case e =>
-                EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai")
+                EmbeddingError(
+                  code = None,
+                  message = s"HTTP request failed: ${e.message}",
+                  provider = ProviderId("openai")
+                )
             }
         )
 
@@ -191,13 +195,17 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
             }.toEither.left
               .map { ex =>
                 logger.error(s"[OpenAIEmbeddingProvider] Parse error: ${ex.getMessage}")
-                EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
+                EmbeddingError(
+                  code = None,
+                  message = s"Parsing error: ${ex.getMessage}",
+                  provider = ProviderId("openai")
+                )
               }
           case status =>
             if (status == 401) token.foreach(rejected)
             val body = Redaction.safeBody(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
-            Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))
+            Left(EmbeddingError(code = Some(status.toString), message = body, provider = ProviderId("openai")))
         }
       }
     }

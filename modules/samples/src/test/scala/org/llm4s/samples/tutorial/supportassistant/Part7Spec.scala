@@ -6,6 +6,7 @@ import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome, PrometheusMetrics 
 import org.llm4s.samples.tutorial.supportassistant.solutions.Part7Solution
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -68,13 +69,15 @@ class Part7Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   }
 
   it should "fail when the provider does" in {
-    respond(agentAnswering(Reply.failure(RateLimitError("openai"))))("When will my order ship?").isLeft shouldBe true
+    respond(agentAnswering(Reply.failure(RateLimitError(ProviderId("openai")))))(
+      "When will my order ship?"
+    ).isLeft shouldBe true
   }
 
   "Part 7's endpoint" should "answer a POST with JSON, and refuse anything else" in {
     val responses: Map[String, Result[ChatResponse]] = Map(
       "hello" -> Right(ChatResponse(answer, "answered")),
-      "down"  -> Left(RateLimitError("openai"))
+      "down"  -> Left(RateLimitError(ProviderId("openai")))
     )
     val server = serve(0)(message => responses(message)).toOption.get
     val url    = s"http://127.0.0.1:${server.getAddress.getPort}/chat"
@@ -147,11 +150,11 @@ class Part7Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
     val ok      = Right(ChatResponse(answer, "answered"))
     val chat = timed(metrics) {
       case "slow" => Thread.sleep(20); ok
-      case _      => Left(RateLimitError("openai"))
+      case _      => Left(RateLimitError(ProviderId("openai")))
     }
 
     chat("slow") shouldBe ok
-    chat("down") shouldBe Left(RateLimitError("openai"))
+    chat("down") shouldBe Left(RateLimitError(ProviderId("openai")))
 
     metrics.observed.map(_._1) shouldBe Seq(Part7Exercise.ReplyDuration, Part7Exercise.ReplyDuration)
     metrics.observed.map(_._2) shouldBe Seq(Seq("answered"), Seq("error"))

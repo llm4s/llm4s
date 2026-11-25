@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -33,7 +34,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   /** Stub provider: never hits network. */
   private val stubClient = EmbeddingClient(new EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] =
-      Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", "stub"))
+      Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", ProviderId("stub")))
   })
 
   private def experimentalOn: Boolean =

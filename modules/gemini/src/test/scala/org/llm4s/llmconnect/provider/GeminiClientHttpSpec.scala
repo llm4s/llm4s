@@ -739,9 +739,9 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val chunks      = ListBuffer.empty[StreamedChunk]
     noContentMessage(
       completeOf(body)
-    ) shouldBe "Gemini stopped the reply after 3 characters of text: finishReason SAFETY"
+    ) shouldBe "gemini stopped the reply after 3 characters of text: finishReason SAFETY"
     noContentMessage(streamOf(sse, chunks += _)) shouldBe
-      "Gemini stopped the reply after 3 characters of text: finishReason SAFETY"
+      "gemini stopped the reply after 3 characters of text: finishReason SAFETY"
     chunks.flatMap(_.contentDelta) shouldBe List("Hel") // what was delivered stays delivered
   }
 

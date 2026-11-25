@@ -633,7 +633,9 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     // The key does not look like a token, so only the resolved config's own key can redact it.
     val key = "plain-conf-held-credential"
     val provider =
-      new AsyncAndHealthSpec.FakeProvider(_ => Left(ServiceError(503, "fixturechat", s"rejected credential $key")))
+      new AsyncAndHealthSpec.FakeProvider(_ =>
+        Left(ServiceError(503, ProviderId("fixturechat"), s"rejected credential $key"))
+      )
     val settings = HealthSettings
       .from(new Llm4sProperties, env("llm4s.default-provider" -> "conf-fixture"))
       .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
@@ -758,7 +760,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       "conf-gateway" -> Seq("conf-held-header-token", "conf-held-tenant-credential")
     ).foreach { case (section, credentials) =>
       val message  = s"rejected ${credentials.mkString(" and ")}"
-      val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(ServiceError(503, "x", message)))
+      val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(ServiceError(503, ProviderId("x"), message)))
       val settings = HealthSettings
         .from(new Llm4sProperties, env("llm4s.default-provider" -> section))
         .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))

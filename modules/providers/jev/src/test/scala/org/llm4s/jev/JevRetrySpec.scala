@@ -1,6 +1,7 @@
 package org.llm4s.jev
 
 import org.llm4s.error.*
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -33,7 +34,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
       }
   }
 
-  private val unavailable: Result[String] = Left(ServiceError(503, "jev", "down"))
+  private val unavailable: Result[String] = Left(ServiceError(503, ProviderId("jev"), "down"))
 
   // ---- the schedule ----
 
@@ -102,28 +103,31 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
   it should "wait the delay a rate limit asks for instead of the computed one" in {
     val h = new Harness(JevRetryPolicy.default)
 
-    h.run(Left(RateLimitError("jev", 7.seconds)), Right("ok")) shouldBe Right("ok")
+    h.run(Left(RateLimitError(ProviderId("jev"), 7.seconds)), Right("ok")) shouldBe Right("ok")
     h.slept.toSeq shouldBe Seq(7.seconds)
   }
 
   it should "wait the delay a failed service asks for" in {
     val h = new Harness(JevRetryPolicy.default)
 
-    h.run(Left(ServiceError(529, "jev", "overloaded").withRetryAfter(2.seconds)), Right("ok")) shouldBe Right("ok")
+    h.run(
+      Left(ServiceError(529, ProviderId("jev"), "overloaded").withRetryAfter(2.seconds)),
+      Right("ok")
+    ) shouldBe Right("ok")
     h.slept.toSeq shouldBe Seq(2.seconds)
   }
 
   it should "use the computed delay when a rate limit names none" in {
     val h = new Harness(JevRetryPolicy.default)
 
-    h.run(Left(RateLimitError("jev")), Right("ok")) shouldBe Right("ok")
+    h.run(Left(RateLimitError(ProviderId("jev"))), Right("ok")) shouldBe Right("ok")
     h.slept.toSeq shouldBe Seq(500.millis)
   }
 
   // ---- the budget ----
 
   it should "not start a retry whose delay would reach the budget" in {
-    val limited = Left(RateLimitError("jev", 40.seconds))
+    val limited = Left(RateLimitError(ProviderId("jev"), 40.seconds))
     val h       = new Harness(JevRetryPolicy.default)
 
     h.run(limited) shouldBe limited
@@ -133,7 +137,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
   it should "count the time already spent, delays included, against the budget" in {
     val h      = new Harness(JevRetryPolicy.default.withMaxRetries(5))
-    val twenty = Left(RateLimitError("jev", 20.seconds))
+    val twenty = Left(RateLimitError(ProviderId("jev"), 20.seconds))
 
     h.run(twenty) shouldBe twenty
     h.calls shouldBe 2
@@ -142,8 +146,8 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
   it should "stop at a delay that exactly reaches the budget" in {
     val policy = JevRetryPolicy.default.withBudget(10.seconds)
-    val exact  = Left(RateLimitError("jev", 10.seconds))
-    val inside = Left(RateLimitError("jev", 9.seconds + 999.millis))
+    val exact  = Left(RateLimitError(ProviderId("jev"), 10.seconds))
+    val inside = Left(RateLimitError(ProviderId("jev"), 9.seconds + 999.millis))
 
     new Harness(policy).run(exact).isLeft shouldBe true
     val h = new Harness(policy)
@@ -165,7 +169,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return the error, not throw, when a server asks for a delay near the largest duration" in {
-    val huge = Left(RateLimitError("jev", FiniteDuration(9223372036854L, MILLISECONDS)))
+    val huge = Left(RateLimitError(ProviderId("jev"), FiniteDuration(9223372036854L, MILLISECONDS)))
     val h    = new Harness(JevRetryPolicy.default)
     val outcome = h.retry.run { _ =>
       h.calls += 1; h.now += 1.millisecond.toNanos; huge
@@ -207,12 +211,12 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
   it should "retry what is transient: a rate limit, 408, 429, 5xx, a network failure, a timeout" in {
     val transient: Seq[LLMError] = Seq(
-      RateLimitError("jev"),
-      ServiceError(408, "jev", "x"),
-      ServiceError(429, "jev", "x"),
-      ServiceError(500, "jev", "x"),
-      ServiceError(502, "jev", "x"),
-      ServiceError(529, "jev", "overloaded"),
+      RateLimitError(ProviderId("jev")),
+      ServiceError(408, ProviderId("jev"), "x"),
+      ServiceError(429, ProviderId("jev"), "x"),
+      ServiceError(500, ProviderId("jev"), "x"),
+      ServiceError(502, ProviderId("jev"), "x"),
+      ServiceError(529, ProviderId("jev"), "overloaded"),
       NetworkError("down", None, "https://api.typesafe.ai"),
       TimeoutError("slow", 30.seconds, "jev")
     )
@@ -228,10 +232,10 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
   it should "not retry what retrying cannot fix: a rejected key, an invalid request, a client error" in {
     val permanent: Seq[LLMError] = Seq(
-      AuthenticationError("jev", "bad key"),
+      AuthenticationError(ProviderId("jev"), "bad key"),
       ValidationError("request", "bad"),
-      ServiceError(404, "jev", "no"),
-      ServiceError(422, "jev", "no"),
+      ServiceError(404, ProviderId("jev"), "no"),
+      ServiceError(422, ProviderId("jev"), "no"),
       ProcessingError("jev-response", "malformed"),
       ConfigurationError("bad")
     )

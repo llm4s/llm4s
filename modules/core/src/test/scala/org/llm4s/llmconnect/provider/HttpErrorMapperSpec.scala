@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
@@ -214,17 +215,17 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "include provider name in AuthenticationError" in {
     val Left(err) = Left(HttpErrorMapper.toError(401, """{"message":"denied"}""", "gemini", Map.empty)): @unchecked
-    err.asInstanceOf[AuthenticationError].provider shouldBe "gemini"
+    err.asInstanceOf[AuthenticationError].provider shouldBe ProviderId("gemini")
   }
 
   it should "include provider name in RateLimitError" in {
     val Left(err) = Left(HttpErrorMapper.toError(429, "{}", "deepseek", Map.empty)): @unchecked
-    err.asInstanceOf[RateLimitError].provider shouldBe "deepseek"
+    err.asInstanceOf[RateLimitError].provider shouldBe ProviderId("deepseek")
   }
 
   it should "include provider name in ServiceError" in {
     val Left(err) = Left(HttpErrorMapper.toError(503, "{}", "ollama", Map.empty)): @unchecked
-    err.asInstanceOf[ServiceError].provider shouldBe "ollama"
+    err.asInstanceOf[ServiceError].provider shouldBe ProviderId("ollama")
   }
 
   // ── Retry-After on 503 ───────────────────────────────────────────

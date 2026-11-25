@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * The provider does not know the model the request named, or the credential has no access to it.
@@ -21,7 +22,7 @@ import org.llm4s.annotation.Stable
 @Stable
 final case class ModelNotFoundError private (
   override val message: String,
-  provider: String,
+  provider: ProviderId,
   model: Option[String],
   override val httpStatus: Option[Int],
   override val requestId: Option[String]
@@ -42,7 +43,7 @@ final case class ModelNotFoundError private (
   private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): ModelNotFoundError =
     copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
 
-  override val context: Map[String, String] = Map("provider" -> provider) ++
+  override val context: Map[String, String] = Map("provider" -> provider.asString) ++
     model.map("model" -> _) ++ requestId.map("requestId" -> _)
 }
 
@@ -52,10 +53,10 @@ object ModelNotFoundError {
   val Code: String = "model_not_found"
 
   /** `provider` does not know the model the request named, explaining it with `details`. */
-  def apply(provider: String, details: String): ModelNotFoundError =
+  def apply(provider: ProviderId, details: String): ModelNotFoundError =
     new ModelNotFoundError(s"$provider does not know the model: $details", provider, None, None, None)
 
   /** Extracts the message, provider and model; the arity is fixed. */
-  def unapply(error: ModelNotFoundError): Some[(String, String, Option[String])] =
+  def unapply(error: ModelNotFoundError): Some[(String, ProviderId, Option[String])] =
     Some((error.message, error.provider, error.model))
 }

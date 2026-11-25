@@ -1,5 +1,5 @@
 /*
-rule = MillisToFiniteDuration
+rules = [MillisToFiniteDuration, ErrorProviderIdTyped]
 */
 package fix
 

@@ -7,6 +7,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.{ MockLLMClients, SmallStack }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -167,7 +168,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] =
-      Left(org.llm4s.error.ServiceError(503, "test-provider", "Mock LLM failure for testing"))
+      Left(org.llm4s.error.ServiceError(503, ProviderId("test-provider"), "Mock LLM failure for testing"))
 
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit

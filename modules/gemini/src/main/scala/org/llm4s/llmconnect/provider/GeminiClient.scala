@@ -255,7 +255,7 @@ final class GeminiClient private[provider] (
                           // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
                           refused = GeminiStreamEnd.streamError(json, providerName)
                         case Right(json) =>
-                          GeminiBlocked.filtered(json, "Gemini", textLength) match {
+                          GeminiBlocked.filtered(json, provider, textLength) match {
                             case Some(filtered) if filtered.usage.isEmpty =>
                               // the usage reported on an earlier chunk, when the filter's chunk states none
                               refused = Some(filtered.withUsage(lastUsage))
@@ -534,7 +534,7 @@ final class GeminiClient private[provider] (
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
       GeminiBlocked
-        .filtered(json, "Gemini")
+        .filtered(json, provider)
         .toLeft(())
         .flatMap(_ => parseCandidate(json))
         .flatMap(c => GeminiBlocked.malformedCall(GeminiBlocked.finishReason(json), "Gemini").toLeft(c))
@@ -628,7 +628,7 @@ final class GeminiClient private[provider] (
     logger.error(s"[Gemini] Error response: $statusCode")
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
     if statusCode == 400 && isInvalidApiKey(details) then
-      Left(TroubleshootingLinks.annotate(AuthenticationError(providerName, details).withHttpStatus(statusCode)))
+      Left(TroubleshootingLinks.annotate(AuthenticationError(provider, details).withHttpStatus(statusCode)))
     else
       Left(
         HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, body, providerName, headers), config.model.asString)

@@ -2,6 +2,7 @@ package org.llm4s.http
 
 import org.llm4s.error.{ NetworkError, ServiceError, ValidationError }
 import org.llm4s.http.HttpResponse.*
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -41,7 +42,7 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
       val error = failure(HttpResponse(status, "upstream said no").ensureSuccess("acme"))
       withClue(s"status $status: ") {
         error.status shouldBe status
-        error.provider shouldBe "acme"
+        error.provider shouldBe ProviderId("acme")
         error.message should include("upstream said no")
       }
     }
@@ -79,11 +80,11 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
   // ==========================================================================
 
   "mapServiceError" should "rewrap a ServiceError as \"<message>: <original message>\" with its status" in {
-    val original = ServiceError(503, "x", "down")
+    val original = ServiceError(503, ProviderId("x"), "down")
     val error    = failure((Left(original): Result[Int]).mapServiceError("acme", "Listing models"))
 
     error.status shouldBe 503
-    error.provider shouldBe "acme"
+    error.provider shouldBe ProviderId("acme")
     error.message should include(s"Listing models: ${original.message}")
   }
 

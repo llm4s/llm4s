@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.SmallStack
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
@@ -124,9 +125,9 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
   it should "propagate provider failures unchanged" in {
     import org.llm4s.error.AuthenticationError
-    val stub   = new StubClient(Left(AuthenticationError("test", "bad key")))
+    val stub   = new StubClient(Left(AuthenticationError(ProviderId("test"), "bad key")))
     val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
-    result shouldBe Left(AuthenticationError("test", "bad key"))
+    result shouldBe Left(AuthenticationError(ProviderId("test"), "bad key"))
   }
 
   it should "tolerate extra JSON fields not in the schema" in {

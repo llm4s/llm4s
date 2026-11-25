@@ -487,7 +487,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def assertLabelled(provider: String, reported: Reported): Unit = {
     reported.error shouldBe an[AuthenticationError]
-    reported.error.asInstanceOf[AuthenticationError].provider shouldBe provider
+    reported.error.asInstanceOf[AuthenticationError].provider.asString shouldBe provider
     reported.error.context("provider") shouldBe provider
     reported.metrics.requestCalls.map(_._1).toSeq shouldBe Seq(provider)
     reported.exchanges.map(_.provider) shouldBe List(provider)

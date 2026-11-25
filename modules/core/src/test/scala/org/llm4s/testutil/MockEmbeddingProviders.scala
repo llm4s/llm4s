@@ -3,6 +3,7 @@ package org.llm4s.testutil
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 /** Shared mock embedding providers for testing. */
@@ -96,6 +97,6 @@ object MockEmbeddingProviders {
   class FailingMock(errorMessage: String = "Mock embedding error") extends EmbeddingProvider {
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-      Left(EmbeddingError(Some("500"), errorMessage, "failing-mock"))
+      Left(EmbeddingError(Some("500"), errorMessage, ProviderId("failing-mock")))
   }
 }

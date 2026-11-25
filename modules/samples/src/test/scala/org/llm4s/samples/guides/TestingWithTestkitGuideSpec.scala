@@ -10,6 +10,7 @@ import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import upickle.default._
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
@@ -62,16 +63,16 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   "The failure examples of the guide" should "return the provider's error to the code under test" in {
-    val failing = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")))
+    val failing = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))))
 
     val outcome = packingAdvice(failing, "Oslo")
 
-    outcome.left.map(providerError) shouldBe Left(RateLimitError("openai"))
+    outcome.left.map(providerError) shouldBe Left(RateLimitError(ProviderId("openai")))
   }
 
   it should "retry through ReliableClient and then succeed" in {
-    val flaky    = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("recovered"))
-    val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+    val flaky = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))), Reply.text("recovered"))
+    val quick = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
     val reliable = ReliableClient(flaky, "openai", quick)
 
     reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")

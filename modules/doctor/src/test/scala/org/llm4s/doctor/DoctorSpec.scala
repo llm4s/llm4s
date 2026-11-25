@@ -285,7 +285,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         run(openAi(s"""apiKey = "$SecretKey""""), options = DoctorOptions().withLive(true)),
         run(
           openAi(s"""apiKey = "$SecretKey""""),
-          new Probe(live = Left(AuthenticationError("openai", s"bad key $SecretKey"))),
+          new Probe(live = Left(AuthenticationError(ProviderId("openai"), s"bad key $SecretKey"))),
           DoctorOptions().withLive(true)
         )
       )
@@ -304,9 +304,10 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   "Doctor hiding keys by value" should {
 
     "replace a key that a provider error echoes in a shape no redaction pattern knows" in {
-      val echoing = new Probe(live = Left(AuthenticationError("openai", s"Incorrect API key provided: $SecretKey")))
-      val report  = run(openAi(s"""apiKey = "$SecretKey""""), echoing, DoctorOptions().withLive(true))
-      val live    = check(report, "Live call")
+      val echoing =
+        new Probe(live = Left(AuthenticationError(ProviderId("openai"), s"Incorrect API key provided: $SecretKey")))
+      val report = run(openAi(s"""apiKey = "$SecretKey""""), echoing, DoctorOptions().withLive(true))
+      val live   = check(report, "Live call")
 
       // Configured keys are registered when the config loads, so the registry masks the echo first ([REDACTED]);
       // the report's own scrub (***) is the second line of defence for a value that was never registered.
@@ -319,7 +320,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         // The fragment of a base URL is a secret the report hides by value, but nothing registers it with
         // KnownSecrets, so only the report's own scrub (***) can catch it when an error echoes it bare.
         val fragment = "opaqueFragmentValue0001"
-        val echoing  = new Probe(live = Left(AuthenticationError("openai", s"Rejected credential: $fragment")))
+        val echoing =
+          new Probe(live = Left(AuthenticationError(ProviderId("openai"), s"Rejected credential: $fragment")))
         val report = run(
           openAi(s"""apiKey = "$SecretKey"""", s"""baseUrl = "https://gw.example.com/v1#$fragment""""),
           echoing,
@@ -335,7 +337,9 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       val config = openAi() +
         s"""\nllm4s.credentials.openai.apiKey = "$SecretKey"\nllm4s.providers.other { provider = "openai", model = "m", apiKey = "second-account-key-98765" }"""
       val echoing =
-        new Probe(live = Left(ServiceError(401, "openai", "keys second-account-key-98765 and " + SecretKey)))
+        new Probe(live =
+          Left(ServiceError(401, ProviderId("openai"), "keys second-account-key-98765 and " + SecretKey))
+        )
       val live = check(run(config, echoing, DoctorOptions().withLive(true)), "Live call")
 
       (live.detail should not).include(SecretKey)
@@ -346,7 +350,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       val shortKey = "abc"
       val report = run(
         openAi(s"""apiKey = "$shortKey""""),
-        new Probe(live = Left(ServiceError(500, "openai", "abc failed"))),
+        new Probe(live = Left(ServiceError(500, ProviderId("openai"), "abc failed"))),
         DoctorOptions().withLive(true)
       )
 
@@ -409,7 +413,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "hide a query parameter's value even when a provider echoes it without the URL" in {
-      val echoing = new Probe(live = Left(ServiceError(403, "openai", "signature SIGSECRET-q1w2e3r4 has expired")))
+      val echoing =
+        new Probe(live = Left(ServiceError(403, ProviderId("openai"), "signature SIGSECRET-q1w2e3r4 has expired")))
       val report =
         run(openAi(s"""apiKey = "$SecretKey"""", s"""baseUrl = "$hosted""""), echoing, DoctorOptions().withLive(true))
 
@@ -450,7 +455,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "keep the password out of the report, and hide its decoded form when an error echoes it" in {
-      val echoing = new Probe(live = Left(ServiceError(401, "openai", "user u rejected with password ENC/PASS-secret")))
+      val echoing =
+        new Probe(live = Left(ServiceError(401, ProviderId("openai"), "user u rejected with password ENC/PASS-secret")))
       val report = run(
         openAi(s"""apiKey = "$SecretKey"""", """baseUrl = "http://u:ENC%2FPASS-secret@gw.example.com/v1""""),
         echoing,
@@ -553,7 +559,10 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       )
       val echoing = new Probe(live =
         Left(
-          AuthenticationError("ollama", "gateway saw X-Gateway-Token=GWTOKEN-plain-value-77 and OTHERHDR-token-9876")
+          AuthenticationError(
+            ProviderId("ollama"),
+            "gateway saw X-Gateway-Token=GWTOKEN-plain-value-77 and OTHERHDR-token-9876"
+          )
         )
       )
       val report = run(config, echoing, DoctorOptions().withLive(true))
@@ -570,8 +579,9 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       val config = localOllama +
         """
           |llm4s.providers.broken { provider = "ollama", headers { X-Key = "BROKENHDR-secret-555" }, timeouts = "nope" }""".stripMargin
-      val echoing = new Probe(live = Left(ServiceError(500, "ollama", "upstream rejected BROKENHDR-secret-555")))
-      val report  = run(config, echoing, DoctorOptions().withLive(true))
+      val echoing =
+        new Probe(live = Left(ServiceError(500, ProviderId("ollama"), "upstream rejected BROKENHDR-secret-555")))
+      val report = run(config, echoing, DoctorOptions().withLive(true))
 
       (report.renderText should not).include("BROKENHDR")
       (report.renderJson should not).include("BROKENHDR")
@@ -628,12 +638,12 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "map each kind of failure to its own advice" in {
       val cases: List[(LLMError, CheckStatus, String)] = List(
-        (AuthenticationError("openai", "bad key"), CheckStatus.Fail, "key"),
-        (RateLimitError("openai"), CheckStatus.Warn, "wait and retry"),
+        (AuthenticationError(ProviderId("openai"), "bad key"), CheckStatus.Fail, "key"),
+        (RateLimitError(ProviderId("openai")), CheckStatus.Warn, "wait and retry"),
         (NotFoundError("no such model", "model"), CheckStatus.Fail, ".model"),
         (TimeoutError("slow", 5.seconds, "complete"), CheckStatus.Fail, "proxy"),
         (NetworkError("unreachable", None, "http://x"), CheckStatus.Fail, "baseUrl"),
-        (ServiceError(500, "openai", "boom"), CheckStatus.Fail, "status page"),
+        (ServiceError(500, ProviderId("openai"), "boom"), CheckStatus.Fail, "status page"),
         (ConfigurationError("odd"), CheckStatus.Fail, "")
       )
 
@@ -647,7 +657,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "make a rate limit a warning with exit code 1" in {
-      val report = run(localOllama, new Probe(live = Left(RateLimitError("openai"))), live)
+      val report = run(localOllama, new Probe(live = Left(RateLimitError(ProviderId("openai")))), live)
 
       report.exitCode shouldBe 1
       report.verdict shouldBe "warn"

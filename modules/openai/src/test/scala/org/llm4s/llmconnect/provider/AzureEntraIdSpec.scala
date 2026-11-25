@@ -192,7 +192,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi"))
     } { baseUrl =>
       val failing = new AccessTokenProvider {
-        def current(): Result[Secret]                   = Left(AuthenticationError("azure", "no managed identity"))
+        def current(): Result[Secret] = Left(AuthenticationError(ProviderId("azure"), "no managed identity"))
         override def invalidate(rejected: Secret): Unit = ()
       }
       val client = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), failing)).value

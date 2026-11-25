@@ -1,6 +1,7 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.{ Duration, FiniteDuration }
@@ -16,7 +17,8 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * server asked for the delay.
  *
  * @param message    what happened, naming the provider and the time left
- * @param provider   the name the breaker was given for the service it guards
+ * @param provider   the id of the service the breaker guards: the name the breaker was given, canonicalised as a
+ *                   `ProviderId` is (trimmed, lower case)
  * @param remaining  how long until the circuit lets a call through to probe the service; zero when a probe is
  *                   already in flight, since its result may close the circuit at any moment
  * @param probing    `true` when the circuit is half-open and the call was refused because a probe is in flight
@@ -24,13 +26,13 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
 @Stable
 final case class CircuitOpenError private (
   override val message: String,
-  provider: String,
+  provider: ProviderId,
   remaining: FiniteDuration,
   probing: Boolean
 ) extends LLMError {
 
   override val context: Map[String, String] = Map(
-    "provider"  -> provider,
+    "provider"  -> provider.asString,
     "remaining" -> DurationText(remaining),
     "probing"   -> probing.toString
   )
@@ -39,7 +41,7 @@ final case class CircuitOpenError private (
 object CircuitOpenError {
 
   /** The circuit for `provider` is open, and stays so for `remaining` (read as zero when negative). */
-  def open(provider: String, remaining: FiniteDuration): CircuitOpenError = {
+  def open(provider: ProviderId, remaining: FiniteDuration): CircuitOpenError = {
     val left = remaining.max(Duration.Zero)
     new CircuitOpenError(
       s"Circuit breaker is open for $provider: the call was not made. Retry after ${DurationText(left)}",
@@ -50,7 +52,7 @@ object CircuitOpenError {
   }
 
   /** The circuit for `provider` is half-open and a probe is already in flight. */
-  def probing(provider: String): CircuitOpenError =
+  def probing(provider: ProviderId): CircuitOpenError =
     new CircuitOpenError(
       s"Circuit breaker is half-open for $provider: a probe is already in progress, and the call was not made",
       provider,
@@ -59,6 +61,6 @@ object CircuitOpenError {
     )
 
   /** Extracts the message, provider, `remaining` and `probing`; the arity is fixed, and it always matches. */
-  def unapply(error: CircuitOpenError): Some[(String, String, FiniteDuration, Boolean)] =
+  def unapply(error: CircuitOpenError): Some[(String, ProviderId, FiniteDuration, Boolean)] =
     Some((error.message, error.provider, error.remaining, error.probing))
 }

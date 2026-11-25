@@ -11,6 +11,7 @@ import org.llm4s.rag.{ RAG, RAGConfig }
 import org.llm4s.samples.guides.PythonDevelopersGuide._
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.{ Args, EitherValues, Reporter }
 import org.scalatest.events.{ Event, TestFailed, TestSucceeded }
@@ -43,7 +44,7 @@ class PythonDevelopersGuideSpec extends AnyFlatSpec with Matchers with EitherVal
   }
 
   it should "return a provider failure as a Left, not an exception" in {
-    val error  = RateLimitError("openai")
+    val error  = RateLimitError(ProviderId("openai"))
     val client = ScriptedLLMClient.sequence(Reply.failure(error))
 
     FirstCall.ask(client, "What is Scala?").left.value shouldBe error

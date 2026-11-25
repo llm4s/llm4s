@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore.redis
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.Redaction
 import org.llm4s.error.{
   AuthenticationError,
@@ -172,7 +173,10 @@ private[redis] object JedisConnection {
   /** The [[org.llm4s.error.LLMError]] for an exception a command or a pipeline threw. */
   def failure(e: Throwable, endpoint: String, timeout: FiniteDuration): LLMError = e match {
     case denied: JedisAccessControlException =>
-      AuthenticationError("redis", s"Redis refused the credentials: ${Redaction.scrubKnown(denied.getMessage)}")
+      AuthenticationError(
+        ProviderId("redis"),
+        s"Redis refused the credentials: ${Redaction.scrubKnown(denied.getMessage)}"
+      )
     case c: JedisConnectionException if Option(c.getCause).exists(_.isInstanceOf[SocketTimeoutException]) =>
       TimeoutError(s"Redis at $endpoint did not answer within $timeout", timeout, "redis")
     case c: JedisConnectionException =>

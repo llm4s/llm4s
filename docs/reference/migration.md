@@ -128,6 +128,52 @@ From 0.6.0 to 0.7.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by 
 [`LLMClient.streamComplete` takes its callback in a second parameter list](#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810),
 [a tool call's id is a `ToolCallId`, and its idempotency key an `IdempotencyKey`](#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)
 and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingclients-key-function-takes-the-request-2908).
+Since 0.7.0, [an error's `provider` is a `ProviderId`](#an-errors-provider-is-a-providerid-2936).
+
+## An error's `provider` is a `ProviderId` (#2936)
+
+The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on
+the nine errors that carry one: `AuthenticationError`, `RateLimitError`, `ServiceError`, `CircuitOpenError`,
+`EmbeddingError`, `ContentFilteredError`, `ContextLengthError`, `ModelNotFoundError` and
+`UnsupportedContentPartError`. Their factories take it, their `provider` field returns it, and their extractors bind
+it.
+
+| Before (0.7.0) | After |
+|---|---|
+| `RateLimitError("openai")`, `RateLimitError.local("openai")` | `RateLimitError(ProviderId("openai"))`, `RateLimitError.local(ProviderId("openai"))` |
+| `AuthenticationError("openai", details)` | `AuthenticationError(ProviderId("openai"), details)` |
+| `ServiceError(503, "openai", details)` | `ServiceError(503, ProviderId("openai"), details)` |
+| `CircuitOpenError.open("openai", remaining)`, `probing("openai")` | `CircuitOpenError.open(ProviderId("openai"), remaining)`, `probing(ProviderId("openai"))` |
+| `EmbeddingError(code, message, "voyage")` | `EmbeddingError(code, message, ProviderId("voyage"))` |
+| `ContentFilteredError.prompt("gemini", reason)`, `reply(...)` | `ContentFilteredError.prompt(ProviderId("gemini"), reason)` |
+| `ContextLengthError("openai", details)`, `ModelNotFoundError(...)`, `UnsupportedContentPartError(...)` | the same, with `ProviderId("openai")` |
+| `error.provider == "openai"`, `error.provider.toUpperCase` | `error.provider == ProviderId("openai")`, or `error.provider.asString` where a `String` is wanted |
+| `case ServiceError(_, _, "openai", _, _)` | `case ServiceError(_, _, p, _, _) if p == ProviderId("openai")` |
+
+`import org.llm4s.types.ProviderModelTypes.ProviderId`. A client built on `BaseLifecycleLLMClient` passes its own
+`provider`. The Scalafix rule `ErrorProviderIdTyped` ([Scalafix](scalafix#migration-rules)), which every umbrella
+runs, wraps the argument of each factory and adds `.asString` to a read of `error.provider`; a literal in a pattern
+is left for the compiler to report.
+
+What stays a `String`: an error's `message` and its `context("provider")` entry, pinned by `ErrorProviderTextSpec`,
+which was written against the old code; the labels of `MetricsCollector` and `ReliableClient`'s `providerName`; the
+`provider` label `HttpErrorMapper`, `SdkErrorMapper`, `PartEncoding` and `HttpResponse.ensureSuccess` take for their
+messages; and the Java and Kotlin view, where an opaque type is its `String` (`error.provider()` returns a `String`,
+and `RateLimitError.apply("openai")` still compiles). The errors are not serialised, so no stored JSON changes. The
+break is in Scala source only: an opaque type erases to its `String`, the binary signatures are those of 0.7.0, and
+MiMa needs no filter.
+
+A `ProviderId` is canonical: trimmed and in lower case. Two things read differently for that:
+
+- An error built with a name that was not canonical carries the canonical one, in `provider`, in its message and in
+  `context`; that includes the label given to `HttpErrorMapper` and the other helpers, where it reaches an error.
+  llm4s itself did so in two places, which now name the provider's id: a `ContentFilteredError` from the
+  Anthropic, Bedrock, Gemini, Vertex AI, OpenAI and Azure OpenAI clients (`gemini blocked the prompt: ...`, where it
+  was `Gemini`; `vertexai`, where it was `Vertex AI`; `azure`, where it was `Azure OpenAI`), and the `ServiceError`
+  of the three vision clients in `llm4s-image` (`Service error from openai: ...`).
+- `ReliableClient` still labels its metrics with the `providerName` it was given, as given. Its own
+  `CircuitOpenError` and local `RateLimitError` carry `ProviderId(providerName)`, so a name with capitals or
+  surrounding spaces is lower-cased and trimmed in those two errors and their messages.
 
 ## A cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties (#2933)
 
@@ -227,7 +273,8 @@ protected def provider: ProviderId = ProviderId("acme")
 
 The client's `providerId`, its metrics label and the provider a `CancelledError` names all come from it; the label a
 `MetricsCollector` receives is still a `String`, `provider.asString`. Where the client passes its name to an
-error builder (`HttpErrorMapper.toError`, `ServiceError`), pass `provider.asString`.
+error builder that takes a label (`HttpErrorMapper.toError`), pass `provider.asString`; an error's own factory
+(`ServiceError(status, provider, details)`) takes the `ProviderId` ([note](#an-errors-provider-is-a-providerid-2936)).
 
 ## Errors, `Result` helpers and `AgentResult.messages` are `Seq`s (#2908)
 
@@ -3196,6 +3243,10 @@ These need a hand edit:
 - 0.7.0 changes outside Scala sources: the configuration key `llm4s.providers.provider`, now `llm4s.defaultProvider`
   (#2806); Java's `LlmException.isRecoverable()`, now `isRetryable()` (#2916); and `AgentBuilder.withTools` and
   `withToolSet`, which now append and refuse a duplicate tool name where a second call replaced the first (#2916).
+- Since 0.7.0, with `ErrorProviderIdTyped` run: a literal provider in a pattern on an error
+  (`case ServiceError(_, _, "openai", _, _)`), which the compiler reports, and the text of an error built with a
+  provider name that was not lower case, which now reads in lower case
+  ([note](#an-errors-provider-is-a-providerid-2936)).
 
 ## `completionTokens` no longer includes thinking tokens (#2564)
 

@@ -5,6 +5,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.error._
 import org.slf4j.LoggerFactory
@@ -95,7 +96,7 @@ object ReliableClientExample {
       val attempt = attemptCounter.incrementAndGet()
       if (attempt < 3) {
         logger.info(s"Base Client attempt $attempt: Simulating RateLimitError (429)")
-        Left(RateLimitError("openai-demo"))
+        Left(RateLimitError(ProviderId("openai-demo")))
       } else {
         logger.info(s"Base Client attempt $attempt: Simulating success")
         Right(dummyCompletion)
@@ -140,7 +141,7 @@ object ReliableClientExample {
     // Set up a mock client that always fails with a 503 Service Unavailable error
     val mockBaseClient = new MockClient(() => {
       logger.info("Base Client: Executing call (and returning 503)")
-      Left(ServiceError(status = 503, provider = "mock-provider", details = "Service is down"))
+      Left(ServiceError(status = 503, provider = ProviderId("mock-provider"), details = "Service is down"))
     })
 
     val reliableClient = ReliableClient(mockBaseClient, "broken-provider", circuitConfig)
@@ -182,7 +183,7 @@ object ReliableClientExample {
     val mockBaseClient = new MockClient(() => {
       logger.info("Base Client: Starting operation (sleeping 200ms)...")
       Thread.sleep(200)
-      Left(ServiceError(500, "slow-provider", "Transient connection failure"))
+      Left(ServiceError(500, ProviderId("slow-provider"), "Transient connection failure"))
     })
 
     val reliableClient = ReliableClient(mockBaseClient, "slow-provider", deadlineConfig)

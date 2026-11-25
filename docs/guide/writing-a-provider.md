@@ -755,7 +755,7 @@ final class AcmeClient(
 A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`: `Text`, `Image` and `Document`, each image
 or document from a `MediaSource` (`Url`, `Inline` bytes, or a `ProviderFile` uploaded to a named provider). Your
 encoder sends every part your API takes, in each role it takes it, and fails the request **before sending it** with
-`UnsupportedContentPartError(provider.asString, part.kind, role.name)` for any other: never drop a part, and never turn
+`UnsupportedContentPartError(provider, part.kind, role.name)` for any other: never drop a part, and never turn
 one into text. Send a `ProviderFile` only when its `provider` is your provider id. A message with exactly one text
 part should encode as your API's plain text form, as before; `message.content` is the text view. The matrix of what
 each llm4s provider sends is in [Multimodal content](multimodal).

@@ -8,6 +8,7 @@ import org.llm4s.error.RateLimitError
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.ox.*
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import scala.concurrent.duration.*
@@ -50,13 +51,13 @@ object DirectStyleExample extends App {
   println(s"Combined: $book")
 
   // 3. Race two providers under a timeout: the first success wins, the slower call is interrupted.
-  val down  = ScriptedLLMClient.always(Reply.failure(RateLimitError("primary", 1.second)))
+  val down  = ScriptedLLMClient.always(Reply.failure(RateLimitError(ProviderId("primary"), 1.second)))
   val spare = ScriptedLLMClient.always(Reply.text("answer from the spare provider"))
   println(s"Race: ${timeoutOption(5.seconds)(raceProviders(down, spare)(ask("Hi"))).map(_.map(_.content))}")
 
   // 4. Retry: the first call is rate limited with a 200 ms retry-after, which the retry waits out.
   val flaky = ScriptedLLMClient.sequence(
-    Reply.failure(RateLimitError("flaky", 200.millis)),
+    Reply.failure(RateLimitError(ProviderId("flaky"), 200.millis)),
     Reply.text("answer after one retry")
   )
   val started = System.nanoTime()

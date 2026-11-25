@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -13,23 +14,23 @@ class NonRetryableErrorsSpec extends AnyFlatSpec with Matchers {
   // ============ AuthenticationError ============
 
   "AuthenticationError" should "create with provider and details" in {
-    val error = AuthenticationError("openai", "Invalid API key")
+    val error = AuthenticationError(ProviderId("openai"), "Invalid API key")
 
-    error.provider shouldBe "openai"
+    error.provider shouldBe ProviderId("openai")
     error.code shouldBe None
     error.message should include("Authentication failed for openai")
     error.message should include("Invalid API key")
   }
 
   it should "create with error code" in {
-    val error = AuthenticationError("anthropic", "Unauthorized", "401")
+    val error = AuthenticationError(ProviderId("anthropic"), "Unauthorized", "401")
 
     error.code shouldBe Some("401")
     error.context should contain("code" -> "401")
   }
 
   it should "not be retryable" in {
-    val error = AuthenticationError("provider", "details")
+    val error = AuthenticationError(ProviderId("provider"), "details")
 
     error.isRetryable shouldBe false
     error shouldBe a[LLMError]
@@ -37,12 +38,12 @@ class NonRetryableErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support pattern matching" in {
-    val error = AuthenticationError("openai", "invalid key", "401")
+    val error = AuthenticationError(ProviderId("openai"), "invalid key", "401")
 
     error match {
       case AuthenticationError(msg, provider, code) =>
         msg should include("Authentication failed")
-        provider shouldBe "openai"
+        provider shouldBe ProviderId("openai")
         code shouldBe Some("401")
       case _ => fail("Pattern matching failed")
     }
@@ -447,7 +448,7 @@ class NonRetryableErrorsSpec extends AnyFlatSpec with Matchers {
 
   "An error the caller must fix" should "not be retryable" in {
     val errors: Seq[LLMError] = Seq(
-      AuthenticationError("p", "m"),
+      AuthenticationError(ProviderId("p"), "m"),
       ValidationError("f", "r"),
       ConfigurationError("m"),
       ProcessingError("o", "m"),
@@ -466,8 +467,8 @@ class NonRetryableErrorsSpec extends AnyFlatSpec with Matchers {
 
   "filterNot(_.isRetryable)" should "keep only the errors that are not retryable" in {
     val errors: List[LLMError] = List(
-      AuthenticationError("p", "m"),
-      RateLimitError("p"),
+      AuthenticationError(ProviderId("p"), "m"),
+      RateLimitError(ProviderId("p")),
       ValidationError("f", "r")
     )
 

@@ -10,6 +10,7 @@ import org.llm4s.error.{
   UnknownError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -196,8 +197,8 @@ object HttpResponse:
     clock: Clock = Clock.systemUTC()
   ): ServiceError =
     val error = HttpHeaders.requestId(response.headers) match
-      case Some(id) => ServiceError(response.statusCode, provider, details, id)
-      case None     => ServiceError(response.statusCode, provider, details)
+      case Some(id) => ServiceError(response.statusCode, ProviderId(provider), details, id)
+      case None     => ServiceError(response.statusCode, ProviderId(provider), details)
     HttpHeaders.retryAfter(response.headers, clock).fold(error)(error.withRetryAfter)
 
   extension (response: HttpResponse)
@@ -224,7 +225,7 @@ object HttpResponse:
     ): Result[A] =
       result.left.map:
         case service: ServiceError =>
-          ServiceError.rewrapped(service, provider, s"$message: ${service.message}")
+          ServiceError.rewrapped(service, ProviderId(provider), s"$message: ${service.message}")
         case other =>
           other
 

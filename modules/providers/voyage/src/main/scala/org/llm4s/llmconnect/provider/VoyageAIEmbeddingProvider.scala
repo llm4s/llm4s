@@ -135,7 +135,11 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                     // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
                     case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
                     case err =>
-                      EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
+                      EmbeddingError(
+                        code = None,
+                        message = s"HTTP request failed: ${err.message}",
+                        provider = ProviderId("voyage")
+                      )
                   }
               )
 
@@ -151,12 +155,16 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 }.toEither.left
                   .map { ex =>
                     logger.error(s"[VoyageAIEmbeddingProvider] Parse error: ${ex.getMessage}")
-                    EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "voyage")
+                    EmbeddingError(
+                      code = None,
+                      message = s"Parsing error: ${ex.getMessage}",
+                      provider = ProviderId("voyage")
+                    )
                   }
               case status =>
                 val body = Redaction.safeBody(response.body)
                 logger.error(s"[VoyageAIEmbeddingProvider] HTTP error: $body")
-                Left(EmbeddingError(code = Some(status.toString), message = body, provider = "voyage"))
+                Left(EmbeddingError(code = Some(status.toString), message = body, provider = ProviderId("voyage")))
             }
           }
         }

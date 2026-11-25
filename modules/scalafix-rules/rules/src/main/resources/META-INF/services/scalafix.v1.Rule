@@ -32,3 +32,4 @@ org.llm4s.scalafix.ModelIdNewtypes
 org.llm4s.scalafix.AccessorRenames
 org.llm4s.scalafix.ErrorIsRetryable
 org.llm4s.scalafix.StreamedChunkDeltaNames
+org.llm4s.scalafix.ErrorProviderIdTyped

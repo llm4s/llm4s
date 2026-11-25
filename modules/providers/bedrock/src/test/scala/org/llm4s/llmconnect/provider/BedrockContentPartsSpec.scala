@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.provider.BedrockTestSupport.*
 import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -144,7 +145,7 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
       val (sent, result) = send(Conversation(Seq(UserMessage(Vector(part)))))
       sent shouldBe None
       result.left.value match {
-        case UnsupportedContentPartError(_, "bedrock", `kind`, "user") => ()
+        case UnsupportedContentPartError(_, p, `kind`, "user") if p == ProviderId("bedrock") => ()
         case other => fail(s"expected UnsupportedContentPartError for $kind, got $other")
       }
     }
@@ -157,6 +158,6 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     )
     val (sent, result) = send(tool)
     sent shouldBe None
-    result.left.value shouldBe UnsupportedContentPartError("bedrock", "image (inline, image/tiff)", "tool")
+    result.left.value shouldBe UnsupportedContentPartError(ProviderId("bedrock"), "image (inline, image/tiff)", "tool")
   }
 }

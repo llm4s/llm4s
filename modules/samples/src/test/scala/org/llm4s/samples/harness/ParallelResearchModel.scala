@@ -4,6 +4,7 @@ import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.model._
 import org.llm4s.samples.harness.ParallelDeepResearch._
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import scala.util.Try
 
@@ -92,7 +93,7 @@ object ParallelResearchModel {
     questionOf(messages).flatMap { q =>
       messages.lastOption.collect {
         case _: UserMessage if failing.contains(q.topic) =>
-          Reply.failure(ServiceError(503, "scripted", s"the provider is down for '${q.topic}'"))
+          Reply.failure(ServiceError(503, ProviderId("scripted"), s"the provider is down for '${q.topic}'"))
         case _: UserMessage => calls(call("fetch", "fetch_page", "url" -> q.url))
         case t: ToolMessage if t.toolCallId == ToolCallId("fetch") =>
           val fetched = pages.get(q.url).exists(page => t.content.contains(page))

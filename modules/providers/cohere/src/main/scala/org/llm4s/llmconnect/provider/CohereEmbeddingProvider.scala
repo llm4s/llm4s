@@ -243,7 +243,11 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
                   case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
                   case err =>
-                    EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "cohere")
+                    EmbeddingError(
+                      code = None,
+                      message = s"HTTP request failed: ${err.message}",
+                      provider = ProviderId("cohere")
+                    )
                 }
             )
 
@@ -252,19 +256,33 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
             case 200 =>
               Try(parseBatch(response.body, texts.size)).toEither.left.map { ex =>
                 logger.error(s"[CohereEmbeddingProvider] Parse error: ${ex.getMessage}")
-                EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "cohere")
+                EmbeddingError(
+                  code = None,
+                  message = s"Parsing error: ${ex.getMessage}",
+                  provider = ProviderId("cohere")
+                )
               }
             case 401 =>
               val body = Redaction.safeBody(response.body)
               logger.error(s"[CohereEmbeddingProvider] Auth error (401): $body")
-              Left(EmbeddingError(code = Some("401"), message = s"Authentication failed: $body", provider = "cohere"))
+              Left(
+                EmbeddingError(
+                  code = Some("401"),
+                  message = s"Authentication failed: $body",
+                  provider = ProviderId("cohere")
+                )
+              )
             case 429 =>
               logger.warn(s"[CohereEmbeddingProvider] Rate limit (429): ${Redaction.safeBody(response.body)}")
-              Left(retryAfter(response).map(RateLimitError("cohere", _)).getOrElse(RateLimitError("cohere")))
+              Left(
+                retryAfter(response)
+                  .map(RateLimitError(ProviderId("cohere"), _))
+                  .getOrElse(RateLimitError(ProviderId("cohere")))
+              )
             case status =>
               val body = Redaction.safeBody(response.body)
               logger.error(s"[CohereEmbeddingProvider] HTTP error $status: $body")
-              Left(EmbeddingError(code = Some(status.toString), message = body, provider = "cohere"))
+              Left(EmbeddingError(code = Some(status.toString), message = body, provider = ProviderId("cohere")))
           }
         }
       }

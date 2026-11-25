@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -47,7 +48,11 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     val file = ContentPart.image(MediaSource.ProviderFile("ollama", "f"), MediaType.Png).value
     val pdf  = ContentPart.document(MediaSource.Inline(bytes), MediaType.Pdf).value
     Seq(url, file, pdf).foreach { part =>
-      body(UserMessage(Vector(part))).left.value shouldBe UnsupportedContentPartError("ollama", part.kind, "user")
+      body(UserMessage(Vector(part))).left.value shouldBe UnsupportedContentPartError(
+        ProviderId("ollama"),
+        part.kind,
+        "user"
+      )
     }
   }
 
@@ -61,7 +66,7 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     )
       .value("messages")(2)("content") shouldBe ujson.Str("a\nb")
     body(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c1"))).left.value shouldBe
-      UnsupportedContentPartError("ollama", image.kind, "tool")
+      UnsupportedContentPartError(ProviderId("ollama"), image.kind, "tool")
   }
 
   "complete" should "fail before sending anything" in {

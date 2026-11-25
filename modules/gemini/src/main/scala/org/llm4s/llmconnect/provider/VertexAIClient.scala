@@ -243,7 +243,7 @@ final class VertexAIClient private[provider] (
                           // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
                           refused = GeminiStreamEnd.streamError(json, providerName)
                         case Right(json) =>
-                          GeminiBlocked.filtered(json, "Vertex AI", textLength) match {
+                          GeminiBlocked.filtered(json, provider, textLength) match {
                             case Some(filtered) if filtered.usage.isEmpty =>
                               // the usage reported on an earlier chunk, when the filter's chunk states none
                               refused = Some(filtered.withUsage(lastUsage))
@@ -481,7 +481,7 @@ final class VertexAIClient private[provider] (
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
       GeminiBlocked
-        .filtered(json, "Vertex AI")
+        .filtered(json, provider)
         .toLeft(())
         .flatMap(_ => parseCandidate(json))
         .flatMap(c => GeminiBlocked.malformedCall(GeminiBlocked.finishReason(json), "Vertex AI").toLeft(c))

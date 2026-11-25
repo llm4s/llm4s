@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ CircuitOpenError, LLMError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -22,7 +23,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
   private val ok: Result[Completion] = Right(
     Completion("id", Instant.EPOCH, ModelName("model"), AssistantMessage("content"))
   )
-  private val down: Result[Completion] = Left(ServiceError(503, "provider-x", "down"))
+  private val down: Result[Completion] = Left(ServiceError(503, ProviderId("provider-x"), "down"))
 
   final private class StubClient(result: () => Result[Completion]) extends LLMClient {
     val calls = new AtomicInteger(0)
@@ -61,7 +62,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
 
     now.set(10000L)
     val fastFail = failFast(client)
-    fastFail shouldBe CircuitOpenError.open("provider-x", 20.seconds)
+    fastFail shouldBe CircuitOpenError.open(ProviderId("provider-x"), 20.seconds)
     fastFail.isRetryable shouldBe false
     fastFail.retryAfter shouldBe None // no server asked for the wait: it is the breaker's own
     fastFail.asInstanceOf[CircuitOpenError].remaining shouldBe 20.seconds
@@ -125,9 +126,9 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     import scala.jdk.CollectionConverters._
     val (probed, refused) = results.asScala.toList.partition(_.isRight)
     probed should have size 1
-    refused.map(_.left.toOption.get).distinct shouldBe List(CircuitOpenError.probing("provider-x"))
-    CircuitOpenError.probing("provider-x").remaining shouldBe Duration.Zero
-    RetryPolicy.exponentialBackoff().isRetryable(CircuitOpenError.probing("provider-x")) shouldBe false
+    refused.map(_.left.toOption.get).distinct shouldBe List(CircuitOpenError.probing(ProviderId("provider-x")))
+    CircuitOpenError.probing(ProviderId("provider-x")).remaining shouldBe Duration.Zero
+    RetryPolicy.exponentialBackoff().isRetryable(CircuitOpenError.probing(ProviderId("provider-x"))) shouldBe false
   }
 
   it should "let the next caller probe once a probe has succeeded, and close after successThreshold probes" in {
@@ -151,7 +152,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     now.set(31000L)
     client.complete(conversation) shouldBe down
     client.currentCircuitState shouldBe CircuitState.Open
-    failFast(client) shouldBe CircuitOpenError.open("provider-x", 30.seconds)
+    failFast(client) shouldBe CircuitOpenError.open(ProviderId("provider-x"), 30.seconds)
     now.set(62000L)
     client.complete(conversation) shouldBe down
     underlying.calls.get() shouldBe 3

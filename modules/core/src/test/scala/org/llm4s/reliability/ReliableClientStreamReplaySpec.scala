@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, NetworkError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -119,7 +120,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
     }
 
     it should "not count a content-filter block against the circuit breaker" in {
-      val filtered = ContentFilteredError.reply("Gemini", "SAFETY")
+      val filtered = ContentFilteredError.reply(ProviderId("gemini"), "SAFETY")
       val inner    = new Scripted(List("Hel") -> Left(filtered), Nil -> Left(filtered), Nil -> Right(completion("ok")))
       val client   = breaking(inner, deadline)
       client.streamComplete(conversation)(_ => ()) shouldBe Left(filtered)

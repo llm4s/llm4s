@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.auth
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError }
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
@@ -173,7 +174,7 @@ object CachingAccessTokenProvider:
       identity
     )
 
-  private val Provider = "workload-identity"
+  private val Provider = ProviderId("workload-identity")
 
   /** The operation a [[org.llm4s.error.CancelledError CancelledError]] names when a caller is interrupted waiting for a token. */
   private[llm4s] val Operation: String = "workload-identity.token"

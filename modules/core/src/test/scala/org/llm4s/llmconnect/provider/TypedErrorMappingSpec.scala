@@ -9,6 +9,7 @@ import org.llm4s.error.{
   ServiceError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -46,7 +47,7 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
         e.requestedTokens shouldBe Some(9431)
         e.httpStatus shouldBe Some(400)
         e.requestId shouldBe Some("req_1")
-        e.provider shouldBe "p"
+        e.provider shouldBe ProviderId("p")
         e.code shouldBe Some("context_length_exceeded")
         e.isRetryable shouldBe false
         e.message should include("maximum context length is 8192 tokens")
@@ -251,10 +252,10 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
   }
 
   "An AuthenticationError built with a status code" should "report it as httpStatus" in {
-    AuthenticationError("p", "bad key", "401").httpStatus shouldBe Some(401)
-    AuthenticationError("p", "bad key", "INVALID_KEY").httpStatus shouldBe None
-    AuthenticationError("p", "bad key").httpStatus shouldBe None
-    AuthenticationError("p", "bad key").withHttpStatus(400).httpStatus shouldBe Some(400)
+    AuthenticationError(ProviderId("p"), "bad key", "401").httpStatus shouldBe Some(401)
+    AuthenticationError(ProviderId("p"), "bad key", "INVALID_KEY").httpStatus shouldBe None
+    AuthenticationError(ProviderId("p"), "bad key").httpStatus shouldBe None
+    AuthenticationError(ProviderId("p"), "bad key").withHttpStatus(400).httpStatus shouldBe Some(400)
   }
 
   "A stream's error event" should "map to the typed errors as a response would" in {

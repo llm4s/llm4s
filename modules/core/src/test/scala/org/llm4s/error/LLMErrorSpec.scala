@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.duration._
@@ -13,31 +14,31 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
 
     "use smart constructors and unapply extractors correctly" in {
       // Test both construction and pattern matching work
-      val error = AuthenticationError("openai", "invalid key", "401")
+      val error = AuthenticationError(ProviderId("openai"), "invalid key", "401")
 
       // Construction works
-      error.provider shouldBe "openai"
+      error.provider shouldBe ProviderId("openai")
       error.code shouldBe Some("401")
 
       // Pattern matching works with unapply extractor
       error match {
         case AuthenticationError(message, provider, code) =>
           message should include("Authentication failed")
-          provider shouldBe "openai"
+          provider shouldBe ProviderId("openai")
           code shouldBe Some("401")
         case _ => fail("Pattern matching failed")
       }
     }
 
     "support pattern matching for all error types" in {
-      val rateError       = RateLimitError("anthropic", 30.seconds)
+      val rateError       = RateLimitError(ProviderId("anthropic"), 30.seconds)
       val validationError = ValidationError("email", List("too short", "invalid"))
       val networkError    = NetworkError("timeout", None, "https://api.example.com")
 
       // Test pattern matching works for all types
       rateError match {
         case RateLimitError(_, retryAfter, provider) =>
-          provider shouldBe "anthropic"
+          provider shouldBe ProviderId("anthropic")
           retryAfter shouldBe Some(30.seconds)
         case _ => fail("RateLimitError pattern matching failed")
       }
@@ -59,19 +60,19 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
 
     "use smart constructors for RateLimitError with cleaner call sites" in {
       // Test simplified construction
-      val error1 = RateLimitError("openai")
-      error1.provider shouldBe "openai"
+      val error1 = RateLimitError(ProviderId("openai"))
+      error1.provider shouldBe ProviderId("openai")
       error1.retryAfter shouldBe None
 
-      val error2 = RateLimitError("anthropic", 60.seconds)
+      val error2 = RateLimitError(ProviderId("anthropic"), 60.seconds)
       error2.retryAfter shouldBe Some(60.seconds)
       error2.context should contain("retryAfter" -> "60s")
     }
 
     "properly categorize errors with trait-based inheritance" in {
       // Test compile-time type safety
-      val authError       = AuthenticationError("provider", "test")
-      val rateError       = RateLimitError("provider")
+      val authError       = AuthenticationError(ProviderId("provider"), "test")
+      val rateError       = RateLimitError(ProviderId("provider"))
       val validationError = ValidationError("field", "invalid")
 
       // Type-level assertions
@@ -106,8 +107,8 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
     "provide type-safe error filtering" in {
       // Test new type-safe methods
       val errors: List[LLMError] = List(
-        AuthenticationError("provider1", "test"),
-        RateLimitError("provider2"),
+        AuthenticationError(ProviderId("provider1"), "test"),
+        RateLimitError(ProviderId("provider2")),
         ValidationError("field", "invalid"),
         NetworkError("timeout", None, "https://api.example.com")
       )
@@ -130,17 +131,17 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
 
     "create AuthenticationError with smart constructors" in {
       // Test the amended smart constructors
-      val error1 = AuthenticationError("openai", "invalid key")
-      error1.provider shouldBe "openai"
+      val error1 = AuthenticationError(ProviderId("openai"), "invalid key")
+      error1.provider shouldBe ProviderId("openai")
       error1.message should include("Authentication failed")
 
-      val error2 = AuthenticationError("openai", "invalid key", "401")
+      val error2 = AuthenticationError(ProviderId("openai"), "invalid key", "401")
       error2.code shouldBe Some("401")
     }
 
     "properly categorize errors as recoverable/non-recoverable" in {
-      val authError = AuthenticationError("openai", "test")
-      val rateError = RateLimitError("openai")
+      val authError = AuthenticationError(ProviderId("openai"), "test")
+      val rateError = RateLimitError(ProviderId("openai"))
 
       // Type-level checks
       authError.isRetryable shouldBe false
@@ -162,10 +163,10 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
 
     "use smart constructors for rate limiting" in {
       // Test smart constructors
-      val error1 = RateLimitError("openai")
+      val error1 = RateLimitError(ProviderId("openai"))
       error1.retryAfter shouldBe None
 
-      val error2 = RateLimitError("openai", 60.seconds)
+      val error2 = RateLimitError(ProviderId("openai"), 60.seconds)
       error2.retryAfter shouldBe Some(60.seconds)
       error2.context should contain("retryAfter" -> "60s")
     }
@@ -174,8 +175,8 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
   "Type-safe error filtering" should {
     "separate recoverable from non-recoverable errors" in {
       val errors: List[LLMError] = List(
-        AuthenticationError("provider", "test"),
-        RateLimitError("provider"),
+        AuthenticationError(ProviderId("provider"), "test"),
+        RateLimitError(ProviderId("provider")),
         ValidationError("field", "invalid")
       )
 

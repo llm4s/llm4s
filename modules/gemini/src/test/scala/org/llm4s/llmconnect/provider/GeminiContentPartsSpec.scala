@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -100,12 +101,12 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
       .check("gemini", Seq(UserMessage("go"), assistant, ToolMessage(Vector(inline), ToolCallId("c1"))), gemini)
       .left
       .value shouldBe
-      UnsupportedContentPartError("gemini", inline.kind, "tool")
+      UnsupportedContentPartError(ProviderId("gemini"), inline.kind, "tool")
     GeminiParts
       .check("vertexai", Seq(UserMessage(Vector(url))), GeminiParts.vertexFileUri)
       .left
       .value shouldBe
-      UnsupportedContentPartError("vertexai", url.kind, "user")
+      UnsupportedContentPartError(ProviderId("vertexai"), url.kind, "user")
     GeminiParts.check(
       "gemini",
       Seq(UserMessage(Vector(ContentPart.Text("a"), inline, filesUri, file))),
@@ -162,7 +163,7 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     val http  = stub[StubbedHttpCalls]
     val other = ContentPart.image(MediaSource.ProviderFile("openai", "file-1"), MediaType.Png).value
     client(http).complete(Conversation(Seq(UserMessage(Vector(other)))), CompletionOptions()).left.value shouldBe
-      UnsupportedContentPartError("gemini", other.kind, "user")
+      UnsupportedContentPartError(ProviderId("gemini"), other.kind, "user")
     (http.onPost _).verify(*, *, *, *).never()
   }
 

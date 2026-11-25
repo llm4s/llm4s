@@ -8,6 +8,7 @@ import org.llm4s.error.{
   ServiceError,
   ValidationError
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.funsuite.AnyFunSuite
@@ -179,7 +180,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       withClue(s"'$reason': ")(result.left.toOption match
         case Some(e: ServiceError) =>
           e.message should include(s"finish_reason '${reason.trim.toLowerCase}'")
-          e.provider shouldBe "watsonx"
+          e.provider shouldBe ProviderId("watsonx")
         case other => fail(s"expected ServiceError, got $other")
       )
     }
@@ -470,7 +471,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     result.left.toOption match
       case Some(e: ServiceError) =>
         e.status shouldBe 500
-        e.provider shouldBe "watsonx"
+        e.provider shouldBe ProviderId("watsonx")
         e.message should include("stream error event")
         e.message should include("model_overloaded")
         e.message should include("try later")

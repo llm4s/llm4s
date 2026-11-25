@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.reliability.{ CircuitBreakerConfig, ReliabilityConfig, RetryPolicy }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.LoneElement
 import org.scalatest.flatspec.AnyFlatSpec
@@ -60,7 +61,7 @@ class TicketPipelineSpec extends AnyFlatSpec with Matchers with LoneElement {
   }
 
   it should "retry a rate limit in the client and then enrich" in {
-    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("scripted", 1.milli)), labels)
+    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("scripted"), 1.milli)), labels)
     val run    = runPipeline(client, List(Input(0, 0, ticket("t1"))))
 
     run.result shouldBe Right(())
@@ -85,7 +86,7 @@ class TicketPipelineSpec extends AnyFlatSpec with Matchers with LoneElement {
 
   it should "dead-letter a model error that retrying does not fix, without retrying it" in {
     val client = ScriptedLLMClient.respondingTo {
-      case c if userText(c).contains("t1") => Reply.failure(AuthenticationError("scripted", "bad key"))
+      case c if userText(c).contains("t1") => Reply.failure(AuthenticationError(ProviderId("scripted"), "bad key"))
       case c if userText(c).contains("t2") => Reply.text("this is not JSON")
       case _                               => labels
     }
@@ -103,7 +104,7 @@ class TicketPipelineSpec extends AnyFlatSpec with Matchers with LoneElement {
 
   it should "stop without producing or committing a record whose transient error outlives the retries" in {
     val client = ScriptedLLMClient.respondingTo {
-      case c if userText(c).contains("t2") => Reply.failure(RateLimitError("scripted", 1.milli))
+      case c if userText(c).contains("t2") => Reply.failure(RateLimitError(ProviderId("scripted"), 1.milli))
       case _                               => labels
     }
     val run = runPipeline(client, List(Input(0, 0, ticket("t1")), Input(0, 1, ticket("t2")), Input(0, 2, ticket("t3"))))

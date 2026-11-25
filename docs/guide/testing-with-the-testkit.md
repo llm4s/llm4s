@@ -59,6 +59,7 @@ import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import upickle.default._
 ```
@@ -113,11 +114,11 @@ The first request offered the tool, and the second carried the tool's result bac
 `Reply.failure` takes any `LLMError`, so a test can see how your code reacts to a rate limit, a timeout or a bad key, with the real error types:
 
 ```scala
-val failing = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")))
+val failing = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))))
 
 val outcome = packingAdvice(failing, "Oslo")
 
-outcome.left.map(providerError) shouldBe Left(RateLimitError("openai"))
+outcome.left.map(providerError) shouldBe Left(RateLimitError(ProviderId("openai")))
 ```
 
 An agent wraps a provider error in a `GraphError.NodeFailed` that names the failing node; the error you scripted is its `cause`. `providerError` is the small helper that takes it out:
@@ -137,8 +138,8 @@ import scala.concurrent.duration._
 ```
 
 ```scala
-val flaky    = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("recovered"))
-val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+val flaky = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))), Reply.text("recovered"))
+val quick = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
 val reliable = ReliableClient(flaky, "openai", quick)
 
 reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")

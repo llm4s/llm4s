@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ServiceError, ProcessingError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -54,7 +55,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] =
-      Left(ServiceError(500, "mock-provider", "LLM service unavailable"))
+      Left(ServiceError(500, ProviderId("mock-provider"), "LLM service unavailable"))
 
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit

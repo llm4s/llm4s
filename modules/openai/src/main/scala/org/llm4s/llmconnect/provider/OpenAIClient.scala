@@ -424,7 +424,7 @@ final class OpenAIClient private[provider] (
       val chunkId = known(chunk._id()).getOrElse("")
 
       ChatCompletionsFinishReason.filtered(
-        displayName,
+        provider,
         finishReason,
         state.textLength + contentOpt.map(_.length).getOrElse(0),
         None
@@ -834,7 +834,7 @@ final class OpenAIClient private[provider] (
    * it was billed; any other reply unchanged (RFC 0009).
    */
   private def filteredReply(c: Completion): Result[Completion] =
-    ChatCompletionsFinishReason.filtered(displayName, Some(c.finishReason), c.content.length, c.usage).toLeft(c)
+    ChatCompletionsFinishReason.filtered(provider, Some(c.finishReason), c.content.length, c.usage).toLeft(c)
 
   /**
    * Converts a chat-completions response to llm4s Completion format.
@@ -1065,7 +1065,7 @@ object OpenAIClient {
     case sse: SseException => streamError(sse, provider)
     case service: OpenAIServiceException if service.statusCode() == 400 && promptFiltered(service) =>
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
-      ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
+      ContentFilteredError.prompt(ProviderId(provider), ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
       Left(
         HttpErrorMapper
@@ -1094,7 +1094,7 @@ object OpenAIClient {
       .flatMap(body => BoundedJson.read(body).toOption)
       .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
       .flatMap(OpenAICompatibleClient.streamedError(_, provider))
-      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+      .getOrElse(ServiceError(502, ProviderId(provider), "the stream reported an error"))
 
   /**
    * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,

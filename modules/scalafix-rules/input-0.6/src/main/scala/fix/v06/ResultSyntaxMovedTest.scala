@@ -1,5 +1,5 @@
 /*
-rule = ResultSyntaxMoved
+rules = [ResultSyntaxMoved, ErrorProviderIdTyped]
 */
 package fix.v06
 

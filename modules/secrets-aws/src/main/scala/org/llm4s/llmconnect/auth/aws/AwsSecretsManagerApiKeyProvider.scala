@@ -6,6 +6,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.net.URI
@@ -159,7 +160,7 @@ final class AwsSecretsManagerApiKeyProvider private (
 @Experimental
 object AwsSecretsManagerApiKeyProvider:
 
-  private val Provider    = "aws-secrets-manager"
+  private val Provider    = ProviderId("aws-secrets-manager")
   private val Service     = "secretsmanager"
   private val Target      = "secretsmanager.GetSecretValue"
   private val ContentType = "application/x-amz-json-1.1"

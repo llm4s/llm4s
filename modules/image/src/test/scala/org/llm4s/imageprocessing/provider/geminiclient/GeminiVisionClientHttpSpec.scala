@@ -8,6 +8,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import org.llm4s.error.{ CancelledError, ConfigurationError, LLMError, NetworkError, ServiceError, TimeoutError }
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -430,7 +431,7 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
       val e = new GeminiVisionClient(cfg()).analyzeImage(p.toString).left.toOption.get
       e shouldBe a[ServiceError]
       val api = e.asInstanceOf[ServiceError]
-      api.provider shouldBe "Gemini"
+      api.provider shouldBe ProviderId("gemini")
       api.status shouldBe code
       e.message should include(s"msg for $code")
       e.message should include(st)

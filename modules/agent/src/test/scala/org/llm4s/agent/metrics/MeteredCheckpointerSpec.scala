@@ -12,6 +12,7 @@ import org.llm4s.agent.graph.middleware.{
   MiddlewareId,
   ModelContext
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.model.UsageSummary
@@ -135,7 +136,7 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val f  = new Fixture
     val on = thread()
     val failed = Agent
-      .builder("assistant", new FailingLLMClient(ServiceError(500, "test", "down")))
+      .builder("assistant", new FailingLLMClient(ServiceError(500, ProviderId("test"), "down")))
       .withRuntime(new GraphRuntime(f.metered))
       .build()
       .value

@@ -3,6 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ ServiceError, CancelledError }
@@ -404,7 +405,7 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     ThreadingGuideSnippets.onVirtualThread(ok) shouldBe "x"
 
     ThreadingGuideSnippets.wasCancelled(LlmResult.failure(CancelledError("test", None))) shouldBe true
-    ThreadingGuideSnippets.wasCancelled(LlmResult.failure(ServiceError(503, "test", "down"))) shouldBe false
+    ThreadingGuideSnippets.wasCancelled(LlmResult.failure(ServiceError(503, ProviderId("test"), "down"))) shouldBe false
     ThreadingGuideSnippets.wasCancelled(LlmResult.success("x")) shouldBe false
 
     ThreadingGuideSnippets.completeOrNull(ok) shouldBe "x"

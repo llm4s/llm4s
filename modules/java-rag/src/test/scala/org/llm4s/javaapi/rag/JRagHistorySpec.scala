@@ -2,6 +2,7 @@ package org.llm4s.javaapi.rag
 
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.RateLimitError
 import org.llm4s.javaapi.{ FacadeInternals, JMessage, JToolCall }
@@ -106,7 +107,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "fail the ask with the kind of its model's failure" in {
-    val condenser = new Fixed("", Some(RateLimitError("test")))
+    val condenser = new Fixed("", Some(RateLimitError(ProviderId("test"))))
     val rag       = JRagHistoryCheck.pipeline(embeddings(), llm(), _.llmQuestionCondenser(llm(condenser)))
     try JRagHistoryCheck.describe(rag.ask(Followup, JRagHistoryCheck.HISTORY)) should startWith("RATE_LIMIT:")
     finally rag.close()

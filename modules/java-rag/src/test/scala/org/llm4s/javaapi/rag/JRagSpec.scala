@@ -1,6 +1,7 @@
 package org.llm4s.javaapi.rag
 
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.javaapi.{ LlmErrorKind, LlmResult }
@@ -113,7 +114,7 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   "a failing embedding provider" should "fail every call with the kind of its error, never throwing" in {
-    val unauthorised = EmbeddingError(Some("401"), "Authentication failed: bad key", "voyage")
+    val unauthorised = EmbeddingError(Some("401"), "Authentication failed: bad key", ProviderId("voyage"))
     val rag          = pipeline(JRag.builder().embeddings(failingEmbeddings(unauthorised)).llm(llm()).build())
     try {
       val log = JRagCheck.failures(rag).asScala
@@ -146,7 +147,11 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   "a failing model" should "fail ask with the kind of its error, while ingest and search still work" in {
     val rag = pipeline(
-      JRag.builder().embeddings(embeddings()).llm(llm(new EchoingLlm(Some(RateLimitError("openai"))))).build()
+      JRag
+        .builder()
+        .embeddings(embeddings())
+        .llm(llm(new EchoingLlm(Some(RateLimitError(ProviderId("openai"))))))
+        .build()
     )
     try {
       JRagCheck.failures(rag).asScala.toList match {

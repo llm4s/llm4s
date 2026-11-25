@@ -263,7 +263,7 @@ final class WatsonXClient private[provider] (
       else
         Left(
           AuthenticationError(
-            providerName,
+            provider,
             s"IAM token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body, 256)}"
           )
         )
@@ -281,7 +281,7 @@ final class WatsonXClient private[provider] (
           tokenCache.set(Some(IamToken(token, nowSeconds() + ttl, apiKey)))
           Right(token)
         case None =>
-          Left(AuthenticationError(providerName, "IAM response contained no access_token"))
+          Left(AuthenticationError(provider, "IAM response contained no access_token"))
       }
     }
 
@@ -524,8 +524,8 @@ final class WatsonXClient private[provider] (
           HttpErrorMapper
             .toError(s, ujson.Obj("message" -> safe).render(), providerName, Map.empty)
         ).left
-          .getOrElse(ServiceError(s, providerName, safe))
-      case None => ServiceError(502, providerName, safe)
+          .getOrElse(ServiceError(s, provider, safe))
+      case None => ServiceError(502, provider, safe)
     }
   }
 
@@ -535,7 +535,7 @@ final class WatsonXClient private[provider] (
       Left(
         ServiceError(
           502,
-          providerName,
+          provider,
           "stream ended without a finish_reason; the response is incomplete"
         )
       )
@@ -545,7 +545,7 @@ final class WatsonXClient private[provider] (
   /** `reason` must already be normalised by [[WatsonXClient.normalizeFinishReason]]. */
   private def checkFinishReason(reason: String): Result[Unit] =
     if (ErrorFinishReasons.contains(reason))
-      Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
+      Left(ServiceError(502, provider, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
   private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model, usage)

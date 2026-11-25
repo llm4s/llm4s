@@ -6,6 +6,7 @@ import org.llm4s.error.{ AuthenticationError, NetworkError }
 import org.llm4s.syntax.toLLMError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.security.{ Secret, TokenGenerations }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -120,8 +121,8 @@ class VertexAIAuthProvider(
       Try(json("type").str).toOption match {
         case Some("authorized_user") => refreshTokenFlow(json)
         case Some("service_account") => serviceAccountFlow(json)
-        case Some(other)             => Left(AuthenticationError("vertexai", s"Unsupported credential type: $other"))
-        case None                    => Left(AuthenticationError("vertexai", "Credential file missing 'type' field"))
+        case Some(other) => Left(AuthenticationError(ProviderId("vertexai"), s"Unsupported credential type: $other"))
+        case None        => Left(AuthenticationError(ProviderId("vertexai"), "Credential file missing 'type' field"))
       }
     }
 
@@ -153,7 +154,7 @@ class VertexAIAuthProvider(
         } else {
           Left(
             AuthenticationError(
-              "vertexai",
+              ProviderId("vertexai"),
               s"Token refresh failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
@@ -182,7 +183,9 @@ class VertexAIAuthProvider(
         .replaceAll("\\s", "")
       val keyBytes = Base64.getDecoder.decode(cleaned)
       KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(keyBytes))
-    }.toEither.left.map(e => AuthenticationError("vertexai", s"Failed to parse private key: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      AuthenticationError(ProviderId("vertexai"), s"Failed to parse private key: ${e.getMessage}")
+    )
 
   private def createJwt(serviceAccountEmail: String, privateKey: java.security.PrivateKey, tokenUri: String): String = {
     val now     = System.currentTimeMillis() / 1000
@@ -236,7 +239,7 @@ class VertexAIAuthProvider(
         } else {
           Left(
             AuthenticationError(
-              "vertexai",
+              ProviderId("vertexai"),
               s"JWT token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
@@ -298,7 +301,7 @@ object VertexAIAuthProvider {
 
   private val noCredentialsError: AuthenticationError =
     AuthenticationError(
-      "vertexai",
+      ProviderId("vertexai"),
       "No credentials found. Set GOOGLE_ACCESS_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, " +
         "run 'gcloud auth application-default login', or deploy on GCE/GKE for Workload Identity."
     )

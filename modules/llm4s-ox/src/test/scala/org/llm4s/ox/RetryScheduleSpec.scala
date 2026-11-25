@@ -3,6 +3,7 @@ package org.llm4s.ox
 import _root_.ox.resilience.retryEither
 import _root_.ox.scheduling.Schedule
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, RateLimitError, ServiceError }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -27,7 +28,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
       (calls.get(between) - calls.get(between - 1)) / 1000000L
   }
 
-  private val unavailable: LLMError = ServiceError(503, "test", "unavailable")
+  private val unavailable: LLMError = ServiceError(503, ProviderId("test"), "unavailable")
 
   "RetrySchedule.retry" should "retry a recoverable error until the call succeeds" in {
     val script = new Script[String](Left(unavailable), Left(NetworkError("reset", None, "test")), Right("ok"))
@@ -36,7 +37,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not retry a client-error status" in {
-    val badRequest = ServiceError(400, "test", "bad request")
+    val badRequest = ServiceError(400, ProviderId("test"), "bad request")
     val script     = new Script[String](Left(badRequest), Right("never"))
     RetrySchedule.retry(quick(5))(script()) shouldBe Left(badRequest)
     script.count shouldBe 1
@@ -56,7 +57,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "wait a RateLimitError's retry-after before the next attempt" in {
-    val limited = RateLimitError("test", 300.millis)
+    val limited = RateLimitError(ProviderId("test"), 300.millis)
     val script  = new Script[String](Left(limited), Right("ok"))
     RetrySchedule.retry(quick(3))(script()) shouldBe Right("ok")
     script.count shouldBe 2
@@ -64,7 +65,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "wait a ServiceError's retry-after before the next attempt" in {
-    val busy   = ServiceError(503, "test", "busy").withRetryAfter(250.millis)
+    val busy   = ServiceError(503, ProviderId("test"), "busy").withRetryAfter(250.millis)
     val script = new Script[String](Left(busy), Right("ok"))
     RetrySchedule.retry(quick(3))(script()) shouldBe Right("ok")
     script.gapMillis(1) should be >= 250L
@@ -77,7 +78,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not wait for a retry-after once the retries are spent" in {
-    val limited = RateLimitError("test", 30.seconds)
+    val limited = RateLimitError(ProviderId("test"), 30.seconds)
     val script  = new Script[String](Left(limited))
     val started = System.nanoTime()
     RetrySchedule.retry(quick(0))(script()) shouldBe Left(limited)
@@ -89,7 +90,7 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
     retryEither(RetrySchedule.config[Int](quick(3)))(retried()) shouldBe Right(1)
     retried.count shouldBe 2
 
-    val refused    = ServiceError(404, "test", "no such model")
+    val refused    = ServiceError(404, ProviderId("test"), "no such model")
     val notRetried = new Script[Int](Left(refused), Right(1))
     retryEither(RetrySchedule.config[Int](quick(3)))(notRetried()) shouldBe Left(refused)
     notRetried.count shouldBe 1
@@ -104,8 +105,8 @@ class RetryScheduleSpec extends AnyFlatSpec with Matchers {
   "RetrySchedule.policy" should "retry what RetryPolicy retries" in {
     val policy = RetrySchedule.policy[Unit]
     policy.isWorthRetrying(unavailable) shouldBe true
-    policy.isWorthRetrying(ServiceError(401, "test", "unauthorised")) shouldBe false
-    policy.isWorthRetrying(RateLimitError("test")) shouldBe true
+    policy.isWorthRetrying(ServiceError(401, ProviderId("test"), "unauthorised")) shouldBe false
+    policy.isWorthRetrying(RateLimitError(ProviderId("test"))) shouldBe true
     policy.isSuccess(()) shouldBe true
     RetrySchedule.config[Unit]().schedule shouldBe RetrySchedule.default
   }

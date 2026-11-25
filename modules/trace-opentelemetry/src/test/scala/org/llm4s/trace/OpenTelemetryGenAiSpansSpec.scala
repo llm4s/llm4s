@@ -158,7 +158,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
   "A failed call through TracingLLMClient" should {
 
     "be the call's span with error.type and an ERROR status" in withTracing() { (tracing, spans) =>
-      TracingLLMClient(new Stub("gemini", Some(RateLimitError("gemini"))), tracing, fixtureConfig)
+      TracingLLMClient(new Stub("gemini", Some(RateLimitError(ProviderId("gemini")))), tracing, fixtureConfig)
         .complete(conversation, options)
         .isLeft shouldBe true
 
@@ -198,7 +198,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     }
 
     "be that span with error.type when it fails" in withTracing() { (tracing, spans) =>
-      EmbeddingClient(provider(Left(RateLimitError("voyage"))))
+      EmbeddingClient(provider(Left(RateLimitError(ProviderId("voyage")))))
         .withProviderId(ProviderId("voyage"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq(Prompt), model = model))

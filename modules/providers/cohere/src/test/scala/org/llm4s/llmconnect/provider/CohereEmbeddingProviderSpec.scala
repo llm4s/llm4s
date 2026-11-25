@@ -322,7 +322,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     embed(new MockHttpClient(limited), Seq("a")).left.toOption.get match {
       case e: RateLimitError =>
         e.retryAfter shouldBe Some(30.seconds)
-        e.provider shouldBe "cohere"
+        e.provider shouldBe ProviderId("cohere")
       case other => fail(s"expected a RateLimitError, got $other")
     }
   }

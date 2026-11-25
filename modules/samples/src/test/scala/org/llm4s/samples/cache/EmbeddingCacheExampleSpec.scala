@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -53,7 +54,7 @@ class EmbeddingCacheExampleSpec extends AnyFlatSpec with Matchers {
   it should "fail when the provider fails" in {
     val failing = new EmbeddingProvider {
       def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-        Left(EmbeddingError(code = None, message = "down", provider = "stub"))
+        Left(EmbeddingError(code = None, message = "down", provider = ProviderId("stub")))
     }
 
     EmbeddingCacheExample.run(failing, model).isLeft shouldBe true

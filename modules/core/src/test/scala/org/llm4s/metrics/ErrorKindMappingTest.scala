@@ -1,6 +1,7 @@
 package org.llm4s.metrics
 
 import org.llm4s.error._
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -9,7 +10,7 @@ import scala.concurrent.duration._
 class ErrorKindMappingTest extends AnyFunSuite with Matchers {
 
   test("fromLLMError maps RateLimitError to RateLimit") {
-    val error = RateLimitError("test", 1.second)
+    val error = RateLimitError(ProviderId("test"), 1.second)
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.RateLimit
   }
 
@@ -19,7 +20,7 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
   }
 
   test("fromLLMError maps AuthenticationError to Authentication") {
-    val error = AuthenticationError("Invalid API key", "test")
+    val error = AuthenticationError(ProviderId("test"), "Invalid API key")
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.Authentication
   }
 
@@ -39,16 +40,16 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
   }
 
   test("fromLLMError maps ServiceError to ServiceError") {
-    val error = ServiceError(500, "test", "Internal server error")
+    val error = ServiceError(500, ProviderId("test"), "Internal server error")
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.ServiceError
   }
 
   test("fromLLMError maps ServiceError with various status codes to ServiceError") {
-    ErrorKind.fromLLMError(ServiceError(400, "test", "Bad request")) shouldBe ErrorKind.ServiceError
-    ErrorKind.fromLLMError(ServiceError(404, "test", "Not found")) shouldBe ErrorKind.ServiceError
-    ErrorKind.fromLLMError(ServiceError(429, "test", "Rate limit")) shouldBe ErrorKind.ServiceError
-    ErrorKind.fromLLMError(ServiceError(500, "test", "Server error")) shouldBe ErrorKind.ServiceError
-    ErrorKind.fromLLMError(ServiceError(503, "test", "Unavailable")) shouldBe ErrorKind.ServiceError
+    ErrorKind.fromLLMError(ServiceError(400, ProviderId("test"), "Bad request")) shouldBe ErrorKind.ServiceError
+    ErrorKind.fromLLMError(ServiceError(404, ProviderId("test"), "Not found")) shouldBe ErrorKind.ServiceError
+    ErrorKind.fromLLMError(ServiceError(429, ProviderId("test"), "Rate limit")) shouldBe ErrorKind.ServiceError
+    ErrorKind.fromLLMError(ServiceError(500, ProviderId("test"), "Server error")) shouldBe ErrorKind.ServiceError
+    ErrorKind.fromLLMError(ServiceError(503, ProviderId("test"), "Unavailable")) shouldBe ErrorKind.ServiceError
   }
 
   test("fromLLMError maps ExecutionError to ExecutionError") {

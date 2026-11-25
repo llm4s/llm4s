@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
@@ -64,7 +65,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     val cachedClient = CachedEmbeddingClient(baseClient, cache)
 
     val request   = EmbeddingRequest(Seq("hello"), testModel)
-    val testError = EmbeddingError(code = Some("500"), message = "server error", provider = "test")
+    val testError = EmbeddingError(code = Some("500"), message = "server error", provider = ProviderId("test"))
 
     // Base client fails on first call then succeeds on second.
     // If errors were cached the second call would never reach the base client.
@@ -79,12 +80,12 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
   }
 
   "EmbeddingError" should "unapply to its code, message and provider" in {
-    val error = EmbeddingError(code = Some("500"), message = "server error", provider = "test")
+    val error = EmbeddingError(code = Some("500"), message = "server error", provider = ProviderId("test"))
     error match {
       case EmbeddingError(code, message, provider) =>
         code shouldBe Some("500")
         message shouldBe "server error"
-        provider shouldBe "test"
+        provider shouldBe ProviderId("test")
       case _ => fail("Pattern matching failed")
     }
   }

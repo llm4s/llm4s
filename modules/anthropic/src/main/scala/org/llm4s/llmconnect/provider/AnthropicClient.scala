@@ -1053,9 +1053,6 @@ object AnthropicClient {
   /** Why a penalty is reported `Dropped`: the Messages API has no such parameter. */
   private val NoPenalties = "Anthropic's Messages API has no penalty parameters"
 
-  /** The provider name a refusal's `ContentFilteredError` carries. */
-  private val DisplayName = "Anthropic"
-
   /** `validate()`'s request waits ten seconds at most. */
   private val ValidationOptions: RequestOptions =
     RequestOptions.builder().timeout(java.time.Duration.ofSeconds(10)).build()
@@ -1079,7 +1076,7 @@ object AnthropicClient {
 
   /** The error for a reply Anthropic refused after `cutAfterChars` characters of text, with the usage it billed. */
   private[provider] def filtered(reason: String, cutAfterChars: Int, usage: Option[TokenUsage]): ContentFilteredError =
-    ContentFilteredError.reply(DisplayName, reason, cutAfterChars).withUsage(usage)
+    ContentFilteredError.reply(ProviderId("anthropic"), reason, cutAfterChars).withUsage(usage)
 
   /** A reply whose `stop_reason` is `refusal` as a `ContentFilteredError`; any other reply unchanged. */
   private[provider] def refused(c: Completion): Result[Completion] =
@@ -1337,14 +1334,14 @@ object AnthropicClient {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
     e match {
       case e: com.anthropic.errors.UnauthorizedException =>
-        AuthenticationError("anthropic", safe(e.getMessage)).withHttpStatus(401)
+        AuthenticationError(ProviderId("anthropic"), safe(e.getMessage)).withHttpStatus(401)
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
       case e: com.anthropic.errors.RateLimitException =>
         Left(
           HttpErrorMapper
             .toError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
         ).left
-          .getOrElse(RateLimitError("anthropic"))
+          .getOrElse(RateLimitError(ProviderId("anthropic")))
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
@@ -1359,7 +1356,7 @@ object AnthropicClient {
       // status, with the Retry-After a 529 or 503 may carry
       case e: com.anthropic.errors.AnthropicServiceException =>
         HttpErrorMapper.typed(e.statusCode(), errorCodes(e), safe(e.getMessage), "anthropic").getOrElse {
-          val error = ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
+          val error = ServiceError(e.statusCode(), ProviderId("anthropic"), safe(e.getMessage))
           Try(headerMap(e.headers())).toOption
             .flatMap(org.llm4s.http.HttpHeaders.retryAfter(_, java.time.Clock.systemUTC()))
             .fold(error)(error.withRetryAfter)

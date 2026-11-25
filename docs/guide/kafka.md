@@ -393,11 +393,12 @@ acknowledgement of each output it covers:
 ```scala
 import org.llm4s.error.RateLimitError
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import scala.concurrent.duration.*
 
 // A rate limit, then the labels: the ReliableClient retries, and the ticket is enriched on the second call.
 val model = ScriptedLLMClient.sequence(
-  Reply.failure(RateLimitError("scripted", 1.milli)),
+  Reply.failure(RateLimitError(ProviderId("scripted"), 1.milli)),
   Reply.text("""{"category": "Billing", "priority": "High", "summary": "Charged twice."}""")
 )
 ```

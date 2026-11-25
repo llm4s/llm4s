@@ -11,6 +11,7 @@ import org.llm4s.llmconnect.model.{
   StreamedChunk,
   UserMessage
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector }
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
@@ -121,7 +122,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("ReliableClient does not retry non-retryable errors") {
-    val authError  = AuthenticationError("Invalid API key", "test")
+    val authError  = AuthenticationError(ProviderId("test"), "Invalid API key")
     val mockClient = new MockClient(() => Left(authError))
 
     val config = ReliabilityConfig(
@@ -139,7 +140,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("ReliableClient does not retry 4xx ServiceError") {
-    val serviceError = ServiceError(400, "test", "Bad request")
+    val serviceError = ServiceError(400, ProviderId("test"), "Bad request")
     val mockClient   = new MockClient(() => Left(serviceError))
 
     val config = ReliabilityConfig(
@@ -160,7 +161,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     var attemptCount = 0
     val mockClient = new MockClient(() => {
       attemptCount += 1
-      if (attemptCount < 2) Left(ServiceError(500, "test", "Internal server error"))
+      if (attemptCount < 2) Left(ServiceError(500, ProviderId("test"), "Internal server error"))
       else Right(testCompletion)
     })
 
@@ -204,7 +205,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val result          = reliableClient.complete(testConversation)
 
     result match {
-      case Left(e: org.llm4s.error.CircuitOpenError) if e.provider == "test" && !e.probing => succeed
+      case Left(e: org.llm4s.error.CircuitOpenError) if e.provider == ProviderId("test") && !e.probing => succeed
       case _ => fail("Expected circuit breaker error")
     }
 
@@ -464,7 +465,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("Custom retry policy does not retry 4xx ServiceError by default") {
-    val serviceError = ServiceError(400, "test", "Bad request")
+    val serviceError = ServiceError(400, ProviderId("test"), "Bad request")
     val mockClient   = new MockClient(() => Left(serviceError))
 
     val config = ReliabilityConfig(
@@ -488,7 +489,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     var attemptCount = 0
     val mockClient = new MockClient(() => {
       attemptCount += 1
-      if (attemptCount < 2) Left(ServiceError(500, "test", "Internal server error"))
+      if (attemptCount < 2) Left(ServiceError(500, ProviderId("test"), "Internal server error"))
       else Right(testCompletion)
     })
 
@@ -657,7 +658,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("ReliableClient preserves original error type after retries") {
-    val rateLimitError = RateLimitError("test", 1.milli)
+    val rateLimitError = RateLimitError(ProviderId("test"), 1.milli)
     val mockClient     = new MockClient(() => Left(rateLimitError))
 
     val config = ReliabilityConfig(
@@ -680,7 +681,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     // Simulates a rate-limiting middleware composed inside the retry loop: every
     // rejection it produces is already recorded (RateLimitOrigin.LocalThrottle), so
     // ReliableClient's terminal-failure handler must not record it a second time.
-    val localRejection = RateLimitError.local("test-provider")
+    val localRejection = RateLimitError.local(ProviderId("test-provider"))
     val mockClient     = new MockClient(() => Left(localRejection))
 
     val config = ReliabilityConfig(
@@ -708,7 +709,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     // The default origin (UpstreamProvider) is never recorded by anyone else, so
     // ReliableClient must remain the sole recorder for it - the fix above must not
     // silently drop metrics for real provider-side 429s.
-    val upstreamRejection = RateLimitError("anthropic")
+    val upstreamRejection = RateLimitError(ProviderId("anthropic"))
     val mockClient        = new MockClient(() => Left(upstreamRejection))
 
     val config = ReliabilityConfig(
@@ -771,7 +772,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     )
     val reliableClient = ReliableClient(new MockClient(() => Right(testCompletion)), "test", config)
 
-    reliableClient.decideRetry(1, AuthenticationError("Invalid API key", "test")) shouldBe RetryDecision.DoNotRetry
+    reliableClient.decideRetry(
+      1,
+      AuthenticationError(ProviderId("test"), "Invalid API key")
+    ) shouldBe RetryDecision.DoNotRetry
   }
 
   test("decideRetry returns DoNotRetry once max attempts are reached") {

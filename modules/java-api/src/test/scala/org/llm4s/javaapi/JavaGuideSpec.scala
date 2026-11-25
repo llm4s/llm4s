@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import org.llm4s.error.{
   AuthenticationError,
@@ -319,7 +320,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
     "point at the key and not print the retry hint for an authentication failure" in {
       val printed = captured(
-        GuideSnippets.handlingAFailure(client(failingWith(AuthenticationError("openai", "bad key", "401"))))
+        GuideSnippets.handlingAFailure(client(failingWith(AuthenticationError(ProviderId("openai"), "bad key", "401"))))
       )
 
       printed.err.linesIterator.toList shouldBe List(
@@ -330,16 +331,18 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
     "print the delay a rate limit asks for, or 'a while' when it gives none" in {
       captured(
-        GuideSnippets.handlingAFailure(client(failingWith(RateLimitError("openai", 20.seconds))))
+        GuideSnippets.handlingAFailure(client(failingWith(RateLimitError(ProviderId("openai"), 20.seconds))))
       ).err.linesIterator.toList
         .drop(1) shouldBe List("rate limited; wait 20 s", "a retry may succeed")
-      captured(GuideSnippets.handlingAFailure(client(failingWith(RateLimitError("openai"))))).err.linesIterator.toList
+      captured(
+        GuideSnippets.handlingAFailure(client(failingWith(RateLimitError(ProviderId("openai")))))
+      ).err.linesIterator.toList
         .drop(1) shouldBe List("rate limited; wait a while", "a retry may succeed")
     }
 
     "print the HTTP status of a provider's error response" in {
       captured(
-        GuideSnippets.handlingAFailure(client(failingWith(ServiceError(503, "openai", "overloaded"))))
+        GuideSnippets.handlingAFailure(client(failingWith(ServiceError(503, ProviderId("openai"), "overloaded"))))
       ).err.linesIterator.toList
         .drop(1) shouldBe List("the provider answered HTTP 503", "a retry may succeed")
     }

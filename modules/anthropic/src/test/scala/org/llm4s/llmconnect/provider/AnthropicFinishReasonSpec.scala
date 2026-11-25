@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, sendSseResponse, withServer }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -79,7 +80,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     withServer("/v1/messages")(sendJsonResponse(_, 200, reply("refusal"))) { baseUrl =>
       clientAt(baseUrl).complete(hi) match {
         case Left(e: ContentFilteredError) =>
-          e.provider shouldBe "Anthropic"
+          e.provider shouldBe ProviderId("anthropic")
           e.reason shouldBe "refusal"
           e.promptBlocked shouldBe false
           e.message should include("after 3 characters")

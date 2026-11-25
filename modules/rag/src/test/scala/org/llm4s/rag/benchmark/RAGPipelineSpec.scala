@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.evaluation.EvaluationError
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.vectorstore._
 import org.scalatest.BeforeAndAfterEach
@@ -396,7 +397,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
         case embErr: EmbeddingError =>
           embErr.message should include("empty embeddings")
           embErr.provider should not be "unknown"
-          embErr.provider shouldBe "text-embedding-3-small"
+          embErr.provider shouldBe ProviderId("text-embedding-3-small")
         case other =>
           fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
       },

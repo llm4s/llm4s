@@ -16,6 +16,7 @@ import org.llm4s.llmconnect.model.{
   ToolMessage,
   UserMessage
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 import org.scalatest.EitherValues
@@ -327,7 +328,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val usage = TokenUsage(7, 1, 8)
     val scripted = ScriptedLLMClient.sequence(
       Reply.text("Paris").withModel("fixture-model").withUsage(usage),
-      Reply.failure(AuthenticationError("fixture", "bad key")),
+      Reply.failure(AuthenticationError(ProviderId("fixture"), "bad key")),
       Reply.text("streamed")
     )
     val client       = new SpringAiLlmClient(new Llm4sChatModel(scripted), 32000, 1000)
@@ -339,7 +340,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     scripted.lastCall.flatMap(_.options.temperature) shouldBe Some(0.1)
 
     client.complete(conversation, CompletionOptions()).left.value shouldBe (AuthenticationError(
-      "fixture",
+      ProviderId("fixture"),
       "bad key"
     ): LLMError)
 

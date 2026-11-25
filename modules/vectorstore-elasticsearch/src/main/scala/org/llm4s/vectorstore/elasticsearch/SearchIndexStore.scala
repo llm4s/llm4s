@@ -2,6 +2,7 @@ package org.llm4s.vectorstore.elasticsearch
 
 import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord, VectorStore, VectorStoreStats }
@@ -356,9 +357,9 @@ final private[vectorstore] class SearchIndexStore(
   private def failure(operation: String, response: HttpResponse): LLMError = {
     val body = scrub(response.body)
     response.statusCode match {
-      case 401 | 403 => AuthenticationError(backend.errorId, s"$product $operation refused: $body")
-      case 429       => RateLimitError(backend.errorId)
-      case status    => ServiceError(status, backend.errorId, s"$product $operation failed: $body")
+      case 401 | 403 => AuthenticationError(ProviderId(backend.errorId), s"$product $operation refused: $body")
+      case 429       => RateLimitError(ProviderId(backend.errorId))
+      case status    => ServiceError(status, ProviderId(backend.errorId), s"$product $operation failed: $body")
     }
   }
 
