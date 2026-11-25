@@ -1,10 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import com.openai.models.{ ReasoningEffort => SdkReasoningEffort }
-import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ CompletionOptions, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.model.{ ModelCapabilities, ModelRegistryService, RequestTransformer }
-import org.llm4s.types.Result
 
 /**
  * OpenAI's request rules that follow from model naming rather than from registry data.
@@ -14,9 +12,10 @@ import org.llm4s.types.Result
  * `max_completion_tokens` in place of `max_tokens`. These were core's `DefaultRequestTransformer`
  * defaults until they moved here, so other providers' clients no longer apply them.
  *
- * Some models restrict tool calls on Chat Completions, the only API `OpenAIClient` speaks ([[toolsOnChatCompletions]]):
- * `gpt-6-luna` calls functions there only with `reasoning_effort: none`, and `gpt-6.1-terra` calls tools only through
- * the Responses API (OpenAI's model pages, checked 2026-11-24).
+ * The GPT 5.6, 6 and 6.1 models restrict tool calls on Chat Completions, the only API `OpenAIClient` speaks
+ * ([[toolsOnChatCompletions]]): they call functions there only with `reasoning_effort: none`, and answer anything
+ * else, a request that leaves the field out included, with a 400 naming the Responses API (requests sent to
+ * `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-luna` and `gpt-6.1-terra` on 2026-11-25, #2940).
  */
 private[llm4s] object OpenAIModelRules {
 
@@ -53,47 +52,26 @@ private[llm4s] object OpenAIModelRules {
 
     /** Only with `reasoning_effort: none`, which the client then sends whatever was asked. */
     case OnlyWithoutReasoning
-
-    /** Not at all: tool calls need the Responses API, which `OpenAIClient` does not speak. */
-    case ResponsesApiOnly
   }
 
   /**
-   * How `modelId` may call tools on Chat Completions, by OpenAI's model pages: `gpt-6-luna` only with
-   * `reasoning_effort: none`, `gpt-6.1-terra` only through the Responses API. A dated snapshot, a router prefix
-   * (`openai/`) and a fine-tune are judged by the model named.
+   * How `modelId` may call tools on Chat Completions: a model of the 5.6, 6 or 6.1 generation only with
+   * `reasoning_effort: none`. The rule is by generation, not by variant: every model tried had it, and a model
+   * wrongly included still calls its tools, where one wrongly left out fails every request with tools. A dated
+   * snapshot, a router prefix (`openai/`) and a fine-tune are judged by the model named.
    */
   def toolsOnChatCompletions(modelId: String): ToolCalls = {
     val name = OpenAIReasoning.baseModel(modelId).trim.toLowerCase.split('/').last
-    def is(family: String) =
-      name == family || name.startsWith(family + "-") && name.drop(family.length).matches(Snapshot)
-    if (is("gpt-6-luna")) ToolCalls.OnlyWithoutReasoning
-    else if (is("gpt-6.1-terra")) ToolCalls.ResponsesApiOnly
-    else ToolCalls.Unrestricted
+    if (ToolsOnlyWithoutReasoning.matches(name)) ToolCalls.OnlyWithoutReasoning else ToolCalls.Unrestricted
   }
 
-  /** A dated snapshot's suffix, `-2026-09-08`. */
-  private val Snapshot = "-\\d{4}-\\d{2}-\\d{2}"
-
-  /**
-   * Refuses a request with tools to a model that calls tools only through the Responses API: sent over Chat
-   * Completions, it would fail at OpenAI or call no tool. Any other request passes.
-   */
-  def checkTools(modelId: String, options: CompletionOptions): Result[Unit] =
-    if (options.tools.nonEmpty && toolsOnChatCompletions(modelId) == ToolCalls.ResponsesApiOnly)
-      Left(
-        ValidationError(
-          "tools",
-          s"$modelId calls tools only through OpenAI's Responses API, and llm4s-openai uses Chat Completions: " +
-            "use a model that calls tools on Chat Completions (such as gpt-6-luna or gpt-5.6-terra), or send no tools"
-        )
-      )
-    else Right(())
+  /** `gpt-5.6`, `gpt-6` or `gpt-6.1`, bare or with a variant and snapshot (`gpt-6.1-terra-2026-09-08`). */
+  private val ToolsOnlyWithoutReasoning = "gpt-(5\\.6|6|6\\.1)(-.*)?".r
 
   /**
    * The `reasoning_effort` a request with tools must send to `modelId`, and what that overrides of what was asked;
-   * `None` when the model takes any effort with tools. For `gpt-6-luna` it is `none`: the asked effort, or the
-   * model's default when none was asked, is reported `Adjusted`, as is a `thinking` other than `Off`.
+   * `None` when the model takes any effort with tools. For a model that calls tools
+   * [[ToolCalls.OnlyWithoutReasoning]] it is `none`: the asked effort, or the model's default when none was asked, is reported `Adjusted`, as is a `thinking` other than `Off`.
    */
   def forcedToolEffort(
     modelId: String,

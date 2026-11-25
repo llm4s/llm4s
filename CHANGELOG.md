@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Providers
+
+- **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

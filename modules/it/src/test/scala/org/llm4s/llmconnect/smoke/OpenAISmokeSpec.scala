@@ -141,6 +141,40 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     usage.get.totalTokens should be > 0
   }
 
+  // #2940: on Chat Completions these models call a function only at reasoning_effort none, which the client sends
+  // whether or not an effort was asked for. A wrong rule shows here as OpenAI's 400.
+  for {
+    model  <- Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6-luna", "gpt-6.1-terra")
+    effort <- Seq(None, Some(ReasoningEffort.Low))
+  } it should s"call a tool on $model, reasoning ${effort.fold("unset")(_.name)}" in {
+    Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+    val weather = org.llm4s.toolapi
+      .ToolBuilder[String](
+        "get_weather",
+        "Returns the current weather for a city",
+        org.llm4s.toolapi.Schema
+          .`object`[Map[String, Any]]("Arguments")
+          .withProperty(org.llm4s.toolapi.Schema.property("city", org.llm4s.toolapi.Schema.string("The city")))
+      )
+      .withHandler(_ => Right("sunny"))
+      .build()
+      .value
+    val options = CompletionOptions().withTools(Seq(weather)).withReasoning(effort)
+    val ask     = Conversation(Seq(UserMessage("What is the weather in Paris? Use the get_weather tool.")))
+
+    val client   = OpenAIClient(config(apiKey.get, model)).toOption.get
+    val sync     = client.complete(ask, options)
+    val streamed = client.streamComplete(ask, options)(_ => ())
+    client.close()
+
+    Seq("complete" -> sync, "streamComplete" -> streamed).foreach { case (call, result) =>
+      withClue(s"$call on $model failed: ${result.swap.toOption}: ") {
+        result.value.message.toolCalls.map(_.name) shouldBe Seq("get_weather")
+      }
+    }
+  }
+
   it should "return AuthenticationError for invalid key" in {
     val client = OpenAIClient(config("sk-invalid-key-for-testing")).toOption.get
     val result = client.complete(conversation, CompletionOptions())
