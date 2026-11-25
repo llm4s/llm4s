@@ -284,6 +284,7 @@ models), changed what a request may carry. LLM4S follows the rules for you and r
 | nothing (`CompletionOptions()`) | no sampling parameter, no `thinking` | the same: the model's defaults apply |
 | `withTemperature(t)` | `temperature: t` | not sent (the API answers any value but the default with a 400), reported `Dropped(Temperature, ...)` |
 | `withTopP(p)` | not sent by this client, reported `Dropped(TopP, ...)` | the same |
+| `withPresencePenalty(p)`, `withFrequencyPenalty(p)` | not sent: the Messages API has no penalty parameter. Reported `Dropped(PresencePenalty, ...)` and `Dropped(FrequencyPenalty, ...)` | the same |
 | `withReasoning(level)` | `thinking: enabled` with the level's `budget_tokens` | `thinking: adaptive` and `output_config.effort: level` (a budget is a 400), reported `Adjusted(Reasoning, ...)` |
 | `withThinking(Thinking.budget(n))` | `budget_tokens: n` | `thinking: adaptive`, reported `Adjusted(Thinking, ...)` |
 | `withThinking(Thinking.Adaptive).withReasoning(level)` | adaptive at that effort, where the model takes it (4.6) | `thinking: adaptive` and `output_config.effort: level`, nothing to report |
@@ -300,11 +301,17 @@ sampling parameter for a model the registry marks.
   For a chat reply or a tool-calling agent that is often more than the task needs: set
   `CompletionOptions().withReasoning(ReasoningEffort.Low)` (or `Medium`) for the model call, as
   [Cost controls](cost-controls#thinking-and-reasoning-effort) describes.
-- **Set `maxTokens` on a model that thinks.** Thinking is spent from the same allowance as the answer, and this client
-  sends `max_tokens: 2048` when you set none (the API requires a value). A long answer, or a hard question at a high
-  effort, can use all of it before any text is written: the completion then has
-  `finishReason == FinishReason.Length` and little or no content, and an agent turn ends `AgentStatus.Truncated`.
-  Give such calls room, for example `withMaxTokens(16000)`.
+- **The output limit follows the model when you set no `maxTokens`.** The API requires `max_tokens`, so the client
+  sends a default: on a streamed call the model's maximum output tokens, from the
+  [model registry](../reference/model-metadata) (128,000 for the current models); on a non-streamed call the same
+  capped at 16,000, because nothing of a non-streamed reply arrives until all of it is generated and the request
+  has 10 minutes by default; and 8,192 for a model the registry does not know. An explicit `withMaxTokens(n)` is
+  always sent as given. (Until 0.7.0 the default was 2048 for every model.)
+- **Thinking is spent from the same allowance as the answer.** A long answer, or a hard question at a high effort,
+  can use all of `max_tokens` before any text is written: the completion then has
+  `finishReason == FinishReason.Length` and little or no content, and an agent turn ends `AgentStatus.Truncated`,
+  with an empty partial answer when there was no text at all. Stream such calls, raise `maxTokens` (with a
+  `timeouts.request` to match on a non-streamed call), or lower the effort.
 
 ### Tips
 
@@ -397,6 +404,9 @@ alike, by model generation ([Cost controls](cost-controls#thinking-and-reasoning
 
 A request never carries both `thinkingBudget` and `thinkingLevel`, which Gemini rejects. Whatever was not sent as
 asked is on `Completion.adjustments`.
+
+`presencePenalty` and `frequencyPenalty` are not sent, by `gemini` or `vertexai`: which Gemini models accept them is
+not in the model registry. Each one you set is reported `Dropped` on `Completion.adjustments`.
 
 ---
 
@@ -649,7 +659,8 @@ llm4s.providers.perplexity-main {
   (`None` as `minimal`). A `ResponseFormat.JsonSchema` is sent as `response_format`; plain
   `ResponseFormat.Json` is refused, since the Agent API takes only a schema. An `anthropic/` model with no
   `maxTokens` is sent `reserveCompletion` as `max_output_tokens`, which the Agent API requires for those models.
-  Penalties have no counterpart and are not sent. Only text content is sent.
+  Penalties have no counterpart: they are not sent, and are reported `Dropped` on `Completion.adjustments`. Only
+  text content is sent.
 - **Not supported yet:** effort levels (`effort`), profiles, model fallback chains, the other built-in tools
   (`fetch_url`, `finance_search`, ...), background runs and `previous_response_id`.
 - No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
@@ -706,6 +717,8 @@ bare id and for an inference profile alike.
 
 Behaviour to know about:
 
+- **Penalties are not sent.** Converse's `inferenceConfig` has no penalty parameter, so a `presencePenalty` or
+  `frequencyPenalty` you set is reported `Dropped` on `Completion.adjustments`.
 - **Streaming and tools.** `complete` uses Converse and `streamComplete` ConverseStream, both with tool calling.
   `onChunk` runs on the calling thread, in order; interrupting that thread cancels the request and returns
   `Left(CancelledError)`.
@@ -1786,6 +1799,9 @@ llm4s {
   }
 }
 ```
+
+`CompletionOptions.presencePenalty` and `frequencyPenalty` are sent as `options.presence_penalty` and
+`options.frequency_penalty`, when set.
 
 ### Structured output
 

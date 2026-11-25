@@ -3,7 +3,16 @@ package org.llm4s.testkit
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ ContentFilteredError, NetworkError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ Completion, Conversation, FinishReason, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{
+  Completion,
+  CompletionOptions,
+  Conversation,
+  FinishReason,
+  RequestAdjustment,
+  RequestOption,
+  StreamedChunk,
+  UserMessage
+}
 import org.llm4s.types.Result
 import org.scalactic.source.Position
 
@@ -26,6 +35,62 @@ private[testkit] object ModelCallContractRun:
       result = Some(sent.fold(thrown => ProviderModuleChecks.failAt(s"the call threw $thrown"), identity))
     }
     result.getOrElse(ProviderModuleChecks.failAt("the call did not run"))
+
+  /**
+   * The penalties the unsupported-option check asks for: values no request carries by chance, each exact in binary,
+   * so a body that holds one is a body the client put it in.
+   */
+  val PresencePenalty: Double  = 0.4375
+  val FrequencyPenalty: Double = 0.3125
+
+  /** The options of the unsupported-option check: both penalties set, nothing else. */
+  val penaltyOptions: CompletionOptions =
+    CompletionOptions().withPresencePenalty(PresencePenalty).withFrequencyPenalty(FrequencyPenalty)
+
+  /**
+   * Answers with `respond`, after recording the request's body in `bodies`: the request a client sent, for a check
+   * that reads what it carried. The body is read whole before `respond` runs, so `respond` sees an exchange it can
+   * only answer - which is all a recorded reply does.
+   */
+  def recording(respond: HttpExchange => Unit, bodies: java.util.Queue[String]): HttpExchange => Unit =
+    exchange =>
+      val body = Try(new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+      bodies.add(body.getOrElse(""))
+      respond(exchange)
+
+  /**
+   * Fails unless each penalty `penaltyOptions` asked for was either sent - one of `bodies`, the requests the client
+   * made, carries its value - or reported on the `Completion`'s `adjustments` (RFC 0008): an option the provider or
+   * model cannot honour is dropped with a report, never silently. A `Dropped` report for a value that was sent
+   * fails too: the report would be false.
+   */
+  def expectPenalties(how: String, result: Result[Completion], bodies: Iterable[String])(using Position): Unit =
+    def fail(detail: String): Nothing = ProviderModuleChecks.failAt(s"penalties, $how: $detail")
+    val completion =
+      result.fold(e => fail(s"expected a Right, got Left(${e.getClass.getSimpleName}: ${e.message})"), identity)
+    val sentJson = bodies.flatMap(body => Try(ujson.read(body)).toOption).toList
+    Seq(
+      ("presencePenalty", RequestOption.PresencePenalty, PresencePenalty),
+      ("frequencyPenalty", RequestOption.FrequencyPenalty, FrequencyPenalty)
+    ).foreach { (name, option, value) =>
+      val sent     = sentJson.exists(carries(_, value))
+      val reported = completion.adjustments.filter(_.option == option)
+      if !sent && reported.isEmpty then
+        fail(
+          s"CompletionOptions.$name was set to $value, the request does not carry it, and Completion.adjustments " +
+            s"reports nothing for RequestOption.$option: the option was dropped silently. Send it, or report a " +
+            "RequestAdjustment.Dropped saying why it cannot be honoured"
+        )
+      if sent && reported.exists(_.isInstanceOf[RequestAdjustment.Dropped]) then
+        fail(s"CompletionOptions.$name is reported Dropped, but the request carries $value")
+    }
+
+  /** Whether `json` holds the number `value` anywhere. */
+  private def carries(json: ujson.Value, value: Double): Boolean = json match
+    case ujson.Num(n)   => n == value
+    case ujson.Arr(vs)  => vs.exists(carries(_, value))
+    case ujson.Obj(kvs) => kvs.values.exists(carries(_, value))
+    case _              => false
 
   /** Fails unless `result`, from `how` (`complete` or `streamComplete`), is what `c` requires. */
   def expect(c: ContractCase, how: String, result: Result[Completion])(using Position): Unit =

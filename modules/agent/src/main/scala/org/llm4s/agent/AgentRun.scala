@@ -373,7 +373,18 @@ private[agent] object AgentRun:
 
   private def completedStatus(state: ThreadState): Result[AgentStatus] = lastAnswer(state).map(AgentStatus.Completed(_))
 
-  private def truncatedStatus(state: ThreadState): Result[AgentStatus] = lastAnswer(state).map(AgentStatus.Truncated(_))
+  /**
+   * `Truncated` with the cut-off answer: the thread's last message, when that is an answer. A reply cut off before the
+   * model wrote any text is not stored (#2933) - the thread then ends with the turn's query or a tool result - and its
+   * partial answer is empty, never an earlier turn's answer.
+   */
+  private def truncatedStatus(state: ThreadState): Result[AgentStatus] =
+    state.get(Messages.key).map { stored =>
+      val partial = stored.lastOption.collect {
+        case StoredMessage(_, a: AssistantMessage) if a.toolCalls.isEmpty => a.content
+      }
+      AgentStatus.Truncated(partial.getOrElse(""))
+    }
 
   private def lastAnswer(state: ThreadState): Result[String] =
     state.get(Messages.key).flatMap { stored =>

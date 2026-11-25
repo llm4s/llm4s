@@ -60,6 +60,10 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     s.reason shouldBe Optional.empty
     s.toString shouldBe "TRUNCATED(The first half)"
     FacadeInternals.agentStatus(AgentStatus.Completed("42")).partialAnswer shouldBe Optional.empty
+    // a reply cut off before any text (#2933): still TRUNCATED, with a present, empty partial answer
+    val blank = FacadeInternals.agentStatus(AgentStatus.Truncated(""))
+    blank.kind shouldBe AgentStatusKind.TRUNCATED
+    blank.partialAnswer shouldBe Optional.of("")
   }
 
   it should "carry a blocked turn's guardrail and reason, and nothing else" in {

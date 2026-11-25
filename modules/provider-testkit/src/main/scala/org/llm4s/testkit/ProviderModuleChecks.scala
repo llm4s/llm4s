@@ -252,6 +252,12 @@ trait ProviderModuleChecks extends Assertions:
    * A stream that succeeds must also have delivered what it returned: its chunks' text joined is the `Completion`'s
    * text, the last reason a chunk carried is its finish reason, and its chunks name the same tool calls.
    *
+   * The [[ContractCase.CleanText]] reply is also asked for with `CompletionOptions.presencePenalty` and
+   * `frequencyPenalty` set, on `complete` and on `streamComplete`: each penalty must either be in the request the
+   * client sent, or be reported on the returned `Completion.adjustments` (a `RequestAdjustment.Dropped` naming the
+   * option, RFC 0008). A client that leaves an option out without a report fails, as does one that reports
+   * `Dropped` for a value it sent. Nothing is declared for it: every chat client takes `CompletionOptions`.
+   *
    * @param cases  every [[ContractCase]], with whether and how it applies
    * @param path   the path the server answers on; `/` answers every path
    * @param client builds the client for the server's base URL (`http://localhost:<port>`)
@@ -267,7 +273,21 @@ trait ProviderModuleChecks extends Assertions:
         failAt(
           s"CleanText is NotApplicable ($reason): every chat client answers with text, and its stream proves the client streams"
         )
-      case Applicability.Applies(_) => ()
+      case Applicability.Applies(text) =>
+        // an option the provider cannot honour is reported, never dropped silently (RFC 0008): the clean text reply
+        // again, asked for with both penalties, on complete and on streamComplete
+        val completeBodies = java.util.concurrent.ConcurrentLinkedQueue[String]()
+        val completed =
+          ModelCallContractRun.call(path, ModelCallContractRun.recording(text.complete, completeBodies), client)(
+            _.complete(_, ModelCallContractRun.penaltyOptions)
+          )
+        ModelCallContractRun.expectPenalties("complete", completed, completeBodies.asScala)
+        val streamBodies = java.util.concurrent.ConcurrentLinkedQueue[String]()
+        val streamed =
+          ModelCallContractRun.call(path, ModelCallContractRun.recording(text.stream, streamBodies), client)(
+            _.streamComplete(_, ModelCallContractRun.penaltyOptions)(_ => ())
+          )
+        ModelCallContractRun.expectPenalties("streamComplete", streamed, streamBodies.asScala)
     ContractCase.values.foreach { c =>
       cases(c) match
         case Applicability.NotApplicable(reason) =>

@@ -282,7 +282,9 @@ final class BedrockClient private[provider] (
       )
       .map { t =>
         val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model.asString, t.options) ++
-          cachePlan(t.options).adjustments ++ BedrockClient.serviceTier(t.options)._2
+          cachePlan(t.options).adjustments ++ BedrockClient.serviceTier(t.options)._2 ++
+          // Converse's inferenceConfig is maxTokens, temperature, topP and stopSequences: it has no penalty
+          UnmappedOptions.penalties("the Bedrock Converse API's inferenceConfig has no penalty parameters", t.options)
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
 
