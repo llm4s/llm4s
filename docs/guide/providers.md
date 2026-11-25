@@ -904,8 +904,23 @@ its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
 Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. For a Claude model,
-`Thinking.Budget(n)` is the budget, fitted to `[1024, maxTokens)`, and `Thinking.Off` sends no thinking block;
-any other `thinking` is reported as dropped.
+`Thinking.Budget(n)` is the budget, and `Thinking.Off` sends no thinking block; any other `thinking` is reported
+as dropped. A budget, a `reasoning` level's included, is at least 1024 and below `maxTokens` when you set it.
+With `maxTokens` unset no `max_tokens` is sent, and the budget is fitted below the model's maximum output
+tokens when the model registry states them. For a model it states none for, which is most of OpenRouter's Claude
+ids today, the budget is kept below 32,000, the smallest maximum output of a Claude model that thinks, and a
+budget cut that way is reported `Adjusted` on `Completion.adjustments`:
+
+| `reasoning`, `maxTokens` unset | Model in the registry (128,000 output) | Model not in the registry |
+|---|---|---|
+| `Minimal` | 1,024 | 1,024 |
+| `Low` | 2,048 | 2,048 |
+| `Medium` | 8,192 | 8,192 |
+| `High` | 32,768 | 31,999 |
+| `XHigh` | 49,152 | 31,999 |
+| `Max` | 65,536 | 31,999 |
+
+Set `maxTokens` above the budget you want to lift the 31,999.
 
 Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
 `reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with

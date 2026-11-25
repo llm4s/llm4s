@@ -53,8 +53,10 @@ import scala.util.Try
  *    `reasoning_effort` string parameter.
  *  - All other models → reasoning configuration is silently omitted.
  *
- * The thinking budget is clamped to `[1024, maxTokens - 1]` for Anthropic
- * models, matching the Anthropic API constraint.
+ * The thinking budget of an Anthropic model is at least 1024, the Anthropic API's minimum, and below
+ * `CompletionOptions.maxTokens` when that is set. When it is not, the request carries no `max_tokens`, and the
+ * budget is fitted below the model's maximum output tokens if the model registry states them, and otherwise below
+ * [[OpenRouterThinkingBudget.UnknownModelMaxOutput]].
  *
  * == Thinking content ==
  *
@@ -99,7 +101,7 @@ final private[provider] class OpenRouterClient(
         timeouts = config.timeouts,
         network = config.network
       ),
-      OpenRouterDialect,
+      new OpenRouterModelDialect(OpenRouterClient.maxOutputTokens(config.model)),
       metrics,
       exchangeLogging,
       httpClient
@@ -123,6 +125,13 @@ object OpenRouterClient {
     config.apiKeyProvider.fold(OpenAICompatibleClient.Credential.Static(config.apiKey))(
       OpenAICompatibleClient.Credential.Rotating(_)
     )
+
+  /**
+   * The registry's maximum output tokens for `model` on OpenRouter, `None` when it does not know the model or
+   * states none: the limit a thinking budget is fitted under when the caller set no `maxTokens`.
+   */
+  private def maxOutputTokens(model: ModelName)(using registry: ModelRegistryService): Option[Int] =
+    registry.lookup(OpenRouterDialect.ProviderId, model).toOption.flatMap(_.maxOutputTokens).filter(_ > 0)
 
   /** `config` unless it carries `workloadIdentity`, which OpenRouter cannot use; then the rules of `OpenAIConfig.validate`. */
   private def validate(config: OpenAIConfig): Result[OpenAIConfig] =
@@ -171,12 +180,13 @@ object OpenRouterClient {
  *    [[decodeThinkingDetails]] and [[encodeThinking]]);
  *  - strict tool-call parsing: a call missing its `id` or `name`, or with
  *    unparseable arguments, fails the completion rather than being defaulted.
+ *
+ * @param modelMaxOutput the model registry's maximum output tokens for the client's model, `None` when it knows
+ *                       none; read when a request first needs it (see [[addReasoning]])
  */
-private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
+private[provider] class OpenRouterModelDialect(modelMaxOutput: => Option[Int]) extends OpenAICompatibleDialect:
 
-  /** The provider id on the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
-  val ProviderId: org.llm4s.types.ProviderModelTypes.ProviderId =
-    org.llm4s.types.ProviderModelTypes.ProviderId("openrouter")
+  private lazy val maxOutput: Option[Int] = modelMaxOutput
 
   // OpenRouter's `/models` answers without a key, so it would pass a wrong one; `GET /key` describes the key sent
   // and answers 401 to a wrong one (https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key, read
@@ -213,20 +223,38 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * Anthropic models receive a `thinking` object with a budget; OpenAI o1/o3/o4 models receive
    * `reasoning_effort`; all others are left unchanged (reasoning silently ignored, as before).
    *
-   * For an Anthropic model the budget is `Thinking.Budget`'s, fitted to `[1024, max_tokens)` and
-   * reported `Adjusted` when fitted; with no `thinking`, the default budget of `reasoning`, as before.
+   * For an Anthropic model the budget is `Thinking.Budget`'s, fitted (see below) and reported `Adjusted` when
+   * fitted; with no `thinking`, the default budget of `reasoning`, fitted the same way.
    * `Thinking.Off` sends no thinking block and wins over a `reasoning` also set. `Thinking.Adaptive`
    * is `Dropped` (this dialect sends Anthropic models a budget only) and the budget comes from
    * `reasoning`. On any other model a `thinking` is `Dropped`.
+   *
+   * A budget is at least 1024 and below the request's output limit: `CompletionOptions.maxTokens` when the caller
+   * set it. When they did not, the request carries no `max_tokens`, so the only limit there is to fit under is the
+   * model's own maximum output: the registry's figure, or [[OpenRouterThinkingBudget.UnknownModelMaxOutput]] for
+   * a model it states none for. A budget fitted under that assumed figure is reported `Adjusted`, a `reasoning`
+   * level's too, with what lifts it. (Until 0.7.0 an unset `maxTokens` counted as 2048, which cut every level
+   * above `Low` down to 2047.)
    */
   override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
     val modelLower       = model.asString.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
       modelLower.contains("o1") || modelLower.contains("o3") || modelLower.contains("o4")
-    val maxTokens = options.maxTokens.getOrElse(2048)
+    // the limit a budget must stay below, and why
+    val assumedLimit = options.maxTokens.isEmpty && maxOutput.isEmpty
+    val (limit, limitReason) = options.maxTokens
+      .map(tokens => tokens -> s"Anthropic takes a budget of at least 1024 and below max_tokens ($tokens)")
+      .orElse(
+        maxOutput.map(tokens =>
+          tokens -> s"Anthropic takes a budget of at least 1024 and below the model's maximum output ($tokens)"
+        )
+      )
+      .getOrElse(
+        OpenRouterThinkingBudget.UnknownModelMaxOutput -> OpenRouterThinkingBudget.unknownModelReason(model)
+      )
 
-    def fitted(budgetTokens: Int): Int = math.max(1024, math.min(budgetTokens, maxTokens - 1))
+    def fitted(budgetTokens: Int): Int = math.max(1024, math.min(budgetTokens, limit - 1))
 
     if (isAnthropicModel) {
       val fromReasoning = options.reasoning.map(ReasoningEffort.defaultBudgetTokens)
@@ -241,7 +269,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
                 RequestOption.Thinking,
                 s"Budget($tokens)",
                 s"Budget($sent)",
-                s"Anthropic takes a budget of at least 1024 and below max_tokens ($maxTokens)"
+                limitReason
               )
             )
         case Some(Thinking.Off) => EffortMapping.overriddenByOff(options, "no thinking")
@@ -249,7 +277,18 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
           fromReasoning.foreach(budget =>
             body("thinking") = ujson.Obj("type" -> "enabled", "budget_tokens" -> fitted(budget))
           )
-          other.toList.map(_ =>
+          // a level fitted under a limit the caller set, or the model's own, is not reported, as before; one
+          // fitted under a limit this client assumed is
+          val assumed = fromReasoning.toList.collect {
+            case budget if assumedLimit && fitted(budget) != budget =>
+              RequestAdjustment.Adjusted(
+                RequestOption.Reasoning,
+                s"budget_tokens $budget",
+                s"budget_tokens ${fitted(budget)}",
+                limitReason
+              )
+          }
+          assumed ++ other.toList.map(_ =>
             RequestAdjustment.Dropped(
               RequestOption.Thinking,
               "OpenRouter sends Anthropic models a thinking budget only"
@@ -344,3 +383,38 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
           arguments <- OpenAICompatibleDialect.toolArguments(name, function.obj.get("arguments"))
         } yield calls :+ ToolCall(ToolCallId(id), name, arguments)
       })
+
+/**
+ * The limit a Claude model's thinking budget is fitted under when nothing states one: the caller set no
+ * `CompletionOptions.maxTokens`, so the request carries no `max_tokens`, and the model registry states no maximum
+ * output for the model.
+ *
+ * Anthropic refuses a `budget_tokens` that is not below the request's output limit, and OpenRouter repeats the rule
+ * (https://openrouter.ai/docs/use-cases/reasoning-tokens) without saying what the limit is when no `max_tokens` is
+ * sent. The most it can be is the model's maximum output, so a budget at or above that risks a 400. Most of
+ * OpenRouter's Claude ids are unknown to the registry, which spells them differently (`anthropic/claude-sonnet-4.5`
+ * against `claude-sonnet-4-5`), so the budget of such a model is kept below the smallest maximum output of any
+ * Claude model that thinks: [[UnknownModelMaxOutput]], Claude Opus 4 and 4.1's. That costs a larger model its
+ * `High` (32,768), `XHigh` and `Max` levels until `maxTokens` is set or the registry knows the model, which is why
+ * the fitted budget is reported `Adjusted`, saying so.
+ */
+private[provider] object OpenRouterThinkingBudget:
+
+  /** The maximum output assumed for a model the registry states none for: a budget is sent below it. */
+  val UnknownModelMaxOutput: Int = 32000
+
+  /** Why a budget was fitted under [[UnknownModelMaxOutput]], and what lifts it. */
+  def unknownModelReason(model: ModelName): String =
+    s"The model registry states no maximum output for ${model.asString}, so the thinking budget is kept below " +
+      s"$UnknownModelMaxOutput, the smallest maximum output of a Claude model that thinks: set maxTokens, or give " +
+      "the model a max_output_tokens in the model registry, to send a larger one"
+
+/**
+ * [[OpenRouterModelDialect]] for no model in particular: what `OpenRouterClient` sends for a model the registry
+ * does not know. The client itself uses an [[OpenRouterModelDialect]] that knows its model's maximum output.
+ */
+private[llm4s] object OpenRouterDialect extends OpenRouterModelDialect(None):
+
+  /** The provider id on the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
+  val ProviderId: org.llm4s.types.ProviderModelTypes.ProviderId =
+    org.llm4s.types.ProviderModelTypes.ProviderId("openrouter")
