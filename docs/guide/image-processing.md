@@ -170,6 +170,8 @@ reply to 1000 tokens.
 
 The file is sent as it is on disk, not resized, and its media type comes from the file extension (JPEG when the
 extension names no image type). To send a smaller image, preprocess it, save it and analyse the saved file.
+The client first decodes the file with `ImageIO`, so a file it cannot read (WebP without a plugin) is refused before
+any request.
 
 Only `description` is the model's reply. The clients fill in the rest of `ImageAnalysisResult` with simple rules, so do
 not treat it as structured output from the model:
@@ -236,7 +238,7 @@ The cases of `ImageOperation`, as the local processor applies them:
 | `Grayscale` | Converts to an 8-bit greyscale image | Never |
 | `Normalize` | Currently does nothing: the image is returned unchanged | Never |
 
-`Resize`, `Crop`, `Rotate`, `Blur`, `Brightness` and `Contrast` produce an RGB image, so transparency is lost.
+Every operation except `Normalize` drops transparency: `Grayscale` produces a greyscale image, the others an RGB one.
 
 With `maintainAspectRatio`, the computed side is truncated to a whole number. If a very elongated image is fitted into
 a very small box, that side can become 0, and the JDK then throws an exception instead of returning a `Left`.
@@ -260,7 +262,8 @@ The client methods and `saveToFile` report failures as a `Left` holding an `LLME
 | Writing the file fails, for example because the directory does not exist | `ProcessingError` |
 
 The OpenAI and Anthropic clients can return a `Right` for a status 200 reply they cannot read, with the description
-`Could not parse response from OpenAI Vision API` (or `Anthropic Vision API`).
+`Could not parse response from OpenAI Vision API` (or `Anthropic Vision API`). JSON without the expected `choices`
+(or `content`) field is a `ServiceError` with status 200.
 
 ```scala
 import org.llm4s.error.{ ConfigurationError, InvalidInputError, LLMError, ProcessingError, ServiceError }
