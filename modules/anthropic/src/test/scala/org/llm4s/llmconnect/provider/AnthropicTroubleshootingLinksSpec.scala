@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
+import org.llm4s.error.{ AuthenticationError, LLMError, ModelNotFoundError, RateLimitError, TroubleshootingLinks }
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -74,7 +74,7 @@ final class AnthropicTroubleshootingLinksSpec extends AnyWordSpec with Matchers 
   "Anthropic replying 404" should {
     "say to check the model and list the provider's models, and link #model-not-found" in {
       val error = failure(404, anthropicError("not_found_error", "model: claude-nope"))
-      error shouldBe a[ServiceError]
+      error shouldBe a[ModelNotFoundError]
       assertLinked(error, TroubleshootingLinks.ModelNotFoundAction, Entry.ModelNotFound)
     }
   }

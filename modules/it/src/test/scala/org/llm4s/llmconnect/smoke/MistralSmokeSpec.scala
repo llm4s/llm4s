@@ -93,7 +93,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     // The first delta carries `content: ""` (the role chunk), so `isDefined` alone would pass for a
     // stream with no text at all; require real text, and that it is what the call returned.
-    val streamed = chunks.flatMap(_.content).mkString
+    val streamed = chunks.flatMap(_.contentDelta).mkString
     streamed should not be empty
     streamed shouldBe result.content
   }

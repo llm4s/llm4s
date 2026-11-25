@@ -299,7 +299,11 @@ class SmokeContractOfflineSpec
   it should "fail a streamed tool call whose chunk arrives without its call's id" in {
     val client = stub(onStream = (_, _, onChunk) => {
       onChunk(
-        StreamedChunk(id = "s", contentDelta = None, toolCallDelta = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
+        StreamedChunk(
+          id = "s",
+          contentDelta = None,
+          toolCallDelta = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall))
+        )
       )
       Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })

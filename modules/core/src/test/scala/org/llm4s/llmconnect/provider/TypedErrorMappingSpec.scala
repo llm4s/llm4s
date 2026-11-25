@@ -102,7 +102,9 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
       "the request exceeds the available context size, try increasing the context window",
       "too many tokens: total number of tokens in the prompt cannot exceed 4081",
       "Input is too long for requested model."
-    ).foreach(message => withClue(message)(map(400, openAIBody("invalid_request", message)) shouldBe a[ContextLengthError]))
+    ).foreach(message =>
+      withClue(message)(map(400, openAIBody("invalid_request", message)) shouldBe a[ContextLengthError])
+    )
 
   it should "also be recognised on a 413 or a 422, which some gateways answer with" in {
     map(413, openAIBody("context_length_exceeded", "too long")) shouldBe a[ContextLengthError]
@@ -171,7 +173,10 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
 
   it should "be recognised in the 400s some OpenAI-compatible services answer with" in {
     // Mistral
-    map(400, """{"object":"error","message":"Invalid model: mistral-nope","type":"invalid_model","code":"1500"}""") shouldBe
+    map(
+      400,
+      """{"object":"error","message":"Invalid model: mistral-nope","type":"invalid_model","code":"1500"}"""
+    ) shouldBe
       a[ModelNotFoundError]
     // DeepSeek
     map(400, openAIBody("invalid_request_error", "Model Not Exist")) shouldBe a[ModelNotFoundError]
@@ -187,7 +192,10 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
         e.isRetryable shouldBe false
       case other => fail(s"expected a ServiceError, got $other")
     }
-    map(404, """{"error":{"message":"The API deployment for this resource does not exist.","code":"DeploymentNotFound"}}""") shouldBe
+    map(
+      404,
+      """{"error":{"message":"The API deployment for this resource does not exist.","code":"DeploymentNotFound"}}"""
+    ) shouldBe
       a[ServiceError]
   }
 

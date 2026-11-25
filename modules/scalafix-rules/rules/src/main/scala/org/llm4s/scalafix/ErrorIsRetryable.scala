@@ -61,7 +61,7 @@ object ErrorIsRetryable {
   private val RecoverableErrors    = "org/llm4s/error/LLMError.recoverableErrors()."
   private val NonRecoverableErrors = "org/llm4s/error/LLMError.nonRecoverableErrors()."
   // the member of `ServiceError` (0.6.0); `DuplicateApisRemoved` renames the 0.5.x `ServiceErrorOps` extension
-  private val IsRecoverableStatus = Set("org/llm4s/error/ServiceError#isRecoverableStatus().")
+  private val IsRecoverableStatus    = Set("org/llm4s/error/ServiceError#isRecoverableStatus().")
   private val ServiceErrorHttpStatus = Set("org/llm4s/error/ServiceError#httpStatus.")
   private val CircuitOpenRetryAfter  = Set("org/llm4s/error/CircuitOpenError#retryAfter.")
 }

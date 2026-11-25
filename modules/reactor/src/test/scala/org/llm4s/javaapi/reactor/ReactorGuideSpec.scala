@@ -34,7 +34,9 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
   private def streaming(pieces: String*): JLlmClient =
     Llm4s.wrapClient(
       new Scripted(
-        onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); Right(completion("")) },
+        onChunk => {
+          pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); Right(completion(""))
+        },
         () => Right(completion(""))
       )
     )

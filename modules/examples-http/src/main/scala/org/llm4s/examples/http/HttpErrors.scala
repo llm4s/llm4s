@@ -31,9 +31,9 @@ final case class HttpFailure(status: Int, retryAfter: Option[FiniteDuration], er
   def body: ujson.Obj =
     ujson.Obj(
       "error" -> ujson.Obj(
-        "type"        -> error.getClass.getSimpleName,
-        "message"     -> error.message,
-        "retryable"   -> error.isRetryable
+        "type"      -> error.getClass.getSimpleName,
+        "message"   -> error.message,
+        "retryable" -> error.isRetryable
       )
     )
 }
@@ -69,12 +69,12 @@ object HttpErrors {
   def of(error: LLMError): HttpFailure = rootCause(error) match {
     case e @ (_: ValidationError | _: InvalidInputError | _: ContentFilteredError | _: ContextLengthError) =>
       HttpFailure(400, None, e)
-    case e: RateLimitError                                                         => HttpFailure(429, e.retryAfter.orElse(Some(RetryPolicy.DefaultRateLimitDelay)), e)
-    case e: TimeoutError                                                           => HttpFailure(504, None, e)
-    case e: AuthenticationError                                                    => HttpFailure(502, None, e)
-    case e: ConfigurationError                                                     => HttpFailure(500, None, e)
-    case e: CircuitOpenError                                                       => HttpFailure(503, Some(e.remaining).filter(_.toMillis > 0), e)
-    case e if e.isRetryable                                                        => HttpFailure(503, None, e)
-    case e                                                                         => HttpFailure(502, None, e)
+    case e: RateLimitError      => HttpFailure(429, e.retryAfter.orElse(Some(RetryPolicy.DefaultRateLimitDelay)), e)
+    case e: TimeoutError        => HttpFailure(504, None, e)
+    case e: AuthenticationError => HttpFailure(502, None, e)
+    case e: ConfigurationError  => HttpFailure(500, None, e)
+    case e: CircuitOpenError    => HttpFailure(503, Some(e.remaining).filter(_.toMillis > 0), e)
+    case e if e.isRetryable     => HttpFailure(503, None, e)
+    case e                      => HttpFailure(502, None, e)
   }
 }

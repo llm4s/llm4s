@@ -22,7 +22,7 @@ final case class EmbeddingError private (
 ) extends LLMError {
   override val context: Map[String, String] = Map("provider" -> provider)
 
-  override def httpStatus: Option[Int] = code.flatMap(_.toIntOption).filter(s => s >= 100 && s <= 599)
+  override def httpStatus: Option[Int] = code.flatMap(_.trim.toIntOption).filter(s => s >= 100 && s <= 599)
 
   override def isRetryable: Boolean = httpStatus.exists(ServiceError.isRetryableStatus)
 }

@@ -82,12 +82,13 @@ private[llm4s] object ProviderErrorSignals {
 
   /** The model's context window and the tokens the request needed, as `message` states them: `(limit, requested)`. */
   def tokens(message: String): (Option[Int], Option[Int]) = {
-    val text = message.take(ScanLength)
+    val text                        = message.take(ScanLength)
     def int(s: String): Option[Int] = s.toIntOption
     TokenPatterns.iterator
       .map { case (pattern, requestedFirst) =>
         val m = pattern.matcher(text)
-        if (m.find()) Some(if (requestedFirst) (int(m.group(2)), int(m.group(1))) else (int(m.group(1)), int(m.group(2))))
+        if (m.find())
+          Some(if (requestedFirst) (int(m.group(2)), int(m.group(1))) else (int(m.group(1)), int(m.group(2))))
         else None
       }
       .collectFirst { case Some(found) => found }

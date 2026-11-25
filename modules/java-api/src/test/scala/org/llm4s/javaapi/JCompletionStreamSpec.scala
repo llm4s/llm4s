@@ -45,7 +45,8 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   it should "skip a chunk with no text" in {
     val client = new Scripted(
       onChunk => {
-        onChunk(StreamedChunk(id = "c", contentDelta = None)); onChunk(StreamedChunk(id = "c", contentDelta = Some("a")));
+        onChunk(StreamedChunk(id = "c", contentDelta = None));
+        onChunk(StreamedChunk(id = "c", contentDelta = Some("a")));
         Right(completion("a"))
       },
       () => Right(completion("a"))

@@ -735,12 +735,12 @@ final class BedrockClient private[provider] (
     unwrap(throwable) match {
       case _: ThrottlingException           => RateLimitError("bedrock")
       case _: ServiceQuotaExceededException => RateLimitError("bedrock")
-      case e: ValidationException =>
+      case e: ValidationException           =>
         // "Input is too long for requested model" is the typed context-length error
         HttpErrorMapper
           .typed(400, Set.empty, safeMessage(e), "bedrock")
           .getOrElse(ValidationError("request", safeMessage(e)).withHttpStatus(400))
-      case e: AccessDeniedException         => AuthenticationError("bedrock", safeMessage(e))
+      case e: AccessDeniedException => AuthenticationError("bedrock", safeMessage(e))
       case e: ApiCallTimeoutException =>
         val timeout = requestTimeout.getOrElse(FiniteDuration(0, TimeUnit.SECONDS))
         TimeoutError(safeMessage(e), timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)

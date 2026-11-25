@@ -508,7 +508,9 @@ final class OpenAIClient private[provider] (
     emit(StreamedChunk(id = chunkId, contentDelta = contentOpt, toolCallDelta = toolCalls.headOption, finishReason))
     toolCalls
       .drop(1)
-      .foreach(tc => emit(StreamedChunk(id = chunkId, contentDelta = None, toolCallDelta = Some(tc), finishReason = None)))
+      .foreach(tc =>
+        emit(StreamedChunk(id = chunkId, contentDelta = None, toolCallDelta = Some(tc), finishReason = None))
+      )
   }
 
   /**

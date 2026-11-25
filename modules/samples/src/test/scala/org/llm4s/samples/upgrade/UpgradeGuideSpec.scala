@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
 import org.llm4s.agent.memory.{ InMemoryStore, Memory, MemoryFilter }
 import org.llm4s.config.PgSearchIndexConfigLoader
-import org.llm4s.error.{ CancelledError, LLMError, RateLimitError }
+import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._

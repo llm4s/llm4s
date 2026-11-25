@@ -60,7 +60,9 @@ final class Llm4sChatModel(client: LLMClient) extends ChatModel with StreamingCh
                 conversation,
                 options
               )(chunk =>
-                chunk.contentDelta.filter(_.nonEmpty).foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
+                chunk.contentDelta
+                  .filter(_.nonEmpty)
+                  .foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
               )
             ) match {
               case Success(Right(completion)) =>

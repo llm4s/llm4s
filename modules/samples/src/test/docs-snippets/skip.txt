@@ -10,14 +10,14 @@ getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition,
 getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not Scala source
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
 getting-started/configuration.md | ca91a867d4 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.types.ProviderModelTypes.ProviderName
-getting-started/configuration.md | 9377ccc0b9 | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | ef67dde531 | with | import org.llm4s.llmconnect.model._
 getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
 getting-started/first-example.md | 5845843420 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 755ae2a95f | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 1e6757e734 | with | import org.llm4s.agent.Agent; import org.llm4s.toolapi.ToolRegistry
-getting-started/first-example.md | 4637150377 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 846d9ce219 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService
 getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
@@ -124,7 +124,7 @@ guide/reliability.md | f2ecd432aa | with | import org.llm4s.reliability._; impor
 guide/reliability.md | 3693c9098a | with | import scala.concurrent.duration._
 guide/reliability.md | 04c0cd961c | with | import scala.concurrent.duration._
 guide/reliability.md | 708c0ce1fc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-guide/reliability.md | 5b1796e84b | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
+guide/reliability.md | 60141646e3 | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
 guide/agents/handoffs.md | a9aa90095d | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
 guide/agents/handoffs.md | 8797be310f | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 66c968311e | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
@@ -194,7 +194,7 @@ getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not 
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
 getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
-tutorials/support-assistant/part-1-first-call.md | 072104ccef | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
+tutorials/support-assistant/part-1-first-call.md | c0673f0690 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
 tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
 tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
 tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
@@ -230,13 +230,13 @@ guide/observability/enhanced-tracing-use-cases.md | af3385a2f9 | skip | an outli
 guide/observability/enhanced-tracing-use-cases.md | 57c21cf8df | skip | one method of a ScalaTest suite mixing in BeforeAndAfterEach, shown on its own
 guide/zio.md | a98b1ebfe6 | skip | sbt build definition, not Scala source
 guide/zio.md | 1f7113dd23 | with | val existingClient: org.llm4s.llmconnect.LLMClient = client
-guide/zio.md | ba8e83d8cb | with | val client: org.llm4s.zio.LLMClientZ = ???
+guide/zio.md | 554c04f10d | with | val client: org.llm4s.zio.LLMClientZ = ???
 guide/zio.md | 5e47087439 | with | import zio.ZIO; val client: org.llm4s.zio.LLMClientZ = ???
 guide/zio.md | f3f49461ef | with | val agentZ: org.llm4s.zio.AgentZ = ???
 guide/zio.md | 414efc1a84 | with | import zio.ZIO; val client: org.llm4s.zio.LLMClientZ = ???
 guide/cats-effect.md | 775e3038cc | skip | sbt build definition, not Scala source
 guide/cats-effect.md | eb8598eb20 | with | import cats.effect.IO; val existingClient: org.llm4s.llmconnect.LLMClient = client
-guide/cats-effect.md | ac527a036e | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
+guide/cats-effect.md | bacb55bd8f | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
 guide/cats-effect.md | 2a722fa69e | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???
 guide/cats-effect.md | 90dea943da | with | import cats.effect.IO; val agentIO: org.llm4s.effect.cats.AgentIO[IO] = ???
 guide/cats-effect.md | f822f63401 | with | import cats.effect.IO; val client: org.llm4s.effect.cats.LLMClientIO[IO] = ???

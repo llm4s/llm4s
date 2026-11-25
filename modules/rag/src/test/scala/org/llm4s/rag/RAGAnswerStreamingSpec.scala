@@ -89,7 +89,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
   private def recorder(events: mutable.Buffer[String]) =
     (
       (contexts: Seq[RAGSearchResult]) => events += s"contexts:${contexts.map(_.content).mkString("|")}": Unit,
-      (chunk: StreamedChunk) => events += s"chunk:${chunk.content.getOrElse("")}": Unit
+      (chunk: StreamedChunk) => events += s"chunk:${chunk.contentDelta.getOrElse("")}": Unit
     )
 
   "RAG.queryWithAnswerStreaming" should "give the contexts first, then each chunk, then return the whole answer" in {

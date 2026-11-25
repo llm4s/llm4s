@@ -180,7 +180,7 @@ def answerOrNothing(client: LLMClientPekko, conversation: Conversation)(using sy
   client
     .streamComplete(conversation)
     .runWith(Sink.seq)
-    .map(chunks => chunks.flatMap(_.content).mkString)
+    .map(chunks => chunks.flatMap(_.contentDelta).mkString)
     .recover { case e: LLMException => s"failed: ${e.error.message}" }
 ```
 

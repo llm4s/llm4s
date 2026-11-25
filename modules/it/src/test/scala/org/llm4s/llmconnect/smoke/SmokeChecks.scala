@@ -302,7 +302,7 @@ object SmokeChecks {
           .left
           .map(e => s"the streamed request carrying a tool failed: ${e.message}")
         _ <- calledTool(tool, completion)
-        idless = chunks.flatMap(_.toolCall).filter(_.id.asString.isEmpty)
+        idless = chunks.flatMap(_.toolCallDelta).filter(_.id.asString.isEmpty)
         _ <- Either.cond(
           idless.isEmpty,
           (),

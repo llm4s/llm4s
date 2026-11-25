@@ -42,7 +42,10 @@ class AgentBuilderToolsSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "withToolSet" should "add to the tools an earlier withToolSet set" in {
     offered(
-      Agent.builder("assistant", _).withToolSet(SpecTools.set(typed("first"))).withToolSet(SpecTools.set(typed("second")))
+      Agent
+        .builder("assistant", _)
+        .withToolSet(SpecTools.set(typed("first")))
+        .withToolSet(SpecTools.set(typed("second")))
     ) shouldBe Seq("first", "second")
   }
 

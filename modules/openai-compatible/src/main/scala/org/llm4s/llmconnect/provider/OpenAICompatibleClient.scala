@@ -793,7 +793,10 @@ class OpenAICompatibleClient private[provider] (
       )
     else
       Left(
-        HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers), settings.model.asString)
+        HttpErrorMapper.naming(
+          HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers),
+          settings.model.asString
+        )
       )
   }
 

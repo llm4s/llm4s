@@ -739,8 +739,7 @@ final class HostFileBackend private (
  * JVM or another process: one root has one writer (design §4.40).
  */
 @Experimental
-final case class HostRootInUse(root: Path, conflict: HostRootInUse.Conflict, detail: String)
-    extends LLMError:
+final case class HostRootInUse(root: Path, conflict: HostRootInUse.Conflict, detail: String) extends LLMError:
   override val message: String = s"$root cannot be opened: $detail"
 
 @Experimental

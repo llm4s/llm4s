@@ -365,7 +365,7 @@ object STTError {
   ) extends STTError {
     override def isRetryable: Boolean = true
     override val retryable: Boolean   = true
-    override def userFriendly       = "Speech recognition service is temporarily unavailable. Please try again."
+    override def userFriendly         = "Speech recognition service is temporarily unavailable. Please try again."
   }
 
   /** Audio format is not supported by the engine */

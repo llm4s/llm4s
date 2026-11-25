@@ -235,7 +235,8 @@ final class OllamaClient private[provider] (
             .withHint(action, entry)
         else ServiceError(404, providerName, details).withHint(action, entry)
       )
-    } else Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, providerName, headers), config.model.asString))
+    } else
+      Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, providerName, headers), config.model.asString))
 
   private def recordExchange(
     startedAt: Instant,
@@ -344,7 +345,9 @@ final class OllamaClient private[provider] (
                         if (calls.isEmpty) Seq(head)
                         else {
                           val callChunks = calls
-                            .map(c => StreamedChunk(id = id, contentDelta = None, toolCallDelta = Some(c), finishReason = None))
+                            .map(c =>
+                              StreamedChunk(id = id, contentDelta = None, toolCallDelta = Some(c), finishReason = None)
+                            )
                           val withText =
                             if (contentOpt.isDefined || thinkingOpt.isDefined) Seq(head.withFinishReason(None))
                             else Seq.empty

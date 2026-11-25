@@ -41,7 +41,7 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
     InvalidPromptError("bad prompt").isRetryable shouldBe false
     UnsupportedOperation("no edits").isRetryable shouldBe false
     InsufficientResourcesError("no credits").isRetryable shouldBe false
-    (ImageUnknownError(new RuntimeException("?"))).isRetryable shouldBe false
+    ImageUnknownError(new RuntimeException("?")).isRetryable shouldBe false
   }
 
   it should "judge an ImageServiceError by the status the provider answered" in {

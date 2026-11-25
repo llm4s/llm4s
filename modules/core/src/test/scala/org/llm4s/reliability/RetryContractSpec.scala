@@ -189,7 +189,6 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-
   "Every concrete LLMError the library defines" should "have a row in the contract" in {
     val covered = rows.map(_.error.getClass.getName).toSet
     val missing = concreteErrorClasses().filterNot(covered.contains)

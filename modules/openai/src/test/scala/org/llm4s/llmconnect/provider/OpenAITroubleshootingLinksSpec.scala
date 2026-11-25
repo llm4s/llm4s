@@ -92,7 +92,10 @@ final class OpenAITroubleshootingLinksSpec extends AnyWordSpec with Matchers {
     }
 
     "stay a ServiceError when the body does not say the model is unknown" in {
-      val error = failure(404, """{"error":{"message":"Invalid URL (POST /v1/chat/completion)","type":"invalid_request_error"}}""")
+      val error = failure(
+        404,
+        """{"error":{"message":"Invalid URL (POST /v1/chat/completion)","type":"invalid_request_error"}}"""
+      )
       error shouldBe a[ServiceError]
       error.httpStatus shouldBe Some(404)
     }

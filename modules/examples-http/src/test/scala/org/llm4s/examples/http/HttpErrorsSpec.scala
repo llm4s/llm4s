@@ -36,7 +36,9 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fall back to RateLimitError's default delay when the provider gave none" in {
-    HttpErrors.of(RateLimitError("fake")).retryAfterSeconds shouldBe Some(org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay.toSeconds)
+    HttpErrors.of(RateLimitError("fake")).retryAfterSeconds shouldBe Some(
+      org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay.toSeconds
+    )
   }
 
   it should "answer 504 for a timeout, 502 for refused credentials and 500 for a misconfigured server" in {

@@ -34,7 +34,7 @@ private[testkit] object ModelCallContractRun:
       case (ContractCase.ContentFiltered, Left(_: ContentFilteredError)) => ()
       case (ContractCase.ContentFiltered, other) => fail(s"expected Left(ContentFilteredError), got ${show(other)}")
       // RFC 0009 rule 1: a retryable NetworkError, or the ServiceError(502) watsonx and Perplexity already return
-      case (ContractCase.StreamEndsEarly, Left(_: NetworkError))                                => ()
+      case (ContractCase.StreamEndsEarly, Left(_: NetworkError))                            => ()
       case (ContractCase.StreamEndsEarly, Left(error: ServiceError)) if error.status == 502 => ()
       case (ContractCase.StreamEndsEarly, other) =>
         fail(s"expected Left(NetworkError) or Left(ServiceError) with status 502, got ${show(other)}")

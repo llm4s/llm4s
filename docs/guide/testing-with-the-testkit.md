@@ -478,7 +478,7 @@ val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSiz
 val chunks = ArrayBuffer.empty[StreamedChunk]
 client.streamComplete(conversation, options)(chunks += _)
 
-chunks.flatMap(_.content).mkString shouldBe "Hello, world"
+chunks.flatMap(_.contentDelta).mkString shouldBe "Hello, world"
 chunks.last.finishReason shouldBe Some(FinishReason.Stop)
 ```
 

@@ -569,7 +569,8 @@ final class AgentWorker private (
           // worth another attempt later: a transient failure, or one that only needs time (an open circuit) or a
           // fresh read (a concurrent write)
           case Right(Left(error))
-              if error.isRetryable || error.isInstanceOf[CircuitOpenError] || error.isInstanceOf[OptimisticLockFailure] =>
+              if error.isRetryable || error.isInstanceOf[CircuitOpenError] || error
+                .isInstanceOf[OptimisticLockFailure] =>
             logger.warn(s"Worker $holder: entry ${entry.id.value} could not be admitted: ${error.message}")
             Next.Expire
           case Right(Left(error)) => Next.Close(EntryOutcome.Failed(FailureReason.RunFailed(error.message)))

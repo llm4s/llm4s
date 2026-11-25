@@ -166,9 +166,9 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     val limited = new LlmException(EmbeddingError(Some("429"), "slow down", "cohere"))
     CompletionCheck.failure(limited).asScala.toList shouldBe
       List("kind:rate-limit", "retryable:true", "retryAfter:none", "status:429", "requestId:none")
-    (EmbeddingError(Some("503"), "x", "p")).isRetryable shouldBe true
-    (EmbeddingError(Some("401"), "x", "p")).isRetryable shouldBe false
-    (EmbeddingError(None, "x", "p")).isRetryable shouldBe false
+    EmbeddingError(Some("503"), "x", "p").isRetryable shouldBe true
+    EmbeddingError(Some("401"), "x", "p").isRetryable shouldBe false
+    EmbeddingError(None, "x", "p").isRetryable shouldBe false
   }
 
   it should "read an error from another module, or one implemented in Java, as OTHER" in {
@@ -273,7 +273,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     val embedding = (None :: List(400, 401, 403, 429, 500).map(s => Some(s.toString)))
       .map(code => EmbeddingError(code, "x", "voyage"))
     (oneOfEach.map(_._1) ++ remapped ++ embedding).foreach { error =>
-      val e         = new LlmException(error)
+      val e    = new LlmException(error)
       val cell = retryableColumn(e.getKind)
       withClue(s"$error reads as ${e.getKind}, whose row says '$cell': ") {
         cell match {

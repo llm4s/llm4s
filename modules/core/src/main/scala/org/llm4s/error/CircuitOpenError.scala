@@ -30,9 +30,9 @@ final case class CircuitOpenError private (
 ) extends LLMError {
 
   override val context: Map[String, String] = Map(
-    "provider"   -> provider,
-    "remaining"  -> DurationText(remaining),
-    "probing"    -> probing.toString
+    "provider"  -> provider,
+    "remaining" -> DurationText(remaining),
+    "probing"   -> probing.toString
   )
 }
 

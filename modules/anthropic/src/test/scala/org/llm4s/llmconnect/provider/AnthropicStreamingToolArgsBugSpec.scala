@@ -95,7 +95,9 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   it should "preserve tool call alongside text content" in {
     val acc = StreamingAccumulator(ModelName("test-model"))
     // Text content first
-    acc.addChunk(StreamedChunk("msg_1", contentDelta = Some("Let me check "), toolCallDelta = None, finishReason = None))
+    acc.addChunk(
+      StreamedChunk("msg_1", contentDelta = Some("Let me check "), toolCallDelta = None, finishReason = None)
+    )
     acc.addChunk(StreamedChunk("msg_1", contentDelta = Some("the weather."), toolCallDelta = None, finishReason = None))
     // Then tool call
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "get_weather"))

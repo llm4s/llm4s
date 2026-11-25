@@ -441,7 +441,9 @@ final class WatsonXClient private[provider] (
                   )
                 }
                 delta.flatMap(_.get("content")).flatMap(_.strOpt).filter(_.nonEmpty).foreach { text =>
-                  emit(StreamedChunk(id = responseId, contentDelta = Some(text), toolCallDelta = None, finishReason = None))
+                  emit(
+                    StreamedChunk(id = responseId, contentDelta = Some(text), toolCallDelta = None, finishReason = None)
+                  )
                 }
                 delta.flatMap(_.get("tool_calls")).flatMap(_.arrOpt).foreach { entries =>
                   entries.zipWithIndex.foreach { case (entry, position) => mergeToolCall(entry, position) }
@@ -473,7 +475,12 @@ final class WatsonXClient private[provider] (
             emit(StreamedChunk(id = responseId, contentDelta = None, toolCallDelta = Some(call), finishReason = None))
           }
           emit(
-            StreamedChunk(id = responseId, contentDelta = None, toolCallDelta = None, finishReason = Some(toFinishReason(reason)))
+            StreamedChunk(
+              id = responseId,
+              contentDelta = None,
+              toolCallDelta = None,
+              finishReason = Some(toFinishReason(reason))
+            )
           )
           accumulator.updateUsage(TokenUsage(promptTokens, generatedTokens, promptTokens + generatedTokens))
         }

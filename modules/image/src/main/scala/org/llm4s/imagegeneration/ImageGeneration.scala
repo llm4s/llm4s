@@ -75,14 +75,12 @@ object ImageServiceError {
 }
 
 /** An [[ImageServiceError]] with a transient status: trying again can help. */
-final case class TransientImageServiceError(message: String, statusCode: Int)
-    extends ImageServiceError {
+final case class TransientImageServiceError(message: String, statusCode: Int) extends ImageServiceError {
   override def isRetryable: Boolean = true
 }
 
 /** An [[ImageServiceError]] the provider refused for good: the same call gets the same answer. */
-final case class RejectedImageServiceError(message: String, statusCode: Int)
-    extends ImageServiceError
+final case class RejectedImageServiceError(message: String, statusCode: Int) extends ImageServiceError
 
 case class ImageValidationError(message: String)       extends ImageGenerationError
 case class InvalidPromptError(message: String)         extends ImageGenerationError

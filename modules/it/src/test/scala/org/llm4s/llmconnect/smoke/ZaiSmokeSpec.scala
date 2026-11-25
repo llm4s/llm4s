@@ -73,8 +73,8 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     // The first delta carries `content: ""`, so `isDefined` alone passes for a stream with no
     // payload; require real text or reasoning text, and that the text is what the call returned.
-    chunks.exists(c => c.content.exists(_.nonEmpty) || c.thinkingDelta.exists(_.nonEmpty)) shouldBe true
-    chunks.flatMap(_.content).mkString shouldBe result.content
+    chunks.exists(c => c.contentDelta.exists(_.nonEmpty) || c.thinkingDelta.exists(_.nonEmpty)) shouldBe true
+    chunks.flatMap(_.contentDelta).mkString shouldBe result.content
   }
 
   it should "return AuthenticationError for invalid key" in {

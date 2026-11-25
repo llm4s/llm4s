@@ -48,8 +48,7 @@ object EncryptionError:
    * `field` of `owner` did not authenticate under key `keyId`: the key is not the one that wrote it, the ciphertext
    * was changed, or it was written for another thread, namespace, item, tenant or place and moved here.
    */
-  final case class DecryptionFailed(owner: Owner, field: String, keyId: KeyId)
-      extends EncryptionError:
+  final case class DecryptionFailed(owner: Owner, field: String, keyId: KeyId) extends EncryptionError:
     override val message: String =
       s"Cannot decrypt $field of ${owner.describe} with key '${keyId.value}': " +
         "wrong key, or the stored value was changed or moved"
@@ -67,6 +66,5 @@ object EncryptionError:
     override val message: String = s"$field of ${owner.describe} is not a ciphertext this build reads"
 
   /** The JVM refused to encrypt `field` of `owner` (`cause` is the exception's class): nothing was written. */
-  final case class EncryptionFailed(owner: Owner, field: String, cause: String)
-      extends EncryptionError:
+  final case class EncryptionFailed(owner: Owner, field: String, cause: String) extends EncryptionError:
     override val message: String = s"Cannot encrypt $field of ${owner.describe}: $cause"

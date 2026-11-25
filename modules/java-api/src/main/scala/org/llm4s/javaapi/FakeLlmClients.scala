@@ -88,18 +88,18 @@ private[javaapi] object FakeLlmClients {
   }
 
   private def errorOf(kind: LlmErrorKind, message: String): LLMError = kind match {
-    case LlmErrorKind.AUTHENTICATION => AuthenticationError("fake", message)
-    case LlmErrorKind.RATE_LIMIT     => RateLimitError("fake")
-    case LlmErrorKind.TIMEOUT        => TimeoutError(message, 30.seconds, "FakeLlmClient")
-    case LlmErrorKind.NETWORK        => NetworkError(message, None, "fake")
-    case LlmErrorKind.SERVICE        => ServiceError(500, "fake", message)
-    case LlmErrorKind.VALIDATION     => ValidationError("fake", message)
+    case LlmErrorKind.AUTHENTICATION  => AuthenticationError("fake", message)
+    case LlmErrorKind.RATE_LIMIT      => RateLimitError("fake")
+    case LlmErrorKind.TIMEOUT         => TimeoutError(message, 30.seconds, "FakeLlmClient")
+    case LlmErrorKind.NETWORK         => NetworkError(message, None, "fake")
+    case LlmErrorKind.SERVICE         => ServiceError(500, "fake", message)
+    case LlmErrorKind.VALIDATION      => ValidationError("fake", message)
     case LlmErrorKind.CONTENT_FILTER  => ContentFilteredError.prompt("fake", message)
     case LlmErrorKind.CONTEXT_LENGTH  => ContextLengthError("fake", message)
     case LlmErrorKind.MODEL_NOT_FOUND => ModelNotFoundError("fake", message)
-    case LlmErrorKind.CONFIGURATION  => ConfigurationError(message)
-    case LlmErrorKind.CANCELLED      => CancelledError("FakeLlmClient")
-    case LlmErrorKind.OTHER          => ProcessingError("FakeLlmClient", message)
+    case LlmErrorKind.CONFIGURATION   => ConfigurationError(message)
+    case LlmErrorKind.CANCELLED       => CancelledError("FakeLlmClient")
+    case LlmErrorKind.OTHER           => ProcessingError("FakeLlmClient", message)
   }
 
   private def lastUserText(conversation: Conversation): String =

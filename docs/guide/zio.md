@@ -65,7 +65,7 @@ first and the stream then fails with the `LLMError`:
 ```scala
 client
   .streamComplete(conversation)
-  .map(_.content.getOrElse(""))
+  .map(_.contentDelta.getOrElse(""))
   .runCollect
   .map(_.mkString)
 ```

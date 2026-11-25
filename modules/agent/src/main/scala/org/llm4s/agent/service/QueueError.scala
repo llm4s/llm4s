@@ -30,8 +30,7 @@ object QueueError:
    * another worker took the entry over after the lease expired, or it was released. `current` is the current lease's
    * token, if the entry is leased.
    */
-  final case class LeaseLost(entryId: EntryId, token: LeaseToken, current: Option[LeaseToken])
-      extends QueueError:
+  final case class LeaseLost(entryId: EntryId, token: LeaseToken, current: Option[LeaseToken]) extends QueueError:
     override val message: String =
       s"Lease ${token.value} on queue entry ${entryId.value} is not its current lease (${current.fold("none")(_.value.toString)})"
 
@@ -40,7 +39,6 @@ object QueueError:
     override val message: String = s"Queue entry ${entryId.value} is closed (${outcome.state})"
 
   /** The submission key names an entry the store holds for a different submission. */
-  final case class SubmissionKeyReused(key: SubmissionKey, entryId: EntryId)
-      extends QueueError:
+  final case class SubmissionKeyReused(key: SubmissionKey, entryId: EntryId) extends QueueError:
     override val message: String =
       s"Submission key '${key.value}' already names queue entry ${entryId.value}, a different submission"

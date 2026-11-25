@@ -68,7 +68,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   // guide-block
   def describe(result: Result[String]): String =
     result match {
-      case Right(text)             => s"ok: $text"
+      case Right(text) => s"ok: $text"
       case Left(e: RateLimitError) =>
         s"wait ${e.retryAfter.getOrElse(RetryPolicy.DefaultRateLimitDelay)}, then retry"
       case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"

@@ -31,14 +31,12 @@ object GraphError:
     override val message: String = s"State key '${keyId.value}' is not registered with this graph"
 
   /** A node emitted an update for a key outside its declared write set. */
-  final case class UndeclaredWrite(nodeId: NodeId, taskId: TaskId, keyId: StateKeyId)
-      extends GraphError:
+  final case class UndeclaredWrite(nodeId: NodeId, taskId: TaskId, keyId: StateKeyId) extends GraphError:
     override val message: String =
       s"Node '${nodeId.value}' (task ${taskId.value}) wrote '${keyId.value}', which it does not declare"
 
   /** A node returned a route this graph cannot schedule. */
-  final case class InvalidRoute(nodeId: NodeId, taskId: TaskId, reason: String)
-      extends GraphError:
+  final case class InvalidRoute(nodeId: NodeId, taskId: TaskId, reason: String) extends GraphError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) returned an invalid route: $reason"
 
   /** A key's update function rejected an update. */
@@ -46,16 +44,14 @@ object GraphError:
     override val message: String = s"Update to state key '${keyId.value}' failed: ${cause.message}"
 
   /** A node returned a failure or threw. */
-  final case class NodeFailed(nodeId: NodeId, taskId: TaskId, cause: LLMError)
-      extends GraphError:
+  final case class NodeFailed(nodeId: NodeId, taskId: TaskId, cause: LLMError) extends GraphError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) failed: ${cause.message}"
 
   /**
    * A tool call failed the run: the tool returned `Fatal`, or broke its contract (an update to a key
    * it does not declare, a question it does not declare). `cause` says which.
    */
-  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
-      extends GraphError:
+  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError) extends GraphError:
     override val message: String = s"Tool '${tool.value}' (call ${toolCallId.asString}) failed: ${cause.message}"
     def withTool(t: ToolName): ToolFailed          = copy(tool = t)
     def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
@@ -99,8 +95,7 @@ object GraphError:
    * checkpoint stays `Running`, so `recover` continues it without re-running them. A step keeps
    * nothing from the cancelled superstep, and returns this with the interrupt flag set.
    */
-  final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String])
-      extends GraphError:
+  final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String]) extends GraphError:
     override val message: String =
       s"Run${threadId.fold("")(t => s" on thread '$t'")} was cancelled${lastCheckpoint.fold("")(c => s"; recover from $c")}"
 
@@ -110,8 +105,7 @@ object GraphError:
    * The checkpoint stays `Running`, so `recover` with a new budget continues the run without
    * re-running tasks that had finished.
    */
-  final case class DeadlineExceeded(threadId: String, lastCheckpoint: Option[String])
-      extends GraphError:
+  final case class DeadlineExceeded(threadId: String, lastCheckpoint: Option[String]) extends GraphError:
     override def isRetryable: Boolean = true
     override val message: String =
       s"Run on thread '$threadId' exceeded its deadline${lastCheckpoint.fold("")(c => s"; recover from $c")}"
@@ -144,8 +138,7 @@ object GraphError:
    * storage (for PostgreSQL, the database schema). Stop every instance of the older build before a release that
    * changes the schema starts (design 4.50).
    */
-  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int)
-      extends GraphError:
+  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int) extends GraphError:
     override val message: String =
       s"$store is at checkpoint schema version $found, newer than the $supported this build supports"
 
@@ -164,8 +157,7 @@ object GraphError:
    * ([[Checkpointer.prune]]), a guardrail `Block` (which retracts its turn) or `deleteThread` removed it.
    * Nothing was changed.
    */
-  final case class CheckpointNotFound(threadId: String, checkpointId: String)
-      extends GraphError:
+  final case class CheckpointNotFound(threadId: String, checkpointId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no checkpoint $checkpointId"
 
   /** A fork's target thread already exists; a fork only ever creates a new thread. Nothing was changed. */
@@ -203,8 +195,7 @@ object GraphError:
    * is not a continuation of the one the reader was following. A subscription ends on it with
    * [[DisconnectReason.ThreadDeleted]]. Read from `0` to follow the thread now under the id.
    */
-  final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long)
-      extends GraphError:
+  final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long) extends GraphError:
     override val message: String =
       s"Thread '$threadId' was deleted after event $afterSeq; the thread now under its id starts at event $firstSeq"
 
@@ -241,8 +232,7 @@ object GraphError:
     override val message: String = s"Cannot resume graph '$graphId': ${problems.mkString("; ")}"
 
   /** `start`, `recover` or the agent's `abandon` was called on a suspended thread; answer its interrupts with `resume`. */
-  final case class PendingInterrupts(threadId: String, interrupts: List[String])
-      extends GraphError:
+  final case class PendingInterrupts(threadId: String, interrupts: List[String]) extends GraphError:
     override val message: String =
       s"Thread '$threadId' is suspended on ${interrupts.mkString(", ")}; resume it with answers"
 
@@ -252,8 +242,7 @@ object GraphError:
    * differ. Nothing was changed. The owning tenant is deliberately not carried or printed, so a
    * caller from another tenant learns nothing about the thread.
    */
-  final case class TenantMismatch(threadId: String, requested: Option[String])
-      extends GraphError:
+  final case class TenantMismatch(threadId: String, requested: Option[String]) extends GraphError:
     override val message: String =
       s"Thread '$threadId' does not belong to tenant ${requested.fold("<none>")(t => s"'$t'")}"
 
@@ -310,7 +299,7 @@ object GraphError:
     latestCheckpoint: Option[String],
     holder: BusyHolder
   ) extends GraphError:
-    override def isRetryable: Boolean = true
+    override def isRetryable: Boolean                           = true
     def withThreadId(value: String): ThreadBusy                 = copy(threadId = value)
     def withLatestCheckpoint(value: String): ThreadBusy         = copy(latestCheckpoint = Some(value))
     def withLatestCheckpoint(value: Option[String]): ThreadBusy = copy(latestCheckpoint = value)
@@ -335,8 +324,7 @@ object GraphError:
    * writer that lost its claim cannot record anything after another run took the thread over.
    * `current` is the token of the thread's current claim, if there is one.
    */
-  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken])
-      extends GraphError:
+  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken]) extends GraphError:
     override val message: String =
       s"Claim token ${token.value} on thread '$threadId' is stale (current: ${current.fold("none")(_.value.toString)})"
 
@@ -354,8 +342,7 @@ object GraphError:
    * that finished the work leaves the thread's state showing it ([[NothingToRecover]]); and a lease that
    * lapsed with no successor leaves the last checkpoint `Running`, which `recover` continues.
    */
-  final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken])
-      extends GraphError:
+  final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken]) extends GraphError:
     override val message: String =
       s"Run on thread '$threadId' lost its claim (token ${token.value}, current: ${current
           .fold("not named")(_.value.toString)}); it stopped and committed nothing more"

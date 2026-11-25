@@ -86,7 +86,7 @@ class OpenAICompatibleSmokeSpec extends AnyFlatSpec with Matchers with EitherVal
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
     }
-    val streamed = chunks.flatMap(_.content).mkString
+    val streamed = chunks.flatMap(_.contentDelta).mkString
     streamed should not be empty
     streamed shouldBe result.value.content
   }
