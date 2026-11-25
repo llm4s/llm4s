@@ -31,16 +31,16 @@ object ClientEntryPointsTest {
     )
 
   def printed(client: LLMClient, conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    client.streamComplete(conversation, options)(chunk => chunk.content.foreach(print))
+    client.streamComplete(conversation, options)(chunk => chunk.thinkingDelta.foreach(print))
 
   def defaulted(client: LLMClient, conversation: Conversation): Result[Completion] =
-    client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
+    client.streamComplete(conversation)(chunk => chunk.thinkingDelta.foreach(print))
 
   def block(client: LLMClient, conversation: Conversation, options: CompletionOptions): Result[Completion] =
     client.streamComplete(
       conversation,
       options)({ chunk =>
-        chunk.content.foreach(print)
+        chunk.thinkingDelta.foreach(print)
       }
     )
 

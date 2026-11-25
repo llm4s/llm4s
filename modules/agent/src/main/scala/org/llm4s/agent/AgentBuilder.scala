@@ -52,6 +52,7 @@ final class AgentBuilder private (
   client: LLMClient,
   tools: Vector[AgentTool[?]],
   validator: ToolArgumentValidator,
+  toolValidators: Map[String, ToolArgumentValidator],
   systemPrompt: Option[String],
   options: CompletionOptions,
   middleware: Vector[AgentMiddleware],
@@ -76,6 +77,7 @@ final class AgentBuilder private (
   private def copy(
     tools: Vector[AgentTool[?]] = tools,
     validator: ToolArgumentValidator = validator,
+    toolValidators: Map[String, ToolArgumentValidator] = toolValidators,
     systemPrompt: Option[String] = systemPrompt,
     options: CompletionOptions = options,
     middleware: Vector[AgentMiddleware] = middleware,
@@ -101,6 +103,7 @@ final class AgentBuilder private (
       client,
       tools,
       validator,
+      toolValidators,
       systemPrompt,
       options,
       middleware,
@@ -123,20 +126,33 @@ final class AgentBuilder private (
     )
 
   /**
-   * The agent's tools, replacing any set before, checked with the set's validator. Named apart from the Stable
-   * [[withTools]] so that MiMa, which skips an `@Experimental` method with every overload of its name, still checks
-   * that one (#2835).
+   * Adds the set's tools to the agent's, after any added before, as [[withMiddleware]], [[withHandoffs]] and the
+   * guardrails add to theirs: each tool is checked with its set's validator, and the last set's validator also
+   * checks the tools a harness or a middleware contributes. [[build]] returns a `Left` naming a tool two calls
+   * defined (`tool 'name': duplicate tool name`). Named apart from the Stable [[withTools]] so that MiMa, which
+   * skips an `@Experimental` method with every overload of its name, still checks that one (#2835).
    */
   @Experimental
-  def withToolSet(tools: ToolSet): AgentBuilder = copy(tools = tools.tools, validator = tools.validator)
+  def withToolSet(tools: ToolSet): AgentBuilder =
+    copy(
+      tools = this.tools ++ tools.tools,
+      validator = tools.validator,
+      toolValidators = toolValidators ++ tools.tools.map(t => t.spec.name -> tools.validatorOf(t.spec.name))
+    )
 
   /**
-   * The registry's tools, replacing any set before, each adapted with
-   * [[org.llm4s.agent.graph.tool.AgentTool.fromToolFunction]]; [[build]] checks them as a
-   * [[org.llm4s.agent.graph.tool.ToolSet]].
+   * Adds the registry's tools to the agent's, after any added before, each adapted with
+   * [[org.llm4s.agent.graph.tool.AgentTool.fromToolFunction]]; [[build]] checks them all as one
+   * [[org.llm4s.agent.graph.tool.ToolSet]], and returns a `Left` naming a tool two calls defined
+   * (`tool 'name': duplicate tool name`).
    */
-  def withTools(registry: ToolRegistry): AgentBuilder =
-    copy(tools = registry.tools.map(AgentTool.fromToolFunction).toVector, validator = ToolArgumentValidator.default)
+  def withTools(registry: ToolRegistry): AgentBuilder = {
+    val added = registry.tools.map(AgentTool.fromToolFunction).toVector
+    copy(
+      tools = tools ++ added,
+      toolValidators = toolValidators ++ added.map(_.spec.name -> ToolArgumentValidator.default)
+    )
+  }
 
   /** Sent first on every model call of this agent; never stored in the thread's history. */
   def withSystemPrompt(prompt: String): AgentBuilder = copy(systemPrompt = Some(prompt))
@@ -428,7 +444,7 @@ final class AgentBuilder private (
         config,
         // its tools' and its middleware's, each checked as this agent checks it, to be checked so in a grantee
         (installed.tools ++ installed.middleware.flatMap(_.tools))
-          .map(t => t.spec.name -> inherited.validators.getOrElse(t.spec.name, validator))
+          .map(t => t.spec.name -> validatorFor(t.spec.name))
           .toMap
       )
       bound <- subagents.foldLeft[Result[Vector[(BoundAgent[?, ?], SubagentPlan)]]](Right(Vector.empty)) {
@@ -541,6 +557,10 @@ final class AgentBuilder private (
             )
           }
 
+  /** The validator that checks tool `name`: a granted tool's, else its own set's, else the agent's. */
+  private def validatorFor(name: String): ToolArgumentValidator =
+    inherited.validators.getOrElse(name, toolValidators.getOrElse(name, validator))
+
   private def loopAgent(
     graphRuntime: GraphRuntime,
     rootTracing: Option[Tracing],
@@ -566,7 +586,7 @@ final class AgentBuilder private (
       checked = output.map(_.withChecks(outputChecks))
       installed <- effective
       delegated <- delegating(graphRuntime, rootTracing, familyTaskNames, bounds)
-      toolSet   <- ToolSet.of(validator, inherited.validators, installed.tools*)
+      toolSet   <- ToolSet.of(validator, toolValidators ++ inherited.validators, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
@@ -672,6 +692,7 @@ object AgentBuilder:
       client,
       Vector.empty,
       ToolArgumentValidator.default,
+      Map.empty,
       None,
       CompletionOptions(),
       Vector.empty,

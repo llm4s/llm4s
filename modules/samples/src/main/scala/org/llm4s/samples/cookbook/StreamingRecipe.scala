@@ -26,7 +26,7 @@ object StreamingRecipe extends RecipeApp {
         CompletionOptions().withMaxTokens(200)
       )(chunk =>
         // A chunk can carry a tool call, a finish reason or reasoning instead of text: print only the text.
-        chunk.content.filter(_.nonEmpty).foreach { text =>
+        chunk.contentDelta.filter(_.nonEmpty).foreach { text =>
           pieces += text
           onText(text)
         }

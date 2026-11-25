@@ -69,7 +69,7 @@ class FakeLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       case Right(c) => c.content shouldBe "streamed"
       case Left(e)  => fail(e.message)
     }
-    chunks.result().flatMap(_.content) shouldBe List("streamed")
+    chunks.result().flatMap(_.contentDelta) shouldBe List("streamed")
     fake.client().underlying.contextWindow should be > 0
     fake.client().underlying.reserveCompletion should be > 0
   }

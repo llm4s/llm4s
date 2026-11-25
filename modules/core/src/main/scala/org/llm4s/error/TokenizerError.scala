@@ -9,8 +9,7 @@ import org.llm4s.annotation.Stable
 final case class TokenizerError private (
   override val message: String,
   tokenizerId: String
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("tokenizerId" -> tokenizerId)
 }
 

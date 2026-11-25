@@ -44,7 +44,7 @@ object ZIOAgentExample extends ZIOAppDefault {
       chunks <- client
         .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
         .runCollect
-      _ <- ZIO.debug(chunks.map(_.content.getOrElse("")).mkString)
+      _ <- ZIO.debug(chunks.map(_.contentDelta.getOrElse("")).mkString)
 
       // Agent with tool support
       agentZ <- client.agent("zio-agent-example")()

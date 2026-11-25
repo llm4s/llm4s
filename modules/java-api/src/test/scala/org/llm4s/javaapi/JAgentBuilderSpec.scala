@@ -36,7 +36,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply(c, o, streamed = false)
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] = {
-      f(StreamedChunk(id = "c", content = Some(answer)))
+      f(StreamedChunk(id = "c", contentDelta = Some(answer)))
       reply(c, o, streamed = true)
     }
     override def contextWindow: Int     = 4096

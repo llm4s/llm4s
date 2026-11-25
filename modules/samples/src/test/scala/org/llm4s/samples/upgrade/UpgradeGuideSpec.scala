@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
 import org.llm4s.agent.memory.{ InMemoryStore, Memory, MemoryFilter }
 import org.llm4s.config.PgSearchIndexConfigLoader
-import org.llm4s.error.{ CancelledError, LLMError, RateLimitError }
+import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -208,13 +208,13 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---- errors, cancellation and types ----
 
-  "The error model" should "have a total isRecoverable and a typed retry delay" in {
-    // `LLMError.isRecoverable(error)` replaced the extension `error.isRecoverable`.
-    LLMError.isRecoverable(RateLimitError("openai", 1.second)) shouldBe true
-    LLMError.isRecoverable(CancelledError("a call")) shouldBe false
+  "The error model" should "have a total isRetryable and a typed retry delay" in {
+    // `error.isRetryable` is the one retry rule, a member of every error.
+    RateLimitError("openai", 1.second).isRetryable shouldBe true
+    CancelledError("a call").isRetryable shouldBe false
 
     // The delay is a `FiniteDuration`, not a number of milliseconds.
-    RateLimitError("openai", 1500.millis).retryDelay shouldBe Some(1500.millis)
+    RateLimitError("openai", 1500.millis).retryAfter shouldBe Some(1500.millis)
   }
 
   "Growth-prone types" should "be changed with with* setters, not copy" in {

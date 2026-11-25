@@ -257,28 +257,33 @@ object EmbeddingUsage {
 }
 
 /**
- * Represents a streamed chunk of completion data.
+ * One chunk of a streamed reply. Every field but `id` is a ''delta'': the part of the reply this chunk adds, not
+ * the reply so far. `StreamingAccumulator` joins the chunks of one stream into a `Completion`.
  *
  * @param id Unique identifier for the stream.
- * @param content Optional text content delta.
- * @param toolCall Optional tool call information.
+ * @param contentDelta The text this chunk adds to the answer, if any.
+ * @param toolCallDelta A fragment of a tool call, if this chunk carries one: the first fragment of a call has its
+ *                      `id` and `name`, and each later one adds a piece of the `arguments` JSON, which parses only
+ *                      once the last has arrived. Every fragment carries its call's `id`: a provider whose
+ *                      continuation deltas name only an `index` has the id filled in by its client, because the
+ *                      accumulator keys calls by id.
  * @param finishReason Why the model's turn ended, on the chunk that reports it (RFC 0009).
- * @param thinkingDelta Optional thinking/reasoning content delta.
+ * @param thinkingDelta The thinking/reasoning text this chunk adds, if any.
  *                      Present when streaming extended thinking content.
  */
 @Stable
 final case class StreamedChunk private (
   id: String,
-  content: Option[String],
-  toolCall: Option[ToolCall],
+  contentDelta: Option[String],
+  toolCallDelta: Option[ToolCall],
   finishReason: Option[FinishReason],
   thinkingDelta: Option[String]
 ) {
   def withId(id: String): StreamedChunk                                   = copy(id = id)
-  def withContent(content: String): StreamedChunk                         = copy(content = Some(content))
-  def withContent(content: Option[String]): StreamedChunk                 = copy(content = content)
-  def withToolCall(toolCall: ToolCall): StreamedChunk                     = copy(toolCall = Some(toolCall))
-  def withToolCall(toolCall: Option[ToolCall]): StreamedChunk             = copy(toolCall = toolCall)
+  def withContentDelta(contentDelta: String): StreamedChunk               = copy(contentDelta = Some(contentDelta))
+  def withContentDelta(contentDelta: Option[String]): StreamedChunk       = copy(contentDelta = contentDelta)
+  def withToolCallDelta(toolCallDelta: ToolCall): StreamedChunk           = copy(toolCallDelta = Some(toolCallDelta))
+  def withToolCallDelta(toolCallDelta: Option[ToolCall]): StreamedChunk   = copy(toolCallDelta = toolCallDelta)
   def withFinishReason(finishReason: FinishReason): StreamedChunk         = copy(finishReason = Some(finishReason))
   def withFinishReason(finishReason: Option[FinishReason]): StreamedChunk = copy(finishReason = finishReason)
   def withThinkingDelta(thinkingDelta: String): StreamedChunk             = copy(thinkingDelta = Some(thinkingDelta))
@@ -292,7 +297,7 @@ final case class StreamedChunk private (
   /**
    * Check if this chunk contains main content.
    */
-  def hasContent: Boolean = content.exists(_.nonEmpty)
+  def hasContent: Boolean = contentDelta.exists(_.nonEmpty)
 }
 
 object StreamedChunk {
@@ -300,10 +305,10 @@ object StreamedChunk {
   /** Creates a [[StreamedChunk]]. Named arguments are the supported way to construct one. */
   def apply(
     id: String,
-    content: Option[String],
-    toolCall: Option[ToolCall] = None,
+    contentDelta: Option[String],
+    toolCallDelta: Option[ToolCall] = None,
     finishReason: Option[FinishReason] = None,
     thinkingDelta: Option[String] = None
   ): StreamedChunk =
-    new StreamedChunk(id, content, toolCall, finishReason, thinkingDelta)
+    new StreamedChunk(id, contentDelta, toolCallDelta, finishReason, thinkingDelta)
 }

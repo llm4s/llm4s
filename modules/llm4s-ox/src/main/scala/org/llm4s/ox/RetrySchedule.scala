@@ -3,21 +3,20 @@ package org.llm4s.ox
 import _root_.ox.resilience.{ retryEither, ResultPolicy, RetryConfig }
 import _root_.ox.scheduling.{ Jitter, Schedule }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, RateLimitError, ServiceError }
+import org.llm4s.error.LLMError
 import org.llm4s.reliability.RetryPolicy
 import org.llm4s.types.Result
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+import scala.concurrent.duration.DurationInt
 
 /**
  * Ox retry presets for `Result`-returning llm4s calls.
  *
  * What is retried is the library's one rule for automatic retry, the one `ReliableClient` and the agent graph use
- * ([[org.llm4s.reliability.RetryPolicy]]'s `isRetryable`): a recoverable error, except a `ServiceError`
- * with a client-error status (any 4xx but 408 and 429) and an `OptimisticLockFailure`. Every other
- * error, a `CancelledError` included, is returned at once.
+ * (`LLMError.isRetryable`): a rate limit, a timeout, a network failure, and a `ServiceError` whose status is 408,
+ * 429 or 5xx. Every other error, a `CancelledError` included, is returned at once.
  *
  * {{{
  * val answer: Result[Completion] = RetrySchedule.retry()(client.complete(conversation))
@@ -33,8 +32,8 @@ object RetrySchedule {
   val default: Schedule =
     Schedule.exponentialBackoff(1.second).maxInterval(30.seconds).jitter(Jitter.Equal).maxRetries(3)
 
-  /** Retries only what `RetryPolicy.isRetryable` retries; every result is a success. */
-  def policy[A]: ResultPolicy[LLMError, A] = ResultPolicy.retryWhen(RetryPolicy.isTransient)
+  /** Retries only an error that is `isRetryable`; every result is a success. */
+  def policy[A]: ResultPolicy[LLMError, A] = ResultPolicy.retryWhen(_.isRetryable)
 
   /**
    * An Ox `RetryConfig` on `schedule` with `policy`, for Ox's own `retryEither`. It waits the schedule's delays
@@ -44,18 +43,18 @@ object RetrySchedule {
 
   /**
    * Runs `operation`, retrying it on `schedule` (by default `default`) while it fails with an error
-   * `RetryPolicy.isRetryable` retries, and returns its first success or its last failure.
+   * that is `isRetryable`, and returns its first success or its last failure.
    *
-   * The wait before a retry is the schedule's delay, or longer when the provider asked for longer: a
-   * `RateLimitError` waits at least its `retryDelay` (its retry-after, else `RateLimitError.DefaultRetryDelay`), a
-   * `ServiceError` at least its explicit `retryAfter`, as core's `RetryPolicy` does. Built on Ox's `retryEither`;
+   * The wait before a retry is the schedule's delay, or longer when the provider asked for longer: an
+   * error waits at least its `retryAfter`, and a `RateLimitError` without one at least
+   * `RetryPolicy.DefaultRateLimitDelay`, as core's `RetryPolicy` does. Built on Ox's `retryEither`;
    * an interrupt during a wait propagates as `InterruptedException`, so an enclosing scope can end.
    */
   def retry[A](schedule: Schedule = default)(operation: => Result[A]): Result[A] = {
     // The earliest System.nanoTime at which the next attempt may start; Long.MinValue when the provider set none.
     val notBefore = new AtomicLong(Long.MinValue)
     val retried = config[A](schedule).afterAttempt { (_, outcome) =>
-      val hinted = outcome.left.toOption.filter(RetryPolicy.isTransient).flatMap(providerDelay)
+      val hinted = outcome.left.toOption.filter(_.isRetryable).flatMap(RetryPolicy.serverDelay)
       notBefore.set(hinted.fold(Long.MinValue)(d => System.nanoTime() + d.toNanos))
     }
     retryEither(retried) {
@@ -66,12 +65,5 @@ object RetrySchedule {
       }
       operation
     }
-  }
-
-  /** The delay the provider asked for before `error` may be retried, if any. */
-  private def providerDelay(error: LLMError): Option[FiniteDuration] = error match {
-    case rate: RateLimitError  => rate.retryDelay
-    case service: ServiceError => service.retryAfter
-    case _                     => None
   }
 }

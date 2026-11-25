@@ -122,7 +122,7 @@ object ChatEndpoints {
     case 429 => "The provider's rate limit (RateLimitError)."
     case 500 => "The server is misconfigured (ConfigurationError)."
     case 502 => "The provider refused the server's credential, or failed in a way retrying will not fix."
-    case 503 => "A recoverable provider failure (network, provider 5xx): try again."
+    case 503 => "A retryable provider failure (network, provider 5xx): try again."
     case _   => "The provider timed out (TimeoutError)."
   }
 }

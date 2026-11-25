@@ -104,7 +104,7 @@ private[llm4s] object SdkErrorMapper {
       if (statuses.contains(Unauthorized))
         AuthenticationError(provider, Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
       else if (statuses.contains(TooManyRequests))
-        RateLimitError(provider).withDetail(Redaction.safeBody(message.getOrElse("")))
+        RateLimitError(provider).withHttpStatus(TooManyRequests).withDetail(Redaction.safeBody(message.getOrElse("")))
       else unknown
     case classified => classified
   }

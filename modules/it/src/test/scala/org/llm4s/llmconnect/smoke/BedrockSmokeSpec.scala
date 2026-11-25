@@ -72,7 +72,7 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       result.isRight shouldBe true
     }
     result.value.content should not be empty
-    chunks.flatMap(_.content) should not be empty
+    chunks.flatMap(_.contentDelta) should not be empty
   }
 
   it should "return AuthenticationError for invalid credentials" in {

@@ -4,7 +4,15 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
+import org.llm4s.error.{
+  AuthenticationError,
+  ContextLengthError,
+  LLMError,
+  ModelNotFoundError,
+  RateLimitError,
+  ServiceError,
+  TroubleshootingLinks
+}
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -71,8 +79,47 @@ final class OpenAITroubleshootingLinksSpec extends AnyWordSpec with Matchers {
     "say to check the model and list the provider's models, and link #model-not-found" in {
       val error =
         failure(404, """{"error":{"message":"The model `gpt-nope` does not exist","type":"invalid_request_error"}}""")
-      error shouldBe a[ServiceError]
+      error shouldBe a[ModelNotFoundError]
+      error.httpStatus shouldBe Some(404)
+      error.isRetryable shouldBe false
       assertLinked(error, TroubleshootingLinks.ModelNotFoundAction, Entry.ModelNotFound)
+    }
+
+    "be recognised by the service's code, model_not_found" in {
+      val body =
+        """{"error":{"message":"The model `gpt-nope` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}"""
+      failure(404, body) shouldBe a[ModelNotFoundError]
+    }
+
+    "stay a ServiceError when the body does not say the model is unknown" in {
+      val error = failure(
+        404,
+        """{"error":{"message":"Invalid URL (POST /v1/chat/completion)","type":"invalid_request_error"}}"""
+      )
+      error shouldBe a[ServiceError]
+      error.httpStatus shouldBe Some(404)
+    }
+  }
+
+  "OpenAI refusing a request as too long" should {
+    "return a ContextLengthError with the tokens its message states" in {
+      val body =
+        """{"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 9431 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}"""
+      failure(400, body) match {
+        case e: ContextLengthError =>
+          (e.limit, e.requestedTokens) shouldBe (Some(8192), Some(9431))
+          e.httpStatus shouldBe Some(400)
+          e.isRetryable shouldBe false
+        case other => fail(s"expected a ContextLengthError, got $other")
+      }
+    }
+  }
+
+  "Any other 400 from OpenAI" should {
+    "stay a ValidationError, carrying its status" in {
+      val error = failure(400, """{"error":{"message":"max_tokens must be positive","type":"invalid_request_error"}}""")
+      error shouldBe a[org.llm4s.error.ValidationError]
+      error.httpStatus shouldBe Some(400)
     }
   }
 }

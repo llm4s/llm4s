@@ -113,7 +113,7 @@ object SpringAiLlmClient {
             val textChunk = Option.when(piece.nonEmpty || reason.nonEmpty)(
               StreamedChunk(chunkId, Option(piece).filter(_.nonEmpty), finishReason = reason.map(FinishReason.Other(_)))
             )
-            textChunk.toSeq ++ fresh.map(c => StreamedChunk(chunkId, None, toolCall = Some(c)))
+            textChunk.toSeq ++ fresh.map(c => StreamedChunk(chunkId, None, toolCallDelta = Some(c)))
           }
       }
     }

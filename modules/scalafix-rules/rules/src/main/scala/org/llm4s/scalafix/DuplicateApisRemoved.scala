@@ -6,14 +6,15 @@ import scalafix.v1._
 /**
  * Two duplicate entry points removed since 0.5.1, whose replacement is already there:
  *
- *   - `import org.llm4s.error.ServiceError.ServiceErrorOps` is deleted: `isRecoverableStatus` is now a method of
- *     `ServiceError`, so `error.isRecoverableStatus` compiles unchanged (#2266).
+ *   - `import org.llm4s.error.ServiceError.ServiceErrorOps` is deleted, and the `error.isRecoverableStatus` it
+ *     provided becomes `error.isRetryable`, the one rule every `LLMError` answers (#2266, #2916).
  *   - `Llm4sConfig.loadTextEmbeddingModel()` becomes `Llm4sConfig.textEmbeddingModel()`, which it duplicated (#2265).
  */
 class DuplicateApisRemoved extends SemanticRule("DuplicateApisRemoved") {
 
   override def description: String =
-    "Removes ServiceError.ServiceErrorOps imports and renames Llm4sConfig.loadTextEmbeddingModel to textEmbeddingModel"
+    "Removes ServiceError.ServiceErrorOps imports, renames its isRecoverableStatus to isRetryable, and " +
+      "Llm4sConfig.loadTextEmbeddingModel to textEmbeddingModel"
 
   import DuplicateApisRemoved._
 
@@ -25,6 +26,8 @@ class DuplicateApisRemoved extends SemanticRule("DuplicateApisRemoved") {
         }.asPatch
       case n: Term.Name if Migration.symbolOf(n).exists(_.value == LoadTextEmbeddingModel) =>
         Patch.replaceTree(n, "textEmbeddingModel")
+      case n: Term.Name if Migration.symbolOf(n).exists(_.value == OpsIsRecoverableStatus) =>
+        Patch.replaceTree(n, "isRetryable")
     }.asPatch
 
   /** The importer names `org.llm4s.error.ServiceError`, by its symbol or, where none is recorded, by its text. */
@@ -41,4 +44,5 @@ class DuplicateApisRemoved extends SemanticRule("DuplicateApisRemoved") {
 object DuplicateApisRemoved {
   private val ServiceError           = "org/llm4s/error/ServiceError"
   private val LoadTextEmbeddingModel = "org/llm4s/config/Llm4sConfig.loadTextEmbeddingModel()."
+  private val OpsIsRecoverableStatus = "org/llm4s/error/ServiceError.ServiceErrorOps#isRecoverableStatus()."
 }

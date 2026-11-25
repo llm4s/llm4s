@@ -1,14 +1,11 @@
 package org.llm4s.imagegeneration
 
-import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * An `ImageGenerationError` is an `LLMError`, and `LLMError.isRecoverable` (with `recoverableErrors`,
- * `nonRecoverableErrors` and every retry policy built on them) is `true` only for a [[RecoverableError]]: an error
- * with neither marker is reported as not recoverable. So every case says which it is, with a marker, and a
- * transient one is not silently left out of retries.
+ * An `ImageGenerationError` is an `LLMError`, and `LLMError.isRetryable` (which every retry policy reads) is `false`
+ * unless an error says otherwise. So every transient case overrides it, and is not silently left out of retries.
  */
 class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
 
@@ -33,35 +30,35 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
     ImageUnknownError(new RuntimeException("something else"))
   )
 
-  "LLMError.isRecoverable" should "answer for every ImageGenerationError as its marker says" in {
-    everyCase.foreach(error => withClue(error.toString)(LLMError.isRecoverable(error) shouldBe retryable(error)))
+  "LLMError.isRetryable" should "answer for every ImageGenerationError" in {
+    everyCase.foreach(error => withClue(error.toString)(error.isRetryable shouldBe retryable(error)))
   }
 
-  it should "call a rate limit recoverable and a rejected request, credential or prompt not" in {
-    LLMError.isRecoverable(ImageRateLimitError("slow down")) shouldBe true
-    LLMError.isRecoverable(ImageAuthenticationError("bad key")) shouldBe false
-    LLMError.isRecoverable(ImageValidationError("bad size")) shouldBe false
-    LLMError.isRecoverable(InvalidPromptError("bad prompt")) shouldBe false
-    LLMError.isRecoverable(UnsupportedOperation("no edits")) shouldBe false
-    LLMError.isRecoverable(InsufficientResourcesError("no credits")) shouldBe false
-    LLMError.isRecoverable(ImageUnknownError(new RuntimeException("?"))) shouldBe false
+  it should "call a rate limit retryable and a rejected request, credential or prompt not" in {
+    ImageRateLimitError("slow down").isRetryable shouldBe true
+    ImageAuthenticationError("bad key").isRetryable shouldBe false
+    ImageValidationError("bad size").isRetryable shouldBe false
+    InvalidPromptError("bad prompt").isRetryable shouldBe false
+    UnsupportedOperation("no edits").isRetryable shouldBe false
+    InsufficientResourcesError("no credits").isRetryable shouldBe false
+    ImageUnknownError(new RuntimeException("?")).isRetryable shouldBe false
   }
 
   it should "judge an ImageServiceError by the status the provider answered" in {
     Seq(0, 408, 429, 500, 502, 503, 504, 599).foreach { status =>
-      withClue(s"status $status")(LLMError.isRecoverable(ImageServiceError("down", status)) shouldBe true)
+      withClue(s"status $status")(ImageServiceError("down", status).isRetryable shouldBe true)
     }
     Seq(400, 401, 403, 404, 409, 422).foreach { status =>
-      withClue(s"status $status")(LLMError.isRecoverable(ImageServiceError("refused", status)) shouldBe false)
+      withClue(s"status $status")(ImageServiceError("refused", status).isRetryable shouldBe false)
     }
   }
 
-  "recoverableErrors and nonRecoverableErrors" should "partition image errors instead of throwing" in {
+  "isRetryable" should "partition image errors" in {
     val errors = everyCase.toList
 
-    LLMError.recoverableErrors(errors).map(_.getClass.getSimpleName).toSet shouldBe
+    errors.filter(_.isRetryable).map(_.getClass.getSimpleName).toSet shouldBe
       Set("ImageRateLimitError", "TransientImageServiceError")
-    LLMError.nonRecoverableErrors(errors) should have size (errors.size - 2).toLong
+    errors.filterNot(_.isRetryable) should have size (errors.size - 2).toLong
   }
 
   "ImageServiceError" should "still be built and matched as (message, status)" in {
@@ -81,8 +78,8 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
     ImageServiceError("refused", 403) shouldBe ImageServiceError("refused", 403)
   }
 
-  it should "carry the marker that matches its status" in {
-    ImageServiceError("down", 503) shouldBe a[RecoverableError]
-    ImageServiceError("refused", 403) shouldBe a[NonRecoverableError]
+  it should "be retryable as its status says" in {
+    ImageServiceError("down", 503).isRetryable shouldBe true
+    ImageServiceError("refused", 403).isRetryable shouldBe false
   }
 }

@@ -95,7 +95,7 @@ class BedrockFinishReasonSpec extends AnyWordSpec with Matchers {
               e.usage.map(_.totalTokens) shouldBe Some(12)
             case other => fail(s"expected a ContentFilteredError, got $other")
           }
-          chunks.flatMap(_.content).mkString shouldBe "Hel" // delivered before the stop, stays delivered
+          chunks.flatMap(_.contentDelta).mkString shouldBe "Hel" // delivered before the stop, stays delivered
           chunks.flatMap(_.finishReason) shouldBe empty
         }
       }

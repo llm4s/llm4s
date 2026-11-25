@@ -238,7 +238,6 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   "HttpErrorMapper.mapHttpError on 503" should "carry Retry-After as the service error's delay" in {
     val err = serviceError(503, Map("Retry-After" -> Seq("120")))
     err.retryAfter shouldBe Some(120.seconds)
-    err.retryDelay shouldBe Some(120.seconds)
     err.context("retryAfter") shouldBe "120s"
   }
 
@@ -246,10 +245,9 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     serviceError(503, Map("Retry-After" -> Seq("Thu, 01 Oct 2026 12:00:30 GMT"))).retryAfter shouldBe Some(30.seconds)
   }
 
-  it should "keep the default delay, and no hint, without Retry-After" in {
+  it should "carry no delay without Retry-After" in {
     val err = serviceError(503, Map.empty)
     err.retryAfter shouldBe None
-    err.retryDelay shouldBe Some(ServiceError.DefaultRetryDelay)
   }
 
   // ── Retry-After on 429 ───────────────────────────────────────────
@@ -263,7 +261,6 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   "HttpErrorMapper.mapHttpError on 429" should "turn Retry-After delta-seconds into a delay" in {
     val err = rateLimit(Map("retry-after" -> Seq("5")))
     err.retryAfter shouldBe Some(5.seconds)
-    err.retryDelay shouldBe Some(5.seconds)
   }
 
   it should "use the public overload with headers" in {
@@ -303,12 +300,12 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "leave the delay unset without the header, so the default backoff applies" in {
     val err = rateLimit(Map.empty)
     err.retryAfter shouldBe None
-    err.retryDelay shouldBe Some(30.seconds)
+    org.llm4s.reliability.RetryPolicy.exponentialBackoff().delayFor(1, err) shouldBe 30.seconds
   }
 
   it should "not read Retry-After for other statuses" in {
     Left(HttpErrorMapper.toErrorAt(503, "{}", provider, Map("retry-after" -> Seq("5")), clock)) match {
-      case Left(err: ServiceError) => err.httpStatus shouldBe 503
+      case Left(err: ServiceError) => err.status shouldBe 503
       case other                   => fail(s"Expected ServiceError, got: $other")
     }
   }
@@ -329,7 +326,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     limited.message should include("quota exceeded for this minute")
     val unavailable = HttpErrorMapper.mapStreamError(503, "overloaded", "gemini")
     unavailable shouldBe a[ServiceError]
-    unavailable.asInstanceOf[ServiceError].httpStatus shouldBe 503
+    unavailable.asInstanceOf[ServiceError].status shouldBe 503
     unavailable.message should include("overloaded")
     (HttpErrorMapper.mapStreamError(502, "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "x").message should not)
       .include("abcdefghijklmnopqrstuvwxyz0123456789")

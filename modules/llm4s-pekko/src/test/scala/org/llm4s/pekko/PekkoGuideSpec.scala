@@ -31,13 +31,13 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   def printAnswer(client: LLMClientPekko)(using system: ActorSystem) =
     client
       .streamComplete(Conversation(Seq(UserMessage("Explain monads in one sentence."))))
-      .runForeach(chunk => print(chunk.content.getOrElse("")))
+      .runForeach(chunk => print(chunk.contentDelta.getOrElse("")))
 
   def cancellable(client: LLMClientPekko, conversation: Conversation)(using system: ActorSystem) =
     client
       .streamComplete(conversation)
       .viaMat(KillSwitches.single[StreamedChunk])(Keep.right)
-      .toMat(Sink.foreach(chunk => print(chunk.content.getOrElse(""))))(Keep.both)
+      .toMat(Sink.foreach(chunk => print(chunk.contentDelta.getOrElse(""))))(Keep.both)
       .run()
 
   def complete(client: LLMClientPekko, conversation: Conversation)(using ec: ExecutionContext): Future[Completion] =
@@ -70,7 +70,7 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     client
       .streamComplete(conversation)
       .runWith(Sink.seq)
-      .map(chunks => chunks.flatMap(_.content).mkString)
+      .map(chunks => chunks.flatMap(_.contentDelta).mkString)
       .recover { case e: LLMException => s"failed: ${e.error.message}" }
 
   /** The lines of the snippets as the page shows them; the page must contain each. */
@@ -82,13 +82,13 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "import org.llm4s.llmconnect.model.{ Conversation, UserMessage }",
     "def printAnswer(client: LLMClientPekko)(using system: ActorSystem) =",
     ".streamComplete(Conversation(Seq(UserMessage(\"Explain monads in one sentence.\"))))",
-    ".runForeach(chunk => print(chunk.content.getOrElse(\"\")))",
+    ".runForeach(chunk => print(chunk.contentDelta.getOrElse(\"\")))",
     "import org.apache.pekko.stream.KillSwitches",
     "import org.apache.pekko.stream.scaladsl.{ Keep, Sink }",
     "import org.llm4s.llmconnect.model.StreamedChunk",
     "def cancellable(client: LLMClientPekko, conversation: Conversation)(using system: ActorSystem) =",
     ".viaMat(KillSwitches.single[StreamedChunk])(Keep.right)",
-    ".toMat(Sink.foreach(chunk => print(chunk.content.getOrElse(\"\"))))(Keep.both)",
+    ".toMat(Sink.foreach(chunk => print(chunk.contentDelta.getOrElse(\"\"))))(Keep.both)",
     "import org.llm4s.llmconnect.model.Completion",
     "import scala.concurrent.{ ExecutionContext, Future }",
     "def complete(client: LLMClientPekko, conversation: Conversation)(using ec: ExecutionContext): Future[Completion] =",
@@ -109,7 +109,7 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "import org.llm4s.pekko.LLMException",
     "import scala.concurrent.ExecutionContext",
     "def answerOrNothing(client: LLMClientPekko, conversation: Conversation)(using system: ActorSystem, ec: ExecutionContext) =",
-    ".map(chunks => chunks.flatMap(_.content).mkString)",
+    ".map(chunks => chunks.flatMap(_.contentDelta).mkString)",
     ".recover { case e: LLMException => s\"failed: ${e.error.message}\" }"
   )
 

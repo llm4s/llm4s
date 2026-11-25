@@ -191,7 +191,6 @@ A retry of a transient failure, passing everything else through:
 
 ```scala
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
-import org.llm4s.error.RecoverableError
 import org.llm4s.types.Result
 
 final class RetryOnce extends AgentMiddleware:
@@ -201,12 +200,12 @@ final class RetryOnce extends AgentMiddleware:
     next: ModelRequest => Result[ModelResponse]
   ): Result[ModelResponse] =
     next(request) match
-      case Left(_: RecoverableError) => next(request)
-      case other                     => other
+      case Left(error) if error.isRetryable => next(request)
+      case other                            => other
 ```
 
 A cancellation, a question from a middleware inside and a call refused at the run's token
-budget are not `RecoverableError`s, so they pass through as they must. To retry provider errors for every
+budget are not retryable, so they pass through as they must. To retry provider errors for every
 caller, not only an agent, wrap the client in `ReliableClient` instead (see [Reliability](../reliability)).
 
 ### Around a tool call

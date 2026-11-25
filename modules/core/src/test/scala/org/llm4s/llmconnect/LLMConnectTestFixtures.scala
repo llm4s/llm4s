@@ -85,29 +85,29 @@ object LLMConnectTestFixtures {
 
   val streamChunk1: StreamedChunk = StreamedChunk(
     id = "msg-123",
-    content = Some("Hello"),
-    toolCall = None,
+    contentDelta = Some("Hello"),
+    toolCallDelta = None,
     finishReason = None
   )
 
   val streamChunk2: StreamedChunk = StreamedChunk(
     id = "msg-123",
-    content = Some(" world"),
-    toolCall = None,
+    contentDelta = Some(" world"),
+    toolCallDelta = None,
     finishReason = None
   )
 
   val streamChunkFinal: StreamedChunk = StreamedChunk(
     id = "msg-123",
-    content = Some("!"),
-    toolCall = None,
+    contentDelta = Some("!"),
+    toolCallDelta = None,
     finishReason = Some(FinishReason.Stop)
   )
 
   val streamChunkWithThinking: StreamedChunk = StreamedChunk(
     id = "msg-456",
-    content = None,
-    toolCall = None,
+    contentDelta = None,
+    toolCallDelta = None,
     finishReason = None,
     thinkingDelta = Some("Let me think about this...")
   )

@@ -53,7 +53,7 @@ class JRagAnswerStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
   /** A model that streams `pieces`, then ends with `end`. */
   private def streaming(pieces: Seq[String], end: => Result[Completion]): LLMClient =
     new Scripted(
-      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end },
+      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); end },
       () => end
     )
 

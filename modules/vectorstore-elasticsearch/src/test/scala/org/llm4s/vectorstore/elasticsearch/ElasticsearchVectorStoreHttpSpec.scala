@@ -464,7 +464,7 @@ class ElasticsearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Ei
 
     val error = es.get("x").left.value
     error shouldBe a[ServiceError]
-    error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+    error.asInstanceOf[ServiceError].status shouldBe 500
     error.message should include("Internal server error")
   }
 

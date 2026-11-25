@@ -74,7 +74,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
     val client = CohereClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[String]
-    val result = client.streamComplete(conversation, CompletionOptions())(_.content.foreach(chunks += _))
+    val result = client.streamComplete(conversation, CompletionOptions())(_.contentDelta.foreach(chunks += _))
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true

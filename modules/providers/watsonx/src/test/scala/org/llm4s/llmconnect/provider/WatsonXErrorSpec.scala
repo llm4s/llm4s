@@ -43,7 +43,7 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
     ("400", 400, Map.empty, { case _: ValidationError => true; case _ => false }),
     ("401", 401, Map.empty, { case _: AuthenticationError => true; case _ => false }),
     ("403", 403, Map.empty, { case _: AuthenticationError => true; case _ => false }),
-    ("404", 404, Map.empty, { case e: ServiceError => e.httpStatus == 404; case _ => false }),
+    ("404", 404, Map.empty, { case e: ServiceError => e.status == 404; case _ => false }),
     ("429 bare", 429, Map.empty, { case e: RateLimitError => e.retryAfter.isEmpty; case _ => false }),
     (
       "429 Retry-After 7",
@@ -63,12 +63,12 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
       lower("Retry-After" -> "-5"),
       { case e: RateLimitError => e.retryAfter.isEmpty; case _ => false }
     ),
-    ("500", 500, Map.empty, { case e: ServiceError => e.httpStatus == 500 && e.retryAfter.isEmpty; case _ => false }),
+    ("500", 500, Map.empty, { case e: ServiceError => e.status == 500 && e.retryAfter.isEmpty; case _ => false }),
     (
       "503 Retry-After 12",
       503,
       lower("Retry-After" -> "12"),
-      { case e: ServiceError => e.httpStatus == 503 && e.retryAfter.contains(12.seconds); case _ => false }
+      { case e: ServiceError => e.status == 503 && e.retryAfter.contains(12.seconds); case _ => false }
     )
   )
 

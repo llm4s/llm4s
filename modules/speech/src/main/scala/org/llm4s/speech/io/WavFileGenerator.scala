@@ -1,6 +1,6 @@
 package org.llm4s.speech.io
 
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 import org.llm4s.speech.{ GeneratedAudio, AudioMeta, AudioFormat }
 import org.llm4s.resource.ManagedResource
@@ -22,8 +22,8 @@ import org.llm4s.syntax.toResult
  */
 object WavFileGenerator {
 
-  /** A WAV file could not be generated or saved; a [[org.llm4s.error.NonRecoverableError NonRecoverableError]], as a core `ProcessingError` is. */
-  sealed trait WavError extends LLMError with NonRecoverableError
+  /** A WAV file could not be generated or saved; not retryable, as a core `ProcessingError` is not. */
+  sealed trait WavError extends LLMError
   final case class WavGenerationFailed(message: String, override val context: Map[String, String] = Map.empty)
       extends WavError
   final case class WavSaveFailed(message: String, override val context: Map[String, String] = Map.empty)

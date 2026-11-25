@@ -64,7 +64,7 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
       val run = stream(event("one ", None) + event("two ", None) + event("three", Some(terminal)))
       withClue(s"terminal '$terminal': ") {
         run.result.map(_.content) shouldBe Right("one two three")
-        run.chunks.flatMap(_.content) shouldBe List("one ", "two ", "three")
+        run.chunks.flatMap(_.contentDelta) shouldBe List("one ", "two ", "three")
         run.chunks.map(_.finishReason) shouldBe List(None, None, None, Some(expectedReason(terminal)))
       }
     }

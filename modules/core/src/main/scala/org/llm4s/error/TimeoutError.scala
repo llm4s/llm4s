@@ -7,7 +7,7 @@ import scala.concurrent.duration.FiniteDuration
 /**
  * Raised when an operation exceeds its specified time limit.
  *
- * Represents operations that timed out. As a [[RecoverableError]],
+ * Represents operations that timed out. It is [[LLMError.isRetryable retryable]]:
  * these can potentially succeed with a different timeout, or by retrying
  * with exponential backoff strategies, assuming the service was temporarily slow.
  *
@@ -32,8 +32,9 @@ final case class TimeoutError private (
   operation: String,
   cause: Option[Throwable],
   override val context: Map[String, String]
-) extends LLMError
-    with RecoverableError {
+) extends LLMError {
+
+  override def isRetryable: Boolean = true
 
   /** Adds a single key-value pair to the error context. */
   def withContext(key: String, value: String): TimeoutError =

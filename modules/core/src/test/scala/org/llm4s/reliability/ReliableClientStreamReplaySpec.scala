@@ -38,7 +38,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
       val (chunks, end) = attempts(math.min(calls.getAndIncrement(), attempts.size - 1))
       // a client turns an exception from onChunk into a Left, as OpenAICompatibleClient does
-      Try(chunks.foreach(t => onChunk(StreamedChunk(id = "c", content = Some(t))))).toEither.left
+      Try(chunks.foreach(t => onChunk(StreamedChunk(id = "c", contentDelta = Some(t))))).toEither.left
         .map(e => NetworkError(s"onChunk failed: ${e.getMessage}", Some(e), "test"))
         .flatMap(_ => end)
     }
@@ -75,7 +75,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
     s"ReliableClient.streamComplete $path" should "not retry once a chunk has reached the caller" in {
       val inner  = new Scripted(List("Hel") -> Left(timeout), List("Hello") -> Right(completion("Hello")))
       val seen   = ListBuffer.empty[String]
-      val result = reliable(inner, deadline).streamComplete(conversation)(c => seen ++= c.content)
+      val result = reliable(inner, deadline).streamComplete(conversation)(c => seen ++= c.contentDelta)
       result shouldBe Left(timeout)
       seen.mkString shouldBe "Hel"
       inner.calls.get() shouldBe 1
@@ -84,7 +84,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
     it should "still retry a failure that came before any chunk" in {
       val inner  = new Scripted(Nil -> Left(timeout), List("Hel", "lo") -> Right(completion("Hello")))
       val seen   = ListBuffer.empty[String]
-      val result = reliable(inner, deadline).streamComplete(conversation)(c => seen ++= c.content)
+      val result = reliable(inner, deadline).streamComplete(conversation)(c => seen ++= c.contentDelta)
       result shouldBe Right(completion("Hello"))
       seen.mkString shouldBe "Hello"
       inner.calls.get() shouldBe 2

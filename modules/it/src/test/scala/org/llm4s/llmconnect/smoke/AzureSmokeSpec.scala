@@ -109,7 +109,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
     }
-    val streamed = chunks.flatMap(_.content).mkString
+    val streamed = chunks.flatMap(_.contentDelta).mkString
     streamed should not be empty
     streamed shouldBe result.value.content
     // The default api-version (2025-01-01-preview) accepts stream_options, so the stream reports usage.

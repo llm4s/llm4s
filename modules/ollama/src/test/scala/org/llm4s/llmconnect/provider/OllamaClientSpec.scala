@@ -277,7 +277,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .returns(Right(HttpResponse(429, "slow down", Map("retry-after" -> Seq("5")))))
 
     mkClient(mockHttp).complete(conversation("Hello"), CompletionOptions()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
+      case Left(err: RateLimitError) => assert(err.retryAfter.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }
@@ -410,7 +410,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     result match {
       case Left(e: NetworkError) =>
         assert(e.message.contains("Connection reset"))
-        assert(org.llm4s.error.LLMError.isRecoverable(e))
+        assert(e.isRetryable)
       case other => fail(s"expected a NetworkError, got $other")
     }
   }
@@ -429,7 +429,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       case Left(e: NetworkError) => assert(e.message.contains("done: true"))
       case other                 => fail(s"expected a NetworkError, got $other")
     }
-    assert(chunks.flatMap(_.content).mkString == "Hel")
+    assert(chunks.flatMap(_.contentDelta).mkString == "Hel")
   }
 
   test("an error line fails the stream with its message, unread past it (RFC 0009)") {
@@ -440,11 +440,11 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
         "{\"message\":{\"content\":\"lo\"},\"done\":true}\n"
     streamLines(lines, chunks) match {
       case Left(e: ServiceError) =>
-        assert(e.httpStatus == 502)
+        assert(e.status == 502)
         assert(e.message.contains("model runner has unexpectedly stopped"))
       case other => fail(s"expected a ServiceError, got $other")
     }
-    assert(chunks.flatMap(_.content).mkString == "Hel")
+    assert(chunks.flatMap(_.contentDelta).mkString == "Hel")
   }
 
   test("streamComplete() parses token counts from the done=true line") {
@@ -532,7 +532,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .returns(Right(StreamingHttpResponse(429, body, Map("retry-after" -> Seq("9")))))
 
     mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(9.seconds))
+      case Left(err: RateLimitError) => assert(err.retryAfter.contains(9.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }
@@ -631,14 +631,14 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
     client.complete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions()) match {
       case Left(err: RateLimitError) =>
         assert(err.retryAfter.contains(5.seconds))
-        assert(err.retryDelay.contains(5.seconds))
+        assert(err.retryAfter.contains(5.seconds))
       case other => fail(s"Expected RateLimitError, got: $other")
     }
   }
 
   test("streamComplete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
     client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
+      case Left(err: RateLimitError) => assert(err.retryAfter.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }

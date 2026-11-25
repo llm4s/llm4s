@@ -4,7 +4,7 @@ import org.llm4s.agent.{ AgentId, AgentRun }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
+import org.llm4s.error.{ CancelledError, CircuitOpenError, LLMError, OptimisticLockFailure, ValidationError }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -566,7 +566,11 @@ final class AgentWorker private (
             passOver(entry.id, settings.pollInterval)
             Next.Release
           case Right(Left(_: CancelledError)) => Next.Release
-          case Right(Left(error)) if LLMError.isRecoverable(error) =>
+          // worth another attempt later: a transient failure, or one that only needs time (an open circuit) or a
+          // fresh read (a concurrent write)
+          case Right(Left(error))
+              if error.isRetryable || error.isInstanceOf[CircuitOpenError] || error
+                .isInstanceOf[OptimisticLockFailure] =>
             logger.warn(s"Worker $holder: entry ${entry.id.value} could not be admitted: ${error.message}")
             Next.Expire
           case Right(Left(error)) => Next.Close(EntryOutcome.Failed(FailureReason.RunFailed(error.message)))

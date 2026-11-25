@@ -54,13 +54,13 @@ object StreamingExample {
           chunkCount += 1
 
           // Process content chunks
-          chunk.content.foreach { content =>
+          chunk.contentDelta.foreach { content =>
             print(content) // Print each chunk as it arrives (Keep print for Streaming UI)
             fullContent += content
           }
 
           // Handle tool calls if present
-          chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
+          chunk.toolCallDelta.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
 
           // Check if streaming is finished
           chunk.finishReason.foreach { reason =>

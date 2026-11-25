@@ -120,7 +120,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
     } { baseUrl =>
       new DeepSeekClient(localConfig(baseUrl)).complete(conversation, CompletionOptions()) match {
-        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(5.seconds)
+        case Left(err: RateLimitError) => err.retryAfter shouldBe Some(5.seconds)
         case other                     => fail(s"Expected RateLimitError, got: $other")
       }
     }
@@ -131,7 +131,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
     } { baseUrl =>
       new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions())(_ => ()) match {
-        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(7.seconds)
+        case Left(err: RateLimitError) => err.retryAfter shouldBe Some(7.seconds)
         case other                     => fail(s"Expected RateLimitError, got: $other")
       }
     }

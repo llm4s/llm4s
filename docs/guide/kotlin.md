@@ -313,7 +313,7 @@ result is committed.
 
 A failed call throws `LLMException`, a `RuntimeException` whose message is the failure's and whose `cause` is the Java
 facade's `org.llm4s.javaapi.LlmException`. The cause carries what the Java guide's
-[error handling](java#handling-a-failure) reads: the `LlmErrorKind`, `isRecoverable()`, and for a provider's error response the
+[error handling](java#handling-a-failure) reads: the `LlmErrorKind`, `isRetryable()`, and for a provider's error response the
 status code and any `Retry-After`:
 
 ```kotlin
@@ -331,7 +331,7 @@ try {
         LlmErrorKind.RATE_LIMIT -> System.err.println("rate limited")
         else -> Unit
     }
-    if (cause?.isRecoverable == true) System.err.println("a retry may succeed")
+    if (cause?.isRetryable == true) System.err.println("a retry may succeed")
 }
 ```
 

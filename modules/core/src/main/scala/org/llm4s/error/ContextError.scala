@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 /**
  * Context management related errors for token windows and conversation handling.
  *
- * This is a [[NonRecoverableError]]. Build one with the smart constructors in the companion object. Its
+ * It is not [[LLMError.isRetryable retryable]]: Build one with the smart constructors in the companion object. Its
  * `context` map is `"contextType" -> contextType` plus the `details` entries.
  *
  * @param message human-readable description of the failure
@@ -25,8 +25,7 @@ final case class ContextError private (
   override val message: String,
   contextType: String,
   details: Map[String, String] = Map.empty
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("contextType" -> contextType) ++ details
 }
 

@@ -66,7 +66,7 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
-      onChunk(StreamedChunk(id = "c", content = Some("42")))
+      onChunk(StreamedChunk(id = "c", contentDelta = Some("42")))
       route(conversation)
     }
     override def contextWindow: Int     = 4096

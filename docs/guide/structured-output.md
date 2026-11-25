@@ -247,7 +247,7 @@ def retryOnce(client: LLMClient, text: String): Result[Invoice] =
   }
 ```
 
-`ValidationError`s are not marked recoverable on their own, so decide per call site whether a retry is
+A `ValidationError` is not retryable, so decide per call site whether a retry is
 reasonable. A model that refuses, or answers in prose again, will fail again.
 
 ## 8. What each provider does with the schema

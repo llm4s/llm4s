@@ -172,7 +172,7 @@ trait ProviderSmokeContract extends BeforeAndAfterAll { self: AnyFlatSpec & Matc
       unknownModelClient(contractKey.getOrElse("")) match {
         case None => cancel(s"$providerLabel's validation request does not look the model up")
         case Some(built) =>
-          validated(built) should matchPattern { case Left(error: ServiceError) if error.httpStatus == 404 => }
+          validated(built) should matchPattern { case Left(error: ServiceError) if error.status == 404 => }
       }
     }
   }

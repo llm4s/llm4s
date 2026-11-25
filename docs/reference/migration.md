@@ -185,7 +185,6 @@ left as `List` or `Vector` in Stable signatures are `Seq`s too.
 | `ConfigurationError.missingKeys: List[String]`; `ConfigurationError(message, missingKeys: List[String])` | `Seq[String]` |
 | `ToolParameterError.MissingParameter.availableParameters`, `ToolParameterError.MultipleErrors.errors`, `ToolCallError.InvalidArguments.parameterErrors`: `List` | `Seq` |
 | `ToolCallErrorJson.flattenErrors(List[...]): List[...]` | `Seq[...]` in and out |
-| `LLMError.recoverableErrors` and `nonRecoverableErrors`: `List[LLMError]` in and out | `Seq[LLMError]` |
 | `Result.sequence(List[Result[A]]): Result[List[A]]`, `Result.traverse(List[A])(f): Result[List[B]]` | `Seq` in, `Result[Seq[...]]` out |
 | `Result.validateAll(List[A])(v): Either[List[LLMError], List[A]]` | `Either[Seq[LLMError], Seq[A]]` |
 | `AgentResult.messages: Vector[Message]` | `Seq[Message]` |
@@ -215,6 +214,157 @@ def tenantKey(tenant: String)(text: String, request: EmbeddingRequest): String =
 The default is still `CacheKeyGenerator.embeddingKey`, which gains an overload of that shape,
 `embeddingKey(text, request)`, and produces the same keys as before: an existing cache stays valid.
 `embeddingKey(text, model, purpose)` is unchanged.
+
+## One retry rule: `LLMError.isRetryable` replaces the recoverable markers (#2916)
+
+"Can this be retried?" had three answers: the `RecoverableError` marker (`LLMError.isRecoverable`), which was `true`
+for a `ServiceError` whatever its status, a 404 included; `ServiceError.isRecoverableStatus`; and
+`RetryPolicy.isRetryable`, the only one the library's own retries used. There is now one: the member
+`LLMError.isRetryable`, `true` only when sending the identical request again may succeed.
+
+| Before | After |
+|---|---|
+| `LLMError.isRecoverable(error)` | `error.isRetryable` |
+| `case e: RecoverableError => ...` | `case e if e.isRetryable => ...` |
+| `LLMError.recoverableErrors(errors)`, `nonRecoverableErrors(errors)` | `errors.filter(_.isRetryable)`, `errors.filterNot(_.isRetryable)` |
+| `serviceError.isRecoverableStatus` | `serviceError.isRetryable` |
+| `class MyError(...) extends LLMError with NonRecoverableError` | `class MyError(...) extends LLMError` |
+| `class MyError(...) extends LLMError with RecoverableError` | `class MyError(...) extends LLMError { override def isRetryable: Boolean = true }` |
+| `RetryPolicy.custom(n, delayFn)` (retried `RetryPolicy`'s rule) | unchanged: it retries `error.isRetryable` |
+
+`RecoverableError`, `NonRecoverableError`, `LLMError.isRecoverable`, `recoverableErrors`, `nonRecoverableErrors` and
+`ServiceError.isRecoverableStatus` are removed. Scalafix's `ErrorIsRetryable` rewrites the calls; a marker on an error
+type of your own is a hand edit, as the table shows.
+
+What the library retries is unchanged: `RetryPolicy.isRetryable(error)` is `error.isRetryable` unless the policy is
+`noRetry` or a `custom` one with its own predicate. What changes is the answer `isRecoverable` used to give for the
+errors that were "recoverable" but never retried:
+
+- a `ServiceError` with a status other than 408, 429 or 5xx (a 404, a 409, a 422) is not retryable;
+- an `OptimisticLockFailure` and a `CircuitOpenError` are not retryable: each needs something to happen first (a
+  re-read, a wait). Match on the type to handle them, as `AgentWorker` does to give a queue entry back;
+- an `EmbeddingError`, which carried no marker, is retryable when its `code` is the status 408, 429 or 5xx.
+
+## Every `LLMError` reports `httpStatus`, `retryAfter` and `requestId` (#2916)
+
+The HTTP status of a provider's response, the delay it asked for and its request id were fields of some error types and
+lost by others: a 400 became a `ValidationError` with no status. They are members of `LLMError` now, `None` when the
+error is not a response or the response did not say:
+
+```scala
+result.left.foreach { error =>
+  error.httpStatus // Option[Int]: 400, 401, 404, 429, 503 ...
+  error.retryAfter // Option[FiniteDuration]: the server's Retry-After, never a default
+  error.requestId  // Option[String]: x-request-id, request-id, x-amzn-requestid or apim-request-id
+}
+```
+
+`HttpErrorMapper` fills them in for every status, and the OpenAI and Anthropic clients read them from their SDK's
+exception. Three names moved to make room:
+
+| Before | After |
+|---|---|
+| `serviceError.httpStatus` (an `Int`) | `serviceError.status`; `httpStatus` is `Some(status)` |
+| `ServiceError(httpStatus = 503, provider = "p", details = "d")` | `ServiceError(status = 503, provider = "p", details = "d")` |
+| `circuitOpenError.retryAfter` (a `FiniteDuration`) | `circuitOpenError.remaining`; `retryAfter` is `None`, since no server asked for the wait |
+| `rateLimitError.retryDelay` | `rateLimitError.retryAfter.orElse(Some(RetryPolicy.DefaultRateLimitDelay))` |
+| `serviceError.retryDelay` | `serviceError.retryAfter`; the policy's backoff is the wait without one |
+| `RateLimitError.DefaultRetryDelay` | `RetryPolicy.DefaultRateLimitDelay` |
+| `ServiceError.DefaultRetryDelay` | removed: nothing used it but `retryDelay` |
+
+Scalafix's `ErrorIsRetryable` renames `serviceError.httpStatus` and `circuitOpenError.retryAfter`; the compiler
+reports a `ServiceError.httpStatus` it missed, because an `Option[Int]` does not compare with an `Int`.
+
+`retryAfter` is now only what the server said. The 30 seconds `RateLimitError.retryDelay` reported when the provider
+gave no `Retry-After` is the retry policy's default (`RetryPolicy.DefaultRateLimitDelay`), which `ReliableClient`
+still waits; a `CircuitOpenError`'s context key `retryAfter` is `remaining`.
+
+An error mapped from a response is no longer equal to one you build without the response's facts:
+`HttpErrorMapper.toError(400, body, "p", headers)` is `ValidationError("request", details).withHttpStatus(400)`, with
+the request id when the headers carry one. Compare the fields a test cares about, or build the expected error with
+`withHttpStatus` and `withRequestId`.
+
+## A context-length overflow and an unknown model are typed errors (#2916)
+
+The two provider refusals a caller most often reacts to had no type: a request too long for the model was a
+`ValidationError` (or a `ServiceError`), an unknown model a `ServiceError` with status 404, and telling either from
+any other 400 or 404 meant reading the provider's message.
+
+```scala
+client.complete(conversation, options) match {
+  case Left(e: ContextLengthError) => // e.limit, e.requestedTokens: shorten the conversation and call again
+  case Left(e: ModelNotFoundError) => // e.model: fix the section's model, or fall back to another provider
+  case other                       => other
+}
+```
+
+`ContextLengthError` carries `limit` and `requestedTokens` when the provider's message states them (OpenAI, Anthropic
+and Gemini do). `ModelNotFoundError` carries `model` when the client knows which it asked for. Neither is retryable.
+OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI, Ollama, Bedrock (context length) and every OpenAI-compatible
+service map to them, by the provider's error code where it has one (`context_length_exceeded`, `model_not_found`,
+Anthropic's `not_found_error`, Mistral's `invalid_model`) and by its message otherwise.
+
+If you matched these cases before, the match changes:
+
+| Before | After |
+|---|---|
+| `case Left(e: ValidationError) if e.message.contains("context length")` | `case Left(e: ContextLengthError)` |
+| `case Left(ServiceError(_, 404, _, _, _))` for an unknown model | `case Left(e: ModelNotFoundError)` |
+
+A 404 that does not say the model is unknown - what a wrong `baseUrl` answers - is still a `ServiceError`. Ollama's 404
+for a model that is not pulled is a `ModelNotFoundError`, with the same `ollama pull` hint in its message.
+`NotFoundError` is unchanged: it is a missing configuration value or record, not a model.
+
+## `AgentBuilder` tools are additive (#2916)
+
+`AgentBuilder.withTools(registry)` and `withToolSet(toolSet)` each replaced whatever the other, or an earlier call, had
+set, silently, while `withMiddleware`, `withHandoffs` and the guardrail setters append. Both now add to the agent's
+tools:
+
+```scala
+Agent.builder("assistant", client)
+  .withTools(builtins)     // a ToolRegistry
+  .withToolSet(typedTools) // adds to them; it used to replace them
+  .build()                 // Left(ValidationError) naming a tool both define: "tool 'x': duplicate tool name"
+```
+
+If you relied on a later call replacing an earlier one - a base builder whose tools a caller overrides - build the
+registry or the set you want first, and call the setter once. Each tool of a `ToolSet` is still checked with its own
+set's validator. The Java facade's `JAgentBuilder.tools(list)` is unchanged: it takes the whole list, as its guardrail
+setters do.
+
+## `StreamedChunk` names its deltas (#2916)
+
+Every field of a `StreamedChunk` but its `id` is what that one chunk adds, yet only `thinkingDelta` said so: `content`
+read as the text so far, and `toolCall` as a whole call.
+
+| Before | After |
+|---|---|
+| `chunk.content` | `chunk.contentDelta` |
+| `chunk.toolCall` | `chunk.toolCallDelta` |
+| `chunk.withContent(text)`, `chunk.withToolCall(call)` | `chunk.withContentDelta(text)`, `chunk.withToolCallDelta(call)` |
+| `StreamedChunk(id = "c1", content = Some("Hel"), toolCall = None)` | `StreamedChunk(id = "c1", contentDelta = Some("Hel"), toolCallDelta = None)` |
+
+Scalafix's `StreamedChunkDeltaNames` rewrites all four. The types are unchanged, and so is `hasContent`. A
+`toolCallDelta` is a fragment: the first of a call has its `id` and `name`, each later one adds a piece of the
+`arguments` JSON, and every fragment carries its call's `id`. `StreamingAccumulator` joins them; `Completion.content`
+and `Completion.toolCalls` are the whole answer, and keep their names.
+
+## `LlmException.isRetryable`, and three new `LlmErrorKind`s (#2916)
+
+The Java facade follows the one error model:
+
+| Before | After |
+|---|---|
+| `e.isRecoverable()` | `e.isRetryable()`: core's `LLMError.isRetryable`, so `false` for a `SERVICE` error with a 400 or a 404 |
+| `e.getKind() == LlmErrorKind.VALIDATION` for a content-filter block | `LlmErrorKind.CONTENT_FILTER` |
+| a context-length overflow: `VALIDATION` or `SERVICE` | `LlmErrorKind.CONTEXT_LENGTH` |
+| an unknown model: `SERVICE` with status 404 | `LlmErrorKind.MODEL_NOT_FOUND` |
+
+A `switch` over `LlmErrorKind` with no `default`, and a Kotlin `when` with no `else`, need the three new cases.
+`getStatusCode()` and `getRetryAfter()` now answer for every error that carries the fact (a `RATE_LIMIT` reports 429,
+an `AUTHENTICATION` 401 or 403), and `getRequestId()` is new. A scripted failure of the fake client (`failure(kind, message)`) builds
+an error of each new kind. In Kotlin, `error.isRecoverable` is `error.isRetryable`.
 
 ## Message parts, citations and adjustments are `Seq`s (#2809)
 

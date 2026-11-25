@@ -20,24 +20,24 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   private def toolStartChunk(msgId: String, toolId: String, toolName: String): StreamedChunk =
     StreamedChunk(
       id = msgId,
-      content = None,
-      toolCall = Some(ToolCall(id = ToolCallId(toolId), name = toolName, arguments = ujson.Obj())),
+      contentDelta = None,
+      toolCallDelta = Some(ToolCall(id = ToolCallId(toolId), name = toolName, arguments = ujson.Obj())),
       finishReason = None
     )
 
   private def argFragmentChunk(msgId: String, toolId: String, fragment: String): StreamedChunk =
     StreamedChunk(
       id = msgId,
-      content = None,
-      toolCall = Some(ToolCall(id = ToolCallId(toolId), name = "", arguments = ujson.Str(fragment))),
+      contentDelta = None,
+      toolCallDelta = Some(ToolCall(id = ToolCallId(toolId), name = "", arguments = ujson.Str(fragment))),
       finishReason = None
     )
 
   private def stopChunk(msgId: String): StreamedChunk =
     StreamedChunk(
       id = msgId,
-      content = None,
-      toolCall = None,
+      contentDelta = None,
+      toolCallDelta = None,
       finishReason = Some(FinishReason.Other("end_turn"))
     )
 
@@ -95,8 +95,10 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   it should "preserve tool call alongside text content" in {
     val acc = StreamingAccumulator(ModelName("test-model"))
     // Text content first
-    acc.addChunk(StreamedChunk("msg_1", content = Some("Let me check "), toolCall = None, finishReason = None))
-    acc.addChunk(StreamedChunk("msg_1", content = Some("the weather."), toolCall = None, finishReason = None))
+    acc.addChunk(
+      StreamedChunk("msg_1", contentDelta = Some("Let me check "), toolCallDelta = None, finishReason = None)
+    )
+    acc.addChunk(StreamedChunk("msg_1", contentDelta = Some("the weather."), toolCallDelta = None, finishReason = None))
     // Then tool call
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "get_weather"))
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", "{\"city\":\"NYC\"}"))

@@ -25,7 +25,7 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
 
   private def emitting(pieces: Seq[String], end: => Result[Completion]): LLMClient =
     new Scripted(
-      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end },
+      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); end },
       () => end
     )
 
@@ -124,7 +124,7 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
       onChunk => {
         var i = 0
         while (!Thread.currentThread().isInterrupted && i < 1_000_000) {
-          onChunk(StreamedChunk(id = "c", content = Some(s"$i"))); i += 1
+          onChunk(StreamedChunk(id = "c", contentDelta = Some(s"$i"))); i += 1
         }
         if (Thread.currentThread().isInterrupted) interrupted.countDown()
         Left(CancelledError("test"))
@@ -145,7 +145,7 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
     val client = new Scripted(
       onChunk => {
         (1 to total).foreach { i =>
-          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", content = Some(s"$i")))
+          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", contentDelta = Some(s"$i")))
         }
         Right(completion("all"))
       },

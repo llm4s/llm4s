@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
  * ConfigurationError, ProcessingError, InvalidInputError, NotFoundError,
  * ContextError, TokenizerError, UnknownError, SimpleError
  */
-class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
+class NonRetryableErrorsSpec extends AnyFlatSpec with Matchers {
 
   // ============ AuthenticationError ============
 
@@ -28,12 +28,12 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.context should contain("code" -> "401")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = AuthenticationError("provider", "details")
 
-    error shouldBe a[NonRecoverableError]
+    error.isRetryable shouldBe false
     error shouldBe a[LLMError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "support pattern matching" in {
@@ -68,11 +68,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.violations should contain("no numbers")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = ValidationError("field", "reason")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "create required field error" in {
@@ -137,11 +136,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.context("missingKeys") should include("API_KEY")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = ConfigurationError("config error")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "not include missingKeys in context when empty" in {
@@ -204,11 +202,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     (error.formatted should not).include("cause=")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = ProcessingError("op", "msg")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "create audio-specific errors" in {
@@ -246,11 +243,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Invalid input for width")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = InvalidInputError("field", "value", "reason")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "include all fields in context" in {
@@ -283,11 +279,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.key shouldBe "OPENAI_API_KEY"
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = NotFoundError("not found", "key")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "include key in context" in {
@@ -331,11 +326,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.details should contain("modelName" -> "gpt-4")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = ContextError.artifactStoreFailed("store", "key-1", "disk full")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "support pattern matching" in {
@@ -359,11 +353,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Tokenizer not available")
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = TokenizerError.notAvailable("tokenizer")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "include tokenizer ID in context" in {
@@ -393,11 +386,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.cause shouldBe cause
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = UnknownError("unknown", new Exception())
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "include exception details in context" in {
@@ -429,11 +421,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message shouldBe "Simple error message"
   }
 
-  it should "be a NonRecoverableError" in {
+  it should "not be retryable" in {
     val error = SimpleError("error")
 
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
   }
 
   it should "have empty context" in {
@@ -452,10 +443,10 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ============ NonRecoverableError Trait ============
+  // ============ Not retryable ============
 
-  "NonRecoverableError" should "always report isRecoverable as false" in {
-    val errors: Seq[NonRecoverableError] = Seq(
+  "An error the caller must fix" should "not be retryable" in {
+    val errors: Seq[LLMError] = Seq(
       AuthenticationError("p", "m"),
       ValidationError("f", "r"),
       ConfigurationError("m"),
@@ -468,22 +459,22 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
       SimpleError("m")
     )
 
-    errors.foreach(error => LLMError.isRecoverable(error) shouldBe false)
+    errors.foreach(error => error.isRetryable shouldBe false)
   }
 
   // ============ LLMError Companion Object ============
 
-  "LLMError.nonRecoverableErrors" should "filter only non-recoverable errors" in {
+  "filterNot(_.isRetryable)" should "keep only the errors that are not retryable" in {
     val errors: List[LLMError] = List(
       AuthenticationError("p", "m"),
       RateLimitError("p"),
       ValidationError("f", "r")
     )
 
-    val nonRecoverable = LLMError.nonRecoverableErrors(errors)
+    val nonRecoverable = errors.filterNot(_.isRetryable)
 
     nonRecoverable should have size 2
-    nonRecoverable.foreach(_ shouldBe a[NonRecoverableError])
+    nonRecoverable.foreach(_.isRetryable shouldBe false)
   }
 
   // ============ Smart Constructors ============

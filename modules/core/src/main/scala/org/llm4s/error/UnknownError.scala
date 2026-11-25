@@ -9,8 +9,7 @@ import org.llm4s.annotation.Stable
 final case class UnknownError private (
   override val message: String,
   cause: Throwable
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map(
     "exceptionType" -> cause.getClass.getSimpleName,
     "stackTrace"    -> cause.getStackTrace.take(3).mkString("; ")

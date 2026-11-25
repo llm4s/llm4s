@@ -54,7 +54,7 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
     // for a retired model, a 5xx) is not the failure this test is about.
     val error = result.left.value
     error shouldBe a[org.llm4s.error.ServiceError]
-    Set(400, 401, 403) should contain(error.asInstanceOf[org.llm4s.error.ServiceError].httpStatus)
+    Set(400, 401, 403) should contain(error.asInstanceOf[org.llm4s.error.ServiceError].status)
     (error.message should not).include("invalid-key-for-testing")
   }
 }

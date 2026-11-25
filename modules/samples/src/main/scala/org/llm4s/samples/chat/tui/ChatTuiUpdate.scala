@@ -257,7 +257,7 @@ private[tui] object ChatTuiUpdate:
     // Capture tool-call deltas onto the session so handleStreamComplete
     // sees them even when they were drained mid-stream by a pump tick.
     model.session.addChunks(chunks)
-    val newText = chunks.flatMap(_.content).mkString
+    val newText = chunks.flatMap(_.contentDelta).mkString
     if newText.isEmpty then model
     else
       val updated = appendToEntry(model.entries, intoIdx, newText)

@@ -77,14 +77,14 @@ abstract class StreamingBridgeContract(name: String)
     val expected = directChunks(ScriptedLLMClient.sequence(Reply.text("abcdef")).withChunkSize(2))
     val streamed = bridge.streamComplete(client, conversation, None)
     streamed.failure shouldBe None
-    streamed.items.flatMap(_.content) shouldBe expected.flatMap(_.content)
+    streamed.items.flatMap(_.contentDelta) shouldBe expected.flatMap(_.contentDelta)
   }
 
   it should "deliver the chunks received before a mid-stream failure, then the error" in {
     val error    = SimpleError("connection reset mid-stream")
     val chunks   = directChunks(ScriptedLLMClient.sequence(Reply.text("abc")).withChunkSize(1))
     val streamed = bridge.streamComplete(new FailingMidStream(chunks, error), conversation, None)
-    streamed.items.flatMap(_.content) shouldBe Vector("a", "b", "c")
+    streamed.items.flatMap(_.contentDelta) shouldBe Vector("a", "b", "c")
     streamed.failure.map(_.error) shouldBe Some(error)
     streamed.failure.map(_.message) shouldBe Some(error.message)
   }

@@ -11,7 +11,7 @@ import org.llm4s.agent.graph.tool.{
   ToolSet
 }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.{ Completion, Message, SystemMessage, ToolCall, ToolCallId }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
@@ -500,6 +500,5 @@ object AgentMiddleware:
  * is an error: a question nobody can answer.
  */
 final private[agent] case class MiddlewareAsked private[graph] (middleware: MiddlewareId, question: ujson.Value)
-    extends LLMError
-    with NonRecoverableError:
+    extends LLMError:
   override val message: String = s"Middleware '${middleware.value}' asked a question"

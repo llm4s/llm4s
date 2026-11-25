@@ -8,7 +8,7 @@ import org.llm4s.agent.graph.{ RunContext, ThreadState }
 import org.llm4s.agent.graph.toolloop.ToolLoop
 import org.llm4s.annotation.Experimental
 import org.llm4s.context.ConversationTokenCounter
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -257,7 +257,7 @@ object ModelContext:
     defined ++ schema
 
   /** An accounted call refused at the run's token budget (#2084): the model step ends the turn `TokenLimitReached`. */
-  final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:
+  final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError:
     def message: String = s"model call refused: the run has used $used tokens of its budget of $budget"
 
   /** `call`'s result and how long it took. */

@@ -138,7 +138,7 @@ object Main extends App {
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    completion <- client.streamComplete(Conversation(Seq(UserMessage("Write a haiku about the JVM."))))(chunk => chunk.content.foreach(print))
+    completion <- client.streamComplete(Conversation(Seq(UserMessage("Write a haiku about the JVM."))))(chunk => chunk.contentDelta.foreach(print))
     _ = client.close()
   } yield completion
 

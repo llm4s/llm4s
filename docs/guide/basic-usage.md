@@ -198,8 +198,8 @@ result match {
 ### LLM Errors
 
 All LLM operations return an {% include api.html t="org.llm4s.error.LLMError" %} on failure. It is an open trait in `org.llm4s.error`
-with a `message`, an optional `code` and a `context` map, and each subtype is either
-recoverable (worth retrying) or not:
+with a `message`, an optional `code` and a `context` map, and each error says whether it is
+retryable (the same request is worth sending again) or not:
 
 ```scala
 import org.llm4s.error._
@@ -212,12 +212,13 @@ def handle(error: LLMError): Unit = error match {
   case other                  => println(other.formatted)
 }
 
-// true for a RecoverableError (RateLimitError, NetworkError, TimeoutError, ...), false otherwise
-def retryable(error: LLMError): Boolean = LLMError.isRecoverable(error)
+// true for a RateLimitError, a NetworkError, a TimeoutError and a ServiceError with status 408, 429 or 5xx
+def retryable(error: LLMError): Boolean = error.isRetryable
 ```
 
-`isRecoverable` answers for every error. One that carries neither marker (`EmbeddingError`, `RerankError`,
-a custom `LLMError` that does not say) is not recoverable.
+`isRetryable` answers for every error, and is `false` unless the error says otherwise: a custom `LLMError` is not
+retried until it overrides the member. Every error also reports `httpStatus`, `retryAfter` (the delay the server
+asked for) and `requestId`, `None` when it has none.
 
 See the [Error Handling guide](error-handling) for every error type, when it is raised, and how
 to handle, convert and test them.
@@ -388,7 +389,7 @@ startup match {
 ### Retrying Failed Calls
 
 For transient failures (rate limits, timeouts, server errors), wrap the client in `ReliableClient`, from
-`llm4s-core`. It retries what `LLMError.isRecoverable` accepts, with exponential backoff, and returns any other error at
+`llm4s-core`. It retries an error that is `isRetryable`, with exponential backoff, and returns any other error at
 once:
 
 ```scala

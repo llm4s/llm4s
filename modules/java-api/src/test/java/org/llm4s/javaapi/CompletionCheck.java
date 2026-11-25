@@ -74,13 +74,14 @@ final class CompletionCheck {
   static List<String> failure(LlmException e) {
     List<String> log = new ArrayList<>();
     LlmErrorKind kind = e.getKind();
-    boolean recoverable = e.isRecoverable();
+    boolean retryable = e.isRetryable();
     Optional<Duration> retryAfter = e.getRetryAfter();
     OptionalInt status = e.getStatusCode();
     log.add("kind:" + describe(kind));
-    log.add("recoverable:" + recoverable);
+    log.add("retryable:" + retryable);
     log.add("retryAfter:" + retryAfter.map(d -> String.valueOf(d.toMillis())).orElse("none"));
     log.add("status:" + (status.isPresent() ? String.valueOf(status.getAsInt()) : "none"));
+    log.add("requestId:" + e.getRequestId().orElse("none"));
     return log;
   }
 
@@ -93,6 +94,9 @@ final class CompletionCheck {
       case NETWORK -> "network";
       case SERVICE -> "service";
       case VALIDATION -> "validation";
+      case CONTENT_FILTER -> "content-filter";
+      case CONTEXT_LENGTH -> "context-length";
+      case MODEL_NOT_FOUND -> "model-not-found";
       case CONFIGURATION -> "configuration";
       case CANCELLED -> "cancelled";
       case OTHER -> "other";

@@ -387,7 +387,9 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       requireAccount()
       val text = scala.collection.mutable.ListBuffer.empty[String]
       val result = withClient()(
-        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20))(_.content.foreach(text += _))
+        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20))(
+          _.contentDelta.foreach(text += _)
+        )
       )
       val completion = result.value
       text.mkString should not be empty

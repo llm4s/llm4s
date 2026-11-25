@@ -6,7 +6,7 @@ import org.llm4s.annotation.Stable
  * Error for invalid input values that fail validation.
  *
  * Provides detailed context about which field was invalid, what value was provided,
- * and why it was rejected. As a [[NonRecoverableError]], the input must be corrected
+ * and why it was rejected. It is not [[LLMError.isRetryable retryable]]: the input must be corrected
  * before retrying.
  *
  * @param message Human-readable error description
@@ -26,8 +26,7 @@ final case class InvalidInputError private (
   field: String,
   value: String,
   reason: String
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map(
     "field"  -> field,
     "value"  -> value,

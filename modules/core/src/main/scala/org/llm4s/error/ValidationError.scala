@@ -5,21 +5,32 @@ import org.llm4s.annotation.Stable
 /**
  * Raised when the request parameters or inputs fail validation before being sent to the provider.
  *
- * This is a [[NonRecoverableError]]: it indicates malformed requests, such as
+ * It is not [[LLMError.isRetryable retryable]]: it indicates malformed requests, such as
  * providing invalid parameters, missing required fields, or exceeding token limits
  * in the input. The user must fix the request payload to resolve this error.
  *
  * @param message human-readable description of the validation failure
  * @param field the name of the field that failed validation
  * @param violations list of specific validation rules that were violated
+ * @param httpStatus the HTTP status of the provider's response (usually 400), when the provider refused the
+ *                   request; `None` when the library refused it before sending
+ * @param requestId the provider's id for the refused request, when the response carried one
  */
 @Stable
 final case class ValidationError private (
   override val message: String,
   field: String,
-  violations: Seq[String]
-) extends LLMError
-    with NonRecoverableError {
+  violations: Seq[String],
+  override val httpStatus: Option[Int],
+  override val requestId: Option[String]
+) extends LLMError {
+
+  /** This error, carrying the HTTP status of the response it was mapped from. */
+  def withHttpStatus(status: Int): ValidationError = copy(httpStatus = Some(status))
+
+  /** This error, carrying the provider's id for the refused request. */
+  def withRequestId(id: String): ValidationError = copy(requestId = Some(id))
+
   override val context: Map[String, String] = Map("field" -> field) ++
     violations.headOption.fold(Map.empty[String, String])(_ => Map("violations" -> violations.mkString("; ")))
 
@@ -61,7 +72,7 @@ object ValidationError {
    * @return the validation error
    */
   def apply(field: String, reason: String): ValidationError =
-    new ValidationError(s"Invalid $field: $reason", field, List(reason))
+    new ValidationError(s"Invalid $field: $reason", field, List(reason), None, None)
 
   /**
    * Creates an error for several violated rules.
@@ -75,7 +86,7 @@ object ValidationError {
    * @return the validation error
    */
   def apply(field: String, violations: Seq[String]): ValidationError =
-    new ValidationError(s"Invalid $field: ${violations.mkString(", ")}", field, violations)
+    new ValidationError(s"Invalid $field: ${violations.mkString(", ")}", field, violations, None, None)
 
   /**
    * Creates an error for a missing required field.
@@ -94,7 +105,7 @@ object ValidationError {
    * @return the validation error
    */
   def required(field: String): ValidationError =
-    apply(s"Field '$field' is required", field, List("required"))
+    new ValidationError(s"Field '$field' is required", field, List("required"), None, None)
 
   /**
    * Creates an error for a field whose value is not acceptable.
@@ -107,7 +118,7 @@ object ValidationError {
    * @return the validation error
    */
   def invalid(field: String, reason: String): ValidationError =
-    apply(s"Field '$field' is invalid: $reason", field, List(reason))
+    new ValidationError(s"Field '$field' is invalid: $reason", field, List(reason), None, None)
 
   /** Unapply extractor for pattern matching */
   def unapply(error: ValidationError): Option[(String, String, Seq[String])] =

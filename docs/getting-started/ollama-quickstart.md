@@ -413,7 +413,7 @@ object StreamingOllama extends App {
     completion <- client.streamComplete(
       conversation,
       CompletionOptions()
-    )(chunk => chunk.content.foreach(print))  // Print tokens as they arrive
+    )(chunk => chunk.contentDelta.foreach(print))  // Print tokens as they arrive
   } yield completion
 
   result match {

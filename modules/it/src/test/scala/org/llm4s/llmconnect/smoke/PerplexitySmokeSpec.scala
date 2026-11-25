@@ -57,7 +57,7 @@ class PerplexitySmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
     val result =
       PerplexityClient(config(apiKey.get)).value.streamComplete(conversation, options)(c => chunks += c).value
 
-    val streamed = chunks.flatMap(_.content).mkString
+    val streamed = chunks.flatMap(_.contentDelta).mkString
     streamed should not be empty
     result.content should not be empty
     result.usage shouldBe defined

@@ -97,7 +97,7 @@ object AdvancedStreamingExample {
             println(s"First chunk received in ${firstChunkTime.get}ms\n")
             println("-" * maxLineLength)
           }
-          chunk.content.foreach { content =>
+          chunk.contentDelta.foreach { content =>
             // Track metrics
             chunkSizes += content.length
             if (lastChunkTime > 0) {
@@ -132,7 +132,7 @@ object AdvancedStreamingExample {
           }
 
           // Show spinner for visual feedback during pauses
-          if (chunk.content.isEmpty && chunk.finishReason.isEmpty) {
+          if (chunk.contentDelta.isEmpty && chunk.finishReason.isEmpty) {
             print(s"\r${spinner(spinnerIndex)} Processing...")
             spinnerIndex = (spinnerIndex + 1) % spinner.length
             Thread.sleep(50)

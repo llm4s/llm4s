@@ -161,7 +161,7 @@ class NetworkSecuritySpec extends AnyFlatSpec with Matchers {
     )
     refusals.foreach { refusal =>
       val error = refusal.left.toOption.getOrElse(fail("expected a refusal"))
-      withClue(error.message)(org.llm4s.error.LLMError.isRecoverable(error) shouldBe false)
+      withClue(error.message)(error.isRetryable shouldBe false)
     }
   }
 
@@ -175,7 +175,7 @@ class NetworkSecuritySpec extends AnyFlatSpec with Matchers {
     NetworkSecurity.validateHostname("no-such-host.invalid") match {
       case Left(error: org.llm4s.error.NetworkError) =>
         error.endpoint shouldBe "no-such-host.invalid"
-        org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
+        error.isRetryable shouldBe true
       case other => fail(s"expected a NetworkError, got $other")
     }
   }

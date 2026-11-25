@@ -575,8 +575,8 @@ class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       "Thread 't': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at c); retry"
   }
 
-  "ThreadBusy" should "be recoverable, so generic retry code retries it" in {
-    org.llm4s.error.LLMError.isRecoverable(GraphError.ThreadBusy("t", None)) shouldBe true
+  "ThreadBusy" should "be retryable, so generic retry code retries it" in {
+    GraphError.ThreadBusy("t", None).isRetryable shouldBe true
   }
 
   "GraphRuntime.inMemory" should "judge retention by the clock it was given, which stamps the checkpoints too" in {

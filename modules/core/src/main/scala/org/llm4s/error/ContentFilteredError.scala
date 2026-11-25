@@ -13,7 +13,7 @@ import org.llm4s.llmconnect.model.TokenUsage
  * and the message says how much there was.
  *
  * The provider is healthy, so a `ReliableClient`'s circuit breaker counts this as neither a success nor a failure.
- * As a [[NonRecoverableError]], sending the same request again would be filtered the same way: the conversation
+ * It is not [[LLMError.isRetryable retryable]]: sending the same request again would be filtered the same way: the conversation
  * must change before a retry.
  *
  * @param provider      the client's provider name, e.g. `Gemini`
@@ -28,8 +28,7 @@ final case class ContentFilteredError private (
   reason: String,
   promptBlocked: Boolean,
   usage: Option[TokenUsage]
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] =
     Map("provider" -> provider, "reason" -> reason, "promptBlocked" -> promptBlocked.toString)
 

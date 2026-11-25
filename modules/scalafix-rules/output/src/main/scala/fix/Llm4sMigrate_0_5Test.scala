@@ -13,7 +13,7 @@ object Llm4sMigrate_0_5Test {
 
   val opts = CompletionOptions().withMaxTokens(500).withTemperature(0.2)
   val cfg  = CrawlerConfig(delay = 500.millis, timeout = 30.seconds)
-  def handle(err: LLMError): Unit = if (LLMError.isRecoverable(err)) retry()
+  def handle(err: LLMError): Unit = if (err.isRetryable) retry()
 
   val rateLimited = Left(RateLimitError("openai", 1.second))
 

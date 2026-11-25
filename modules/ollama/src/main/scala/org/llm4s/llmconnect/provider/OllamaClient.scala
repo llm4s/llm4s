@@ -3,7 +3,14 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
-import org.llm4s.error.{ LLMError, NetworkError, ServiceError, TroubleshootingLinks, ValidationError }
+import org.llm4s.error.{
+  LLMError,
+  ModelNotFoundError,
+  NetworkError,
+  ServiceError,
+  TroubleshootingLinks,
+  ValidationError
+}
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -215,16 +222,22 @@ final class OllamaClient private[provider] (
             "Use a model whose Ollama page lists the 'tools' capability, or send no tools."
         )
       )
-    else if (status == 404)
+    else if (status == 404) {
       // Ollama answers 404 for a model it has not pulled: say which command fetches it (#2285).
+      val details = HttpErrorMapper.extractErrorDetails(body, status, providerName)
+      val action  = TroubleshootingLinks.ollamaModelMissingAction(config.model.asString)
+      val entry   = TroubleshootingLinks.Entry.OllamaModelMissing
       Left(
-        ServiceError(404, providerName, HttpErrorMapper.extractErrorDetails(body, status, providerName))
-          .withHint(
-            TroubleshootingLinks.ollamaModelMissingAction(config.model.asString),
-            TroubleshootingLinks.Entry.OllamaModelMissing
-          )
+        // `model "x" not found` is the typed error; any other 404 (a wrong path) keeps its status
+        if (ProviderErrorSignals.isModelNotFound(status, HttpErrorMapper.errorCodes(body), details))
+          ModelNotFoundError(providerName, details)
+            .withModel(config.model.asString)
+            .withHttpStatus(status)
+            .withHint(action, entry)
+        else ServiceError(404, providerName, details).withHint(action, entry)
       )
-    else Left(HttpErrorMapper.toError(status, body, providerName, headers))
+    } else
+      Left(HttpErrorMapper.naming(HttpErrorMapper.toError(status, body, providerName, headers), config.model.asString))
 
   private def recordExchange(
     startedAt: Instant,
@@ -323,8 +336,8 @@ final class OllamaClient private[provider] (
                       val finish = Option.when(done)(OllamaClient.finishReason(json, sawCalls))
                       val head = StreamedChunk(
                         id = id,
-                        content = contentOpt,
-                        toolCall = None,
+                        contentDelta = contentOpt,
+                        toolCallDelta = None,
                         finishReason = finish,
                         thinkingDelta = thinkingOpt
                       )
@@ -333,13 +346,15 @@ final class OllamaClient private[provider] (
                         if (calls.isEmpty) Seq(head)
                         else {
                           val callChunks = calls
-                            .map(c => StreamedChunk(id = id, content = None, toolCall = Some(c), finishReason = None))
+                            .map(c =>
+                              StreamedChunk(id = id, contentDelta = None, toolCallDelta = Some(c), finishReason = None)
+                            )
                           val withText =
                             if (contentOpt.isDefined || thinkingOpt.isDefined) Seq(head.withFinishReason(None))
                             else Seq.empty
                           val closing =
                             if (finish.isDefined)
-                              Seq(head.withContent(None: Option[String]).withThinkingDelta(None: Option[String]))
+                              Seq(head.withContentDelta(None: Option[String]).withThinkingDelta(None: Option[String]))
                             else Seq.empty
                           withText ++ callChunks ++ closing
                         }

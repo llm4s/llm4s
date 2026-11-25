@@ -1,6 +1,6 @@
 package org.llm4s.mcp
 
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.CancelledError
 import org.llm4s.testkit.{ LocalProviderTestServer, ProviderModuleChecks }
 import org.llm4s.toolapi._
 import org.scalatest.BeforeAndAfterAll
@@ -172,6 +172,6 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   "the cancellation the MCP layers return" should "be a CancelledError, which no retry layer retries" in {
-    LLMError.isRecoverable(CancelledError("mcp.http")) shouldBe false
+    CancelledError("mcp.http").isRetryable shouldBe false
   }
 }

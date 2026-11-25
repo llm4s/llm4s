@@ -434,16 +434,15 @@ Non-retryable errors (fail immediately):
 - ❌ `ValidationError` - Invalid input
 - ❌ `ConfigurationError` - Client misconfiguration
 - ❌ `ServiceError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
-- ❌ `OptimisticLockFailure` - recoverable, but the caller must re-read the record first
-- ❌ `CircuitOpenError` - recoverable after its `retryAfter`, but repeating the call at once is what an open circuit prevents
+- ❌ `ContextLengthError`, `ModelNotFoundError` - the request does not fit the model, or names one the provider does not know
+- ❌ `OptimisticLockFailure` - the caller must re-read the record first
+- ❌ `CircuitOpenError` - worth sending after its `remaining` time, but repeating the call at once is what an open circuit prevents
 - ❌ `CancelledError` - the caller stopped the call
 
-**One rule.** Automatic retry is `LLMError.isRecoverable` minus the three exceptions above (a client-error response,
-an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, which `ReliableClient` applies, and an agent graph node's default
-retry both use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
-again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
-enough. `RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, and
-`ServiceError.isRecoverableStatus` is the same status check, so a policy that customises only the delay retries
+**One rule.** Automatic retry is `LLMError.isRetryable`: whether repeating the identical request may succeed.
+`RetryPolicy.isRetryable`, which `ReliableClient` applies, and an agent graph node's default
+retry both read it, so they cannot disagree about an error, and neither can your own code.
+`RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, so a policy that customises only the delay retries
 exactly what the other policies retry.
 
 ## Best Practices
@@ -1050,7 +1049,7 @@ a `ReliableClient` given such a configuration returns that error from every call
 sealed trait RetryPolicy {
   def maxAttempts: Int
   def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
-  def isRetryable(error: LLMError): Boolean // default: the recoverable errors, except a client-error response (4xx other than 408/429), an OptimisticLockFailure and a CircuitOpenError
+  def isRetryable(error: LLMError): Boolean // default: error.isRetryable
 }
 ```
 

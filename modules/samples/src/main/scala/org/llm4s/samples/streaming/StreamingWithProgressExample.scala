@@ -67,10 +67,10 @@ object StreamingWithProgressExample {
 
         // Update counts
         chunkCount += 1
-        chunk.content.foreach(c => charCount += c.length)
+        chunk.contentDelta.foreach(c => charCount += c.length)
 
         // Print content
-        chunk.content.foreach(print)
+        chunk.contentDelta.foreach(print)
 
         // Update progress in terminal title (if supported)
         if (chunkCount % 5 == 0) {

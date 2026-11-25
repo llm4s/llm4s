@@ -66,7 +66,8 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
       OpenAIClient.forTest("gpt-4o", transport(streaming = _ => stream(content, stop, usageOnly)), openAI("gpt-4o"))
     val chunks = scala.collection.mutable.ListBuffer.empty[String]
 
-    val completion = client.streamComplete(hello, CompletionOptions())(c => chunks += c.content.getOrElse("")).value
+    val completion =
+      client.streamComplete(hello, CompletionOptions())(c => chunks += c.contentDelta.getOrElse("")).value
 
     completion.content shouldBe "Hi"
     val usage = completion.usage.value

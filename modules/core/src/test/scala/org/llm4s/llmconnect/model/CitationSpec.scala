@@ -118,7 +118,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
 
   "A completion assembled from streamed chunks" should "carry no citations, because a chunk reports none" in {
     val acc = StreamingAccumulator(ModelName("test-model"))
-    acc.addChunk(StreamedChunk(id = "s", content = Some("answer"), finishReason = Some(FinishReason.Stop)))
+    acc.addChunk(StreamedChunk(id = "s", contentDelta = Some("answer"), finishReason = Some(FinishReason.Stop)))
 
     acc.toCompletion(Instant.EPOCH).map(_.citations) shouldBe Right(Nil)
   }

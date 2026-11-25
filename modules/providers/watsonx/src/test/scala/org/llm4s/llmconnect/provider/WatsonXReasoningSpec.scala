@@ -126,7 +126,7 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   test("stream: delta.reasoning_content pieces become thinking deltas, in order, and the completion's thinking") {
     val (completion, chunks) = stream(recorded)
     chunks.flatMap(_.thinkingDelta) shouldBe List("User", " wants", " translation", ".")
-    chunks.flatMap(_.content) shouldBe List("Hola", "!")
+    chunks.flatMap(_.contentDelta) shouldBe List("Hola", "!")
     completion.thinking shouldBe Some("User wants translation.")
     completion.content shouldBe "Hola!"
     completion.message.content shouldBe "Hola!"
@@ -135,8 +135,8 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   test("stream: empty reasoning_content pieces are not passed on, and a thinking chunk carries no content") {
     val (_, chunks) = stream(recorded)
     chunks.filter(_.thinkingDelta.isDefined).foreach { chunk =>
-      chunk.content shouldBe None
-      chunk.toolCall shouldBe None
+      chunk.contentDelta shouldBe None
+      chunk.toolCallDelta shouldBe None
       chunk.finishReason shouldBe None
       chunk.id shouldBe "chatcmpl-3956"
     }

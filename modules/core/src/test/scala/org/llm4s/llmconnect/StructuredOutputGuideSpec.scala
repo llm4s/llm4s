@@ -224,8 +224,8 @@ class StructuredOutputGuideSpec extends AnyWordSpec with Matchers with EitherVal
     "not be retried by the reliability rule, because a ValidationError is not recoverable (section 7)" in {
       val error = extractInvoice(new SimpleMock("nope"), "x").left.value
 
-      error shouldBe a[org.llm4s.error.NonRecoverableError]
-      org.llm4s.reliability.RetryPolicy.isTransient(error) shouldBe false
+      error.isRetryable shouldBe false
+      org.llm4s.reliability.RetryPolicy.exponentialBackoff().isRetryable(error) shouldBe false
     }
 
     "succeed on a second try when the first reply was unusable (section 7)" in {

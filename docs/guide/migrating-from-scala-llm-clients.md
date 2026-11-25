@@ -249,7 +249,7 @@ callback that receives each chunk, and returns the whole completion when the str
 val shown = new StringBuilder
 val streamed: Result[String] = for {
   conversation <- Conversation.fromPrompts("You answer in one sentence.", "What is Scala?")
-  completion   <- client.streamComplete(conversation, CompletionOptions())(_.content.foreach(shown.append))
+  completion   <- client.streamComplete(conversation, CompletionOptions())(_.contentDelta.foreach(shown.append))
 } yield completion.content
 ```
 
@@ -257,7 +257,7 @@ With cats-effect, `llm4s-effect` turns the same call into an `fs2.Stream` (given
 
 ```scala
 val text: IO[String] =
-  LLMClientIO[IO](client).streamComplete(conversation).map(_.content.getOrElse("")).compile.string
+  LLMClientIO[IO](client).streamComplete(conversation).map(_.contentDelta.getOrElse("")).compile.string
 ```
 
 `llm4s-zio` and `llm4s-pekko` do the same for ZIO Streams and Pekko Streams ([cats-effect](cats-effect), [ZIO](zio),

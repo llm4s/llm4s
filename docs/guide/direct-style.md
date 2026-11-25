@@ -200,7 +200,7 @@ def fastest(openai: LLMClient, anthropic: LLMClient): Option[Result[Completion]]
 ### Retries
 
 `RetrySchedule.retry` retries what the library's one retry rule retries (the rule `ReliableClient` and the agent
-graph use): a recoverable error, but not a client-error status (a 4xx other than 408 and 429) and never a
+graph use): an error that is `isRetryable`, so not a client-error status (a 4xx other than 408 and 429) and never a
 `CancelledError`. It waits the schedule's delay, or longer when the provider asked for longer: a `RateLimitError`'s
 retry-after, or a `ServiceError`'s. `RetrySchedule.default` is exponential backoff from 1 second, capped at 30
 seconds, with jitter, for at most 3 retries. `RetrySchedule.config` is the same rule as an Ox `RetryConfig`, for Ox's

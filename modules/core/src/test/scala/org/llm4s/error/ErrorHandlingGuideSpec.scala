@@ -68,11 +68,13 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   // guide-block
   def describe(result: Result[String]): String =
     result match {
-      case Right(text)             => s"ok: $text"
-      case Left(e: RateLimitError) => s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
+      case Right(text) => s"ok: $text"
+      case Left(e: RateLimitError) =>
+        s"wait ${e.retryAfter.getOrElse(RetryPolicy.DefaultRateLimitDelay)}, then retry"
       case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"
-      case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
-      case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
+      case Left(e: ContextLengthError)  => s"shorten the conversation: ${e.message}"
+      case Left(e) if e.isRetryable     => s"transient, may succeed on retry: ${e.message}"
+      case Left(e)                      => s"not retried: ${e.message}"
     }
   // end-guide-block
 
@@ -161,99 +163,85 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       describe(Left(ValidationError("model", "must not be empty"))) should startWith("not retried")
     }
 
-    "need a catch-all, because LLMError is an open trait (not sealed), and a custom error mixes in a marker" in {
+    "need a catch-all, because LLMError is an open trait (not sealed), and a custom error says if it is retryable" in {
       // guide-block
-      final case class VendorError(message: String) extends LLMError with NonRecoverableError
+      final case class VendorError(message: String) extends LLMError
+
+      final case class FlakyVendorError(message: String) extends LLMError {
+        override def isRetryable: Boolean = true
+      }
       // end-guide-block
-      final case class FlakyVendorError(message: String) extends LLMError with RecoverableError
-      describe(Left(VendorError("custom"))) shouldBe
-        "not retried (permanent, or not marked either way): custom"
+      describe(Left(VendorError("custom"))) shouldBe "not retried: custom"
       describe(Left(FlakyVendorError("blip"))) shouldBe "transient, may succeed on retry: blip"
     }
 
-    "route an error with no marker to the catch-all" in {
-      // The guide lists the library errors that carry neither marker. If one of these gains a marker,
-      // update the guide's table of errors defined by other modules together with this assertion.
-      val embedding = EmbeddingError(Some("500"), "provider failed", "openai")
-      (embedding: LLMError) should not be a[RecoverableError]
-      (embedding: LLMError) should not be a[NonRecoverableError]
-      describe(Left(embedding)) shouldBe "not retried (permanent, or not marked either way): provider failed"
+    "route an embedding error by its status, as the guide's table of other modules' errors says" in {
+      describe(Left(EmbeddingError(Some("500"), "provider failed", "openai"))) shouldBe
+        "transient, may succeed on retry: provider failed"
+      describe(Left(EmbeddingError(Some("401"), "bad key", "openai"))) shouldBe "not retried: bad key"
+      describe(Left(EmbeddingError(None, "unparseable", "openai"))) shouldBe "not retried: unparseable"
+    }
 
-      final case class UnmarkedError(message: String) extends LLMError
-      describe(Left(UnmarkedError("no marker"))) shouldBe
-        "not retried (permanent, or not marked either way): no marker"
+    "tell a context-length overflow apart by its type" in {
+      describe(Left(ContextLengthError("openai", "too long"))) should startWith("shorten the conversation")
     }
   }
 
-  "recoverability" should {
-    "be answered by isRecoverable for every error, as the Basic Usage guide calls it, an unmarked one included" in {
-      LLMError.isRecoverable(NetworkError("down", None, "https://x")) shouldBe true
-      LLMError.isRecoverable(ValidationError("f", "r")) shouldBe false
-      LLMError.isRecoverable(EmbeddingError(Some("500"), "provider failed", "openai")) shouldBe false
+  "isRetryable" should {
+    "answer for every error, one of your own included" in {
+      NetworkError("down", None, "https://x").isRetryable shouldBe true
+      ValidationError("f", "r").isRetryable shouldBe false
 
-      final case class UnmarkedError(message: String) extends LLMError
-      LLMError.isRecoverable(UnmarkedError("no marker")) shouldBe false
+      final case class PlainError(message: String) extends LLMError
+      PlainError("says nothing").isRetryable shouldBe false
     }
 
-    "agree with the marker-trait match the guide shows, including on an unmarked error" in {
-      def retryable(error: LLMError): Boolean = error match {
-        case _: RecoverableError => true
-        case _                   => false
-      }
-      final case class UnmarkedError(message: String) extends LLMError
-      val errors: List[LLMError] = List(
-        NetworkError("down", None, "https://x"),
-        ValidationError("f", "r"),
-        EmbeddingError(Some("500"), "provider failed", "openai"),
-        UnmarkedError("no marker")
-      )
-      errors.foreach(e => withClue(e.toString)(LLMError.isRecoverable(e) shouldBe retryable(e)))
-    }
-
-    "partition a list holding an unmarked error instead of throwing" in {
-      final case class UnmarkedError(message: String) extends LLMError
-      val network                = NetworkError("down", None, "https://x")
-      val unmarked               = UnmarkedError("no marker")
-      val errors: List[LLMError] = List(network, unmarked, ValidationError("f", "r"))
-      LLMError.recoverableErrors(errors) shouldBe List(network)
-      LLMError.nonRecoverableErrors(errors) should have size 2
-      LLMError.nonRecoverableErrors(errors) should contain(unmarked)
-    }
-
-    "follow the marker trait of each error type, as the guide's table says" in {
-      val recoverable: List[LLMError] = List(
+    "be what the guide's table says for each error type" in {
+      val retryable: List[LLMError] = List(
         NetworkError("m", None, "u"),
         RateLimitError("p"),
         TimeoutError("m", 1.second, "op"),
         ServiceError(503, "p", "d"),
-        ExecutionError("m", "op", None, None),
-        OptimisticLockFailure("m", "id", 1L)
+        ExecutionError("m", "op", None, None)
       )
-      val permanent: List[LLMError] = List(
+      val not: List[LLMError] = List(
         AuthenticationError("p", "d"),
         ConfigurationError("m", List("k")),
         ValidationError("f", "r"),
+        ContextLengthError("p", "d"),
+        ModelNotFoundError("p", "d"),
         InvalidInputError("f", "v", "r"),
         ProcessingError("op", "m"),
         NotFoundError("m", "k"),
         CancelledError("op"),
-        SimpleError("m")
+        SimpleError("m"),
+        OptimisticLockFailure("m", "id", 1L),
+        CircuitOpenError.open("p", 1.second)
       )
-      recoverable.map(LLMError.isRecoverable).distinct shouldBe List(true)
-      permanent.map(LLMError.isRecoverable).distinct shouldBe List(false)
+      retryable.map(_.isRetryable).distinct shouldBe List(true)
+      not.map(_.isRetryable).distinct shouldBe List(false)
     }
 
-    "say whether a ServiceError's own status is transient, with no import" in {
-      ServiceError(503, "p", "d").isRecoverableStatus shouldBe true
-      ServiceError(429, "p", "d").isRecoverableStatus shouldBe true
-      ServiceError(408, "p", "d").isRecoverableStatus shouldBe true
-      ServiceError(404, "p", "d").isRecoverableStatus shouldBe false
+    "follow a ServiceError's status" in {
+      ServiceError(503, "p", "d").isRetryable shouldBe true
+      ServiceError(429, "p", "d").isRetryable shouldBe true
+      ServiceError(408, "p", "d").isRetryable shouldBe true
+      ServiceError(404, "p", "d").isRetryable shouldBe false
     }
 
-    "give a rate limit's own delay, falling back to the default of 30 seconds" in {
-      RateLimitError("p", 7.seconds).retryDelay shouldBe Some(7.seconds)
-      RateLimitError("p").retryDelay shouldBe Some(RateLimitError.DefaultRetryDelay)
-      RateLimitError.DefaultRetryDelay shouldBe 30.seconds
+    "report only the provider's own delay as retryAfter, the 30-second default being the retry policy's" in {
+      RateLimitError("p", 7.seconds).retryAfter shouldBe Some(7.seconds)
+      RateLimitError("p").retryAfter shouldBe None
+      RetryPolicy.DefaultRateLimitDelay shouldBe 30.seconds
+    }
+
+    "report the transport facts of a mapped response on every error type" in {
+      import org.llm4s.llmconnect.provider.HttpErrorMapper
+      val error = HttpErrorMapper.toError(400, """{"error":{"message":"bad"}}""", "p", Map("x-request-id" -> Seq("r1")))
+      error shouldBe a[ValidationError]
+      error.httpStatus shouldBe Some(400)
+      error.requestId shouldBe Some("r1")
+      error.retryAfter shouldBe None
     }
   }
 
@@ -347,7 +335,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     "wait a rate limit's own delay and a service error's hint, and the policy's delay otherwise" in {
       val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 3.seconds)
       policy.delayFor(1, RateLimitError("p", 7.seconds)) shouldBe 7.seconds
-      policy.delayFor(1, RateLimitError("p")) shouldBe RateLimitError.DefaultRetryDelay
+      policy.delayFor(1, RateLimitError("p")) shouldBe RetryPolicy.DefaultRateLimitDelay
       policy.delayFor(1, ServiceError(503, "p", "d").withRetryAfter(9.seconds)) shouldBe 9.seconds
       Seq(1, 2, 3).map(policy.delayFor(_, ServiceError(503, "p", "d"))) shouldBe Seq(1.second, 2.seconds, 3.seconds)
       policy.isRetryable(NetworkError("down", None, "https://x")) shouldBe true

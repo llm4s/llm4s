@@ -60,11 +60,10 @@ final case class RetryPolicy private (
 object RetryPolicy:
 
   /**
-   * Retry what the library's one retry rule retries, so a node and an LLM call agree about an error: a recoverable
-   * error, except a client-error response and an optimistic-lock failure. See
-   * `org.llm4s.reliability.RetryPolicy.isRetryable`.
+   * Retry what the library's one retry rule retries, so a node and an LLM call agree about an error: an error
+   * that is `isRetryable` (`org.llm4s.error.LLMError.isRetryable`).
    */
-  val transientOnly: LLMError => Boolean = error => org.llm4s.reliability.RetryPolicy.isTransient(error)
+  val transientOnly: LLMError => Boolean = _.isRetryable
 
   private def problems(
     maxAttempts: Int,

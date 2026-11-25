@@ -106,7 +106,7 @@ class ZioChatServerSpec extends AnyFlatSpec with Matchers {
     def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
-      onChunk(StreamedChunk(id = "c1", content = Some("partial")))
+      onChunk(StreamedChunk(id = "c1", contentDelta = Some("partial")))
       val deadline = System.nanoTime() + 60.seconds.toNanos
       while (!Thread.currentThread().isInterrupted && System.nanoTime() < deadline)
         LockSupport.parkNanos(10.millis.toNanos)

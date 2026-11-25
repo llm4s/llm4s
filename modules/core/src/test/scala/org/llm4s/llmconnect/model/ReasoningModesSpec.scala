@@ -263,7 +263,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
   it should "handle both content and thinking" in {
     val chunk = StreamedChunk(
       id = "1",
-      content = Some("response"),
+      contentDelta = Some("response"),
       thinkingDelta = Some("thinking")
     )
 

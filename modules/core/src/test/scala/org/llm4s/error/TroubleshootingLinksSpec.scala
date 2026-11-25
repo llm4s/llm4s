@@ -107,9 +107,17 @@ class TroubleshootingLinksSpec extends AnyWordSpec with Matchers:
 
     "on a 404, say to check the model and list the provider's models" in {
       val error = mapped(404, """{"error":{"message":"The model `nope` does not exist"}}""")
+      error shouldBe a[ModelNotFoundError]
+      error.message shouldBe
+        "openai does not know the model: The model `nope` does not exist. " +
+        s"${TroubleshootingLinks.ModelNotFoundAction} See $Page#model-not-found"
+    }
+
+    "on a 404 that does not say the model is unknown, say the same of a ServiceError" in {
+      val error = mapped(404, """{"error":{"message":"Invalid URL (POST /v1/chat/completion)"}}""")
       error shouldBe a[ServiceError]
       error.message shouldBe
-        "Service error from openai: The model `nope` does not exist (HTTP 404). " +
+        "Service error from openai: Invalid URL (POST /v1/chat/completion) (HTTP 404). " +
         s"${TroubleshootingLinks.ModelNotFoundAction} See $Page#model-not-found"
     }
 
@@ -141,8 +149,8 @@ class TroubleshootingLinksSpec extends AnyWordSpec with Matchers:
       val auth = TroubleshootingLinks.annotate(AuthenticationError("openai", "nope", "401"))
       auth.code shouldBe Some("401")
       val service = TroubleshootingLinks.annotate(ServiceError(404, "openai", "missing"))
-      service.asInstanceOf[ServiceError].httpStatus shouldBe 404
-      LLMError.isRecoverable(service) shouldBe LLMError.isRecoverable(ServiceError(404, "openai", "missing"))
+      service.asInstanceOf[ServiceError].status shouldBe 404
+      service.isRetryable shouldBe ServiceError(404, "openai", "missing").isRetryable
     }
   }
 

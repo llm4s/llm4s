@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 /**
  * Raised when there is an issue with the client or operation configuration.
  *
- * This is a [[NonRecoverableError]]: it indicates a permanent failure due to missing or
+ * It is not [[LLMError.isRetryable retryable]]: it indicates a permanent failure due to missing or
  * invalid configuration values (e.g., missing base URL, invalid model name).
  * The user must correct the configuration to resolve this error.
  *
@@ -16,8 +16,7 @@ import org.llm4s.annotation.Stable
 final case class ConfigurationError private (
   override val message: String,
   missingKeys: Seq[String]
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] =
     missingKeys.headOption.fold(Map.empty[String, String])(_ => Map("missingKeys" -> missingKeys.mkString(", ")))
 }

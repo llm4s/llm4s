@@ -6,7 +6,7 @@ import org.scalatest.matchers.should.Matchers
 
 class ChatTuiStreamSessionSpec extends AnyFunSuite with Matchers {
   private def chunk(id: String, name: String, args: ujson.Value): StreamedChunk =
-    StreamedChunk(id = "response", content = None, toolCall = Some(ToolCall(ToolCallId(id), name, args)))
+    StreamedChunk(id = "response", contentDelta = None, toolCallDelta = Some(ToolCall(ToolCallId(id), name, args)))
 
   test("parse a complete raw argument document before tool approval") {
     val session = new ChatTuiModel.StreamSession

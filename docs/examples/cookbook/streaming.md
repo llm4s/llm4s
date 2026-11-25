@@ -54,7 +54,7 @@ object StreamingRecipe extends RecipeApp {
         CompletionOptions().withMaxTokens(200)
       )(chunk =>
         // A chunk can carry a tool call, a finish reason or reasoning instead of text: print only the text.
-        chunk.content.filter(_.nonEmpty).foreach { text =>
+        chunk.contentDelta.filter(_.nonEmpty).foreach { text =>
           pieces += text
           onText(text)
         }
@@ -105,7 +105,7 @@ steps; see [Streaming](../../guide/agents/streaming).
 ## Pitfalls
 
 - A chunk is not always text: it can carry a piece of a tool call, a finish reason or reasoning, with no content.
-  Print only `chunk.content`, and skip empty pieces.
+  Print only `chunk.contentDelta`, and skip empty pieces.
 - A chunk is a piece of a word as often as a whole one. Do not add spaces between chunks.
 - The callback runs on the client's thread, while the request is open. Keep it quick: hand slow work (a database
   write, a UI update across threads) to something else.
