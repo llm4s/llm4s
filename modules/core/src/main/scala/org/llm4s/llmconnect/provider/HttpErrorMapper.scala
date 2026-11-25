@@ -56,35 +56,36 @@ object HttpErrorMapper {
    *
    * @param statusCode the HTTP status code (must be outside 2xx range)
    * @param body       the raw response body (may be JSON or plain text)
-   * @param provider   short provider label used in error messages (e.g. `"gemini"`)
+   * @param provider   the id of the provider that answered (e.g. `gemini`): the provider the error names, in its
+   *                   `provider` and its message
    * @param headers    the response headers, as carried by `org.llm4s.http.HttpResponse`; `Map.empty` only when
    *                   there is no response to take them from
    * @return the appropriate `LLMError` subtype; a client returns it as a `Left`
    */
-  def toError(statusCode: Int, body: String, provider: String, headers: Map[String, Seq[String]]): LLMError =
+  def toError(statusCode: Int, body: String, provider: ProviderId, headers: Map[String, Seq[String]]): LLMError =
     toErrorAt(statusCode, body, provider, headers, Clock.systemUTC())
 
   /** As [[toError]], with the clock an HTTP-date `Retry-After` is measured against. */
   private[provider] def toErrorAt(
     statusCode: Int,
     body: String,
-    provider: String,
+    provider: ProviderId,
     headers: Map[String, Seq[String]],
     clock: Clock
   ): LLMError = {
     val details = extractErrorDetails(body, statusCode, provider)
     val mapped: LLMError = statusCode match {
-      case 401 | 403 => AuthenticationError(ProviderId(provider), details, statusCode.toString)
+      case 401 | 403 => AuthenticationError(provider, details, statusCode.toString)
       case 429 =>
         (retryAfter(headers, clock) match {
-          case Some(delay) => RateLimitError(ProviderId(provider), delay)
-          case None        => RateLimitError(ProviderId(provider))
+          case Some(delay) => RateLimitError(provider, delay)
+          case None        => RateLimitError(provider)
         }).withHttpStatus(statusCode)
       case s =>
         typed(s, errorCodes(body), details, provider).getOrElse {
           if (s == 400) ValidationError("request", details).withHttpStatus(s)
           else {
-            val error = ServiceError(s, ProviderId(provider), details)
+            val error = ServiceError(s, provider, details)
             retryAfter(headers, clock).fold(error)(error.withRetryAfter)
           }
         }
@@ -101,12 +102,12 @@ object HttpErrorMapper {
    *
    * @param codes the machine-readable codes of the error: an OpenAI `error.code`, an Anthropic `error.type`
    */
-  private[llm4s] def typed(status: Int, codes: Set[String], message: String, provider: String): Option[LLMError] =
+  private[llm4s] def typed(status: Int, codes: Set[String], message: String, provider: ProviderId): Option[LLMError] =
     if (ProviderErrorSignals.isContextLength(status, codes, message)) {
       val (limit, requested) = ProviderErrorSignals.tokens(message)
-      Some(ContextLengthError(ProviderId(provider), message).withTokens(limit, requested).withHttpStatus(status))
+      Some(ContextLengthError(provider, message).withTokens(limit, requested).withHttpStatus(status))
     } else if (ProviderErrorSignals.isModelNotFound(status, codes, message))
-      Some(ModelNotFoundError(ProviderId(provider), message).withHttpStatus(status))
+      Some(ModelNotFoundError(provider, message).withHttpStatus(status))
     else None
 
   /** `error` naming `model` as the model the request asked for, when it is a [[org.llm4s.error.ModelNotFoundError]]. */
@@ -155,9 +156,9 @@ object HttpErrorMapper {
    * @param status   the HTTP status the event stands for: the one it states, or the one its kind maps to (502 for a
    *                 failure that states none)
    * @param message  the provider's explanation, as the event carried it
-   * @param provider short provider label used in error messages
+   * @param provider the id of the provider that reported it: the provider the error names
    */
-  def mapStreamError(status: Int, message: String, provider: String): LLMError = {
+  def mapStreamError(status: Int, message: String, provider: ProviderId): LLMError = {
     val safe = org.llm4s.util.Redaction.remoteBody(message)
     val body = ujson.Obj("error" -> ujson.Obj("message" -> safe)).render()
     toError(status, body, provider, Map.empty) match {
@@ -188,7 +189,7 @@ object HttpErrorMapper {
    *
    * @return a sanitised (redacted + trimmed + truncated) error detail string
    */
-  private[provider] def extractErrorDetails(body: String, statusCode: Int, provider: String): String = {
+  private[provider] def extractErrorDetails(body: String, statusCode: Int, provider: ProviderId): String = {
     val defaultMsg = s"$provider API error (HTTP $statusCode)"
     val raw = BoundedJson
       .read(body)

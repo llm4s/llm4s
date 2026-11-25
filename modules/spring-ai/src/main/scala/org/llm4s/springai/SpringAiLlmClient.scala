@@ -16,6 +16,7 @@ import org.llm4s.llmconnect.model.{
   TokenUsage,
   ToolCall
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.springframework.ai.chat.model.{ ChatModel, ChatResponse }
 
@@ -78,7 +79,7 @@ object SpringAiLlmClient {
   private def attempt[A](call: => A): Result[A] =
     Try(call).toEither.left.map {
       case e: LlmException => e.error
-      case t               => SdkErrorMapper(t, "spring-ai"): LLMError
+      case t               => SdkErrorMapper(t, ProviderId("spring-ai")): LLMError
     }
 
   /** A streamed reply put together: the text in order, each tool call once, and the last id, model and usage seen. */

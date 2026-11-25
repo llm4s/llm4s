@@ -22,7 +22,7 @@ import scala.concurrent.duration.DurationInt
 class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
 
   private def map(status: Int, body: String, headers: Map[String, Seq[String]] = Map.empty): LLMError =
-    HttpErrorMapper.toError(status, body, "p", headers)
+    HttpErrorMapper.toError(status, body, ProviderId("p"), headers)
 
   private def openAIBody(code: String, message: String): String =
     ujson
@@ -259,8 +259,9 @@ class TypedErrorMappingSpec extends AnyFlatSpec with Matchers {
   }
 
   "A stream's error event" should "map to the typed errors as a response would" in {
-    HttpErrorMapper.mapStreamError(400, "prompt is too long: 10 tokens > 5 maximum", "p") shouldBe a[ContextLengthError]
-    HttpErrorMapper.mapStreamError(404, "model: claude-nope not found", "p") shouldBe a[ModelNotFoundError]
+    HttpErrorMapper
+      .mapStreamError(400, "prompt is too long: 10 tokens > 5 maximum", ProviderId("p")) shouldBe a[ContextLengthError]
+    HttpErrorMapper.mapStreamError(404, "model: claude-nope not found", ProviderId("p")) shouldBe a[ModelNotFoundError]
   }
 
   "ProviderErrorSignals" should "read only the head of a huge message, and in linear time" in {

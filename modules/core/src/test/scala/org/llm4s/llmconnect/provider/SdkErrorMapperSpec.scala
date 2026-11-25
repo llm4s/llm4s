@@ -15,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
   import SdkErrorMapperSpec.{ Adversarial, Megabyte, ScalingSize }
 
-  private def mapSdk(t: Throwable): LLMError = SdkErrorMapper(t, "unknown")
+  private def mapSdk(t: Throwable): LLMError = SdkErrorMapper(t, ProviderId("unknown"))
 
   private def unknownWithCause(t: Throwable): Unit =
     mapSdk(t) match {
@@ -192,9 +192,9 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "name the provider it was given, and redact the message a RateLimitError keeps" in {
-    SdkErrorMapper(new RuntimeException("HTTP 401 Unauthorized"), "openai").message shouldBe
+    SdkErrorMapper(new RuntimeException("HTTP 401 Unauthorized"), ProviderId("openai")).message shouldBe
       "Authentication failed for openai: HTTP 401 Unauthorized"
-    val limited = SdkErrorMapper(new RuntimeException("429: " + EchoedCredentials.JsonError), "anthropic")
+    val limited = SdkErrorMapper(new RuntimeException("429: " + EchoedCredentials.JsonError), ProviderId("anthropic"))
     limited shouldBe a[RateLimitError]
     limited.message should startWith("Rate limited by anthropic: 429: ")
     EchoedCredentials.leaked(limited.message) shouldBe empty

@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse }
@@ -34,19 +35,27 @@ private[speech] object CloudSpeechSupport {
     if (secret.reveal.isEmpty) body else body.replace(secret.reveal, "[REDACTED]")
 
   /** The body of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
-  def textBody(provider: String, response: HttpResponse, secret: Secret): Result[String] =
+  def textBody(clientName: String, response: HttpResponse, secret: Secret): Result[String] =
     if (success(response.statusCode)) Right(response.body)
-    else Left(HttpErrorMapper.toError(response.statusCode, scrub(response.body, secret), provider, response.headers))
+    else
+      Left(
+        HttpErrorMapper.toError(
+          response.statusCode,
+          scrub(response.body, secret),
+          ProviderId(clientName),
+          response.headers
+        )
+      )
 
   /** The bytes of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
-  def rawBody(provider: String, response: HttpRawResponse, secret: Secret): Result[Array[Byte]] =
+  def rawBody(clientName: String, response: HttpRawResponse, secret: Secret): Result[Array[Byte]] =
     if (success(response.statusCode)) Right(response.body)
     else
       Left(
         HttpErrorMapper.toError(
           response.statusCode,
           scrub(new String(response.body, StandardCharsets.UTF_8), secret),
-          provider,
+          ProviderId(clientName),
           response.headers
         )
       )

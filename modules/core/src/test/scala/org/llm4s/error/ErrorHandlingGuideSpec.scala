@@ -238,7 +238,12 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
     "report the transport facts of a mapped response on every error type" in {
       import org.llm4s.llmconnect.provider.HttpErrorMapper
-      val error = HttpErrorMapper.toError(400, """{"error":{"message":"bad"}}""", "p", Map("x-request-id" -> Seq("r1")))
+      val error = HttpErrorMapper.toError(
+        400,
+        """{"error":{"message":"bad"}}""",
+        ProviderId("p"),
+        Map("x-request-id" -> Seq("r1"))
+      )
       error shouldBe a[ValidationError]
       error.httpStatus shouldBe Some(400)
       error.requestId shouldBe Some("r1")

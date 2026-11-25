@@ -324,7 +324,7 @@ final class WatsonXClient private[provider] (
                     HttpErrorMapper.toError(
                       response.statusCode,
                       Redaction.scrubRemote(response.body),
-                      providerName,
+                      provider,
                       response.headers
                     )
                   )
@@ -357,7 +357,7 @@ final class WatsonXClient private[provider] (
               noteStatus(response.statusCode, token)
               Left(
                 HttpErrorMapper
-                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+                  .toError(response.statusCode, Redaction.scrubRemote(err), provider, response.headers)
               )
             }
           }
@@ -522,7 +522,7 @@ final class WatsonXClient private[provider] (
       case Some(s) =>
         Left(
           HttpErrorMapper
-            .toError(s, ujson.Obj("message" -> safe).render(), providerName, Map.empty)
+            .toError(s, ujson.Obj("message" -> safe).render(), provider, Map.empty)
         ).left
           .getOrElse(ServiceError(s, provider, safe))
       case None => ServiceError(502, provider, safe)
@@ -552,7 +552,7 @@ final class WatsonXClient private[provider] (
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
-      .check(providerName, conversation.messages, WatsonXClient.userPart, PartEncoding.textOnly)
+      .check(provider, conversation.messages, WatsonXClient.userPart, PartEncoding.textOnly)
       .map(_ => requestBody(conversation, options))
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {

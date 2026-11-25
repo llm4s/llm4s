@@ -62,7 +62,10 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
       .value
       .message should include("is not valid UTF-8 text")
     val valid = doc(MediaSource.Inline(IArray.from("café".getBytes("UTF-8"))), MediaType.PlainText)
-    AnthropicClient.checkParts("anthropic", Seq(UserMessage(Vector(ContentPart.Text("read"), valid)))) shouldBe Right(
+    AnthropicClient.checkParts(
+      ProviderId("anthropic"),
+      Seq(UserMessage(Vector(ContentPart.Text("read"), valid)))
+    ) shouldBe Right(
       ()
     )
   }
@@ -135,7 +138,10 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
 
   it should "accept any inline image llm4s accepts, up to MaxInlineBytes" in {
     val largest = image(MediaSource.Inline(IArray.fill[Byte](ContentPart.MaxInlineBytes)(1)))
-    AnthropicClient.checkParts("anthropic", Seq(UserMessage(Vector(ContentPart.Text("x"), largest)))) shouldBe Right(())
+    AnthropicClient.checkParts(
+      ProviderId("anthropic"),
+      Seq(UserMessage(Vector(ContentPart.Text("x"), largest)))
+    ) shouldBe Right(())
   }
 
   "complete" should "refuse, before sending, each part Anthropic cannot take" in {

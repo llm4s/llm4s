@@ -149,16 +149,21 @@ it.
 | `ContextLengthError("openai", details)`, `ModelNotFoundError(...)`, `UnsupportedContentPartError(...)` | the same, with `ProviderId("openai")` |
 | `error.provider == "openai"`, `error.provider.toUpperCase` | `error.provider == ProviderId("openai")`, or `error.provider.asString` where a `String` is wanted |
 | `case ServiceError(_, _, "openai", _, _)` | `case ServiceError(_, _, p, _, _) if p == ProviderId("openai")` |
+| `HttpErrorMapper.toError(status, body, "acme", headers)`, `mapStreamError(status, message, "acme")` | `HttpErrorMapper.toError(status, body, provider, headers)`, `mapStreamError(status, message, provider)`: the client's own `ProviderId` |
+| `PartEncoding.check("acme", messages, user, tool)`, `encodeAll("acme", role, parts)(encode)` | `PartEncoding.check(provider, messages, user, tool)`, `encodeAll(provider, role, parts)(encode)` |
+| `response.ensureSuccess("acme")`, `result.mapServiceError("acme", message)` | `response.ensureSuccess(ProviderId("acme"))`, `result.mapServiceError(ProviderId("acme"), message)` |
 
 `import org.llm4s.types.ProviderModelTypes.ProviderId`. A client built on `BaseLifecycleLLMClient` passes its own
-`provider`. The Scalafix rule `ErrorProviderIdTyped` ([Scalafix](scalafix#migration-rules)), which every umbrella
-runs, wraps the argument of each factory and adds `.asString` to a read of `error.provider`; a literal in a pattern
-is left for the compiler to report.
+`provider`, to an error's factory and to the helpers that build one (#2939): `HttpErrorMapper.toError` and
+`mapStreamError`, `PartEncoding.check` and `encodeAll`, and `HttpResponse`'s `ensureSuccess` and `mapServiceError`
+take a `ProviderId` where they took a `String` label, so `provider.asString` there is `provider` again. The Scalafix
+rule `ErrorProviderIdTyped` ([Scalafix](scalafix#migration-rules)), which every umbrella runs, wraps the argument of
+each factory and helper (an argument written `id.asString` loses the `.asString` instead) and adds `.asString` to a
+read of `error.provider`; a literal in a pattern is left for the compiler to report.
 
 What stays a `String`: an error's `message` and its `context("provider")` entry, pinned by `ErrorProviderTextSpec`,
-which was written against the old code; the labels of `MetricsCollector` and `ReliableClient`'s `providerName`; the
-`provider` label `HttpErrorMapper`, `SdkErrorMapper`, `PartEncoding` and `HttpResponse.ensureSuccess` take for their
-messages; and the Java and Kotlin view, where an opaque type is its `String` (`error.provider()` returns a `String`,
+which was written against the old code; the labels of `MetricsCollector` and `ReliableClient`'s `providerName`; and
+the Java and Kotlin view, where an opaque type is its `String` (`error.provider()` returns a `String`,
 and `RateLimitError.apply("openai")` still compiles). The errors are not serialised, so no stored JSON changes. The
 break is in Scala source only: an opaque type erases to its `String`, the binary signatures are those of 0.7.0, and
 MiMa needs no filter.
@@ -166,7 +171,8 @@ MiMa needs no filter.
 A `ProviderId` is canonical: trimmed and in lower case. Two things read differently for that:
 
 - An error built with a name that was not canonical carries the canonical one, in `provider`, in its message and in
-  `context`; that includes the label given to `HttpErrorMapper` and the other helpers, where it reaches an error.
+  `context`; so does one a helper builds, and the default detail `HttpErrorMapper` writes for a body it cannot read
+  (`acme API error (HTTP 500)`).
   llm4s itself did so in two places, which now name the provider's id: a `ContentFilteredError` from the
   Anthropic, Bedrock, Gemini, Vertex AI, OpenAI and Azure OpenAI clients (`gemini blocked the prompt: ...`, where it
   was `Gemini`; `vertexai`, where it was `Vertex AI`; `azure`, where it was `Azure OpenAI`), and the `ServiceError`
@@ -273,8 +279,8 @@ protected def provider: ProviderId = ProviderId("acme")
 
 The client's `providerId`, its metrics label and the provider a `CancelledError` names all come from it; the label a
 `MetricsCollector` receives is still a `String`, `provider.asString`. Where the client passes its name to an
-error builder that takes a label (`HttpErrorMapper.toError`), pass `provider.asString`; an error's own factory
-(`ServiceError(status, provider, details)`) takes the `ProviderId` ([note](#an-errors-provider-is-a-providerid-2936)).
+error builder (`HttpErrorMapper.toError`) or an error's own factory (`ServiceError(status, provider, details)`),
+pass `provider`: both take the `ProviderId` ([note](#an-errors-provider-is-a-providerid-2936)).
 
 ## Errors, `Result` helpers and `AgentResult.messages` are `Seq`s (#2908)
 
@@ -382,7 +388,7 @@ gave no `Retry-After` is the retry policy's default (`RetryPolicy.DefaultRateLim
 still waits; a `CircuitOpenError`'s context key `retryAfter` is `remaining`.
 
 An error mapped from a response is no longer equal to one you build without the response's facts:
-`HttpErrorMapper.toError(400, body, "p", headers)` is `ValidationError("request", details).withHttpStatus(400)`, with
+`HttpErrorMapper.toError(400, body, ProviderId("p"), headers)` is `ValidationError("request", details).withHttpStatus(400)`, with
 the request id when the headers carry one. Compare the fields a test cares about, or build the expected error with
 `withHttpStatus` and `withRequestId`.
 
@@ -1601,10 +1607,10 @@ model data, the model-metadata JSON llm4s writes and the agent's events only eve
 wraps `lookup`, `listByProvider`, `getDimension`, `withProvider` and `ModelMetadata`'s `provider`.
 
 Left as `String` on purpose, being labels rather than ids: `MetricsCollector`'s `model` and `provider` (and
-`MetricsRecording.withMetrics` and `ReliableClient`'s `providerName`, which pass them through); the `provider` of the
-error types (`ServiceError`, `RateLimitError`, `AuthenticationError`, ...) and of `HttpErrorMapper`, `SdkErrorMapper`
-and `PartEncoding`, which name the client or the configured section for a message; `OpenAICompatibleClient.Settings`'
-`providerName`; and `ThinkingBlock.Opaque.provider`, part of a stored message. The model of the image, speech and RAG
+`MetricsRecording.withMetrics` and `ReliableClient`'s `providerName`, which pass them through); `OpenAICompatibleClient.Settings`'
+`providerName`; and `ThinkingBlock.Opaque.provider`, part of a stored message. (The `provider` of the error types and of
+`HttpErrorMapper` and `PartEncoding`, left a `String` then, is a `ProviderId` since
+[#2936](#an-errors-provider-is-a-providerid-2936).) The model of the image, speech and RAG
 configs (`RAGConfig.embeddingModel`, the image generation configs) also stays a `String`: no provider config or the
 registry reads it.
 

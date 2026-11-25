@@ -14,6 +14,10 @@ import scalafix.v1._
  *     `ServiceError(status, provider, ...)`, `CircuitOpenError.open` and `probing`, `EmbeddingError(code, message,
  *     provider)`, `ContentFilteredError(...)`, its `prompt` and `reply`, `ContextLengthError`, `ModelNotFoundError`
  *     and `UnsupportedContentPartError`, by position or by name;
+ *   - the provider a helper that builds one of those errors is given is wrapped the same way:
+ *     `HttpErrorMapper.toError(status, body, provider, headers)` and `mapStreamError`, `PartEncoding.check` and
+ *     `encodeAll`, `response.ensureSuccess(provider)` and `result.mapServiceError(provider, message)`; a
+ *     `ProviderId` unwrapped for the call, `provider.asString`, loses the `.asString` instead;
  *   - a read of `error.provider` gets `.asString`, which keeps its type, so a comparison with a literal, a metrics
  *     label or a string method still compiles and means what it did. A read inside a string interpolation is left
  *     as it is: it prints the same.
@@ -25,20 +29,21 @@ import scalafix.v1._
 class ErrorProviderIdTyped extends SemanticRule("ErrorProviderIdTyped") {
 
   override def description: String =
-    "Wraps the String provider of the llm4s errors in ProviderId, and reads it back with .asString"
+    "Wraps the String provider of the llm4s errors and error helpers in ProviderId, and reads it back with .asString"
 
   import ErrorProviderIdTyped._
 
   override def fix(implicit doc: SemanticDocument): Patch = {
-    val sets        = doc.tree.collect { case t: Term.Apply if !t.fun.is[Term.Apply] => providerArgument(t) }.flatten
-    val wraps       = sets.filterNot(isWrapped)
-    val wrapPatches = wraps.map(arg => Patch.addLeft(arg, Provider + "(") + Patch.addRight(arg, ")"))
+    val sets = doc.tree.collect { case t: Term.Apply if !t.fun.is[Term.Apply] => providerArgument(t) }.flatten
+    val (unwraps, wraps) = sets.filterNot(isWrapped).partition(unwrapped(_).isDefined)
+    val wrapPatches      = wraps.map(arg => Patch.addLeft(arg, Provider + "(") + Patch.addRight(arg, ")"))
+    val unwrapPatches    = unwraps.flatMap(arg => unwrapped(arg).map(id => Patch.replaceTree(arg, id.syntax)))
     val reads = doc.tree.collect {
       case s: Term.Select if isRead(s) && !alreadyString(s) && !interpolated(s) && !sets.exists(_ eq s) =>
         Patch.addRight(s, ".asString")
     }
     val imports = if (wraps.isEmpty) Patch.empty else Migration.importOnce(Newtypes, Provider)
-    (wrapPatches ++ reads).asPatch + imports
+    (wrapPatches ++ unwrapPatches ++ reads).asPatch + imports
   }
 
   /** The argument of a factory call that is the error's provider. */
@@ -62,6 +67,14 @@ class ErrorProviderIdTyped extends SemanticRule("ErrorProviderIdTyped") {
     case _              => false
   }
 
+  /** The `ProviderId` of an argument written `id.asString`, which the call takes as it is now. */
+  private def unwrapped(arg: Term)(implicit doc: SemanticDocument): Option[Term] = arg match {
+    case Term.Select(id, method @ Term.Name("asString"))
+        if Migration.symbolOf(method).exists(_.value.contains("ProviderModelTypes.ProviderId.")) =>
+      Some(id)
+    case _ => None
+  }
+
   private def isRead(t: Tree)(implicit doc: SemanticDocument): Boolean = t match {
     case s: Term.Select => Migration.symbolOf(s.name).exists(sym => Reads.contains(sym.value))
     case _              => false
@@ -83,29 +96,40 @@ class ErrorProviderIdTyped extends SemanticRule("ErrorProviderIdTyped") {
 
 object ErrorProviderIdTyped {
 
-  private val Newtypes = "org.llm4s.types.ProviderModelTypes"
-  private val Provider = "ProviderId"
-  private val Errors   = "org/llm4s/error/"
+  private val Newtypes  = "org.llm4s.types.ProviderModelTypes"
+  private val Provider  = "ProviderId"
+  private val Errors    = "org/llm4s/error/"
+  private val Providers = "org/llm4s/llmconnect/provider/"
+  private val Http      = "org/llm4s/http/"
 
   /** Where `EmbeddingError` lived up to 0.6.0. */
   private val Model06 = "org/llm4s/llmconnect/model/"
 
-  /** The factories that take the provider, with its position: an owner (its `apply`) or a method (`...().`). */
+  /**
+   * The factories and helpers that take the provider, with its position: an owner (its `apply`) or a method
+   * (`...().`).
+   */
   private val Factories: List[(String, Int)] = List(
-    Errors + "AuthenticationError"            -> 0,
-    Errors + "RateLimitError.local()."        -> 0,
-    Errors + "RateLimitError"                 -> 0,
-    Errors + "ServiceError"                   -> 1,
-    Errors + "CircuitOpenError.open()."       -> 0,
-    Errors + "CircuitOpenError.probing()."    -> 0,
-    Errors + "EmbeddingError"                 -> 2,
-    Model06 + "EmbeddingError"                -> 2,
-    Errors + "ContentFilteredError.prompt()." -> 0,
-    Errors + "ContentFilteredError.reply()."  -> 0,
-    Errors + "ContentFilteredError"           -> 0,
-    Errors + "ContextLengthError"             -> 0,
-    Errors + "ModelNotFoundError"             -> 0,
-    Errors + "UnsupportedContentPartError"    -> 0
+    Errors + "AuthenticationError"                  -> 0,
+    Errors + "RateLimitError.local()."              -> 0,
+    Errors + "RateLimitError"                       -> 0,
+    Errors + "ServiceError"                         -> 1,
+    Errors + "CircuitOpenError.open()."             -> 0,
+    Errors + "CircuitOpenError.probing()."          -> 0,
+    Errors + "EmbeddingError"                       -> 2,
+    Model06 + "EmbeddingError"                      -> 2,
+    Errors + "ContentFilteredError.prompt()."       -> 0,
+    Errors + "ContentFilteredError.reply()."        -> 0,
+    Errors + "ContentFilteredError"                 -> 0,
+    Errors + "ContextLengthError"                   -> 0,
+    Errors + "ModelNotFoundError"                   -> 0,
+    Errors + "UnsupportedContentPartError"          -> 0,
+    Providers + "HttpErrorMapper.toError()."        -> 2,
+    Providers + "HttpErrorMapper.mapStreamError()." -> 2,
+    Providers + "PartEncoding.encodeAll()."         -> 0,
+    Providers + "PartEncoding.check()."             -> 0,
+    Http + "HttpResponse.ensureSuccess()."          -> 0,
+    Http + "HttpResponse.mapServiceError()."        -> 0
   )
 
   /** The reads that returned a `String` in 0.7.0 and return a `ProviderId` now. */

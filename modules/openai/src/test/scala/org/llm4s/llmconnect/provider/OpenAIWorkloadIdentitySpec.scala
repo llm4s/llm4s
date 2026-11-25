@@ -104,7 +104,7 @@ class OpenAIWorkloadIdentitySpec
         .provider()
       val failure = Try(provider.getTokenAsync(null, null).join()).failed.get
       failure shouldBe a[CompletionException]
-      OpenAIClient.mapError(new IllegalStateException("token refresh failed", failure), "openai") shouldBe
+      OpenAIClient.mapError(new IllegalStateException("token refresh failed", failure), ProviderId("openai")) shouldBe
         an[AuthenticationError]
     }
 
@@ -136,7 +136,8 @@ class OpenAIWorkloadIdentitySpec
           """"refresh_token":"opaque-refresh-token-1"}"""
       )
       for message <- sdkMessages do
-        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai")
+        val error =
+          OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), ProviderId("openai"))
         error.message should include("Token exchange response")
         for secret <- Seq(
             "client_secret_id_1",
@@ -162,7 +163,7 @@ class OpenAIWorkloadIdentitySpec
           val message = OpenAIClient
             .mapError(
               new com.openai.errors.OpenAIInvalidDataException(s"Token exchange failed for subject $t"),
-              "openai"
+              ProviderId("openai")
             )
             .message
           message should include("Token exchange failed")

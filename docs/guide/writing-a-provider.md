@@ -539,7 +539,7 @@ to `cfg.apiKey`, rather than `cfg.apiKey` itself; it is `None` for a provider th
 HttpErrorMapper.toError(
   statusCode: Int,
   body: String,
-  provider: String,
+  provider: ProviderId,
   headers: Map[String, Seq[String]]
 ): LLMError
 ```
@@ -549,7 +549,8 @@ Maps a non-2xx response to the standard error types - 401/403 `AuthenticationErr
 `ContextLengthError`, one that says the model is unknown `ModelNotFoundError`, any other 400
 `ValidationError`, anything else `ServiceError` - pulling a message out of
 common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types and their
-`isRetryable`, so use it rather than inventing your own. Every error it returns carries the response's facts:
+`isRetryable`, so use it rather than inventing your own. `provider` is your provider's id, the `ProviderId` your
+client already has, and the provider every error it returns names. Every error it returns carries the response's facts:
 `httpStatus`, the `requestId` its headers name, and `retryAfter`. Pass the response's `headers`: a `Retry-After`
 (delta-seconds or an HTTP-date) becomes the error's `retryAfter`, a `FiniteDuration` - on a 429's
 `RateLimitError`, or a 503's (any other status's) `ServiceError` - so retries wait as long as the
@@ -729,7 +730,7 @@ final class AcmeClient(
     val response  = http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120.seconds)
     val result = response.flatMap { r =>
       if r.statusCode / 100 == 2 then AcmeWire.decode(r.body).map(withCost)
-      else Left(HttpErrorMapper.toError(r.statusCode, r.body, provider.asString, r.headers))
+      else Left(HttpErrorMapper.toError(r.statusCode, r.body, provider, r.headers))
     }
     ProviderExchangeRecorder.record(
       clientOptions.exchangeLogging,

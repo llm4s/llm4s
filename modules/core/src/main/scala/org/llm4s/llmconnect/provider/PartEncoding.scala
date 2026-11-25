@@ -21,11 +21,15 @@ import java.util.Base64
 object PartEncoding {
 
   /** The error for `part` in a `role` message sent to `provider`. */
-  private[llm4s] def unsupported(provider: String, part: ContentPart, role: MessageRole): UnsupportedContentPartError =
-    UnsupportedContentPartError(ProviderId(provider), part.kind, role.name)
+  private[llm4s] def unsupported(
+    provider: ProviderId,
+    part: ContentPart,
+    role: MessageRole
+  ): UnsupportedContentPartError =
+    UnsupportedContentPartError(provider, part.kind, role.name)
 
   /** `parts`, each encoded with `encode`; the first part `encode` does not cover fails the whole. */
-  def encodeAll[A](provider: String, role: MessageRole, parts: Seq[ContentPart])(
+  def encodeAll[A](provider: ProviderId, role: MessageRole, parts: Seq[ContentPart])(
     encode: PartialFunction[ContentPart, A]
   ): Result[Vector[A]] =
     nullPart(role, parts).flatMap { _ =>
@@ -42,7 +46,7 @@ object PartEncoding {
    * `isDefinedAt`: nothing is encoded, so inline media is not base64-encoded twice per request.
    */
   def check(
-    provider: String,
+    provider: ProviderId,
     messages: Seq[Message],
     user: PartialFunction[ContentPart, Any],
     tool: PartialFunction[ContentPart, Any]
@@ -57,7 +61,7 @@ object PartEncoding {
       .getOrElse(Right(()))
 
   private def covered(
-    provider: String,
+    provider: ProviderId,
     role: MessageRole,
     parts: Seq[ContentPart],
     encode: PartialFunction[ContentPart, Any]
@@ -109,8 +113,8 @@ object PartEncoding {
   private[llm4s] def bytes(inline: MediaSource.Inline): Array[Byte] = inline.bytes.asInstanceOf[Array[Byte]].clone()
 
   /** Whether `source` is a file uploaded to `provider`. */
-  private[llm4s] def isFileOf(provider: String, source: MediaSource): Boolean = source match {
-    case MediaSource.ProviderFile(owner, _) => owner == provider
+  private[llm4s] def isFileOf(provider: ProviderId, source: MediaSource): Boolean = source match {
+    case MediaSource.ProviderFile(owner, _) => owner == provider.asString
     case _                                  => false
   }
 }

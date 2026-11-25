@@ -122,7 +122,7 @@ final class VertexAIClient private[provider] (
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri)
+          .check(provider, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
@@ -181,7 +181,7 @@ final class VertexAIClient private[provider] (
       // a part Gemini cannot take fails the request here, before anything is sent
       .flatMap(transformed =>
         GeminiParts
-          .check(providerName, transformed.messages, fileUri)
+          .check(provider, transformed.messages, fileUri)
           .map(_ => transformed)
       )
       .flatMap { transformed =>
@@ -239,9 +239,9 @@ final class VertexAIClient private[provider] (
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
                       // (#1562); a data line that is not JSON at all fails the stream too (RFC 0009, open question 5)
                       BoundedJson.read(jsonStr) match {
-                        case Right(json) if GeminiStreamEnd.streamError(json, providerName).isDefined =>
+                        case Right(json) if GeminiStreamEnd.streamError(json, provider).isDefined =>
                           // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
-                          refused = GeminiStreamEnd.streamError(json, providerName)
+                          refused = GeminiStreamEnd.streamError(json, provider)
                         case Right(json) =>
                           GeminiBlocked.filtered(json, provider, textLength) match {
                             case Some(filtered) if filtered.usage.isEmpty =>
@@ -280,7 +280,7 @@ final class VertexAIClient private[provider] (
                           refused = Some(tooDeep)
                         case Left(unparsed) =>
                           logger.warn("[VertexAI] Stream refused: a data line is not JSON")
-                          refused = Some(GeminiStreamEnd.unreadable(unparsed.message, providerName))
+                          refused = Some(GeminiStreamEnd.unreadable(unparsed.message, provider))
                       }
                     }
                   }
@@ -567,7 +567,7 @@ final class VertexAIClient private[provider] (
   ): Result[Nothing] = {
     logger.error(s"[VertexAI] Error response: $statusCode")
     Left(
-      HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, body, providerName, headers), config.model.asString)
+      HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, body, provider, headers), config.model.asString)
     )
   }
 
