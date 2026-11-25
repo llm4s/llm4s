@@ -64,8 +64,10 @@ object OpenRouterModelLister extends ProviderModelLister:
  *
  * This was `ProviderModelListers.Mistral` until the provider moved to
  * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ *
+ * Experimental, as the Mistral dialect it lists for is.
  */
-@Stable
+@Experimental
 object MistralModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(

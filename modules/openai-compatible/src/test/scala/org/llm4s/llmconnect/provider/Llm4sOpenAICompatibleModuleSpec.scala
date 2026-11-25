@@ -295,11 +295,11 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       }
     }
 
-    "report a model Cohere does not have as the ServiceError 404 its Models API answers with (#2855)" in {
+    "report a model Cohere does not have as the ModelNotFoundError its Models API's 404 maps to (#2855)" in {
       withServer("/")(sendJsonResponse(_, 404, """{"message":"model 'test-model' not found"}""")) { baseUrl =>
         val client = assertBuildsClient(CohereProvider, section(CohereProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
         client.validate() should matchPattern {
-          case Left(error: org.llm4s.error.ServiceError) if error.httpStatus == 404 =>
+          case Left(error: org.llm4s.error.ModelNotFoundError) if error.httpStatus.contains(404) =>
         }
         client.close()
       }

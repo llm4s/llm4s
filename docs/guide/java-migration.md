@@ -250,7 +250,7 @@ if (result.isFailure()) {
     return switch (error.getKind()) {
         case AUTHENTICATION, CONFIGURATION -> "Fix the setup: " + error.getMessage();
         case RATE_LIMIT, TIMEOUT, NETWORK -> "Try again later";
-        default -> error.isRecoverable() ? "Retry: " + error.getMessage() : "Failed: " + error.getMessage();
+        default -> error.isRetryable() ? "Retry: " + error.getMessage() : "Failed: " + error.getMessage();
     };
 }
 return result.get();
@@ -410,7 +410,7 @@ Plainly, as of this page's sources:
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).
 - **Automatic retries.** Spring AI retries transient failures for you [S5]; an llm4s Java client reports them
-  (`isRecoverable()`) and leaves the retry to you.
+  (`isRetryable()`) and leaves the retry to you.
 - **Breadth.** LangChain4j and Spring AI list many more model providers, vector stores and document loaders than
   llm4s has modules for ([comparison](comparison)).
 - **Scala types in a few signatures.** `Conversation` and `ProviderConfig` are Scala classes

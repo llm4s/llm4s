@@ -22,7 +22,6 @@ import org.llm4s.annotation.Stable
 final case class SimpleError private (
   override val message: String
 ) extends LLMError
-    with NonRecoverableError
 
 /** Factory methods for creating [[SimpleError]] instances. */
 object SimpleError {

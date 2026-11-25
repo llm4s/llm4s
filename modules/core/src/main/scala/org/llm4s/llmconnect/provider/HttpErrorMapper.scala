@@ -3,7 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{
   AuthenticationError,
+  ContextLengthError,
   LLMError,
+  ModelNotFoundError,
   RateLimitError,
   ServiceError,
   TroubleshootingLinks,
@@ -31,19 +33,25 @@ object HttpErrorMapper {
   /**
    * Maps an HTTP error response to a typed [[org.llm4s.error.LLMError]].
    *
-   * | Status      | Error                                                                 |
-   * |-------------|-----------------------------------------------------------------------|
-   * | 401, 403    | [[org.llm4s.error.AuthenticationError]]                               |
-   * | 429         | [[org.llm4s.error.RateLimitError]], with `retryAfter` from `Retry-After` |
-   * | 400         | [[org.llm4s.error.ValidationError]]                                   |
-   * | other       | [[org.llm4s.error.ServiceError]]                                      |
+   * | Status        | Error                                                                    |
+   * |---------------|--------------------------------------------------------------------------|
+   * | 401, 403      | [[org.llm4s.error.AuthenticationError]]                                  |
+   * | 429           | [[org.llm4s.error.RateLimitError]], with `retryAfter` from `Retry-After` |
+   * | 400, 413, 422 | [[org.llm4s.error.ContextLengthError]] when the body says the request does not fit the model's context window |
+   * | 400, 404      | [[org.llm4s.error.ModelNotFoundError]] when the body says the model is unknown |
+   * | 400           | [[org.llm4s.error.ValidationError]]                                      |
+   * | other         | [[org.llm4s.error.ServiceError]]                                         |
+   *
+   * Every error carries the response's facts: `httpStatus` is `statusCode`, `requestId` the id in the response's
+   * headers (`x-request-id`, `request-id`, `x-amzn-requestid`, `apim-request-id`) when it has one, and
+   * `retryAfter` the delay its `Retry-After` header asks for.
    *
    * A 401, 403, 429 or 404 message ends with the next step to take and a link to its entry on the
    * First-Run Troubleshooting page.
    *
-   * A 429's `Retry-After` header (delta-seconds or an HTTP-date, name matched
+   * A `Retry-After` header (delta-seconds or an HTTP-date, name matched
    * case-insensitively) becomes the error's `retryAfter` duration; an absent,
-   * unparseable or negative value leaves it unset, so the error's default backoff applies.
+   * unparseable or negative value leaves it unset, and the retry policy chooses the wait.
    *
    * @param statusCode the HTTP status code (must be outside 2xx range)
    * @param body       the raw response body (may be JSON or plain text)
@@ -67,17 +75,75 @@ object HttpErrorMapper {
     val mapped: LLMError = statusCode match {
       case 401 | 403 => AuthenticationError(provider, details, statusCode.toString)
       case 429 =>
-        retryAfter(headers, clock) match {
+        (retryAfter(headers, clock) match {
           case Some(delay) => RateLimitError(provider, delay)
           case None        => RateLimitError(provider)
-        }
-      case 400 => ValidationError("request", details)
+        }).withHttpStatus(statusCode)
       case s =>
-        val error = ServiceError(s, provider, details)
-        retryAfter(headers, clock).fold(error)(error.withRetryAfter)
+        typed(s, errorCodes(body), details, provider).getOrElse {
+          if (s == 400) ValidationError("request", details).withHttpStatus(s)
+          else {
+            val error = ServiceError(s, provider, details)
+            retryAfter(headers, clock).fold(error)(error.withRetryAfter)
+          }
+        }
     }
     // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
-    TroubleshootingLinks.annotate(mapped)
+    TroubleshootingLinks.annotate(withRequestId(mapped, HttpHeaders.requestId(headers)))
+  }
+
+  /**
+   * The typed error for a response a caller reacts to by type, if `status`, the body's error `codes` or the
+   * provider's `message` say it is one: a [[org.llm4s.error.ContextLengthError]] (with the limit and the requested
+   * tokens when the message states them) or a [[org.llm4s.error.ModelNotFoundError]], carrying `status`. For a
+   * client that maps its SDK's exceptions itself; [[toError]] applies it already.
+   *
+   * @param codes the machine-readable codes of the error: an OpenAI `error.code`, an Anthropic `error.type`
+   */
+  private[llm4s] def typed(status: Int, codes: Set[String], message: String, provider: String): Option[LLMError] =
+    if (ProviderErrorSignals.isContextLength(status, codes, message)) {
+      val (limit, requested) = ProviderErrorSignals.tokens(message)
+      Some(ContextLengthError(provider, message).withTokens(limit, requested).withHttpStatus(status))
+    } else if (ProviderErrorSignals.isModelNotFound(status, codes, message))
+      Some(ModelNotFoundError(provider, message).withHttpStatus(status))
+    else None
+
+  /** `error` naming `model` as the model the request asked for, when it is a [[org.llm4s.error.ModelNotFoundError]]. */
+  private[llm4s] def naming(error: LLMError, model: String): LLMError = error match {
+    case e: ModelNotFoundError if e.model.isEmpty => e.withModel(model)
+    case other                                    => other
+  }
+
+  /** `error` carrying `id` as its request id, when it is a type that holds one and has none yet. */
+  private[llm4s] def withRequestId(error: LLMError, id: Option[String]): LLMError =
+    id.filter(_ => error.requestId.isEmpty).fold(error) { requestId =>
+      error match {
+        case e: AuthenticationError => e.withRequestId(requestId)
+        case e: RateLimitError      => e.withRequestId(requestId)
+        case e: ValidationError     => e.withRequestId(requestId)
+        case e: ContextLengthError  => e.withRequestId(requestId)
+        case e: ModelNotFoundError  => e.withRequestId(requestId)
+        case e: ServiceError        => e.withRequestId(requestId)
+        case other                  => other
+      }
+    }
+
+  /**
+   * The machine-readable codes of an error body, lower-cased: `code`, `type` and `status` of its `error` object
+   * (OpenAI's `error.code`, Anthropic's `error.type`, Gemini's `error.status`) and of the body itself (Mistral).
+   * Empty for a body that is not a JSON object.
+   */
+  private[llm4s] def errorCodes(body: String): Set[String] = {
+    def of(obj: collection.Map[String, ujson.Value]): Seq[String] =
+      Seq("code", "type", "status").flatMap(obj.get).flatMap(_.strOpt)
+    BoundedJson
+      .read(body)
+      .toOption
+      .flatMap(_.objOpt)
+      .map(json => of(json) ++ json.get("error").flatMap(_.objOpt).toSeq.flatMap(of))
+      .getOrElse(Seq.empty)
+      .map(_.toLowerCase(java.util.Locale.ROOT))
+      .toSet
   }
 
   /**

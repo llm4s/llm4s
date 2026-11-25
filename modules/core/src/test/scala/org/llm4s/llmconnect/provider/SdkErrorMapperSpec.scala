@@ -60,7 +60,7 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
       case e: NetworkError =>
         e.message shouldBe "Request timeout"
         e.cause shouldBe Some(timeout)
-        LLMError.isRecoverable(e) shouldBe true
+        e.isRetryable shouldBe true
       case other => fail(s"expected a NetworkError, got $other")
     }
   }
@@ -136,7 +136,7 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
           e.provider shouldBe "unknown"
           e.code shouldBe Some("401")
           e.message should startWith("Authentication failed for unknown: ")
-          LLMError.isRecoverable(e) shouldBe false
+          e.isRetryable shouldBe false
         case other => fail(s"expected an AuthenticationError for '$message', got $other")
       }
     }
@@ -179,7 +179,7 @@ class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
         case e: RateLimitError =>
           e.provider shouldBe "unknown"
           e.message shouldBe s"Rate limited by unknown: $message"
-          LLMError.isRecoverable(e) shouldBe true
+          e.isRetryable shouldBe true
         case other => fail(s"expected a RateLimitError for '$message', got $other")
       }
     }

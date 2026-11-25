@@ -12,7 +12,7 @@ import scala.concurrent.duration.*
  * retries after the first attempt, a first delay of 0.5 s that doubles up to 5 s with a quarter of each delay
  * randomly taken off, and a budget of 30 s for the whole call. A delay the server asked for (`Retry-After` or
  * `retry-after-ms`) replaces the computed one. What is retried is LLM4S's one retry rule,
- * [[org.llm4s.reliability.RetryPolicy.isTransient]]: a 408, a 429, a 5xx (the API's `529 Overloaded` too), and a
+ * [[org.llm4s.error.LLMError.isRetryable]]: a 408, a 429, a 5xx (the API's `529 Overloaded` too), and a
  * connection failure or timeout. A rejected credential (401, 403), an invalid request (400, 422) and a
  * cancellation are never retried.
  *

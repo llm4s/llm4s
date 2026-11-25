@@ -528,7 +528,7 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
         val error   = awaitResult(handle).value.failed._2
         val claim   = store.latest(thread).value.get.checkpoint
         error shouldBe GraphError.DeadlineExceeded(thread.value, Some(claim.id))
-        org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
+        error.isRetryable shouldBe true
         eventsOf(store).last.event shouldBe RunEvent.RunTimedOut(RunStoppedDetails.empty)
         eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled(RunStoppedDetails.empty)
         runtime.recover(thread, Fixture(Set.empty).graph).awaited.value.completed._2 shouldBe Vector("A")

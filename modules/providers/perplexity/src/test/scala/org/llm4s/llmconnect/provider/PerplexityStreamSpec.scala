@@ -36,7 +36,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
       http.requests.head.streaming shouldBe true
       http.requests.head.headers("Accept") shouldBe "text/event-stream"
       http.lastBody("stream").bool shouldBe true
-      chunks.flatMap(_.content) shouldBe List("Hi", " there")
+      chunks.flatMap(_.contentDelta) shouldBe List("Hi", " there")
       chunks.head.id shouldBe "resp_s"
       chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       val completion = result.fold(e => fail(e.message), identity)
@@ -62,7 +62,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
     "report tool calls whole, after the text, with finish reason tool_calls" in {
       val done                = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]")
       val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
-      chunks.flatMap(_.toolCall) shouldBe List(
+      chunks.flatMap(_.toolCallDelta) shouldBe List(
         ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Oslo"))
       )
       chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
@@ -74,7 +74,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
     "fail an incomplete response with a call, delivering no call (RFC 0009, Part 3)" in {
       val done = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]", status = "incomplete")
       val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
-      chunks.flatMap(_.toolCall) shouldBe empty
+      chunks.flatMap(_.toolCallDelta) shouldBe empty
       result.left.map(_.message.contains("FinishReason.Length")) shouldBe Left(true)
     }
 
@@ -96,7 +96,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
       val (_, result, chunks) =
         streamed(Right(StreamingHttpResponse(200, new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)))))
       result.map(_.content) shouldBe Right("a")
-      chunks.flatMap(_.content) shouldBe List("a")
+      chunks.flatMap(_.contentDelta) shouldBe List("a")
     }
 
     "fail on response.failed with Perplexity's error, from the event or its response" in {

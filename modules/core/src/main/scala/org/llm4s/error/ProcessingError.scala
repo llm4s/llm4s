@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 /**
  * Raised when an internal processing operation fails, such as image or audio processing.
  *
- * This is a [[NonRecoverableError]]: it indicates a failure in processing
+ * It is not [[LLMError.isRetryable retryable]]: it indicates a failure in processing
  * multimodal inputs (e.g., resampling audio, converting image formats) before
  * sending them to the provider. This usually requires fixing the input media
  * or addressing the underlying cause.
@@ -19,8 +19,7 @@ final case class ProcessingError private (
   override val message: String,
   operation: String,
   cause: Option[Throwable]
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("operation" -> operation) ++
     cause.map(c => Map("cause" -> LLMError.describeCause(c))).getOrElse(Map.empty)
 }

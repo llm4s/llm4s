@@ -135,7 +135,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
     gemini(mockHttp).streamComplete(question, CompletionOptions())(_ => ()) match {
-      case Left(e: ServiceError) => e.httpStatus shouldBe 502
+      case Left(e: ServiceError) => e.status shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }
   }
@@ -159,7 +159,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
     vertex(mockHttp, textReply).streamComplete(question, CompletionOptions())(_ => ()) match {
-      case Left(e: ServiceError) => e.httpStatus shouldBe 502
+      case Left(e: ServiceError) => e.status shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }
   }

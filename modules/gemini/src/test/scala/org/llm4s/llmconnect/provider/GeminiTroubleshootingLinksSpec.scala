@@ -4,7 +4,15 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
+import org.llm4s.error.{
+  AuthenticationError,
+  ContextLengthError,
+  LLMError,
+  ModelNotFoundError,
+  RateLimitError,
+  ServiceError,
+  TroubleshootingLinks
+}
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -67,8 +75,27 @@ final class GeminiTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
   "Gemini replying 404" should {
     "say to check the model and list the provider's models, and link #model-not-found" in {
       val error = failure(404, googleError(404, "NOT_FOUND", "models/gemini-nope is not found"))
-      error shouldBe a[ServiceError]
+      error shouldBe a[ModelNotFoundError]
+      error.httpStatus shouldBe Some(404)
+      error.isRetryable shouldBe false
       assertLinked(error, TroubleshootingLinks.ModelNotFoundAction, Entry.ModelNotFound)
+    }
+
+    "stay a ServiceError when the body does not say the model is unknown" in {
+      failure(404, googleError(404, "NOT_FOUND", "Requested entity was not found.")) shouldBe a[ServiceError]
+    }
+  }
+
+  "Gemini refusing a request as too long" should {
+    "return a ContextLengthError with the tokens its message states" in {
+      val message = "The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."
+      failure(400, googleError(400, "INVALID_ARGUMENT", message)) match {
+        case e: ContextLengthError =>
+          (e.limit, e.requestedTokens) shouldBe (Some(1048576), Some(1200000))
+          e.httpStatus shouldBe Some(400)
+          e.isRetryable shouldBe false
+        case other => fail(s"expected a ContextLengthError, got $other")
+      }
     }
   }
 

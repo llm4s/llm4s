@@ -101,7 +101,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
     c.toolCalls(1).arguments shouldBe ujson.Obj("tz" -> "UTC", "h" -> ujson.Arr(1, 2.5, ujson.Null))
     c.message.toolCalls shouldBe c.toolCalls
     c.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((7, 3))
-    chunks.flatMap(_.content).mkString shouldBe "Hello wörld ☃"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hello wörld ☃"
     chunks.flatMap(_.finishReason) shouldBe List(FinishReason.ToolCalls)
   }
 
@@ -168,7 +168,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
             sendEventStream(_, Seq(delta(0, ujson.Obj("text" -> "partial")), exceptionFrame(exceptionType, "boom")))
           ) { url =>
             val (r, chunks) = run(url)
-            chunks.flatMap(_.content) shouldBe List("partial")
+            chunks.flatMap(_.contentDelta) shouldBe List("partial")
             val err = r.left.toOption.value
             withClue(err.toString)(ok(err) shouldBe true)
           }
@@ -178,7 +178,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
 
     "report the status carried by an internal server error" in {
       withServer("/")(sendEventStream(_, Seq(exceptionFrame("internalServerException", "boom")))) { url =>
-        run(url)._1.left.toOption.value should matchPattern { case e: ServiceError if e.httpStatus == 500 => }
+        run(url)._1.left.toOption.value should matchPattern { case e: ServiceError if e.status == 500 => }
       }
     }
   }

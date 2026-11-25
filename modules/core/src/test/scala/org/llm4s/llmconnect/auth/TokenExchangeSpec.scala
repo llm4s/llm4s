@@ -114,7 +114,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       val http  = MockHttpClient(Seq(HttpResponse(503, "busy")))
       val error = TokenExchange.rfc8693(config(), http, clock)().left.value
       error shouldBe a[ServiceError]
-      error.asInstanceOf[ServiceError].httpStatus shouldBe 503
+      error.asInstanceOf[ServiceError].status shouldBe 503
     }
 
     "fail on a malformed body or a missing access_token" in {

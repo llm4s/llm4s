@@ -11,8 +11,8 @@ package org.llm4s.javaapi;
  * it has none. An error the library does not know - one from another llm4s module, such as a speech error, or one
  * your own code implements - is {@link #OTHER}.
  *
- * <p>The kind says what went wrong; {@link LlmException#isRecoverable()} says separately whether trying again may
- * help, so a {@link #SERVICE} error can be either.
+ * <p>The kind says what went wrong; {@link LlmException#isRetryable()} says separately whether sending the
+ * same request again may succeed, so a {@link #SERVICE} error can be either.
  *
  * <p>A Java enum, not a Scala 3 one: Java reads a Scala 3 enum's cases through its companion object, and a
  * {@code switch} that runs before that object is initialised finds them {@code null}.
@@ -37,6 +37,15 @@ public enum LlmErrorKind {
 
   /** The request itself is wrong: a missing or invalid argument or field ({@code ValidationError}, {@code InvalidInputError}), or a content part the provider cannot send ({@code UnsupportedContentPartError}). */
   VALIDATION,
+
+  /** The provider's content filter stopped the prompt or withheld the reply ({@code ContentFilteredError}): change the conversation. */
+  CONTENT_FILTER,
+
+  /** The request does not fit the model's context window ({@code ContextLengthError}): shorten the conversation, lower the reply limit, or use a model with a larger window. */
+  CONTEXT_LENGTH,
+
+  /** The provider does not know the model the request named ({@code ModelNotFoundError}): correct the model name. */
+  MODEL_NOT_FOUND,
 
   /** The library is configured wrongly: a missing or invalid setting ({@code ConfigurationError}). */
   CONFIGURATION,

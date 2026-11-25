@@ -48,7 +48,7 @@ class CloudSpeechErrorMappingSpec extends AnyFlatSpec with Matchers {
       call(StubHttpClient.json(400, "bad request")).left.toOption.get shouldBe a[ValidationError]
       val service = call(StubHttpClient.json(500, "boom")).left.toOption.get
       service shouldBe a[ServiceError]
-      service.asInstanceOf[ServiceError].httpStatus shouldBe 500
+      service.asInstanceOf[ServiceError].status shouldBe 500
     }
 
     it should "pass a network failure through as NetworkError" in {

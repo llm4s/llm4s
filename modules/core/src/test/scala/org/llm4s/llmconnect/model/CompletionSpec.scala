@@ -173,7 +173,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("StreamedChunk.hasThinking returns true when thinking delta present") {
     val chunk = StreamedChunk(
       id = "msg-1",
-      content = None,
+      contentDelta = None,
       thinkingDelta = Some("Thinking...")
     )
 
@@ -183,7 +183,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("StreamedChunk.hasContent returns true when content present") {
     val chunk = StreamedChunk(
       id = "msg-1",
-      content = Some("Hello")
+      contentDelta = Some("Hello")
     )
 
     chunk.hasContent shouldBe true
@@ -192,7 +192,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("StreamedChunk.hasContent returns false when content is empty") {
     val chunk = StreamedChunk(
       id = "msg-1",
-      content = Some("")
+      contentDelta = Some("")
     )
 
     chunk.hasContent shouldBe false

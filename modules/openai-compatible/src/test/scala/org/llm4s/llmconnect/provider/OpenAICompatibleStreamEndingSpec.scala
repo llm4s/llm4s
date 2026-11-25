@@ -55,7 +55,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
     streaming(sse(event("""{"content":"The answer is"}"""))) { (result, chunks) =>
       result.left.value shouldBe a[NetworkError]
       result.left.value.message should include("finish_reason")
-      chunks.flatMap(_.content) shouldBe List("The answer is")
+      chunks.flatMap(_.contentDelta) shouldBe List("The answer is")
     }
 
   it should "fail, not report a call with empty arguments, when a tool call is cut before its arguments" in
@@ -105,7 +105,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
     ) { (result, chunks) =>
       result.left.value shouldBe a[ServiceError]
       result.left.value.message should include("upstream overloaded")
-      chunks.flatMap(_.content) shouldBe List("par")
+      chunks.flatMap(_.contentDelta) shouldBe List("par")
     }
 
   it should "fail on an error event whose error is a plain string" in
@@ -171,14 +171,14 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
           """"code":"tool_use_failed","status_code":400}}"""
       )
     ) { (result, _) =>
-      org.llm4s.reliability.RetryPolicy.isTransient(result.left.value) shouldBe false
+      result.left.value.isRetryable shouldBe false
       result.left.value.message should include("Failed to parse tool call arguments")
     }
 
   it should "keep the meaning of an error event's status code: a rejected key is not retried" in
     streaming(sse("""data: {"error":{"code":401,"message":"invalid key"}}""")) { (result, _) =>
       result.left.value shouldBe a[AuthenticationError]
-      org.llm4s.reliability.RetryPolicy.isTransient(result.left.value) shouldBe false
+      result.left.value.isRetryable shouldBe false
     }
 
   it should "keep the meaning of an error event's status code: a rate limit stays one" in
@@ -189,7 +189,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
   it should "treat an error event's code that is not an HTTP failure status as a bad gateway" in
     streaming(sse("""data: {"error":{"code":"overloaded_error","message":"busy"}}""")) { (result, _) =>
       result.left.value shouldBe a[ServiceError]
-      org.llm4s.reliability.RetryPolicy.isTransient(result.left.value) shouldBe true
+      result.left.value.isRetryable shouldBe true
     }
 
   it should "cut a very long error event message" in
@@ -199,7 +199,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
 
   it should "report an error event as a retryable failure" in
     streaming(sse("""data: {"error":{"message":"overloaded"}}"""))((result, _) =>
-      org.llm4s.reliability.RetryPolicy.isTransient(result.left.value) shouldBe true
+      result.left.value.isRetryable shouldBe true
     )
 
   for (empty <- List("null", "{}", "\"\""))

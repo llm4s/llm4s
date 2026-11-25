@@ -86,7 +86,8 @@ private[llm4s] object TroubleshootingLinks:
 
   /**
    * A provider's reply error with its next action and link: a 401 or 403 (an [[AuthenticationError]], or a
-   * [[ServiceError]] with that status), an upstream [[RateLimitError]], and a 404 [[ServiceError]]. Any other
+   * [[ServiceError]] with that status), an upstream [[RateLimitError]], and a 404 [[ServiceError]] or a
+   * [[ModelNotFoundError]]. Any other
    * error, and one whose message already links the page, is returned unchanged.
    */
   def annotate(error: LLMError): LLMError =
@@ -95,7 +96,8 @@ private[llm4s] object TroubleshootingLinks:
       case e: AuthenticationError           => e.withHint(AuthenticationAction, Entry.AuthenticationFailed)
       case e: RateLimitError if e.origin == RateLimitOrigin.UpstreamProvider =>
         e.withHint(RateLimitAction, Entry.RateLimited)
-      case e: ServiceError if e.httpStatus == 401 || e.httpStatus == 403 =>
+      case e: ServiceError if e.status == 401 || e.status == 403 =>
         e.withHint(AuthenticationAction, Entry.AuthenticationFailed)
-      case e: ServiceError if e.httpStatus == 404 => e.withHint(ModelNotFoundAction, Entry.ModelNotFound)
-      case other                                  => other
+      case e: ServiceError if e.status == 404 => e.withHint(ModelNotFoundAction, Entry.ModelNotFound)
+      case e: ModelNotFoundError              => e.withHint(ModelNotFoundAction, Entry.ModelNotFound)
+      case other                              => other

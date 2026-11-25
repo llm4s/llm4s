@@ -115,6 +115,9 @@ class CompletionTest {
         LlmErrorKind.NETWORK -> "network"
         LlmErrorKind.SERVICE -> "service"
         LlmErrorKind.VALIDATION -> "validation"
+        LlmErrorKind.CONTENT_FILTER -> "content-filter"
+        LlmErrorKind.CONTEXT_LENGTH -> "context-length"
+        LlmErrorKind.MODEL_NOT_FOUND -> "model-not-found"
         LlmErrorKind.CONFIGURATION -> "configuration"
         LlmErrorKind.CANCELLED -> "cancelled"
         LlmErrorKind.OTHER -> "other"
@@ -132,7 +135,7 @@ class CompletionTest {
     fun `a failed completion reads its kind, recoverability, retry delay and status as properties`() {
         val limited = failureOf(RateLimitError.apply("openai", FiniteDuration.apply(3L, TimeUnit.SECONDS)))
         assertEquals("rate-limit", kindName(limited.kind))
-        assertTrue(limited.isRecoverable)
+        assertTrue(limited.isRetryable)
         assertEquals(Optional.of(Duration.ofSeconds(3)), limited.retryAfter)
         assertEquals(OptionalInt.empty(), limited.statusCode)
 
@@ -142,6 +145,6 @@ class CompletionTest {
 
         val badKey = failureOf(AuthenticationError.apply("openai", "bad key"))
         assertEquals(LlmErrorKind.AUTHENTICATION, badKey.kind)
-        assertFalse(badKey.isRecoverable)
+        assertFalse(badKey.isRetryable)
     }
 }

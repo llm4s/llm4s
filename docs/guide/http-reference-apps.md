@@ -334,17 +334,17 @@ Errors map to the same statuses as the other apps (`HttpErrors.of`, below); a fa
 
 ## Errors
 
-An error is answered as `{"error": {"type", "message", "recoverable"}}`. `HttpErrors.of` chooses the status from the
+An error is answered as `{"error": {"type", "message", "retryable"}}`. `HttpErrors.of` chooses the status from the
 error that failed the run, unwrapping the agent runtime's `GraphError.NodeFailed`:
 
 | Error | Status |
 |---|---|
-| a body that is not `{"message": "<non-blank>"}`, `ValidationError`, `InvalidInputError` | `400` |
-| `RateLimitError` | `429`, with `Retry-After`: the provider's hint, else `RateLimitError.DefaultRetryDelay` |
+| a body that is not `{"message": "<non-blank>"}`, `ValidationError`, `InvalidInputError`, `ContextLengthError` | `400` |
+| `RateLimitError` | `429`, with `Retry-After`: the provider's hint, else `RetryPolicy.DefaultRateLimitDelay` |
 | `TimeoutError` | `504` |
 | `AuthenticationError` | `502`: the provider refused the server's credential, which the caller cannot fix |
 | `ConfigurationError` | `500` |
-| any other `RecoverableError` (network, provider 5xx) | `503` |
+| a `CircuitOpenError`, and any other error that is `isRetryable` (network, provider 5xx) | `503` |
 | anything else | `502` |
 
 The message is the library's, which can name the provider; a public service may want to log it and send less.

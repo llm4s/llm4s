@@ -1,7 +1,7 @@
 package org.llm4s.speech.io
 
 import org.llm4s.speech.{ AudioFormat, GeneratedAudio }
-import org.llm4s.error.{ LLMError, NonRecoverableError, ValidationError }
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.resource.ManagedResource
 
@@ -11,8 +11,8 @@ import org.llm4s.syntax.toResult
 
 object AudioIO {
 
-  /** Audio could not be saved; a [[org.llm4s.error.NonRecoverableError NonRecoverableError]], as a core `ProcessingError` is. */
-  sealed trait AudioIOError extends LLMError with NonRecoverableError
+  /** Audio could not be saved; not retryable, as a core `ProcessingError` is not. */
+  sealed trait AudioIOError extends LLMError
   final case class SaveFailed(message: String, override val context: Map[String, String] = Map.empty)
       extends AudioIOError
 

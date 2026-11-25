@@ -4,7 +4,14 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.error.TroubleshootingLinks.Entry
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
+import org.llm4s.error.{
+  AuthenticationError,
+  LLMError,
+  ModelNotFoundError,
+  RateLimitError,
+  ServiceError,
+  TroubleshootingLinks
+}
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -69,9 +76,22 @@ final class OllamaTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
   "Ollama replying 404" should {
     "say to pull the model, and link #ollama-model-missing" in {
       val error = failure(404, """{"error":"model \"llama3\" not found, try pulling it first"}""")
-      error shouldBe a[ServiceError]
+      error match {
+        case e: ModelNotFoundError =>
+          e.model shouldBe Some("llama3")
+          e.httpStatus shouldBe Some(404)
+          e.isRetryable shouldBe false
+        case other => fail(s"expected a ModelNotFoundError, got $other")
+      }
       assertLinked(error, TroubleshootingLinks.ollamaModelMissingAction("llama3"), Entry.OllamaModelMissing)
       error.message should include("not found, try pulling it first")
+    }
+
+    "stay a ServiceError, with the same hint, when the body does not say the model is missing" in {
+      val error = failure(404, "404 page not found")
+      error shouldBe a[ServiceError]
+      error.httpStatus shouldBe Some(404)
+      assertLinked(error, TroubleshootingLinks.ollamaModelMissingAction("llama3"), Entry.OllamaModelMissing)
     }
   }
 

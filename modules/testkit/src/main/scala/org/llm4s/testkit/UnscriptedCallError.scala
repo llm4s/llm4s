@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 
 /**
  * The error a [[ScriptedLLMClient]] returns for a call its script has no reply for: a call past the end of a
@@ -16,7 +16,7 @@ import org.llm4s.error.{ LLMError, NonRecoverableError }
  * }
  * }}}
  *
- * It is a `NonRecoverableError`, so a `ReliableClient` around the scripted client does not retry it.
+ * It is not retryable, so a `ReliableClient` around the scripted client does not retry it.
  *
  * @param callNumber which call had no reply, counting from 1
  * @param reason why there was none, for example `the script has 2 replies`
@@ -27,8 +27,7 @@ final case class UnscriptedCallError private (
   callNumber: Int,
   reason: String,
   lastMessage: Option[String]
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
 
   override def message: String = {
     val last = lastMessage.fold("the conversation has no messages")(m => s"the last message was $m")

@@ -1,7 +1,7 @@
 package org.llm4s.agent.harness
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
 import scala.collection.immutable.VectorMap
@@ -147,7 +147,7 @@ object Skill:
  * 1-based line, and the problem in the parser's own words, which never quote the file.
  */
 @Experimental
-final case class SkillFormatError(path: VPath, line: Int, problem: String) extends LLMError with NonRecoverableError:
+final case class SkillFormatError(path: VPath, line: Int, problem: String) extends LLMError:
   override val message: String = s"${path.value}:$line: $problem"
 
 /**

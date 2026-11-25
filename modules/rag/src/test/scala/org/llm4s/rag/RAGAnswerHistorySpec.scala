@@ -45,7 +45,7 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       conversations += conversation
-      onChunk(StreamedChunk(id = "a", content = Some("42")))
+      onChunk(StreamedChunk(id = "a", contentDelta = Some("42")))
       Right(answer)
     }
     override def contextWindow: Int     = 4096
@@ -182,7 +182,7 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
     try {
       val chunks = mutable.Buffer.empty[String]
       f.rag
-        .queryWithAnswerStreaming("And the second?", history = history)(_ => (), c => chunks ++= c.content)
+        .queryWithAnswerStreaming("And the second?", history = history)(_ => (), c => chunks ++= c.contentDelta)
         .map(_.answer) shouldBe Right("42")
       chunks.toList shouldBe List("42")
       f.searched shouldBe Seq("blue widget price")

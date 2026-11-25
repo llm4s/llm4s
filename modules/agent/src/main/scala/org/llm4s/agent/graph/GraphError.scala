@@ -2,17 +2,17 @@ package org.llm4s.agent.graph
 
 import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
+import org.llm4s.error.LLMError
 
 import scala.concurrent.duration.FiniteDuration
 
 /**
- * Errors raised while building, running or restoring a typed graph. Every case is a
- * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
+ * Errors raised while building, running or restoring a typed graph. No case is
+ * [[org.llm4s.error.LLMError.isRetryable retryable]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  *
- * The marker says what should happen without anyone deciding: a `RecoverableError` may be tried again as it is (an
- * `AgentWorker` gives such an entry back for a later attempt), a `NonRecoverableError` is reported. It does not say
+ * `isRetryable` says what should happen without anyone deciding: a retryable error may be tried again as it is (an
+ * `AgentWorker` gives such an entry back for a later attempt), any other is reported. It does not say
  * whether the thread can go on. A run that ended [[GraphError.NodeFailed]], [[GraphError.Cancelled]] or
  * [[GraphError.SuperstepLimitExceeded]] leaves its checkpoint `Running`, and an explicit `recover` continues it.
  */
@@ -23,43 +23,35 @@ sealed trait GraphError extends LLMError
 object GraphError:
 
   /** The builder found one or more structural problems; every problem is listed. */
-  final case class InvalidGraph(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
+  final case class InvalidGraph(graphId: String, problems: List[String]) extends GraphError:
     override val message: String = s"Graph '$graphId' is invalid: ${problems.mkString("; ")}"
 
   /** A key was read or written that the graph did not register, or another key shares its id. */
-  final case class UnknownStateKey(keyId: StateKeyId) extends GraphError with NonRecoverableError:
+  final case class UnknownStateKey(keyId: StateKeyId) extends GraphError:
     override val message: String = s"State key '${keyId.value}' is not registered with this graph"
 
   /** A node emitted an update for a key outside its declared write set. */
-  final case class UndeclaredWrite(nodeId: NodeId, taskId: TaskId, keyId: StateKeyId)
-      extends GraphError
-      with NonRecoverableError:
+  final case class UndeclaredWrite(nodeId: NodeId, taskId: TaskId, keyId: StateKeyId) extends GraphError:
     override val message: String =
       s"Node '${nodeId.value}' (task ${taskId.value}) wrote '${keyId.value}', which it does not declare"
 
   /** A node returned a route this graph cannot schedule. */
-  final case class InvalidRoute(nodeId: NodeId, taskId: TaskId, reason: String)
-      extends GraphError
-      with NonRecoverableError:
+  final case class InvalidRoute(nodeId: NodeId, taskId: TaskId, reason: String) extends GraphError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) returned an invalid route: $reason"
 
   /** A key's update function rejected an update. */
-  final case class StateUpdateFailed(keyId: StateKeyId, cause: LLMError) extends GraphError with NonRecoverableError:
+  final case class StateUpdateFailed(keyId: StateKeyId, cause: LLMError) extends GraphError:
     override val message: String = s"Update to state key '${keyId.value}' failed: ${cause.message}"
 
   /** A node returned a failure or threw. */
-  final case class NodeFailed(nodeId: NodeId, taskId: TaskId, cause: LLMError)
-      extends GraphError
-      with NonRecoverableError:
+  final case class NodeFailed(nodeId: NodeId, taskId: TaskId, cause: LLMError) extends GraphError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) failed: ${cause.message}"
 
   /**
    * A tool call failed the run: the tool returned `Fatal`, or broke its contract (an update to a key
    * it does not declare, a question it does not declare). `cause` says which.
    */
-  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
-      extends GraphError
-      with NonRecoverableError:
+  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError) extends GraphError:
     override val message: String = s"Tool '${tool.value}' (call ${toolCallId.asString}) failed: ${cause.message}"
     def withTool(t: ToolName): ToolFailed          = copy(tool = t)
     def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
@@ -75,7 +67,7 @@ object GraphError:
    * checkpoint stays `Running`, and `recover` re-runs only that task; from `beforeAgent` or `afterAgent` the turn is
    * blocked, the thread stays usable and there is nothing to recover.
    */
-  final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
+  final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
 
   /**
@@ -85,7 +77,7 @@ object GraphError:
    * prefixed with a JSON path, or those an application check returned (`AgentBuilder.withOutputCheck`), as it worded
    * them. They quote the answer, so `message`, which durable events record, gives only their count.
    */
-  final case class OutputInvalid(errors: Vector[String]) extends GraphError with NonRecoverableError:
+  final case class OutputInvalid(errors: Vector[String]) extends GraphError:
     private val problems = if errors.size == 1 then "1 problem" else s"${errors.size} problems"
     override val message: String =
       s"The agent's answer did not match its response format after a corrective retry ($problems)"
@@ -93,7 +85,7 @@ object GraphError:
   private def describe(thrown: Throwable): String = Option(thrown.getMessage).getOrElse(thrown.toString)
 
   /** The graph went quiescent while a join still waited for arrivals that nothing can produce. */
-  final case class UnsatisfiedJoin(joinId: JoinId, missing: List[String]) extends GraphError with NonRecoverableError:
+  final case class UnsatisfiedJoin(joinId: JoinId, missing: List[String]) extends GraphError:
     override val message: String =
       s"Join '${joinId.value}' can never release; still waiting for ${missing.mkString(", ")}"
 
@@ -104,9 +96,7 @@ object GraphError:
    * checkpoint stays `Running`, so `recover` continues it without re-running them. A step keeps
    * nothing from the cancelled superstep, and returns this with the interrupt flag set.
    */
-  final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String])
-      extends GraphError
-      with NonRecoverableError:
+  final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String]) extends GraphError:
     override val message: String =
       s"Run${threadId.fold("")(t => s" on thread '$t'")} was cancelled${lastCheckpoint.fold("")(c => s"; recover from $c")}"
 
@@ -116,32 +106,31 @@ object GraphError:
    * The checkpoint stays `Running`, so `recover` with a new budget continues the run without
    * re-running tasks that had finished.
    */
-  final case class DeadlineExceeded(threadId: String, lastCheckpoint: Option[String])
-      extends GraphError
-      with RecoverableError:
+  final case class DeadlineExceeded(threadId: String, lastCheckpoint: Option[String]) extends GraphError:
+    override def isRetryable: Boolean = true
     override val message: String =
       s"Run on thread '$threadId' exceeded its deadline${lastCheckpoint.fold("")(c => s"; recover from $c")}"
 
   /**
    * The run reached its superstep limit (`RunBudgets.maxSupersteps`) with work still scheduled. The checkpoint stays
    * `Running`, and `recover` continues the run with a fresh allowance: the limit counts one run's supersteps. It is
-   * a [[org.llm4s.error.NonRecoverableError NonRecoverableError]] all the same, deliberately: the limit guards
+   * not [[org.llm4s.error.LLMError.isRetryable retryable]] all the same, deliberately: the limit guards
    * against a graph that does not stop, so nothing retries past it automatically - a retry would only multiply the
    * limit by the attempts - and continuing is the caller's decision.
    */
-  final case class SuperstepLimitExceeded(limit: Int) extends GraphError with NonRecoverableError:
+  final case class SuperstepLimitExceeded(limit: Int) extends GraphError:
     override val message: String = s"Graph exceeded its limit of $limit supersteps"
 
   /** An execution was passed to a graph other than the one that created or restored it. */
-  final case class ForeignExecution(graphId: String) extends GraphError with NonRecoverableError:
+  final case class ForeignExecution(graphId: String) extends GraphError:
     override val message: String = s"Execution does not belong to graph '$graphId'"
 
   /** A snapshot does not match this compiled graph; every problem is listed. */
-  final case class RestoreRejected(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
+  final case class RestoreRejected(graphId: String, problems: List[String]) extends GraphError:
     override val message: String = s"Snapshot cannot be restored into graph '$graphId': ${problems.mkString("; ")}"
 
   /** A checkpoint was written in a format this build does not read. */
-  final case class UnsupportedCheckpointFormat(found: Int, supported: Int) extends GraphError with NonRecoverableError:
+  final case class UnsupportedCheckpointFormat(found: Int, supported: Int) extends GraphError:
     override val message: String = s"Checkpoint format $found is not supported; this build reads up to $supported"
 
   /**
@@ -150,21 +139,18 @@ object GraphError:
    * storage (for PostgreSQL, the database schema). Stop every instance of the older build before a release that
    * changes the schema starts (design 4.50).
    */
-  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int)
-      extends GraphError
-      with NonRecoverableError:
+  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int) extends GraphError:
     override val message: String =
       s"$store is at checkpoint schema version $found, newer than the $supported this build supports"
 
   /** A new checkpoint's parent is not the thread's latest: another writer advanced the thread. */
   final case class CheckpointConflict(threadId: String, expected: Option[String], actual: Option[String])
-      extends GraphError
-      with NonRecoverableError:
+      extends GraphError:
     override val message: String =
       s"Thread '$threadId' is at checkpoint ${actual.getOrElse("<none>")}, not ${expected.getOrElse("<none>")}"
 
   /** A commit is malformed, such as a pending write naming a checkpoint other than the latest. */
-  final case class InvalidCommit(threadId: String, reason: String) extends GraphError with NonRecoverableError:
+  final case class InvalidCommit(threadId: String, reason: String) extends GraphError:
     override val message: String = s"Invalid commit to thread '$threadId': $reason"
 
   /**
@@ -172,13 +158,11 @@ object GraphError:
    * ([[Checkpointer.prune]]), a guardrail `Block` (which retracts its turn) or `deleteThread` removed it.
    * Nothing was changed.
    */
-  final case class CheckpointNotFound(threadId: String, checkpointId: String)
-      extends GraphError
-      with NonRecoverableError:
+  final case class CheckpointNotFound(threadId: String, checkpointId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no checkpoint $checkpointId"
 
   /** A fork's target thread already exists; a fork only ever creates a new thread. Nothing was changed. */
-  final case class ThreadExists(threadId: String) extends GraphError with NonRecoverableError:
+  final case class ThreadExists(threadId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' already exists; fork to a new thread id"
 
   /**
@@ -187,7 +171,7 @@ object GraphError:
    * it are refused before any claim, and nothing was changed. Reads (`history`, `checkpoint`, `subscribe`,
    * `children`) are allowed; delete the parent to delete the child.
    */
-  final case class ChildThread(threadId: String, parent: String) extends GraphError with NonRecoverableError:
+  final case class ChildThread(threadId: String, parent: String) extends GraphError:
     override val message: String =
       s"Thread '$threadId' is a child thread of '$parent'; it is driven only through its parent's run"
 
@@ -197,12 +181,12 @@ object GraphError:
    * child. `start`, `recover`, `resume`, `fork` (from it) and `updateState` on it are refused before any claim, and
    * nothing was changed; `deleteThread` finishes the delete.
    */
-  final case class ThreadDeleting(threadId: String) extends GraphError with NonRecoverableError:
+  final case class ThreadDeleting(threadId: String) extends GraphError:
     override val message: String =
       s"Thread '$threadId' is being deleted; run deleteThread again to finish the delete"
 
   /** Events before `earliestSeq` were compacted away and cannot be replayed. */
-  final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:
+  final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError:
     override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"
 
   /**
@@ -212,19 +196,17 @@ object GraphError:
    * is not a continuation of the one the reader was following. A subscription ends on it with
    * [[DisconnectReason.ThreadDeleted]]. Read from `0` to follow the thread now under the id.
    */
-  final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long)
-      extends GraphError
-      with NonRecoverableError:
+  final case class ThreadDeleted(threadId: String, afterSeq: Long, firstSeq: Long) extends GraphError:
     override val message: String =
       s"Thread '$threadId' was deleted after event $afterSeq; the thread now under its id starts at event $firstSeq"
 
   /** `start` was called on a thread whose latest checkpoint is mid-execution; use `recover`. */
-  final case class IncompleteRun(threadId: String, checkpointId: String) extends GraphError with NonRecoverableError:
+  final case class IncompleteRun(threadId: String, checkpointId: String) extends GraphError:
     override val message: String =
       s"Thread '$threadId' has an incomplete execution at checkpoint $checkpointId; recover it before starting a new run"
 
   /** `recover`, or the agent's `abandon`, was called on a thread with no incomplete execution. */
-  final case class NothingToRecover(threadId: String) extends GraphError with NonRecoverableError:
+  final case class NothingToRecover(threadId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no incomplete execution to recover"
 
   /**
@@ -232,8 +214,7 @@ object GraphError:
    * `runError` is the run's own failure when the commit failed while recording it.
    */
   final case class CheckpointWriteFailed private (threadId: String, cause: LLMError, runError: Option[LLMError])
-      extends GraphError
-      with NonRecoverableError:
+      extends GraphError:
     def withThreadId(value: String): CheckpointWriteFailed           = copy(threadId = value)
     def withCause(value: LLMError): CheckpointWriteFailed            = copy(cause = value)
     def withRunError(value: LLMError): CheckpointWriteFailed         = copy(runError = Some(value))
@@ -248,13 +229,11 @@ object GraphError:
       new CheckpointWriteFailed(threadId, cause, runError)
 
   /** A resume was refused: no answers, an interrupt that is not parked, or an answer that does not decode. */
-  final case class InvalidResume(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
+  final case class InvalidResume(graphId: String, problems: List[String]) extends GraphError:
     override val message: String = s"Cannot resume graph '$graphId': ${problems.mkString("; ")}"
 
   /** `start`, `recover` or the agent's `abandon` was called on a suspended thread; answer its interrupts with `resume`. */
-  final case class PendingInterrupts(threadId: String, interrupts: List[String])
-      extends GraphError
-      with NonRecoverableError:
+  final case class PendingInterrupts(threadId: String, interrupts: List[String]) extends GraphError:
     override val message: String =
       s"Thread '$threadId' is suspended on ${interrupts.mkString(", ")}; resume it with answers"
 
@@ -264,14 +243,12 @@ object GraphError:
    * differ. Nothing was changed. The owning tenant is deliberately not carried or printed, so a
    * caller from another tenant learns nothing about the thread.
    */
-  final case class TenantMismatch(threadId: String, requested: Option[String])
-      extends GraphError
-      with NonRecoverableError:
+  final case class TenantMismatch(threadId: String, requested: Option[String]) extends GraphError:
     override val message: String =
       s"Thread '$threadId' does not belong to tenant ${requested.fold("<none>")(t => s"'$t'")}"
 
   /** `resume` was called on a thread that is not suspended. */
-  final case class NotSuspended(threadId: String) extends GraphError with NonRecoverableError:
+  final case class NotSuspended(threadId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
 
   /**
@@ -322,8 +299,8 @@ object GraphError:
     threadId: String,
     latestCheckpoint: Option[String],
     holder: BusyHolder
-  ) extends GraphError
-      with RecoverableError:
+  ) extends GraphError:
+    override def isRetryable: Boolean                           = true
     def withThreadId(value: String): ThreadBusy                 = copy(threadId = value)
     def withLatestCheckpoint(value: String): ThreadBusy         = copy(latestCheckpoint = Some(value))
     def withLatestCheckpoint(value: Option[String]): ThreadBusy = copy(latestCheckpoint = value)
@@ -348,9 +325,7 @@ object GraphError:
    * writer that lost its claim cannot record anything after another run took the thread over.
    * `current` is the token of the thread's current claim, if there is one.
    */
-  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken])
-      extends GraphError
-      with NonRecoverableError:
+  final case class StaleClaim(threadId: String, token: FencingToken, current: Option[FencingToken]) extends GraphError:
     override val message: String =
       s"Claim token ${token.value} on thread '$threadId' is stale (current: ${current.fold("none")(_.value.toString)})"
 
@@ -368,9 +343,7 @@ object GraphError:
    * that finished the work leaves the thread's state showing it ([[NothingToRecover]]); and a lease that
    * lapsed with no successor leaves the last checkpoint `Running`, which `recover` continues.
    */
-  final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken])
-      extends GraphError
-      with NonRecoverableError:
+  final case class ClaimLost(threadId: String, token: FencingToken, current: Option[FencingToken]) extends GraphError:
     override val message: String =
       s"Run on thread '$threadId' lost its claim (token ${token.value}, current: ${current
           .fold("not named")(_.value.toString)}); it stopped and committed nothing more"
@@ -391,7 +364,7 @@ object GraphError:
    * commit's events are in the thread's log and reach the thread's subscribers, but never the run's own listeners
    * or its tracing.
    */
-  final case class CommitTimedOut(threadId: String, after: FiniteDuration) extends GraphError with NonRecoverableError:
+  final case class CommitTimedOut(threadId: String, after: FiniteDuration) extends GraphError:
     override val message: String =
       s"Run on thread '$threadId' ended without its closing commit, which had not returned after $after; " +
         "it may still land, so read the thread before recovering it"
@@ -402,7 +375,7 @@ object GraphError:
    * [[CheckpointWriteFailed]] instead. Its thread claim is released; whatever the
    * store holds for the thread stands.
    */
-  final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError with NonRecoverableError:
+  final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError:
     override val message: String = s"Run on thread '$threadId' crashed: $cause"
 
   /**
@@ -410,5 +383,5 @@ object GraphError:
    * the effect began, it may already have run and cannot be checked, or its outcome was not kept. A
    * refusal the model should see: a tool maps it to `ToolOutcome.Error` (design §4.24).
    */
-  final case class EffectReplayRefused(operation: String, reason: String) extends GraphError with NonRecoverableError:
+  final case class EffectReplayRefused(operation: String, reason: String) extends GraphError:
     override val message: String = s"The effect '$operation' was not replayed: $reason"

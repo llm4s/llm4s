@@ -48,7 +48,7 @@ import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 def printAnswer(client: LLMClientPekko)(using system: ActorSystem) =
   client
     .streamComplete(Conversation(Seq(UserMessage("Explain monads in one sentence."))))
-    .runForeach(chunk => print(chunk.content.getOrElse("")))
+    .runForeach(chunk => print(chunk.contentDelta.getOrElse("")))
 ```
 
 The provider call starts when the stream is materialized, once per materialization, on a thread of its own: a
@@ -71,7 +71,7 @@ blocking call never runs on a stream or actor dispatcher thread.
      client
        .streamComplete(conversation)
        .viaMat(KillSwitches.single[StreamedChunk])(Keep.right)
-       .toMat(Sink.foreach(chunk => print(chunk.content.getOrElse(""))))(Keep.both)
+       .toMat(Sink.foreach(chunk => print(chunk.contentDelta.getOrElse(""))))(Keep.both)
        .run()
    // later: killSwitch.shutdown() interrupts the provider call
    ```
@@ -180,7 +180,7 @@ def answerOrNothing(client: LLMClientPekko, conversation: Conversation)(using sy
   client
     .streamComplete(conversation)
     .runWith(Sink.seq)
-    .map(chunks => chunks.flatMap(_.content).mkString)
+    .map(chunks => chunks.flatMap(_.contentDelta).mkString)
     .recover { case e: LLMException => s"failed: ${e.error.message}" }
 ```
 

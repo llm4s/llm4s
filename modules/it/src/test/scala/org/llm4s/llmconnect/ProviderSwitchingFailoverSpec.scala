@@ -206,7 +206,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           val chunks = new ConcurrentLinkedQueue[StreamedChunk]()
           val result = p.client.streamComplete(hello, CompletionOptions())(chunk => chunks.add(chunk): Unit).value
           result.content shouldBe s"hello from ${p.id}"
-          chunks.asScala.flatMap(_.content).mkString shouldBe s"hello from ${p.id}"
+          chunks.asScala.flatMap(_.contentDelta).mkString shouldBe s"hello from ${p.id}"
         }
       }
 
@@ -297,7 +297,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           val error = p.client.complete(hello).left.value
           withClue(s"${p.id}: $error") {
             error shouldBe a[ServiceError]
-            error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+            error.asInstanceOf[ServiceError].status shouldBe 500
             retryable(error) shouldBe true
           }
         }

@@ -140,7 +140,7 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
         val chunks = ListBuffer.empty[StreamedChunk]
         val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(chunks += _)
         client.close()
-        chunks.flatMap(_.content).toList shouldBe List("trunc")
+        chunks.flatMap(_.contentDelta).toList shouldBe List("trunc")
         result.left.toOption.value.message should include("messageStop")
       }
     }

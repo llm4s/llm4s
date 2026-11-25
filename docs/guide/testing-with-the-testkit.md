@@ -159,7 +159,7 @@ error.message should include("no reply is scripted for call 1")
 error.message should include("Capital of France?")
 ```
 
-Inside an agent, that error arrives wrapped in the same `NodeFailed` as any provider error. It is a `NonRecoverableError`, so a `ReliableClient` does not retry it.
+Inside an agent, that error arrives wrapped in the same `NodeFailed` as any provider error. It is not retryable, so a `ReliableClient` does not retry it.
 
 ## Check that every reply was used
 
@@ -478,7 +478,7 @@ val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSiz
 val chunks = ArrayBuffer.empty[StreamedChunk]
 client.streamComplete(conversation, options)(chunks += _)
 
-chunks.flatMap(_.content).mkString shouldBe "Hello, world"
+chunks.flatMap(_.contentDelta).mkString shouldBe "Hello, world"
 chunks.last.finishReason shouldBe Some(FinishReason.Stop)
 ```
 

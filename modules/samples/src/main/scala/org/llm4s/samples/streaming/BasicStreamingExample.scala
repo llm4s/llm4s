@@ -43,18 +43,18 @@ object BasicStreamingExample {
         options = CompletionOptions(temperature = Some(0.7))
       ) { chunk =>
         // Record time to first chunk
-        if (firstChunkTime.isEmpty && chunk.content.isDefined) {
+        if (firstChunkTime.isEmpty && chunk.contentDelta.isDefined) {
           firstChunkTime = Some(System.currentTimeMillis() - startTime)
         }
 
         // Print content as it arrives
-        chunk.content.foreach(print)
+        chunk.contentDelta.foreach(print)
 
         // Track chunks
         chunkCount += 1
 
         // Show when we receive tool calls (if any)
-        chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
+        chunk.toolCallDelta.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
 
         // Show finish reason
         chunk.finishReason.foreach(reason => logger.info("[Stream finished: {}]", reason.name))

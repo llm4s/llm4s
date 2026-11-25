@@ -116,24 +116,21 @@ class SafetySpec extends AnyFlatSpec with Matchers {
     val error     = throwable.toLLMError
 
     // Should be able to pattern match
-    error match {
-      case _: RecoverableError    => succeed
-      case _: NonRecoverableError => fail("Expected RecoverableError")
-    }
+    error.isRetryable shouldBe true
 
     // Should work with LLMError utilities
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
     error.formatted should include("NetworkError")
   }
 
   it should "preserve recoverability based on error type" in {
     // Network errors are recoverable
     val networkThrowable = new java.net.SocketTimeoutException("timeout")
-    LLMError.isRecoverable(networkThrowable.toLLMError) shouldBe true
+    networkThrowable.toLLMError.isRetryable shouldBe true
 
     // Unknown errors are not recoverable
     val unknownThrowable = new RuntimeException("unknown")
-    LLMError.isRecoverable(unknownThrowable.toLLMError) shouldBe false
+    unknownThrowable.toLLMError.isRetryable shouldBe false
   }
 
   "Safety.safely" should "return the value, or the mapped exception" in {

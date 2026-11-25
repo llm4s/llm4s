@@ -28,7 +28,7 @@ object LocalJlamaExample {
       given ModelRegistryService = registry
       client <- LLMConnect.getClient(providerConfig)
       completion <- client.streamComplete(Conversation(Seq(UserMessage("In one sentence, what is Scala?"))))(chunk =>
-        chunk.content.foreach(text => print(text))
+        chunk.contentDelta.foreach(text => print(text))
       )
       _ = client.close()
     } yield completion.content.trim

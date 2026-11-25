@@ -90,7 +90,7 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
       completion.content
         .split("(?<=\\s)")
         .filter(_.nonEmpty)
-        .foreach(piece => onChunk(StreamedChunk(id = completion.id, content = Some(piece))))
+        .foreach(piece => onChunk(StreamedChunk(id = completion.id, contentDelta = Some(piece))))
       completion
     }
 

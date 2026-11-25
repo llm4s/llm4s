@@ -7,7 +7,8 @@ import org.llm4s.annotation.Stable
  *
  * Returned when an update is attempted but the record has been modified by another
  * concurrent writer since it was last read. Callers should re-read the record and
- * retry the operation.
+ * retry the operation. It is not [[LLMError.isRetryable retryable]]: the same update fails again until the
+ * record is re-read.
  *
  * @param message          Human-readable error description
  * @param recordId         The ID of the memory record that was concurrently modified
@@ -18,8 +19,7 @@ final case class OptimisticLockFailure private (
   override val message: String,
   recordId: String,
   attemptedVersion: Long
-) extends LLMError
-    with RecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map(
     "recordId"         -> recordId,
     "attemptedVersion" -> attemptedVersion.toString

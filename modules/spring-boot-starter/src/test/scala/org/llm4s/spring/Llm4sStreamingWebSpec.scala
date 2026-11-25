@@ -36,7 +36,7 @@ object Llm4sStreamingWebSpec {
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       if (c.messages.lastOption.exists(_.content == "fail")) Left(ServiceError(503, "scripted", "the model is down"))
       else {
-        Pieces.foreach(p => f(StreamedChunk(id = "c", content = Some(p))))
+        Pieces.foreach(p => f(StreamedChunk(id = "c", contentDelta = Some(p))))
         Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(Pieces.mkString)))
       }
     override def contextWindow: Int     = 4096

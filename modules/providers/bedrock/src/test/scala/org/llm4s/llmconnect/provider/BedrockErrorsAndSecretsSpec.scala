@@ -106,16 +106,16 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
         val err = failWith(status, errorType, stream)
         err.getClass.getSimpleName shouldBe expected
         err match {
-          case s: ServiceError => s.httpStatus shouldBe status
+          case s: ServiceError => s.status shouldBe status
           case _               => succeed
         }
       }
 
     "treat throttling and service errors as recoverable and validation and auth errors as not" in {
-      failWith(429, "ThrottlingException", stream = false) shouldBe a[RecoverableError]
-      failWith(503, "ServiceUnavailableException", stream = false) shouldBe a[RecoverableError]
-      failWith(400, "ValidationException", stream = false) should not be a[RecoverableError]
-      failWith(403, "AccessDeniedException", stream = false) should not be a[RecoverableError]
+      failWith(429, "ThrottlingException", stream = false).isRetryable shouldBe true
+      failWith(503, "ServiceUnavailableException", stream = false).isRetryable shouldBe true
+      failWith(400, "ValidationException", stream = false).isRetryable shouldBe false
+      failWith(403, "AccessDeniedException", stream = false).isRetryable shouldBe false
     }
 
     "map a refused connection to NetworkError, on both paths" in {

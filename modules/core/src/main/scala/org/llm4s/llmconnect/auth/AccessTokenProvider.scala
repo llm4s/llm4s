@@ -64,7 +64,7 @@ trait AccessTokenProvider:
  * at once instead of each making their own attempt in turn, which during an outage would hold the
  * last of N callers for N times the exchange's timeout. A rejection (an authentication or
  * configuration error, or any other error not marked recoverable) is shared for `FailureTtl`
- * (5 seconds); a transient failure (a [[org.llm4s.error.RecoverableError]]: network, timeout, rate
+ * (5 seconds); a transient failure (one that is `isRetryable`: network, timeout, rate
  * limit, 5xx) for `TransientFailureTtl` (1 second) - long enough for the callers queued behind the
  * fetch, short enough that a blip does not outlive itself. After the window the next call tries
  * again; a success, or a rejected cached token, ends it sooner.
@@ -141,7 +141,7 @@ final class CachingAccessTokenProvider(
     }
 
   private def failureTtl(error: LLMError): FiniteDuration =
-    if LLMError.isRecoverable(error) then CachingAccessTokenProvider.TransientFailureTtl
+    if error.isRetryable then CachingAccessTokenProvider.TransientFailureTtl
     else CachingAccessTokenProvider.FailureTtl
 
   private def recentFailure(): Option[LLMError] =

@@ -65,7 +65,7 @@ class ChatEndpointsSpec extends AnyFlatSpec with Matchers {
     Seq("ChatRequest", "ChatResponse", "ErrorBody", "ErrorDetail").filterNot(schemas.contains) shouldBe empty
     val yaml = openApi.toYaml
     yaml should include("threadId")
-    yaml should include("recoverable")
+    yaml should include("retryable")
   }
 
   "A JSON body" should "decode JSON and refuse anything else" in {

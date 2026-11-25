@@ -9,7 +9,7 @@ import scala.concurrent.duration._
  * Tests for recoverable error types: NetworkError, ServiceError,
  * TimeoutError, ExecutionError, RateLimitError
  */
-class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
+class RetryableErrorsSpec extends AnyFlatSpec with Matchers {
 
   // ============ NetworkError ============
 
@@ -22,11 +22,10 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.endpoint shouldBe "https://api.example.com"
   }
 
-  it should "be a RecoverableError" in {
+  it should "be retryable" in {
     val error = NetworkError("timeout", None, "https://api.example.com")
 
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
   }
 
   it should "include exception type in context" in {
@@ -62,7 +61,7 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
   "ServiceError" should "create with HTTP status" in {
     val error = ServiceError(503, "openai", "Service unavailable")
 
-    error.httpStatus shouldBe 503
+    error.status shouldBe 503
     error.provider shouldBe "openai"
     error.code shouldBe Some("503")
     error.message should include("Service error from openai")
@@ -76,28 +75,32 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Request ID req-12345")
   }
 
-  it should "be a RecoverableError" in {
+  it should "be retryable" in {
     val error = ServiceError(502, "provider", "Bad gateway")
 
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
   }
 
-  it should "provide retry delay" in {
+  it should "report no retryAfter unless the provider gave one" in {
     val error = ServiceError(503, "provider", "unavailable")
 
-    error.retryDelay shouldBe Some(2.seconds)
+    error.retryAfter shouldBe None
+    error.withRetryAfter(7.seconds).retryAfter shouldBe Some(7.seconds)
+  }
+
+  it should "report its status as httpStatus" in {
+    ServiceError(503, "provider", "unavailable").httpStatus shouldBe Some(503)
   }
 
   it should "identify recoverable HTTP status codes" in {
-    ServiceError(500, "p", "d").isRecoverableStatus shouldBe true
-    ServiceError(502, "p", "d").isRecoverableStatus shouldBe true
-    ServiceError(503, "p", "d").isRecoverableStatus shouldBe true
-    ServiceError(429, "p", "d").isRecoverableStatus shouldBe true
-    ServiceError(408, "p", "d").isRecoverableStatus shouldBe true
-    ServiceError(400, "p", "d").isRecoverableStatus shouldBe false
-    ServiceError(401, "p", "d").isRecoverableStatus shouldBe false
-    ServiceError(404, "p", "d").isRecoverableStatus shouldBe false
+    ServiceError(500, "p", "d").isRetryable shouldBe true
+    ServiceError(502, "p", "d").isRetryable shouldBe true
+    ServiceError(503, "p", "d").isRetryable shouldBe true
+    ServiceError(429, "p", "d").isRetryable shouldBe true
+    ServiceError(408, "p", "d").isRetryable shouldBe true
+    ServiceError(400, "p", "d").isRetryable shouldBe false
+    ServiceError(401, "p", "d").isRetryable shouldBe false
+    ServiceError(404, "p", "d").isRetryable shouldBe false
   }
 
   it should "support pattern matching" in {
@@ -123,11 +126,10 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.operation shouldBe "api-call"
   }
 
-  it should "be a RecoverableError" in {
+  it should "be retryable" in {
     val error = TimeoutError("timeout", 10.seconds, "operation")
 
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
   }
 
   it should "support withContext" in {
@@ -178,11 +180,10 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.exitCode shouldBe None
   }
 
-  it should "be a RecoverableError" in {
+  it should "be retryable" in {
     val error = ExecutionError("failed", "op")
 
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
   }
 
   it should "support withContext" in {
@@ -226,9 +227,9 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Rate limited by openai")
   }
 
-  it should "take its retry delay as a duration, as retryDelay reports it" in {
+  it should "take its retry delay as a duration, as retryAfter reports it" in {
     val error = RateLimitError("anthropic", 1500.millis)
-    error.retryDelay shouldBe Some(1500.millis)
+    error.retryAfter shouldBe Some(1500.millis)
     error.message should include("Retry after 1.5s")
   }
 
@@ -244,20 +245,30 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Retry after 60s")
   }
 
-  it should "be a RecoverableError" in {
+  it should "be retryable" in {
     val error = RateLimitError("provider")
 
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+    error.isRetryable shouldBe true
   }
 
-  it should "calculate intelligent retry delay" in {
-    val errorWithDelay = RateLimitError("p", 30.millis)
-    errorWithDelay.retryDelay shouldBe Some(30.millis)
+  it should "report only the delay the provider gave as retryAfter" in {
+    RateLimitError("p", 30.millis).retryAfter shouldBe Some(30.millis)
 
-    // Without a provider hint, the default backoff applies
-    RateLimitError("p").retryDelay shouldBe Some(RateLimitError.DefaultRetryDelay)
-    RateLimitError.DefaultRetryDelay shouldBe 30.seconds
+    // Without a provider hint there is none: the wait is the retry policy's decision
+    RateLimitError("p").retryAfter shouldBe None
+    org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay shouldBe 30.seconds
+  }
+
+  it should "carry the HTTP status and request id it is given, and none otherwise" in {
+    val bare = RateLimitError("p")
+    bare.httpStatus shouldBe None
+    bare.requestId shouldBe None
+
+    val full = bare.withHttpStatus(429).withRequestId("req-1")
+    full.httpStatus shouldBe Some(429)
+    full.requestId shouldBe Some("req-1")
+    full.context should contain("requestId" -> "req-1")
+    RateLimitError.local("p").httpStatus shouldBe None
   }
 
   it should "support pattern matching" in {
@@ -272,10 +283,10 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ============ RecoverableError Trait ============
+  // ============ Retryable ============
 
-  "RecoverableError" should "always report isRecoverable as true" in {
-    val errors: Seq[RecoverableError] = Seq(
+  "A transient error" should "be retryable" in {
+    val errors: Seq[LLMError] = Seq(
       NetworkError("m", None, "e"),
       ServiceError(500, "p", "m"),
       TimeoutError("m", 1.second, "o"),
@@ -283,7 +294,7 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
       RateLimitError("p"),
     )
 
-    errors.foreach(error => LLMError.isRecoverable(error) shouldBe true)
+    errors.foreach(error => error.isRetryable shouldBe true)
   }
 
   // ============ Formatting ============
@@ -305,11 +316,8 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.attemptedVersion shouldBe 2L
   }
 
-  it should "be a RecoverableError" in {
-    val error = OptimisticLockFailure("conflict", "mem-1", 2L)
-
-    error shouldBe a[RecoverableError]
-    LLMError.isRecoverable(error) shouldBe true
+  it should "not be retryable: the same update fails until the record is re-read" in {
+    OptimisticLockFailure("conflict", "mem-1", 2L).isRetryable shouldBe false
   }
 
   it should "include recordId and attemptedVersion in context" in {
@@ -341,9 +349,9 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
       ValidationError("f", "r")
     )
 
-    val recoverable = LLMError.recoverableErrors(errors)
+    val recoverable = errors.filter(_.isRetryable)
 
     recoverable should have size 2
-    recoverable.foreach(_ shouldBe a[RecoverableError])
+    recoverable.foreach(_.isRetryable shouldBe true)
   }
 }

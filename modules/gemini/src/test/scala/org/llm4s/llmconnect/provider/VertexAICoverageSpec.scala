@@ -517,8 +517,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     result.isRight shouldBe true
     chunks should have size 1
-    chunks.head.toolCall should not be empty
-    chunks.head.toolCall.get.name shouldBe "get_weather"
+    chunks.head.toolCallDelta should not be empty
+    chunks.head.toolCallDelta.get.name shouldBe "get_weather"
   }
 
   it should "skip non-data SSE lines (comment and event lines)" in {
@@ -619,7 +619,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       mockHttp
     )
     client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ()) match {
-      case Left(e: org.llm4s.error.NetworkError) => org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
+      case Left(e: org.llm4s.error.NetworkError) => e.isRetryable shouldBe true
       case other                                 => fail(s"expected a NetworkError, got $other")
     }
   }

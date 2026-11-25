@@ -159,8 +159,8 @@ private[provider] object GeminiThoughtSignatures {
       Seq(
         StreamedChunk(
           id = messageId,
-          content = content,
-          toolCall = None,
+          contentDelta = content,
+          toolCallDelta = None,
           finishReason = finishReason,
           thinkingDelta = thought
         )
@@ -171,8 +171,8 @@ private[provider] object GeminiThoughtSignatures {
         val last  = i == parsed.calls.size - 1
         StreamedChunk(
           id = messageId,
-          content = if (first) content else None,
-          toolCall = Some(call),
+          contentDelta = if (first) content else None,
+          toolCallDelta = Some(call),
           finishReason = if (last) finishReason else None,
           thinkingDelta = if (first) thought else None
         )

@@ -117,7 +117,7 @@ final class MigrationSnippets {
             return switch (error.getKind()) {
                 case AUTHENTICATION, CONFIGURATION -> "Fix the setup: " + error.getMessage();
                 case RATE_LIMIT, TIMEOUT, NETWORK -> "Try again later";
-                default -> error.isRecoverable() ? "Retry: " + error.getMessage() : "Failed: " + error.getMessage();
+                default -> error.isRetryable() ? "Retry: " + error.getMessage() : "Failed: " + error.getMessage();
             };
         }
         return result.get();

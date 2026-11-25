@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 
 /**
  * A guardrail refused the run's input or answer. `guardrail` is the first failing guardrail's name
@@ -23,6 +23,6 @@ import org.llm4s.error.{ LLMError, NonRecoverableError }
  * rebuilt from it has no reason.
  */
 @Experimental
-final case class GuardrailBlocked(guardrail: String, reason: Option[String]) extends LLMError with NonRecoverableError:
+final case class GuardrailBlocked(guardrail: String, reason: Option[String]) extends LLMError:
   val message: String                       = s"Guardrail '$guardrail' blocked"
   override val context: Map[String, String] = Map("guardrail" -> guardrail)

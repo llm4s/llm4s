@@ -597,7 +597,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments shouldBe ujson.Obj("location" -> "Paris")
         (completion.toolCalls.head.id.asString should fullyMatch).regex(callId)
-        chunks.flatMap(_.toolCall) should have size 1
+        chunks.flatMap(_.toolCallDelta) should have size 1
         chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
         completion.usage.map(_.totalTokens) shouldBe Some(15)
       }
@@ -688,7 +688,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         calls.map(_.id) shouldBe List("call_x", "call_y")
         calls.map(_.name) shouldBe List("get_weather", "get_weather")
         calls.map(_.arguments) shouldBe List(ujson.Obj("location" -> "Paris"), ujson.Obj("location" -> "Rome"))
-        chunks.flatMap(_.toolCall).map(_.id) shouldBe List("call_x", "call_y")
+        chunks.flatMap(_.toolCallDelta).map(_.id) shouldBe List("call_x", "call_y")
       }
     }
 
@@ -707,8 +707,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
         result.left.toOption.get shouldBe a[ProcessingError]
         result.left.toOption.get.message should include("call_y")
-        chunks.flatMap(_.toolCall) should have size 1
-        chunks.flatMap(_.content) should not contain "never read"
+        chunks.flatMap(_.toolCallDelta) should have size 1
+        chunks.flatMap(_.contentDelta) should not contain "never read"
       }
     }
 
@@ -765,7 +765,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ProcessingError]
-        chunks.flatMap(_.content) should not contain "never read"
+        chunks.flatMap(_.contentDelta) should not contain "never read"
       }
     }
   }

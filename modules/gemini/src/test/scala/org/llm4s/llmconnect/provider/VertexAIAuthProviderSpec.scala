@@ -326,7 +326,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     result.isLeft shouldBe true
     val err = result.left.toOption.get
     err shouldBe a[NetworkError]
-    LLMError.isRecoverable(err) shouldBe true
+    err.isRetryable shouldBe true
   }
 
   it should "fetch only once when racing concurrent callers on a cache miss" in {

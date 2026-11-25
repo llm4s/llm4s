@@ -62,7 +62,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       completion.content shouldBe "Bonjour le monde"
       completion.model shouldBe ModelName("mistral-small-latest")
       completion.usage shouldBe Some(TokenUsage(12, 7, 19))
-      chunks.flatMap(_.content).mkString shouldBe "Bonjour le monde"
+      chunks.flatMap(_.contentDelta).mkString shouldBe "Bonjour le monde"
       chunks.flatMap(_.finishReason) shouldBe Seq(FinishReason.Stop)
     }
     ujson.read(requestBody)("stream").bool shouldBe true
@@ -92,7 +92,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe
         List(("D681PevKs", "get_weather", ujson.Obj("city" -> "Paris")))
       completion.message.toolCalls shouldBe completion.toolCalls
-      chunks.flatMap(_.toolCall).map(_.name) shouldBe Seq("get_weather")
+      chunks.flatMap(_.toolCallDelta).map(_.name) shouldBe Seq("get_weather")
     }
 
   it should "stream a reasoning model's thinking chunks as thinking, and its text chunks as content" in

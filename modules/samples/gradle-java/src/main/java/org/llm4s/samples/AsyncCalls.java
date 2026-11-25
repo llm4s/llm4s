@@ -53,7 +53,7 @@ public final class AsyncCalls {
                 client.completeAsync("One more?").get();
             } catch (ExecutionException e) {
                 LlmException error = (LlmException) e.getCause();
-                System.out.println("failed:  " + error.getKind() + " (recoverable: " + error.isRecoverable() + ")");
+                System.out.println("failed:  " + error.getKind() + " (retryable: " + error.isRetryable() + ")");
             }
 
             // Your own executor, here a bounded pool: the client never shuts it down.

@@ -202,7 +202,7 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             val key = c.messages.head.content
-            (0 until perStream).foreach(i => onChunk(StreamedChunk(id = s"$key-$i", content = Some(key))))
+            (0 until perStream).foreach(i => onChunk(StreamedChunk(id = s"$key-$i", contentDelta = Some(key))))
             Right(completion)
           }
           def contextWindow: Int     = 4096

@@ -14,7 +14,7 @@ class CancelledErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   "CancelledError" should "be non-recoverable" in {
-    LLMError.isRecoverable(CancelledError("op")) shouldBe false
+    CancelledError("op").isRetryable shouldBe false
     CancelledError("op").message shouldBe "op was cancelled"
   }
 

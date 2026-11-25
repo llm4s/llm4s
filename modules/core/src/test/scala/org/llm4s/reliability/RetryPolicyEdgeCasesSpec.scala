@@ -76,7 +76,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "exponentialBackoff" should "use exponential calculation for RateLimitError without server delay" in {
     val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 32.seconds)
-    // RateLimitError always has a retryDelay due to its retryDelay method fallback
+    // RateLimitError without a retryAfter waits the policy's rate-limit default
     // so this will use the server-provided delay
     val rateLimitError = RateLimitError("test", 3.seconds)
     policy.delayFor(1, rateLimitError) shouldBe 3.seconds

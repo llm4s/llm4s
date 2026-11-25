@@ -572,9 +572,10 @@ try {
             + e.getRetryAfter().map(d -> d.toSeconds() + " s").orElse("a while"));
         case SERVICE -> System.err.println("the provider answered HTTP "
             + (e.getStatusCode().isPresent() ? e.getStatusCode().getAsInt() : "?"));
+        case CONTEXT_LENGTH -> System.err.println("the conversation is too long for the model; shorten it");
         default -> { }
     }
-    if (e.isRecoverable()) {
+    if (e.isRetryable()) {
         System.err.println("a retry may succeed");
     }
 }
@@ -582,31 +583,31 @@ try {
 
 `getKind()` is the Java enum `LlmErrorKind`:
 
-| Kind | The failure | Recoverable |
+| Kind | The failure | Retryable |
 |---|---|---|
-| `AUTHENTICATION` | the provider rejected the API key | no, unless it is a provider's `401` or `403` reported as a service error |
-| `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes, unless it is an embedding provider's error |
+| `AUTHENTICATION` | the provider rejected the API key | no |
+| `RATE_LIMIT` | the provider, or a local limiter, refused the call for now | yes |
 | `TIMEOUT` | the call did not finish in time | yes |
 | `NETWORK` | the provider could not be reached | yes |
-| `SERVICE` | the provider answered with an error | yes, unless it is an embedding provider's error |
-| `VALIDATION` | the request is wrong: a missing or invalid argument | no, unless it is a provider's `400` reported as a service error |
+| `SERVICE` | the provider answered with an error | for status 408, 429 and 5xx |
+| `VALIDATION` | the request is wrong: a missing or invalid argument | no |
+| `CONTENT_FILTER` | the provider's content filter stopped the prompt or withheld the reply | no |
+| `CONTEXT_LENGTH` | the conversation does not fit the model's context window | no |
+| `MODEL_NOT_FOUND` | the provider does not know the model the request named | no |
 | `CONFIGURATION` | a setting is missing or invalid | no |
 | `CANCELLED` | the call was cancelled, for example by an interrupt | no |
 | `OTHER` | anything else, including an error from another llm4s module or your own code | depends on the error |
 
 A provider's error response with status `400`, `401`/`403` or `429` has the kind that status means (`VALIDATION`,
-`AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. Such an error keeps
-the recoverability of its class: a `ServiceError` is recoverable whatever its status, so a `403`
-reported as one reads as `AUTHENTICATION` and `isRecoverable()` is `true`. The table's column is what the kind's own
-error classes say; to decide whether to try again, always call `isRecoverable()` rather than infer it from the kind.
+`AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. To decide
+whether to try again, call `isRetryable()` rather than infer it from the kind.
 Every error class in `org.llm4s.error` has a kind, and a test fails when a new one is added without one.
-An [embedding](#embeddings) provider's error response has the kind of its HTTP status in the same way, but llm4s does
-not call any embedding error recoverable, so `isRecoverable()` is `false` for it whatever its kind.
+An [embedding](#embeddings) provider's error response has the kind of its HTTP status in the same way.
 
-`isRecoverable()` says whether the call may succeed if tried again, perhaps after you do something first: wait out a rate
-limit, or correct a request the provider rejected. `getRetryAfter()` is the `Optional<Duration>` the provider asked you
-to wait (its `Retry-After` header), empty when it did not say, and `getStatusCode()` the `OptionalInt` HTTP status of a
-provider's error response. If the error carries a `Throwable`, it is the exception's `getCause()`.
+`isRetryable()` says whether sending the same request again may succeed: the one rule llm4s's own retries apply.
+`getRetryAfter()` is the `Optional<Duration>` the provider asked you
+to wait (its `Retry-After` header), empty when it did not say, `getStatusCode()` the `OptionalInt` HTTP status of a
+provider's error response, and `getRequestId()` the `Optional<String>` id the provider gave the request. If the error carries a `Throwable`, it is the exception's `getCause()`.
 
 `e.error()` is still the llm4s error itself, a Scala `LLMError` whose `message()` and `formatted()` (the message plus its
 code and context) are plain methods, and whose classes - `RateLimitError`, `ServiceError` and the rest - you can test

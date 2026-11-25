@@ -94,7 +94,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     client.close()
     result match {
       case Left(error: org.llm4s.error.ServiceError) =>
-        error.httpStatus shouldBe 404
+        error.status shouldBe 404
         error.message should include("ollama pull")
       case other => fail(s"expected a ServiceError 404, got $other")
     }

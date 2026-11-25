@@ -372,7 +372,7 @@ object ModelStep:
           withTools
         )(chunk =>
           chunk.thinkingDelta.filter(_.nonEmpty).foreach(call.thinkingDelta)
-          chunk.content.filter(_.nonEmpty).foreach(call.textDelta)
+          chunk.contentDelta.filter(_.nonEmpty).foreach(call.textDelta)
         )
 
 /**

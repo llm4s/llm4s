@@ -39,7 +39,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
           val read = Try {
             val reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body))
             Iterator.continually(reader.readLine()).takeWhile(_ != null).filter(_.nonEmpty).foreach { line =>
-              onChunk(StreamedChunk(id = "s", content = Some(line)))
+              onChunk(StreamedChunk(id = "s", contentDelta = Some(line)))
             }
           }
           Left(read.fold(e => SimpleError(e.toString), _ => SimpleError("stream ended")))

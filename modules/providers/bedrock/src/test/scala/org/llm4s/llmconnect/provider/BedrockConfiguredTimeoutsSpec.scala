@@ -112,7 +112,7 @@ final class BedrockConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
           case Left(e: TimeoutError) => e.timeoutDuration shouldBe 500.millis
           case other                 => fail(s"expected a TimeoutError, got $other")
         }
-        chunks.flatMap(_.content) shouldBe Seq("Hi")
+        chunks.flatMap(_.contentDelta) shouldBe Seq("Hi")
         elapsed should be < 10.seconds
       } finally client.close()
     }

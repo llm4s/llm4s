@@ -96,7 +96,7 @@ final class JRagAnswerStream private[rag] (
   private def run(): Unit =
     Using.resource(new AutoCloseable { def close(): Unit = delivered.countDown() }) { _ =>
       val called = CancelledError.attempt("JRag.askStream")(
-        Safety.safely(call(deliverSources, chunk => chunk.content.foreach(deliverChunk))).flatten
+        Safety.safely(call(deliverSources, chunk => chunk.contentDelta.foreach(deliverChunk))).flatten
       )
       // a listener's own failure decides the outcome; a cancelled call that failed reports the cancellation, whatever
       // error the interrupted call returned, and one that had already completed keeps its answer

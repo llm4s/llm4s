@@ -92,7 +92,7 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     val result = await(handle.value)
     val latest = store.latest(thread).value.get
     result.failed._2 shouldBe GraphError.DeadlineExceeded("t", Some(latest.checkpoint.id))
-    LLMError.isRecoverable(result.failed._2) shouldBe true
+    result.failed._2.isRetryable shouldBe true
     f.interrupted.toArray.toSet shouldBe Set("b", "c")
     latest.checkpoint.status shouldBe CheckpointStatus.Running
     events(store) should contain(RunEvent.RunTimedOut(RunStoppedDetails.empty))
@@ -292,9 +292,9 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
   // Decided (#2829): the marker says what is retried without anyone deciding, not whether `recover` can go on.
   it should "fail with an error nothing retries automatically, though recover continues the run" in {
     val error = GraphError.SuperstepLimitExceeded(3)
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
     org.llm4s.reliability.RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.milli).isRetryable(error) shouldBe false
     // unlike a deadline, which a worker gives back for a later attempt
-    LLMError.isRecoverable(GraphError.DeadlineExceeded("t", None)) shouldBe true
+    GraphError.DeadlineExceeded("t", None).isRetryable shouldBe true
   }
 }

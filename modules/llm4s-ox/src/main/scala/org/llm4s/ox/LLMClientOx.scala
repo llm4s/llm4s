@@ -73,7 +73,7 @@ object LLMClientOx {
   extension (flow: Flow[StreamedChunk]) {
 
     /** The text of each chunk that carries some, in order; tool-call, thinking and finish chunks are dropped. */
-    def textDeltas: Flow[String] = flow.mapConcat(_.content.filter(_.nonEmpty))
+    def textDeltas: Flow[String] = flow.mapConcat(_.contentDelta.filter(_.nonEmpty))
 
     /**
      * Runs the flow and accumulates its chunks into the `Completion` they describe (content, tool calls, thinking,

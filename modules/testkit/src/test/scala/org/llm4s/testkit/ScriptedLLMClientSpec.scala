@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import org.llm4s.types.ProviderModelTypes.ModelName
-import org.llm4s.error.{ AuthenticationError, LLMError, NonRecoverableError, RateLimitError, TimeoutError }
+import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, TimeoutError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.scalatest.EitherValues
@@ -106,7 +106,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
         e.reason shouldBe "the script has 1 reply"
         e.lastMessage shouldBe Some("user: \"b\"")
         e.context shouldBe Map("callNumber" -> "2")
-        e shouldBe a[NonRecoverableError]
+        e.isRetryable shouldBe false
         e shouldBe UnscriptedCallError(2, "the script has 1 reply", Some("user: \"b\""))
       case other => fail(s"expected an UnscriptedCallError, got $other")
     }
@@ -222,8 +222,8 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.sequence(Reply.text("abcdefghij")).withChunkSize(3)
     val chunks = ArrayBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation("q"), options)(chunks += _).value
-    chunks.flatMap(_.content).toList shouldBe List("abc", "def", "ghi", "j")
-    chunks.flatMap(_.content).mkString shouldBe "abcdefghij"
+    chunks.flatMap(_.contentDelta).toList shouldBe List("abc", "def", "ghi", "j")
+    chunks.flatMap(_.contentDelta).mkString shouldBe "abcdefghij"
     result.content shouldBe "abcdefghij"
   }
 
@@ -232,7 +232,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val chunks = ArrayBuffer.empty[StreamedChunk]
     client.streamComplete(conversation("q"), options)(chunks += _).value
     chunks.last.finishReason shouldBe Some(FinishReason.Stop)
-    chunks.last.content shouldBe None
+    chunks.last.contentDelta shouldBe None
     chunks.init.flatMap(_.finishReason) shouldBe empty
   }
 
@@ -242,10 +242,10 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
     val chunks = ArrayBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation("q"), options)(chunks += _).value
-    chunks.flatMap(_.toolCall).map(_.name).toList shouldBe List("one", "two")
-    chunks.flatMap(_.toolCall).map(_.id).toList shouldBe List("call-1-1", "call-1-2")
+    chunks.flatMap(_.toolCallDelta).map(_.name).toList shouldBe List("one", "two")
+    chunks.flatMap(_.toolCallDelta).map(_.id).toList shouldBe List("call-1-1", "call-1-2")
     chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
-    chunks.flatMap(_.content) shouldBe empty
+    chunks.flatMap(_.contentDelta) shouldBe empty
     result.toolCalls.map(_.id) shouldBe List("call-1-1", "call-1-2")
     result.finishReason shouldBe FinishReason.ToolCalls
   }

@@ -519,7 +519,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     completion.content shouldBe ""
     completion.usage shouldBe Some(noPartsUsage)
     chunks.flatMap(_.finishReason) shouldBe List(FinishReason.Length)
-    chunks.flatMap(_.content) shouldBe empty
+    chunks.flatMap(_.contentDelta) shouldBe empty
   }
 
   noContentShapes.foreach { case (body, expected, filtered) =>
@@ -530,7 +530,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
           .streamComplete(conversation("Hi"), CompletionOptions())(chunks += _),
         filtered
       ) should include(expected)
-      chunks.flatMap(_.content) shouldBe empty
+      chunks.flatMap(_.contentDelta) shouldBe empty
     }
   }
 
@@ -643,7 +643,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     ) shouldBe "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
     noContentMessage(streamOf(sse, chunks += _)) shouldBe
       "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
-    chunks.flatMap(_.content) shouldBe List("Hel") // what was delivered stays delivered
+    chunks.flatMap(_.contentDelta) shouldBe List("Hel") // what was delivered stays delivered
   }
 
   "A filtered reply" should "keep the token usage it was billed, from complete and from a stream (#2676)" in {
@@ -673,7 +673,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       case Left(e: org.llm4s.error.NetworkError) => e.message should include("finishReason")
       case other                                 => fail(s"expected a NetworkError, got $other")
     }
-    chunks.flatMap(_.content) shouldBe List("Hel")
+    chunks.flatMap(_.contentDelta) shouldBe List("Hel")
   }
 
   "An error object in a stream" should "fail it with the error its code stands for, unread past it" in {
@@ -683,11 +683,11 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       """data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
     streamOf(sse, chunks += _) match {
       case Left(e: org.llm4s.error.ServiceError) =>
-        e.httpStatus shouldBe 503
+        e.status shouldBe 503
         e.message should include("The model is overloaded.")
       case other => fail(s"expected a ServiceError, got $other")
     }
-    chunks.flatMap(_.content) shouldBe List("Hel")
+    chunks.flatMap(_.contentDelta) shouldBe List("Hel")
     val limited     = """data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}"""
     val rateLimited = streamOf(limited + "\n\n", _ => ()).left.toOption.value
     rateLimited shouldBe a[org.llm4s.error.RateLimitError]
@@ -702,12 +702,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         """data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
     streamOf(sse, chunks += _) match {
       case Left(e: org.llm4s.error.ServiceError) =>
-        e.httpStatus shouldBe 502
+        e.status shouldBe 502
         e.message should include("not JSON")
       case other => fail(s"expected a ServiceError, got $other")
     }
     // the text already delivered stays delivered; the chunk after the unreadable line is never read
-    chunks.flatMap(_.content) shouldBe List("Hel")
+    chunks.flatMap(_.contentDelta) shouldBe List("Hel")
   }
 
   it should "not be confused with a blank line or an SSE comment, which a keep-alive is: both are ignored" in {

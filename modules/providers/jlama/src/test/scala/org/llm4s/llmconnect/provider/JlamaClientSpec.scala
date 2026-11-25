@@ -167,7 +167,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
       val completion = client(new ScriptedEngine(tokens = Seq("A", "B", "C")))
         .streamComplete(hello, CompletionOptions())(chunks += _)
         .fold(e => fail(e.message), identity)
-      chunks.flatMap(_.content) shouldBe Seq("A", "B", "C")
+      chunks.flatMap(_.contentDelta) shouldBe Seq("A", "B", "C")
       chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       chunks.map(_.id).distinct shouldBe Seq(completion.id)
       completion.content shouldBe "ABC"

@@ -330,8 +330,8 @@ class AssistantErrorSpec extends AnyFlatSpec with Matchers {
 
     result.left.map(_.message) shouldBe Left("Session not found: s1")
     widened shouldBe Left(error)
-    error shouldBe a[NonRecoverableError]
-    LLMError.isRecoverable(error) shouldBe false
+    error.isRetryable shouldBe false
+    error.isRetryable shouldBe false
     error.formatted shouldBe "SessionError: Session not found: s1[component=session-manager,sessionId=s1,operation=load]"
   }
 

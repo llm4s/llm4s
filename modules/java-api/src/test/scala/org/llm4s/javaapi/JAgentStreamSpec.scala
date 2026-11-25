@@ -106,7 +106,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
   it should "carry text deltas from an agent created with streaming, and none without" in {
     val client = new Scripted(
       onChunk => {
-        onChunk(org.llm4s.llmconnect.model.StreamedChunk(id = "c", content = Some("he")))
+        onChunk(org.llm4s.llmconnect.model.StreamedChunk(id = "c", contentDelta = Some("he")))
         Right(completion("hello"))
       },
       () => Right(completion("hello"))

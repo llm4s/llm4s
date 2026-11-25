@@ -56,7 +56,7 @@ class HttpErrorMapperDeepBodySpec extends AnyFlatSpec with Matchers {
 
   "HttpErrorMapper.mapHttpError" should "return a Left with the default message for a deep top-level array" in {
     onSmallStack(Left(HttpErrorMapper.toError(400, deepArray, provider, Map.empty))) shouldBe
-      Left(ValidationError("request", default(400)))
+      Left(ValidationError("request", default(400)).withHttpStatus(400))
     onSmallStack(Left(HttpErrorMapper.toError(500, deepArray, provider, Map.empty))) shouldBe
       Left(ServiceError(500, provider, default(500)))
   }

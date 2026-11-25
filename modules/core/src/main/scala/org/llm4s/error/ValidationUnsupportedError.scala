@@ -16,8 +16,7 @@ import org.llm4s.annotation.Stable
 final case class ValidationUnsupportedError private (
   override val message: String,
   client: String
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("client" -> client)
 }
 

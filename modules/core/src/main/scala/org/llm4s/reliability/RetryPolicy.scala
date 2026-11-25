@@ -25,62 +25,34 @@ sealed trait RetryPolicy {
   def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
 
   /**
-   * Check if an error is retryable: whether the identical request is worth sending again, with nobody in the
-   * loop.
+   * Whether this policy sends the request again after `error`.
    *
-   * This is the library's one rule for automatic retry: [[ReliableClient]] applies it, and the agent graph's node
-   * retries use it too. It is derived from [[org.llm4s.error.LLMError.isRecoverable]], never wider: an error is retried
-   * only if it is a [[org.llm4s.error.RecoverableError]]. `isRecoverable` says an error may succeed if tried again,
-   * perhaps after the caller does something first; this rule keeps the part where repeating the same request is
-   * enough. A recoverable error is therefore retried unless one of three documented exceptions applies:
-   *
-   *  - '''A client-error HTTP status.''' A [[org.llm4s.error.ServiceError]] is retried only for 5xx, 429 or 408.
-   *    Any other 4xx means the request itself is wrong, so sending it unchanged cannot succeed.
-   *  - '''An [[org.llm4s.error.OptimisticLockFailure]].''' The caller must re-read the record first; the same update
-   *    fails again until it does.
-   *  - '''A [[org.llm4s.error.CircuitOpenError]].''' A circuit breaker refused the call without making it; sending
-   *    it again at once is what the open circuit is there to prevent. It is worth sending after the error's
-   *    `retryAfter`.
-   *
-   * So the retried errors are [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.TimeoutError]],
-   * [[org.llm4s.error.NetworkError]], [[org.llm4s.error.ExecutionError]], a `ServiceError` with a retryable
-   * status, and any other `RecoverableError` a module defines - such as `llm4s-agent`'s `GraphError.DeadlineExceeded` and
-   * `GraphError.ThreadBusy`. Every
-   * [[org.llm4s.error.NonRecoverableError]] is not, including [[org.llm4s.error.CancelledError]].
+   * By default it is the library's one rule, [[org.llm4s.error.LLMError.isRetryable]]: [[ReliableClient]] applies it
+   * through this method, and the agent graph's node retries use the same rule. `noRetry` retries nothing, and a
+   * [[RetryPolicy.custom custom]] policy may decide differently.
    */
-  def isRetryable(error: LLMError): Boolean = RetryPolicy.isTransient(error)
+  def isRetryable(error: LLMError): Boolean = error.isRetryable
 }
 
 object RetryPolicy {
 
-  /** The HTTP statuses worth retrying: any 5xx, 429 (rate limit) and 408 (request timeout). */
-  private[llm4s] def isRetryableStatus(status: Int): Boolean =
-    status >= 500 || status == 429 || status == 408
+  /**
+   * How long a backoff policy waits after a [[org.llm4s.error.RateLimitError]] whose provider gave no
+   * `Retry-After`: the library's own guess, longer than the first steps of a backoff because a rate-limit window
+   * rarely reopens within a second or two. A delay the provider did give (`error.retryAfter`) is used as it is.
+   */
+  val DefaultRateLimitDelay: FiniteDuration = 30.seconds
 
   /**
-   * The one rule for automatic retry; see [[RetryPolicy.isRetryable]]. It is `LLMError.isRecoverable` with three
-   * documented exceptions, and total like it: an error that is neither a `RecoverableError` nor a
-   * `NonRecoverableError` is not retried.
+   * The delay a backoff policy uses for `error` in place of its own schedule: the delay the server asked for
+   * (`error.retryAfter`), else [[DefaultRateLimitDelay]] for a rate limit. Any other error gets the policy's
+   * backoff.
    */
-  private[llm4s] def isTransient(error: LLMError): Boolean = error match {
-    case s: ServiceError          => isRetryableStatus(s.httpStatus)
-    case _: OptimisticLockFailure => false
-    case _: CircuitOpenError      => false
-    case _: RecoverableError      => true
-    case _                        => false
-  }
-
-  /**
-   * The delay the provider asked for before retrying `error`, if it gave one: a rate limit's
-   * `retryDelay` (its `Retry-After`, else [[org.llm4s.error.RateLimitError.DefaultRetryDelay RateLimitError.DefaultRetryDelay]]), or a service
-   * error's explicit `retryAfter`. A service error without one gets the policy's own backoff,
-   * not its generic default.
-   */
-  private[reliability] def serverDelay(error: LLMError): Option[FiniteDuration] = error match {
-    case re: RateLimitError => re.retryDelay
-    case se: ServiceError   => se.retryAfter
-    case _                  => None
-  }
+  private[llm4s] def serverDelay(error: LLMError): Option[FiniteDuration] =
+    error.retryAfter.orElse(error match {
+      case _: RateLimitError => Some(DefaultRateLimitDelay)
+      case _                 => None
+    })
 
   /**
    * Exponential backoff: 2^n * baseDelay.
@@ -121,13 +93,13 @@ object RetryPolicy {
   /**
    * Custom retry policy.
    *
-   * `retryableFn` defaults to the library's one retry rule, [[RetryPolicy.isRetryable]], so a policy that only
+   * `retryableFn` defaults to the library's one retry rule, [[org.llm4s.error.LLMError.isRetryable]], so a policy that only
    * customises the delay retries exactly what the other factories' policies retry.
    */
   def custom(
     attempts: Int,
     delayFn: (Int, LLMError) => FiniteDuration,
-    retryableFn: LLMError => Boolean = isTransient
+    retryableFn: LLMError => Boolean = _.isRetryable
   ): RetryPolicy = new CustomRetryPolicy(attempts, delayFn, retryableFn)
 }
 

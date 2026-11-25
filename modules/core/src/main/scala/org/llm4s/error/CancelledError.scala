@@ -20,8 +20,7 @@ final case class CancelledError private (
   message: String,
   operation: String,
   cause: Option[Throwable]
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("operation" -> operation)
 }
 
