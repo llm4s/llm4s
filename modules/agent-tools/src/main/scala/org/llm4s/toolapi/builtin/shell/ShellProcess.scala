@@ -17,7 +17,8 @@ import scala.util.Try
  *  - on every exit path - completion, timeout, or an interrupt of the calling thread (how `ToolExecutor` ends a call
  *    that timed out or was cancelled) - the process and every descendant it started are killed;
  *  - stdout and stderr are read by daemon threads into synchronised buffers, joined for a bounded time and their
- *    streams closed, so a reader blocked on a pipe that an escaped grandchild holds open never keeps the JVM alive.
+ *    streams closed, so a reader blocked on a pipe that an escaped grandchild holds open never keeps the JVM alive;
+ *    output a reader had not finished by then is reported as truncated.
  *
  * An interrupt is reported as [[ShellProcess.Interrupted]] with the thread's interrupt flag set again.
  */
@@ -54,15 +55,15 @@ private[shell] object ShellProcess {
     // scalafix:off
     try {
       val completed = process.waitFor(DurationRounding.ceilMillis(timeout), TimeUnit.MILLISECONDS)
-      val exitCode  = if (completed) process.exitValue() else -1
-      killTree(process)
-      stdout.finish()
-      stderr.finish()
+      // An exited process is not destroyed before its readers finish: destroying it closes its streams, and with them
+      // any output still in the pipe. Its descendants hold the pipes open, so they go first either way.
+      if (completed) killDescendants(process) else killTree(process)
+      val complete = stdout.finish() & stderr.finish()
       Finished(
-        exitCode = exitCode,
+        exitCode = if (completed) process.exitValue() else -1,
         stdout = stdout.text,
         stderr = stderr.text,
-        truncated = stdout.truncated || stderr.truncated,
+        truncated = !complete || stdout.truncated || stderr.truncated,
         timedOut = !completed
       )
     } catch {
@@ -81,11 +82,18 @@ private[shell] object ShellProcess {
    * Kills `process` and every process it started. The descendants are listed before the process is killed, because
    * once it has gone its children are re-parented and no longer listed as its descendants.
    */
-  private[shell] def killTree(process: Process): Unit = {
-    val descendants = Try(process.descendants().iterator().asScala.toList).getOrElse(Nil)
+  private def killTree(process: Process): Unit = {
+    val descendants = descendantsOf(process)
     process.destroyForcibly()
     descendants.foreach(handle => Try(handle.destroyForcibly()))
   }
+
+  /** Kills every process `process` started, leaving `process` itself, and so its streams, alone. */
+  private def killDescendants(process: Process): Unit =
+    descendantsOf(process).foreach(handle => Try(handle.destroyForcibly()))
+
+  private def descendantsOf(process: Process): List[ProcessHandle] =
+    Try(process.descendants().iterator().asScala.toList).getOrElse(Nil)
 
   /** One output stream, read on a daemon thread into a buffer of at most `maxSize` characters. */
   final private class Capture(stream: InputStream, maxSize: Int) {
@@ -96,8 +104,15 @@ private[shell] object ShellProcess {
 
     def start(): Unit = thread.start()
 
-    /** Waits a bounded time for the reader; the stream's own end arrives once the process tree is gone. */
-    def finish(): Unit = thread.join(ReaderJoinMillis)
+    /**
+     * Waits a bounded time for the reader; the stream's own end arrives once the process tree is gone. False when the
+     * reader is still going, so the output may be incomplete; it is then marked truncated.
+     */
+    def finish(): Boolean = {
+      thread.join(ReaderJoinMillis)
+      if (thread.isAlive) cut = true
+      !thread.isAlive
+    }
 
     def close(): Unit = { val _ = Try(stream.close()) }
 

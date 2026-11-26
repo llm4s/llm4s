@@ -31,6 +31,15 @@ class ShellProcessSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       |        System.out.println("eof");
       |        break;
       |      }
+      |      case "flood": {
+      |        int lines = Integer.parseInt(args[1]);
+      |        java.io.PrintStream out = new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), false);
+      |        java.io.PrintStream err = new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.err), false);
+      |        for (int i = 0; i < lines; i++) { out.println("out " + i); err.println("err " + i); }
+      |        out.flush();
+      |        err.flush();
+      |        break;
+      |      }
       |      case "sleep": {
       |        Files.writeString(Path.of(args[1]), Long.toString(ProcessHandle.current().pid()));
       |        Thread.sleep(120_000);
@@ -104,6 +113,32 @@ class ShellProcessSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       case other => fail(s"expected Finished, got $other")
     }
     took should be < 20.seconds
+  }
+
+  it should "keep all the output of a command that writes a lot and exits at once" in {
+    // Several at a time, so that a reader is still behind when its process exits: the end of the output is then in
+    // the pipe, and closing the streams before the readers finish would drop it.
+    val lines = 20000
+    val runs = (1 to 16).map { attempt =>
+      scala.concurrent.Future(attempt -> ShellProcess.run(child("flood", lines.toString), 60.seconds, 10000000))(
+        scala.concurrent.ExecutionContext.global
+      )
+    }
+    val outcomes = scala.concurrent.Await.result(
+      scala.concurrent.Future.sequence(runs)(implicitly, scala.concurrent.ExecutionContext.global),
+      3.minutes
+    )
+    outcomes.foreach {
+      case (attempt, f: ShellProcess.Finished) =>
+        withClue(s"run $attempt: ") {
+          f.exitCode shouldBe 0
+          f.truncated shouldBe false
+          f.stdout.linesIterator.count(_.nonEmpty) shouldBe lines
+          f.stderr.linesIterator.count(_.nonEmpty) shouldBe lines
+          f.stdout.linesIterator.toSeq.last shouldBe s"out ${lines - 1}"
+        }
+      case (attempt, other) => fail(s"run $attempt: expected Finished, got $other")
+    }
   }
 
   it should "kill the whole process tree when a command times out" in {
