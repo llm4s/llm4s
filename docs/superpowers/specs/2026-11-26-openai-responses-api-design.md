@@ -175,7 +175,8 @@ checked per model by the builder rather than inherited from the Chat Completions
   them.
 - **Verified live on 2026-11-26** (`gpt-6.1-terra`, `gpt-5.6-luna`, `store: false`): OpenAI accepts a `function_call`
   input item sent back without the reasoning item that preceded it, and returns the final answer. Slice 1's tool loop
-  needs no decision; unsealed turns can be sent as items.
+  needs no decision; unsealed turns can be sent as items. One of four runs of the luna case failed before request
+  acceptance could be told from the model not calling the tool; the case now cancels in that situation.
 - **To verify live in slice 2**: that an interleaved reply (two tool calls, each with its own reasoning item) is
   accepted back in its original order, and that a reasoning item is accepted with its `id` under `store: false`.
 - Reasoning summaries are opt-in: section key `reasoningSummary = "auto" | "concise" | "detailed"`

@@ -216,9 +216,17 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
       client.close()
 
       val completion = withClue(s"Responses complete on $model failed: ${result.swap.toOption}: ")(result.value)
-      info(s"$model reasoning tokens: ${completion.usage.flatMap(_.thinkingTokens)}")
-      completion.message.toolCalls.map(_.name) shouldBe Seq("submit_answer")
-      completion.usage.flatMap(_.thinkingTokens).exists(_ > 0) shouldBe true
+      val usage      = completion.usage
+      info(s"$model reasoning tokens: ${usage.flatMap(_.thinkingTokens)}")
+      withClue(
+        s"$model answered without the tool: content=${completion.content}, tool calls=${completion.message.toolCalls
+            .map(_.name)}: "
+      ) {
+        completion.message.toolCalls.map(_.name) shouldBe Seq("submit_answer")
+      }
+      withClue(s"$model reported no reasoning tokens, usage=$usage: ") {
+        usage.flatMap(_.thinkingTokens).exists(_ > 0) shouldBe true
+      }
       completion.adjustments shouldBe empty
     }
 
@@ -231,18 +239,25 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
       val first   = client.complete(Conversation(Seq(calculationMessage)), options)
       val firstOk = withClue(s"Responses turn 1 on $model failed: ${first.swap.toOption}: ")(first.value)
       val calls   = firstOk.message.toolCalls
-      calls should have size 1
-      // Only the function_call goes back: the reply's reasoning item is not sent in this release.
+      // The case tests the replay: a model that made no tool call leaves nothing to replay.
+      if (calls.isEmpty) {
+        client.close()
+        cancel(s"$model made no tool call on turn 1, content: ${firstOk.content}")
+      }
+      // Only the function_calls go back, one result each: the reply's reasoning item is not sent in this release.
       val turn2 = Conversation(
-        Seq(calculationMessage, AssistantMessage(None, calls), ToolMessage("recorded", calls.head.id))
+        Seq(calculationMessage, AssistantMessage(None, calls)) ++ calls.map(call => ToolMessage("recorded", call.id))
       )
       val second = client.complete(turn2, options)
       client.close()
 
-      withClue(s"Responses turn 2 on $model failed: ${second.swap.toOption}: ") {
-        second.isRight shouldBe true
+      // What is asserted is that OpenAI accepted the request; the model may answer or call the tool again.
+      val reply = withClue(s"Responses turn 2 on $model was rejected: ${second.swap.toOption}: ")(second.value)
+      withClue(
+        s"$model replied with neither content nor a tool call: content=${reply.content}, tool calls=${reply.message.toolCalls}: "
+      ) {
+        (reply.content.nonEmpty || reply.message.toolCalls.nonEmpty) shouldBe true
       }
-      second.value.content should not be empty
     }
   }
 
