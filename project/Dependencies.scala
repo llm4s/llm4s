@@ -123,6 +123,8 @@ object Versions {
   // AWS SDK
   val awsSdk        = "2.46.14"
   val opentelemetry = "1.63.0"
+  // The jackson-core opentelemetry-exporter-logging-otlp 1.63.0 declares: the OTLP/JSON marshaler needs it (#2948).
+  val opentelemetryJackson = "2.21.3"
 
   // Prometheus (1.x stable)
   val prometheus = "1.8.0"
@@ -312,6 +314,11 @@ object Deps {
   val opentelemetryApi          = "io.opentelemetry" % "opentelemetry-api"           % Versions.opentelemetry
   val opentelemetrySdk          = "io.opentelemetry" % "opentelemetry-sdk"           % Versions.opentelemetry
   val opentelemetryExporterOtlp = "io.opentelemetry" % "opentelemetry-exporter-otlp" % Versions.opentelemetry
+  // The file mode's OTLP/JSON encoding (#2948): TraceRequestMarshaler, which writes JSON through jackson-core.
+  // otlp-common comes with exporter-otlp anyway; declared so the module does not lean on a transitive dependency.
+  val opentelemetryExporterOtlpCommon =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp-common" % Versions.opentelemetry
+  val opentelemetryJacksonCore = "com.fasterxml.jackson.core" % "jackson-core" % Versions.opentelemetryJackson
   // Prometheus metrics
   val prometheusCore = "io.prometheus" % "prometheus-metrics-core"                % Versions.prometheus
   val prometheusHttp = "io.prometheus" % "prometheus-metrics-exporter-httpserver" % Versions.prometheus

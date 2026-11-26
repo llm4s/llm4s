@@ -12,6 +12,7 @@ getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comp
 getting-started/configuration.md | ca91a867d4 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.types.ProviderModelTypes.ProviderName
 getting-started/configuration.md | ef67dde531 | with | import org.llm4s.llmconnect.model._
 getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | dffedb6d3e | skip | needs llm4s-observability-otel, which llm4s-samples leaves off its classpath (UpgradeGuideSpec checks that); FileTracingSpec covers OpenTelemetryTracing.toFiles
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
 getting-started/first-example.md | 5845843420 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._

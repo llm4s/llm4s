@@ -423,25 +423,18 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
     OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
     OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
     OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna-2026-10-01") shouldBe ToolCalls.OnlyWithoutReasoning
-    OpenAIModelRules.toolsOnChatCompletions("gpt-6.1-terra") shouldBe ToolCalls.ResponsesApiOnly
-    OpenAIModelRules.toolsOnChatCompletions("GPT-6.1-TERRA") shouldBe ToolCalls.ResponsesApiOnly
-    OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6.1-terra-2026-09-08") shouldBe ToolCalls.ResponsesApiOnly
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6.1-terra") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("GPT-6.1-TERRA") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6.1-terra-2026-09-08") shouldBe ToolCalls.OnlyWithoutReasoning
     // a fine-tune is judged by its base model
     OpenAIModelRules.toolsOnChatCompletions("ft:gpt-6-luna:my-org::abc123") shouldBe ToolCalls.OnlyWithoutReasoning
     OpenAIModelRules.toolsOnChatCompletions("ft:gpt-6.1-terra-2026-09-08:my-org:custom:abc123") shouldBe
-      ToolCalls.ResponsesApiOnly
-    Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6.2-astra", "gpt-6-lunar", "gpt-6.1-terra-mini", "gpt-4o").foreach { m =>
-      withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.Unrestricted)
-    }
-  }
-
-  test("a request with tools to gpt-6.1-terra is refused, naming the Responses API") {
-    val error = OpenAIModelRules.checkTools("gpt-6.1-terra", withTool).left.value
-    error shouldBe a[org.llm4s.error.ValidationError]
-    error.message should include("Responses API")
-    error.message should include("gpt-6.1-terra")
-    OpenAIModelRules.checkTools("gpt-6.1-terra", CompletionOptions()) shouldBe Right(())
-    OpenAIModelRules.checkTools("gpt-6-luna", withTool) shouldBe Right(())
+      ToolCalls.OnlyWithoutReasoning
+    // one rule for the 5.6, 6 and 6.1 generations, whatever the variant (#2940)
+    Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-terra-2026-08-01", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra-mini")
+      .foreach(m => withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.OnlyWithoutReasoning))
+    Seq("gpt-5", "gpt-5.2", "gpt-5.60-luna", "gpt-6.2-astra", "gpt-6.10-terra", "gpt-60-luna", "gpt-4o", "o3-mini")
+      .foreach(m => withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.Unrestricted))
   }
 
   test("a request with tools to gpt-6-luna sends reasoning_effort none and reports what it overrode") {
@@ -466,6 +459,26 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
     OpenAIModelRules.forcedToolEffort("gpt-6-luna", withTool.withThinking(Thinking.Off)).map(_._2) shouldBe Some(Nil)
     // no tools, or another model: the usual effort plan applies
     OpenAIModelRules.forcedToolEffort("gpt-6-luna", CompletionOptions()) shouldBe None
-    OpenAIModelRules.forcedToolEffort("gpt-5.6-luna", withTool) shouldBe None
+    OpenAIModelRules.forcedToolEffort("gpt-4o", withTool) shouldBe None
+  }
+
+  test("a request with tools to a gpt-5.6 model or gpt-6.1-terra sends reasoning_effort none (#2940)") {
+    import org.llm4s.llmconnect.model.{ ReasoningEffort, RequestAdjustment, RequestOption }
+    Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6.1-terra").foreach { model =>
+      val reason = s"$model calls tools on Chat Completions only with reasoning_effort none"
+      withClue(model) {
+        // leaving the field out is not enough: the model's default effort is not none
+        OpenAIModelRules.forcedToolEffort(model, withTool) shouldBe Some(
+          (
+            com.openai.models.ReasoningEffort.NONE,
+            List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "model default", "none", reason))
+          )
+        )
+        OpenAIModelRules.forcedToolEffort(model, withTool.withReasoning(ReasoningEffort.Low)).map(_._2) shouldBe Some(
+          List(RequestAdjustment.Adjusted(RequestOption.Reasoning, ReasoningEffort.Low.name, "none", reason))
+        )
+        OpenAIModelRules.forcedToolEffort(model, CompletionOptions()) shouldBe None
+      }
+    }
   }
 }

@@ -2385,7 +2385,9 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
-      Deps.opentelemetryExporterOtlp
+      Deps.opentelemetryExporterOtlp,
+      Deps.opentelemetryExporterOtlpCommon,
+      Deps.opentelemetryJacksonCore
     )
   )
 
