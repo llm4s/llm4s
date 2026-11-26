@@ -18,7 +18,7 @@ final class ClientSettings {
 
   static final ClientSettings EMPTY =
       new ClientSettings(null, null, null, null, null, null, null, null, null, null, Map.of(), null,
-          ClientNetwork.EMPTY, false, null, null);
+          ClientNetwork.EMPTY, false, null, null, null, true, null);
 
   final String apiKey;
   final String model;
@@ -42,6 +42,12 @@ final class ClientSettings {
   final String entraIdClientId;
   /** Azure: the bearer tokens to authenticate with instead of an API key (#2274); {@code null} for none. */
   final AccessTokenProvider tokenProvider;
+  /** OpenAI: {@code responses} or {@code chat-completions}; {@code null} lets the client choose. */
+  final String api;
+  /** OpenAI: whether a thread keeps the model's reasoning; {@code true} unless set. */
+  final boolean keepReasoning;
+  /** OpenAI: {@code auto}, {@code concise} or {@code detailed}; {@code null} requests no summary. */
+  final String reasoningSummary;
 
   private ClientSettings(
       String apiKey,
@@ -59,7 +65,10 @@ final class ClientSettings {
       ClientNetwork network,
       boolean entraId,
       String entraIdClientId,
-      AccessTokenProvider tokenProvider) {
+      AccessTokenProvider tokenProvider,
+      String api,
+      boolean keepReasoning,
+      String reasoningSummary) {
     this.apiKey = apiKey;
     this.model = model;
     this.baseUrl = baseUrl;
@@ -76,77 +85,110 @@ final class ClientSettings {
     this.entraId = entraId;
     this.entraIdClientId = entraIdClientId;
     this.tokenProvider = tokenProvider;
+    this.api = api;
+    this.keepReasoning = keepReasoning;
+    this.reasoningSummary = reasoningSummary;
+  }
+
+  ClientSettings api(String value) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
+        tokenProvider, value, keepReasoning, reasoningSummary);
+  }
+
+  ClientSettings keepReasoning(boolean value) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
+        tokenProvider, api, value, reasoningSummary);
+  }
+
+  ClientSettings reasoningSummary(String value) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
+        tokenProvider, api, keepReasoning, value);
   }
 
   ClientSettings apiKey(String value) {
     return new ClientSettings(value, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings model(String value) {
     return new ClientSettings(apiKey, value, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings baseUrl(String value) {
     return new ClientSettings(apiKey, model, value, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings organization(String value) {
     return new ClientSettings(apiKey, model, baseUrl, value, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings endpoint(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, value, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings apiVersion(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, value, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings contextWindow(int value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, value,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings reserveCompletion(int value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow, value,
-        requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId, tokenProvider);
+        requestTimeout, streamTimeout, headers, metrics, network, entraId, entraIdClientId, tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings requestTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, value, streamTimeout, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings streamTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, value, headers, metrics, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings metrics(MetricsCollector value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, value, network, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   ClientSettings network(ClientNetwork value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, headers, metrics, value, entraId, entraIdClientId,
-        tokenProvider);
+        tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   /**
@@ -155,13 +197,15 @@ final class ClientSettings {
    */
   ClientSettings entraId(String clientId) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, true, clientId, null);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, true, clientId, null,
+        api, keepReasoning, reasoningSummary);
   }
 
   /** Bearer tokens from {@code value}; clears {@link #entraId}. */
   ClientSettings tokenProvider(AccessTokenProvider value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, false, null, value);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network, false, null, value,
+        api, keepReasoning, reasoningSummary);
   }
 
   /** {@code name} set to {@code value}, or removed when {@code value} is {@code null}. */
@@ -174,7 +218,8 @@ final class ClientSettings {
     }
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
         reserveCompletion, requestTimeout, streamTimeout, Collections.unmodifiableMap(next), metrics, network,
-        entraId, entraIdClientId, tokenProvider);
+        entraId, entraIdClientId, tokenProvider,
+        api, keepReasoning, reasoningSummary);
   }
 
   /**
@@ -192,6 +237,9 @@ final class ClientSettings {
     if (organization != null) fields.add("organization=" + organization);
     if (contextWindow != null) fields.add("contextWindow=" + contextWindow);
     if (reserveCompletion != null) fields.add("reserveCompletion=" + reserveCompletion);
+    if (api != null) fields.add("api=" + api);
+    if (reasoningSummary != null) fields.add("reasoningSummary=" + reasoningSummary);
+    if (!keepReasoning) fields.add("keepReasoning=false");
     if (requestTimeout != null) fields.add("requestTimeout=" + requestTimeout);
     if (streamTimeout != null) fields.add("streamTimeout=" + streamTimeout);
     if (!headers.isEmpty()) fields.add("headers=" + headers.keySet());

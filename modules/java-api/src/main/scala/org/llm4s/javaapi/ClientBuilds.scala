@@ -11,7 +11,9 @@ import org.llm4s.llmconnect.config.{
   GeminiConfig,
   OllamaConfig,
   OpenAICompatibleConfig,
+  OpenAIApi,
   OpenAIConfig,
+  OpenAIReasoningSummary,
   ProviderConfig,
   ProviderTimeouts
 }
@@ -91,7 +93,23 @@ private[javaapi] object ClientBuilds {
       )(using resolver)
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
-    } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
+      api <- present(s.api).fold[Result[Option[OpenAIApi]]](Right(None))(v =>
+        OpenAIApi.parse(v).left.map(e => ValidationError.invalid("api", e.message)).map(Some(_))
+      )
+      summary <- present(s.reasoningSummary).fold[Result[Option[OpenAIReasoningSummary]]](Right(None))(v =>
+        OpenAIReasoningSummary
+          .parse(v)
+          .left
+          .map(e => ValidationError.invalid("reasoningSummary", e.message))
+          .map(Some(_))
+      )
+    } yield config
+      .withContextWindow(sized._1)
+      .withReserveCompletion(sized._2)
+      .withTimeouts(timeouts)
+      .withApi(api)
+      .withReasoningSummary(summary)
+      .withKeepReasoning(s.keepReasoning)
 
   def anthropicConfig(s: ClientSettings): Result[ProviderConfig] =
     for {

@@ -3,6 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.javaapi.usage.ClientBuilderCheck
+import org.llm4s.llmconnect.config.{ OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.testkit.LocalProviderTestServer.{ anthropicMessage, openAICompletion, sendJsonResponse, withServer }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -328,5 +329,70 @@ class ClientBuildersSpec extends AnyFlatSpec with Matchers {
     )
     seen.foreach(r => withClue(r)(r._3 shouldBe Outcome.Success))
     Llm4s.ollama().model("llama3.2").metrics(metrics).toString should include("metrics=")
+  }
+
+  "the OpenAI builder" should "leave the API, the reasoning summary and keepReasoning unspecified until set" in {
+    val config = fromBuilder(ClientBuilds.openAiConfig(ClientSettings.EMPTY.apiKey("k").model("gpt-4o")))
+      .asInstanceOf[OpenAIConfig]
+    (config.api, config.reasoningSummary, config.keepReasoning) shouldBe ((None, None, true))
+  }
+
+  it should "pass the API, the reasoning summary and keepReasoning to the config" in {
+    val settings                  = ClientSettings.EMPTY.apiKey("k").model("gpt-4o")
+    def config(s: ClientSettings) = fromBuilder(ClientBuilds.openAiConfig(s)).asInstanceOf[OpenAIConfig]
+    config(settings.api("chat-completions")).api shouldBe Some(OpenAIApi.ChatCompletions)
+    config(settings.api("responses")).api shouldBe Some(OpenAIApi.Responses)
+    config(settings.api(" responses ")).api shouldBe Some(OpenAIApi.Responses)
+    config(settings.api(null)).api shouldBe None
+    config(settings.api(" ")).api shouldBe None
+    config(settings.reasoningSummary("auto")).reasoningSummary shouldBe Some(OpenAIReasoningSummary.Auto)
+    config(settings.reasoningSummary("concise")).reasoningSummary shouldBe Some(OpenAIReasoningSummary.Concise)
+    config(settings.reasoningSummary("detailed")).reasoningSummary shouldBe Some(OpenAIReasoningSummary.Detailed)
+    config(settings.reasoningSummary(null)).reasoningSummary shouldBe None
+    config(settings.keepReasoning(false)).keepReasoning shouldBe false
+    config(settings.keepReasoning(false).keepReasoning(true)).keepReasoning shouldBe true
+  }
+
+  it should "make the config application.conf makes from the same values" in {
+    fromBuilder(
+      ClientBuilds.openAiConfig(
+        ClientSettings.EMPTY
+          .apiKey("k")
+          .model("gpt-4o")
+          .api("chat-completions")
+          .reasoningSummary("detailed")
+          .keepReasoning(false)
+      )
+    ) shouldBe fromConfig(
+      """p { provider = openai, model = "gpt-4o", apiKey = k, api = "chat-completions",
+        |  reasoningSummary = "detailed", keepReasoning = false }""".stripMargin,
+      "p"
+    )
+  }
+
+  it should "name a bad api or reasoningSummary as VALIDATION from build(), listing the valid values" in {
+    def error(result: LlmResult[JLlmClient]): (LlmErrorKind, String) =
+      (result.getError().getKind, result.getError().getMessage)
+    val base = Llm4s.openAi().apiKey("k").model("gpt-4o")
+    error(base.api("chat").build()) shouldBe
+      (
+        (
+          LlmErrorKind.VALIDATION,
+          "Field 'api' is invalid: Unknown OpenAI api 'chat': expected 'responses' or 'chat-completions'"
+        )
+      )
+    error(base.reasoningSummary("long").build()) shouldBe
+      (
+        (
+          LlmErrorKind.VALIDATION,
+          "Field 'reasoningSummary' is invalid: Unknown OpenAI reasoningSummary 'long': expected 'auto', 'concise' or 'detailed'"
+        )
+      )
+    base.api("responses").reasoningSummary("auto").keepReasoning(false).build().isSuccess shouldBe true
+  }
+
+  it should "show the settings it was given in toString" in {
+    Llm4s.openAi().model("m").api("chat-completions").reasoningSummary("auto").keepReasoning(false).toString shouldBe
+      "OpenAiClientBuilder(model=m, api=chat-completions, reasoningSummary=auto, keepReasoning=false)"
   }
 }

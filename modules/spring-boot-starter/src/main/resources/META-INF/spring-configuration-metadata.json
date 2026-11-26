@@ -67,6 +67,25 @@
       "description": "OpenAI only: the organisation id."
     },
     {
+      "name": "llm4s.api",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "OpenAI only: the API to call, responses or chat-completions. Unset lets the client choose: the Responses API for a model the registry lists for it on api.openai.com, Chat Completions otherwise."
+    },
+    {
+      "name": "llm4s.keep-reasoning",
+      "type": "java.lang.Boolean",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "OpenAI only: whether a thread keeps the model's reasoning across requests on the Responses API.",
+      "defaultValue": true
+    },
+    {
+      "name": "llm4s.reasoning-summary",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "OpenAI only: the reasoning summary to ask the Responses API for: auto, concise or detailed. Unset asks for none."
+    },
+    {
       "name": "llm4s.context-window",
       "type": "java.lang.Integer",
       "sourceType": "org.llm4s.spring.Llm4sProperties",

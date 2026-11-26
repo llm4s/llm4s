@@ -52,11 +52,26 @@ class OpenAiSpec internal constructor() : ClientSpec() {
     /** The OpenAI organization ID, sent as the `OpenAI-Organization` header. */
     var organization: String? = null
 
+    /**
+     * Which of OpenAI's APIs to call: `"responses"` or `"chat-completions"`. `null`, the default, lets the client
+     * choose; any other value makes the build fail with a `VALIDATION` error.
+     */
+    var api: String? = null
+
+    /** Whether a conversation keeps the model's reasoning across requests on the Responses API; `null` is `true`. */
+    var keepReasoning: Boolean? = null
+
+    /** The reasoning summary to ask the Responses API for: `"auto"`, `"concise"` or `"detailed"`; `null` asks for none. */
+    var reasoningSummary: String? = null
+
     internal fun toBuilder(): OpenAiClientBuilder {
         var builder = JLlm4s.openAi().apiKey(apiKey).model(model).baseUrl(baseUrl).organization(organization)
             .requestTimeout(requestTimeoutJava).streamTimeout(streamTimeoutJava).metrics(metrics)
         contextWindow?.let { builder = builder.contextWindow(it) }
         reserveCompletion?.let { builder = builder.reserveCompletion(it) }
+        api?.let { builder = builder.api(it) }
+        keepReasoning?.let { builder = builder.keepReasoning(it) }
+        reasoningSummary?.let { builder = builder.reasoningSummary(it) }
         return builder
     }
 }

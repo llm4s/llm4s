@@ -176,6 +176,31 @@ class OptionsAndClientDslTest {
     }
 
     @Test
+    fun `the OpenAI block passes the API, the reasoning summary and keepReasoning only when set`() {
+        val unset = OpenAiSpec().apply { apiKey = "k"; model = "gpt-4o" }
+        assertEquals(JLlm4s.openAi().apiKey("k").model("gpt-4o").toString(), unset.toBuilder().toString())
+
+        val set = OpenAiSpec().apply {
+            apiKey = "k"; model = "gpt-4o"; api = "chat-completions"; keepReasoning = false; reasoningSummary = "auto"
+        }
+        assertEquals(
+            JLlm4s.openAi().apiKey("k").model("gpt-4o").api("chat-completions").keepReasoning(false)
+                .reasoningSummary("auto").toString(),
+            set.toBuilder().toString(),
+        )
+    }
+
+    @Test
+    fun `a bad api or reasoning summary throws LLMException naming the field`() {
+        val api = assertFailsWith<LLMException> { Llm4s.openAi { apiKey = "k"; model = "gpt-4o"; api = "chat" } }
+        assertTrue(api.message!!.contains("api") && api.message!!.contains("chat-completions"), api.message)
+        val summary = assertFailsWith<LLMException> {
+            Llm4s.openAi { apiKey = "k"; model = "gpt-4o"; reasoningSummary = "long" }
+        }
+        assertTrue(summary.message!!.contains("reasoningSummary") && summary.message!!.contains("detailed"), summary.message)
+    }
+
+    @Test
     fun `a required field left out throws LLMException naming it`() {
         val missing = assertFailsWith<LLMException> { Llm4s.openAi { apiKey = "k" } }
         assertTrue(missing.message!!.contains("model"), missing.message)
