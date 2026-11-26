@@ -192,10 +192,11 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 Every token read stays in context for the rest of the session, so read narrowly.
 - **Locate, then read a range.** `grep -n` first, then `sed -n 'a,bp'` or Read with `offset`/`limit`. Never print all of `CHANGELOG.md`, `build.sbt` (1.6k), `docs/reference/migration.md` or a design document.
 - **Don't re-read** a file already read in this session unless it has changed since. Keep the line numbers from the first read.
-- **CHANGELOG.md: never read it whole.** `[Unreleased]` is the net change since the last release, organised by area; `grep -n '^## \|^### ' CHANGELOG.md | head -20` lists the areas. Grep the area heading and the issue number, then Edit.
-  - Add an entry to its area's list, starting **Added**, **Changed**, **Removed** or **Fixed**. Never create a duplicate heading. A breaking change also gets one line under `### Breaking changes`.
-  - An entry is 1-2 lines: the user-visible change plus the issue and design-record links. Detail goes in the design records and `docs/reference/migration.md`.
-  - A fix or follow-up to something not yet released edits that feature's existing entry (grep its issue number) or adds nothing. It never adds a new entry.
+- **Changelog: write a fragment, never edit CHANGELOG.md.** An entry is its own file, `changelog.d/<area>/<issue>.md`, so PRs in one area never conflict; the release folds them into `[Unreleased]` (`scripts/changelog-fragments.sh assemble`). The format is in `changelog.d/README.md`. Never read CHANGELOG.md whole.
+  - Areas: `core`, `providers`, `observability`, `agent-runtime`, `tools`, `embeddings-rag`, `configuration`, `build-tooling`. The file holds the entry as it will read: `- **Added**` / `**Changed**` / `**Removed**` / `**Fixed**`, a continuation line indented two spaces, linking `[#N](https://github.com/llm4s/llm4s/issues/N)`. A breaking change adds front matter `breaking: <line>` that links its `docs/reference/migration.md#...` note.
+  - An entry is 1-2 lines (at most 900 characters): the user-visible change plus the issue and design-record links; relative links are from the repository root. Detail goes in the design records and `docs/reference/migration.md`.
+  - A fix or follow-up to something not yet released edits that issue's fragment, or its entry already under `[Unreleased]` (`grep -rn '#N\b' changelog.d CHANGELOG.md`), or adds nothing. It never adds a new entry.
+  - `scripts/changelog-fragments.sh check` (Quick Checks, `scripts/check-docs.sh`) fails a malformed fragment.
 - **Typed agent runtime design:** `docs/design/typed-agent-runtime-design.md` holds the model and roadmap, with one file per slice (§4.2 onwards) under `docs/design/typed-agent-runtime/`. Open only the § you need.
 - **Filter command output at the source:**
   - sbt: `... 2>&1 | tail -40`, or `grep -E '\[error\]|\*\*\* FAILED|Tests: |Failed tests'`.

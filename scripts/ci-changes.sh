@@ -47,6 +47,7 @@ BUILD=(
 NONCODE=(
   '^docs/'
   '^[^/]+\.md$'
+  '^changelog\.d/'
   '^\.github/'
   '^scripts/'
   '^hooks/'

@@ -100,6 +100,7 @@ expect 'docs only'             'docs'                                    "touchp
 expect 'a top-level markdown'  'docs'                                    "touchp CONTRIBUTING.md"
 expect 'a guide a consumer checks' 'docs consumers'                      "touchp docs/guide/quarkus.md"
 expect 'a ScalaDoc script'     'docs'                                    "touchp scripts/check-scaladoc-warnings.sh"
+expect 'a changelog fragment'  'none'                                    "touchp changelog.d/core/1.md"
 expect 'another script'        'none'                                    "touchp scripts/check-doc-seo.sh"
 expect 'a consumer script'     'consumers'                               "touchp scripts/check-bom-consumers.sh"
 expect 'another workflow'      'none'                                    "touchp .github/workflows/pages.yml"
