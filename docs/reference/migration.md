@@ -132,6 +132,18 @@ From 0.7.0 to 1.0.0, [an error's `provider` is a `ProviderId`](#an-errors-provid
 source break, and three behaviour changes:
 [a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
 
+## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
+
+Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;
+`VaultSettings` and `AwsSecretsManagerSettings` gain `withCleartext`.
+
+| Before (1.0.0) | After |
+|---|---|
+| `VaultSettings("http://vault.internal:8200", ...)` and `withEndpoint("http://...")` were accepted for any host | A `ConfigurationError` unless the host is loopback (`localhost`, `127.0.0.0/8`, `::1`). Use `https`, or add `.withCleartext(true)` to send the token or credentials unencrypted on purpose |
+| `https://user:password@vault...` was accepted and printed by `toString` | A `ConfigurationError`; the HTTP client never used the user info. Remove it |
+| An AWS secret whose `SecretString` is a JSON object, read without `withField`, was sent whole as the API key | A `ConfigurationError` naming the object's keys. Add `.withField("apiKey")` with the key that holds the API key |
+| A failed read was tried again by the very next `current()` | The failure is returned to every caller for 1 second (a retryable error) or 5 seconds (any other), then the next call reads again. A caller interrupted while waiting gets a `CancelledError` |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- `llm4s-secrets-vault` and `llm4s-secrets-aws` (experimental), behaviour: an `http://` Vault address or AWS endpoint whose host is not loopback is refused unless the settings call `withCleartext(true)`, as is user info in either; a JSON-object `SecretString` read without `withField` is a `ConfigurationError`; and a failed read is shared for 1 or 5 seconds, not retried by the next call
+  ([migration](docs/reference/migration.md#secret-providers-refuse-cleartext-http-and-a-json-object-secret-without-a-field-and-share-a-failed-read-3102)) [#3102](https://github.com/llm4s/llm4s/issues/3102).
+
+### Configuration
+
+- **Fixed** `VaultApiKeyProvider` and `AwsSecretsManagerApiKeyProvider` during a store outage: the callers queued behind a failed read share its failure instead of each waiting out their own timeout in turn, a cancelled caller leaves at once with a `CancelledError`, and no monitor is held across the read (they share `CachingAccessTokenProvider`'s cache) [#3102](https://github.com/llm4s/llm4s/issues/3102).
+- **Fixed** `AwsSecretsManagerApiKeyProvider` no longer sends a whole JSON key/value secret to the vendor as the API key when `withField` is not set: it is a `ConfigurationError` naming the object's keys [#3102](https://github.com/llm4s/llm4s/issues/3102).
+- **Changed** `VaultSettings` and `AwsSecretsManagerSettings` refuse cleartext `http` to a non-loopback host (`withCleartext(true)` allows it) and user info, and no `toString` or error prints a password given in the URL [#3102](https://github.com/llm4s/llm4s/issues/3102).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

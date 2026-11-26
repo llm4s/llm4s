@@ -198,8 +198,8 @@ until the first `current()`. As with Vault, `apply(settings, httpClient)` takes 
 
 ## When the key is read
 
-The two providers behave the same way (`VaultApiKeyProvider.scala:57-65`,
-`AwsSecretsManagerApiKeyProvider.scala:67-76`).
+The two providers behave the same way (`VaultApiKeyProvider.scala:61-66`,
+`AwsSecretsManagerApiKeyProvider.scala:72-77`).
 Both sit on the single-flight cache that `CachingAccessTokenProvider` uses.
 
 - **Lazily.** The first `current()` reads the key, on the request path. Building the provider reads nothing.
