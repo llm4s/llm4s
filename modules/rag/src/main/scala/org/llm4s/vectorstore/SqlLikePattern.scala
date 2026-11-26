@@ -11,7 +11,7 @@ package org.llm4s.vectorstore
  * on, so even an escaped `Doc-A-chunk-` would match - and delete - `doc-a-chunk-0`. `GLOB` is
  * case-sensitive.
  */
-private[vectorstore] object SqlLikePattern {
+private[llm4s] object SqlLikePattern {
 
   /**
    * The `ESCAPE` clause that goes with [[prefix]]: one backslash, as an `E''` literal. A plain `'\'` is one

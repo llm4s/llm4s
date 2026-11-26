@@ -4,6 +4,7 @@ import org.llm4s.util.Redaction
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
+import org.llm4s.vectorstore.SqlLikePattern
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -114,7 +115,7 @@ final class PgCollectionStore(
 
   override def list(pattern: CollectionPattern): Result[Seq[Collection]] = Try {
     withConnection { conn =>
-      val (whereClause, params) = patternToSql(pattern)
+      val (whereClause, params) = PgCollectionStore.patternToSql(pattern)
       val sql =
         s"SELECT id, path, parent_path, queryable_by, is_leaf, metadata FROM llm4s_collections WHERE $whereClause ORDER BY path"
 
@@ -137,7 +138,7 @@ final class PgCollectionStore(
     pattern: CollectionPattern
   ): Result[Seq[Collection]] = Try {
     withConnection { conn =>
-      val (patternClause, patternParams) = patternToSql(pattern)
+      val (patternClause, patternParams) = PgCollectionStore.patternToSql(pattern)
 
       val sql = if (auth.isAdmin) {
         s"""SELECT id, path, parent_path, queryable_by, is_leaf, metadata
@@ -419,14 +420,6 @@ final class PgCollectionStore(
 
   // Helper methods
 
-  private def patternToSql(pattern: CollectionPattern): (String, Seq[String]) = pattern match {
-    case CollectionPattern.All                       => ("TRUE", Seq.empty)
-    case CollectionPattern.Exact(path)               => ("path = ?", Seq(path.value))
-    case CollectionPattern.ImmediateChildren(parent) => ("parent_path = ?", Seq(parent.value))
-    case CollectionPattern.AllDescendants(prefix) =>
-      ("(path = ? OR path LIKE ?)", Seq(prefix.value, s"${prefix.value}/%"))
-  }
-
   private def validatePermissionsNotLoosened(
     parent: Set[PrincipalId],
     child: Set[PrincipalId]
@@ -498,4 +491,25 @@ final class PgCollectionStore(
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(getConnection())(f)
+}
+
+private[pg] object PgCollectionStore {
+
+  /**
+   * The `WHERE` clause and parameters selecting the collections `pattern` matches.
+   *
+   * `AllDescendants` escapes the prefix before using it in `LIKE`: `_` is a legal path character and a
+   * `LIKE` wildcard, so `tenant_1/%` also matched `tenant11/...` and `tenant-1/...` (#2989), unlike the
+   * exact in-memory [[CollectionPattern.matches]].
+   */
+  def patternToSql(pattern: CollectionPattern): (String, Seq[String]) = pattern match {
+    case CollectionPattern.All                       => ("TRUE", Seq.empty)
+    case CollectionPattern.Exact(path)               => ("path = ?", Seq(path.value))
+    case CollectionPattern.ImmediateChildren(parent) => ("parent_path = ?", Seq(parent.value))
+    case CollectionPattern.AllDescendants(prefix) =>
+      (
+        s"(path = ? OR path LIKE ? ${SqlLikePattern.EscapeClause})",
+        Seq(prefix.value, SqlLikePattern.prefix(s"${prefix.value}/"))
+      )
+  }
 }
