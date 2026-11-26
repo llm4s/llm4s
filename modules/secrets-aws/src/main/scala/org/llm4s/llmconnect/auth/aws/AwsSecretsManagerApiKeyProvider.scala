@@ -128,13 +128,16 @@ final class AwsSecretsManagerApiKeyProvider private (
           .map(_.trim)
           .filter(_.nonEmpty)
           .toRight(failure(settings.field.fold("has a blank SecretString")(f => s"has no non-blank string field '$f'")))
-          .filterOrElse(
-            _ => objectKeys.isEmpty,
-            failure(
-              s"is a JSON object (keys: ${objectKeys.getOrElse(Seq.empty).mkString(", ")}), not a key: " +
-                "choose the field that holds the API key with withField"
-            )
-          )
+          .flatMap { key =>
+            objectKeys.fold[Result[String]](Right(key)) { keys =>
+              Left(
+                failure(
+                  s"is a JSON object (keys: ${keys.mkString(", ")}), not a key: " +
+                    "choose the field that holds the API key with withField"
+                )
+              )
+            }
+          }
           .flatMap { key =>
             // A line break in a header value would be refused by the HTTP client, or split the header.
             if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
