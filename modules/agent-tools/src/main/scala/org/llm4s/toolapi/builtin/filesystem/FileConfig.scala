@@ -203,8 +203,9 @@ object FileConfig {
  * allowed directory is written through. The tool writes to the resolved path.
  *
  * @param allowedPaths Paths where writing is allowed (required for safety)
- * @param maxFileSize Maximum file size to write in bytes
- * @param allowOverwrite Whether to allow overwriting existing files
+ * @param maxFileSize Maximum file size to write in bytes: the size of the file after the write, so an append is
+ *                    refused when the existing file plus the new content would exceed it
+ * @param allowOverwrite Whether to allow overwriting existing files (an overwrite replaces the file atomically)
  * @param createDirectories Whether to create parent directories if they don't exist
  */
 case class WriteConfig(

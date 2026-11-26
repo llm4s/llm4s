@@ -101,9 +101,10 @@ object ListDirectoryTool {
     ).withHandler { extractor =>
       for {
         pathStr <- extractor.getString("path")
-        maxEntries    = extractor.getInt("max_entries").fold(_ => MaxEntries, identity).min(MaxEntries)
-        includeHidden = extractor.getBoolean("include_hidden").fold(_ => false, identity)
-        result <- listDirectory(pathStr, maxEntries, includeHidden, config).left.map(ToolHandlerError.failed)
+        // absent or null is the default; a wrong type refuses the call
+        maxEntries    <- extractor.getOptionalInt("max_entries").map(_.getOrElse(MaxEntries).min(MaxEntries))
+        includeHidden <- extractor.getOptionalBoolean("include_hidden").map(_.getOrElse(false))
+        result        <- listDirectory(pathStr, maxEntries, includeHidden, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
 

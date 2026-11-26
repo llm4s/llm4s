@@ -4,9 +4,22 @@ import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
 
-import java.nio.ByteBuffer
-import java.nio.file.{ FileAlreadyExistsException, Files, LinkOption, Path, Paths, StandardOpenOption }
-import scala.util.{ Try, Using }
+import java.nio.{ ByteBuffer, CharBuffer }
+import java.nio.channels.{ FileChannel, WritableByteChannel }
+import java.nio.charset.{ CharacterCodingException, Charset, CodingErrorAction }
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{
+  FileAlreadyExistsException,
+  FileSystemException,
+  Files,
+  LinkOption,
+  Path,
+  Paths,
+  StandardCopyOption,
+  StandardOpenOption
+}
+import java.util.UUID
+import scala.util.{ Failure, Success, Try, Using }
 
 /**
  * Result from writing a file.
@@ -94,9 +107,10 @@ object WriteFileTool {
       for {
         pathStr <- extractor.getString("path")
         content <- extractor.getString("content")
-        append   = extractor.getBoolean("append").fold(_ => false, identity)
-        encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
-        result <- writeFile(pathStr, content, append, encoding, config).left.map(ToolHandlerError.failed)
+        // absent or null is the default; a wrong type refuses the call, so `"append": "true"` never overwrites
+        append   <- extractor.getOptionalBoolean("append").map(_.getOrElse(false))
+        encoding <- extractor.getOptionalString("encoding").map(_.getOrElse("UTF-8"))
+        result   <- writeFile(pathStr, content, append, encoding, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
 
@@ -118,15 +132,21 @@ object WriteFileTool {
             s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}"
           )
         case Some(real) =>
-          Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
+          Try(Charset.forName(encodingStr)).toEither.left
             .map(_ => s"Unsupported encoding: $encodingStr")
-            .map(content.getBytes)
+            .flatMap(charset => encode(content, charset))
             .flatMap { contentBytes =>
+              val fileExists = Files.exists(real, LinkOption.NOFOLLOW_LINKS)
+              // the size the file will have: an append adds to what is already there
+              val existing = if (append && fileExists) Try(Files.size(real)).getOrElse(0L) else 0L
               if (contentBytes.length > config.maxFileSize) {
                 Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")
+              } else if (existing + contentBytes.length > config.maxFileSize) {
+                Left(
+                  s"File would be too large: $existing bytes plus ${contentBytes.length} appended " +
+                    s"(max: ${config.maxFileSize} bytes)"
+                )
               } else {
-                val fileExists = Files.exists(real)
-
                 if (fileExists && !append && !config.allowOverwrite) {
                   Left(s"File already exists and overwrite is not allowed: $pathStr")
                 } else {
@@ -155,33 +175,87 @@ object WriteFileTool {
     }
   }
 
-  /** Opens the checked final component atomically, without following a link inserted after resolution. */
+  /** The content in `charset`, refused when a character has no encoding in it rather than written as `?`. */
+  private def encode(content: String, charset: Charset): Either[String, Array[Byte]] =
+    Try {
+      val encoded = charset
+        .newEncoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .encode(CharBuffer.wrap(content))
+      val bytes = new Array[Byte](encoded.remaining())
+      encoded.get(bytes)
+      bytes
+    }.toEither.left.map {
+      case _: CharacterCodingException =>
+        s"Content cannot be encoded as ${charset.name}: it contains characters ${charset.name} cannot represent"
+      case e => s"Failed to encode content as ${charset.name}: ${e.getMessage}"
+    }
+
+  /**
+   * Writes the checked final component without following a link inserted after resolution, and returns whether the
+   * file was created.
+   *
+   *  - A new file is created with `CREATE_NEW`, so a file or link that appeared since the check is not written
+   *    through. If the write fails, the partial file is removed.
+   *  - An overwrite is staged: the content goes to a new temporary file in the same directory, which then replaces
+   *    the target in one atomic rename. A failed or interrupted write leaves the original whole and no temporary
+   *    file behind. The replacement keeps the original's POSIX permissions where the file system has them.
+   *  - An append adds to the file in place (`APPEND`), so concurrent appends are not lost; it is not atomic.
+   */
   private[builtin] def writeResolved(
     real: Path,
     content: Array[Byte],
     append: Boolean,
     allowOverwrite: Boolean
-  ): Boolean = {
-    val (channel, created) =
-      Try {
-        (
-          Files.newByteChannel(
-            real,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.CREATE_NEW,
-            LinkOption.NOFOLLOW_LINKS
-          ),
-          true
-        )
-      }.recover {
-        case _: FileAlreadyExistsException if append || allowOverwrite =>
-          val mode = if (append) StandardOpenOption.APPEND else StandardOpenOption.TRUNCATE_EXISTING
-          (Files.newByteChannel(real, StandardOpenOption.WRITE, mode, LinkOption.NOFOLLOW_LINKS), false)
-      }.get
-    Using.resource(channel) { openChannel =>
-      val bytes = ByteBuffer.wrap(content)
-      while (bytes.hasRemaining) openChannel.write(bytes)
-      created
+  ): Boolean =
+    Try(
+      Files.newByteChannel(real, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW, LinkOption.NOFOLLOW_LINKS)
+    ) match {
+      case Success(channel) =>
+        Try(Using.resource(channel)(writeAll(_, content))) match {
+          case Success(_) => true
+          case Failure(e) =>
+            Try(Files.deleteIfExists(real))
+            Failure(e).get
+        }
+      case Failure(_: FileAlreadyExistsException) if append =>
+        Using.resource(
+          Files.newByteChannel(real, StandardOpenOption.WRITE, StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS)
+        )(writeAll(_, content))
+        false
+      case Failure(_: FileAlreadyExistsException) if allowOverwrite =>
+        replace(real, content).get
+        false
+      case Failure(e) => Failure(e).get
     }
+
+  /** Replaces the regular file `real` with `content`: writes a temporary sibling and renames it over `real`. */
+  private def replace(real: Path, content: Array[Byte]): Try[Unit] =
+    Try(Files.readAttributes(real, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)).flatMap { attributes =>
+      if (!attributes.isRegularFile)
+        Failure(new FileSystemException(real.toString, null, "not a regular file, so it is not replaced"))
+      else {
+        val permissions = Try(Files.getPosixFilePermissions(real, LinkOption.NOFOLLOW_LINKS)).toOption
+        val temp        = real.resolveSibling(s".${real.getFileName}.llm4s-${UUID.randomUUID()}.tmp")
+        val staged = Try {
+          Using.resource(
+            FileChannel.open(temp, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW, LinkOption.NOFOLLOW_LINKS)
+          ) { channel =>
+            writeAll(channel, content)
+            channel.force(true)
+          }
+          permissions.foreach(p => Try(Files.setPosixFilePermissions(temp, p)))
+          Files.move(temp, real, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+          ()
+        }
+        if (staged.isFailure) Try(Files.deleteIfExists(temp))
+        staged
+      }
+    }
+
+  private def writeAll(channel: WritableByteChannel, content: Array[Byte]): Unit = {
+    val bytes = ByteBuffer.wrap(content)
+    while (bytes.hasRemaining) channel.write(bytes)
   }
 }
