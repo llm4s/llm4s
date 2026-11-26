@@ -3,14 +3,12 @@ package org.llm4s.toolapi.builtin.shell
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.builtin.filesystem.{ FileConfig, PathPolicy }
 import org.llm4s.types.Result
-import org.llm4s.util.DurationRounding
 import upickle.default._
 
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.file.{ Path, Paths }
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.collection.mutable
 import scala.util.Try
@@ -576,7 +574,6 @@ object ShellTool {
 
     Try {
       val processBuilder = new ProcessBuilder(tokens: _*)
-        .redirectErrorStream(false)
 
       // Set working directory if configured
       config.workingDirectory.foreach(dir => processBuilder.directory(new File(dir)))
@@ -590,101 +587,24 @@ object ShellTool {
       }
       config.environment.foreach { case (k, v) => environment.put(k, v) }
 
-      val process = processBuilder.start()
-
-      // Read stdout and stderr in parallel threads with size limits
-      val stdoutBuilder             = new StringBuilder
-      val stderrBuilder             = new StringBuilder
-      @volatile var stdoutTruncated = false
-      @volatile var stderrTruncated = false
-
-      val stdoutReader = new Thread(() =>
-        readStreamSafely(
-          process.getInputStream,
-          stdoutBuilder,
-          config.maxOutputSize,
-          () => stdoutTruncated = true
-        )
-      )
-
-      val stderrReader = new Thread(() =>
-        readStreamSafely(
-          process.getErrorStream,
-          stderrBuilder,
-          config.maxOutputSize,
-          () => stderrTruncated = true
-        )
-      )
-
-      stdoutReader.start()
-      stderrReader.start()
-
-      // Wait for process to complete with timeout
-      val completed = process.waitFor(DurationRounding.ceilMillis(config.timeout), TimeUnit.MILLISECONDS)
-
-      val (exitCode, timedOut) = if (!completed) {
-        process.destroyForcibly()
-        (-1, true)
-      } else {
-        (process.exitValue(), false)
+      ShellProcess.run(processBuilder, config.timeout, config.maxOutputSize)
+    }.toEither.left
+      .map(e => s"Command execution failed: ${e.getMessage}")
+      .flatMap {
+        case ShellProcess.Interrupted =>
+          Left("Command interrupted: the call was cancelled or timed out, and the command was stopped")
+        case f: ShellProcess.Finished =>
+          Right(
+            ShellResult(
+              command = originalCommand,
+              exitCode = f.exitCode,
+              stdout = f.stdout,
+              stderr = f.stderr,
+              executionTime = (System.currentTimeMillis() - startTime).millis,
+              truncated = f.truncated,
+              timedOut = f.timedOut
+            )
+          )
       }
-
-      // Wait for readers to finish (with small timeout to avoid hanging)
-      stdoutReader.join(500)
-      stderrReader.join(500)
-
-      val endTime = System.currentTimeMillis()
-
-      val truncated = stdoutTruncated || stderrTruncated
-      val stdout = if (stdoutTruncated) {
-        stdoutBuilder.toString + "\n... (truncated)"
-      } else {
-        stdoutBuilder.toString
-      }
-      val stderr = if (stderrTruncated) {
-        stderrBuilder.toString + "\n... (truncated)"
-      } else {
-        stderrBuilder.toString
-      }
-
-      ShellResult(
-        command = originalCommand,
-        exitCode = exitCode,
-        stdout = stdout,
-        stderr = stderr,
-        executionTime = (endTime - startTime).millis,
-        truncated = truncated,
-        timedOut = timedOut
-      )
-    }.toEither.left.map(e => s"Command execution failed: ${e.getMessage}")
-  }
-
-  /**
-   * Safely read from an input stream with size limiting.
-   * Silently handles IOException (e.g., when stream is closed due to process destruction).
-   */
-  private def readStreamSafely(
-    is: java.io.InputStream,
-    builder: StringBuilder,
-    maxSize: Int,
-    onTruncate: () => Unit
-  ): Unit = {
-    val result = scala.util.Try {
-      val buffer = new Array[Byte](1024)
-      var read   = 0
-      while ({ read = is.read(buffer); read != -1 } && builder.length < maxSize) {
-        val toAdd = Math.min(read, maxSize - builder.length)
-        builder.append(new String(buffer, 0, toAdd))
-        if (toAdd < read) onTruncate()
-      }
-      // Drain remaining input to prevent blocking
-      while (is.read(buffer) != -1) onTruncate()
-      is.close()
-    }
-    // Silently ignore IOException - stream may be closed when process is destroyed
-    result.failed.foreach {
-      case _: java.io.IOException => ()
-      case e                      => throw e
-    }
   }
 }
