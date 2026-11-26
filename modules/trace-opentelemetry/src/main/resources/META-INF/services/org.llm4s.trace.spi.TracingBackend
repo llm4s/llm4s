@@ -1,2 +1,4 @@
 # Serves TRACING_MODE=opentelemetry (or otel) - see OpenTelemetryTracingBackend.
 org.llm4s.trace.OpenTelemetryTracingBackend
+# Serves TRACING_MODE=file - see FileTracingBackend (#2948).
+org.llm4s.trace.FileTracingBackend
