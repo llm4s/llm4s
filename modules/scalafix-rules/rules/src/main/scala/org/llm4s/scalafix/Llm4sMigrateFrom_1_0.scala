@@ -20,7 +20,9 @@ class Llm4sMigrateFrom_1_0 extends SemanticRule("Llm4sMigrateFrom_1_0") {
   override def description: String =
     "Migrates code from llm4s 1.0.x to the current release: every rewrite and lint for the breaking changes since 1.0.0"
 
-  private val rules: List[SemanticRule] = List(new PositionalPatternsGainFields(List(PositionalPatternsGainFields.arity10)))
+  private val rules: List[SemanticRule] = List(
+    new PositionalPatternsGainFields(List(PositionalPatternsGainFields.arity10))
+  )
 
   override def fix(implicit doc: SemanticDocument): Patch = rules.map(_.fix).asPatch
 }
