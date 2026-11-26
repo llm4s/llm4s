@@ -193,15 +193,13 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 `temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
-`llm4s-openai` speaks Chat Completions, where some models restrict tool calls (OpenAI's model pages for
-[`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna) and
-[`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra), checked 2026-11-24):
-
-- `gpt-6-luna` calls functions there only with `reasoning_effort: none`. A request with tools is sent `none`
-  whatever `reasoning` or `thinking` asked, and the `Completion` reports what was overridden as a
-  `RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking` unless it was `Off`).
-- `gpt-6.1-terra` calls tools only through the Responses API, which `llm4s-openai` does not use yet: a request with
-  tools is refused with a `ValidationError` before anything is sent. Without tools it works as any reasoning model.
+`llm4s-openai` speaks Chat Completions, where the GPT 5.6, 6 and 6.1 models (`gpt-5.6-luna`, `gpt-5.6-terra`,
+`gpt-6-luna`, `gpt-6.1-terra`) call functions only with `reasoning_effort: none`. OpenAI answers any other request
+with tools, one that leaves the field out included, with a 400 that names the Responses API (requests sent on
+2026-11-25). So a request with tools to one of these models is sent `none` whatever `reasoning` or `thinking` asked,
+and the `Completion` reports what was overridden as a `RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking`
+unless it was `Off`). Without tools the effort is sent as asked. Reasoning together with tools on these models needs
+the Responses API, which `llm4s-openai` does not use yet.
 
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
 returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
