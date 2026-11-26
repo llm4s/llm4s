@@ -5,7 +5,8 @@ description: "Configure the LLM4S workspace sandbox: command allowlists, program
 search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
-cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014, 3046, 3053]
+cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
+cites_issues: [3046, 3053]
 ---
 
 # Workspace Sandbox Configuration
@@ -798,7 +799,8 @@ A container never outlives its client for long ([#3053](https://github.com/llm4s
 
 The runner ends a connection after 30 seconds with no message, and kills its commands. That happens after a long GC
 pause, a debugger stop or a laptop asleep. The client then reconnects with backoff, for about 16 seconds. It also
-drops and reconnects a connection whose heartbeats the runner has not answered for 20 seconds (a hung runner).
+drops and reconnects a connection whose heartbeats the runner has not answered for 20 seconds (a hung runner), and
+gives up after three such connections in a row.
 
 - A read (explore, read, search, snapshot, workspace info) whose connection closed before its response is sent again.
 - A file change or an execute command in flight fails with `WorkspaceAgentException` code `CONNECTION_CLOSED`. It

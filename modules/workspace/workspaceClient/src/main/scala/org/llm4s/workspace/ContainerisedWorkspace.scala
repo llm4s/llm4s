@@ -96,6 +96,8 @@ class ContainerisedWorkspace(
   private val ConnectionTimeoutMs      = 10000L
   private val DefaultCommandTimeoutSec = 30
   private val ResponseTimeoutBufferSec = 5
+  // a runner that accepts connections but answers no heartbeat on this many in a row is given up on
+  private val MaxUnansweredConnections = 3
 
   /** How `docker` is run; a spec replaces it to start no container. */
   private[workspace] def docker: DockerCli = DockerCli.Process
@@ -115,8 +117,12 @@ class ContainerisedWorkspace(
   private val heartbeatExecutor     = new AtomicReference[ScheduledExecutorService]()
   private val heartbeatThread       = new AtomicReference[Thread]()
   private val lastHeartbeatResponse = new AtomicLong(0L)
-  private val reconnectLock         = new Object
-  private val shutdownHook          = new AtomicReference[Thread]()
+  // connections in a row dropped for an unanswered heartbeat; a heartbeat response resets it
+  private val unansweredConnections = new java.util.concurrent.atomic.AtomicInteger(0)
+  // set when the runner became unusable and the container was removed for it
+  private val unavailable   = new AtomicBoolean(false)
+  private val reconnectLock = new Object
+  private val shutdownHook  = new AtomicReference[Thread]()
 
   // WebSocket client and response handling
   private val wsClient = new AtomicReference[WorkspaceWebSocketClient]()
@@ -175,6 +181,7 @@ class ContainerisedWorkspace(
 
           case HeartbeatResponseMessage(timestamp) =>
             lastHeartbeatResponse.set(System.nanoTime())
+            unansweredConnections.set(0)
             logger.debug(s"Received heartbeat response at $timestamp")
 
           case StreamingOutputMessage(commandId, outputType, content, isComplete) =>
@@ -343,7 +350,7 @@ class ContainerisedWorkspace(
     reconnectLock.synchronized {
       Option(wsClient.get()).filter(_.isOpen) match {
         case Some(open)                      => Right(open)
-        case None if !containerRunning.get() => Left(notRunning)
+        case None if !containerRunning.get() => Left(if (unavailable.get()) unavailableError else notRunning)
         case None =>
           val connected = reconnectDelays.iterator
             .map { delay =>
@@ -359,24 +366,27 @@ class ContainerisedWorkspace(
               }
             }
             .collectFirst { case Some(result) => result }
-          connected.getOrElse {
-            logger.error(
-              s"Could not reconnect to the workspace runner after ${reconnectDelays.size} attempts; removing the " +
-                s"container $containerName (#3053)"
-            )
-            stopContainer(): Unit
-            Left(
-              new WorkspaceAgentException(
-                s"Lost the connection to the workspace runner and could not reconnect; the container $containerName " +
-                  "is removed",
-                "WORKSPACE_UNAVAILABLE",
-                None
-              )
-            )
-          }
+          connected.getOrElse(Left(giveUp(s"could not reconnect after ${reconnectDelays.size} attempts")))
       }
     }
   }
+
+  /**
+   * Ends the workspace for good after its runner became unreachable or stopped answering: the container is removed,
+   * and every later call fails `WORKSPACE_UNAVAILABLE`.
+   */
+  private def giveUp(why: String): WorkspaceAgentException = {
+    logger.error(s"The workspace runner is unusable ($why); removing the container $containerName (#3053)")
+    unavailable.set(true)
+    stopContainer(): Unit
+    unavailableError
+  }
+
+  private def unavailableError = new WorkspaceAgentException(
+    s"Lost the connection to the workspace runner and could not recover it; the container $containerName is removed",
+    "WORKSPACE_UNAVAILABLE",
+    None
+  )
 
   private def startHeartbeatTask(): Unit = {
     logger.info("Starting heartbeat task")
@@ -404,8 +414,14 @@ class ContainerisedWorkspace(
   private def heartbeat(): Unit =
     Option(wsClient.get()).filter(_.isOpen) match {
       case Some(client) if System.nanoTime() - lastHeartbeatResponse.get() > heartbeatResponseTimeout.toNanos =>
-        logger.warn(s"The workspace runner has answered no heartbeat for $heartbeatResponseTimeout; reconnecting")
-        client.closeConnection(CloseFrame.ABNORMAL_CLOSE, "no heartbeat response")
+        // a runner that accepts handshakes but answers nothing would otherwise be reconnected to for ever
+        val unanswered = unansweredConnections.incrementAndGet()
+        if (unanswered > MaxUnansweredConnections)
+          giveUp(s"$unanswered connections in a row got no heartbeat response"): Unit
+        else {
+          logger.warn(s"The workspace runner has answered no heartbeat for $heartbeatResponseTimeout; reconnecting")
+          client.closeConnection(CloseFrame.ABNORMAL_CLOSE, "no heartbeat response")
+        }
       case Some(client) =>
         client.send(write(HeartbeatMessage(System.currentTimeMillis())))
         logger.debug("Heartbeat sent")

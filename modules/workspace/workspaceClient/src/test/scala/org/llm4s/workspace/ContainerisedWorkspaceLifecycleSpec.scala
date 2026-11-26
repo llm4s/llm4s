@@ -205,10 +205,26 @@ class ContainerisedWorkspaceLifecycleSpec extends AnyFlatSpec with Matchers {
     val ws = new TestWorkspace(port, fake, tempDir())
     ws.startContainer() shouldBe true
     runner.stop(1000)
-    val e = intercept[WorkspaceAgentException](ws.getWorkspaceInfo())
-    Seq("WORKSPACE_UNAVAILABLE", "WORKSPACE_NOT_RUNNING") should contain(e.code)
+    intercept[WorkspaceAgentException](ws.getWorkspaceInfo()).code shouldBe "WORKSPACE_UNAVAILABLE"
     eventually("the container removed")(fake.commands.contains(Seq("docker", "rm", "-f", ws.containerName)))
-    intercept[WorkspaceAgentException](ws.getWorkspaceInfo()).code shouldBe "WORKSPACE_NOT_RUNNING"
+    intercept[WorkspaceAgentException](ws.getWorkspaceInfo()).code shouldBe "WORKSPACE_UNAVAILABLE"
+    // a stop by the caller afterwards is still a plain stop
+    ws.stopContainer() shouldBe true
+  }
+
+  it should "give up on a runner that accepts connections but never answers a heartbeat" in {
+    val port   = freePort()
+    val fake   = new FakeDocker(Success((0, "id", "")), Success((0, "", "")))
+    val runner = new FakeRunner(port, () => fake.token)
+    runner.startAndWait()
+    val ws = new TestWorkspace(port, fake, tempDir())
+    try {
+      ws.startContainer() shouldBe true
+      runner.silent.set(true)
+      eventually("the container removed")(fake.commands.contains(Seq("docker", "rm", "-f", ws.containerName)))
+      runner.opened.get() should be <= 4 // the first connection and at most three reconnections
+      intercept[WorkspaceAgentException](ws.getWorkspaceInfo()).code shouldBe "WORKSPACE_UNAVAILABLE"
+    } finally runner.stop(1000)
   }
 
   it should "fail a file change in flight when the connection drops, never sending it twice, and carry on" in {
