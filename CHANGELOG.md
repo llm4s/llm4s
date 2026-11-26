@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Observability
+
+- **Added** `TRACING_MODE=file` in `llm4s-observability-otel`: each trace appended to `<dir>/<trace-id>.jsonl` as OTLP JSON Lines, unplaced events to one shared file per run, with no tracing service ([#2948](https://github.com/llm4s/llm4s/issues/2948); [Trace files](docs/getting-started/configuration.md#trace-files-no-tracing-service)).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

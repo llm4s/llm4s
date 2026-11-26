@@ -276,13 +276,15 @@ Variables that *are* bound by some module's `reference.conf`:
 
 ```bash
 # Tracing mode (llm4s-core): console (default), none, or a TracingBackend's mode from its module
-TRACING_MODE=langfuse                # langfuse (llm4s-observability), opentelemetry | otel (llm4s-observability-otel)
+TRACING_MODE=langfuse                # langfuse (llm4s-observability), opentelemetry | otel | file (llm4s-observability-otel)
 # Langfuse (llm4s-observability) -> llm4s.tracing.langfuse.*; also LANGFUSE_URL, _ENV, _RELEASE, _VERSION
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 # OpenTelemetry (llm4s-observability-otel) -> llm4s.tracing.opentelemetry.*
 OTEL_SERVICE_NAME=llm4s-agent        # OTLP headers: llm4s.tracing.opentelemetry.headers, not OTEL_EXPORTER_OTLP_HEADERS
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+# File (llm4s-observability-otel) -> llm4s.tracing.file.*; also OTEL_SERVICE_NAME and the GenAI capture-content variable
+LLM4S_TRACE_DIR=./llm4s-traces       # one <trace-id>.jsonl per placed trace, OTLP JSON Lines
 
 # Vendor keys -> llm4s.credentials.<id>.apiKey (chat sections, embeddings and the reranker share them)
 OPENAI_API_KEY=sk-...                # llm4s-openai (openai); also REQUESTY_API_KEY, AZURE_OPENAI_API_KEY
