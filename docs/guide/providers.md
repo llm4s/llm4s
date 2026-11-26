@@ -183,17 +183,22 @@ The client decides once, when it is built, and logs the choice and the reason at
 On `https://api.openai.com/v1`, with `api` unset, that means:
 
 - **Responses:** `gpt-4o` and `gpt-4o-mini` (and the snapshots `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`,
-  `gpt-4o-mini-2024-07-18`), `gpt-4.1`, the gpt-5 family (`gpt-5`, `gpt-5-mini`, ...), the GPT 5.6, 6 and 6.1
-  models (`gpt-5.6-terra`, `gpt-6-astra`, `gpt-6.1-sol`, ...) and `o3`, which the registry lists for
-  `/v1/responses`; and a model id the registry does not know, such as a model newer than the bundled data.
+  `gpt-4o-mini-2024-07-18`), `gpt-4.1`, most of the gpt-5 and later models (`gpt-5`, `gpt-5-mini`, `gpt-5.1`,
+  `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6.1-terra`, ...) and `o3`: the
+  models the registry lists for `/v1/responses`; and a model id the registry does not know, such as a model newer
+  than the bundled data.
 - **Chat Completions:** the models the registry knows and does not list there: `gpt-4-turbo`, `gpt-4`,
   `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots
   (`gpt-4o-audio-preview-2024-12-17`, `gpt-4o-audio-preview-2025-06-03`, `gpt-4o-mini-audio-preview-2024-12-17`),
-  the `gpt-audio` family and the search models (`gpt-4o-search-preview`, `gpt-5-search-api`, ...).
-- **A fine-tune** follows the registry's `ft:` entry for its base, else its base model's entry: the bundled `ft:`
-  entries (`ft:gpt-4o-mini-2024-07-18`, `ft:gpt-4.1-2025-04-14`, `ft:o4-mini-2025-04-16`, ...) list no endpoints,
-  so `ft:gpt-4o-mini-2024-07-18:my-org::abc123` stays on Chat Completions. A fine-tune of a base the registry does
-  not know is unknown, and uses Responses.
+  the `gpt-audio` family, the search models (`gpt-4o-search-preview`, `gpt-5-search-api`, ...), `gpt-5.5-cyber`,
+  `gpt-5.5-cyber-preview` and `gpt-6-rosalind`.
+- **A fine-tune** with an `ft:` entry in the registry for its base follows that entry; one with no `ft:` entry
+  follows its base model. The bundled `ft:` entries (`ft:gpt-4o-mini-2024-07-18`, `ft:gpt-4.1-2025-04-14`,
+  `ft:o4-mini-2025-04-16`, ...) list no endpoints, so `ft:gpt-4o-mini-2024-07-18:my-org::abc123` stays on Chat
+  Completions although `gpt-4o-mini-2024-07-18` itself uses Responses. A fine-tune of a base the registry does not
+  know is unknown, and uses Responses.
+
+The INFO line logged when a client is built says which API that section chose, and why.
 
 The bundled LiteLLM data is wrong about some of these, so llm4s corrects it with patch entries
 ([Model Metadata](../reference/model-metadata#embedded-overrides)). On 2026-11-26 every OpenAI chat model in the
