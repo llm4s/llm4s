@@ -17,6 +17,36 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
 2. **The per-model facts come from the LiteLLM model file llm4s already bundles**, not from a list kept in
    `llm4s-openai`: its `mode` and `supported_endpoints` say which API a model is served on (2026-11-26). LiteLLM's
    routing behaviour (Chat Completions by default, Responses per request) is not followed; see Approaches.
+3. **Positional patterns on growth-safe classes are outside the source promise**: the compatibility policy says so,
+   the migration guide notes each gain (`OpenAIConfig` 11 to 14 fields, `ModelMetadata` 8 to 9), and the Scalafix
+   umbrellas rewrite them with `PositionalPatternsGainFields`: `Llm4sMigrateFrom_1_0` and `Llm4sMigrateFrom_0_7` both
+   classes, `Llm4sMigrateFrom_0_6` and `Llm4sMigrateFrom_0_5` only `OpenAIConfig` (to its current 14 fields), since
+   0.5.1's and 0.6.0's `ModelMetadata` had two fields since removed. The carve-out was introduced in 1.1.0; the policy
+   as published at 1.0.0 did not state it (confirmed 2026-11-26).
+4. **Routing follows the LiteLLM model data, corrected by llm4s override patches; it is data-positive**: a model the
+   registry knows but does not list for `/v1/responses`, whether it lists other endpoints or none, stays on Chat
+   Completions. Live evidence (2026-11-26, `POST /v1/responses`, `store: false`): `gpt-4o-search-preview`,
+   `gpt-4o-mini-search-preview` and `gpt-5-search-api` answered 400 "not supported with the Responses API", and so did
+   `gpt-audio-1.5`; `gpt-4o` answered 200 (OpenAI has since retired the two search-preview models: a later run on
+   2026-11-26 got 404 "has been deprecated"). The bundled file has 48 OpenAI chat entries with no
+   `supported_endpoints`. This refines decision 1: the models the registry knows but does not list stay on Chat
+   Completions until the data lists the endpoint or the section sets `api = "responses"`. The `gpt-4o` and
+   `gpt-4o-mini` ids verified live (`gpt-4o`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini`,
+   `gpt-4o-mini-2024-07-18`) are listed by an llm4s patch entry (see the probe under Routing), so they do use
+   Responses. What stays on Chat Completions without live verification, because this account could not call it:
+   `gpt-3.5-turbo*`, `gpt-4`, `gpt-4-turbo*`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots, `o1*`,
+   `o3-mini*` and `o4-mini*`. A model id the registry does not hold (an undated alias such as `gpt-4o-audio-preview`,
+   a newer snapshot) uses Responses. The probe of 2026-11-26 corrected the data: the `gpt-audio` family is taken off
+   Responses, the verified `gpt-4o` / `gpt-4o-mini` ids are put on, and the generations that could not be verified
+   stay on Chat Completions (confirmed 2026-11-26).
+5. **A responses-only model uses Responses behind any base URL** (rule 4 before rule 5): a model the registry marks
+   `mode: responses` (the pro, codex and deep-research models: `o1-pro`, `o3-pro`, `gpt-5-pro`, `gpt-5.5-pro`,
+   `gpt-5-codex`, `gpt-5.3-codex`, `o3-deep-research`, `o4-mini-deep-research`, ...) goes to `/v1/responses` even on a
+   gateway or proxy base URL, with or without an `openai/` prefix, because OpenAI's Chat Completions cannot serve it;
+   a gateway that bridges Chat Completions for such a model needs `api = "chat-completions"`. The alternative
+   considered: leave every non-OpenAI base URL on Chat Completions (rule 5 before rule 4), so a gateway user opts in
+   with `api = "responses"` and nothing changes behind a gateway. The exception is documented in the providers guide
+   and the migration note (confirmed 2026-11-26).
 
 ## Proposed by the implementation plans, for the maintainer to confirm
 
@@ -30,34 +60,9 @@ by the maintainer yet.
    causes (another key or organisation, a moved model alias, an old thread) and the two remedies (`keepReasoning =
    false`, or continuing from an edited turn). A silent retry would hide that a thread's reasoning has gone and would
    double the request.
-- **P3. Positional patterns on growth-safe classes are outside the source promise**: the compatibility policy says
-   so, the migration guide notes each gain (`OpenAIConfig` 11 to 14 fields, `ModelMetadata` 8 to 9), and the Scalafix
-   umbrellas rewrite them with `PositionalPatternsGainFields`: `Llm4sMigrateFrom_1_0` and `Llm4sMigrateFrom_0_7` both
-   classes, `Llm4sMigrateFrom_0_6` and `Llm4sMigrateFrom_0_5` only `OpenAIConfig` (to its current 14 fields), since
-   0.5.1's and 0.6.0's `ModelMetadata` had two fields since removed.
-- **P4. Routing is data-positive**: a model the registry knows but does not list for `/v1/responses`, whether it lists
-   other endpoints or none, stays on Chat Completions. Live evidence (2026-11-26, `POST /v1/responses`, `store:
-   false`): `gpt-4o-search-preview`, `gpt-4o-mini-search-preview` and `gpt-5-search-api` answered 400 "not supported
-   with the Responses API", and so did `gpt-audio-1.5`; `gpt-4o` answered 200 (OpenAI has since retired the two
-   search-preview models: a later run on 2026-11-26 got 404 "has been deprecated"). The bundled file has 48 OpenAI chat
-   entries with no `supported_endpoints`. **This narrows decision 1**: the models the registry knows but does not list
-   stay on Chat Completions until the data lists the endpoint or the section sets `api = "responses"`. The `gpt-4o`
-   and `gpt-4o-mini` ids verified live (`gpt-4o`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini`,
-   `gpt-4o-mini-2024-07-18`) are listed by an llm4s patch entry (see the probe under Routing), so they do use
-   Responses. What stays on Chat Completions without live verification, because this account could not call it:
-   `gpt-3.5-turbo*`, `gpt-4`, `gpt-4-turbo*`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots, `o1*`,
-   `o3-mini*` and `o4-mini*`. A model id the registry does not hold (an undated alias such as
-   `gpt-4o-audio-preview`, a newer snapshot) uses Responses.
-- **P5. Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
+- **P3. Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
    message views dropping thinking blocks when a caller rebuilds a conversation; `DeterministicCompressor` unsealing
    tool-call-only messages; Azure OpenAI on Responses; OpenAI's hosted tools.
-- **P6. A responses-only model uses Responses behind any base URL** (rule 4 before rule 5): a model the registry marks
-   `mode: responses` (the pro, codex and deep-research models: `o1-pro`, `o3-pro`, `gpt-5-pro`, `gpt-5.5-pro`,
-   `gpt-5-codex`, `gpt-5.3-codex`, `o3-deep-research`, `o4-mini-deep-research`, ...) goes to `/v1/responses` even on a
-   gateway or proxy base URL, with or without an `openai/` prefix, because OpenAI's Chat Completions cannot serve it;
-   a gateway that bridges Chat Completions for such a model needs `api = "chat-completions"`. **For the maintainer to
-   confirm.** The alternative: leave every non-OpenAI base URL on Chat Completions (rule 5 before rule 4), so a
-   gateway user opts in with `api = "responses"` and nothing changes behind a gateway.
 
 ## Goals
 
@@ -116,7 +121,7 @@ by the maintainer yet.
   entry whose `litellm_provider` is `openai`, `azure` or `text-completion-openai`); a lookup that fails counts as a model the registry does not know. There is no model
   list in `llm4s-openai`. A registry of the user's own (`llm4s.modelRegistry`) that lists `/v1/responses` for a
   model opts it in.
-- Rule 6 is data-positive (P4): 48 older chat entries list no endpoints, and some of them (the search
+- Rule 6 is data-positive (decision 4): 48 older chat entries list no endpoints, and some of them (the search
   previews) are refused on `/v1/responses`.
 - A fine-tune (`ft:<base>:<org>:<suffix>:<id>`) is looked up as `OpenAIReasoning.describingEntry` finds it: the id as
   given, then the registry's `ft:<base>` entry, then the base's own entry (dated, then undated). The bundled `ft:`
@@ -351,7 +356,7 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 (A 46-minute gap seen in one live run was the test machine asleep, not a hung request.)
 
 Open after slice 4:
-- The follow-ups of P5: the Java facade (and so the Kotlin API, which wraps it) and Spring AI message views drop opaque blocks when a caller
+- The follow-ups of P3: the Java facade (and so the Kotlin API, which wraps it) and Spring AI message views drop opaque blocks when a caller
   rebuilds a conversation; `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's
   `None` into `Some("")` and so unseals it; Azure OpenAI on Responses; hosted tools, which would need a reasoning item
   anchored to a non-function item.
