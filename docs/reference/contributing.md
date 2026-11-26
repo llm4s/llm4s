@@ -112,6 +112,25 @@ Your PR description must explain:
 
 A PR with just "Add feature X" and no context will take longer to review and may be closed.
 
+### Changelog entry
+
+A PR that adds a feature, fixes a bug or makes a breaking change adds a changelog fragment instead of editing
+`CHANGELOG.md`: one file, `changelog.d/<area>/<issue>.md`, so two PRs in the same area never conflict. The area is
+the directory for its CHANGELOG heading (`core`, `providers`, `agent-runtime`, `tools`, `docs`, `build-tooling` and
+the others listed in
+[`changelog.d/README.md`](https://github.com/llm4s/llm4s/blob/main/changelog.d/README.md)), and the file holds the
+entry as it will read in the CHANGELOG:
+
+```markdown
+- **Fixed** what a user sees change, in 1-2 lines ([#N](https://github.com/llm4s/llm4s/issues/N); [Guide](docs/guide/foo.md#section)).
+```
+
+Each entry starts **Added**, **Changed**, **Removed** or **Fixed**, links its issue, and writes relative links from
+the repository root. A breaking change adds front matter, `breaking: <line>`, for the *Breaking changes* list, linking
+its migration note. A follow-up to a change not yet released edits that issue's fragment rather than adding one. The
+release folds the fragments into the CHANGELOG, and `scripts/check-docs.sh` fails a malformed one. The full format is in
+[`changelog.d/README.md`](https://github.com/llm4s/llm4s/blob/main/changelog.d/README.md).
+
 ### Commit Messages
 
 Use imperative mood. Explain the *why*, not just the *what*.

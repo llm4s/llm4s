@@ -433,7 +433,7 @@ Keep `openaiCompatible`'s coverage at or above its floor in `build.sbt`
   and in [the installation guide](docs/getting-started/installation.md).
 - The `Llm4sOpenAICompatibleModule` Scaladoc, which lists the module's providers, and the
   module's line in `CLAUDE.md`'s repository structure.
-- An entry under **Added** in [`CHANGELOG.md`](CHANGELOG.md).
+- An **Added** changelog fragment, `changelog.d/providers/<issue>.md` ([format](changelog.d/README.md)).
 - If `llm4s-config-policy`'s presets should allow it, their provider lists in `ConfigPolicy`.
 
 ## Build Commands

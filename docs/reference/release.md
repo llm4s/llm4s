@@ -98,6 +98,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **Every release:**
 
+- [ ] Fold the changelog fragments into `[Unreleased]`: `scripts/changelog-fragments.sh assemble` appends each
+      `changelog.d/<area>/<issue>.md` to its area's list, in issue order, and deletes it; commit the result.
 - [ ] Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - <date>`, add its `### Highlights`, and open a new,
       empty `[Unreleased]`. Every entry under `### Breaking changes` links its note in the
       [Migration Guide](../reference/migration).

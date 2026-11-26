@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
-     its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+<!-- The net change since 1.0.0, by area. Do not add entries here: write a fragment, changelog.d/<area>/<issue>.md
+     (changelog.d/README.md), which the release folds in. A follow-up to an entry already here edits it. -->
 
 ### Breaking changes
 

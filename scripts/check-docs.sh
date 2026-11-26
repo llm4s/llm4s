@@ -57,6 +57,8 @@ DOCS=(
   "check-flink-guide-snippets.sh"
   "test-check-docs-tests.sh"
   "test-check-docs.sh"
+  "test-changelog-fragments.sh"
+  "changelog-fragments.sh check"
 )
 # Documentation checks that read the build model: run with --model.
 MODEL_CHECKS=(

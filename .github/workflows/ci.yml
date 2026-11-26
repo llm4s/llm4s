@@ -177,6 +177,14 @@ jobs:
           scripts/test-check-cited-issues.sh
           scripts/check-cited-issues.sh --offline
 
+      # Each pull request writes its CHANGELOG entry as a fragment, changelog.d/<area>/<issue>.md, so two in one area do
+      # not conflict (#3121). This fails a fragment in an unknown area, not named for an issue, without a leading verb,
+      # longer than 2 lines or not linking its issue; the tests fold sample fragments into a CHANGELOG.
+      - name: Check the changelog fragments
+        run: |
+          scripts/test-changelog-fragments.sh
+          scripts/changelog-fragments.sh check
+
       # scripts/check-docs.sh runs the doc checks of this job in one command, for a local run before a push (#2833). Its
       # test fails when this job runs a script the local command does not list.
       - name: Test the local docs check
