@@ -311,10 +311,18 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
   }
 
   it should "start the runner without NET_ADMIN, so nothing it runs can undo the firewall (#870)" in {
-    val (status, out) = docker("exec", live(workspaceA).containerName, "grep", "CapBnd", "/proc/1/status")
-    withClue(s"/proc/1/status: $out") {
+    // the runner's JVM, not PID 1: the container starts with --init (#3053), so PID 1 is Docker's init, which runs
+    // nothing but the entry point
+    val (status, out) = docker(
+      "exec",
+      live(workspaceA).containerName,
+      "sh",
+      "-c",
+      "for p in /proc/[0-9]*; do grep -q '^Name:[[:space:]]*java$' $p/status 2>/dev/null && grep CapBnd $p/status; done; exit 0"
+    )
+    withClue(s"the runner's CapBnd: $out") {
       status shouldBe 0
-      val bounding = BigInt(out.split("\\s+").last, 16)
+      val bounding = BigInt(out.trim.linesIterator.next().split("\\s+").last, 16)
       bounding.testBit(12) shouldBe false // CAP_NET_ADMIN
       bounding.testBit(21) shouldBe false // CAP_SYS_ADMIN
     }
