@@ -13,11 +13,18 @@ import scala.util.Try
  *
  *  1. a config that is not an [[OpenAIConfig]] (Azure): Chat Completions;
  *  1. `api` set on the config: as set;
- *  1. a provider other than `openai` (Requesty): Chat Completions;
+ *  1. a client provider other than `openai` (Requesty), or a config whose own provider id is not `openai` (a
+ *     hand-built config pointed at OpenRouter): Chat Completions;
  *  1. a model the registry marks `mode: responses`: Responses, wherever the client points;
  *  1. a base URL that is not OpenAI's own ([[isOpenAI]]): Chat Completions;
- *  1. a model whose registry entry lists endpoints without `/v1/responses`: Chat Completions;
- *  1. otherwise: Responses.
+ *  1. a model the registry knows whose entry does not list `/v1/responses`, whether it lists other endpoints or
+ *     none: Chat Completions;
+ *  1. otherwise (the entry lists `/v1/responses`, or the registry does not know the model): Responses.
+ *
+ * Rule 6 is data-positive because a model the registry knows but does not list may be served on Chat Completions
+ * only, as the search-preview models are (verified against OpenAI on 2026-11-26); a registry override that adds
+ * `/v1/responses` to a model's endpoints opts it in. OpenAI's regional hosts (`us.`, `eu.`, `ae.api.openai.com`)
+ * are not treated as the default base URL, so they stay on Chat Completions unless `api` is set.
  *
  * The per-model facts come from the model registry, never from a list here. `resolve` never throws: a registry
  * lookup that fails counts as a model the registry does not know.
@@ -46,17 +53,25 @@ private[provider] object OpenAIApiRouting:
     lazy val entry: Option[ModelMetadata] = Try(OpenAIReasoning.openAIEntry(model, registry)).toOption.flatten
     if provider != OpenAIProvider then
       Choice(OpenAIApi.ChatCompletions, s"the provider is ${provider.asString}, which is served on Chat Completions")
+    else if config.providerId != OpenAIProvider then
+      Choice(
+        OpenAIApi.ChatCompletions,
+        s"the config's provider is ${config.providerId.asString}, which is served on Chat Completions"
+      )
     else if entry.exists(_.mode == ModelMode.Responses) then
       Choice(OpenAIApi.Responses, s"$model is served only on the Responses API")
     else if !isOpenAI(config.baseUrl) then
       Choice(OpenAIApi.ChatCompletions, s"the base URL is not OpenAI's (${loggable(config.baseUrl)})")
-    else if entry.exists(notOnResponses) then
-      Choice(OpenAIApi.ChatCompletions, s"$model is not served on $ResponsesEndpoint")
-    else Choice(OpenAIApi.Responses, "the base URL is OpenAI's own API and no rule says otherwise")
-
-  /** An entry that lists its endpoints, without `/v1/responses`; one that lists none says nothing. */
-  private def notOnResponses(meta: ModelMetadata): Boolean =
-    meta.supportedEndpoints.nonEmpty && !meta.supportedEndpoints.contains(ResponsesEndpoint)
+    else
+      entry match
+        case Some(meta) if !meta.supportedEndpoints.contains(ResponsesEndpoint) =>
+          Choice(
+            OpenAIApi.ChatCompletions,
+            s"the model registry does not list $model for $ResponsesEndpoint; set api = responses to use it there"
+          )
+        case Some(_) => Choice(OpenAIApi.Responses, s"the model registry lists $model for $ResponsesEndpoint")
+        case None =>
+          Choice(OpenAIApi.Responses, s"the model registry does not know $model, and this is OpenAI's own API")
 
   /** Whether `baseUrl` is OpenAI's own API: https, host api.openai.com (any case), port absent or 443. */
   def isOpenAI(baseUrl: BaseUrl): Boolean =
