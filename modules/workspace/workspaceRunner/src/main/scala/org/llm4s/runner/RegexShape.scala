@@ -40,6 +40,11 @@ import scala.util.boundary.break
  *     `(?<!...(?!)a{0,1000})` ran past 12 s on a 1000-character line with almost no reads). An accepted lookbehind
  *     counts its body's steps once per position it is tried from;
  *   - a counted repetition above `maxRepetition` (the workspace runner's cap; core passes `Int.MaxValue`);
+ *   - nesting deeper than [[MaxNesting]], so the parser's own stack stays small.
+ *
+ * The check's own work is bounded by the pattern's length, never by a number written in it: a repetition's cost is
+ * built a step at a time only until it stops changing or passes the limit, which takes a few thousand steps at most
+ * (`(?i){2147483647}` is a fixed point at once).
  *   - comments mode (`x`) and canonical equivalence (`c`, `CANON_EQ`), whose syntax this check does not follow.
  *
  * The pattern is parsed after `Pattern.compile` accepted it, so its syntax is valid; anything this parser does not
@@ -73,6 +78,14 @@ private[runner] object RegexShape {
 
   /** The longest body a lookbehind may have, in characters: the JDK tries it from each of that many earlier positions. */
   val MaxLookbehindLength = 64L
+
+  /**
+   * The deepest nesting of groups and classes accepted. The parser recurses once per level, so this bounds its stack;
+   * ordinary patterns nest a few levels.
+   */
+  val MaxNesting = 64
+
+  private val TooDeep = s"A pattern nested more than $MaxNesting groups or classes deep is not supported"
 
   private val LookbehindRefused =
     s"A lookbehind whose body can be longer than $MaxLookbehindLength characters, or has no maximum length, or " +
@@ -143,6 +156,7 @@ private[runner] object RegexShape {
   final private class Parser(src: String, maxRepetition: Int)(using boundary.Label[Option[String]]) {
     private var pos          = 0
     private var groupsOpened = 0
+    private var depth        = 0
     private val nullable     = mutable.Map.empty[Int, Boolean]
     private val named        = mutable.Map.empty[String, Int]
 
@@ -227,13 +241,26 @@ private[runner] object RegexShape {
         // more ways, the body's empty match and the skip, both tried by the JDK when what follows fails
         val optional = Cost(add(body.e, 1), add(body.f, 1))
         val extra    = max.fold(1L)(m => m - min) // an unbounded loop ends on an iteration that matched empty
-        var cost     = Cost(1, 0)
-        var i        = 0L
-        while (i < extra && cost.f <= MaxSilentSteps) { cost = andThen(optional, cost); i += 1 }
-        i = 0L
-        while (i < min && cost.f <= MaxSilentSteps) { cost = andThen(body, cost); i += 1 }
-        cost
+        times(body, min, times(optional, extra, Cost(1, 0)))
       }
+
+    /**
+     * `part` repeated `n` times before `rest`, without taking `n` steps: the costs saturate at the limit, so the result
+     * stops changing (a fixed point) or passes the limit within a few thousand repetitions whatever `n` the pattern
+     * writes. `(?i){2147483647}` is a fixed point at once (#3135).
+     */
+    private def times(part: Cost, n: Long, rest: Cost): Cost = {
+      var cost = rest
+      var i    = 0L
+      var done = false
+      while (!done && i < n) {
+        val next = andThen(part, cost)
+        done = (next.e == cost.e && next.f == cost.f) || next.f > MaxSilentSteps // len is set by the caller
+        cost = next
+        i += 1
+      }
+      cost
+    }
 
     /** One quantifier: its minimum and its maximum, None when unbounded. */
     private def quantifier(): (Long, Option[Long]) =
@@ -264,7 +291,18 @@ private[runner] object RegexShape {
         case _ => Literal
       }
 
-    private def group(): Cost =
+    /** One level deeper, within [[MaxNesting]]: this parser recurses once per level, so its stack stays small. */
+    private def nested[A](body: => A): A = {
+      depth += 1
+      if (depth > MaxNesting) refuse(TooDeep)
+      val result = body
+      depth -= 1
+      result
+    }
+
+    private def group(): Cost = nested(groupBody())
+
+    private def groupBody(): Cost =
       if (peek != '?') capturing(None)
       else {
         pos += 1
@@ -356,7 +394,9 @@ private[runner] object RegexShape {
       }
 
     /** A character class, after its `[`: a `]` first in it (after any `^`) is a literal, as `Pattern` reads it. */
-    private def charClass(): Unit = {
+    private def charClass(): Unit = nested(classBody())
+
+    private def classBody(): Unit = {
       if (peek == '^') pos += 1
       if (peek == ']') pos += 1
       while (peek != ']')

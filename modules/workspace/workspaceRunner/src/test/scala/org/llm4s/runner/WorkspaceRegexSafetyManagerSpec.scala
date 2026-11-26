@@ -206,6 +206,45 @@ class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit wit
     withinGuard(WorkspaceRegexSafetyManager.safeFind(pattern, "x" * 1000))
   }
 
+  // Codex on #3135: `(?i){2147483647}` kept the check's own loop running 2^31 times, since its body costs nothing and
+  // the cost never grew. The check's work must be bounded by the pattern's length, never by a number written in it.
+  private def countsAndNesting = Seq(
+    "(?i){2147483647}",
+    "(?:){2147483647}",
+    "(?=){2147483647}",
+    "(?i){0,2147483647}",
+    "(?:(?i){2147483647}){2147483647}",
+    "(?:(?:){2147483647}){2147483647}x",
+    "(" * 499 + "a" + ")" * 499,
+    "(?:" * 240 + "a" + ")" * 240,
+    "(?=" * 240 + ")" * 240,
+    "(?<=" * 190 + "a" + ")" * 190,
+    "[" * 499 + "a" + "]" * 499,
+    "(?:a|" * 160 + ")" * 160,
+    "a?" * 500
+  )
+
+  it should "check a pattern in time bounded by its length, whatever counts or nesting it writes" in {
+    countsAndNesting.foreach(pattern =>
+      withClue(pattern.take(40))(withinGuard(WorkspaceRegexSafetyManager.safeCompile(pattern)))
+    )
+  }
+
+  it should "check a deeply nested pattern without overflowing a small stack" in {
+    countsAndNesting.foreach { pattern =>
+      withClue(pattern.take(40)) {
+        @volatile var escaped: Option[Throwable] = None
+        val thread =
+          new Thread(null, () => RegexShape.refusal(pattern, 0, 1000): Unit, "small-stack-shape", 256L * 1024)
+        thread.setUncaughtExceptionHandler((_, e) => escaped = Some(e))
+        thread.start()
+        thread.join(5000)
+        thread.isAlive shouldBe false
+        escaped shouldBe None
+      }
+    }
+  }
+
   // Runs `body` on a daemon thread and fails if it has not finished within the guard, rather than hanging the suite.
   private def withinGuard(body: => Any): Unit = {
     @volatile var done = false
