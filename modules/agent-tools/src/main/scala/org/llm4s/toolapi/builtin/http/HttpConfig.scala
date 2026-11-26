@@ -15,7 +15,9 @@ import scala.concurrent.duration.*
  *  - Cloud metadata endpoints are blocked (169.254.169.254)
  *  - Localhost and loopback addresses are blocked
  *
- * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed. A leading `www.` and trailing dots are ignored.
+ * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed. An entry also matches its
+ *                        subdomains; trailing dots are ignored, and a leading `www.` is ignored only for the exact-host
+ *                        comparison, never when matching a subdomain.
  * @param blockedDomains List of domains that are always blocked. A leading `www.` and trailing dots are ignored, so `example.com.` is blocked with `example.com`.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
@@ -61,28 +63,33 @@ case class HttpConfig(
    *
    * This method performs hostname-based checks only:
    * 1. Hostname-based blocklist check, ignoring case, trailing dots and a leading `www.` in both the domain and configured entries
-   * 2. Allowlist check (if configured)
+   * 2. Allowlist check (if configured): the exact host, a leading `www.` ignored, or a subdomain of the configured host
    *
    * Note: IP-based SSRF protection (DNS resolution + IP range validation) is performed
    * at request time by the HTTP tool to avoid expensive DNS lookups during validation.
    */
   def isDomainAllowed(domain: String): Boolean = {
     val normalizedDomain = HttpConfig.normalizeHost(domain)
+    val domainWithoutWww = HttpConfig.withoutLeadingWww(normalizedDomain)
 
-    // Check blocked domains first
+    // Check blocked domains first. A blocklist match errs on the broad side: a leading `www.` is ignored
+    // in the entry and the host before either the exact or the subdomain comparison.
     val isBlocked = blockedDomains.exists { blocked =>
-      val b = HttpConfig.normalizeHost(blocked)
-      normalizedDomain == b || normalizedDomain.endsWith(s".$b")
+      val b = HttpConfig.withoutLeadingWww(HttpConfig.normalizeHost(blocked))
+      domainWithoutWww == b || domainWithoutWww.endsWith(s".$b")
     }
 
     if (isBlocked) false
     else
-      // If allowlist is defined, domain must be in it
+      // If allowlist is defined, domain must be in it. An allowlist match may never be broader than the
+      // entry: `www.` is ignored only for exact-host equality, while a subdomain must be beneath the
+      // configured host as written.
       allowedDomains match {
         case Some(allowed) =>
           allowed.exists { a =>
             val normalizedAllowed = HttpConfig.normalizeHost(a)
-            normalizedDomain == normalizedAllowed || normalizedDomain.endsWith(s".$normalizedAllowed")
+            domainWithoutWww == HttpConfig.withoutLeadingWww(normalizedAllowed) ||
+            normalizedDomain.endsWith(s".$normalizedAllowed")
           }
         case None => true
       }
@@ -149,15 +156,18 @@ object HttpConfig {
     Seq("Accept", "Accept-Language", "Accept-Encoding", "User-Agent", "Content-Type")
 
   /**
-   * The form a host and a configured domain are compared in: lower case, without trailing dots and without a leading
-   * `www.`. A trailing dot names the same host (the DNS root), so `example.com.` matches what `example.com` matches.
+   * The form a host and a configured domain are compared in: lower case and without trailing dots. A trailing dot
+   * names the same host (the DNS root), so `example.com.` matches what `example.com` matches.
    */
   private def normalizeHost(host: String): String = {
     val lower = host.toLowerCase(Locale.ROOT)
     var end   = lower.length
     while (end > 0 && lower.charAt(end - 1) == '.') end -= 1
-    lower.substring(0, end).stripPrefix("www.")
+    lower.substring(0, end)
   }
+
+  /** `host` without one leading `www.`, for exact-host comparisons only. */
+  private def withoutLeadingWww(host: String): String = host.stripPrefix("www.")
 
   /**
    * Default blocked domains (hostnames).

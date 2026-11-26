@@ -275,7 +275,9 @@ The default blocklist includes `/var`, which on macOS is where the system tempor
 | `timeout` | 30 seconds, for the whole call: connecting, every redirect hop and reading the body |
 | `maxResponseSize` | 10 MB: at most this many bytes of the body are read; the rest is never read, and `truncated` is `true` |
 
-`HttpConfig.restricted(Seq("api.example.com"))` allows only those domains. `HttpConfig.withWriteMethods()` adds
+`HttpConfig.restricted(Seq("api.example.com"))` allows only those domains and their subdomains. A leading `www.` is
+ignored only when comparing the exact host: an entry `www.example.com` admits `example.com` and `www.example.com`,
+not every subdomain of `example.com`. `HttpConfig.withWriteMethods()` adds
 `POST`, `PUT`, `DELETE` and the rest, and `HttpConfig.unsafe` also turns the address checks off: use that only in a
 sandbox.
 
@@ -311,7 +313,8 @@ bundle by what you would be willing to let it do unsupervised.
 
 What the controls do, and where they stop:
 
-- **HTTP** refuses methods outside `allowedMethods`, a scheme other than `http` and `https`, any domain outside
+- **HTTP** refuses methods outside `allowedMethods`, a body unless the method is `POST`, `PUT`, `PATCH` or `DELETE`,
+  a scheme other than `http` and `https`, any domain outside
   `allowedDomains`, `localhost`, loopback, the cloud metadata addresses, and private ranges such as `10.x`, `172.16.x`
   and `192.168.x` (and their IPv6 counterparts, such as unique-local `fc00::/7` and IPv6 forms that carry a private
   IPv4 address, and every other range the IANA special-purpose registries mark as not globally reachable, such as
