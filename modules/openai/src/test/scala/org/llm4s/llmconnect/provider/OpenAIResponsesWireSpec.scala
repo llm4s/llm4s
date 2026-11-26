@@ -139,6 +139,22 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     }
   }
 
+  it should "post a responses-only model to /responses on any base URL when api is unset" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, reply(outputMessage("hi")))
+    } { baseUrl =>
+      val client = OpenAIClient(configFor(baseUrl, "o1-pro")).value
+      val result = client.complete(hello, CompletionOptions())
+      client.close()
+
+      result.value.content shouldBe "hi"
+      seen.get().path shouldBe "/v1/responses"
+      seen.get().body("model").str shouldBe "o1-pro"
+    }
+  }
+
   it should "report a 404 from a gateway without /responses as the provider's service error" in {
     val requests = new AtomicInteger(0)
     LocalProviderTestServer.withServer("/") { exchange =>

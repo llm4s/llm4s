@@ -162,14 +162,9 @@ final class OpenAIClient private[provider] (
 
   private val displayName: String = OpenAIClient.displayName(provider)
 
-  /** The API this client speaks, resolved once: the Responses API only for an `OpenAIConfig` whose `api` says so. */
+  /** The API this client speaks, resolved once by [[OpenAIApiRouting]]. */
   private val api: OpenAIApi = {
-    val (resolved, reason) = config match {
-      case openAI: OpenAIConfig if openAI.api.contains(OpenAIApi.Responses) =>
-        (OpenAIApi.Responses, "the section sets api = responses")
-      case _: OpenAIConfig => (OpenAIApi.ChatCompletions, "the section sets no api other than chat-completions")
-      case _               => (OpenAIApi.ChatCompletions, s"$displayName speaks Chat Completions only")
-    }
+    val OpenAIApiRouting.Choice(resolved, reason) = OpenAIApiRouting.resolve(config, provider, model, registryService)
     logger.info(s"$displayName client for model $model uses ${OpenAIApi.configValue(resolved)}: $reason")
     resolved
   }

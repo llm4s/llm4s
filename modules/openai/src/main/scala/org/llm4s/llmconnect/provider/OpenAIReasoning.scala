@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.models.{ ReasoningEffort => SdkReasoningEffort }
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
-import org.llm4s.model.{ EffortMapping, ModelCapabilities, ModelRegistryService }
+import org.llm4s.model.{ EffortMapping, ModelCapabilities, ModelMetadata, ModelRegistryService }
 
 /**
  * Decides whether [[OpenAIClient]] treats a model as an OpenAI reasoning model, and how it
@@ -60,9 +60,13 @@ private[provider] object OpenAIReasoning {
 
   /** The registry's answer for `model`, if it resolves `model` to an OpenAI or Azure entry. */
   private def registrySupport(model: String, registry: ModelRegistryService): Option[Support] =
-    registry.lookup(ModelName(model)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString)).map {
-      meta => if (meta.capabilities.supportsReasoning.contains(true)) Support.Reasoning else Support.NonReasoning
+    openAIEntry(model, registry).map { meta =>
+      if (meta.capabilities.supportsReasoning.contains(true)) Support.Reasoning else Support.NonReasoning
     }
+
+  /** The registry's entry for `model`, if it resolves `model` to an OpenAI or Azure entry. */
+  def openAIEntry(model: String, registry: ModelRegistryService): Option[ModelMetadata] =
+    registry.lookup(ModelName(model)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString))
 
   /**
    * The model a fine-tuned model id was trained from, or `model` itself if it is not a
