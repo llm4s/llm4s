@@ -316,7 +316,11 @@ final class OpenAIClient private[provider] (
       provider = provider,
       effort = reasoningEffortFor(options),
       serviceTier = OpenAIServiceTier.onResponses(serviceTierPlan(options)._1),
-      omitsSampling = omitsSampling(options)
+      omitsSampling = omitsSampling(options),
+      reasons = isReasoningRequest(options),
+      summary = config match
+        case openAI: OpenAIConfig => openAI.reasoningSummary
+        case _                    => None
     )
 
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(

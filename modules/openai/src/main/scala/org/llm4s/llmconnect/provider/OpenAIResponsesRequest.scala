@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.openai.core.ObjectMappers
 import com.openai.models.Reasoning
 import com.openai.models.responses.{
+  ResponseIncludable,
   EasyInputMessage,
   FunctionTool,
   ResponseCreateParams,
@@ -14,6 +15,7 @@ import com.openai.models.responses.{
   ResponseInputText,
   ResponseTextConfig
 }
+import org.llm4s.llmconnect.config.OpenAIReasoningSummary
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
@@ -39,7 +41,7 @@ import scala.util.Try
 /**
  * A conversation and its options as OpenAI's Responses API request (`POST /responses`).
  *
- * Every request sends `store: false`, and no `previous_response_id` or `include`: the conversation travels whole in
+ * Every request sends `store: false`, and no `previous_response_id`, and `include` only to ask a reasoning model for its encrypted reasoning: the conversation travels whole in
  * `input`, and OpenAI keeps nothing. System messages are input messages in their own position, never `instructions`.
  */
 private[provider] object OpenAIResponsesRequest:
@@ -52,13 +54,17 @@ private[provider] object OpenAIResponsesRequest:
    * @param effort the `reasoning.effort` to send, from `OpenAIReasoning.plan`
    * @param serviceTier the `service_tier` to send
    * @param omitsSampling whether `temperature` and `top_p` are left out (a reasoning model that restricts sampling)
+   * @param reasons whether the request goes to a reasoning model: it then asks for `reasoning.encrypted_content`
+   * @param summary the `reasoning.summary` to ask for, sent only when `reasons`
    */
   final case class Settings(
     model: String,
     provider: ProviderId,
     effort: Option[com.openai.models.ReasoningEffort],
     serviceTier: Option[ResponseCreateParams.ServiceTier],
-    omitsSampling: Boolean
+    omitsSampling: Boolean,
+    reasons: Boolean,
+    summary: Option[OpenAIReasoningSummary]
   )
 
   /** OpenAI rejects a `max_output_tokens` below this. */
@@ -104,13 +110,25 @@ private[provider] object OpenAIResponsesRequest:
           if !settings.omitsSampling then
             options.temperature.foreach(t => builder.temperature(t))
             options.topP.foreach(p => builder.topP(p))
-          settings.effort.foreach(e => builder.reasoning(Reasoning.builder().effort(e).build()))
+          val summary = if settings.reasons then settings.summary else None
+          if settings.effort.isDefined || summary.isDefined then
+            val reasoning = Reasoning.builder()
+            settings.effort.foreach(e => reasoning.effort(e))
+            summary.foreach(s => reasoning.summary(reasoningSummary(s)))
+            builder.reasoning(reasoning.build())
+          if settings.reasons then builder.addInclude(ResponseIncludable.REASONING_ENCRYPTED_CONTENT)
           settings.serviceTier.foreach(t => builder.serviceTier(t))
           options.tools.map(_.toolDefinition(strict = true)).foreach(t => builder.addTool(functionTool(t)))
           options.responseFormat.foreach(f => builder.text(textConfig(f)))
           builder.build()
         }.toEither.left.map(_.toLLMError)
       }
+
+  private def reasoningSummary(summary: OpenAIReasoningSummary): Reasoning.Summary =
+    summary match
+      case OpenAIReasoningSummary.Auto     => Reasoning.Summary.AUTO
+      case OpenAIReasoningSummary.Concise  => Reasoning.Summary.CONCISE
+      case OpenAIReasoningSummary.Detailed => Reasoning.Summary.DETAILED
 
   private def items(settings: Settings, messages: Seq[Message]): Result[Vector[ResponseInputItem]] =
     // the SDK builders throw on malformed content (a null text): inside the Result
