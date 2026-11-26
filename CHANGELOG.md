@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tools
 
 - **Fixed** `SchemaOf`, `PartialOf` and derived tools read a `@description`, `@toolName` or key given as any constant string: a literal, a `final val` or `inline val`, a `+` of constants, or an `s"..."` of constants. Only a single literal was read, and anything else was dropped without a warning ([#2951](https://github.com/llm4s/llm4s/issues/2951); [Derived schemas](docs/guide/derived-schemas.md#descriptions)).
+- **Fixed** `ShellTool` leaves no process behind: a timeout or an interrupt of the call kills the command and every process it started, stdin is the null device (`cat` with no file returns at once), and output readers are daemon threads ([#3050](https://github.com/llm4s/llm4s/issues/3050)).
 
 ### Embeddings & RAG
 
