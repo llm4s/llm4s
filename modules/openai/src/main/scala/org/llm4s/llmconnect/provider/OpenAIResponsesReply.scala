@@ -94,7 +94,7 @@ private[provider] object OpenAIResponsesReply:
 
   /**
    * The error an object of a `code` and a `message` states: a failed reply's `error`, or a stream's `error` event. It
-   * is a 502 unless the code names a status ([[statusOf]]), so `rate_limit_exceeded` is a `RateLimitError` in both.
+   * is a 502 unless the code names a status ([[statusOf]]): `rate_limit_exceeded` is a `RateLimitError` and a request fault a 400.
    */
   private[provider] def errorOf(error: ujson.Value, provider: ProviderId): LLMError =
     val status = error.objOpt.flatMap(_.get("code")).flatMap(_.strOpt).flatMap(statusOf)
@@ -104,11 +104,35 @@ private[provider] object OpenAIResponsesReply:
       .streamedError(ujson.Obj.from(fields), provider)
       .getOrElse(ServiceError(502, provider, "the response failed"))
 
-  /** The HTTP status of the one `error.code` that names one; `server_error` and every other code stay a 502. */
+  /**
+   * The HTTP status an `error.code` names: 429 for `rate_limit_exceeded`, and 400 for each code that says the request
+   * or its input can never succeed (`invalid_prompt` and the image codes), so it is not retried. `server_error`,
+   * `vector_store_timeout`, `data_residency_mismatch` and the policy codes stay a 502.
+   */
   private def statusOf(code: String): Option[Int] =
     code match
-      case "rate_limit_exceeded" => Some(429)
-      case _                     => None
+      case "rate_limit_exceeded"          => Some(429)
+      case c if RequestFaults.contains(c) => Some(400)
+      case _                              => None
+
+  /** The `ResponseError.Code`s that describe the caller's prompt or images, never the service. */
+  private val RequestFaults: Set[String] = Set(
+    "invalid_prompt",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_url",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "image_content_policy_violation",
+    "invalid_image_mode",
+    "image_file_too_large",
+    "unsupported_image_media_type",
+    "empty_image_file",
+    "failed_to_download_image",
+    "image_file_not_found"
+  )
 
   /** `completed` is `Stop`; `incomplete` is `Length` at the output limit and the content filter's at the filter. */
   private def finishReason(status: Option[String], response: Response): FinishReason =

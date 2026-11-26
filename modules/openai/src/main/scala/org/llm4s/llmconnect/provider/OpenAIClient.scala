@@ -242,22 +242,26 @@ final class OpenAIClient private[provider] (
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics(completeAndRecord(conversation, options)(_ => ()))
 
+  /** A failed call's error, and the request and reply bodies it has to record (none before a reply was read). */
+  final private case class Failed(error: LLMError, bodies: Option[(String, String)])
+
   /** One recorded completion call; `deliver` sees the completion before its exchange is recorded, a throw a `Left`. */
   private def completeAndRecord(conversation: Conversation, options: CompletionOptions)(
     deliver: Completion => Unit
   ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    val result = for {
-      request <- transformedRequest(conversation, options)
+    val result: Either[Failed, Completion] = for {
+      request <- transformedRequest(conversation, options).left.map(Failed(_, None))
       (transformedConversation, transformedOptions, adjustments) = request
       exchange <- api match {
         case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformedOptions, adjustments)
         case OpenAIApi.ChatCompletions =>
-          completeOnChatCompletions(transformedConversation, transformedOptions, adjustments)
+          completeOnChatCompletions(transformedConversation, transformedOptions, adjustments).left
+            .map(Failed(_, None))
       }
       (body, responseBody, completion) = exchange
-      _ <- call("delivery")(deliver(completion))
+      _ <- call("delivery")(deliver(completion)).left.map(Failed(_, None))
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -266,7 +270,10 @@ final class OpenAIClient private[provider] (
       )
     } yield completion
 
-    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
+    result.left.foreach(failed =>
+      recordExchange(startedAt, failed.bodies.map(_._1), failed.bodies.map(_._2), Left(failed.error))
+    )
+    result.left.map(_.error)
   }
 
   /** The conversation and options the model's rules leave, and the adjustments the request reports. */
@@ -309,19 +316,26 @@ final class OpenAIClient private[provider] (
       completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
     } yield (body, serialize(response), completion)
 
-  /** One Responses API call, step for step as [[completeOnChatCompletions]]. */
+  /**
+   * One Responses API call, step for step as [[completeOnChatCompletions]], except that a reply that maps to an error
+   * keeps the request and reply bodies for the exchange log.
+   */
   private def completeOnResponses(
     conversation: Conversation,
     options: CompletionOptions,
     adjustments: Seq[RequestAdjustment]
-  ): Result[(String, String, Completion)] =
+  ): Either[Failed, (String, String, Completion)] =
     for {
-      params <- OpenAIResponsesRequest.build(responsesSettings(options), conversation, options)
+      params <- OpenAIResponsesRequest
+        .build(responsesSettings(options), conversation, options)
+        .left
+        .map(Failed(_, None))
       _    = adjustmentLog.record(model, adjustments)
       body = serialize(params._body())
-      response   <- call("response")(transport.createResponse(params))
-      completion <- responsesCompletion(response, adjustments)
-    } yield (body, serialize(response), completion)
+      response <- call("response")(transport.createResponse(params)).left.map(Failed(_, None))
+      responseBody = serialize(response)
+      completion <- responsesCompletion(response, adjustments).left.map(Failed(_, Some((body, responseBody))))
+    } yield (body, responseBody, completion)
 
   /** A Responses reply as `complete` returns it: priced, with the request's adjustments, failing when filtered. */
   private def responsesCompletion(response: Response, adjustments: Seq[RequestAdjustment]): Result[Completion] =

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
+import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.error.{
   ContentFilteredError,
@@ -8,7 +9,8 @@ import org.llm4s.error.{
   ProcessingError,
   RateLimitError,
   ServiceError,
-  UnsupportedContentPartError
+  UnsupportedContentPartError,
+  ValidationError
 }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -543,8 +545,99 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
 
   it should "report a failed reply whose error has a code and no message with the code in the message" in {
     val error = answer(reply("", status = "failed", extra = """"error":{"code":"invalid_prompt"}""")).left.value
-    error shouldBe a[ServiceError]
+    error shouldBe a[ValidationError]
     error.message should include("invalid_prompt")
+  }
+
+  private def failedWith(code: String): LLMError =
+    answer(reply("", status = "failed", extra = s""""error":{"code":"$code","message":"msg for $code"}""")).left.value
+
+  private def requestFaults = Seq(
+    "invalid_prompt",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_url",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "image_content_policy_violation",
+    "invalid_image_mode",
+    "image_file_too_large",
+    "unsupported_image_media_type",
+    "empty_image_file",
+    "failed_to_download_image",
+    "image_file_not_found"
+  )
+
+  it should "report a failed reply the request can never satisfy as a 400-class error, not a 502" in {
+    requestFaults.foreach { code =>
+      val error = failedWith(code)
+      withClue(code) {
+        error shouldBe a[ValidationError]
+        error.isRetryable shouldBe false
+        error.message should include(s"msg for $code")
+      }
+    }
+  }
+
+  it should "keep a failed reply about the service itself a retryable 502 ServiceError" in {
+    Seq(
+      "server_error",
+      "vector_store_timeout",
+      "data_residency_mismatch",
+      "bio_policy",
+      "misalignment_policy_violation"
+    )
+      .foreach { code =>
+        val error = failedWith(code)
+        withClue(code) {
+          error shouldBe a[ServiceError]
+          error.asInstanceOf[ServiceError].status shouldBe 502
+          error.isRetryable shouldBe true
+        }
+      }
+  }
+
+  private def recordedOnComplete(
+    body: String
+  ): (Either[LLMError, org.llm4s.llmconnect.model.Completion], Seq[ProviderExchange]) =
+    val recorded = scala.collection.mutable.ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit = recorded += exchange
+    var out = Option.empty[Either[LLMError, org.llm4s.llmconnect.model.Completion]]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(new AtomicReference[Seen](), exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+    } { baseUrl =>
+      val config = configFor(baseUrl, "gpt-4o").withApi(OpenAIApi.Responses)
+      val client =
+        OpenAIClient(config, LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))).value
+      out = Some(client.complete(hello, CompletionOptions()))
+      client.close()
+    }
+    (out.get, recorded.toSeq)
+
+  it should "record the request and the reply for a 200 reply that maps to an error" in {
+    val replies = Seq(
+      "failed" -> reply("", status = "failed", extra = """"error":{"code":"server_error","message":"boom"}"""),
+      "content filter" -> reply(
+        outputMessage("cut"),
+        status = "incomplete",
+        extra = """"incomplete_details":{"reason":"content_filter"}"""
+      ),
+      "bad arguments" -> reply(functionCall("call_1", "get_weather", "{not json"))
+    )
+    replies.foreach { case (label, body) =>
+      val (result, recorded) = recordedOnComplete(body)
+      withClue(label) {
+        result.isLeft shouldBe true
+        recorded should have size 1
+        recorded.head.requestBody should include("hello")
+        recorded.head.responseBody.getOrElse("") should include("resp_")
+        recorded.head.errorMessage should not be empty
+      }
+    }
   }
 
   it should "read an incomplete reply whose incomplete_details is not an object as an Unknown finish" in {

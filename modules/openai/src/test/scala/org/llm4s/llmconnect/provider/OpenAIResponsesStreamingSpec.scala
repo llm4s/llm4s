@@ -275,6 +275,14 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     s.chunks.flatMap(_.finishReason) shouldBe empty
   }
 
+  it should "fail a response.failed with invalid_prompt as the same non-retryable 400-class error" in {
+    val s = streamed(
+      sse(failed(reply("", status = "failed", extra = """"error":{"code":"invalid_prompt","message":"bad prompt"}""")))
+    )
+    s.result.left.value shouldBe a[org.llm4s.error.ValidationError]
+    s.result.left.value.isRetryable shouldBe false
+  }
+
   it should "fail with the mapped error on an error event" in {
     val s = streamed(sse(textDelta("so far"), errorEvent("server_error", "boom")))
     s.result.left.value.message should include("boom")
