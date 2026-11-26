@@ -446,6 +446,30 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     }
   }
 
+  it should "refuse a JSON-object SecretString with no field, never sending its values on" in {
+    val json = """{"apiKey":"sk-json-key-value","dbPassword":"db-pass-value"}"""
+    replies.put("llm4s/jsonobj", 200 -> secretString(json))
+    val e = error(provider(settings("llm4s/jsonobj")))
+    e shouldBe a[ConfigurationError]
+    e.message should include("withField")
+    e.message should include("llm4s/jsonobj")
+    assertNoSecrets(e, "sk-json-key-value", "db-pass-value")
+
+    key(provider(settings("llm4s/jsonobj").withField("apiKey"))) shouldBe "sk-json-key-value"
+  }
+
+  it should "still use a whole SecretString that is not a JSON object" in {
+    val cases = Seq(
+      "brace"  -> "{not-json-sk-value",
+      "scalar" -> "12345678",
+      "array"  -> """["sk-in-array"]"""
+    )
+    cases.foreach { case (name, secret) =>
+      replies.put(s"llm4s/$name", 200 -> secretString(secret))
+      withClue(name)(key(provider(settings(s"llm4s/$name"))) shouldBe secret)
+    }
+  }
+
   it should "refuse unusable credentials before contacting AWS, naming the part, not its value" in {
     replies.put("llm4s/creds", 200 -> secretString("sk-never-read"))
     val cases = Seq[(() => org.llm4s.types.Result[AwsCredentials], String)](

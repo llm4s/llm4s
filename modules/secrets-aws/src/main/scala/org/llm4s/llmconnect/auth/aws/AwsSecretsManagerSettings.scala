@@ -26,7 +26,8 @@ import scala.util.Try
  * @param region          the AWS region, such as `us-east-1`; picks the endpoint and is part of the signature
  * @param credentials     called once per read for the credentials that sign it; never printed by `toString`
  * @param secretId        the secret's name or ARN
- * @param field           the key of a JSON-object `SecretString` that holds the API key; none for the whole string
+ * @param field           the key of a JSON-object `SecretString` that holds the API key; none for a plain-string
+ *                        secret, whose whole string is the key (a JSON-object `SecretString` with no field is refused)
  * @param versionStage    the version stage read: `AWSCURRENT` by default, the version rotation last promoted
  * @param endpoint        the Secrets Manager endpoint; `https://secretsmanager.<region>.amazonaws.com` by default,
  *                        set for a VPC endpoint or a FIPS endpoint
@@ -53,7 +54,7 @@ final case class AwsSecretsManagerSettings private (
   def withCredentials(credentials: () => Result[AwsCredentials]): AwsSecretsManagerSettings =
     copy(credentials = credentials)
 
-  /** The key of the JSON-object `SecretString` that holds the API key. */
+  /** The key of the JSON-object `SecretString` that holds the API key; required for a key/value secret. */
   def withField(field: String): AwsSecretsManagerSettings = copy(field = Some(field))
 
   /** The key of the JSON-object `SecretString` that holds the API key, or none for the whole string. */

@@ -180,7 +180,7 @@ long-lived credentials and add `.withSessionToken(Secret(token))` for temporary 
 | `region` | such as `eu-west-1`; picks the endpoint and is part of the signature | required |
 | `credentials` | an `AwsCredentials`, or `withCredentials(() => Result[AwsCredentials])`, called once per read | required |
 | `secretId` | the secret's name or ARN | required |
-| `withField(f)` | the key of a JSON-object `SecretString` that holds the key; takes a `String` or an `Option` | none: the whole `SecretString` is the key |
+| `withField(f)` | the key of a JSON-object `SecretString` that holds the key; takes a `String` or an `Option` | none: the whole `SecretString` is the key, so a JSON-object secret is refused until you name its field |
 | `withVersionStage(s)` | the version stage read | `AWSCURRENT` (`DefaultVersionStage`) |
 | `withEndpoint(url)` | `http(s)://host[:port]` with no path, for a VPC or FIPS endpoint; takes a `String` or an `Option` | `https://secretsmanager.<region>.amazonaws.com`, `.amazonaws.com.cn` for a `cn-` region |
 | `withRefreshInterval(d)` | how long a key is used before it is read again | 5 minutes |
@@ -228,7 +228,7 @@ client call fails with it.
 |:----------|:------|:--------------------|
 | Store refuses the caller | `AuthenticationError` on 401 or 403, with Vault's `errors` text | `AuthenticationError` on 401, 403 or an auth error type such as `AccessDeniedException`, `ExpiredTokenException`, `InvalidSignatureException` |
 | No such secret | `NotFoundError` on 404 | `NotFoundError` on `ResourceNotFoundException` (also a missing version stage) |
-| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, or more than one line | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, or more than one line |
+| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, or more than one line | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, a JSON-object `SecretString` with no `withField`, or more than one line |
 | Any other answer | `ServiceError` with the status | `ServiceError` with the status |
 | Store unreachable or timed out | the HTTP client's own error | the HTTP client's own error |
 

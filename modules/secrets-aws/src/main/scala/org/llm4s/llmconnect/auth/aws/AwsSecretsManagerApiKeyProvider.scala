@@ -45,7 +45,7 @@ import scala.util.Try
  *
  * Errors never hold the key or a credential: an `AuthenticationError` when AWS refuses the credentials or denies
  * access, a `NotFoundError` when there is no such secret or version stage, a `ConfigurationError` when the secret has
- * no usable string (binary only, a missing or blank field, more than one line), a `ServiceError` for any other
+ * no usable string (binary only, a missing or blank field, a JSON object read without `withField`, more than one line), a `ServiceError` for any other
  * answer, and the HTTP client's own error when Secrets Manager cannot be reached.
  *
  * It depends on no AWS SDK: one `POST` with llm4s's own HTTP client, signed with Signature Version 4. Getting the
@@ -116,12 +116,24 @@ final class AwsSecretsManagerApiKeyProvider private (
     text match
       case None if binary => Left(failure("holds only SecretBinary, not a SecretString"))
       case None           => Left(failure("came back with no SecretString"))
-      case Some(secret) =>
+      case Some(secret)   =>
+        // Without a field the whole string is sent as the key: a JSON object (the console's key/value secret) would
+        // leak its sibling fields to the vendor. Only the key names are reported, never a value.
+        val objectKeys =
+          if settings.field.isEmpty then Try(ujson.read(secret.trim)).toOption.flatMap(_.objOpt).map(_.value.keys.toSeq)
+          else None
         settings.field
           .fold(Option(secret))(field => Try(ujson.read(secret)(field)).toOption.flatMap(_.strOpt))
           .map(_.trim)
           .filter(_.nonEmpty)
           .toRight(failure(settings.field.fold("has a blank SecretString")(f => s"has no non-blank string field '$f'")))
+          .filterOrElse(
+            _ => objectKeys.isEmpty,
+            failure(
+              s"is a JSON object (keys: ${objectKeys.getOrElse(Seq.empty).mkString(", ")}), not a key: " +
+                "choose the field that holds the API key with withField"
+            )
+          )
           .flatMap { key =>
             // A line break in a header value would be refused by the HTTP client, or split the header.
             if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
