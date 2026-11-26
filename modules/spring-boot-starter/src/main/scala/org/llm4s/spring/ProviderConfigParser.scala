@@ -5,6 +5,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.javaapi.{ LlmResult, ProviderModules }
 import org.llm4s.security.Secret
+import org.llm4s.types.Result
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 
@@ -62,20 +63,31 @@ object ProviderConfigParser {
     if (apiKey.isEmpty) {
       invalid("llm4s.api-key is required for OpenAI", "llm4s.api-key")
     } else {
-      val baseUrl = Some(text(p.baseUrl)).filter(_.nonEmpty).getOrElse("https://api.openai.com/v1")
+      val baseUrl = Some(text(p.baseUrl)).filter(_.nonEmpty).map(BaseUrl(_)).getOrElse(OpenAIConfig.DEFAULT_BASE_URL)
       val org     = Some(text(p.organization)).filter(_.nonEmpty)
-      LlmResult.success(
-        OpenAIConfig(
-          apiKey = Secret(apiKey),
-          model = ModelName(model),
-          organization = org,
-          baseUrl = BaseUrl(baseUrl),
-          contextWindow = p.contextWindow,
-          reserveCompletion = p.reserveCompletion
-        )
-      )
+      val api     = optional(p.api, OpenAIApi.parse(_))
+      val summary = optional(p.reasoningSummary, OpenAIReasoningSummary.parse(_))
+      (api, summary) match {
+        case (Left(e), _) => invalid(s"llm4s.api is invalid: ${e.message}", "llm4s.api")
+        case (_, Left(e)) => invalid(s"llm4s.reasoning-summary is invalid: ${e.message}", "llm4s.reasoning-summary")
+        case (Right(a), Right(r)) =>
+          LlmResult.success(
+            OpenAIConfig(
+              apiKey = Secret(apiKey),
+              model = ModelName(model),
+              organization = org,
+              baseUrl = baseUrl,
+              contextWindow = p.contextWindow,
+              reserveCompletion = p.reserveCompletion
+            ).withApi(a).withReasoningSummary(r).withKeepReasoning(p.keepReasoning)
+          )
+      }
     }
   }
+
+  /** `value` read by `parse` when it says something; blank is `None`. */
+  private def optional[A](value: String, parse: String => Result[A]): Result[Option[A]] =
+    Some(text(value)).filter(_.nonEmpty).fold[Result[Option[A]]](Right(None))(v => parse(v).map(Some(_)))
 
   private def parseAnthropic(p: Llm4sProperties, model: String): LlmResult[ProviderConfig] = {
     val apiKey = text(p.apiKey)

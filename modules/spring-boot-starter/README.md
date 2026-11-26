@@ -153,4 +153,6 @@ check probes again. The probe is billed: keep the TTL generous.
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports DOWN |
 
 Other flat settings: `llm4s.base-url`, `llm4s.organization`, `llm4s.context-window`,
-`llm4s.reserve-completion`. All keys are in `META-INF/additional-spring-configuration-metadata.json`.
+`llm4s.reserve-completion`. For OpenAI: `llm4s.api` (`responses` or `chat-completions`; unset lets the client
+choose), `llm4s.reasoning-summary` (`auto`, `concise`, `detailed`) and `llm4s.keep-reasoning` (default `true`).
+All keys are in `META-INF/additional-spring-configuration-metadata.json`.

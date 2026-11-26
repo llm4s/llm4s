@@ -62,6 +62,15 @@ class Llm4sProperties {
 
   @BeanProperty var organization: String = ""
 
+  /** OpenAI only: `responses` or `chat-completions`; blank lets the client choose. */
+  @BeanProperty var api: String = ""
+
+  /** OpenAI only: whether a thread keeps the model's reasoning across requests on the Responses API. */
+  @BeanProperty var keepReasoning: Boolean = true
+
+  /** OpenAI only: the reasoning summary to ask for, `auto`, `concise` or `detailed`; blank asks for none. */
+  @BeanProperty var reasoningSummary: String = ""
+
   @BeanProperty var contextWindow: Int = 128000
 
   @BeanProperty var reserveCompletion: Int = 4096

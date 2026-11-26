@@ -131,8 +131,110 @@ and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingc
 From 0.7.0 to 1.0.0, [an error's `provider` is a `ProviderId`](#an-errors-provider-is-a-providerid-2936), the one
 source break, and three behaviour changes:
 [a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
-After 1.0.0, in the Experimental `llm4s-schema-derivation`,
+After 1.0.0, [an `openai` section on api.openai.com uses the Responses API](#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900),
+and, in the Experimental `llm4s-schema-derivation`,
 [an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951).
+
+## An `openai` section on api.openai.com uses the Responses API (#2900)
+
+**Who is affected:** a client of provider `openai` whose base URL is OpenAI's default (`https://api.openai.com/v1`),
+with no `api` set, and a model the model registry lists for `/v1/responses` or does not know: `gpt-4o` and
+`gpt-4o-mini` (and the snapshots `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`), `gpt-4.1`,
+most of the gpt-5 and later models the registry lists (`gpt-5`, `gpt-5-mini`, `gpt-5.1`, `gpt-5.6-luna`,
+`gpt-5.6-terra`, `gpt-6-luna`, `gpt-6.1-terra`, ...), `o3`, and a model newer than the bundled data. A fine-tune with
+no `ft:` entry in the registry follows its base model; one with an `ft:` entry follows that entry, and today those
+list no endpoints, so it stays on Chat Completions. The INFO line logged when a client is built says what it chose
+(below). OpenAI served the named models on the Responses API on 2026-11-26; llm4s's own patch to the bundled data lists `/v1/responses` for the `gpt-4o` ones, which LiteLLM does
+not. That covers a section in `application.conf`, an `OpenAIConfig` built in code, the Java builder
+(`Llm4s.openAi()`), the Kotlin DSL (`openAi { }`), the Spring Boot starter (the flat `llm4s.provider=openai` or a
+section `llm4s.providers.<name>.provider=openai`) and the Quarkus extension (a section only). Such a client now calls
+OpenAI's Responses API (`/v1/responses`) instead of Chat Completions; OpenAI's pro, codex and deep-research models,
+which it serves only there, go to it wherever the base URL points.
+
+**Not affected:** a model the registry knows but does not list for `/v1/responses` (`gpt-4-turbo`, `gpt-4`,
+`gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots such as
+`gpt-4o-audio-preview-2024-12-17`, the `gpt-audio` family, the search models, `gpt-5.5-cyber`,
+`gpt-5.5-cyber-preview`, `gpt-6-rosalind`), a fine-tune the registry's `ft:`
+entry covers (`ft:gpt-4o-mini-2024-07-18:...`: those entries list no endpoints), another base URL (a proxy, a
+gateway, OpenAI's regional hosts), Requesty, OpenRouter and Azure OpenAI. These stay on Chat Completions and send
+what 1.0.x sent. The `gpt-audio` and search models were refused on the Responses API on 2026-11-26; `o1`,
+`o3-mini`, `o4-mini`, `gpt-4-turbo` and `gpt-3.5-turbo` could not be called then, so they follow the data,
+unverified. The one exception to another base URL: a responses-only model (`mode: responses` in the registry: the
+pro, codex and deep-research models such as `o3-pro`, `gpt-5-pro`, `gpt-5-codex`, `o3-deep-research`) uses the
+Responses API behind a gateway or proxy too, with or without an `openai/` prefix, because Chat Completions cannot
+serve it at OpenAI; a gateway that bridges Chat Completions for it needs `api = "chat-completions"` on the section.
+A model id the registry does
+not hold, such as the undated alias `gpt-4o-audio-preview` or a snapshot newer than the bundled data, is unknown to
+it and uses the Responses API on api.openai.com; if that model is served on Chat Completions only, set
+`api = "chat-completions"` on its section (or add it to a model registry of your own). [Which API a section uses](../guide/providers#which-api-a-section-uses) has
+the rules, and how to move one of these models to the Responses API (`api = "responses"`, or a model registry of
+your own that lists `/v1/responses` for it).
+
+**What changes for an affected client:**
+
+- The request is a Responses API request (`input` items, `max_output_tokens`, `reasoning.effort` when an effort is asked, `store: false`),
+  and the exchange log records it and its reply; the log's format does not change.
+- A reasoning model calling tools is sent the effort you asked for. On Chat Completions a request with tools to a
+  GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (in 1.0.x only `gpt-6-luna` got that; the others failed,
+  see [#2940](https://github.com/llm4s/llm4s/issues/2940)). On the Responses API the configured effort is sent, and
+  with none configured the field is left out, so the model's own default effort applies. So these models now reason
+  with tools: reasoning tokens are used, billed and
+  reported (`TokenUsage.thinkingTokens`), and they count against `maxTokens` (sent as `max_output_tokens`, which
+  includes reasoning), so a small limit can cut the answer short. Replies take longer, which matters for request
+  timeouts. Choose with `withReasoning(ReasoningEffort.Low)` (or another level) or `withThinking(Thinking.Off)`.
+- The stored opaque reasoning blocks count towards the context window's token estimate (`ConversationTokenCounter`,
+  about a quarter of their length), so context pruning starts earlier on a long thread.
+- `presencePenalty` and `frequencyPenalty` are not sent, and are reported as `RequestAdjustment.Dropped`. A
+  `maxTokens` below 16 is sent as 16 and reported as `RequestAdjustment.Adjusted`.
+- A reasoning model's reasoning is kept on the thread: each reasoning item is stored on the assistant message as an
+  encrypted opaque thinking block and sent back on later requests to the same model. Stored threads and checkpoints
+  grow by one such item per reasoning turn. `keepReasoning = false` on the section (`withKeepReasoning(false)` in
+  code) turns it off; when OpenAI answers a request with an error refusing a stored item, the error says so and
+  names that setting
+  ([Reasoning kept across a thread](../guide/providers#reasoning-kept-across-a-thread)).
+- `Completion.id` and each streamed chunk's `id` are the response id (`resp_...`), not `chatcmpl-...`.
+- A reply that fails with an error code is reported by what the code means: `rate_limit_exceeded` as a
+  `RateLimitError`, a code for a request that can never succeed (`invalid_prompt`, the image codes) as a
+  `ValidationError`, a policy refusal (`bio_policy`, ...) as a `ContentFilteredError`, any other as a `ServiceError`
+  502 ([the list](../guide/providers#what-differs-on-the-responses-api)).
+
+**To see which API a client chose,** look for the INFO line logged when it is built:
+`OpenAI client for model <model> uses <responses|chat-completions>: <reason>`, for example
+`OpenAI client for model gpt-4.1 uses responses: the model registry lists gpt-4.1 for /v1/responses`.
+
+**A model registry of your own** (`llm4s.modelRegistry.filePath`, `.url` or `.resourcePath`) replaces the bundled
+catalogue, llm4s's patches included, so routing follows your entries: a model your registry lists for
+`/v1/responses` (in `supported_endpoints`) or marks `mode: responses` uses the Responses API, one it lists without
+it stays on Chat Completions, and a model your registry omits is unknown, so it uses the Responses API on
+api.openai.com and Chat Completions on any other base URL
+([Model Metadata](model-metadata#endpoints-and-the-openai-api)).
+
+**To keep 1.0.x behaviour,** set `api` to `chat-completions`; the request is then what 1.0.x sent. The value is
+exactly `chat-completions` or `responses`; any other fails the load.
+
+| Entry point | The line |
+|---|---|
+| HOCON section (`application.conf`) | `api = "chat-completions"` in `llm4s.providers.<name> { ... }` |
+| `OpenAIConfig` in code | `config.withApi(OpenAIApi.ChatCompletions)` |
+| Java builder | `Llm4s.openAi().api("chat-completions")` |
+| Kotlin DSL | `api = "chat-completions"` in the `openAi { }` block |
+| Spring Boot, flat keys | `llm4s.api=chat-completions` |
+| Spring Boot, named section | `llm4s.providers.<name>.api=chat-completions` |
+| Quarkus, named section | `llm4s.providers.<name>.api=chat-completions` |
+
+Once any `llm4s.providers.*` property is set, Spring ignores the flat keys, so a named-section application sets `api`
+in the section.
+
+**Positional patterns.** `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning` (11 fields to 14), and
+`ModelMetadata` gained `supportedEndpoints` (8 to 9). Both are growth-safe classes, built with `apply` and `with*`
+setters, so a field gained is not a break of the 1.x promise
+([Compatibility policy](compatibility-policy#what-the-promise-covers)), but a pattern that binds their fields by
+position no longer compiles: `case OpenAIConfig(_, model, _, _, _, _, _, _, _, _, _) =>` needs three more `_`.
+Read the fields by name (`config.model`), or let Scalafix add them, from code still compiling against 1.0.x:
+
+```bash
+sbt "scalafixAll dependency:Llm4sMigrateFrom_1_0@org.llm4s::llm4s-scalafix:<the new version>"
+```
 
 ## An annotation that is not a constant string is a compile error (#2951)
 

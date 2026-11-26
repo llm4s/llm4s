@@ -7,7 +7,7 @@ import com.openai.auth.SubjectTokenType
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.IdentitySource
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.security.{ KnownSecrets, Secret }
@@ -89,11 +89,15 @@ class OpenAIWorkloadIdentitySpec
       val missing = Files.createTempFile("svid", ".jwt")
       Files.delete(missing)
       // Forward slashes: a Windows path's backslashes would be read as escapes inside the quoted HOCON string.
-      val body  = section.replace("/var/run/svid", missing.toString.replace('\\', '/'))
-      val c     = assertBuildsClient(OpenAIProvider, sectionOf(body))
-      val error = c.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).left.value
-      error shouldBe an[AuthenticationError]
-      error.message should include("workload-identity")
+      val body = section.replace("/var/run/svid", missing.toString.replace('\\', '/'))
+      // on both APIs: the token is read before either sends anything
+      for api <- Seq("chat-completions", "responses") do
+        withClue(s"$api: ") {
+          val c     = assertBuildsClient(OpenAIProvider, sectionOf(s"$body\napi = \"$api\""))
+          val error = c.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).left.value
+          error shouldBe an[AuthenticationError]
+          error.message should include("workload-identity")
+        }
     }
 
     "keep a missing identity token an AuthenticationError through the SDK's async path and its wrapping" in {
@@ -171,65 +175,72 @@ class OpenAIWorkloadIdentitySpec
         KnownSecrets.scrub(subjects.head, "[X]") shouldBe subjects.head
       }
 
-    "mask the access token the SDK obtained when the API's error body echoes it bare, on complete and stream (#1932)" in
-      KnownSecrets.isolated {
-        // The SDK posts the exchange to a fixed https://auth.openai.com/oauth/token, so no local server can answer
-        // it: the SDK runs for real over an in-memory HTTP client, which answers the exchange and the API call.
-        import com.openai.core.http.{ Headers, HttpClient as SdkHttp, HttpRequest, HttpResponse as SdkResponse }
-        val token = "opaqueOpenAIAccess0001"
-        val seen  = new java.util.concurrent.ConcurrentLinkedQueue[String]()
-        def response(status: Int, text: String): SdkResponse = new SdkResponse {
-          def statusCode(): Int = status
-          def headers(): Headers =
-            Headers.builder().put("Content-Type", "application/json").build()
-          def body(): java.io.InputStream =
-            new java.io.ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-          def close(): Unit = ()
-        }
-        val base = new SdkHttp {
-          def execute(request: HttpRequest, options: com.openai.core.RequestOptions): SdkResponse =
-            if request.url().startsWith("https://auth.openai.com/") then
-              response(
-                200,
-                s"""{"access_token":"$token","issued_token_type":"urn:ietf:params:oauth:token-type:access_token",""" +
-                  """"token_type":"Bearer","expires_in":3600}"""
-              )
-            else
-              seen.add(request.headers().values("Authorization").asScala.mkString(","))
-              response(403, s"""{"error":{"message":"request with $token is denied","type":"permission_error"}}""")
-          def executeAsync(
-            request: HttpRequest,
-            options: com.openai.core.RequestOptions
-          ): java.util.concurrent.CompletableFuture[SdkResponse] =
-            java.util.concurrent.CompletableFuture.completedFuture(execute(request, options))
-          def close(): Unit = ()
-        }
-        val wi = OpenAIWorkloadIdentity(IdentitySource.Literal(Secret("eyJ.svid.sig")), "idp_1", "sa_1")
-        val config = OpenAIConfig(
-          Secret(""),
-          ModelName("gpt-4o-mini"),
-          None,
-          BaseUrl("https://api.openai.com/v1"),
-          128000,
-          4096,
-          workloadIdentity = Some(wi)
-        )
-        val transport = OpenAIClientTransport.sdk(OpenAIClientTransport.workloadIdentitySdk(config, wi, base))
-        val client = OpenAIClient.forTest("gpt-4o-mini", transport, config)(using
-          org.llm4s.model.ModelRegistryTestSupport.defaultService()
-        )
-        val conversation = Conversation(Seq(UserMessage("hi")))
-        for result <- Seq(
-            client.complete(conversation, CompletionOptions()),
-            client.streamComplete(conversation, CompletionOptions())(_ => ())
+    "mask the access token the SDK obtained when the API's error body echoes it bare, on complete and stream (#1932)" in {
+      // on both APIs: masking holds whichever one the client speaks
+      val apis = Seq(OpenAIApi.ChatCompletions -> "/v1/chat/completions", OpenAIApi.Responses -> "/v1/responses")
+      for (api, path) <- apis do
+        withClue(s"$api: ")(KnownSecrets.isolated {
+          // The SDK posts the exchange to a fixed https://auth.openai.com/oauth/token, so no local server can answer
+          // it: the SDK runs for real over an in-memory HTTP client, which answers the exchange and the API call.
+          import com.openai.core.http.{ Headers, HttpClient as SdkHttp, HttpRequest, HttpResponse as SdkResponse }
+          val token = "opaqueOpenAIAccess0001"
+          val seen  = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+          val paths = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+          def response(status: Int, text: String): SdkResponse = new SdkResponse {
+            def statusCode(): Int = status
+            def headers(): Headers =
+              Headers.builder().put("Content-Type", "application/json").build()
+            def body(): java.io.InputStream =
+              new java.io.ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            def close(): Unit = ()
+          }
+          val base = new SdkHttp {
+            def execute(request: HttpRequest, options: com.openai.core.RequestOptions): SdkResponse =
+              if request.url().startsWith("https://auth.openai.com/") then
+                response(
+                  200,
+                  s"""{"access_token":"$token","issued_token_type":"urn:ietf:params:oauth:token-type:access_token",""" +
+                    """"token_type":"Bearer","expires_in":3600}"""
+                )
+              else
+                seen.add(request.headers().values("Authorization").asScala.mkString(","))
+                paths.add(java.net.URI.create(request.url()).getPath)
+                response(403, s"""{"error":{"message":"request with $token is denied","type":"permission_error"}}""")
+            def executeAsync(
+              request: HttpRequest,
+              options: com.openai.core.RequestOptions
+            ): java.util.concurrent.CompletableFuture[SdkResponse] =
+              java.util.concurrent.CompletableFuture.completedFuture(execute(request, options))
+            def close(): Unit = ()
+          }
+          val wi = OpenAIWorkloadIdentity(IdentitySource.Literal(Secret("eyJ.svid.sig")), "idp_1", "sa_1")
+          val config = OpenAIConfig(
+            Secret(""),
+            ModelName("gpt-4o-mini"),
+            None,
+            BaseUrl("https://api.openai.com/v1"),
+            128000,
+            4096,
+            workloadIdentity = Some(wi)
+          ).withApi(api)
+          val transport = OpenAIClientTransport.sdk(OpenAIClientTransport.workloadIdentitySdk(config, wi, base))
+          val client = OpenAIClient.forTest("gpt-4o-mini", transport, config)(using
+            org.llm4s.model.ModelRegistryTestSupport.defaultService()
           )
-        do
-          val message = result.left.value.message
-          message should include("denied")
-          (message should not).include(token)
-        seen.asScala.toSeq.distinct shouldBe Seq(s"Bearer $token")
-        client.close()
-      }
+          val conversation = Conversation(Seq(UserMessage("hi")))
+          for result <- Seq(
+              client.complete(conversation, CompletionOptions()),
+              client.streamComplete(conversation, CompletionOptions())(_ => ())
+            )
+          do
+            val message = result.left.value.message
+            message should include("denied")
+            (message should not).include(token)
+          seen.asScala.toSeq.distinct shouldBe Seq(s"Bearer $token")
+          paths.asScala.toSeq.distinct shouldBe Seq(path)
+          client.close()
+        })
+    }
 
     "read the identity token for the async path off the common pool" in {
       val file = Files.createTempFile("svid", ".jwt")

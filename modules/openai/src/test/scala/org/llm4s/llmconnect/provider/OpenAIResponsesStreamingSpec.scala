@@ -6,6 +6,7 @@ import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, RateLimit
 import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
 import org.llm4s.llmconnect.model.{
+  AssistantMessage,
   Completion,
   CompletionOptions,
   Conversation,
@@ -13,13 +14,14 @@ import org.llm4s.llmconnect.model.{
   RequestAdjustment,
   RequestOption,
   StreamedChunk,
+  ThinkingBlock,
   UserMessage
 }
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer
-import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -65,7 +67,9 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     options: CompletionOptions = CompletionOptions(),
     status: Int = 200,
     json: Boolean = false,
-    onChunk: Option[StreamedChunk => Unit] = None
+    onChunk: Option[StreamedChunk => Unit] = None,
+    keepReasoning: Boolean = true,
+    conversation: Conversation = hello
   ): Streamed =
     val seen      = new AtomicReference[Seen]()
     val chunks    = ListBuffer.empty[StreamedChunk]
@@ -80,10 +84,10 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
       else LocalProviderTestServer.sendSseResponse(exchange, body)
     } { baseUrl =>
       val client = OpenAIClient(
-        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
+        configFor(baseUrl, model).withApi(OpenAIApi.Responses).withKeepReasoning(keepReasoning),
         LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
       ).value
-      out = Some(client.streamComplete(hello, options)(onChunk.getOrElse(chunks += _)))
+      out = Some(client.streamComplete(conversation, options)(onChunk.getOrElse(chunks += _)))
       client.close()
     }
     Streamed(out.get, chunks.toList, exchanges.toList, Option(seen.get()))
@@ -180,6 +184,24 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     s.chunks.flatMap(_.thinkingDelta) shouldBe Seq("Thinking", " it through.")
     s.completion.thinking shouldBe Some("Thinking it through.")
     s.completion.message.hasSealedThinking shouldBe true
+  }
+
+  it should "keep no reasoning on the final message when keepReasoning is false, and still deliver the summary" in {
+    val s = streamed(
+      sse(
+        summaryDelta("Thinking"),
+        summaryDelta(" it through."),
+        textDelta("4"),
+        completed(reply(reasoningItem("rs_1", summary = Seq("Thinking it through.")) + "," + outputMessage("4")))
+      ),
+      model = "gpt-6.1-terra",
+      keepReasoning = false
+    )
+    s.chunks.flatMap(_.thinkingDelta) shouldBe Seq("Thinking", " it through.")
+    s.request.body.obj.keySet should not contain "include"
+    s.completion.thinking shouldBe Some("Thinking it through.")
+    s.completion.message.hasSealedThinking shouldBe false
+    s.completion.message.thinkingBinding shouldBe None
   }
 
   it should "separate a reasoning item's summary parts as the final thinking does" in {
@@ -387,6 +409,61 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     val error = nestedError("invalid_prompt").result.left.value
     error shouldBe a[org.llm4s.error.ValidationError]
     error.isRetryable shouldBe false
+  }
+
+  // a thread whose earlier turn stored a reasoning item for the model, so the request carries it back
+  private lazy val Terra = "gpt-6.1-terra"
+  private def carrying: Conversation =
+    val item = ujson.Obj("type" -> "reasoning", "id" -> "rs_1", "summary" -> ujson.Arr(), "encrypted_content" -> "enc")
+    val turn = AssistantMessage(
+      Some("hi"),
+      Nil,
+      Seq(ThinkingBlock.Opaque(ProviderId("openai"), ujson.Obj("item" -> item).render()))
+    )
+    Conversation(
+      Seq(UserMessage("go"), ThinkingReplay.bindOrigin(ReplayOrigin("openai", Terra), turn), UserMessage("again"))
+    )
+
+  private lazy val rejected = "The encrypted content gAAA could not be verified."
+
+  private def rejection(event: String, conversation: Conversation): LLMError =
+    val s = streamed(sse(event), model = Terra, conversation = conversation)
+    if conversation != hello then types(s.request.body("input")) should contain("reasoning")
+    s.result.left.value
+
+  private def types(input: ujson.Value): Seq[String] =
+    input.arr.toSeq.map(item => item.obj.get("type").map(_.str).getOrElse(item("role").str))
+
+  it should "add the rejected-reasoning hint to an error event, only when the request carried a reasoning item" in {
+    val event  = errorEvent("invalid_encrypted_content", rejected)
+    val hinted = rejection(event, carrying)
+    hinted shouldBe a[org.llm4s.error.ValidationError]
+    hinted.isRetryable shouldBe false
+    hinted.message should include("could not be verified")
+    hinted.message should include("keepReasoning")
+    val plain = rejection(event, hello)
+    plain shouldBe a[org.llm4s.error.ValidationError]
+    (plain.message should not).include("keepReasoning")
+  }
+
+  it should "add the rejected-reasoning hint to a nested error event, only when the request carried a reasoning item" in {
+    val event  = nestedErrorEvent("invalid_encrypted_content", rejected)
+    val hinted = rejection(event, carrying)
+    hinted shouldBe a[org.llm4s.error.ValidationError]
+    hinted.isRetryable shouldBe false
+    hinted.message should include("keepReasoning")
+    (rejection(event, hello).message should not).include("keepReasoning")
+  }
+
+  it should "add the rejected-reasoning hint to a response.failed, only when the request carried a reasoning item" in {
+    val event = failed(
+      reply("", status = "failed", extra = s""""error":{"code":"invalid_encrypted_content","message":"$rejected"}""")
+    )
+    val hinted = rejection(event, carrying)
+    hinted shouldBe a[org.llm4s.error.ValidationError]
+    hinted.isRetryable shouldBe false
+    hinted.message should include("keepReasoning")
+    (rejection(event, hello).message should not).include("keepReasoning")
   }
 
   it should "map a nested server_error error event to a retryable ServiceError" in {

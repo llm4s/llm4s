@@ -56,6 +56,8 @@ private[provider] object OpenAIResponsesRequest:
    * @param reasons whether the request goes to a reasoning model: it then asks for `reasoning.encrypted_content`
    * @param summary the `reasoning.summary` to ask for, sent only when `reasons`
    * @param origin the provider and model whose sealed reasoning this request may carry back
+   * @param keepReasoning whether the thread keeps reasoning: when false the request neither asks for the encrypted
+   *                      reasoning nor sends back what an earlier turn stored
    */
   final case class Settings(
     model: String,
@@ -65,7 +67,8 @@ private[provider] object OpenAIResponsesRequest:
     omitsSampling: Boolean,
     reasons: Boolean,
     summary: Option[OpenAIReasoningSummary],
-    origin: ReplayOrigin
+    origin: ReplayOrigin,
+    keepReasoning: Boolean
   )
 
   /** OpenAI rejects a `max_output_tokens` below this. */
@@ -117,7 +120,8 @@ private[provider] object OpenAIResponsesRequest:
             settings.effort.foreach(e => reasoning.effort(e))
             summary.foreach(s => reasoning.summary(reasoningSummary(s)))
             builder.reasoning(reasoning.build())
-          if settings.reasons then builder.addInclude(ResponseIncludable.REASONING_ENCRYPTED_CONTENT)
+          if settings.reasons && settings.keepReasoning then
+            builder.addInclude(ResponseIncludable.REASONING_ENCRYPTED_CONTENT)
           settings.serviceTier.foreach(t => builder.serviceTier(t))
           options.tools.map(_.toolDefinition(strict = true)).foreach(t => builder.addTool(functionTool(t)))
           options.responseFormat.foreach(f => builder.text(textConfig(f)))
@@ -145,7 +149,7 @@ private[provider] object OpenAIResponsesRequest:
           case parts =>
             val mapped = parts.map(userPart(settings))
             Vector(easy(EasyInputMessage.Role.USER, _.contentOfResponseInputMessageContentList(mapped.asJava)))
-      case assistant: AssistantMessage => assistantItems(assistant)
+      case assistant: AssistantMessage => assistantItems(settings, assistant)
       case tool: ToolMessage =>
         Vector(
           ResponseInputItem.ofFunctionCallOutput(
@@ -161,8 +165,8 @@ private[provider] object OpenAIResponsesRequest:
    * An assistant turn's items, in order: the reasoning items with no anchor, its text, then each tool call preceded by
    * the reasoning items stored with that call's id. A stored item whose call the message no longer has is not sent.
    */
-  private def assistantItems(message: AssistantMessage): Vector[ResponseInputItem] =
-    val reasoning  = OpenAIReasoningItems.stored(message.thinking)
+  private def assistantItems(settings: Settings, message: AssistantMessage): Vector[ResponseInputItem] =
+    val reasoning  = if settings.keepReasoning then OpenAIReasoningItems.stored(message.thinking) else Seq.empty
     val unanchored = reasoning.filter(_.before.isEmpty).map(s => ResponseInputItem.ofReasoning(s.item))
     val said =
       message.text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector

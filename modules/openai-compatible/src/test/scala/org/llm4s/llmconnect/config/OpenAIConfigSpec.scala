@@ -81,4 +81,14 @@ class OpenAIConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     OpenAIReasoningSummary.parse("detailed") shouldBe Right(OpenAIReasoningSummary.Detailed)
     OpenAIReasoningSummary.parse("full").isLeft shouldBe true
   }
+
+  test("OpenAIConfig keeps reasoning unless told not to, and shows it in toString only when off") {
+    val config = OpenAIConfig(Secret("sk-test"), ModelName("gpt-6.1-terra"))
+    config.keepReasoning shouldBe true
+    openai.keepReasoning shouldBe true
+    (config.toString should not).include("keepReasoning")
+    config.withKeepReasoning(false).keepReasoning shouldBe false
+    config.withKeepReasoning(false).toString should include("keepReasoning=false")
+    config.withKeepReasoning(false).withKeepReasoning(true) shouldBe config
+  }
 }

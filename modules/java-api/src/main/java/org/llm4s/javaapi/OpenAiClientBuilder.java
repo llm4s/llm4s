@@ -52,6 +52,33 @@ public final class OpenAiClientBuilder {
   }
 
   /**
+   * Which of OpenAI's APIs the client calls: {@code "responses"} or {@code "chat-completions"}; {@code null}, the
+   * default, lets the client choose (the Responses API for a model that supports it on {@code api.openai.com}, Chat
+   * Completions otherwise). Any other value makes {@link #build()} return a failed result of kind {@code VALIDATION}
+   * naming both.
+   */
+  public OpenAiClientBuilder api(String api) {
+    return new OpenAiClientBuilder(settings.api(api));
+  }
+
+  /**
+   * Whether a conversation keeps the model's reasoning across requests on the Responses API; {@code true}, the
+   * default. {@code false} keeps it out of the thread and the request.
+   */
+  public OpenAiClientBuilder keepReasoning(boolean keepReasoning) {
+    return new OpenAiClientBuilder(settings.keepReasoning(keepReasoning));
+  }
+
+  /**
+   * The reasoning summary to ask the Responses API for: {@code "auto"}, {@code "concise"} or {@code "detailed"};
+   * {@code null}, the default, asks for none. Any other value makes {@link #build()} return a failed result of kind
+   * {@code VALIDATION} naming the three.
+   */
+  public OpenAiClientBuilder reasoningSummary(String summary) {
+    return new OpenAiClientBuilder(settings.reasoningSummary(summary));
+  }
+
+  /**
    * The model's context window in tokens, at least 1, instead of the one the library knows for the model (or guesses
    * from its name).
    */

@@ -83,6 +83,11 @@ The overrides patch every Claude model that rejects a budget: Opus 4.7 and 4.8 a
 Anthropic's API, Bedrock, Vertex AI and Azure AI. A test fails when a refreshed snapshot has a member of those
 families without its patch.
 
+Patches also correct `supported_endpoints` for OpenAI models where a request to OpenAI on 2026-11-26 contradicted
+LiteLLM: `gpt-4o`, `gpt-4o-mini` and their snapshots `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20` and
+`gpt-4o-mini-2024-07-18` gain `/v1/responses`, and the `gpt-audio` models lose it
+([Endpoints and the OpenAI API](#endpoints-and-the-openai-api)).
+
 An override can also carry a whole entry for a current model the snapshot predates, copied from LiteLLM's upstream
 file and checked against the vendor's pricing page; the next refresh of the snapshot makes it redundant. Two whole
 entries remain because upstream no longer lists those ids at all: `gemini/gemini-1.5-flash` and
@@ -233,6 +238,36 @@ Most capability keys only describe a model. These decide what a client sends, an
 
 `llm4s-anthropic` and `llm4s-bedrock` also know the Claude models by name, for an id no entry describes; what an
 entry states wins over the name.
+
+### Endpoints and the OpenAI API
+
+Two keys say where a model is served, and an `openai` section with no `api` set chooses its API from them
+([Which API a section uses](../guide/providers#which-api-a-section-uses)):
+
+| Key | `ModelMetadata` | Effect |
+|-----|-----------------|--------|
+| `mode: "responses"` | `mode = ModelMode.Responses` | The model is served only on OpenAI's Responses API (the pro, codex and deep-research models): an `openai` client uses that API wherever its base URL points. |
+| `supported_endpoints: ["/v1/chat/completions", "/v1/responses", ...]` | `supportedEndpoints` | The API paths that serve the model. On `https://api.openai.com`, an `openai` client uses the Responses API when the list holds `/v1/responses`, and Chat Completions when the entry does not hold it, whether it lists other paths or none. A model the registry does not know uses the Responses API there. |
+
+A registry of your own replaces the bundled one, llm4s's patches included, so to move a model to the Responses
+API by default, list `/v1/responses` in its entry:
+
+```json
+{
+  "gpt-4-turbo": {
+    "litellm_provider": "openai",
+    "mode": "chat",
+    "max_input_tokens": 128000,
+    "max_output_tokens": 4096,
+    "supported_endpoints": ["/v1/chat/completions", "/v1/responses"],
+    "supports_function_calling": true
+  }
+}
+```
+
+A model your registry omits is unknown to it, so it uses the Responses API on `https://api.openai.com` and Chat
+Completions on any other base URL. `api = "responses"` or `api = "chat-completions"` on a section overrides both
+keys for that section.
 
 To correct one model's context window without replacing the catalogue, set it on the provider section instead:
 `contextWindow` and `reserveCompletion` are keys of the generic `openai-compatible` and Perplexity sections, among

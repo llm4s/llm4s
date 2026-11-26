@@ -1,7 +1,7 @@
 package org.llm4s.spring
 
 import org.llm4s.types.ProviderModelTypes.BaseUrl
-import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -14,7 +14,10 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     baseUrl: String = "",
     organization: String = "",
     contextWindow: Int = 128000,
-    reserveCompletion: Int = 4096
+    reserveCompletion: Int = 4096,
+    api: String = "",
+    keepReasoning: Boolean = true,
+    reasoningSummary: String = ""
   ): Llm4sProperties = {
     val p = new Llm4sProperties
     p.provider = provider
@@ -24,6 +27,9 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
     p.organization = organization
     p.contextWindow = contextWindow
     p.reserveCompletion = reserveCompletion
+    p.api = api
+    p.keepReasoning = keepReasoning
+    p.reasoningSummary = reasoningSummary
     p
   }
 
@@ -82,6 +88,60 @@ class ProviderConfigParserSpec extends AnyFlatSpec with Matchers {
       props(provider = "OpenAI", model = "gpt-4o", apiKey = "sk-test")
     )
     result.isSuccess shouldBe true
+  }
+
+  it should "use the library's default base URL when none is given" in {
+    ProviderConfigParser
+      .parse(props(provider = "openai", model = "m", apiKey = "k"))
+      .get()
+      .asInstanceOf[OpenAIConfig]
+      .baseUrl shouldBe OpenAIConfig.DEFAULT_BASE_URL
+  }
+
+  it should "leave the API and the reasoning summary unspecified and keep reasoning, unless told" in {
+    val config = ProviderConfigParser
+      .parse(props(provider = "openai", model = "m", apiKey = "k"))
+      .get()
+      .asInstanceOf[OpenAIConfig]
+    (config.api, config.reasoningSummary, config.keepReasoning) shouldBe ((None, None, true))
+  }
+
+  it should "read llm4s.api, llm4s.reasoning-summary and llm4s.keep-reasoning" in {
+    def config(api: String = "", summary: String = "", keep: Boolean = true) =
+      ProviderConfigParser
+        .parse(
+          props(
+            provider = "openai",
+            model = "m",
+            apiKey = "k",
+            api = api,
+            reasoningSummary = summary,
+            keepReasoning = keep
+          )
+        )
+        .get()
+        .asInstanceOf[OpenAIConfig]
+    config(api = "chat-completions").api shouldBe Some(OpenAIApi.ChatCompletions)
+    config(api = " responses ").api shouldBe Some(OpenAIApi.Responses)
+    config(summary = "concise").reasoningSummary shouldBe Some(OpenAIReasoningSummary.Concise)
+    config(keep = false).keepReasoning shouldBe false
+  }
+
+  it should "fail on a bad llm4s.api or llm4s.reasoning-summary, naming the valid values" in {
+    val api = ProviderConfigParser.parse(props(provider = "openai", model = "m", apiKey = "k", api = "chat"))
+    api.isFailure shouldBe true
+    api.getError().getMessage should (include("llm4s.api").and(include("responses")).and(include("chat-completions")))
+    val summary =
+      ProviderConfigParser.parse(props(provider = "openai", model = "m", apiKey = "k", reasoningSummary = "long"))
+    summary.isFailure shouldBe true
+    summary.getError().getMessage should (include("llm4s.reasoning-summary")
+      .and(include("auto"))
+      .and(
+        include(
+          "concise"
+        )
+      )
+      .and(include("detailed")))
   }
 
   "Anthropic parsing" should "succeed with all required fields" in {

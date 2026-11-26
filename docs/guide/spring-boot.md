@@ -125,6 +125,9 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | `llm4s.api-key` | empty | required for `openai` and `anthropic`; not used by `ollama` |
 | `llm4s.base-url` | empty | overrides the provider's default URL (below) |
 | `llm4s.organization` | empty | OpenAI only: the organisation id |
+| `llm4s.api` | empty | OpenAI only: `responses` or `chat-completions`; empty lets the client choose |
+| `llm4s.keep-reasoning` | `true` | OpenAI only: whether a thread keeps the model's reasoning on the Responses API |
+| `llm4s.reasoning-summary` | empty | OpenAI only: `auto`, `concise` or `detailed`; empty asks for none |
 | `llm4s.context-window` | `128000` | the model's context window in tokens; must be positive |
 | `llm4s.reserve-completion` | `4096` | tokens kept for the reply; at least 0 and less than the context window |
 | `llm4s.async.max-threads` | `16` | worker threads of the default executor |

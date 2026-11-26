@@ -12,10 +12,10 @@ import org.llm4s.model.{ ModelCapabilities, ModelRegistryService, RequestTransfo
  * `max_completion_tokens` in place of `max_tokens`. These were core's `DefaultRequestTransformer`
  * defaults until they moved here, so other providers' clients no longer apply them.
  *
- * The GPT 5.6, 6 and 6.1 models restrict tool calls on Chat Completions, the only API `OpenAIClient` speaks
- * ([[toolsOnChatCompletions]]): they call functions there only with `reasoning_effort: none`, and answer anything
- * else, a request that leaves the field out included, with a 400 naming the Responses API (requests sent to
- * `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-luna` and `gpt-6.1-terra` on 2026-11-25, #2940).
+ * The GPT 5.6, 6 and 6.1 models restrict tool calls on Chat Completions, and [[toolsOnChatCompletions]] applies
+ * when `OpenAIClient` is on Chat Completions: they call functions there only with `reasoning_effort: none`, and
+ * answer anything else, a request that leaves the field out included, with a 400 naming the Responses API (requests
+ * sent to `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-luna` and `gpt-6.1-terra` on 2026-11-25, #2940).
  */
 private[llm4s] object OpenAIModelRules {
 

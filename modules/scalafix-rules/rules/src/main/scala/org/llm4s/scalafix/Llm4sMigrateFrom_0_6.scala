@@ -9,7 +9,8 @@ import scalafix.v1._
  * [[ToolFunctionOneTypeParameter]], [[PositionalPatternsGainFields]], [[SamplingOptionsOptional]],
  * [[CompletionFromMessage]], [[MessageAndConversationShapes]], [[ClientEntryPoints]], [[ToolCallIdTyped]],
  * [[AccessorRenames]] and the
- * [[AgentStatusGainsTruncated]] lint, and those for the breaks since 0.7.0 ([[ErrorProviderIdTyped]]). It grows as the 1.0 breaks land (#1281).
+ * [[AgentStatusGainsTruncated]] lint, and those for the breaks since 0.7.0 ([[ErrorProviderIdTyped]]). Its [[PositionalPatternsGainFields]] takes an `OpenAIConfig` pattern of
+ * 0.6.0's eleven fields to the current fourteen in one pass (#2900). It grows as the 1.0 breaks land (#1281).
  *
  * It leaves out the rules for the 0.5.1 breaks that 0.6.x code is already past (`CredentialsToSecret`,
  * `CompletionCreatedToInstant`, `FromValuesKeyFirst`, ...), which would rewrite it a second time; [[Llm4sMigrateFrom_0_5]]

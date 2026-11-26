@@ -5,7 +5,7 @@ import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.JLlmClient
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
 import org.llm4s.testutil.FixtureChatClient
 import org.scalatest.flatspec.AnyFlatSpec
@@ -79,6 +79,20 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       |"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7}}""".stripMargin
 
   // ---- the property names ------------------------------------------------------------------------
+
+  "a named OpenAI section" should "carry api and keep-reasoning to the config" in {
+    val e = layered(
+      "test" -> (section ++ Seq(
+        "llm4s.providers.o.api-key"           -> "k",
+        "llm4s.providers.o.api"               -> "chat-completions",
+        "llm4s.providers.o.keep-reasoning"    -> "false",
+        "llm4s.providers.o.reasoning-summary" -> "auto"
+      ))
+    )
+    val config = SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig]
+    (config.api, config.keepReasoning, config.reasoningSummary) shouldBe
+      ((Some(OpenAIApi.ChatCompletions), false, Some(OpenAIReasoningSummary.Auto)))
+  }
 
   "SpringProviderSource.camel" should "read kebab-case and snake_case names as the camelCase HOCON names" in {
     SpringProviderSource.camel("api-key") shouldBe "apiKey"

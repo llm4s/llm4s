@@ -47,6 +47,9 @@ import org.llm4s.types.Result
  *                 together with `workloadIdentity`.
  * @param api      the OpenAI API the client speaks, set with [[withApi]]; `None` leaves the choice to the client
  * @param reasoningSummary the reasoning summary to request, set with [[withReasoningSummary]]; `None` requests none
+ * @param keepReasoning whether a thread keeps the model's reasoning across requests on the Responses API: it asks for
+ *                 the encrypted reasoning, stores each reply's reasoning items on the message and sends them back.
+ *                 `true` unless [[withKeepReasoning]] says `false`, which also stops sending stored reasoning
  */
 @Stable
 final case class OpenAIConfig private (
@@ -62,7 +65,8 @@ final case class OpenAIConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider],
   api: Option[OpenAIApi],
-  reasoningSummary: Option[OpenAIReasoningSummary]
+  reasoningSummary: Option[OpenAIReasoningSummary],
+  keepReasoning: Boolean
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -96,6 +100,7 @@ final case class OpenAIConfig private (
     copy(reasoningSummary = Some(summary))
   def withReasoningSummary(summary: Option[OpenAIReasoningSummary]): OpenAIConfig =
     copy(reasoningSummary = summary)
+  def withKeepReasoning(keepReasoning: Boolean): OpenAIConfig = copy(keepReasoning = keepReasoning)
 
   def withApiKey(apiKey: Secret): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
@@ -114,7 +119,8 @@ final case class OpenAIConfig private (
     s"OpenAIConfig(apiKey=$apiKey, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
       s"workloadIdentity=$workloadIdentity${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")}" +
-      s"${api.fold("")(a => s", api=Some($a)")}${reasoningSummary.fold("")(r => s", reasoningSummary=Some($r)")})"
+      s"${api.fold("")(a => s", api=Some($a)")}${reasoningSummary.fold("")(r => s", reasoningSummary=Some($r)")}" +
+      s"${if keepReasoning then "" else ", keepReasoning=false"})"
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -151,7 +157,8 @@ object OpenAIConfig {
       network = HttpNetworkSettings.default,
       apiKeyProvider = None,
       api = None,
-      reasoningSummary = None
+      reasoningSummary = None,
+      keepReasoning = true
     )
 
   /**
@@ -192,6 +199,16 @@ object OpenAIConfig {
   /** The declaration of [[ReasoningSummaryKey]]. */
   val ReasoningSummaryConfigKey: ProviderConfigKey =
     ProviderConfigKey.optional(ReasoningSummaryKey, "the reasoning summary to request: auto, concise or detailed")
+
+  /** The provider-specific key switching reasoning retention, `keepReasoning`: `true` (the default) or `false`. */
+  val KeepReasoningKey: String = "keepReasoning"
+
+  /** The declaration of [[KeepReasoningKey]]. */
+  val KeepReasoningConfigKey: ProviderConfigKey =
+    ProviderConfigKey.optional(
+      KeepReasoningKey,
+      "whether a thread keeps the model's reasoning across requests on the Responses API: true (default) or false"
+    )
 
   private def openAIFallback(modelName: ModelName): ContextLimits =
     modelName.asString match {

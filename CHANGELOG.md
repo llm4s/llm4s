@@ -12,15 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- Behaviour, no signature: an `openai` section on api.openai.com sends a model the registry lists for `/v1/responses`, or does not know, to the Responses API (`api = "chat-completions"` restores 1.0.x), and a positional pattern on `OpenAIConfig` or `ModelMetadata` needs a `_` per new field, which `Llm4sMigrateFrom_1_0` adds ([migration](docs/reference/migration.md#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900)) [#2900](https://github.com/llm4s/llm4s/issues/2900).
 - `llm4s-schema-derivation` (Experimental): a `@description`, `@toolName` or `@upickle.implicits.key` whose argument is not a constant string is now a compile error where the schema, partial type or tool is derived; it was silently ignored ([#2951](https://github.com/llm4s/llm4s/issues/2951); [migration](docs/reference/migration.md#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951)).
 
 ### Core
 
 - **Added** `StringSchema.withPattern(regex)`, written as JSON Schema `pattern`; an agent's argument validator checks it (found anywhere in the string unless anchored, with `java.util.regex`) for tool arguments and `withOutput` answers, so a raw schema using `pattern` now builds, and `llm4s-schema-iron` derives it from `Match` ([#2954](https://github.com/llm4s/llm4s/issues/2954); [Custom Tools](docs/guide/custom-tools.md#string-patterns)).
+- **Added** `ModelMode.Responses` and `ModelMetadata.supportedEndpoints`, read from the bundled model data's `mode` and `supported_endpoints`; llm4s's overrides correct the endpoints of the `gpt-4o` and `gpt-audio` models ([#2900](https://github.com/llm4s/llm4s/issues/2900); [Model Metadata](docs/reference/model-metadata.md#endpoints-and-the-openai-api)).
 
 ### Providers
 
-- **Added** an `openai` section with `api = "responses"` uses OpenAI's Responses API, where reasoning and tools work together, a turn's reasoning is kept across the thread's requests, and `reasoningSummary` asks for summary text; `streamComplete` there streams text, tool-call arguments and reasoning summaries ([#2900](https://github.com/llm4s/llm4s/issues/2900)).
+- **Changed** an `openai` section on api.openai.com uses OpenAI's Responses API for a model the model registry lists for `/v1/responses` or does not know (`gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, most gpt-5 and later models such as `gpt-5` and `gpt-6.1-terra`, `o3`; `gpt-4-turbo`, `o1`, `o4-mini`, `gpt-5.5-cyber` and the `gpt-audio` models stay on Chat Completions; the INFO log says which): reasoning works with tools, a turn's reasoning is kept across the thread (`keepReasoning`), and `streamComplete` streams natively; `api = "chat-completions"` keeps 1.0.x behaviour.
+  The section keys `api`, `reasoningSummary` and `keepReasoning` have Java, Kotlin and Spring settings ([#2900](https://github.com/llm4s/llm4s/issues/2900); [migration](docs/reference/migration.md#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900)).
 - **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
 
 ### Observability
@@ -38,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
-- **Added** the umbrella Scalafix rule `Llm4sMigrateFrom_1_0`, for code on 1.0.x; it runs no rule yet, since nothing has broken since 1.0.0 ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#one-umbrella-rule-per-starting-version)).
+- **Added** the umbrella Scalafix rule `Llm4sMigrateFrom_1_0`, for code on 1.0.x: it runs `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9), and the older umbrellas widen an `OpenAIConfig` pattern to the current 14 (0.7's also `ModelMetadata`) ([#2900](https://github.com/llm4s/llm4s/issues/2900); [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#one-umbrella-rule-per-starting-version)).
 
 ## [1.0.0] - 2026-11-25
 
