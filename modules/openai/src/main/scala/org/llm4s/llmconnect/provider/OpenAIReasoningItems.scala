@@ -53,8 +53,10 @@ private[provider] object OpenAIReasoningItems:
 
   private def read(data: String): Option[Stored] =
     val envelope = ujson.read(data).obj
-    val item = ObjectMappers
-      .jsonMapper()
-      .readValue(envelope("item").render(), classOf[ResponseReasoningItem])
-    item.validate()
-    Some(Stored(envelope.get("before").flatMap(_.strOpt), item))
+    val raw      = envelope("item")
+    // not `validate()`: an item OpenAI returned that this SDK version cannot fully type (a newer `status`) is still sent back
+    if !raw.obj.get("type").exists(_.strOpt.contains("reasoning")) || !raw.obj.get("id").exists(_.strOpt.isDefined) then
+      None
+    else
+      val item = ObjectMappers.jsonMapper().readValue(raw.render(), classOf[ResponseReasoningItem])
+      Some(Stored(envelope.get("before").flatMap(_.strOpt), item))

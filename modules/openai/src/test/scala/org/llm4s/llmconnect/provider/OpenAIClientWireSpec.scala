@@ -16,7 +16,14 @@ import org.llm4s.llmconnect.{
 }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, UserMessage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  CompletionOptions,
+  Conversation,
+  ReasoningEffort,
+  ThinkingBlock,
+  UserMessage
+}
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer
@@ -103,6 +110,29 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       request.body("messages")(0)("content").str shouldBe "hello"
       request.body("max_tokens").num shouldBe 64
       request.body.obj.contains("stream") shouldBe false
+    }
+  }
+
+  it should "send no reasoning to /chat/completions for an assistant message that carries an openai opaque block" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "gpt-4o"))
+    } { baseUrl =>
+      val envelope = """{"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"enc-rs_1"}}"""
+      val earlier  = AssistantMessage(Some("earlier"), Nil, Seq(ThinkingBlock.Opaque(ProviderId("openai"), envelope)))
+      val config =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(s"$baseUrl/v1")).value
+      val client = OpenAIClient(config).value
+      val result =
+        client.complete(Conversation(Seq(UserMessage("hi"), earlier, UserMessage("again"))), CompletionOptions())
+      client.close()
+
+      result.value.content shouldBe "hi"
+      val request = seen.get()
+      request.path shouldBe "/v1/chat/completions"
+      (request.body.render() should not).include("reasoning")
+      (request.body.render() should not).include("enc-rs_1")
     }
   }
 

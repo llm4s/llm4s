@@ -177,7 +177,7 @@ final class OpenAIClient private[provider] (
   protected def clientDescription: String = s"$displayName client for model $model"
   private def providerName: String        = provider.asString
   // sealed reasoning is replayed only to the provider and model this client is configured for
-  private val replayOrigin           = ReplayOrigin(providerName, config.model.asString)
+  private val replayOrigin           = ReplayOrigin(providerName, model)
   protected def modelName: ModelName = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
@@ -312,6 +312,10 @@ final class OpenAIClient private[provider] (
         .flatMap(filteredReply)
     } yield (body, serialize(response), completion)
 
+  private def reasoningSummary: Option[org.llm4s.llmconnect.config.OpenAIReasoningSummary] = config match
+    case openAI: OpenAIConfig => openAI.reasoningSummary
+    case _                    => None
+
   private def responsesSettings(options: CompletionOptions): OpenAIResponsesRequest.Settings =
     OpenAIResponsesRequest.Settings(
       model = model,
@@ -320,9 +324,8 @@ final class OpenAIClient private[provider] (
       serviceTier = OpenAIServiceTier.onResponses(serviceTierPlan(options)._1),
       omitsSampling = omitsSampling(options),
       reasons = isReasoningRequest(options),
-      summary = config match
-        case openAI: OpenAIConfig => openAI.reasoningSummary
-        case _                    => None
+      summary = reasoningSummary,
+      origin = replayOrigin
     )
 
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(

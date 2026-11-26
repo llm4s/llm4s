@@ -93,3 +93,19 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
     item.encryptedContent().get() shouldBe "enc-rs_1"
     item.summary().asScala.map(_.text()) shouldBe Seq("a")
   }
+
+  it should "read an item whose status this SDK version does not know" in {
+    val envelope = ujson.Obj(
+      "item" -> ujson.read(
+        """{"type":"reasoning","id":"rs_f","summary":[],"encrypted_content":"enc-f","status":"some_future_status"}"""
+      )
+    )
+    val read = OpenAIReasoningItems.stored(Seq(ThinkingBlock.Opaque(ProviderId("openai"), envelope.render())))
+    read.map(_.item.id()) shouldBe Seq("rs_f")
+  }
+
+  it should "give back an encrypted_content with awkward characters exactly" in {
+    val awkward = ("A/b+c=" * 200) + "é中\"\\\n\t\u0001"
+    val blocks  = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", encrypted = Some(awkward))))
+    OpenAIReasoningItems.stored(blocks).map(_.item.encryptedContent().get()) shouldBe Seq(awkward)
+  }

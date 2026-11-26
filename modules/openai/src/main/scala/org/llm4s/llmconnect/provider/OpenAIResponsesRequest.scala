@@ -29,7 +29,6 @@ import org.llm4s.llmconnect.model.{
   ToolMessage,
   UserMessage
 }
-import org.llm4s.llmconnect.provider.PartEncoding
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.syntax.toLLMError
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -56,6 +55,7 @@ private[provider] object OpenAIResponsesRequest:
    * @param omitsSampling whether `temperature` and `top_p` are left out (a reasoning model that restricts sampling)
    * @param reasons whether the request goes to a reasoning model: it then asks for `reasoning.encrypted_content`
    * @param summary the `reasoning.summary` to ask for, sent only when `reasons`
+   * @param origin the provider and model whose sealed reasoning this request may carry back
    */
   final case class Settings(
     model: String,
@@ -64,7 +64,8 @@ private[provider] object OpenAIResponsesRequest:
     serviceTier: Option[ResponseCreateParams.ServiceTier],
     omitsSampling: Boolean,
     reasons: Boolean,
-    summary: Option[OpenAIReasoningSummary]
+    summary: Option[OpenAIReasoningSummary],
+    origin: ReplayOrigin
   )
 
   /** OpenAI rejects a `max_output_tokens` below this. */
@@ -98,7 +99,7 @@ private[provider] object OpenAIResponsesRequest:
   def build(settings: Settings, conversation: Conversation, options: CompletionOptions): Result[ResponseCreateParams] =
     PartEncoding
       .check(settings.provider, conversation.messages, userPart(settings), PartEncoding.textOnly)
-      .flatMap(_ => items(settings, conversation.messages))
+      .flatMap(_ => items(settings, ThinkingReplay.replayableOrigin(settings.origin, conversation.messages)))
       .flatMap { items =>
         Try {
           val builder = ResponseCreateParams
@@ -144,18 +145,7 @@ private[provider] object OpenAIResponsesRequest:
           case parts =>
             val mapped = parts.map(userPart(settings))
             Vector(easy(EasyInputMessage.Role.USER, _.contentOfResponseInputMessageContentList(mapped.asJava)))
-      case AssistantMessage(text, toolCalls, _, _) => // earlier reasoning is never sent in this release
-        val said = text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector
-        said ++ toolCalls.map { call =>
-          ResponseInputItem.ofFunctionCall(
-            ResponseFunctionToolCall
-              .builder()
-              .callId(call.id.asString)
-              .name(call.name)
-              .arguments(call.arguments.render())
-              .build()
-          )
-        }
+      case assistant: AssistantMessage => assistantItems(assistant)
       case tool: ToolMessage =>
         Vector(
           ResponseInputItem.ofFunctionCallOutput(
@@ -166,6 +156,29 @@ private[provider] object OpenAIResponsesRequest:
               .build()
           )
         )
+
+  /**
+   * An assistant turn's items, in order: the reasoning items with no anchor, its text, then each tool call preceded by
+   * the reasoning items stored with that call's id. A stored item whose call the message no longer has is not sent.
+   */
+  private def assistantItems(message: AssistantMessage): Vector[ResponseInputItem] =
+    val reasoning  = OpenAIReasoningItems.stored(message.thinking)
+    val unanchored = reasoning.filter(_.before.isEmpty).map(s => ResponseInputItem.ofReasoning(s.item))
+    val said =
+      message.text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector
+    val calls = message.toolCalls.flatMap { call =>
+      val anchored =
+        reasoning.filter(_.before.contains(call.id.asString)).map(s => ResponseInputItem.ofReasoning(s.item))
+      anchored :+ ResponseInputItem.ofFunctionCall(
+        ResponseFunctionToolCall
+          .builder()
+          .callId(call.id.asString)
+          .name(call.name)
+          .arguments(call.arguments.render())
+          .build()
+      )
+    }
+    unanchored.toVector ++ said ++ calls
 
   /** Text, an image by URL or inline, a PDF inline or uploaded to this provider; anything else is refused up front. */
   private def userPart(settings: Settings): PartialFunction[ContentPart, ResponseInputContent] =
