@@ -73,8 +73,9 @@ object RegexSafetyManager {
    * It also returns a `Left` for a pattern whose matching the step bound of [[safeFind]] could not bound (#3051): one
    * that can take more than 1000 steps at one position without reading the input, such as many required iterations
    * of something that can match the empty string (`(){5000}`) or many ways in a row to match it (`(?:|)`,
-   * `(\s*)?` or `(?:a?)*` repeated); and comments mode or canonical equivalence (`(?x)`, `Pattern.COMMENTS`,
-   * `Pattern.CANON_EQ`), whose syntax the check does not follow. One empty-matching part, such as `(\s*)?`, `(a|)?`
+   * `(\s*)?` or `(?:a?)*` repeated); a lookbehind longer than 64 characters, unbounded, or holding another
+   * lookaround, which the engine retries from each earlier position without reading; and comments mode or canonical
+   * equivalence (`(?x)`, `Pattern.COMMENTS`, `Pattern.CANON_EQ`), whose syntax the check does not follow. One empty-matching part, such as `(\s*)?`, `(a|)?`
    * or `(a?)*`, or a few in a row, compiles.
    *
    * @param pattern the regular expression to compile

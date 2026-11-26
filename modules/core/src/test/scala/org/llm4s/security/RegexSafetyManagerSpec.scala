@@ -175,7 +175,23 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
       "(?:a?)+",
       "(?=a?)",
       "(?:\\b)*",
-      "(a?)\\1"
+      "(a?)\\1",
+      // the audit of #3135: constructs that may move or retry without reading
+      "(a?)(?:\\1)?",
+      "(?:\\G)?",
+      "(?:\\G|)",
+      "(?:\\R)?",
+      "(?:\\X)?",
+      "\\p{L}?",
+      "(?i:a?)?",
+      "(?iu:\u00e9?)?",
+      "(?:(?=a?)a?)?",
+      "(?:(?=a?))*",
+      "(?>a?)?",
+      "(?>(?:a?)*)",
+      "(?:a?)?+",
+      "(?<=a{0,64})",
+      "(?<!\\d{1,3})"
     )
     for {
       unit   <- units
@@ -192,6 +208,31 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
         }
       }
     }
+  }
+
+  // Codex on #3135: the JDK tries a lookbehind's body from each earlier position its length allows, moving back
+  // without reading, and nested lookarounds multiply the scans: this ran past 12 s on a 1000-character line.
+  it should "refuse a long or unbounded lookbehind, and one holding another lookaround" in {
+    val nested = (1 to 4).foldLeft("")((p, _) => "(?<!" + p + "(?!)a{0,1000})")
+    Seq(
+      "$" + nested,
+      "(?<!(?!)a{0,1000})",
+      "(?<=a{0,65})x",
+      "(?<=(?=a)a)x",
+      "(?<=a\\X)x",
+      "(a)(?<=\\1)x"
+    ).foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
+    Seq("(?<=\\d{1,3})x", "(?<!\\\\)\"", "(?<=^|,)\\w+", "(?<=a{0,64})x", "(?<![a-z]{2})\\d")
+      .foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
+  }
+
+  it should "bound the longest accepted chain of lookbehinds on a long line" in {
+    val unit     = "(?<=a{0,64})"
+    val accepted = (1 to 60).takeWhile(n => RegexSafetyManager.safeCompile(unit * n + "(?!)").isRight)
+    accepted should not be empty
+    val pattern = Pattern.compile(unit * accepted.last + "(?!)")
+    withinGuard(RegexSafetyManager.safeFind(pattern, "a" * 1000))
+    withinGuard(RegexSafetyManager.safeFind(pattern, "x" * 1000))
   }
 
   // Runs `body` on a daemon thread and fails if it has not finished within the guard, rather than hanging the suite.

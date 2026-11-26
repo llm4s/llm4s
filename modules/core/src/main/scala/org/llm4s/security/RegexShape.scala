@@ -34,6 +34,11 @@ import scala.util.boundary.break
  * grows exponentially or with a large required count.
  *
  * It also refuses:
+ *   - a lookbehind whose body can be longer than [[MaxLookbehindLength]] characters, has no maximum length, or holds
+ *     another lookaround: the JDK tries a lookbehind's body from each earlier position its length allows, moving back
+ *     without reading, and nested lookarounds multiply those scans (Codex on #3135: four nested
+ *     `(?<!...(?!)a{0,1000})` ran past 12 s on a 1000-character line with almost no reads). An accepted lookbehind
+ *     counts its body's steps once per position it is tried from;
  *   - a counted repetition above `maxRepetition` (the workspace runner's cap; core passes `Int.MaxValue`);
  *   - comments mode (`x`) and canonical equivalence (`c`, `CANON_EQ`), whose syntax this check does not follow.
  *
@@ -66,10 +71,25 @@ private[security] object RegexShape {
       "step budget cannot bound: a repetition of something that can match the empty string, such as `(){5000}`, or " +
       "many ways to match it in a row, such as `(?:|)` or `(?:a?)*` repeated"
 
-  /** Ways to match the empty string (`e`) and steps without a read (`f`), both saturating just above the limit. */
-  final private case class Cost(e: Long, f: Long) {
+  /** The longest body a lookbehind may have, in characters: the JDK tries it from each of that many earlier positions. */
+  val MaxLookbehindLength = 64L
+
+  private val LookbehindRefused =
+    s"A lookbehind whose body can be longer than $MaxLookbehindLength characters, or has no maximum length, or " +
+      "holds another lookaround, is not supported: the engine tries it from each earlier position without reading"
+
+  /**
+   * Ways to match the empty string (`e`) and steps without a read (`f`), both saturating just above the limit; the
+   * most characters it can consume (`len`, [[Unbounded]] when it has no maximum); and whether it holds a lookaround.
+   */
+  final private case class Cost(e: Long, f: Long, len: Long = 0, look: Boolean = false) {
     def nullable: Boolean = e > 0
   }
+
+  private val Unbounded = Long.MaxValue / 4
+
+  private def addLen(a: Long, b: Long): Long = math.min(Unbounded, a + b)
+  private def mulLen(a: Long, b: Long): Long = if (a == 0 || b == 0) 0 else if (a > Unbounded / b) Unbounded else a * b
 
   private val Cap = MaxSilentSteps + 1
 
@@ -77,9 +97,14 @@ private[security] object RegexShape {
   private def mul(a: Long, b: Long): Long = if (a == 0 || b == 0) 0 else math.min(Cap, a * b)
 
   /** `first` then `rest`: what follows is tried once for each way `first` matched empty. */
-  private def andThen(first: Cost, rest: Cost): Cost = Cost(mul(first.e, rest.e), add(first.f, mul(first.e, rest.f)))
+  private def andThen(first: Cost, rest: Cost): Cost =
+    Cost(mul(first.e, rest.e), add(first.f, mul(first.e, rest.f)), addLen(first.len, rest.len), first.look || rest.look)
 
-  private val Consuming = Cost(0, 1)
+  /** One character of the pattern's own, which matches one `char`. */
+  private val Literal = Cost(0, 1, 1)
+
+  /** A class, `.` or escape, which may match a supplementary code point: two `char`s. */
+  private val Consuming = Cost(0, 1, 2)
   private val ZeroWidth = Cost(1, 1)
 
   /**
@@ -155,12 +180,17 @@ private[security] object RegexShape {
 
     /** Alternatives separated by `|`: each is tried, a step even when empty, so their ways and steps add. */
     private def alternation(): Cost = {
-      def tried(c: Cost) = Cost(c.e, add(c.f, 1))
+      def tried(c: Cost) = c.copy(f = add(c.f, 1))
       var cost           = tried(sequence())
       while (peek == '|') {
         pos += 1
         val alternative = tried(sequence())
-        cost = Cost(add(cost.e, alternative.e), add(cost.f, alternative.f))
+        cost = Cost(
+          add(cost.e, alternative.e),
+          add(cost.f, alternative.f),
+          math.max(cost.len, alternative.len),
+          cost.look || alternative.look
+        )
       }
       checked(cost)
     }
@@ -183,7 +213,12 @@ private[security] object RegexShape {
     }
 
     /** `body{min,max}` (`max` None when unbounded). */
-    private def repeated(body: Cost, min: Long, max: Option[Long]): Cost =
+    private def repeated(body: Cost, min: Long, max: Option[Long]): Cost = {
+      val len = max.fold(if (body.len == 0) 0L else Unbounded)(m => mulLen(body.len, m))
+      silent(body, min, max).copy(len = len, look = body.look)
+    }
+
+    private def silent(body: Cost, min: Long, max: Option[Long]): Cost =
       if (!body.nullable)
         // every iteration reads; at one position only the first is tried, and the loop can be skipped when min is 0
         Cost(if (min == 0) 1 else 0, add(body.f, 1))
@@ -221,11 +256,12 @@ private[security] object RegexShape {
       next() match {
         case '('       => group()
         case '['       => charClass(); Consuming
+        case '.'       => Consuming
         case '\\'      => escape()
         case '^' | '$' => ZeroWidth
         case c if c.isHighSurrogate && peek != -1 && peek.toChar.isLowSurrogate =>
           pos += 1; Consuming
-        case _ => Consuming
+        case _ => Literal
       }
 
     private def group(): Cost =
@@ -234,9 +270,9 @@ private[security] object RegexShape {
         pos += 1
         next() match {
           case ':' | '>' => closed(alternation())
-          case '=' | '!' => lookaround()
+          case '=' | '!' => lookahead()
           case '<' if peek == '=' || peek == '!' =>
-            pos += 1; lookaround()
+            pos += 1; lookbehind()
           case '<' => capturing(Some(takeUntil('>')))
           case _ =>
             pos -= 1
@@ -245,9 +281,16 @@ private[security] object RegexShape {
       }
 
     /** Zero-width; its body is tried each time it is reached. */
-    private def lookaround(): Cost = {
+    private def lookahead(): Cost = {
       val body = closed(alternation())
-      checked(Cost(1, add(body.f, 1)))
+      checked(Cost(1, add(body.f, 1), 0, look = true))
+    }
+
+    /** Zero-width; its body is tried from each earlier position within its maximum length. */
+    private def lookbehind(): Cost = {
+      val body = closed(alternation())
+      if (body.look || body.len > MaxLookbehindLength) refuse(LookbehindRefused)
+      checked(Cost(1, add(1, mul(body.len + 1, body.f)), 0, look = true))
     }
 
     /** `(?flags)`, zero-width, or `(?flags:...)`, a group. */
@@ -274,9 +317,9 @@ private[security] object RegexShape {
 
     private def closed(cost: Cost): Cost = { expect(')'); cost }
 
-    /** A backreference can match the empty string unless its group is closed and cannot. */
+    /** A backreference can match the empty string unless its group is closed and cannot; its length is the group's. */
     private def backreference(group: Option[Int]): Cost =
-      if (group.flatMap(nullable.get).getOrElse(true)) ZeroWidth else Consuming
+      Cost(if (group.flatMap(nullable.get).getOrElse(true)) 1 else 0, 1, Unbounded)
 
     private def escape(): Cost =
       next() match {
@@ -308,7 +351,8 @@ private[security] object RegexShape {
           if (peek == '{') skipPast('}')
           ZeroWidth
         case 'B' | 'A' | 'G' | 'Z' | 'z' => ZeroWidth
-        case _                           => Consuming // a class such as \d or \R, or an escaped character
+        case 'X'                         => Consuming.copy(len = Unbounded) // a grapheme cluster has no maximum length
+        case _ => Consuming // a class such as \d or \R, or an escaped character
       }
 
     /** A character class, after its `[`: a `]` first in it (after any `^`) is a literal, as `Pattern` reads it. */
