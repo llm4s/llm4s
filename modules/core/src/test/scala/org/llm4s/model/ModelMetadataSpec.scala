@@ -180,4 +180,69 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
 
     pricing.estimateCost(1000, 500) shouldBe None
   }
+
+  "ModelMode.fromString" should "read responses" in {
+    ModelMode.fromString("responses") shouldBe ModelMode.Responses
+    ModelMode.fromString("RESPONSES") shouldBe ModelMode.Responses
+    ModelMode.Responses.name shouldBe "responses"
+    upickle.default.read[ModelMode](upickle.default.write[ModelMode](ModelMode.Responses)) shouldBe ModelMode.Responses
+  }
+
+  private def fromJson(json: String): ModelMetadata =
+    ModelMetadata.fromJson(ModelName("m"), ujson.read(json)).fold(e => fail(e.message), identity)
+
+  "ModelMetadata.fromJson" should "read supported_endpoints, and none when the entry lists none" in {
+    fromJson(
+      """{"litellm_provider":"openai","mode":"chat","supported_endpoints":["/v1/chat/completions","/v1/responses"]}"""
+    ).supportedEndpoints shouldBe Seq("/v1/chat/completions", "/v1/responses")
+    fromJson("""{"litellm_provider":"openai","mode":"chat"}""").supportedEndpoints shouldBe Seq.empty
+    fromJson("""{"litellm_provider":"openai","supported_endpoints":null}""").supportedEndpoints shouldBe Seq.empty
+    fromJson(
+      """{"litellm_provider":"openai","supported_endpoints":"/v1/responses"}"""
+    ).supportedEndpoints shouldBe Seq.empty
+  }
+
+  it should "read a responses-only entry" in {
+    val meta = fromJson(
+      """{"litellm_provider":"openai","mode":"responses","supported_endpoints":["/v1/responses"]}"""
+    )
+    meta.mode shouldBe ModelMode.Responses
+    meta.supportedEndpoints shouldBe Seq("/v1/responses")
+  }
+
+  "The bundled registry" should "mark the responses-only OpenAI models and know which endpoints serve the current ones" in {
+    val service = ModelRegistryTestSupport.defaultServiceResult().fold(e => fail(e.message), identity)
+    def lookup(id: String): ModelMetadata = service.lookup(ModelName(id)).fold(e => fail(e.message), identity)
+    lookup("o1-pro").mode shouldBe ModelMode.Responses
+    lookup("gpt-6.1-terra").mode shouldBe ModelMode.Chat
+    lookup("gpt-6.1-terra").supportedEndpoints should contain("/v1/responses")
+    lookup("gpt-audio-1.5").supportedEndpoints should not contain "/v1/responses"
+  }
+
+  "ModelMetadata's stored form" should "read an entry written before supportedEndpoints existed" in {
+    // as 1.0.0's writer produced it
+    val literal = """{"modelId":"gpt-4o","provider":"openai","maxInputTokens":128000,"maxOutputTokens":16384}"""
+    val read    = upickle.default.read[ModelMetadata](literal)
+    read.supportedEndpoints shouldBe Seq.empty
+    read.maxInputTokens shouldBe Some(128000)
+  }
+
+  it should "still be built by the 8-argument apply" in {
+    ModelMetadata(
+      ModelName("m"),
+      ProviderId("openai"),
+      ModelMode.Chat,
+      None,
+      None,
+      ModelCapabilities(),
+      ModelPricing(),
+      None
+    ).supportedEndpoints shouldBe Seq.empty
+  }
+
+  it should "set supportedEndpoints" in {
+    ModelMetadata(ModelName("m"), ProviderId("openai"))
+      .withSupportedEndpoints(Seq("/v1/responses"))
+      .supportedEndpoints shouldBe Seq("/v1/responses")
+  }
 }

@@ -25,6 +25,8 @@ import java.time.LocalDate
  * @param capabilities Model capabilities and features
  * @param pricing Prices, among them the per-token input and output costs
  * @param deprecationDate The date the model is deprecated from, when known
+ * @param supportedEndpoints The API endpoints that serve the model (`/v1/chat/completions`, `/v1/responses`, ...), as
+ *                           LiteLLM lists them; empty when the entry lists none
  */
 @Stable
 final case class ModelMetadata private (
@@ -35,7 +37,8 @@ final case class ModelMetadata private (
   maxOutputTokens: Option[Int] = None,
   capabilities: ModelCapabilities = ModelCapabilities(),
   pricing: ModelPricing = ModelPricing(),
-  deprecationDate: Option[LocalDate] = None
+  deprecationDate: Option[LocalDate] = None,
+  supportedEndpoints: Seq[String] = Seq.empty
 ) {
   def withModelId(modelId: ModelName): ModelMetadata                   = copy(modelId = modelId)
   def withProvider(provider: ProviderId): ModelMetadata                = copy(provider = provider)
@@ -48,6 +51,8 @@ final case class ModelMetadata private (
   def withPricing(pricing: ModelPricing): ModelMetadata                = copy(pricing = pricing)
   def withDeprecationDate(deprecationDate: LocalDate): ModelMetadata   = copy(deprecationDate = Some(deprecationDate))
   def withDeprecationDate(deprecationDate: Option[LocalDate]): ModelMetadata = copy(deprecationDate = deprecationDate)
+  def withSupportedEndpoints(supportedEndpoints: Seq[String]): ModelMetadata =
+    copy(supportedEndpoints = supportedEndpoints)
 
   /**
    * Get the effective context window size.
@@ -108,7 +113,7 @@ final case class ModelMetadata private (
 
 object ModelMetadata {
 
-  /** Creates a [[ModelMetadata]]: a chat model with no limits, capabilities, prices or deprecation unless given. */
+  /** Creates a [[ModelMetadata]]: a chat model with no limits, capabilities, prices, deprecation or endpoints unless given. */
   def apply(
     modelId: ModelName,
     provider: ProviderId,
@@ -117,7 +122,8 @@ object ModelMetadata {
     maxOutputTokens: Option[Int] = None,
     capabilities: ModelCapabilities = ModelCapabilities(),
     pricing: ModelPricing = ModelPricing(),
-    deprecationDate: Option[LocalDate] = None
+    deprecationDate: Option[LocalDate] = None,
+    supportedEndpoints: Seq[String] = Seq.empty
   ): ModelMetadata =
     new ModelMetadata(
       modelId,
@@ -127,7 +133,31 @@ object ModelMetadata {
       maxOutputTokens,
       capabilities,
       pricing,
-      deprecationDate
+      deprecationDate,
+      supportedEndpoints
+    )
+
+  /** The 1.0.0 signature, kept for source and binary compatibility; it lists no endpoints. */
+  def apply(
+    modelId: ModelName,
+    provider: ProviderId,
+    mode: ModelMode,
+    maxInputTokens: Option[Int],
+    maxOutputTokens: Option[Int],
+    capabilities: ModelCapabilities,
+    pricing: ModelPricing,
+    deprecationDate: Option[LocalDate]
+  ): ModelMetadata =
+    apply(
+      modelId,
+      provider,
+      mode,
+      maxInputTokens,
+      maxOutputTokens,
+      capabilities,
+      pricing,
+      deprecationDate,
+      Seq.empty
     )
 
   // ISO-8601 (YYYY-MM-DD), as litellm writes it
@@ -159,6 +189,12 @@ object ModelMetadata {
             .get("deprecation_date")
             .flatMap(v => if (v.isNull || v.str.isEmpty) None else Some(LocalDate.parse(v.str)))
 
+        val supportedEndpoints =
+          obj
+            .get("supported_endpoints")
+            .collect { case ujson.Arr(items) => items.collect { case ujson.Str(endpoint) => endpoint }.toSeq }
+            .getOrElse(Seq.empty)
+
         ModelMetadata(
           modelId = modelId,
           provider = provider,
@@ -167,7 +203,8 @@ object ModelMetadata {
           maxOutputTokens = maxOutputTokens,
           capabilities = capabilities,
           pricing = pricing,
-          deprecationDate = deprecationDate
+          deprecationDate = deprecationDate,
+          supportedEndpoints = supportedEndpoints
         )
       }
       .toResult
@@ -194,6 +231,7 @@ object ModelMode {
   case object Moderation         extends ModelMode { val name = "moderation"          }
   case object Rerank             extends ModelMode { val name = "rerank"              }
   case object Search             extends ModelMode { val name = "search"              }
+  case object Responses          extends ModelMode { val name = "responses"           }
   case object Unknown            extends ModelMode { val name = "unknown"             }
 
   def fromString(s: String): ModelMode = s.toLowerCase match {
@@ -206,6 +244,7 @@ object ModelMode {
     case "moderation"          => Moderation
     case "rerank"              => Rerank
     case "search"              => Search
+    case "responses"           => Responses
     case _                     => Unknown
   }
 
