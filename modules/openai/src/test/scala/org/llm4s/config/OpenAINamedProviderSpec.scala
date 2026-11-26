@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.llmconnect.provider.{ AzureProvider, OpenAIProvider, RequestyProvider }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -207,6 +207,63 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
       organization("openai-main") shouldBe Some("org-1")
       organization("requesty-main") shouldBe Some("org-2")
       organization("openai-plain") shouldBe None
+    }
+
+    "load api = responses and reasoningSummary = auto into an openai section's config" in {
+      val hocon =
+        """
+          |llm4s.providers.openai-main {
+          |  provider = "openai"
+          |  model = "gpt-6.1-terra"
+          |  apiKey = "sk-test"
+          |  api = "responses"
+          |  reasoningSummary = "auto"
+          |}
+          |""".stripMargin
+
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("openai-main")) match
+        case Right(config: OpenAIConfig) =>
+          config.api shouldBe Some(OpenAIApi.Responses)
+          config.reasoningSummary shouldBe Some(OpenAIReasoningSummary.Auto)
+        case other => fail(s"Expected OpenAIConfig, got $other")
+    }
+
+    "fail an openai section with an api it does not know, naming the section and both values" in {
+      val hocon =
+        """
+          |llm4s.providers.openai-main {
+          |  provider = "openai"
+          |  model = "gpt-4o"
+          |  apiKey = "sk-test"
+          |  api = "response"
+          |}
+          |""".stripMargin
+
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("openai-main")) match
+        case Left(error) =>
+          error.message should include("openai-main")
+          error.message should include("chat-completions")
+          error.message should include("responses")
+        case Right(config) => fail(s"Expected a failure, got $config")
+    }
+
+    "report api on a requesty section as an unknown key and drop it" in {
+      val name = ProviderName("requesty-main")
+      val raw = RawNamedProviderSection(
+        provider = Some("requesty"),
+        model = Some("openai/gpt-4o-mini"),
+        baseUrl = None,
+        apiKey = Some(ApiKey("rq-key")),
+        extras = Map("api" -> "responses")
+      )
+
+      val (cfg, warnings) = NamedProviderConfigNormalizer
+        .normalize(name, raw)
+        .flatMap(NamedProviderSectionValidator.validateWithWarnings(name, RequestyProvider, _))
+        .fold(err => fail(err.message), identity)
+
+      cfg.extra("api") shouldBe None
+      warnings.head should include("llm4s.providers.requesty-main has unknown key(s) api, which are ignored")
     }
 
     "fail an Azure section with no endpoint, naming the key" in {

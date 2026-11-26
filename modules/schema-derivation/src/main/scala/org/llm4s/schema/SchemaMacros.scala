@@ -95,19 +95,20 @@ private[schema] object SchemaMacros {
     Expr(show(TypeRepr.of[A]))
   }
 
-  private def stringArgument(using q: Quotes)(annotation: q.reflect.Term): Option[String] = {
+  // The string an annotation of `A`, or of the part of it that `of` names, was given: any constant string, and a
+  // compile error when it is not one (#2951).
+  private def stringArgument[A: Type](using q: Quotes)(annotation: q.reflect.Term, of: String): String = {
     import q.reflect.*
-    annotation match {
-      case Apply(_, List(Literal(StringConstant(text)))) => Some(text)
-      case _                                             => None
-    }
+    ConstantStrings.read(annotation, s"Cannot derive SchemaOf[${TypeRepr.of[A].show}]", of)
   }
 
   private def fieldAnnotationsImpl[A: Type](annotationClass: String)(using q: Quotes): Expr[List[Option[String]]] = {
     import q.reflect.*
     val annotation = Symbol.requiredClass(annotationClass)
     val parameters = TypeRepr.of[A].typeSymbol.primaryConstructor.paramSymss.flatten.filterNot(_.isType)
-    Expr.ofList(parameters.map(p => Expr(p.getAnnotation(annotation).flatMap(a => stringArgument(a)))))
+    Expr.ofList(
+      parameters.map(p => Expr(p.getAnnotation(annotation).map(a => stringArgument[A](a, s"field ${p.name}"))))
+    )
   }
 
   private def caseAnnotationsImpl[A: Type](annotationClass: String)(using q: Quotes): Expr[Map[String, String]] = {
@@ -118,7 +119,7 @@ private[schema] object SchemaMacros {
       List(child, child.moduleClass, child.companionModule)
         .filterNot(_.isNoSymbol)
         .flatMap(_.getAnnotation(annotation))
-        .flatMap(a => stringArgument(a))
+        .map(a => stringArgument[A](a, s"case ${child.name.stripSuffix("$")}"))
         .headOption
     val keys = TypeRepr.of[A].typeSymbol.children.flatMap { child =>
       key(child).map(written => child.name.stripSuffix("$") -> written)
@@ -134,13 +135,15 @@ private[schema] object SchemaMacros {
   private def discriminatorImpl[A: Type](using q: Quotes): Expr[String] = {
     import q.reflect.*
     val annotation = Symbol.requiredClass("upickle.implicits.key")
-    Expr(TypeRepr.of[A].typeSymbol.getAnnotation(annotation).flatMap(a => stringArgument(a)).getOrElse("$type"))
+    val symbol     = TypeRepr.of[A].typeSymbol
+    Expr(symbol.getAnnotation(annotation).map(a => stringArgument[A](a, symbol.name)).getOrElse("$type"))
   }
 
   private def typeDescriptionImpl[A: Type](using q: Quotes): Expr[Option[String]] = {
     import q.reflect.*
     val annotation = Symbol.requiredClass("org.llm4s.schema.description")
-    Expr(TypeRepr.of[A].typeSymbol.getAnnotation(annotation).flatMap(a => stringArgument(a)))
+    val symbol     = TypeRepr.of[A].typeSymbol
+    Expr(symbol.getAnnotation(annotation).map(a => stringArgument[A](a, symbol.name)))
   }
 
   private def checkImpl[A: Type](namedTupleRoot: Expr[Boolean])(using q: Quotes): Expr[Unit] = {

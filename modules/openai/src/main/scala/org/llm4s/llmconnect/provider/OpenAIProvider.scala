@@ -7,7 +7,14 @@ import org.llm4s.security.Secret
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.auth.AuthConfig
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
+import org.llm4s.llmconnect.config.{
+  ContextWindowResolver,
+  OpenAIApi,
+  OpenAIConfig,
+  OpenAIReasoningSummary,
+  OpenAIWorkloadIdentity,
+  ProviderConfig
+}
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
   ProviderConfigContext,
@@ -50,7 +57,13 @@ object OpenAIProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
-      .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
+      .withExtras(
+        Seq(
+          OpenAIConfig.OrganizationConfigKey,
+          OpenAIConfig.ApiSelectionConfigKey,
+          OpenAIConfig.ReasoningSummaryConfigKey
+        )
+      )
       .withAuthExtras(
         Seq(
           ProviderConfigKey.required(IdentityProviderIdKey, "the OpenAI workload identity provider id"),
@@ -69,6 +82,10 @@ object OpenAIProvider extends ProviderDescriptor:
         if (workloadIdentity.isDefined) Right(Secret(""))
         else ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      api     <- optionalExtra(context.providerName, section, OpenAIConfig.ApiSelectionKey)(OpenAIApi.parse)
+      summary <- optionalExtra(context.providerName, section, OpenAIConfig.ReasoningSummaryKey)(
+        OpenAIReasoningSummary.parse
+      )
       config <- OpenAIConfig
         .fromValues(
           section.model,
@@ -79,7 +96,16 @@ object OpenAIProvider extends ProviderDescriptor:
         )
         .left
         .map(ProviderConfig.inSection(context.providerName, AuthSectionKeys))
-    yield config
+    yield config.withApi(api).withReasoningSummary(summary)
+
+  /** An optional extra `key` of the section, parsed; a value `parse` refuses is an error naming the section. */
+  private def optionalExtra[A](providerName: String, section: NamedProviderConfig, key: String)(
+    parse: String => Result[A]
+  ): Result[Option[A]] =
+    section.extra(key) match
+      case None => Right(None)
+      case Some(value) =>
+        parse(value).map(Some(_)).left.map(ProviderConfig.inSection(providerName))
 
   private def workloadIdentityOf(
     providerName: String,

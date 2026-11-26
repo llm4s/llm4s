@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.security.Secret
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.NamedProviderConfig
-import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIApi, OpenAIConfig }
 import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -175,6 +175,14 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
 
+    def openAIResponsesClientAt(baseUrl: String): LLMClient =
+      OpenAIConfig
+        .fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl), None)
+        .map(_.withApi(OpenAIApi.Responses))
+        .flatMap(OpenAIClient(_)) match
+        case Right(client) => client
+        case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
+
     "return CancelledError when a call is interrupted" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         assertCancelsWhenInterrupted(openAIClientAt(baseUrl))
@@ -329,6 +337,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
       assertModelCallContract(OpenAIContractFixtures.replies)(openAIClientAt)
+      assertModelCallContract(OpenAIResponsesContractFixtures.replies)(openAIResponsesClientAt)
       assertModelCallContract(OpenAIContractFixtures.replies) { baseUrl =>
         val config =
           AzureConfig

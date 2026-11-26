@@ -296,6 +296,23 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ---- Descriptions
+
+  object Descriptions {
+    import org.llm4s.schema.*
+
+    object Limits {
+      final val MaxNarration = 750 // a constant: declared without a type
+      inline val Tone        = "second person, present tense"
+    }
+
+    case class Answer(
+      @description("at most " + Limits.MaxNarration + " characters") narration: String,
+      @description(s"written in the ${Limits.Tone}") reply: String,
+      @description(Limits.Tone) tone: String
+    ) derives SchemaOf
+  }
+
   // ---- The guide, read from the repository
 
   private val root: Path =
@@ -336,7 +353,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 13
+    scalaBlocks should have size 14
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -506,6 +523,32 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       "The order's id, for example O-17"
     cancel.execute(ujson.Obj("orderId" -> "O-17", "reason" -> "late")) shouldBe
       Right(ujson.Obj("orderId" -> "O-17", "refunded" -> true))
+  }
+
+  "The descriptions of the guide" should "be the constants' text, and refuse what the guide says is refused" in {
+    val properties = org.llm4s.schema.SchemaOf[Descriptions.Answer].toJsonSchema(true)("properties")
+    properties("narration")("description").str shouldBe "at most 750 characters"
+    properties("reply")("description").str shouldBe "written in the second person, present tense"
+    properties("tone")("description").str shouldBe "second person, present tense"
+
+    def refused(found: List[scala.compiletime.testing.Error]): Boolean =
+      found.exists(_.message.contains("the @description of field text is not a constant string"))
+    refused(
+      scala.compiletime.testing.typeCheckErrors(
+        """{ import org.llm4s.schema.*; object L { final val Max: Int = 750 }
+          |  case class A(@description("at most " + L.Max) text: String); SchemaOf.derived[A] }""".stripMargin
+      )
+    ) shouldBe true
+    refused(
+      scala.compiletime.testing.typeCheckErrors(
+        """{ import org.llm4s.schema.*; case class A(@description(f"at most ${750}%d") text: String); SchemaOf.derived[A] }"""
+      )
+    ) shouldBe true
+    refused(
+      scala.compiletime.testing.typeCheckErrors(
+        """{ import org.llm4s.schema.*; case class A(@description(" padded ".trim) text: String); SchemaOf.derived[A] }"""
+      )
+    ) shouldBe true
   }
 
   "A recursion through a hand-written given" should "fail on first use with the message the guide quotes, not hang" in {
