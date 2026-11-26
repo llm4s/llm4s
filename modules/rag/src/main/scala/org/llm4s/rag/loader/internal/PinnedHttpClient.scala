@@ -2,7 +2,7 @@ package org.llm4s.rag.loader.internal
 
 import org.llm4s.error.NetworkError
 import org.llm4s.rag.loader.UrlPolicy
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, Redaction }
 
 import java.io.{ BufferedInputStream, ByteArrayOutputStream, InputStream }
 import java.net.{ InetAddress, InetSocketAddress, Socket, URI }
@@ -21,7 +21,9 @@ import scala.util.{ Failure, Success, Try, Using }
  * caller choose the address per request. This client asks the policy, opens the socket to an approved address
  * itself, and sends the original `Host` header; for `https` it runs TLS over that socket with the original host as
  * the SNI server name and the certificate check (`HTTPS` endpoint identification), as a browser would. Redirects are
- * followed here, each hop asking the policy again. It speaks `Connection: close` and `identity` encoding, decodes a
+ * followed here, each hop asking the policy again; once a hop leaves the first URL's origin, caller headers that can
+ * carry a credential (`Authorization`, `Cookie`, `X-Api-Key`, ...) are no longer sent, and a redirect from `https` to
+ * `http` is refused when any were supplied. It speaks `Connection: close` and `identity` encoding, decodes a
  * chunked or `Content-Length` body, and reads the body as UTF-8. Only a `2xx` response's body is read: any other's is empty. It uses no proxy.
  */
 private[loader] object PinnedHttpClient {
@@ -46,14 +48,23 @@ private[loader] object PinnedHttpClient {
     maxRedirects: Int = DefaultMaxRedirects
   ): Either[NetworkError, Response] = {
 
+    val hasCredentials = headers.exists { case (k, _) => isCredentialHeader(k) }
+
+    // `hopHeaders` is what is sent to `current`: every caller header until a hop leaves the first URL's origin,
+    // then (for the rest of the chain, even back on the first origin) only those that cannot carry a credential.
     @tailrec
-    def loop(current: URI, redirectsLeft: Int, first: Boolean): Either[NetworkError, Response] =
+    def loop(
+      current: URI,
+      hopHeaders: Seq[(String, String)],
+      redirectsLeft: Int,
+      first: Boolean
+    ): Either[NetworkError, Response] =
       policy.resolve(current) match {
         case Left(err) if first => Left(err)
         case Left(err) =>
           Left(NetworkError(s"Redirect blocked by SSRF protection: ${err.message}", None, "ssrf-protection"))
         case Right(addresses) =>
-          request(current, addresses, headers, timeout) match {
+          request(current, addresses, hopHeaders, timeout) match {
             case Left(err) => Left(err)
             case Right(resp) if resp.status >= 300 && resp.status < 400 =>
               resp.header("Location") match {
@@ -61,8 +72,14 @@ private[loader] object PinnedHttpClient {
                 case Some(_) if redirectsLeft <= 0 => Left(http("Too many redirects"))
                 case Some(location) =>
                   Try(current.resolve(location.trim)) match {
-                    case Failure(e)    => Left(http(s"Invalid redirect location '$location': ${e.getMessage}"))
-                    case Success(next) => loop(next, redirectsLeft - 1, first = false)
+                    case Failure(e) => Left(http(s"Invalid redirect location '$location': ${e.getMessage}"))
+                    case Success(next) if hasCredentials && isDowngrade(current, next) =>
+                      Left(http(s"Refusing to follow a redirect from https to http with credentials: $next"))
+                    case Success(next) =>
+                      val nextHeaders =
+                        if (Origin.of(next) == Origin.of(current)) hopHeaders
+                        else hopHeaders.filterNot { case (k, _) => isCredentialHeader(k) }
+                      loop(next, nextHeaders, redirectsLeft - 1, first = false)
                   }
               }
             case Right(resp) => Right(resp)
@@ -71,7 +88,41 @@ private[loader] object PinnedHttpClient {
 
     Try(new URI(url)) match {
       case Failure(e)   => Left(NetworkError(s"Invalid URL: ${e.getMessage}", Some(e), "ssrf-protection"))
-      case Success(uri) => loop(uri, maxRedirects, first = true)
+      case Success(uri) => loop(uri, headers, maxRedirects, first = true)
+    }
+  }
+
+  /**
+   * Header names never sent to another origin. Core's redaction catches most other credential names (`X-Api-Key`,
+   * `X-Auth-Token`, `X-Client-Secret`, ...); these are the ones it may not. Same rule as the HTTP tool's (#1734).
+   */
+  private val NeverForwarded: Set[String] = Set("authorization", "proxy-authorization", "cookie", "cookie2")
+
+  /** Header names ending in these (with `-` and `_` dropped) are credentials too: `Private-Token`, `Ocp-Apim-Subscription-Key`. */
+  private val CredentialHeaderSuffixes: Seq[String] = Seq("token", "key")
+
+  /** Whether a caller header can carry a credential, so that it is withheld once a redirect leaves the origin. */
+  private[internal] def isCredentialHeader(name: String): Boolean = {
+    val key     = name.trim.toLowerCase(Locale.ROOT)
+    val compact = key.filter(_.isLetterOrDigit)
+    NeverForwarded.contains(key) || Redaction.isCredentialName(key) || CredentialHeaderSuffixes.exists(compact.endsWith)
+  }
+
+  /** A redirect from `https` to plain `http`, which would send whatever it carries in clear text. */
+  private[internal] def isDowngrade(from: URI, to: URI): Boolean =
+    scheme(from) == "https" && scheme(to) == "http"
+
+  private def scheme(uri: URI): String = Option(uri.getScheme).getOrElse("").toLowerCase(Locale.ROOT)
+
+  /** RFC 6454 origin: scheme, host and port, with the scheme's default port filled in. */
+  final private[internal] case class Origin(scheme: String, host: String, port: Int)
+
+  private[internal] object Origin {
+    def of(uri: URI): Origin = {
+      val s    = PinnedHttpClient.scheme(uri)
+      val host = Option(uri.getHost).getOrElse("").stripSuffix(".").toLowerCase(Locale.ROOT)
+      val port = if (uri.getPort != -1) uri.getPort else if (s == "https") 443 else 80
+      Origin(s, host, port)
     }
   }
 

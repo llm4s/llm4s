@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** `SchemaOf`, `PartialOf` and derived tools read a `@description`, `@toolName` or key given as any constant string: a literal, a `final val` or `inline val`, a `+` of constants, or an `s"..."` of constants. Only a single literal was read, and anything else was dropped without a warning ([#2951](https://github.com/llm4s/llm4s/issues/2951); [Derived schemas](docs/guide/derived-schemas.md#descriptions)).
 
+### Embeddings & RAG
+
+- **Fixed** `UrlLoader` and the other loaders using its client no longer send the caller's `Authorization`, `Cookie`,
+  `Proxy-Authorization` or other credential headers to a different origin a redirect leads to, and refuse an `https`
+  to `http` redirect when credentials were supplied, as the HTTP tool does [#2997](https://github.com/llm4s/llm4s/issues/2997).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
