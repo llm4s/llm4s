@@ -126,6 +126,49 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
     info("input: " + input.arr.map(i => kind(i) + i.obj.get("id").fold("")(id => ":" + id.str)).mkString(", "))
   }
 
+  it should "keep two reasoning items that came together before the call, after the text" in {
+    val seen = thread(
+      Seq(
+        outputMessage("Checking."),
+        reasoningItem("rs_1"),
+        reasoningItem("rs_2"),
+        functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+      ).mkString(",")
+    )(c => Seq(UserMessage("go"), c.message, ToolMessage("18C", ToolCallId("call_1"))))
+    types(seen.input) shouldBe
+      Seq("user", "assistant", "reasoning", "reasoning", "function_call", "function_call_output")
+    seen.input(2)("id").str shouldBe "rs_1"
+    seen.input(3)("id").str shouldBe "rs_2"
+  }
+
+  it should "send a reasoning item before the text and the one anchored to the call before the call" in {
+    val seen = thread(
+      Seq(
+        reasoningItem("rs_1"),
+        outputMessage("Checking."),
+        reasoningItem("rs_2"),
+        functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+      ).mkString(",")
+    )(c => Seq(UserMessage("go"), c.message, ToolMessage("18C", ToolCallId("call_1"))))
+    types(seen.input) shouldBe
+      Seq("user", "reasoning", "assistant", "reasoning", "function_call", "function_call_output")
+    seen.input(1)("id").str shouldBe "rs_1"
+    seen.input(3)("id").str shouldBe "rs_2"
+  }
+
+  it should "not replay reasoning bound to the prefix of a conversation rather than to the message's origin" in {
+    val origin  = ReplayOrigin("openai", Terra)
+    val request = Seq[Message](UserMessage("go"))
+    val message = ThinkingReplay.bind(
+      origin,
+      AssistantMessage(Some("hi"), Nil, Seq(opaque("rs_1", None))),
+      request,
+      CompletionOptions()
+    )
+    val seen = thread(outputMessage("hi"))(_ => Seq(UserMessage("go"), message, UserMessage("again")))
+    types(seen.input) should not contain "reasoning"
+  }
+
   it should "send a reasoning item that came before the answer's text ahead of that text" in {
     val seen = thread(reasoningItem("rs_1") + "," + outputMessage("It is 18C."))(c =>
       Seq(UserMessage("go"), c.message, UserMessage("thanks"))
