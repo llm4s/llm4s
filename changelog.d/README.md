@@ -2,17 +2,28 @@
 
 Each pull request writes its `CHANGELOG.md` entry here, as `changelog.d/<area>/<issue>.md`, instead of editing
 `CHANGELOG.md`, so two pull requests in one area never conflict. At release, `scripts/changelog-fragments.sh assemble`
-folds the fragments into `[Unreleased]` under their area headings, in issue order, and deletes them.
+folds the fragments into `[Unreleased]` under their area headings, in issue order, and deletes them. The areas are
+the headings the release sections use, in this order:
 
 | Directory | `[Unreleased]` heading |
 |---|---|
 | `core` | Core |
+| `capabilities` | Capabilities |
 | `providers` | Providers |
 | `observability` | Observability |
 | `agent-runtime` | Agent runtime |
+| `agent-harness` | Agent harness |
+| `memory` | Memory |
 | `tools` | Tools |
+| `mcp` | MCP |
 | `embeddings-rag` | Embeddings & RAG |
+| `speech-image` | Speech & image |
 | `configuration` | Configuration |
+| `java-kotlin` | Java & Kotlin APIs |
+| `streaming-integrations` | Streaming integrations |
+| `security` | Security |
+| `testkits` | Testkits |
+| `docs` | Docs |
 | `build-tooling` | Build & tooling |
 
 A fragment holds one or more entries, exactly as they will read in `CHANGELOG.md`:

@@ -22,7 +22,10 @@
 # checklist (docs/reference/release.md) runs it before renaming [Unreleased]. scripts/test-changelog-fragments.sh
 # tests both on sample fragments.
 #
-# Usage: scripts/changelog-fragments.sh check|assemble [--root DIR]
+# `areas` prints each area's directory and heading, tab-separated, in CHANGELOG order (changelog.d/README.md's table
+# must agree; the tests check it).
+#
+# Usage: scripts/changelog-fragments.sh check|assemble|areas [--root DIR]
 #   --root DIR  the repository root holding CHANGELOG.md and changelog.d/ (default: this script's)
 set -euo pipefail
 
@@ -36,8 +39,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$MODE" in
-  check|assemble) ;;
-  *) echo "usage: $0 check|assemble [--root DIR]" >&2; exit 2 ;;
+  check|assemble|areas) ;;
+  *) echo "usage: $0 check|assemble|areas [--root DIR]" >&2; exit 2 ;;
 esac
 
 export ROOT MODE
@@ -51,12 +54,22 @@ frag_dir = root / "changelog.d"
 # Directory -> the [Unreleased] heading it folds under, in CHANGELOG.md's order.
 AREAS = [
     ("core", "Core"),
+    ("capabilities", "Capabilities"),
     ("providers", "Providers"),
     ("observability", "Observability"),
     ("agent-runtime", "Agent runtime"),
+    ("agent-harness", "Agent harness"),
+    ("memory", "Memory"),
     ("tools", "Tools"),
+    ("mcp", "MCP"),
     ("embeddings-rag", "Embeddings & RAG"),
+    ("speech-image", "Speech & image"),
     ("configuration", "Configuration"),
+    ("java-kotlin", "Java & Kotlin APIs"),
+    ("streaming-integrations", "Streaming integrations"),
+    ("security", "Security"),
+    ("testkits", "Testkits"),
+    ("docs", "Docs"),
     ("build-tooling", "Build & tooling"),
 ]
 AREA_DIRS = dict(AREAS)
@@ -65,6 +78,11 @@ MAX_LINES = 2
 MAX_CHARS = 900
 ENTRY_START = re.compile(r"^- \*\*(Added|Changed|Removed|Fixed)\*\* \S")
 REL_LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)\s]*)?\)")
+
+if mode == "areas":
+    for d, title in AREAS:
+        print(f"{d}\t{title}")
+    sys.exit(0)
 
 errors = []
 

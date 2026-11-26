@@ -143,6 +143,15 @@ ENTRY="$entry" awk '{ print } /^## \[Unreleased\]/ { print ""; print "### Tools"
 diff -u "$WORK/expected-released.md" "$R/CHANGELOG.md" > "$WORK/diff" && ok ||
   { ko "folding into an empty [Unreleased] adds more than the heading and the entry:"; cat "$WORK/diff"; }
 
+# changelog.d/README.md's table lists the script's areas, in its order.
+table="$(sed -nE 's/^\| `([a-z-]+)` \| (.*) \|$/\1\t\2/p' "$REPO_ROOT/changelog.d/README.md")"
+[ -n "$table" ] && [ "$table" = "$("$SCRIPT" areas)" ] && ok ||
+  ko "changelog.d/README.md's table does not match \`changelog-fragments.sh areas\`"
+# Every area heading the real [Unreleased] uses has a directory.
+unknown="$(awk '/^## /{n++} n==1 && /^### /{print substr($0,5)}' "$REPO_ROOT/CHANGELOG.md" |
+  grep -vxF -e 'Breaking changes' -e 'Highlights' | grep -vxF -f <("$SCRIPT" areas | cut -f2))"
+[ -z "$unknown" ] && ok || ko "[Unreleased] uses headings with no fragment directory: $unknown"
+
 # The repository's own fragments pass.
 "$SCRIPT" check > "$WORK/out" 2>&1 && ok || { ko "the repository's fragments fail check:"; cat "$WORK/out"; }
 

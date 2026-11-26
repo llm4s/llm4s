@@ -116,8 +116,10 @@ A PR with just "Add feature X" and no context will take longer to review and may
 
 A PR that adds a feature, fixes a bug or makes a breaking change adds a changelog fragment instead of editing
 `CHANGELOG.md`: one file, `changelog.d/<area>/<issue>.md`, so two PRs in the same area never conflict. The area is
-one of `core`, `providers`, `observability`, `agent-runtime`, `tools`, `embeddings-rag`, `configuration` and
-`build-tooling`, and the file holds the entry as it will read in the CHANGELOG:
+the directory for its CHANGELOG heading (`core`, `providers`, `agent-runtime`, `tools`, `docs`, `build-tooling` and
+the others listed in
+[`changelog.d/README.md`](https://github.com/llm4s/llm4s/blob/main/changelog.d/README.md)), and the file holds the
+entry as it will read in the CHANGELOG:
 
 ```markdown
 - **Fixed** what a user sees change, in 1-2 lines ([#N](https://github.com/llm4s/llm4s/issues/N); [Guide](docs/guide/foo.md#section)).
