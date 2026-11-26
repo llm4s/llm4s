@@ -39,11 +39,12 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
   private lazy val call1 = ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Paris"))
   private lazy val call2 = ToolCall(ToolCallId("call_2"), "get_time", ujson.Obj("zone" -> "CET"))
 
-  private def clientFor(baseUrl: String, model: String): OpenAIClient =
+  private def clientFor(baseUrl: String, model: String, keepReasoning: Boolean = true): OpenAIClient =
     val config = OpenAIConfig
       .fromValues(ModelName(model), Secret("sk-test"), BaseUrl(s"$baseUrl/v1"))
       .value
       .withApi(OpenAIApi.Responses)
+      .withKeepReasoning(keepReasoning)
     OpenAIClient(config).value
 
   private def kind(item: ujson.Value): String        = item.obj.get("type").map(_.str).getOrElse(item("role").str)
@@ -61,7 +62,8 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
     firstModel: String = Terra,
     secondModel: String = Terra,
     status: String = "completed",
-    extra: String = ""
+    extra: String = "",
+    secondKeepsReasoning: Boolean = true
   )(
     next: Completion => Seq[Message]
   ): Thread =
@@ -80,7 +82,7 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
       val completion =
         first.complete(Conversation(Seq(UserMessage("go"))), CompletionOptions(maxTokens = Some(64))).value
       first.close()
-      val second = clientFor(baseUrl, secondModel)
+      val second = clientFor(baseUrl, secondModel, secondKeepsReasoning)
       val sent   = second.complete(Conversation(next(completion)), CompletionOptions(maxTokens = Some(64)))
       second.close()
       sent.value.content shouldBe "done"
@@ -319,4 +321,117 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
       Seq(UserMessage("go"), c.message, UserMessage("again"))
     )
     seen.input(1)("encrypted_content").str shouldBe awkward
+  }
+
+  it should "not send stored reasoning back to a client with keepReasoning off, and still succeed" in {
+    val kept = thread(interleaved)(toolTurn)
+    types(kept.input) should contain("reasoning")
+    val off = thread(interleaved, secondKeepsReasoning = false)(toolTurn)
+    types(off.input) should not contain "reasoning"
+    types(off.input) shouldBe Seq(
+      "user",
+      "function_call",
+      "function_call",
+      "function_call_output",
+      "function_call_output"
+    )
+  }
+
+  "A reply with keepReasoning off" should "not keep its reasoning items, but keep the summary text" in {
+    val count = new AtomicInteger(0)
+    var out   = Option.empty[Completion]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      count.incrementAndGet()
+      exchange.getRequestBody.readAllBytes()
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        reply(
+          reasoningItem("rs_1", summary = Seq("Thought.")) + "," + functionCall(
+            "call_1",
+            "get_weather",
+            """{"city":"Paris"}"""
+          )
+        )
+      )
+    } { baseUrl =>
+      val client = clientFor(baseUrl, Terra, keepReasoning = false)
+      out = client.complete(Conversation(Seq(UserMessage("go"))), CompletionOptions(maxTokens = Some(64))).toOption
+      client.close()
+    }
+    val completion = out.get
+    completion.message.hasSealedThinking shouldBe false
+    completion.message.thinkingBinding shouldBe None
+    completion.thinking shouldBe Some("Thought.")
+    completion.toolCalls.map(_.name) shouldBe Seq("get_weather")
+  }
+
+  // OpenAI's refusal of an old encrypted reasoning item, and what the client makes of it
+  private lazy val rejection =
+    """{"error":{"message":"The encrypted content gAAA could not be verified.","type":"invalid_request_error","param":null,"code":"invalid_encrypted_content"}}"""
+
+  private def carrying: Conversation =
+    Conversation(
+      Seq(
+        UserMessage("go"),
+        bound(Terra, AssistantMessage(Some("hi"), Nil, Seq(opaque("rs_1", None)))),
+        UserMessage("again")
+      )
+    )
+
+  private def plain: Conversation = Conversation(Seq(UserMessage("go")))
+
+  private def refused(conversation: Conversation, body: String, stream: Boolean = false) =
+    var out = Option.empty[Either[org.llm4s.error.LLMError, Completion]]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      exchange.getRequestBody.readAllBytes()
+      LocalProviderTestServer.sendJsonResponse(exchange, 400, body)
+    } { baseUrl =>
+      val client  = clientFor(baseUrl, Terra)
+      val options = CompletionOptions(maxTokens = Some(64))
+      out = Some(
+        if stream then client.streamComplete(conversation, options)(_ => ()) else client.complete(conversation, options)
+      )
+      client.close()
+    }
+    out.get.left.value
+
+  "A rejected reasoning item" should "say what to do, keeping OpenAI's own message and the error type of a 400" in {
+    val before = refused(plain, rejection) // the same body, to a request with no reasoning item: today's error
+    val error  = refused(carrying, rejection)
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.getClass shouldBe before.getClass
+    error.httpStatus shouldBe Some(400)
+    error.message should include("could not be verified")
+    error.message should include("keepReasoning")
+    error.message should include("withKeepReasoning(false)")
+    error.message should include("API key or organisation")
+    info(error.message)
+  }
+
+  it should "say it on a streamed request too" in {
+    val error = refused(carrying, rejection, stream = true)
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.message should include("could not be verified")
+    error.message should include("keepReasoning")
+  }
+
+  it should "recognise the message when the code is another" in {
+    val body =
+      """{"error":{"message":"Invalid Encrypted Content in item rs_1","type":"invalid_request_error","code":"invalid_value"}}"""
+    refused(carrying, body).message should include("keepReasoning")
+  }
+
+  it should "leave a 400 with another code exactly as it is" in {
+    val body =
+      """{"error":{"message":"Unsupported parameter: foo","type":"invalid_request_error","code":"unsupported_parameter"}}"""
+    val error = refused(carrying, body)
+    (error.message should not).include("keepReasoning")
+    error shouldBe refused(plain, body)
+  }
+
+  it should "leave the code on a request that carried no reasoning item exactly as it is" in {
+    val error = refused(plain, rejection)
+    (error.message should not).include("keepReasoning")
+    error.message should include("could not be verified")
   }

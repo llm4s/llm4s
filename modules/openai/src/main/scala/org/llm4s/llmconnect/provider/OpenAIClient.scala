@@ -330,7 +330,16 @@ final class OpenAIClient private[provider] (
         .map(Failed(_, None))
       _    = adjustmentLog.record(model, adjustments)
       body = serialize(params._body())
-      response <- call("response")(transport.createResponse(params)).left.map(Failed(_, None))
+      response <- callMapping(
+        "response",
+        OpenAIClient.mapResponsesError(
+          _,
+          provider,
+          carriesReasoning = OpenAIReasoningRejection.carriesReasoning(params)
+        )
+      )(
+        transport.createResponse(params)
+      ).left.map(Failed(_, None))
       responseBody = serialize(response)
       completion <- responsesCompletion(response, adjustments).left.map(Failed(_, Some((body, responseBody))))
     } yield (body, responseBody, completion)
@@ -338,9 +347,13 @@ final class OpenAIClient private[provider] (
   /** A Responses reply as `complete` returns it: priced, with the request's adjustments, failing when filtered. */
   private def responsesCompletion(response: Response, adjustments: Seq[RequestAdjustment]): Result[Completion] =
     OpenAIResponsesReply
-      .completion(response, provider, modelName, replayOrigin)
+      .completion(response, provider, modelName, replayOrigin, keepReasoning)
       .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
       .flatMap(filteredReply)
+
+  private def keepReasoning: Boolean = config match
+    case openAI: OpenAIConfig => openAI.keepReasoning
+    case _                    => true
 
   private def reasoningSummary: Option[org.llm4s.llmconnect.config.OpenAIReasoningSummary] = config match
     case openAI: OpenAIConfig => openAI.reasoningSummary
@@ -355,7 +368,8 @@ final class OpenAIClient private[provider] (
       omitsSampling = omitsSampling(options),
       reasons = isReasoningRequest(options),
       summary = reasoningSummary,
-      origin = replayOrigin
+      origin = replayOrigin,
+      keepReasoning = keepReasoning
     )
 
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
@@ -386,8 +400,9 @@ final class OpenAIClient private[provider] (
         adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
         val rawEvents = StringBuilder()
         val stream    = new OpenAIResponsesStream(onChunk)
+        val carried   = OpenAIReasoningRejection.carriesReasoning(params)
         // `onChunk` runs inside `call`, so a caller's failure is a `Left` too, with the stream closed
-        val attempt = callMapping("response stream", OpenAIClient.mapResponsesStreamError(_, provider)) {
+        val attempt = callMapping("response stream", OpenAIClient.mapResponsesStreamError(_, provider, carried)) {
           Using.resource(transport.createResponseStream(params)) { response =>
             response.stream().forEach { event =>
               rawEvents.append(serialize(event)).append('\n')
@@ -399,7 +414,11 @@ final class OpenAIClient private[provider] (
         val body = serialize(params._body().toBuilder().putAdditionalProperty("stream", JsonValue.from(true)).build())
         recordingExchange(startedAt, Some(body)) {
           attempt
-            .flatMap(_ => stream.streamError.map(OpenAIResponsesReply.errorOf(_, provider)).toLeft(()))
+            .flatMap(_ =>
+              stream.streamError
+                .map(e => OpenAIClient.explained(OpenAIResponsesReply.errorOf(e, provider), e, carried))
+                .toLeft(())
+            )
             .flatMap(_ =>
               stream.terminal.toRight(OpenAIClient.unfinished(config.endpointUrl.map(_.asUrl).getOrElse(displayName)))
             )
@@ -1298,10 +1317,40 @@ object OpenAIClient {
    * A failure of a Responses stream: the error object an `SseException` carries goes through the Responses error table
    * ([[OpenAIResponsesReply.errorOf]], as an `error` event's is); any other failure is mapped as [[mapError]] does.
    */
-  private[provider] def mapResponsesStreamError(e: Throwable, provider: ProviderId): LLMError = e match {
+  private[provider] def mapResponsesStreamError(
+    e: Throwable,
+    provider: ProviderId,
+    carriedReasoning: Boolean = false
+  ): LLMError = e match {
     case sse: SseException =>
-      streamErrorObject(sse).fold(mapError(e, provider))(OpenAIResponsesReply.errorOf(_, provider))
-    case _ => mapError(e, provider)
+      streamErrorObject(sse).fold(mapResponsesError(e, provider, carriedReasoning)) { error =>
+        explained(OpenAIResponsesReply.errorOf(error, provider), error, carriedReasoning)
+      }
+    case _ => mapResponsesError(e, provider, carriedReasoning)
+  }
+
+  /** [[mapError]], with the hint for a rejected reasoning item when the request `carriesReasoning`. */
+  private[provider] def mapResponsesError(e: Throwable, provider: ProviderId, carriesReasoning: Boolean): LLMError = {
+    val mapped = mapError(e, provider)
+    if (carriesReasoning) explained(mapped, errorObjectOf(e), carriesReasoning) else mapped
+  }
+
+  /** `mapped` with the rejected-reasoning hint, when the request carried reasoning and `error` is that rejection. */
+  private def explained(mapped: LLMError, error: Option[ujson.Value], carriesReasoning: Boolean): LLMError =
+    if (carriesReasoning && error.exists(OpenAIReasoningRejection.rejects)) OpenAIReasoningRejection.explain(mapped)
+    else mapped
+
+  private[provider] def explained(mapped: LLMError, error: ujson.Value, carriesReasoning: Boolean): LLMError =
+    explained(mapped, Some(error), carriesReasoning)
+
+  /** The `error` object of a service refusal (or, should the SDK hand over only that, its body), or of a stream's `error` event. */
+  private def errorObjectOf(e: Throwable): Option[ujson.Value] = e match {
+    case sse: SseException => streamErrorObject(sse)
+    case service: OpenAIServiceException if service.statusCode() == 400 =>
+      Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).toOption
+        .flatMap(body => BoundedJson.read(body).toOption)
+        .map(body => body.objOpt.flatMap(_.get("error").filter(_.objOpt.isDefined)).getOrElse(body))
+    case _ => None
   }
 
   /**

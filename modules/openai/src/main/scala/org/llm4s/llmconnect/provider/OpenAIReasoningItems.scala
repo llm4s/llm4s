@@ -46,6 +46,11 @@ private[provider] object OpenAIReasoningItems:
         else Seq.empty
       summary ++ sealedItem
 
+  /** Whether `block` is a reasoning item to send back, rather than a summary to show. */
+  def isOpaque(block: ThinkingBlock): Boolean = block match
+    case ThinkingBlock.Opaque(provider, _) => provider == Provider
+    case _                                 => false
+
   /** One stored reasoning item: where it goes back, and the item itself. */
   final case class Stored(before: Option[String], item: ResponseReasoningItem)
 

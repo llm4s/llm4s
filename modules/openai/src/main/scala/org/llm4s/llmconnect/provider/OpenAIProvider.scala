@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ConfigurationError
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.config.NamedProviderConfig
@@ -61,7 +62,8 @@ object OpenAIProvider extends ProviderDescriptor:
         Seq(
           OpenAIConfig.OrganizationConfigKey,
           OpenAIConfig.ApiSelectionConfigKey,
-          OpenAIConfig.ReasoningSummaryConfigKey
+          OpenAIConfig.ReasoningSummaryConfigKey,
+          OpenAIConfig.KeepReasoningConfigKey
         )
       )
       .withAuthExtras(
@@ -86,6 +88,9 @@ object OpenAIProvider extends ProviderDescriptor:
       summary <- optionalExtra(context.providerName, section, OpenAIConfig.ReasoningSummaryKey)(
         OpenAIReasoningSummary.parse
       )
+      keep <- optionalExtra(context.providerName, section, OpenAIConfig.KeepReasoningKey)(
+        parseBoolean(_, OpenAIConfig.KeepReasoningKey)
+      )
       config <- OpenAIConfig
         .fromValues(
           section.model,
@@ -96,7 +101,15 @@ object OpenAIProvider extends ProviderDescriptor:
         )
         .left
         .map(ProviderConfig.inSection(context.providerName, AuthSectionKeys))
-    yield config.withApi(api).withReasoningSummary(summary)
+    yield config.withApi(api).withReasoningSummary(summary).withKeepReasoning(keep.getOrElse(true))
+
+  /** `true` or `false`, as a section's extra carries a HOCON boolean; anything else is a refusal naming `key`. */
+  private def parseBoolean(value: String, key: String): Result[Boolean] =
+    value.trim.toLowerCase(java.util.Locale.ROOT) match
+      case "true"  => Right(true)
+      case "false" => Right(false)
+      case other =>
+        Left(ConfigurationError(s"Unknown OpenAI $key '$other': expected 'true' or 'false'", List(key)))
 
   /** An optional extra `key` of the section, parsed; a value `parse` refuses is an error naming the section. */
   private def optionalExtra[A](providerName: String, section: NamedProviderConfig, key: String)(

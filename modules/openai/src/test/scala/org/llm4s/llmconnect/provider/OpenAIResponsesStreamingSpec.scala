@@ -65,7 +65,8 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     options: CompletionOptions = CompletionOptions(),
     status: Int = 200,
     json: Boolean = false,
-    onChunk: Option[StreamedChunk => Unit] = None
+    onChunk: Option[StreamedChunk => Unit] = None,
+    keepReasoning: Boolean = true
   ): Streamed =
     val seen      = new AtomicReference[Seen]()
     val chunks    = ListBuffer.empty[StreamedChunk]
@@ -80,7 +81,7 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
       else LocalProviderTestServer.sendSseResponse(exchange, body)
     } { baseUrl =>
       val client = OpenAIClient(
-        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
+        configFor(baseUrl, model).withApi(OpenAIApi.Responses).withKeepReasoning(keepReasoning),
         LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
       ).value
       out = Some(client.streamComplete(hello, options)(onChunk.getOrElse(chunks += _)))
@@ -180,6 +181,24 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     s.chunks.flatMap(_.thinkingDelta) shouldBe Seq("Thinking", " it through.")
     s.completion.thinking shouldBe Some("Thinking it through.")
     s.completion.message.hasSealedThinking shouldBe true
+  }
+
+  it should "keep no reasoning on the final message when keepReasoning is false, and still deliver the summary" in {
+    val s = streamed(
+      sse(
+        summaryDelta("Thinking"),
+        summaryDelta(" it through."),
+        textDelta("4"),
+        completed(reply(reasoningItem("rs_1", summary = Seq("Thinking it through.")) + "," + outputMessage("4")))
+      ),
+      model = "gpt-6.1-terra",
+      keepReasoning = false
+    )
+    s.chunks.flatMap(_.thinkingDelta) shouldBe Seq("Thinking", " it through.")
+    s.request.body.obj.keySet should not contain "include"
+    s.completion.thinking shouldBe Some("Thinking it through.")
+    s.completion.message.hasSealedThinking shouldBe false
+    s.completion.message.thinkingBinding shouldBe None
   }
 
   it should "separate a reasoning item's summary parts as the final thinking does" in {

@@ -82,9 +82,10 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
   private def responsesClient(
     baseUrl: String,
     model: String = "gpt-4o",
-    summary: Option[OpenAIReasoningSummary] = None
+    summary: Option[OpenAIReasoningSummary] = None,
+    keepReasoning: Boolean = true
   ): OpenAIClient =
-    val config = configFor(baseUrl, model).withApi(OpenAIApi.Responses)
+    val config = configFor(baseUrl, model).withApi(OpenAIApi.Responses).withKeepReasoning(keepReasoning)
     OpenAIClient(summary.fold(config)(config.withReasoningSummary)).value
 
   "OpenAIClient on the Responses API" should "post to <baseUrl>/responses with store false and read the reply" in {
@@ -187,7 +188,8 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     model: String = "gpt-4o",
-    summary: Option[OpenAIReasoningSummary] = None
+    summary: Option[OpenAIReasoningSummary] = None,
+    keepReasoning: Boolean = true
   ): Sent =
     val seen = new AtomicReference[Seen]()
     var out  = Option.empty[Sent]
@@ -195,7 +197,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       capture(seen, exchange)
       LocalProviderTestServer.sendJsonResponse(exchange, 200, reply(outputMessage("ok")))
     } { baseUrl =>
-      val client = responsesClient(baseUrl, model, summary)
+      val client = responsesClient(baseUrl, model, summary, keepReasoning)
       val result = client.complete(conversation, options)
       client.close()
       out = Some(Sent(result, Option(seen.get())))
@@ -343,6 +345,20 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     val sent = send(hello, model = "gpt-6.1-terra")
     sent.body("include").arr.map(_.str).toSeq shouldBe Seq("reasoning.encrypted_content")
     sent.body("store").bool shouldBe false
+  }
+
+  it should "not ask for encrypted reasoning when keepReasoning is false" in {
+    val sent = send(hello, model = "gpt-6.1-terra", keepReasoning = false)
+    sent.body.obj.keySet should not contain "include"
+  }
+
+  it should "still send the effort and the summary setting when keepReasoning is false" in {
+    val low = CompletionOptions().withReasoning(ReasoningEffort.Low)
+    val sent =
+      send(hello, low, model = "gpt-6.1-terra", summary = Some(OpenAIReasoningSummary.Auto), keepReasoning = false)
+    sent.body("reasoning")("effort").str shouldBe "low"
+    sent.body("reasoning")("summary").str shouldBe "auto"
+    sent.body.obj.keySet should not contain "include"
   }
 
   it should "not ask a non-reasoning model for encrypted reasoning" in {

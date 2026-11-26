@@ -228,6 +228,54 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
         case other => fail(s"Expected OpenAIConfig, got $other")
     }
 
+    "load keepReasoning = false, written as a boolean or a string, into an openai section's config" in {
+      List("false", "\"false\"").foreach { written =>
+        val hocon =
+          s"""
+            |llm4s.providers.openai-main {
+            |  provider = "openai"
+            |  model = "gpt-6.1-terra"
+            |  apiKey = "sk-test"
+            |  keepReasoning = $written
+            |}
+            |""".stripMargin
+        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("openai-main")) match
+          case Right(config: OpenAIConfig) => config.keepReasoning shouldBe false
+          case other                       => fail(s"Expected OpenAIConfig, got $other")
+      }
+    }
+
+    "keep reasoning in an openai section that does not say" in {
+      val hocon =
+        """
+          |llm4s.providers.openai-main {
+          |  provider = "openai"
+          |  model = "gpt-6.1-terra"
+          |  apiKey = "sk-test"
+          |}
+          |""".stripMargin
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("openai-main")) match
+        case Right(config: OpenAIConfig) => config.keepReasoning shouldBe true
+        case other                       => fail(s"Expected OpenAIConfig, got $other")
+    }
+
+    "fail an openai section with a keepReasoning it does not know, naming the section and the key" in {
+      val hocon =
+        """
+          |llm4s.providers.openai-main {
+          |  provider = "openai"
+          |  model = "gpt-6.1-terra"
+          |  apiKey = "sk-test"
+          |  keepReasoning = "sometimes"
+          |}
+          |""".stripMargin
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("openai-main")) match
+        case Left(error) =>
+          error.message should include("openai-main")
+          error.message should include("keepReasoning")
+        case Right(config) => fail(s"Expected a failure, got $config")
+    }
+
     "fail an openai section with an api it does not know, naming the section and both values" in {
       val hocon =
         """

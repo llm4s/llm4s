@@ -33,9 +33,10 @@ private[provider] object OpenAIResponsesReply:
     response: Response,
     provider: ProviderId,
     configuredModel: ModelName,
-    origin: ReplayOrigin
+    origin: ReplayOrigin,
+    keepReasoning: Boolean
   ): Result[Completion] =
-    Try(read(response, provider, configuredModel, origin)).toEither.left
+    Try(read(response, provider, configuredModel, origin, keepReasoning)).toEither.left
       .map(OpenAIClient.mapError(_, provider))
       .flatMap(identity)
 
@@ -43,7 +44,8 @@ private[provider] object OpenAIResponsesReply:
     response: Response,
     provider: ProviderId,
     configuredModel: ModelName,
-    origin: ReplayOrigin
+    origin: ReplayOrigin,
+    keepReasoning: Boolean
   ): Result[Completion] =
     val status = known(response._status()).map(_.asString())
     if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider))
@@ -61,7 +63,7 @@ private[provider] object OpenAIResponsesReply:
         val message = ThinkingReplay.bindOrigin(
           origin,
           AssistantMessage(text = if text.isEmpty then None else Some(text), toolCalls = toolCalls)
-            .withThinking(OpenAIReasoningItems.blocks(items))
+            .withThinking(OpenAIReasoningItems.blocks(items).filter(keepReasoning || !OpenAIReasoningItems.isOpaque(_)))
         )
         ToolCallRules.checked(
           Completion(
