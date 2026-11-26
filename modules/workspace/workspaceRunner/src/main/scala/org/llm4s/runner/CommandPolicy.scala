@@ -208,6 +208,15 @@ private[runner] object CommandPolicy {
   private val GitGlobalAllowed: Set[String] =
     Set("--version", "--no-pager", "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects")
 
+  /**
+   * The options that ask a git subcommand for its help. `--help` first after the subcommand makes git run `git help
+   * <subcommand>`, which starts the manual viewer the repository's configuration names (`man.viewer` with
+   * `man.<tool>.cmd`, run by a shell), and the runner injects no option before it for `ls-files`, `ls-tree` and
+   * `rev-parse`. Each is refused wherever it appears, for every subcommand, so a change to the injected options cannot
+   * reopen the route; `-h` and `--help-all` only print usage, and are refused with it (#3047).
+   */
+  private val GitHelpOptions: Set[String] = Set("--help", "-h", "--help-all")
+
   /** The git subcommands that only read. `branch` only lists (see [[gitBranchRefusal]]). */
   val GitReadSubcommands: Set[String] =
     Set("status", "log", "show", "diff", "ls-files", "ls-tree", "grep", "blame", "rev-parse", "branch")
@@ -866,6 +875,17 @@ private[runner] object CommandPolicy {
                 GitReadSubcommands.toSeq.sorted.mkString(", ") + "."
             )
           )
+        else if (subArgs.exists(GitHelpOptions.contains))
+          subArgs
+            .find(GitHelpOptions.contains)
+            .map(
+              notAllowed(
+                s"git $subcommand",
+                _,
+                "git's help runs the manual viewer, which the repository's configuration may name (man.viewer, " +
+                  "man.<tool>.cmd); use the documentation outside the workspace (#3047)."
+              )
+            )
         else if (subcommand == "branch") gitBranchRefusal(subArgs)
         else if (subArgs.exists(_.startsWith(":")))
           subArgs
