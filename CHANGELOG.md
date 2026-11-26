@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llm4s-schema-derivation` (Experimental): a `@description`, `@toolName` or `@upickle.implicits.key` whose argument is not a constant string is now a compile error where the schema, partial type or tool is derived; it was silently ignored ([#2951](https://github.com/llm4s/llm4s/issues/2951); [migration](docs/reference/migration.md#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951)).
 - `llm4s-secrets-vault` and `llm4s-secrets-aws` (experimental), behaviour: an `http://` Vault address or AWS endpoint whose host is not loopback is refused unless the settings call `withCleartext(true)`, as is user info in either; a JSON-object `SecretString` read without `withField` is a `ConfigurationError`; and a failed read is shared for 1 or 5 seconds, not retried by the next call
   ([migration](docs/reference/migration.md#secret-providers-refuse-cleartext-http-and-a-json-object-secret-without-a-field-and-share-a-failed-read-3102)) [#3102](https://github.com/llm4s/llm4s/issues/3102).
+- `llm4s-workspace-client` and the workspace-runner image (experimental): the runner refuses to start without `LLM4S_RUNNER_TOKEN` and refuses a WebSocket handshake without it, so a client and an image from different releases do not mix; `ContainerisedWorkspace` gains a last parameter, `idleTimeout` ([migration](docs/reference/migration.md#the-workspace-runner-needs-a-token-and-its-container-is-published-on-loopback-only-3046-3053)) [#3046](https://github.com/llm4s/llm4s/issues/3046).
 
 ### Core
 
@@ -35,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent runtime
 
 - **Added** `AgentBuilder.withOutput` takes a schema whose root is an `anyOf` of objects, so an agent answers with a sealed trait or an enum with fields (`withOutput(SchemaOf[Turn].definition)`, `decodeOutput[Turn]`): the union is sent inside an envelope object and stored, checked and decoded without it; a root still refused says what to do instead ([#2953](https://github.com/llm4s/llm4s/issues/2953); [guide](docs/guide/agents/index.md#a-union-as-the-answer)).
+
+### Agent harness
+
+- **Fixed** the workspace runner could be driven by anything that reached its port, published on every host interface: `ContainerisedWorkspace` publishes it on `127.0.0.1` only, and every handshake must carry a per-container token, with a browser's (`Origin`) refused [#3046](https://github.com/llm4s/llm4s/issues/3046).
+  Its container no longer leaks (`--rm`, `docker rm -f` on a failed start and stop, a shutdown hook, `AutoCloseable`, the runner's idle exit), and a dropped connection is reconnected rather than ending the workspace ([#3053](https://github.com/llm4s/llm4s/issues/3053); [sandbox](docs/reference/workspace-sandbox.md#who-can-reach-the-runner)).
 
 ### Tools
 

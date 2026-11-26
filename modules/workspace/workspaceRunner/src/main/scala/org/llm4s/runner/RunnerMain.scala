@@ -96,6 +96,28 @@ object RunnerMain extends cask.MainRoutes {
     }
   }
 
+  // The container's token (#3046): every WebSocket handshake must carry it. No token, no runner: an open port that
+  // anyone on the host (or a web page, through ws://localhost) could drive is never started.
+  private val token: String =
+    RunnerHandshake.tokenFrom(Option(System.getenv(RunnerHandshake.TokenEnvVar))) match {
+      case Right(t) => t
+      case Left(msg) =>
+        logger.error(msg)
+        throw new IllegalArgumentException(msg)
+    }
+
+  // How long the runner waits with no client connected before it exits (#3053), so a container whose client died
+  // does not run on with its port published and the host directory mounted
+  private val idleTimeout: Option[scala.concurrent.duration.FiniteDuration] =
+    IdleExit.timeoutFrom(Option(System.getenv(RunnerHandshake.IdleTimeoutEnvVar))) match {
+      case Right(t) => t
+      case Left(msg) =>
+        logger.error(msg)
+        throw new IllegalArgumentException(msg)
+    }
+  private val idleExit = new IdleExit(idleTimeout, System.currentTimeMillis())
+  private val exiting  = new java.util.concurrent.atomic.AtomicBoolean(false)
+
   // Initialize workspace interface
   private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
 
@@ -155,7 +177,8 @@ object RunnerMain extends cask.MainRoutes {
 
   private val commandExecutor = new WebSocketCommandExecutor(workspaceInterface, MaxOutputSize)(ec)
 
-  // Default host binding - 0.0.0.0 to be accessible from outside container
+  // 0.0.0.0 inside the container, so Docker can forward the published port to it. The client publishes that port on
+  // the host's loopback only (127.0.0.1:<hostPort>), and every handshake must carry the token (#3046).
   override def host: String = "0.0.0.0"
 
   /**
@@ -165,11 +188,12 @@ object RunnerMain extends cask.MainRoutes {
   def root(): String = "LLM4S WebSocket Runner service - connect via WebSocket at /ws"
 
   /**
-   * WebSocket endpoint for workspace agent communication.
+   * WebSocket endpoint for workspace agent communication. A handshake without the container's token, or with an
+   * `Origin` header (a browser's), is refused before any socket opens (#3046).
    */
   @cask.websocket("/ws")
-  def websocketHandler(): cask.WebsocketResult =
-    cask.WsHandler { channel =>
+  def websocketHandler(request: cask.Request): cask.WebsocketResult =
+    RunnerAccess.guard(token, request)(cask.WsHandler { channel =>
       logger.info(s"WebSocket connection opened")
       connections.put(channel, new AtomicLong(System.currentTimeMillis()))
 
@@ -186,7 +210,7 @@ object RunnerMain extends cask.MainRoutes {
           logger.error(s"WebSocket error: ${ex.getMessage}", ex)
           disconnect(channel, "socket error")
       }
-    }
+    })
 
   /**
    * Ends a client's connection: its commands waiting at the gate never start (it is no longer connected, and its early
@@ -426,6 +450,12 @@ object RunnerMain extends cask.MainRoutes {
             disconnect(channel, "heartbeat timeout")
           }
         }
+
+        if (idleExit.observe(connections.size(), System.currentTimeMillis()) && exiting.compareAndSet(false, true)) {
+          logger.warn(s"No client has been connected for ${idleTimeout.fold("ever")(_.toString)}: exiting (#3053)")
+          // on a thread of its own: exit runs the shutdown hook, which waits for this executor to finish
+          new Thread(() => System.exit(0), "llm4s-runner-idle-exit").start()
+        }
       },
       HeartbeatCheckIntervalSeconds,
       HeartbeatCheckIntervalSeconds,
@@ -445,6 +475,7 @@ object RunnerMain extends cask.MainRoutes {
     logger.info(s"Using workspace path: $workspacePath")
     logger.info(s"Sandbox profile: ${sandboxConfig.map(_ => "configured").getOrElse("permissive (default)")}")
     logger.info(s"Heartbeat timeout: ${HeartbeatTimeoutMs}ms")
+    logger.info(s"Idle exit: ${idleTimeout.fold("never")(t => s"after $t with no client connected")}")
     logger.info(s"Max output size per stream: ${MaxOutputSize / 1024}KB")
   }
 
