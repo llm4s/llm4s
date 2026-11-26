@@ -214,7 +214,9 @@ val tools = BuiltinTools.customSafe(
 ```
 
 `write_file` replaces an existing file atomically: it writes a temporary file beside it and renames that over the
-original, so a failed or interrupted write leaves the original whole. An append is written in place, and
+original, so a failed or interrupted write leaves the original whole. The replacement keeps the original's owner,
+group and permissions (on Windows its owner and ACL), and the write is refused when one cannot be kept or the file is
+read-only; setuid, setgid and sticky bits, extended ACLs and extended attributes are not carried over. An append is written in place, and
 `maxFileSize` bounds the file's size after the append, not only the appended content. Text that the chosen
 `encoding` cannot represent is refused, never written as `?`. In every file tool, an optional argument that is absent
 or `null` takes its default, and one of the wrong type (`"append": "true"`) refuses the call.

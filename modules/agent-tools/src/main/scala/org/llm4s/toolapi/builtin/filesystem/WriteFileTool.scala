@@ -7,7 +7,13 @@ import upickle.default._
 import java.nio.{ ByteBuffer, CharBuffer }
 import java.nio.channels.{ FileChannel, WritableByteChannel }
 import java.nio.charset.{ CharacterCodingException, Charset, CodingErrorAction }
-import java.nio.file.attribute.{ AclFileAttributeView, BasicFileAttributes, PosixFilePermissions }
+import java.nio.file.attribute.{
+  AclFileAttributeView,
+  BasicFileAttributes,
+  PosixFileAttributeView,
+  PosixFileAttributes,
+  PosixFilePermissions
+}
 import java.nio.file.{
   FileAlreadyExistsException,
   FileSystemException,
@@ -202,7 +208,9 @@ object WriteFileTool {
    *  - An overwrite is staged: the content goes to a new temporary file in the same directory, which then replaces
    *    the target in one atomic rename. A failed or interrupted write leaves the original whole and no temporary
    *    file behind. The temporary file is owner-only while it is written (POSIX), and the replacement gets the
-   *    original's POSIX permissions (or, on Windows, its ACL); if they cannot be copied, nothing is replaced.
+   *    original's owner, group and permissions (on Windows its owner and ACL); if one cannot be copied, nothing is
+   *    replaced (see [[copyAccessRights]] for what NIO cannot carry over). A file that is not writable is refused, as
+   *    an in-place write would be.
    *  - An append adds to the file in place (`APPEND`), so concurrent appends are not lost; it is not atomic.
    */
   private[builtin] def writeResolved(
@@ -241,6 +249,9 @@ object WriteFileTool {
     Try(Files.readAttributes(real, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)).flatMap { attributes =>
       if (!attributes.isRegularFile)
         Failure(new FileSystemException(real.toString, null, "not a regular file, so it is not replaced"))
+      // a rename needs only the directory to be writable: a read-only file stays as refused as an in-place write was
+      else if (!Files.isWritable(real))
+        Failure(new java.nio.file.AccessDeniedException(real.toString, null, "the file is not writable"))
       else {
         val temp = stagingPath(real)
         val staged = Try {
@@ -281,17 +292,39 @@ object WriteFileTool {
     path.getFileSystem.supportedFileAttributeViews().contains("posix")
 
   /**
-   * Gives `temp` the access rights of `original`: its POSIX permissions, or, on a file system with ACLs and no POSIX
-   * permissions (Windows), its ACL. Throws when they cannot be read or set, so the replace is refused rather than
-   * leaving a file with different rights.
+   * Gives `temp` the access-relevant attributes of `original`, as an in-place write would have kept them, and throws
+   * when one cannot be read or set, so the replace is refused rather than leaving a file anyone else can open.
+   *
+   *  - POSIX: the owner and the group, then the permission bits (in that order, since changing an owner may clear
+   *    bits). An owner or group the process may not give a file (another user's file, a group it is not in) refuses
+   *    the replace.
+   *  - Windows (ACLs, no POSIX permissions): the owner, then the ACL.
+   *
+   * NIO does not show the setuid, setgid and sticky bits, POSIX or macOS extended ACLs, extended attributes or security
+   * labels (SELinux), so these are not carried over: the replacement has none of them. A hard link to the original
+   * keeps the old content, since the replacement is a new file.
    */
   private def copyAccessRights(original: Path, temp: Path): Unit =
-    if (supportsPosix(original))
-      Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(original, LinkOption.NOFOLLOW_LINKS))
-    else
+    if (supportsPosix(original)) {
+      val from = Files.readAttributes(original, classOf[PosixFileAttributes], LinkOption.NOFOLLOW_LINKS)
+      copyPosix(from, Files.getFileAttributeView(temp, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS))
+    } else {
       Option(Files.getFileAttributeView(original, classOf[AclFileAttributeView], LinkOption.NOFOLLOW_LINKS))
         .zip(Option(Files.getFileAttributeView(temp, classOf[AclFileAttributeView], LinkOption.NOFOLLOW_LINKS)))
-        .foreach { case (from, to) => to.setAcl(from.getAcl) }
+        .foreach { case (from, to) =>
+          val owner = from.getOwner
+          if (to.getOwner != owner) to.setOwner(owner)
+          to.setAcl(from.getAcl)
+        }
+    }
+
+  /** Sets `to`'s owner and group, where they differ, and then its permissions, to `from`'s. */
+  private[builtin] def copyPosix(from: PosixFileAttributes, to: PosixFileAttributeView): Unit = {
+    val current = to.readAttributes()
+    if (current.owner != from.owner) to.setOwner(from.owner)
+    if (current.group != from.group) to.setGroup(from.group)
+    to.setPermissions(from.permissions)
+  }
 
   private def writeAll(channel: WritableByteChannel, content: Array[Byte]): Unit = {
     val bytes = ByteBuffer.wrap(content)

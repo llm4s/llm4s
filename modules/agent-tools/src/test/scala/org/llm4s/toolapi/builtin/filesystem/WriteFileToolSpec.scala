@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
-import java.nio.file.attribute.PosixFilePermissions
+import java.nio.file.attribute.{ PosixFileAttributeView, PosixFileAttributes, PosixFilePermissions }
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
 
@@ -25,6 +25,8 @@ class WriteFileToolSpec extends AnyFlatSpec with Matchers with EitherValues with
     Using.resource(Files.walk(dir))(_.iterator().asScala.toList.reverse.foreach(p => Files.deleteIfExists(p)))
     super.afterEach()
   }
+
+  private val isWindows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows")
 
   private def config(maxFileSize: Long = 10 * 1024 * 1024, allowOverwrite: Boolean = true) =
     WriteConfig(allowedPaths = Seq(dir.toString), maxFileSize = maxFileSize, allowOverwrite = allowOverwrite)
@@ -164,6 +166,71 @@ class WriteFileToolSpec extends AnyFlatSpec with Matchers with EitherValues with
     result.isFailure shouldBe true
     Files.readString(target) shouldBe "ORIGINAL"
     names shouldBe Set("data.txt")
+  }
+
+  it should "keep the original's group when it replaces it" in {
+    assume(!isWindows, "POSIX groups only")
+    val target       = existing("shared.txt", "ORIGINAL")
+    val view         = Files.getFileAttributeView(target, classOf[PosixFileAttributeView])
+    val lookup       = target.getFileSystem.getUserPrincipalLookupService
+    val defaultGroup = view.readAttributes().group
+    // a second group of the test user's, which a file it owns may be given
+    val other = Try(scala.sys.process.Process(Seq("id", "-Gn")).!!.trim.split("\\s+").toSeq)
+      .getOrElse(Seq.empty)
+      .flatMap(name => Try(lookup.lookupPrincipalByGroupName(name)).toOption)
+      .find(g => g != defaultGroup && Try(view.setGroup(g)).isSuccess)
+    assume(other.isDefined, "the test user has no second group")
+    Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-r-----"))
+    write(config(), ujson.Obj("path" -> target.toString, "content" -> "replaced")).isRight shouldBe true
+    Files.readString(target) shouldBe "replaced"
+    val after = Files.readAttributes(target, classOf[PosixFileAttributes])
+    after.group shouldBe other.get
+    PosixFilePermissions.toString(after.permissions) shouldBe "rw-r-----"
+  }
+
+  it should "refuse the replace when the original's owner cannot be given to the replacement" in {
+    assume(!isWindows, "POSIX owners only")
+    assume(System.getProperty("user.name") != "root", "root may give a file any owner")
+    val target = existing("theirs.txt", "ORIGINAL")
+    val lookup = target.getFileSystem.getUserPrincipalLookupService
+    val nobody = Try(lookup.lookupPrincipalByName("nobody")).toOption
+    assume(nobody.isDefined, "no `nobody` user")
+    val real = Files.readAttributes(target, classOf[PosixFileAttributes])
+    // the original as it would look were it another user's file
+    val theirs = new PosixFileAttributes {
+      def owner()            = nobody.get
+      def group()            = real.group
+      def permissions()      = real.permissions
+      def lastModifiedTime() = real.lastModifiedTime
+      def lastAccessTime()   = real.lastAccessTime
+      def creationTime()     = real.creationTime
+      def isRegularFile()    = true
+      def isDirectory()      = false
+      def isSymbolicLink()   = false
+      def isOther()          = false
+      def size()             = real.size
+      def fileKey()          = real.fileKey
+    }
+    val result = WriteFileTool.replace(
+      target,
+      "new".getBytes(StandardCharsets.UTF_8),
+      (_, temp) => WriteFileTool.copyPosix(theirs, Files.getFileAttributeView(temp, classOf[PosixFileAttributeView]))
+    )
+    result.isFailure shouldBe true
+    Files.readString(target) shouldBe "ORIGINAL"
+    names shouldBe Set("theirs.txt")
+  }
+
+  it should "refuse to replace a read-only file, as an in-place write would" in {
+    val target = existing("readonly.txt", "ORIGINAL")
+    target.toFile.setWritable(false)
+    val writable = Files.isWritable(target)
+    val result   = write(config(), ujson.Obj("path" -> target.toString, "content" -> "replaced"))
+    target.toFile.setWritable(true)
+    assume(!writable, "the test user can write a read-only file (root)")
+    result.isLeft shouldBe true
+    Files.readString(target) shouldBe "ORIGINAL"
+    names shouldBe Set("readonly.txt")
   }
 
   it should "stage under a bounded name, so a target with a long name can be replaced" in {
