@@ -43,9 +43,20 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
 
   it should "leave out `before` when the next item is the message or nothing" in {
     val withMessage = opaque(OpenAIReasoningItems.blocks(output(reasoningItem("rs_1"), outputMessage("hi"))))
-    val alone       = opaque(OpenAIReasoningItems.blocks(output(reasoningItem("rs_1"))))
     withMessage.map(_._2.obj.keySet) shouldBe Seq(Set("item"))
-    alone.map(_._2.obj.keySet) shouldBe Seq(Set("item"))
+  }
+
+  it should "not store a reasoning item with no message or call after it, but keep its summary" in {
+    OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", summary = Seq("Thought.")))) shouldBe
+      Seq(ThinkingBlock.Text("Thought."))
+    opaque(OpenAIReasoningItems.blocks(output(outputMessage("hi"), reasoningItem("rs_1")))) shouldBe empty
+    val found = opaque(
+      OpenAIReasoningItems.blocks(
+        output(reasoningItem("rs_1"), functionCall("call_1", "get_weather", "{}"), reasoningItem("rs_2"))
+      )
+    )
+    found.map(_._2("item")("id").str) shouldBe Seq("rs_1")
+    found.map(_._2("before").str) shouldBe Seq("call_1")
   }
 
   it should "anchor reasoning items to the call after the run of reasoning items they start" in {
@@ -85,7 +96,9 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "keep a summary as text, before its opaque block" in {
-    val blocks = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", summary = Seq("First.", "Second."))))
+    val blocks = OpenAIReasoningItems.blocks(
+      output(reasoningItem("rs_1", summary = Seq("First.", "Second.")), outputMessage("hi"))
+    )
     blocks.head shouldBe ThinkingBlock.Text("First.\n\nSecond.")
     blocks(1) shouldBe a[ThinkingBlock.Opaque]
   }
@@ -124,7 +137,7 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "round-trip an item field for field" in {
-    val blocks = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", summary = Seq("a"))))
+    val blocks = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", summary = Seq("a")), outputMessage("hi")))
     val item   = OpenAIReasoningItems.stored(blocks).head.item
     item.encryptedContent().get() shouldBe "enc-rs_1"
     item.summary().asScala.map(_.text()) shouldBe Seq("a")
@@ -142,6 +155,7 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
 
   it should "give back an encrypted_content with awkward characters exactly" in {
     val awkward = ("A/b+c=" * 200) + "é中\"\\\n\t\u0001"
-    val blocks  = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", encrypted = Some(awkward))))
+    val blocks =
+      OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", encrypted = Some(awkward)), outputMessage("hi")))
     OpenAIReasoningItems.stored(blocks).map(_.item.encryptedContent().get()) shouldBe Seq(awkward)
   }

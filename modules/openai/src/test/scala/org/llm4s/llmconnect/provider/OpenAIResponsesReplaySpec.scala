@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  FinishReason,
   Message,
   ThinkingBlock,
   ToolCall,
@@ -55,7 +56,13 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
    * Serves `firstOutput` to the first request and a plain answer to every later one; the second request is sent by
    * `secondModel`'s client with the conversation `next` builds from the first completion.
    */
-  private def thread(firstOutput: String, firstModel: String = Terra, secondModel: String = Terra)(
+  private def thread(
+    firstOutput: String,
+    firstModel: String = Terra,
+    secondModel: String = Terra,
+    status: String = "completed",
+    extra: String = ""
+  )(
     next: Completion => Seq[Message]
   ): Thread =
     val count  = new AtomicInteger(0)
@@ -65,7 +72,8 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
       bodies.synchronized(
         bodies += ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       )
-      val answer = if count.getAndIncrement() == 0 then reply(firstOutput) else reply(outputMessage("done"))
+      val answer =
+        if count.getAndIncrement() == 0 then reply(firstOutput, status, extra) else reply(outputMessage("done"))
       LocalProviderTestServer.sendJsonResponse(exchange, 200, answer)
     } { baseUrl =>
       val first = clientFor(baseUrl, firstModel)
@@ -175,6 +183,40 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
     )
     types(seen.input) shouldBe Seq("user", "reasoning", "assistant", "user")
     seen.input(1)("id").str shouldBe "rs_1"
+  }
+
+  it should "keep a reasoning item cut off at max_output_tokens out of the stored message and the next request" in {
+    val seen = thread(
+      reasoningItem("rs_1"),
+      status = "incomplete",
+      extra = """"incomplete_details":{"reason":"max_output_tokens"}"""
+    )(c => Seq(UserMessage("go"), c.message, UserMessage("again")))
+    seen.first.finishReason shouldBe FinishReason.Length
+    seen.first.message.hasSealedThinking shouldBe false
+    types(seen.input) should not contain "reasoning"
+  }
+
+  it should "not send a reasoning item that came after the turn's text" in {
+    val seen = thread(outputMessage("Done.") + "," + reasoningItem("rs_1"))(c =>
+      Seq(UserMessage("go"), c.message, UserMessage("again"))
+    )
+    types(seen.input) shouldBe Seq("user", "assistant", "user")
+  }
+
+  // This is the stored format of 1.1.0. If this test fails after a change, stored conversations will lose their
+  // reasoning: do not regenerate the literal.
+  private lazy val StoredFor110 =
+    """{"type":"assistant","toolCalls":[{"id":"call_1","name":"get_weather","arguments":{"city":"Paris"}}],"thinking":[{"type":"opaque","provider":"openai","data":"{\"item\":{\"id\":\"rs_1\",\"summary\":[],\"type\":\"reasoning\",\"encrypted_content\":\"enc-rs_1\"},\"before\":\"call_1\"}"}],"thinkingBinding":"424214ff564c90a4342787649e81c100d21f86796dee44f713ac23b368d7c410"}"""
+
+  it should "read a message stored by 1.1.0 and send its reasoning back before its call" in {
+    val seen = thread(outputMessage("unused")) { _ =>
+      val stored = upickle.default.read[Message](StoredFor110)
+      Seq(UserMessage("go"), stored, ToolMessage("18C", ToolCallId("call_1")))
+    }
+    types(seen.input) shouldBe Seq("user", "reasoning", "function_call", "function_call_output")
+    seen.input(1)("id").str shouldBe "rs_1"
+    seen.input(1)("encrypted_content").str shouldBe "enc-rs_1"
+    seen.input(2)("call_id").str shouldBe "call_1"
   }
 
   it should "send the same request PR 1 sent for a thread with no reasoning" in {

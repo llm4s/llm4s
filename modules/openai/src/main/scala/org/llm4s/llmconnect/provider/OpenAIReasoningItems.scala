@@ -15,8 +15,9 @@ import scala.util.Try
  * Each item with `encrypted_content` is kept as a `ThinkingBlock.Opaque` of provider `openai` whose data is the
  * envelope `{"item": <the item as returned>, "before": "<call_id>"}`; `before` is the `call_id` of the
  * `function_call` that follows it in the output, looking past any reasoning items between, and is absent when the
- * next other item is anything else (a search call, say). A reasoning item that comes after the turn's text with no
- * later call is therefore sent before the text. An item's summary text is a `ThinkingBlock.Text` before its opaque
+ * next other item is anything else (a message, say). A reasoning item with no later message or call (a reply cut
+ * off in its reasoning, or reasoning after the turn's text) is not kept for replay, because OpenAI rejects a
+ * reasoning item with nothing after it; its summary is. An item's summary text is a `ThinkingBlock.Text` before its opaque
  * block. Nothing here throws: what cannot be read is left out.
  */
 private[provider] object OpenAIReasoningItems:
@@ -37,7 +38,7 @@ private[provider] object OpenAIReasoningItems:
         case Seq() => Seq.empty
         case texts => Seq(ThinkingBlock.Text(texts.mkString("\n\n")))
       val sealedItem =
-        if item.encryptedContent().toScala.exists(_.nonEmpty) then
+        if next.isDefined && item.encryptedContent().toScala.exists(_.nonEmpty) then
           val before = next.filter(_.isFunctionCall).map(_.asFunctionCall().callId())
           val fields = Seq("item" -> ujson.read(ObjectMappers.jsonMapper().writeValueAsString(item))) ++
             before.map("before" -> ujson.Str(_))

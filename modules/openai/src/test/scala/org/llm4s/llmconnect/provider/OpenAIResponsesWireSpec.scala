@@ -638,7 +638,8 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
   private def streamed(
     body: String,
     status: Int = 200,
-    options: CompletionOptions = CompletionOptions()
+    options: CompletionOptions = CompletionOptions(),
+    model: String = "gpt-4o"
   ): Streamed =
     val seen      = new AtomicReference[Seen]()
     val chunks    = ListBuffer.empty[StreamedChunk]
@@ -651,7 +652,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       LocalProviderTestServer.sendJsonResponse(exchange, status, body)
     } { baseUrl =>
       val client = OpenAIClient(
-        configFor(baseUrl, "gpt-4o").withApi(OpenAIApi.Responses),
+        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
         LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
       ).value
       out = Some(client.streamComplete(hello, options)(chunks += _))
@@ -667,6 +668,27 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     s.chunks.last.finishReason shouldBe Some(FinishReason.Stop)
     s.request.path shouldBe "/v1/responses"
     s.request.body.obj.keySet should not contain "stream"
+  }
+
+  it should "give a streamed completion the same message, reasoning included, as complete does" in {
+    val body =
+      reply(
+        reasoningItem("rs_1", summary = Seq("Thinking.")) + "," +
+          functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+      )
+    val s                  = streamed(body, model = "gpt-6.1-terra")
+    val streamedCompletion = s.result.value
+    streamedCompletion.message.hasSealedThinking shouldBe true
+    streamedCompletion.message.thinkingBinding shouldBe defined
+    var unstreamed = Option.empty[org.llm4s.llmconnect.model.Completion]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+    } { baseUrl =>
+      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
+      unstreamed = client.complete(hello, CompletionOptions()).toOption
+      client.close()
+    }
+    streamedCompletion.message shouldBe unstreamed.get.message
   }
 
   it should "report the same adjustments on a streamed completion as complete does" in {
