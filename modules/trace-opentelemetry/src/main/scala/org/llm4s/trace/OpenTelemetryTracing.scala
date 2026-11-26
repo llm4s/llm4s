@@ -11,7 +11,7 @@ import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.sdk.trace.{ IdGenerator, SdkTracerProvider, SpanProcessor }
 import io.opentelemetry.sdk.trace.`export`.{ BatchSpanProcessor, SimpleSpanProcessor, SpanExporter }
 import org.llm4s.error.UnknownError
-import org.llm4s.llmconnect.config.OpenTelemetryConfig
+import org.llm4s.llmconnect.config.{ FileTracingConfig, OpenTelemetryConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
@@ -24,6 +24,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
@@ -53,14 +54,14 @@ import scala.util.Try
  */
 class OpenTelemetryTracing private[trace] (
   serviceName: String,
-  newProcessor: () => SpanProcessor,
+  newProcessor: PlacedIds => SpanProcessor,
   captureContent: Boolean
 ) extends Tracing {
 
   def this(serviceName: String, endpoint: String, headers: Map[String, String], captureContent: Boolean = false) =
     this(
       serviceName,
-      () => {
+      _ => {
         val spanExporterBuilder = OtlpGrpcSpanExporter
           .builder()
           .setEndpoint(endpoint)
@@ -89,7 +90,7 @@ class OpenTelemetryTracing private[trace] (
       .builder()
       .setResource(resource)
       .setIdGenerator(ids)
-      .addSpanProcessor(newProcessor())
+      .addSpanProcessor(newProcessor(ids))
       .build()
 
     val openTelemetry = OpenTelemetrySdk
@@ -624,6 +625,13 @@ final private[trace] class PlacedIds extends IdGenerator {
   def generateSpanId(): String  = placed.get.fold(random.generateSpanId())(_.spanId)
   def generateTraceId(): String = placed.get.fold(random.generateTraceId())(_.traceId)
 
+  /**
+   * Whether the span starting on this thread is a placed one: true only inside [[startingAs]] with a placement, so
+   * true from a `SpanProcessor.onStart`, which the SDK calls within `startSpan`. The file mode reads it there to tell a
+   * placed trace from an unplaced event's trace of its own (#2948).
+   */
+  def placing: Boolean = placed.get.isDefined
+
   def startingAs[A](context: Option[TraceContext])(start: => A): A =
     if (context.isEmpty) start
     else {
@@ -650,7 +658,33 @@ object OpenTelemetryTracing {
     exporter: SpanExporter,
     captureContent: Boolean = false
   ): OpenTelemetryTracing =
-    new OpenTelemetryTracing(serviceName, () => SimpleSpanProcessor.create(exporter), captureContent)
+    new OpenTelemetryTracing(serviceName, _ => SimpleSpanProcessor.create(exporter), captureContent)
+
+  /**
+   * A tracing that writes every span to local files as OTLP JSON Lines, with no tracing service (#2948): the file
+   * mode, `TRACING_MODE=file`. Each span is appended as it ends, as one line holding an OTLP/JSON
+   * `ExportTraceServiceRequest`: a placed trace's spans to `<dir>/<trace-id>.jsonl`, and the spans of events without a
+   * placement - each a trace of its own - to one `<dir>/unplaced-<start>-<id>.jsonl` for this tracing.
+   *
+   * The directory is created if it is missing. One that cannot be created, is not a directory or is not writable is
+   * a [[org.llm4s.error.ConfigurationError]]; so is an SDK that cannot start.
+   *
+   * {{{
+   * OpenTelemetryTracing.toFiles(FileTracingConfig(Paths.get("traces")).withCaptureContent(true))
+   * }}}
+   */
+  def toFiles(config: FileTracingConfig): Result[OpenTelemetryTracing] =
+    TraceFiles.usableDirectory(config.dir).flatMap { dir =>
+      val unplaced = TraceFiles.unplacedFileName(Instant.now())
+      val tracing = new OpenTelemetryTracing(
+        config.serviceName,
+        ids => new TraceFileSpanProcessor(ids, dir, unplaced),
+        config.captureContent
+      )
+      tracing.initializationFailure match
+        case Some(error) => Left(UnknownError(s"File tracing failed to initialise: $error", error))
+        case None        => Right(tracing)
+    }
 
   def from(config: OpenTelemetryConfig): OpenTelemetryTracing =
     new OpenTelemetryTracing(

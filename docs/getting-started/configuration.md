@@ -6,6 +6,7 @@ search_title: "Configure LLM4S providers and API keys in Scala"
 parent: Getting Started
 nav_order: 3
 cites_closed_issues: [903, 2265, 2273, 2341]
+cites_open_issues: [2948]
 ---
 
 # Configuration Guide
@@ -1106,12 +1107,77 @@ val result = for {
 } yield ()
 ```
 
+### Trace files (no tracing service)
+
+`TRACING_MODE=file` writes every trace to a local file as OTLP JSON Lines, so you can capture and inspect what a run
+did with nothing else running ([#2948](https://github.com/llm4s/llm4s/issues/2948)). It is served by
+`llm4s-observability-otel`, from the same spans as the `opentelemetry` mode.
+
+```bash
+TRACING_MODE=file
+LLM4S_TRACE_DIR=./llm4s-traces                             # the default
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true    # optional: record prompts and completions too
+```
+
+**Message content is off by default** - the files are plain text on disk - and one setting turns it on:
+`llm4s.tracing.file.captureContent = true`, or the variable above. With it, model calls traced through
+`TracingLLMClient` carry their prompts and completions, and `ToolExecuted` events their input and output, redacted
+first, as in [OpenTelemetry](#opentelemetry). An agent run's own spans carry no message content in either mode.
+
+| Config key | Variable | Default | Description |
+|----------|----------|---------|-------------|
+| `llm4s.tracing.mode` | `TRACING_MODE` | `console` | Must be `file` |
+| `llm4s.tracing.file.dir` | `LLM4S_TRACE_DIR` | `llm4s-traces` (relative to the working directory) | The trace directory, created on demand |
+| `llm4s.tracing.file.serviceName` | `OTEL_SERVICE_NAME` | `llm4s-agent` | `service.name` on every span's resource |
+| `llm4s.tracing.file.captureContent` | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `false` | Record message content, redacted |
+
+**What goes where.** A placed trace - an agent run and everything under it, delegated child runs included - is
+appended to `<dir>/<trace-id>.jsonl`, named by its 32-hex-character trace id, one line per span as each span ends, so
+the file grows while the run runs. Two processes that share the directory and a trace append to the same file. An
+event with no placement - an embedding call, a model call made outside an agent, a cache hit - is a trace of its own,
+so rather than one file each, a tracing instance appends all of them to one
+`<dir>/unplaced-<yyyyMMddTHHmmssZ>-<8 hex>.jsonl`, named by when the tracing started; each span in it keeps its own
+trace id. A directory that cannot be created, or is not a writable directory, makes `Tracing.fromSettings` return a
+`ConfigurationError`.
+
+Each line is one OTLP/JSON `ExportTraceServiceRequest` (the shape of the
+[OpenTelemetry file exporter](https://opentelemetry.io/docs/specs/otel/protocol/file-exporter/)'s `TracesData`):
+the resource, the `org.llm4s` scope and the spans, with hex trace and span ids, integer enums and 64-bit integers as
+strings. Any tool that reads OTLP JSON can read a file, and a collector can replay it. One line, wrapped here:
+
+```json
+{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"llm4s-agent"}},
+  {"key":"telemetry.sdk.language","value":{"stringValue":"java"}}, ...]},
+ "scopeSpans":[{"scope":{"name":"org.llm4s","attributes":[]},"spans":[{"traceId":"503a5152f54a37fc9996c1c20f7cbd18",
+  "spanId":"7ed1cf6553a22979","parentSpanId":"1dd2f34725c5d86b","name":"chat gpt-x","kind":3,
+  "startTimeUnixNano":"1795600800010000000","endTimeUnixNano":"1795600800850000000",
+  "attributes":[{"key":"gen_ai.operation.name","value":{"stringValue":"chat"}},
+   {"key":"gen_ai.usage.input_tokens","value":{"intValue":"12"}}, ...],
+  "events":[],"links":[],"status":{},"flags":769}],"schemaUrl":"https://opentelemetry.io/schemas/1.37.0"}]}]}
+```
+
+Each line is written whole: appends are serialised within the JVM and take an exclusive lock on the file where the
+file system supports one, so processes appending to one file do not interleave inside a line. There is no rotation
+or retention: delete old files yourself.
+
+In code, without configuration:
+
+```scala
+import java.nio.file.Paths
+import org.llm4s.llmconnect.config.FileTracingConfig
+import org.llm4s.trace.OpenTelemetryTracing
+
+val tracing = OpenTelemetryTracing.toFiles(
+  FileTracingConfig(Paths.get("traces")).withCaptureContent(true)
+) // Result[OpenTelemetryTracing]; close() it when done
+```
+
 ### Other tracing backends
 
 `console` and `none` are built into `llm4s-core`; every other mode is served by a
 `org.llm4s.trace.spi.TracingBackend` that a module registers in
 `META-INF/services/org.llm4s.trace.spi.TracingBackend` - `langfuse` by `llm4s-observability`,
-`opentelemetry` by `llm4s-observability-otel`. A mode llm4s has no name for, such as
+`opentelemetry` and `file` by `llm4s-observability-otel`. A mode llm4s has no name for, such as
 `TRACING_MODE=datadog`, is read as `TracingMode.Named("datadog")` and goes to whichever backend
 declares that mode, or declares it as an alias (`otel` is an alias `llm4s-observability-otel`'s
 backend declares; core knows none). With no such backend, `Tracing.fromSettings` returns an error
@@ -1143,10 +1209,11 @@ also set in `application.conf` or with `-D`.
 
 | Variable | Config key | Bound by |
 |---|---|---|
-| `TRACING_MODE` | `llm4s.tracing.mode` (`console` - the default - or `none`, both built in; `langfuse`, `opentelemetry`, or the mode of any other `TracingBackend` on the classpath) | `llm4s-core` |
+| `TRACING_MODE` | `llm4s.tracing.mode` (`console` - the default - or `none`, both built in; `langfuse`, `opentelemetry`, `file`, or the mode of any other `TracingBackend` on the classpath) | `llm4s-core` |
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
-| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `llm4s.tracing.opentelemetry.captureContent` (`false` by default: spans carry no prompt or completion content) | `llm4s-observability-otel` |
+| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint`; `OTEL_SERVICE_NAME` also `llm4s.tracing.file.serviceName` | `llm4s-observability-otel` |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `llm4s.tracing.opentelemetry.captureContent` and `llm4s.tracing.file.captureContent` (`false` by default: spans carry no prompt or completion content) | `llm4s-observability-otel` |
+| `LLM4S_TRACE_DIR` | `llm4s.tracing.file.dir` (`llm4s-traces` by default), the directory `TRACING_MODE=file` writes trace files to | `llm4s-observability-otel` |
 | `EMBEDDING_MODEL` | `llm4s.embeddings.model` | `llm4s-core` |
 | `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
