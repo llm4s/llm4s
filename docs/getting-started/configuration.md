@@ -5,8 +5,7 @@ description: "Configure LLM4S providers in application.conf: named provider sect
 search_title: "Configure LLM4S providers and API keys in Scala"
 parent: Getting Started
 nav_order: 3
-cites_closed_issues: [903, 2265, 2273, 2341]
-cites_open_issues: [2948]
+cites_closed_issues: [903, 2265, 2273, 2341, 2948]
 ---
 
 # Configuration Guide

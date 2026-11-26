@@ -52,6 +52,14 @@ private[llm4s] object OpenAIModelRules {
 
     /** Only with `reasoning_effort: none`, which the client then sends whatever was asked. */
     case OnlyWithoutReasoning
+
+    /**
+     * No model is this any more: 1.0.0 refused `gpt-6.1-terra`'s tool requests with it, and that model calls tools
+     * with `reasoning_effort: none` like the rest of its generation (#2940). The case stays because 1.0.0's
+     * bytecode has it and `llm4s-openai` is binary compatible across 1.x; it must stay last, so the others keep
+     * their ordinals.
+     */
+    case ResponsesApiOnly
   }
 
   /**
