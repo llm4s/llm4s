@@ -238,10 +238,13 @@ private[runner] object RegexShape {
         Cost(if (min == 0) 1 else 0, add(body.f, 1))
       else {
         // each required iteration in turn, then each optional one (a `?` is one), which may be taken or skipped: two
-        // more ways, the body's empty match and the skip, both tried by the JDK when what follows fails
+        // more ways, the body's empty match and the skip, both tried by the JDK when what follows fails. Every
+        // iteration is at least one step, whatever its body costs: the JDK runs it even when the body does nothing,
+        // so `(?i){2147483647}` is two billion steps (Codex on #3135: 50 of them took 5.2 s with no read)
+        val required = body.copy(f = add(body.f, 1))
         val optional = Cost(add(body.e, 1), add(body.f, 1))
         val extra    = max.fold(1L)(m => m - min) // an unbounded loop ends on an iteration that matched empty
-        times(body, min, times(optional, extra, Cost(1, 0)))
+        times(required, min, times(optional, extra, Cost(1, 0)))
       }
 
     /**
@@ -338,7 +341,7 @@ private[runner] object RegexShape {
       if (flags.indexOf("x") >= 0) refuse(CommentsMode)
       if (flags.indexOf("c") >= 0) refuse(CanonEq)
       next() match {
-        case ')' => Cost(1, 0)
+        case ')' => ZeroWidth // counted as a step, as every other atom is, though the JDK makes no node for it
         case ':' => closed(alternation())
         case c   => refuse(s"Unsupported group construct '(?${flags}$c'")
       }

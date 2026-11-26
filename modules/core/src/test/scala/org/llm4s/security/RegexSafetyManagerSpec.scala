@@ -274,6 +274,36 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // Codex on #3135: an inline flag cost nothing, so this passed the check, yet the JDK runs every required iteration
+  // whatever the body does: 5.2 s on an empty input with no read. Every iteration is now at least one step.
+  it should "refuse many required iterations of a part that does nothing" in {
+    Seq("(?i){2147483647}" * 50 + "(?!)", "(?i){1001}(?!)", "(?:){1001}(?!)", "(?:^){1001}(?!)")
+      .foreach(pattern => withClue(pattern.take(40))(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
+  }
+
+  it should "match every accepted repetition of a zero-width part quickly before a failing suffix" in {
+    val units    = Seq("(?i)", "(?:)", "()", "^", "$", "\\b", "\\B", "\\G", "(?=)", "(?!x)", "(?<=)", "(?<!x)")
+    val counts   = Seq("1", "10", "100", "499", "999", "1000", "0,999", "0,2147483647", "2147483647")
+    var accepted = 0
+    for {
+      unit  <- units
+      count <- counts
+      n     <- Seq(1, 2, 10, 50)
+    } {
+      val source = s"(?:$unit){$count}" * n + "(?!)"
+      RegexSafetyManager.safeCompile(source).foreach { pattern =>
+        accepted += 1
+        withClue(source.take(60)) {
+          withinGuard {
+            RegexSafetyManager.safeFind(pattern, "")
+            RegexSafetyManager.safeFind(pattern, "xyz", 100000L)
+          }
+        }
+      }
+    }
+    accepted should be > 0
+  }
+
   // Runs `body` on a daemon thread and fails if it has not finished within the guard, rather than hanging the suite.
   private def withinGuard(body: => Any): Unit = {
     @volatile var done = false
