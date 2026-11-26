@@ -18,6 +18,29 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
    `llm4s-openai`: its `mode` and `supported_endpoints` say which API a model is served on (2026-11-26). LiteLLM's
    routing behaviour (Chat Completions by default, Responses per request) is not followed; see Approaches.
 
+Recorded by PR 4's plan (`docs/superpowers/plans/2026-11-26-openai-responses-api-pr4.md`); each is **the plan's call,
+for the maintainer to confirm**:
+
+3. **`keepReasoning`**: `OpenAIConfig.keepReasoning`, default `true`, section key `keepReasoning`. When `false` a
+   request sends no `include`, a reply's reasoning items are not stored as opaque blocks (summary text still is), and
+   stored `openai` opaque blocks are not sent back. It is the size knob and the recovery hatch.
+4. **A rejected reasoning item is an explanatory error, with no automatic retry**: OpenAI's message, then the likely
+   causes (another key or organisation, a moved model alias, an old thread) and the two remedies (`keepReasoning =
+   false`, or continuing from an edited turn). A silent retry would hide that a thread's reasoning has gone and would
+   double the request.
+5. **Positional patterns on growth-safe classes are outside the source promise**: the compatibility policy says so,
+   the migration guide notes each gain (`OpenAIConfig` 11 to 14 fields, `ModelMetadata` 8 to 9), and the Scalafix
+   umbrellas rewrite them (`PositionalPatternsGainFields` in `Llm4sMigrateFrom_1_0` and every older umbrella).
+6. **Routing is data-positive**: a model the registry knows but does not list for `/v1/responses`, whether it lists
+   other endpoints or none, stays on Chat Completions. Live evidence (2026-11-26, `POST /v1/responses`, `store:
+   false`): `gpt-4o-search-preview`, `gpt-4o-mini-search-preview` and `gpt-5-search-api` answered 400 "not supported
+   with the Responses API", and so did `gpt-audio-1.5`; `gpt-4o` answered 200. The bundled file has 48 OpenAI chat
+   entries with no `supported_endpoints`, so `gpt-4o`, `o1`, `o3-mini`, `o4-mini` and their generation stay on Chat
+   Completions until the data lists the endpoint or the section sets `api = "responses"`; this narrows decision 1.
+7. **Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
+   message views dropping thinking blocks when a caller rebuilds a conversation; `DeterministicCompressor` unsealing
+   tool-call-only messages; Azure OpenAI on Responses; OpenAI's hosted tools.
+
 ## Goals
 
 - `OpenAIClient` sends `complete` and `streamComplete` to `/v1/responses` when its section points at OpenAI.
@@ -58,39 +81,36 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
 
 ## Routing
 
-`OpenAIConfig` gains `api: Option[OpenAIApi]`; `None` means "decide from where the config points".
+`OpenAIConfig` gains `api: Option[OpenAIApi]`; `None` means "decide from where the config points". The choice is
+`OpenAIApiRouting.resolve`, made once when the client is built and logged at INFO with the reason. First match wins:
 
-| Client | `api` unset | `api` set |
+| # | When | API |
 |---|---|---|
-| `openai`, base URL is `OpenAIProvider.DEFAULT_BASE_URL` | Responses | as set |
-| `openai`, any other base URL (a gateway, a proxy, a mock) | Chat Completions | as set |
-| `requesty` | Chat Completions | not a key of its section |
-| `azure` (`AzureConfig`) | Chat Completions | no such field |
+| 1 | The config is not an `OpenAIConfig` (Azure's `AzureConfig`) | Chat Completions |
+| 2 | `api` is set | as set |
+| 3 | The client's provider is not `openai` (Requesty), or the config's own provider id is not `openai` (a hand-built config pointed at OpenRouter) | Chat Completions |
+| 4 | The registry marks the model `mode: responses` (the pro, codex, deep-research and healthcare models, each listing only `/v1/responses`) | Responses, wherever the base URL points |
+| 5 | The base URL is not OpenAI's own: `https`, host `api.openai.com` (any case), port absent or 443, no user info | Chat Completions |
+| 6 | The registry knows the model and its entry does not list `/v1/responses`, whether it lists other endpoints or none | Chat Completions |
+| 7 | Otherwise: the entry lists `/v1/responses`, or the registry does not know the model | Responses |
 
-- The comparison is on the normalised base URL (trailing slash, case of the host).
-- With `api` unset, two facts from the model registry (decision 2) adjust the table for an `openai` client, looked
-  up as `registryService.lookup(ProviderId("openai"), model)`:
-  - **`mode: responses`** (28 OpenAI entries in the bundled file: the pro, codex, deep-research and healthcare
-    models, each listing only `/v1/responses`): Responses, whatever the base URL. Chat Completions cannot serve
-    these, so a gateway that fronts one must speak Responses.
-  - **`supported_endpoints` present and without `/v1/responses`** (one chat entry today, `gpt-audio-1.5`): Chat
-    Completions, even on the default base URL.
-  - A model the registry does not know, or an entry that lists no endpoints (48 older chat entries), follows the
-    table: Responses on the default base URL.
-- With `api` set explicitly the request goes where it was told and OpenAI's error is reported.
-- There is no model list in `llm4s-openai` for this. A registry override (`Llm4sConfig.modelRegistryService()`'s
-  user file) corrects a wrong or missing entry, as it does for capabilities.
+- The per-model facts come from the model registry (decision 2), looked up as `OpenAIReasoning.openAIEntry` (an
+  `openai` or `azure` entry); a lookup that fails counts as a model the registry does not know. There is no model
+  list in `llm4s-openai`. A registry of the user's own (`llm4s.modelRegistry`) that lists `/v1/responses` for a
+  model opts it in.
+- Rule 6 is data-positive (decision 6): 48 older chat entries list no endpoints, and some of them (the search
+  previews) are refused on `/v1/responses`.
+- OpenAI's regional hosts (`us.`, `eu.`, `ae.api.openai.com`) are not treated as the default base URL, so they stay
+  on Chat Completions unless `api` is set.
+- With `api` set explicitly the request goes where it was told and OpenAI's error is reported. An explicit `api` on
+  an `OpenAIConfig` is honoured by whichever client is built from it, a Requesty-labelled one included: a caller who
+  builds the config in code and sets it has asked for it. Only the `openai` descriptor declares the section key.
 - Section key: `api = "responses"` or `api = "chat-completions"`, a declared extra of the `openai` descriptor
   (`ProviderConfigKey.optional`), never a field of `NamedProviderConfig`. Any other value fails the section load,
   naming both values.
-- The choice is resolved once, when the client is built, and logged at INFO with the reason.
-- An explicit `api` on an `OpenAIConfig` is honoured by whichever client is built from it, a Requesty-labelled
-  one included: a caller who builds the config in code and sets it has asked for it. Only the unset default looks
-  at the provider id and base URL, and it picks Responses only for provider `openai`. *My call.*
 
-On Responses no Chat Completions tool rule applies: `forcedToolEffort` is skipped and the effort is sent as asked,
-and if `checkTools` / `ToolCalls.ResponsesApiOnly` still exist when this is built (#2944 deletes them) they are
-skipped too. On Chat Completions the rule applies as #2944 leaves it.
+On Responses no Chat Completions tool rule applies: `forcedToolEffort` is skipped and the effort is sent as asked.
+On Chat Completions the rule applies as #2944 leaves it.
 
 ## API surface (all in frozen modules)
 
@@ -260,7 +280,8 @@ A 200 reply that maps to an error keeps its request and response bodies in the e
 
 - `docs/guide/providers.md` and `docs/getting-started/configuration.md`: which API a section uses, the two keys,
   what differs (penalties, reasoning with tools, encrypted reasoning in stored threads).
-- CHANGELOG, Providers: one **Changed** entry. It is not an API break, so no *Breaking changes* line, but
+- CHANGELOG, Providers: one **Changed** entry. No `@Stable` API breaks, but the wire and a positional pattern
+  change, so, as 1.0.0 listed its default changes, *Breaking changes* gets one "Behaviour, no signature" line, and
   `docs/reference/migration.md` gets a note: what changes on the wire for an `openai` section on upgrade, and
   `api = "chat-completions"` to keep 1.0.x behaviour.
 - The `reference.conf` comment block in `llm4s-openai` shows the key.
@@ -282,22 +303,17 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 
 ## Carried into later slices
 
-Slice 4 (the default):
-- Add `OpenAIApi` and `OpenAIReasoningSummary` to the compatibility policy's "Sealed types that may gain a case" table.
-- The Java facade (`ClientBuilds`), the Kotlin DSL and Spring/Quarkus flat keys (`ProviderConfigParser`) cannot set `api`: they need a way to opt out before the default flips.
-- `docs/guide/providers.md`'s extras table lists neither new key.
-- Adding two fields to `OpenAIConfig` breaks positional patterns on it at source (11 to 13 fields): state in the compatibility policy that positional patterns on growth-safe (private-constructor) classes are outside the source promise, add a migration note, and decide whether `Llm4sMigrateFrom_1_0` gets a `PositionalPatternsGainFields` entry (maintainer to confirm).
-- A setting that keeps reasoning out of stored history and requests: size, and an escape hatch when OpenAI rejects an old encrypted item after a key, organisation or snapshot change (`ReplayOrigin` excludes key and endpoint).
-- Decide what the client does on such a rejection: an error that names the cause, possibly one retry without reasoning.
-- A live comparison of the empty-turn-2 rate with and without replay on `gpt-5.6-luna`.
-- Document checkpoint growth from encrypted reasoning.
-- The Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller rebuilds a conversation.
-- `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's `None` into `Some("")` and so unseals it.
-- Hosted tools would need a reasoning item anchored to a non-function item.
+Open after slice 4:
+- A live comparison of the empty-turn-2 rate with and without replay on `gpt-5.6-luna` (PR 4's live verification).
+- The follow-ups of decision 7: the Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller
+  rebuilds a conversation; `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's
+  `None` into `Some("")` and so unseals it; Azure OpenAI on Responses; hosted tools, which would need a reasoning item
+  anchored to a non-function item.
 - Verify live what an in-stream error looks like on the wire (flat or nested).
 - `response.output_item.added` already carrying arguments would double them in a consumer that accumulates chunks.
 - Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses.
-- A migration note: a streamed chunk's id is the response id (`resp_...`), and failed-reply codes map to `ValidationError`, `ContentFilteredError` or a rate-limit error.
+- A failed reply (HTTP 200, `status: failed`) with `invalid_encrypted_content` gets no remedy hint; only an HTTP error
+  or an in-stream error event does.
 - Chat Completions' fake-streaming route lets a throwing `onChunk` escape (pre-existing).
 
 ## Left to the builder
