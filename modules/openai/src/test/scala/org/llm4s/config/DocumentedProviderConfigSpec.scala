@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.llmconnect.provider.OpenAIProvider
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.matchers.should.Matchers
@@ -75,6 +75,22 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
       |      provider = "openai"
       |      model    = "gpt-4o-mini"
       |      apiKey   = ${?OPENAI_BATCH_API_KEY}
+      |    }
+      |  }
+      |}
+      |""".stripMargin
+
+  /** The providers guide's section choosing the API and the reasoning settings ("Which API a section uses"), verbatim. */
+  private val apiAndReasoning =
+    """
+      |llm4s {
+      |  providers {
+      |    openai-reasoning {
+      |      provider         = "openai"
+      |      model            = "gpt-5.6-terra"
+      |      api              = "responses"  # optional: responses or chat-completions; unset, the client chooses
+      |      reasoningSummary = "concise"    # optional: auto, concise or detailed; Responses API only
+      |      keepReasoning    = false        # optional, default true; Responses API only
       |    }
       |  }
       |}
@@ -171,6 +187,32 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
           "openai-batch" -> ApiKeySource.Section("llm4s.providers.openai-batch.apiKey")
         )
       )
+    }
+  }
+
+  "The documented api, reasoningSummary and keepReasoning section" should {
+
+    "carry each of the three keys onto the OpenAIConfig" in {
+      Llm4sConfig.provider(
+        withEnv(apiAndReasoning, Map("OPENAI_API_KEY" -> "sk-from-env")),
+        ProviderName("openai-reasoning")
+      ) match
+        case Right(openai: OpenAIConfig) =>
+          openai.api shouldBe Some(OpenAIApi.Responses)
+          openai.reasoningSummary shouldBe Some(OpenAIReasoningSummary.Concise)
+          openai.keepReasoning shouldBe false
+        case other =>
+          fail(s"Expected OpenAIConfig, got $other")
+    }
+
+    "leave all three unset in the getting-started section: the client chooses the API and keeps reasoning" in {
+      Llm4sConfig.defaultProvider(withEnv(gettingStarted, Map("OPENAI_API_KEY" -> "sk-from-env"))) match
+        case Right(openai: OpenAIConfig) =>
+          openai.api shouldBe None
+          openai.reasoningSummary shouldBe None
+          openai.keepReasoning shouldBe true
+        case other =>
+          fail(s"Expected OpenAIConfig, got $other")
     }
   }
 

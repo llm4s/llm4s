@@ -403,6 +403,9 @@ section with an `apiKey`.
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
 | `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
+| `api` | OpenAI: `responses` or `chat-completions`, the API the section uses; unset, the client chooses ([which API a section uses](../guide/providers#which-api-a-section-uses)) |
+| `reasoningSummary` | OpenAI, Responses API only: `auto`, `concise` or `detailed`, the reasoning summary to ask for; unset, none ([details](../guide/providers#which-api-a-section-uses)) |
+| `keepReasoning` | OpenAI, Responses API only: `false` keeps the model's reasoning out of the thread and later requests; default `true` ([details](../guide/providers#reasoning-kept-across-a-thread)) |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |

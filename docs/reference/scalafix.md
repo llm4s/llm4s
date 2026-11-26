@@ -111,10 +111,12 @@ version to the current release, so you run one rule, once, and no rule runs twic
 |---|---|---|
 | 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
 | 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" or "Since 0.7.0" below, and `PositionalPatternsGainFields` |
-| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped` |
-| 1.0.x | `Llm4sMigrateFrom_1_0` | nothing yet: no API has broken since 1.0.0. It is published from the release after 1.0.0 |
+| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped`, and `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9) |
+| 1.0.x | `Llm4sMigrateFrom_1_0` | `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9) |
 
-A rule for a later break is added to every umbrella whose starting version is older than the break. Code on 0.4.x runs
+A rule for a later break is added to every umbrella whose starting version is older than the break. `Llm4sMigrateFrom_1_0`
+is published from the release after 1.0.0. A 1.x class built with `apply` and `with*` setters gains fields in a minor release, which
+breaks a positional pattern on it, and that umbrella rewrites each one ([migration note](migration#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900)). Code on 0.4.x runs
 `Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
 
 `Llm4sMigrateFrom_0_5` runs every rule for the breaking changes since 0.5.1 (the notes in the
@@ -126,7 +128,7 @@ A rule for a later break is added to every umbrella whose starting version is ol
 | `CredentialsToSecret` | `OpenAIConfig(apiKey = key, ...)` and `config.withApiKey(key)` to `Secret(key)` on the provider configs (`Some(Secret(key))` where the key is an `Option`), and a read of `config.apiKey` to `config.apiKey.reveal` |
 | `FromValuesKeyFirst` | `OpenAIConfig.fromValues(model, key, organization, baseUrl, ...)` to `fromValues(model, Secret(key), baseUrl, organization, ...)`, dropping a `None` organization; `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` to `fromValues(deployment, Secret(key), endpoint, apiVersion)` |
 | `CompletionCreatedToInstant` | `Completion(created = seconds)`, `withCreated(seconds)` and `toCompletion(seconds)` to `Instant.ofEpochSecond(seconds)` (`0L` to `Instant.EPOCH`), and a read of `completion.created` to `completion.created.getEpochSecond` |
-| `PositionalPatternsGainFields` | A positional pattern on one of the 42 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also the `TraceEvent` cases, the provider configs and `ModelCapabilities`; 0.6.0's ten-field `Completion` and eight-field `ModelCallCompleted` patterns gain `finishReason` and `servedTier`, its fourteen-field `TraceEvent.CompletionReceived` pattern `servedTier`, its `TokenUsage`, `ModelPricing`, `TurnState` and `RAGConfig` patterns their new last field, and its `CompletionOptions` patterns `promptCache` and `serviceTier` |
+| `PositionalPatternsGainFields` | A positional pattern on one of the 42 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also the `TraceEvent` cases, the provider configs and `ModelCapabilities`; 0.6.0's ten-field `Completion` and eight-field `ModelCallCompleted` patterns gain `finishReason` and `servedTier`, its fourteen-field `TraceEvent.CompletionReceived` pattern `servedTier`, its `TokenUsage`, `ModelPricing`, `TurnState` and `RAGConfig` patterns their new last field, and its `CompletionOptions` patterns `promptCache` and `serviceTier`. An `OpenAIConfig` pattern of 0.5.1's nine fields, or 0.6.0's eleven, is widened straight to the current fourteen; a positional pattern on `ModelMetadata` written against 0.5.x or 0.6.x is not rewritten (two of its fields were later removed) and must be changed by hand |
 | `DuplicateApisRemoved` | Deletes `import ServiceError.ServiceErrorOps`, and its `error.isRecoverableStatus` to `error.isRetryable`; `Llm4sConfig.loadTextEmbeddingModel()` to `textEmbeddingModel()` |
 | `RemovedApis_1_0` | Lint only: `org.llm4s.types.typeclass`, `CompletionChunk`/`ChunkDelta`, `OpenAIToolHelper`, `AnsiColors`, the embeddings sample's settings on `Llm4sConfig`, `APIError`, `SystemError` and the `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` constructors, and `ErrorMapper`, `DefaultErrorMapper`, the `AsyncResult` object, `Result.combine` / `fromBoolean` / `fromBooleanWithValue` / `fromFuture`, and `TraceEvent.AgentInitialized`, each with a link to its note |
 | `ThinkingReplacesBudgetTokens` | Since 0.6.0: `withReasoning(ReasoningEffort.None)` and `CompletionOptions(reasoning = Some(ReasoningEffort.None))` to `Thinking.Off`, unless the same chain sets `withReasoning` again afterwards (`Thinking.Off` takes precedence over `reasoning`). Lints `budgetTokens` and `withBudgetTokens` (`Thinking.budget(n)` is a `Result`), any other `ReasoningEffort.None`, and a `match` on `ReasoningEffort` with no catch-all, which needs `Minimal`, `XHigh` and `Max` |
@@ -181,9 +183,10 @@ compiled against the 0.6.0 artifacts and its expected output under `output/.../f
 the 0.7.0 artifacts and its expected output under `output/.../fix/v07`: `ErrorProviderIdTypedTest` for its one rule
 so far, and `Llm4sMigrateFrom_0_7Test`, which pins that the umbrella runs it and leaves alone what the older umbrellas
 would rewrite. `scalafixTests10` is the same for `Llm4sMigrateFrom_1_0`, with `modules/scalafix-rules/input-1.0`
-compiled against the 1.0.0 artifacts and its expected output under `output/.../fix/v10`. That umbrella has no rule to
-run yet: `Llm4sMigrateFrom_1_0ChangesNothingTest` pins that it is found by name and changes nothing, including what
-`Llm4sMigrateFrom_0_7` would rewrite. A rule for a break after 1.0.0 adds its fixtures there.
+compiled against the 1.0.0 artifacts and its expected output under `output/.../fix/v10`: `PositionalPatternsGainFieldsTest`
+for its one rule, the `OpenAIConfig` and `ModelMetadata` patterns, and `Llm4sMigrateFrom_1_0ChangesNothingTest`, which
+pins that it leaves the rest of 1.0.0 code alone, including what `Llm4sMigrateFrom_0_7` would rewrite. A rule for a
+later break adds its fixtures there.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

@@ -89,6 +89,12 @@ What it does **not** cover:
   samples, the workspace runner, `modules/it` and the benchmarks.
 - Bug fixes. A fix that changes behaviour to match what the documentation or the types already promised is
   not a compatibility break; it is listed under *Fixed* in the CHANGELOG.
+- A positional pattern on a growth-safe class, one built with its companion `apply` and `with*` setters whose
+  constructor is private (`OpenAIConfig`, `ModelMetadata`, `CompletionOptions`, ...). Such a class gains fields in
+  minor releases, and a pattern that binds its fields by position stops compiling when it does: since 1.0.0,
+  `OpenAIConfig` has gone from 11 fields to 14 and `ModelMetadata` from 8 to 9. Each gain is listed
+  in the [Migration Guide](migration), and `Llm4sMigrateFrom_1_0` rewrites such a pattern
+  ([Scalafix](scalafix#one-umbrella-rule-per-starting-version)). Read the fields by name to avoid it.
 
 ---
 
@@ -133,7 +139,7 @@ value of the new case throws a `MatchError`. Removing or renaming a case is a br
 | Errors | `LLMError`'s hierarchy (the trait is open: a new error type can appear in any minor release, and `LLMError.isRetryable` says how to treat one you do not know), `ToolCallError`, `ToolParameterError`, `RateLimitOrigin` |
 | Tools | `SchemaDefinition`, `ToolParameterType` |
 | Tracing and metrics | `TraceEvent`, `ErrorKind`, `ProviderExchangeOutcome` |
-| Models and configuration | `ModelMode`, `ModelRegistrySource`, `ApiKeySource`, `IdentitySource`, `ProviderCollisionKind` |
+| Models and configuration | `ModelMode`, `ModelRegistrySource`, `ApiKeySource`, `IdentitySource`, `ProviderCollisionKind`, `OpenAIApi`, `OpenAIReasoningSummary` |
 | HTTP | `HttpBody`, `MultipartPart`, `HttpMethod`: an `Llm4sHttpClient` of your own answers one it does not know with a `Left`, never a `MatchError` |
 | Agents | `AgentStatus`, `RunStatus` |
 

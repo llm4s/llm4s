@@ -6,6 +6,7 @@ search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
 parent: Core
 nav_order: 102
 grand_parent: User Guide
+cites_open_issues: [2900]
 cites_closed_issues: [1023, 1133, 1215, 2274]
 ---
 
@@ -156,6 +157,79 @@ Without an `apiKey` line the section uses `OPENAI_API_KEY`. Set `apiKey` for a s
 or a variable name of your own; it wins over the shared key. `OPENAI_ORGANIZATION` is read only
 because the section binds it.
 
+### Which API a section uses
+
+OpenAI serves chat on two HTTP APIs: Chat Completions (`/v1/chat/completions`) and the Responses API
+(`/v1/responses`). Only the Responses API lets a current model reason while it calls tools, and only it can carry the
+model's reasoning from one turn of a thread to the next. So an `openai` section that points at OpenAI itself uses
+the Responses API for the models the model registry lists for it, and for a model the registry does not know;
+everything else stays on Chat Completions, as in 1.0.x
+([#2900](https://github.com/llm4s/llm4s/issues/2900)).
+
+The client decides once, when it is built, and logs the choice and the reason at INFO, for example
+`... client for model gpt-4o uses chat-completions: the model registry does not list gpt-4o for /v1/responses; set
+api = responses to use it there`. The first rule that matches wins:
+
+| # | When | API |
+|---|---|---|
+| 1 | Azure OpenAI (`provider = "azure"`) | Chat Completions |
+| 2 | The section sets `api` (or the `OpenAIConfig` was built with `withApi`) | As set |
+| 3 | The provider is not `openai` (Requesty), or an `OpenAIConfig` built in code belongs to another provider (one pointed at OpenRouter) | Chat Completions |
+| 4 | The model registry marks the model `mode: responses`, a model OpenAI serves only there (the pro, codex and deep-research models: `o3-pro`, `gpt-5-pro`, `gpt-5-codex`, `o3-deep-research`) | Responses, wherever `baseUrl` points |
+| 5 | `baseUrl` is not OpenAI's own `https://api.openai.com` (a proxy, a gateway, a mock server, or a regional host such as `eu.api.openai.com`) | Chat Completions |
+| 6 | The model registry knows the model and does not list `/v1/responses` for it | Chat Completions |
+| 7 | Otherwise: the registry lists `/v1/responses` for the model, or does not know it | Responses |
+
+On `https://api.openai.com/v1`, with `api` unset, that means:
+
+- **Responses:** `gpt-4.1`, the gpt-5 family (`gpt-5`, `gpt-5-mini`, ...), the GPT 5.6, 6 and 6.1 models
+  (`gpt-5.6-terra`, `gpt-6-astra`, `gpt-6.1-sol`, ...) and `o3`, which the bundled registry lists for
+  `/v1/responses`; and a model id the registry does not know, such as a model newer than the bundled data or a
+  fine-tune (`ft:gpt-4o:my-org::abc123`).
+- **Chat Completions:** `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, the
+  search models (`gpt-4o-search-preview`, `gpt-5-search-api`) and the audio-preview models. The bundled registry
+  knows these but does not list `/v1/responses` for them, and OpenAI answers the search models on the Responses API
+  with a 400 ("not supported with the Responses API", requests sent on 2026-11-26).
+
+To move a model that stays on Chat Completions to the Responses API, set `api = "responses"` on its section, or use
+a [model registry of your own](../reference/model-metadata#your-own-metadata) whose entry for the model lists
+`/v1/responses` in `supported_endpoints` (it replaces the bundled catalogue, so it must hold every model you use).
+To keep 1.0.x behaviour for every model, set `api = "chat-completions"`: the request is then what 1.0.x sent.
+
+The section keys that choose the API and the reasoning settings, all optional:
+
+```hocon
+llm4s {
+  providers {
+    openai-reasoning {
+      provider         = "openai"
+      model            = "gpt-5.6-terra"
+      api              = "responses"  # optional: responses or chat-completions; unset, the client chooses
+      reasoningSummary = "concise"    # optional: auto, concise or detailed; Responses API only
+      keepReasoning    = false        # optional, default true; Responses API only
+    }
+  }
+}
+```
+
+- `api`: exactly `responses` or `chat-completions`; any other value fails the section's load, naming both. With
+  `api` set the request goes where it was told, and an error OpenAI returns for that model is reported as it is.
+- `reasoningSummary`: asks a reasoning model for a summary of its reasoning, returned as `Completion.thinking`
+  (streamed as thinking deltas). Unset, none is asked for: OpenAI answers a summary request from an organisation it
+  has not verified with a 400, so llm4s does not ask by default.
+- `keepReasoning`: whether a thread keeps the model's reasoning across requests
+  ([below](#reasoning-kept-across-a-thread)): `true` or `false`.
+
+In code, the same settings are `OpenAIConfig.withApi(OpenAIApi.Responses)` (or `OpenAIApi.ChatCompletions`),
+`withReasoningSummary(OpenAIReasoningSummary.Concise)` and `withKeepReasoning(false)`. The Java builder
+(`Llm4s.openAi()`) has `api("chat-completions")`, `reasoningSummary("concise")` and `keepReasoning(false)`, the
+Kotlin DSL's `openAi { }` block the properties `api`, `reasoningSummary` and `keepReasoning`, and the Spring Boot
+starter the properties `llm4s.api`, `llm4s.reasoning-summary` and `llm4s.keep-reasoning`
+([Spring Boot](spring-boot)).
+
+Not covered: Azure OpenAI and Requesty stay on Chat Completions, and OpenAI's hosted tools (web search, file
+search, code interpreter, computer use) are not available through this client on either API.
+
 ### Available Models
 
 General models such as `gpt-4o`, `gpt-4o-mini` and `gpt-4.1`, and reasoning models: the gpt-5 family (`gpt-5`,
@@ -188,31 +262,81 @@ non-OpenAI model behind Requesty is not sent `reasoning_effort`. A fine-tuned mo
 the model it was trained from: `ft:o4-mini-2025-04-16:my-org:my-suffix:abc123` is treated as
 `o4-mini`, and a fine-tune of `gpt-4o-mini` as `gpt-4o-mini`.
 
-Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` is sent as
-`max_completion_tokens` (which counts reasoning tokens too) rather than `max_tokens`, and
+Requests to a reasoning model also follow OpenAI's rules for them: on Chat Completions `maxTokens` is sent as
+`max_completion_tokens` (which counts reasoning tokens too) rather than `max_tokens` (on the Responses API it is
+always `max_output_tokens`), and
 `temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
-`llm4s-openai` speaks Chat Completions, where the GPT 5.6, 6 and 6.1 models (`gpt-5.6-luna`, `gpt-5.6-terra`,
-`gpt-6-luna`, `gpt-6.1-terra`) call functions only with `reasoning_effort: none`. OpenAI answers any other request
-with tools, one that leaves the field out included, with a 400 that names the Responses API (requests sent on
-2026-11-25). So a request with tools to one of these models is sent `none` whatever `reasoning` or `thinking` asked,
-and the `Completion` reports what was overridden as a `RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking`
-unless it was `Off`). Without tools the effort is sent as asked. Reasoning together with tools on these models needs
-the Responses API, which `llm4s-openai` does not use yet.
+On the Responses API the same effort is sent as `reasoning.effort`.
 
-The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
-returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
-inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
-`thinkingTokens` (`totalTokens` is kept as reported, and `totalOutputTokens` is the two added
-together). OpenAI's chat-completions API does not return the
-reasoning text itself, so `Completion.thinking` stays empty.
+The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens` on Chat Completions,
+`output_tokens_details.reasoning_tokens` on the Responses API) are returned as `TokenUsage.thinkingTokens`, for
+streamed and non-streamed calls. OpenAI counts them inside the output tokens; llm4s takes them out, because
+`completionTokens` never includes `thinkingTokens` (`totalTokens` is kept as reported, and `totalOutputTokens` is the
+two added together). Chat Completions does not return the reasoning text itself, so there `Completion.thinking` stays
+empty; on the Responses API it holds the reasoning summary when the section sets `reasoningSummary`.
+
+### Reasoning with tools
+
+On the Responses API a reasoning model is sent the effort you asked for, tools or not: an agent's tool calls are
+made with the model reasoning.
+
+On Chat Completions the GPT 5.6, 6 and 6.1 models (`gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-luna`, `gpt-6.1-terra`)
+call functions only with `reasoning_effort: none`. OpenAI answers any other request with tools, one that leaves the
+field out included, with a 400 that names the Responses API (requests sent on 2026-11-25). So a section on Chat
+Completions (`api = "chat-completions"`, or a `baseUrl` that is not OpenAI's) sends a request with tools to one of
+these models `none` whatever `reasoning` or `thinking` asked, and the `Completion` reports what was overridden as a
+`RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking` unless it was `Off`). Without tools the effort is sent as
+asked.
+
+### Reasoning kept across a thread
+
+On the Responses API llm4s keeps a reasoning model's reasoning on the thread, so the next request of a tool loop
+picks up where the model left off. Every request is sent with `store: false` and the whole conversation; OpenAI
+keeps nothing between requests. Instead:
+
+- A request to a reasoning model asks for the encrypted reasoning (`include: ["reasoning.encrypted_content"]`).
+- Each reasoning item of the reply is stored on the assistant message as an opaque thinking block (`ThinkingBlock.Opaque`,
+  provider `openai`): the item as OpenAI returned it, encrypted, which llm4s cannot read. Its summary text, if one
+  was asked for, is a `ThinkingBlock.Text` beside it.
+- Later requests send each stored item back before the tool call it preceded. They are sent only to the same
+  provider and model, and only while the message is unchanged: a message whose content or tool calls you edit, or a
+  thread continued on another model, is sent without them.
+
+So a stored thread, and an agent's checkpoints, grow by one encrypted item per reasoning turn. Set
+`keepReasoning = false` to turn this off: the request does not ask for the encrypted reasoning, a reply's reasoning
+items are not stored (a summary still is), and reasoning stored earlier is not sent back.
+
+OpenAI can refuse a stored item, for example after the thread moves to another API key or organisation, or when
+the model alias now points at another snapshot. The request then fails, and the error carries OpenAI's message
+followed by what happened and the two ways on: set `keepReasoning = false` on the section (or `withKeepReasoning(false)`
+on the `OpenAIConfig`), or continue the thread from an edited turn. llm4s does not retry without the reasoning on its
+own.
+
+The stored reasoning travels on llm4s's Scala message types. The Java facade's and Spring AI's message views do not
+carry it, so a conversation rebuilt through them is sent without it.
+
+### What differs on the Responses API
+
+- `presencePenalty` and `frequencyPenalty` are not sent (the Responses API has neither) and are reported as
+  `RequestAdjustment.Dropped` on the `Completion`.
+- A `maxTokens` below 16 is sent as 16, the least OpenAI accepts there, and reported as `RequestAdjustment.Adjusted`.
+- `Completion.id`, and the `id` of each streamed chunk, is the response id (`resp_...`), not a `chatcmpl-...` id.
+- A reply that fails with an error code is reported by what the code means: `rate_limit_exceeded` as a
+  `RateLimitError`; a code that says the request can never succeed (`invalid_prompt`, `data_residency_mismatch`, the
+  image codes such as `invalid_image_url` or `failed_to_download_image`) as a `ValidationError`, which is not retried;
+  a policy refusal (`image_content_policy_violation`, `bio_policy`, `misalignment_policy_violation`) as a
+  `ContentFilteredError`; any other code (`server_error`, `vector_store_timeout`) as a `ServiceError` 502.
+- The exchange log records the Responses API's request and reply bodies; its format does not change.
 
 ### Streaming and token usage
 
-Streaming requests set `stream_options.include_usage`, so OpenAI reports token usage on a final
-chunk with no choices, and a streamed `Completion` carries `usage` and `estimatedCost` like a
-non-streamed one. The final chunk produces no `StreamedChunk`.
+`streamComplete` streams on both APIs, and a streamed `Completion` carries `usage` and `estimatedCost` like a
+non-streamed one. On the Responses API text arrives as content deltas, a reasoning summary as thinking deltas, and
+each fragment of a tool call's arguments carries its call's id. On Chat Completions streaming requests set
+`stream_options.include_usage`, so OpenAI reports token usage on a final chunk with no choices, which produces no
+`StreamedChunk`.
 
 ### Costs
 
@@ -483,7 +607,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 
 | Provider | Its own keys |
 |---|---|
-| OpenAI, Requesty, OpenRouter | `organization` |
+| OpenAI, Requesty, OpenRouter | `organization`; OpenAI also `api`, `reasoningSummary`, `keepReasoning` ([which API a section uses](#which-api-a-section-uses)) |
 | Azure OpenAI | `endpoint` (required), `apiVersion`, `authentication`, `clientId` |
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
