@@ -22,8 +22,15 @@ import scalafix.v1._
  * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). `AgentResult`'s six, the same in
  * 0.5.1 and 0.6.0, gain `runUsage` (#2922). A pattern with any other number of arguments is left
  * alone.
+ *
+ * [[Llm4sMigrateFrom_1_0]] runs it with [[PositionalPatternsGainFields.arity10]]: since 1.0.0, `OpenAIConfig` gained
+ * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900).
  */
-class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
+class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
+    extends SemanticRule("PositionalPatternsGainFields") {
+
+  /** The rule of 0.5.x and 0.6.x code: [[PositionalPatternsGainFields.arity]] and [[PositionalPatternsGainFields.arity06]]. */
+  def this() = this(PositionalPatternsGainFields.since05)
 
   override def description: String =
     "Adds a _ for each field appended since llm4s 0.5.1 (or 0.6.0) to positional patterns on the types that gained fields"
@@ -34,7 +41,7 @@ class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainF
       Migration
         .symbolOf(p.fun)
         .map(s => Migration.owner(s))
-        .flatMap(PositionalPatternsGainFields.gained(_, args.size))
+        .flatMap(PositionalPatternsGainFields.gained(maps, _, args.size))
         .collect {
           case added if args.nonEmpty && !args.exists(_.is[Pat.SeqWildcard]) => Patch.addRight(args.last, ", _" * added)
         }
@@ -106,7 +113,20 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
   )
 
-  /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */
-  def gained(owner: String, size: Int): Option[Int] =
-    List(arity, arity06).flatMap(_.get(owner)).collectFirst { case (before, after) if before == size => after - before }
+  /**
+   * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
+   * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900).
+   * Run alone, by [[Llm4sMigrateFrom_1_0]]: 0.5.1's and 0.6.0's maps stay as they were.
+   */
+  val arity10: Map[String, (Int, Int)] = Map(
+    "org/llm4s/llmconnect/config/OpenAIConfig" -> (11 -> 14),
+    "org/llm4s/model/ModelMetadata"            -> (8  -> 9)
+  )
+
+  /** The maps the rule of [[Llm4sMigrateFrom_0_5]] and [[Llm4sMigrateFrom_0_6]] reads. */
+  private[scalafix] val since05: List[Map[String, (Int, Int)]] = List(arity, arity06)
+
+  /** The number of fields a pattern of `size` arguments on `owner` lacks, if a map in `maps` has its arity. */
+  def gained(maps: List[Map[String, (Int, Int)]], owner: String, size: Int): Option[Int] =
+    maps.flatMap(_.get(owner)).collectFirst { case (before, after) if before == size => after - before }
 }
