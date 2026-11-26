@@ -6,7 +6,7 @@ search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
 cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
-cites_issues: [3046, 3047, 3052, 3053]
+cites_issues: [3046, 3047, 3051, 3052, 3053]
 ---
 
 # Workspace Sandbox Configuration
@@ -142,6 +142,23 @@ use `WorkspaceSandboxConfig.fromProfileName`.
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible; bind commands too on Linux ([Command confinement](#command-confinement)) |
 | `networkAllowed` | Boolean | Whether commands may open network sockets (default false). Enforced on Linux by the runner's seccomp filter, and for the whole container by its firewall ([Container egress](#container-egress)) |
 | `allowedCommands` | Set[String] | Executable names `executeCommand` may run; field default `ReadOnlyCommands`; the permissive profile (the default profile) uses `ReadWriteCommands`, which adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …). Arguments are checked too: see [Command policy](#command-policy) |
+
+## Search and regex replacement bounds
+
+`searchFiles` and a `modifyFile` regex replacement hold the file lock and the command gate while they run, so every
+other request waits for them. Each is bounded ([#3051](https://github.com/llm4s/llm4s/issues/3051)):
+
+- **Time.** A request that is still matching 10 seconds after it started fails with `TIMEOUT`; a `modifyFile` that does
+  changes nothing.
+- **Pattern shape.** A regex is refused, and searched or replaced as literal text instead, when it has a quantifier
+  over something that can match the empty string (`(a?)*`, `(){1000}`), an alternation with more than one such
+  alternative (`(a?|b?)`), a counted repetition above 1000, or comments mode (`(?x)`). These are the shapes whose
+  matching the per-line step budget could not bound, since the budget counts reads of the line.
+- **Response size.** `contextLines` is clamped to 0..20. A matched line longer than 1000 characters is cut to 1000 around
+  its first match, a context line to its first 1000. Matches stop being added, with `isTruncated` set, before their
+  text would exceed `maxOutputSize`.
+- **Replacement size.** A replacement whose result would exceed `maxFileSize` fails with `SIZE_LIMIT_EXCEEDED` and
+  changes nothing.
 
 ## Command policy
 

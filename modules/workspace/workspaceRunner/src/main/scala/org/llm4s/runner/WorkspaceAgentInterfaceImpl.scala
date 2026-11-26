@@ -36,6 +36,8 @@ import scala.util.chaining._
  * @param cgroups       where each confined command gets a cgroup of its own, killed whole when it ends (#2008); the
  *                      platform's: Left, saying why, where the container has no writable cgroup v2 hierarchy, and a
  *                      daemon a command starts can then outlive it
+ * @param matchTimeLimit how long one `searchFiles` or `modifyFile` may spend matching before it is refused
+ *                      (`TIMEOUT`); [[WorkspaceAgentInterfaceImpl.MatchTimeLimit]] bar in tests
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -46,7 +48,8 @@ class WorkspaceAgentInterfaceImpl(
   startProcess: java.lang.ProcessBuilder => Process = _.start(),
   commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate,
   confiner: Option[Confiner] = Confiner.platform(),
-  cgroups: => Either[String, CommandCgroups] = CommandCgroups.platform
+  cgroups: => Either[String, CommandCgroups] = CommandCgroups.platform,
+  matchTimeLimit: FiniteDuration = WorkspaceAgentInterfaceImpl.MatchTimeLimit
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -982,8 +985,25 @@ class WorkspaceAgentInterfaceImpl(
         )
     }
 
-    // Apply operations
-    val modifiedLines = applyOperations(lines, operations)
+    // Apply operations: a regex replacement within the match time limit, and never building more than the size limit
+    val limits = new WorkspaceAgentInterfaceImpl.EditLimits(
+      System.nanoTime() + matchTimeLimit.toNanos,
+      maxFileSize,
+      () =>
+        new WorkspaceAgentException(
+          s"The regex replacement in '$path' ran past its time limit ($matchTimeLimit); nothing was changed",
+          "TIMEOUT",
+          None
+        ),
+      () =>
+        new WorkspaceAgentException(
+          s"File '$path' would exceed the maximum size limit ($maxFileSize bytes) after the regex replacement; " +
+            "nothing was changed",
+          "SIZE_LIMIT_EXCEEDED",
+          None
+        )
+    )
+    val modifiedLines = applyOperations(lines, operations, limits)
     val separator     = System.lineSeparator().length.toLong
     val resultingSize =
       modifiedLines.iterator.map(l => l.getBytes(StandardCharsets.UTF_8).length.toLong + separator).sum
@@ -1143,9 +1163,14 @@ class WorkspaceAgentInterfaceImpl(
    *
    * @param lines Original file lines
    * @param operations Operations to apply
+   * @param limits     when a regex replacement must end by, and the most characters it may leave
    * @return Modified lines
    */
-  private def applyOperations(lines: List[String], operations: List[FileOperation]): List[String] =
+  private def applyOperations(
+    lines: List[String],
+    operations: List[FileOperation],
+    limits: WorkspaceAgentInterfaceImpl.EditLimits
+  ): List[String] =
     operations.foldLeft(lines) { (currentLines, operation) =>
       operation match {
         case ReplaceOperation(_, startLine, endLine, newContent) =>
@@ -1204,26 +1229,46 @@ class WorkspaceAgentInterfaceImpl(
           val caseInsensitive = patternFlags.contains("i")
           val replaceGlobally = patternFlags.contains("g")
 
+          // Every line's matching shares the request's deadline, and the replaced lines together stay within the
+          // file size limit: a pattern or a replacement that would run on or grow without end is stopped, and the
+          // file is left unchanged (#3051).
+          var produced  = 0L
+          def remaining = math.max(0L, limits.maxChars - produced)
+          def kept(line: String): String = {
+            produced += line.length + 1L
+            if (produced > limits.maxChars) throw limits.tooLarge()
+            line
+          }
+
           // Literal-replacement fallback used when a pattern is rejected up front
           // or a per-line match aborts (e.g. exceeds the ReDoS step budget). This
           // changes regex semantics to plain substring replacement, so it is
           // logged (once) rather than applied silently.
           def literalReplace(line: String): String =
-            if (replaceGlobally)
-              WorkspaceRegexSafetyManager.replaceAllLiteral(line, pattern, replacement, caseInsensitive)
-            else
-              WorkspaceRegexSafetyManager.replaceFirstLiteral(line, pattern, replacement, caseInsensitive)
+            WorkspaceRegexSafetyManager
+              .replaceLiteral(line, pattern, replacement, caseInsensitive, replaceGlobally, remaining) match {
+              case Right(result) => kept(result)
+              case Left(_)       => throw limits.tooLarge()
+            }
 
           WorkspaceRegexSafetyManager.safeCompile(pattern, regexFlags) match {
             case Right(regex) =>
               var loggedRuntimeFallback = false
+              val deadline              = Some(limits.deadline)
               currentLines.map { line =>
+                limits.inTime()
                 val replaced =
-                  if (replaceGlobally) WorkspaceRegexSafetyManager.safeReplaceAll(regex, line, replacement)
-                  else WorkspaceRegexSafetyManager.safeReplaceFirst(regex, line, replacement)
+                  if (replaceGlobally)
+                    WorkspaceRegexSafetyManager
+                      .safeReplaceAll(regex, line, replacement, deadline = deadline, maxOutputChars = remaining)
+                  else
+                    WorkspaceRegexSafetyManager
+                      .safeReplaceFirst(regex, line, replacement, deadline = deadline, maxOutputChars = remaining)
                 replaced match {
-                  case Right(result) => result
+                  case Right(result)                                        => kept(result)
+                  case Left(WorkspaceRegexSafetyManager.OutputLimitReached) => throw limits.tooLarge()
                   case Left(err) =>
+                    limits.inTime()
                     if (!loggedRuntimeFallback) {
                       logger.warn(
                         s"Regex replace aborted at runtime ($err) for pattern '$pattern'; " +
@@ -1239,13 +1284,20 @@ class WorkspaceAgentInterfaceImpl(
                 s"Rejected unsafe or invalid replace regex '$pattern' ($err); " +
                   "falling back to literal replacement."
               )
-              currentLines.map(literalReplace)
+              currentLines.map { line =>
+                limits.inTime()
+                literalReplace(line)
+              }
           }
       }
     }
 
   /**
    * Search for content in files across the workspace.
+   *
+   * Bounded (#3051): it is refused (`TIMEOUT`) once it has matched for `matchTimeLimit`; `contextLines` is clamped to
+   * `0..MaxContextLines`; each line returned is cut to `MaxSearchLineChars`; and matches stop being added, with
+   * `isTruncated` set, before the matches' text would exceed `maxOutputSize` encoded bytes.
    */
   override def searchFiles(
     paths: List[String],
@@ -1255,9 +1307,18 @@ class WorkspaceAgentInterfaceImpl(
     excludePatterns: Option[List[String]] = None,
     contextLines: Option[Int] = None
   ): SearchFilesResponse = mutating { // under the gate, as every read: see fileSnapshot
+    import WorkspaceAgentInterfaceImpl.{ clipLine, encodedLength, MaxContextLines, SearchMatchOverhead }
+    val deadline    = System.nanoTime() + matchTimeLimit.toNanos
     val isRecursive = recursive.getOrElse(true)
-    val context     = contextLines.getOrElse(2)
+    val context     = math.max(0, math.min(contextLines.getOrElse(2), MaxContextLines))
     val patterns    = excludePatterns.getOrElse(defaultExclusions)
+    def inTime(): Unit =
+      if (System.nanoTime() - deadline > 0L)
+        throw new WorkspaceAgentException(
+          s"The search ran past its time limit ($matchTimeLimit); narrow its paths or simplify the query",
+          "TIMEOUT",
+          None
+        )
 
     if (!List("regex", "literal").contains(searchType)) {
       throw new WorkspaceAgentException(
@@ -1329,7 +1390,11 @@ class WorkspaceAgentInterfaceImpl(
     // max; that allows us to report `isTruncated` correctly while avoiding a
     // full workspace sweep. the `totalMatches` value is therefore only guaranteed
     // to be accurate up to maxSearchResults+1.
+    // the matches' text, in the bytes it takes in the response, is kept within the workspace's output limit
+    var responseBytes = 0L
+
     for (file <- filesToSearch if !done) {
+      inTime()
       val relativePath = rootPath.relativize(file).toString
 
       // opened where it physically is, checked immediately before: an entry retargeted since the walk is skipped
@@ -1338,13 +1403,16 @@ class WorkspaceAgentInterfaceImpl(
         .flatMap(bytes =>
           Try(StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString).toOption
         )
-        .map(text => Source.fromString(text).getLines().toList)
+        .map(text => Source.fromString(text).getLines().toVector)
         .foreach { lines =>
           for ((line, lineIndex) <- lines.zipWithIndex if !done) {
-            val isMatch =
-              WorkspaceRegexSafetyManager.safeFind(pattern, line) match {
+            inTime()
+            // where the first match starts, if the line matches
+            val matchStart =
+              WorkspaceRegexSafetyManager.safeFindStart(pattern, line, deadline = Some(deadline)) match {
                 case Right(m) => m
                 case Left(err) =>
+                  inTime() // a match stopped at the deadline ends the search, never falls back
                   if (!loggedRuntimeFallback) {
                     logger.warn(
                       s"Regex search aborted at runtime ($err) for query '$query'; " +
@@ -1352,24 +1420,32 @@ class WorkspaceAgentInterfaceImpl(
                     )
                     loggedRuntimeFallback = true
                   }
-                  literalFallbackPattern.matcher(line).find()
+                  val literal = literalFallbackPattern.matcher(line)
+                  if (literal.find()) Some(literal.start()) else None
               }
 
-            if (isMatch) {
+            matchStart.foreach { start =>
               totalMatches += 1
 
               if (matches.size < defaultLimits.maxSearchResults) {
                 val lineNumber    = lineIndex + 1
-                val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-                val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
-
-                matches += SearchMatch(
+                val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex).map(clipLine(_)).toList
+                val afterContext  = lines.slice(lineIndex + 1, lineIndex + 1 + context).map(clipLine(_)).toList
+                val found = SearchMatch(
                   path = relativePath,
                   line = lineNumber,
-                  matchText = line,
+                  matchText = clipLine(line, start),
                   contextBefore = beforeContext,
                   contextAfter = afterContext
                 )
+                val size = SearchMatchOverhead + encodedLength(found.path) + encodedLength(found.matchText) +
+                  (found.contextBefore ++ found.contextAfter).iterator.map(encodedLength(_) + 3L).sum
+                // a match that would take the response past the limit is not added, and the search ends truncated
+                if (responseBytes + size > defaultLimits.maxOutputSize) done = true
+                else {
+                  responseBytes += size
+                  matches += found
+                }
               }
 
               // once we've seen one hit past the cap we can stop scanning entirely
@@ -2001,6 +2077,66 @@ private[runner] object WorkspaceAgentInterfaceImpl {
 
   /** How long a file mutation waits for running commands to end before it is refused as `WORKSPACE_BUSY`. */
   val GateWait: FiniteDuration = WorkspaceSandboxConfig.CommandGateWait
+
+  /** The bytes a search match's JSON takes besides its strings: the keys, punctuation and the line number. */
+  val SearchMatchOverhead = 96L
+
+  /**
+   * How long one `searchFiles` or `modifyFile` may spend matching, across all its lines and files, before it is
+   * refused as `TIMEOUT` (#3051). It holds the file lock and the command gate meanwhile, so this is how long it can
+   * keep every other request waiting.
+   */
+  val MatchTimeLimit: FiniteDuration = 10L.seconds
+
+  /** The most lines of context `searchFiles` returns on each side of a match; a larger `contextLines` is clamped. */
+  val MaxContextLines = 20
+
+  /**
+   * The most characters of one line `searchFiles` returns: a longer matched line is cut to a window this wide around
+   * its first match, a longer context line to its first this many characters.
+   */
+  val MaxSearchLineChars = 1000
+
+  /**
+   * When a regex replacement must end by (a `System.nanoTime` value), and the most characters it may leave.
+   * `inTime` throws `timedOut()` past the deadline.
+   */
+  final class EditLimits(
+    val deadline: Long,
+    val maxChars: Long,
+    timedOut: () => WorkspaceAgentException,
+    oversized: () => WorkspaceAgentException
+  ) {
+    def inTime(): Unit                      = if (System.nanoTime() - deadline > 0L) throw timedOut()
+    def tooLarge(): WorkspaceAgentException = oversized()
+  }
+
+  /**
+   * `line` cut to at most [[MaxSearchLineChars]] characters, never inside a surrogate pair: from `around - a quarter
+   * of the width`, so a match at `around` shows with what leads up to it, or from the start.
+   */
+  def clipLine(line: String, around: Int = 0): String =
+    if (line.length <= MaxSearchLineChars) line
+    else {
+      def boundary(i: Int): Int =
+        if (i > 0 && i < line.length && Character.isLowSurrogate(line.charAt(i)) && line.charAt(i - 1).isHighSurrogate)
+          i - 1
+        else i
+      val start = boundary(math.max(0, math.min(around - MaxSearchLineChars / 4, line.length - MaxSearchLineChars)))
+      line.substring(start, boundary(start + MaxSearchLineChars))
+    }
+
+  /** The bytes `s` takes in the JSON a response is carried in, as [[WebSocketCommandExecutor.encodedWidth]] counts. */
+  def encodedLength(s: String): Long = {
+    var total = 0L
+    var i     = 0
+    while (i < s.length) {
+      val cp = s.codePointAt(i)
+      total += WebSocketCommandExecutor.encodedWidth(cp)
+      i += Character.charCount(cp)
+    }
+    total
+  }
 
   /**
    * Gives `to` the owner, the group and the ACL of `from`, each where the file system has it and the runner may set

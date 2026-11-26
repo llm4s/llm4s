@@ -83,4 +83,123 @@ class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit wit
     WorkspaceRegexSafetyManager.safeFind(Pattern.compile("a"), null) shouldBe Left("Input cannot be null")
     WorkspaceRegexSafetyManager.safeReplaceAll(Pattern.compile("a"), "a" * 100001, "X").isLeft shouldBe true
   }
+
+  // #3051: the step budget counts reads, so a loop whose body matches the empty string ran unbounded under it:
+  // `(){2000000000}b` took 18 s on a 40-character line with 40 reads counted.
+  "WorkspaceRegexSafetyManager.safeCompile" should "refuse a quantifier over something that can match the empty string" in {
+    Seq(
+      "(){2000000000}b",
+      "(){1000}b",
+      "(?:){5}",
+      "(a?){3}b",
+      "(?:a|){2,}b",
+      "(?:a*)?",
+      "(?=a)*b",
+      "\\b+",
+      "^*a",
+      "(a)?\\2*",
+      "(a?)\\1+",
+      "(?<n>a?)\\k<n>{2}",
+      "(a?)\\Q\\E*", // `\Q\E` is removed before parsing, so this is `(a?)*`
+      "((?:)|x)+"
+    ).foreach(pattern => withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
+  }
+
+  it should "refuse an alternation with more than one alternative that can match the empty string" in {
+    // on an empty line every one of 2^n empty paths is tried without a single read
+    Seq("(?:|)" * 40 + "b", "(?:(?=x)|)" * 30 + "b", "(a?|b?)c", "(|x|)", "a?|b?").foreach { pattern =>
+      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
+    }
+  }
+
+  it should "refuse a counted repetition above the limit, comments mode and canonical equivalence" in {
+    WorkspaceRegexSafetyManager.safeCompile("a{1001}").isLeft shouldBe true
+    WorkspaceRegexSafetyManager.safeCompile("a{2,1001}").isLeft shouldBe true
+    WorkspaceRegexSafetyManager.safeCompile("(?:ab){1000}").isRight shouldBe true
+    WorkspaceRegexSafetyManager.safeCompile("(?x) ( a ? ) *").isLeft shouldBe true
+    WorkspaceRegexSafetyManager.safeCompile("a", Pattern.COMMENTS).isLeft shouldBe true
+    WorkspaceRegexSafetyManager.safeCompile("a", Pattern.CANON_EQ).isLeft shouldBe true
+  }
+
+  it should "accept ordinary patterns" in {
+    Seq(
+      "b+",
+      "^\\s*$",
+      "\\d{4}-\\d{2}-\\d{2}",
+      "(?:, \\w)*",
+      "(foo|bar)?baz",
+      "(a|)b",
+      "def\\s+(\\w+)\\(",
+      "[]a]+",
+      "[^]a]*x",
+      "[a-z&&[^q]]+",
+      "(\\w)\\1+",
+      "(?<word>\\w+) \\k<word>",
+      "\\Q(a?)*\\E",
+      "(?i)todo:?",
+      "(?i:fix)me",
+      "(?=\\w)\\w+",
+      "(?<!\\\\)\"",
+      "\\p{Lu}\\p{Ll}*",
+      "\\x{1F600}+",
+      "[^/]*\\.scala",
+      ".*Spec\\.scala",
+      "x{0,1000}",
+      "a*+b",
+      "\\R+",
+      "(.*a){25}b"
+    ).foreach { pattern =>
+      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).map(_.pattern()) shouldBe Right(pattern))
+    }
+  }
+
+  "WorkspaceRegexSafetyManager.safeFind" should "stop at its deadline" in {
+    val past = Some(System.nanoTime() - 1L)
+    WorkspaceRegexSafetyManager.safeFind(Pattern.compile("b"), "a" * 5000, deadline = past) shouldBe
+      Left(WorkspaceRegexSafetyManager.TimeLimitReached)
+    WorkspaceRegexSafetyManager.safeReplaceAll(Pattern.compile("b"), "a" * 5000, "X", deadline = past) shouldBe
+      Left(WorkspaceRegexSafetyManager.TimeLimitReached)
+    // a deadline still ahead changes nothing
+    WorkspaceRegexSafetyManager.safeFind(
+      Pattern.compile("b"),
+      "a" * 5000 + "b",
+      deadline = Some(System.nanoTime() + 60L * 1000000000L)
+    ) shouldBe Right(true)
+  }
+
+  it should "say where the first match starts" in {
+    WorkspaceRegexSafetyManager.safeFindStart(Pattern.compile("b+"), "aabbb") shouldBe Right(Some(2))
+    WorkspaceRegexSafetyManager.safeFindStart(Pattern.compile("c"), "aabbb") shouldBe Right(None)
+  }
+
+  "WorkspaceRegexSafetyManager replacement" should "stop once its result outgrows the limit" in {
+    val limit = Left(WorkspaceRegexSafetyManager.OutputLimitReached)
+    // an empty match at every position: 2001 insertions of 1000 characters
+    WorkspaceRegexSafetyManager.safeReplaceAll(
+      Pattern.compile("x*"),
+      "a" * 2000,
+      "R" * 1000,
+      maxOutputChars = 10000L
+    ) shouldBe limit
+    WorkspaceRegexSafetyManager.safeReplaceAll(
+      Pattern.compile("(a+)"),
+      "a" * 2000,
+      "$1$1",
+      maxOutputChars = 3000L
+    ) shouldBe limit
+    WorkspaceRegexSafetyManager.replaceLiteral(
+      "a" * 2000,
+      "a",
+      "RR",
+      false,
+      global = true,
+      maxOutputChars = 3000L
+    ) shouldBe limit
+    // within the limit, the same as Matcher's
+    WorkspaceRegexSafetyManager.safeReplaceAll(Pattern.compile("x*"), "ab", "-", maxOutputChars = 5L) shouldBe
+      Right("-a-b-")
+    WorkspaceRegexSafetyManager.safeReplaceFirst(Pattern.compile("(b)"), "abab", "[$1]") shouldBe Right("a[b]ab")
+    WorkspaceRegexSafetyManager.replaceLiteral("a.a", ".", "$1", true, global = true) shouldBe Right("a$1a")
+    WorkspaceRegexSafetyManager.replaceLiteral("A.a.", "A", "x", true, global = false) shouldBe Right("x.a.")
+  }
 }
