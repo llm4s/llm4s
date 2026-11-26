@@ -37,6 +37,7 @@ import com.openai.models.chat.completions.{
   ChatCompletionUserMessageParam
 }
 import com.openai.models.completions.CompletionUsage
+import com.openai.models.responses.{ Response, ResponseCreateParams }
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
@@ -51,6 +52,7 @@ import org.llm4s.llmconnect.auth.{
 }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
+  OpenAIApi,
   OpenAIConfig,
   OpenAIWorkloadIdentity,
   ProviderConfig,
@@ -83,6 +85,9 @@ import scala.util.{ Try, Using }
 private[provider] trait OpenAIClientTransport {
   def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion
   def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk]
+
+  /** `POST /responses`, OpenAI's Responses API. */
+  def createResponse(params: ResponseCreateParams): Response
 
   /** `GET /models/<model>`, for `validate()`: returns when the service has `model`, and throws as a completion does. */
   def retrieveModel(model: String): Unit
@@ -153,6 +158,18 @@ final class OpenAIClient private[provider] (
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
   private val displayName: String = OpenAIClient.displayName(provider)
+
+  /** The API this client speaks, resolved once: the Responses API only for an `OpenAIConfig` whose `api` says so. */
+  private val api: OpenAIApi = {
+    val (resolved, reason) = config match {
+      case openAI: OpenAIConfig if openAI.api.contains(OpenAIApi.Responses) =>
+        (OpenAIApi.Responses, "the section sets api = responses")
+      case _: OpenAIConfig => (OpenAIApi.ChatCompletions, "the section sets no api other than chat-completions")
+      case _               => (OpenAIApi.ChatCompletions, s"$displayName speaks Chat Completions only")
+    }
+    logger.info(s"$displayName client for model $model uses ${OpenAIApi.configValue(resolved)}: $reason")
+    resolved
+  }
 
   // The workload-identity ids, which an error built from a remote reply must not repeat; the keys are Secrets.
   OpenAIClient.registerCredentials(config)
@@ -231,9 +248,33 @@ final class OpenAIClient private[provider] (
       )
       adjustments             = openAIAdjustments(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
+      exchange <- api match {
+        case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformed.options, adjustments)
+        case OpenAIApi.ChatCompletions =>
+          completeOnChatCompletions(transformedConversation, transformed.options, adjustments)
+      }
+      (body, responseBody, completion) = exchange
+      _ = recordExchange(
+        startedAt,
+        Some(body),
+        Some(responseBody),
+        Right(completion)
+      )
+    } yield completion
+
+    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
+  }
+
+  /** One Chat Completions call: the request body, the reply's JSON and the `Completion`. */
+  private def completeOnChatCompletions(
+    conversation: Conversation,
+    options: CompletionOptions,
+    adjustments: Seq[RequestAdjustment]
+  ): Result[(String, String, Completion)] =
+    for {
       params <- buildParams(
-        transformedConversation,
-        transformed.options,
+        conversation,
+        options,
         OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
@@ -241,16 +282,33 @@ final class OpenAIClient private[provider] (
       body = serializeParams(params)
       response   <- call("completion")(transport.createChatCompletion(params))
       completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
-      _ = recordExchange(
-        startedAt,
-        Some(body),
-        Some(serialize(response)),
-        Right(completion)
-      )
-    } yield completion
+    } yield (body, serialize(response), completion)
 
-    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
-  }
+  /** One Responses API call, step for step as [[completeOnChatCompletions]]. */
+  private def completeOnResponses(
+    conversation: Conversation,
+    options: CompletionOptions,
+    adjustments: Seq[RequestAdjustment]
+  ): Result[(String, String, Completion)] =
+    for {
+      params <- OpenAIResponsesRequest.build(responsesSettings(options), conversation, options)
+      _    = adjustmentLog.record(model, adjustments)
+      body = serialize(params._body())
+      response <- call("response")(transport.createResponse(params))
+      completion <- OpenAIResponsesReply
+        .completion(response, provider)
+        .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
+        .flatMap(filteredReply)
+    } yield (body, serialize(response), completion)
+
+  private def responsesSettings(options: CompletionOptions): OpenAIResponsesRequest.Settings =
+    OpenAIResponsesRequest.Settings(
+      model = model,
+      providerName = providerName,
+      effort = reasoningEffortFor(options),
+      serviceTier = None, // the Responses form of OpenAIServiceTier arrives with the rest of the request mapping
+      omitsSampling = omitsSampling(options)
+    )
 
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
@@ -578,7 +636,8 @@ final class OpenAIClient private[provider] (
 
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
-    OpenAIModelRules.forcedToolEffort(model, options) match {
+    // forcedToolEffort is a Chat Completions rule: the Responses API takes the plan's effort as it is
+    (if (api == OpenAIApi.Responses) None else OpenAIModelRules.forcedToolEffort(model, options)) match {
       case Some((effort, adjustments)) => OpenAIReasoning.EffortPlan(Some(effort), adjustments)
       case None                        => OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
     }
@@ -860,6 +919,9 @@ final class OpenAIClient private[provider] (
       .flatMap(ToolCallRules.checked)
   }
 
+  private def estimatedCostOf(usage: Option[TokenUsage]): Option[BigDecimal] =
+    usage.flatMap(u => CostEstimator.estimate(modelName, u))
+
   private def completionOf(
     response: ChatCompletion,
     message: Option[ChatCompletionMessage],
@@ -873,7 +935,7 @@ final class OpenAIClient private[provider] (
     val usage = known(response._usage()).map(toTokenUsage)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(modelName, u))
+    val cost = estimatedCostOf(usage)
 
     Completion(
       id = known(response._id()).getOrElse(""),
@@ -1209,6 +1271,9 @@ private[provider] object OpenAIClientTransport {
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
         requestOpts.fold(client.chat().completions().create(params))(o => client.chat().completions().create(params, o))
 
+      override def createResponse(params: ResponseCreateParams): Response =
+        requestOpts.fold(client.responses().create(params))(o => client.responses().create(params, o))
+
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
       ): StreamResponse[ChatCompletionChunk] =
@@ -1504,6 +1569,10 @@ private[provider] object OpenAIClientTransport {
           refresh()
           underlying.createChatCompletionStream(params)
         }
+        override def createResponse(params: ResponseCreateParams): Response = {
+          refresh()
+          underlying.createResponse(params)
+        }
         override def retrieveModel(model: String): Unit = { refresh(); underlying.retrieveModel(model) }
         override def listModels(): Unit                 = { refresh(); underlying.listModels() }
         override def close(): Unit                      = underlying.close()
@@ -1547,6 +1616,9 @@ private[provider] object OpenAIClientTransport {
           params: ChatCompletionCreateParams
         ): StreamResponse[ChatCompletionChunk] =
           rejected(underlying.createChatCompletionStream(params))
+        override def createResponse(params: ResponseCreateParams): Response = rejected(
+          underlying.createResponse(params)
+        )
         override def retrieveModel(model: String): Unit = rejected(underlying.retrieveModel(model))
         override def listModels(): Unit                 = rejected(underlying.listModels())
         override def close(): Unit                      = underlying.close()
