@@ -1,0 +1,333 @@
+{
+  "threadId": "object-output-1.0.0",
+  "graphVersion": "53caf3cd749ce57e27e05f2fc4169c1e85c5c60c1df13f564effa218a5ecf6b4",
+  "answer": "{\"customer\":\"Acme\",\"total\":12.5}",
+  "checkpoint": {
+    "formatVersion": 9,
+    "id": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/5",
+    "parent": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/4",
+    "threadId": "object-output-1.0.0",
+    "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+    "status": "Completed",
+    "createdAt": "2026-11-26T02:37:40.202619Z",
+    "snapshot": {
+      "graphId": "extractor",
+      "graphVersion": "53caf3cd749ce57e27e05f2fc4169c1e85c5c60c1df13f564effa218a5ecf6b4",
+      "fingerprint": "7f2a287131a03f322abd0a24164dcb8a1864b5852181ab1f51fee8eac0908c76",
+      "superstep": 3,
+      "state": {
+        "messages": {
+          "version": 2,
+          "value": [
+            {
+              "id": "0.0/user",
+              "message": {
+                "type": "user",
+                "content": "bill Acme"
+              }
+            },
+            {
+              "id": "1.0/assistant",
+              "message": {
+                "type": "assistant",
+                "content": "{\"customer\":\"Acme\",\"total\":12.5}",
+                "toolCalls": []
+              }
+            }
+          ]
+        },
+        "active-agent": {
+          "version": 1,
+          "value": "extractor"
+        },
+        "usage": {
+          "version": 1,
+          "value": {
+            "requestCount": 2,
+            "inputTokens": 20,
+            "outputTokens": 40,
+            "byModel": {
+              "test-model": {
+                "requestCount": 2,
+                "inputTokens": 20,
+                "outputTokens": 40
+              }
+            }
+          }
+        },
+        "turn": {
+          "version": 1,
+          "value": {
+            "steps": 1,
+            "outcome": "Completed",
+            "startAgent": "extractor"
+          }
+        },
+        "delegation-counted": {
+          "version": 1,
+          "value": []
+        }
+      },
+      "frontier": [],
+      "staticJoins": [],
+      "dynamicJoins": [],
+      "parked": [],
+      "paused": false,
+      "shape": {
+        "entry": "input",
+        "nodes": [
+          "extractor/approval",
+          "extractor/call-tool",
+          "extractor/collect",
+          "extractor/finish",
+          "extractor/model",
+          "input"
+        ],
+        "edges": {},
+        "staticJoins": [],
+        "dynamicJoins": {
+          "extractor/tool-batch": "extractor/collect"
+        },
+        "resumes": [
+          "extractor/approval"
+        ],
+        "keys": [
+          "active-agent",
+          "delegation-counted",
+          "delegation-grant",
+          "delegation-input",
+          "delegation-prior-usage",
+          "delegation-timed-out",
+          "messages",
+          "tool-results",
+          "transfer",
+          "turn",
+          "usage"
+        ]
+      }
+    },
+    "fencingToken": 1,
+    "outcome": "Answered",
+    "trace": "00-cf544a1637fe419adb14d82e60d66a31-36dca6d05ad076b7-01"
+  },
+  "pendingWrites": [],
+  "events": [
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 1,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/1",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-26T02:37:39.948797Z",
+      "event": {
+        "$type": "RunStarted",
+        "tenantId": null,
+        "principal": null
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 2,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/1",
+      "taskId": "0.0",
+      "nodeId": "input",
+      "timestamp": "2026-11-26T02:37:40.060512Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 3,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/2",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-26T02:37:40.069148Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 1
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 4,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/2",
+      "taskId": "1.0",
+      "nodeId": "extractor/model",
+      "timestamp": "2026-11-26T02:37:40.184601Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 5,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/2",
+      "taskId": "1.0",
+      "nodeId": "extractor/model",
+      "timestamp": "2026-11-26T02:37:40.150148Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.model_call_completed",
+        "version": 1,
+        "payload": {
+          "agent": "extractor",
+          "model": "test-model",
+          "attempts": 1,
+          "toolCalls": 0,
+          "usage": {
+            "promptTokens": 10,
+            "completionTokens": 20,
+            "totalTokens": 30,
+            "thinkingTokens": null
+          },
+          "estimatedCost": null,
+          "finishReason": "Stop",
+          "duration": 44
+        }
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 6,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/2",
+      "taskId": "1.0",
+      "nodeId": "extractor/model",
+      "timestamp": "2026-11-26T02:37:40.164373Z",
+      "event": {
+        "$type": "Custom",
+        "name": "agent.model_call_completed",
+        "version": 1,
+        "payload": {
+          "agent": "extractor",
+          "model": "test-model",
+          "attempts": 2,
+          "toolCalls": 0,
+          "usage": {
+            "promptTokens": 10,
+            "completionTokens": 20,
+            "totalTokens": 30,
+            "thinkingTokens": null
+          },
+          "estimatedCost": null,
+          "finishReason": "Stop",
+          "duration": 0
+        }
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 7,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/3",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-26T02:37:40.190493Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 2
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 8,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/3",
+      "taskId": "2.0",
+      "nodeId": "extractor/finish",
+      "timestamp": "2026-11-26T02:37:40.194723Z",
+      "event": "TaskCompleted"
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 9,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/4",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-26T02:37:40.196034Z",
+      "event": {
+        "$type": "CheckpointCommitted",
+        "superstep": 3
+      }
+    },
+    {
+      "threadId": "object-output-1.0.0",
+      "seq": 10,
+      "runId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a",
+      "token": 1,
+      "checkpointId": "fb02a1d1-d562-4ff6-ba21-ca66e94c031a/5",
+      "taskId": null,
+      "nodeId": null,
+      "timestamp": "2026-11-26T02:37:40.222472Z",
+      "event": "RunCompleted"
+    }
+  ],
+  "calls": [
+    {
+      "system": "Extract the invoice.\n\nWhen you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:\n{\"type\":\"object\",\"description\":\"An invoice\",\"properties\":{\"customer\":{\"type\":\"string\",\"description\":\"who is billed\"},\"total\":{\"type\":\"number\",\"description\":\"the amount\",\"minimum\":0}},\"required\":[\"customer\",\"total\"],\"additionalProperties\":false}",
+      "responseFormat": {
+        "name": "response",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "description": "An invoice",
+          "properties": {
+            "customer": {
+              "type": "string",
+              "description": "who is billed"
+            },
+            "total": {
+              "type": "number",
+              "description": "the amount",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "customer",
+            "total"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "system": "Extract the invoice.\n\nWhen you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:\n{\"type\":\"object\",\"description\":\"An invoice\",\"properties\":{\"customer\":{\"type\":\"string\",\"description\":\"who is billed\"},\"total\":{\"type\":\"number\",\"description\":\"the amount\",\"minimum\":0}},\"required\":[\"customer\",\"total\"],\"additionalProperties\":false}",
+      "responseFormat": {
+        "name": "response",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "description": "An invoice",
+          "properties": {
+            "customer": {
+              "type": "string",
+              "description": "who is billed"
+            },
+            "total": {
+              "type": "number",
+              "description": "the amount",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "customer",
+            "total"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

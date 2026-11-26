@@ -120,7 +120,7 @@ agent
 | Event | Fields | Sent |
 |---|---|---|
 | `ModelCallStarted` | `agent`, `attempt` | before each attempt of a model call |
-| `TextDelta` | `attempt`, `text` | per chunk of the answer (needs `withStreaming()`) |
+| `TextDelta` | `attempt`, `text` | per chunk of the answer as the model writes it (needs `withStreaming()`); with `withOutput` that is the raw JSON, including the `{"answer": ...}` envelope of a [union answer](index#a-union-as-the-answer) |
 | `ThinkingDelta` | `attempt`, `text` | per chunk of the model's reasoning (needs `withStreaming()`) |
 | `ToolCallStarted` | `toolCallId`, `tool`, `arguments` | after the arguments validate, before middleware runs |
 | `ToolCallResult` | `toolCallId`, `content`, `isError` | when the call's result is recorded |

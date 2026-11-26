@@ -23,6 +23,21 @@ import scala.util.Try
  * An answer that matches the schema and reads as the type then goes through the format's application checks
  * (`AgentBuilder.withOutputCheck`, #2920), in the order they were added: each returns the answer's problems, and any
  * problem makes the answer invalid exactly as a schema error does, in the same retry.
+ *
+ * The schema's root is an object (`"type": "object"`), or a union of objects (#2953): an `anyOf` whose
+ * alternatives are all object schemas, which is what `SchemaOf` derives for a sealed trait or an enum whose cases all
+ * have fields. A strict response format needs an object at its root, so a union is asked for inside an envelope
+ * object, `{"answer": <one alternative>}`, with each alternative as strict as it was written: [[responseFormat]] and
+ * the prompt section both carry the envelope's schema, the same for every provider. The envelope is only ever on the
+ * wire. It is removed when the answer is checked, before the type's reader, the application checks, the output
+ * guardrails and the thread see the answer, so the answer stored, guarded and decoded is the alternative's JSON
+ * alone. An answer that is one of the alternatives without the envelope is accepted as it is, since a model not held
+ * to the format - on a call that offers tools, or with a provider that only states it - may leave the envelope out.
+ * What is not stored still shows the model's own text, envelope included: live `TextDelta`s, the invalid answer
+ * echoed in the corrective request, and the partial answer of a turn cut off at the output limit. The envelope's
+ * property is `answer`, or - when an alternative declares a property of that name - the first of `final_answer`,
+ * `final_answer_2`, ... that none declares. Any other root is refused when the agent is built: nest that value under
+ * a property of an object schema, and read the property from the decoded answer.
  */
 @Experimental
 final class OutputFormat private (
@@ -31,29 +46,36 @@ final class OutputFormat private (
   checks: Vector[ujson.Value => Seq[String]]
 ):
 
+  /** The envelope's property when the schema's root is a union of objects; `None` for any other root. */
+  private val envelope: Option[String] = OutputFormat.envelopeKey(schema)
+
+  /** The schema the model is shown and held to: [[schema]], or the envelope object holding it. */
+  private val wire: ujson.Value = envelope.fold(schema)(OutputFormat.enveloped(schema, _))
+
   /** This format with `more` added after its application checks. */
   private[agent] def withChecks(more: Vector[ujson.Value => Seq[String]]): OutputFormat =
     new OutputFormat(schema, reads, checks ++ more)
 
-  /** The `responseFormat` a model call of the agent that offers no tools is made with. */
-  def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(schema)
+  /**
+   * The `responseFormat` a model call of the agent that offers no tools is made with: [[schema]], or - for a union
+   * of objects - the envelope object that holds it.
+   */
+  def responseFormat: ResponseFormat.JsonSchema = ResponseFormat.JsonSchema(wire)
 
   /**
-   * The prompt section that states the schema, joining the middleware's sections on every model call of the
-   * agent: cacheable, since it is fixed when the agent is built.
+   * The prompt section that states the schema the response format carries, joining the middleware's sections on
+   * every model call of the agent: cacheable, since it is fixed when the agent is built.
    */
   private[agent] def section: PromptSection =
-    PromptSection(OutputFormat.SectionId, s"${OutputFormat.Instruction}\n${ujson.write(schema)}", cacheable = true)
+    PromptSection(OutputFormat.SectionId, s"${OutputFormat.Instruction}\n${ujson.write(wire)}", cacheable = true)
 
   /**
    * The schema's problems, as a build refuses them: empty when the format is usable. `budget` is the agent's
    * prompt section budget in estimated tokens (four characters a token), which the section alone must fit.
    */
   private[toolloop] def problems(validator: ToolArgumentValidator, budget: Int): Vector[String] =
-    val notObject = schema.objOpt.flatMap(_.get("type")) match
-      case Some(ujson.Str("object")) => Vector.empty
-      case _                         => Vector("its schema's root type must be \"object\"")
-    val tokens = (section.text.length.toLong + 3) / 4
+    val notObject = OutputFormat.rootProblem(schema).toVector
+    val tokens    = (section.text.length.toLong + 3) / 4
     val tooLong =
       if tokens <= budget then Vector.empty
       else Vector(s"its prompt section is $tokens estimated tokens, over the agent's maxPromptSectionTokens of $budget")
@@ -65,14 +87,21 @@ final class OutputFormat private (
    * `null`, matches the schema, reads as the output type and passes every application check; otherwise its
    * problems, at most [[OutputFormat.MaxErrors]], each cut to [[OutputFormat.MaxErrorChars]]. The application checks
    * run only on an answer the schema and the type accept, all of them, so the model is told every problem at once.
+   *
+   * A union's answer comes back without its envelope. An object holding the envelope's property is the envelope: it
+   * is checked against the envelope's schema, so its problems are at the paths of the text the model wrote
+   * (`$.answer.exits`), and its property's value is the answer. Anything else is checked as the answer itself.
    */
   private[toolloop] def check(answer: String, validator: ToolArgumentValidator): Either[Vector[String], ujson.Value] =
     OutputFormat
       .parse(answer)
       .left
       .map(Vector(_))
-      .flatMap { json =>
-        val problems = validator.validate(schema, json) match
+      .flatMap { written =>
+        val (json, violations) = envelope.flatMap(key => written.objOpt.flatMap(_.get(key))) match
+          case Some(inside) => inside  -> validator.validate(wire, written)
+          case None         => written -> validator.validate(schema, written)
+        val problems = violations match
           case none if none.isEmpty =>
             reads(json) match
               case Some(unreadable) => Vector(unreadable)
@@ -102,6 +131,51 @@ object OutputFormat:
 
   private val Instruction =
     "When you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:"
+
+  /** What a refused root is told to do instead. */
+  private val RootAdvice =
+    "to answer with any other value, make it a property of an object schema and read that property from the " +
+      "decoded answer"
+
+  /** The alternatives of a root `anyOf` with no `type` beside it, each with whether it is an object schema. */
+  private def union(schema: ujson.Value): Option[Vector[(ujson.Value, Boolean)]] =
+    schema.objOpt.filterNot(_.contains("type")).flatMap(_.get("anyOf")).flatMap(_.arrOpt).map { alternatives =>
+      alternatives.toVector.map(a => a -> a.objOpt.flatMap(_.get("type")).contains(ujson.Str("object")))
+    }
+
+  /** Why `schema`'s root cannot be an agent's response format; `None` for an object, or a union of objects. */
+  private def rootProblem(schema: ujson.Value): Option[String] =
+    if schema.objOpt.flatMap(_.get("type")).contains(ujson.Str("object")) then None
+    else
+      union(schema) match
+        case Some(alternatives) if alternatives.nonEmpty =>
+          val others = alternatives.zipWithIndex.collect { case ((_, false), i) => s"anyOf[$i]" }
+          Option.when(others.nonEmpty)(
+            s"its schema's root anyOf must hold only object schemas, and ${others.mkString(", ")} " +
+              s"${if others.size == 1 then "is" else "are"} not: $RootAdvice"
+          )
+        case _ =>
+          Some(s"its schema's root type must be \"object\", or its root an anyOf of object schemas: $RootAdvice")
+
+  /**
+   * The envelope's property for a schema whose root is a union of objects: `answer`, or the first of `final_answer`,
+   * `final_answer_2`, ... when an alternative declares a property of that name, so an object holding the property is
+   * never one of the alternatives.
+   */
+  private def envelopeKey(schema: ujson.Value): Option[String] =
+    union(schema).filter(alternatives => alternatives.nonEmpty && alternatives.forall(_._2)).map { alternatives =>
+      val declared = alternatives.flatMap(_._1.obj.get("properties").flatMap(_.objOpt).toVector.flatMap(_.keys)).toSet
+      (Iterator("answer", "final_answer") ++ Iterator.from(2).map(i => s"final_answer_$i")).dropWhile(declared).next()
+    }
+
+  /** `{"type": "object", "properties": {<key>: <schema>}, "required": [<key>], "additionalProperties": false}` */
+  private def enveloped(schema: ujson.Value, key: String): ujson.Value =
+    ujson.Obj(
+      "type"                 -> ujson.Str("object"),
+      "properties"           -> ujson.Obj(key -> schema),
+      "required"             -> ujson.Arr(ujson.Str(key)),
+      "additionalProperties" -> ujson.False
+    )
 
   /**
    * The format of `O`: `definition`'s strict JSON schema, and `O`'s reader. A schema derived with
