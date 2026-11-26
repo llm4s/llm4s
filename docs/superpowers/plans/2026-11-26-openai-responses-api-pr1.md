@@ -65,8 +65,8 @@ def withReasoningSummary(summary: OpenAIReasoningSummary): OpenAIConfig
 def withReasoningSummary(summary: Option[OpenAIReasoningSummary]): OpenAIConfig
 
 // object OpenAIConfig
-val ApiKey: String = "api"
-val ApiConfigKey: ProviderConfigKey               // optional
+val ApiSelectionKey: String = "api"
+val ApiSelectionConfigKey: ProviderConfigKey               // optional
 val ReasoningSummaryKey: String = "reasoningSummary"
 val ReasoningSummaryConfigKey: ProviderConfigKey  // optional
 ```

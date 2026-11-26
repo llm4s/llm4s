@@ -111,7 +111,7 @@ skipped too. On Chat Completions the rule applies as #2944 leaves it.
   forwarding overloads (CLAUDE.md, growth-prone data types). **Both fields are added in slice 1**, so there is one
   round of kept overloads, although `reasoningSummary` is first read in slice 2. MiMa against 1.0.0 must pass with
   no filter.
-- `OpenAIConfig.ApiKey` / `ApiConfigKey` and `ReasoningSummaryKey` / `ReasoningSummaryConfigKey`, as
+- `OpenAIConfig.ApiSelectionKey` / `ApiSelectionConfigKey` and `ReasoningSummaryKey` / `ReasoningSummaryConfigKey`, as
   `OrganizationKey` / `OrganizationConfigKey` are; both are extras of the `openai` descriptor only.
 - Nothing else public. Core changes nothing for reasoning: `ThinkingBlock.Opaque` and `ThinkingReplay` already
   exist.
@@ -261,6 +261,23 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 4. **The default.** `ModelMode.Responses` and `ModelMetadata.supportedEndpoints` in core, routing by base URL and
    by the registry, the docs, CHANGELOG and migration note, the full
    live suite.
+
+## Carried into later slices
+
+Slice 2 (reasoning):
+- `reasoningSummary` is accepted and not yet read.
+
+Slice 3 (streaming):
+- A failed reply's `invalid_prompt` and image error codes are still a 502 `ServiceError`, which invites retries of a request that cannot succeed: give them a 400-class error where `response.failed` shares the mapping.
+- A 200 reply that maps to a `Left` (failed, content filter, malformed tool call) is recorded in the exchange log with no request or response body: record both.
+- In the faked stream the first chunk carries the finish reason and later tool calls follow it; native streaming must end with the finish reason.
+
+Slice 4 (the default):
+- Add `OpenAIApi` and `OpenAIReasoningSummary` to the compatibility policy's "Sealed types that may gain a case" table.
+- The Java facade (`ClientBuilds`), the Kotlin DSL and Spring/Quarkus flat keys (`ProviderConfigParser`) cannot set `api`: they need a way to opt out before the default flips.
+- `docs/guide/providers.md`'s extras table lists neither new key.
+- Adding two fields to `OpenAIConfig` breaks positional patterns on it at source (11 to 13 fields): state in the compatibility policy that positional patterns on growth-safe (private-constructor) classes are outside the source promise, add a migration note, and decide whether `Llm4sMigrateFrom_1_0` gets a `PositionalPatternsGainFields` entry (maintainer to confirm).
+- Citation indexes are per `output_text` part while the text is concatenated across parts.
 
 ## Left to the builder
 

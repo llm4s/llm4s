@@ -22,7 +22,7 @@ object OpenAIApi:
         Left(
           ConfigurationError(
             s"Unknown OpenAI api '$other': expected '$ResponsesValue' or '$ChatCompletionsValue'",
-            List(OpenAIConfig.ApiKey)
+            List(OpenAIConfig.ApiSelectionKey)
           )
         )
 

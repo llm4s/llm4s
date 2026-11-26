@@ -143,6 +143,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
 
       error shouldBe a[ServiceError]
       error.asInstanceOf[ServiceError].status shouldBe 404
+      error.asInstanceOf[ServiceError].provider shouldBe ProviderId("openai")
       requests.get() shouldBe 1
     }
   }
@@ -337,6 +338,13 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       Seq(RequestOption.Temperature, RequestOption.TopP, RequestOption.PresencePenalty)
   }
 
+  it should "send temperature and top_p as asked to a model that takes sampling, with no adjustment" in {
+    val sent = send(hello, CompletionOptions().withTemperature(0.3).withTopP(0.9))
+    sent.body("temperature").num shouldBe 0.3
+    sent.body("top_p").num shouldBe 0.9
+    sent.completion.adjustments shouldBe empty
+  }
+
   it should "raise a max_output_tokens below 16 to 16 and report it, and send 16 as asked" in {
     val raised = send(hello, CompletionOptions(maxTokens = Some(15)))
     raised.body("max_output_tokens").num shouldBe 16
@@ -445,6 +453,37 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     val error = answer(reply("", status = "failed")).left.value
     error shouldBe a[ServiceError]
     error.message should include("the response failed")
+  }
+
+  it should "report a failed reply whose error is not an object as a service error, not a throw" in {
+    val error = answer(reply("", status = "failed", extra = """"error":"boom"""")).left.value
+    error shouldBe a[ServiceError]
+    error.message should include("the response failed")
+  }
+
+  it should "report a failed reply whose error has a code and no message with the code in the message" in {
+    val error = answer(reply("", status = "failed", extra = """"error":{"code":"invalid_prompt"}""")).left.value
+    error shouldBe a[ServiceError]
+    error.message should include("invalid_prompt")
+  }
+
+  it should "read an incomplete reply whose incomplete_details is not an object as an Unknown finish" in {
+    val completion =
+      answer(reply(outputMessage("cut"), status = "incomplete", extra = """"incomplete_details":"odd"""")).value
+    completion.content shouldBe "cut"
+    completion.finishReason shouldBe FinishReason.Unknown
+  }
+
+  it should "report a reply whose status is not a string as an error, not a throw" in {
+    val body = reply(outputMessage("hi")).replace(""""status":"completed","model"""", """"status":7,"model"""")
+    body should include(""""status":7""")
+    answer(body).isLeft shouldBe true
+  }
+
+  it should "read the served tier and price the call" in {
+    val completion = answer(reply(outputMessage("hi"), extra = """"service_tier":"default"""")).value
+    completion.servedTier shouldBe Some(ServiceTier.Default)
+    completion.estimatedCost shouldBe defined
   }
 
   it should "read url_citation annotations as citations" in {

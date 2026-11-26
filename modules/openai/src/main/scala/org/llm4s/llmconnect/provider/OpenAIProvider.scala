@@ -58,7 +58,11 @@ object OpenAIProvider extends ProviderDescriptor:
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
       .withExtras(
-        Seq(OpenAIConfig.OrganizationConfigKey, OpenAIConfig.ApiConfigKey, OpenAIConfig.ReasoningSummaryConfigKey)
+        Seq(
+          OpenAIConfig.OrganizationConfigKey,
+          OpenAIConfig.ApiSelectionConfigKey,
+          OpenAIConfig.ReasoningSummaryConfigKey
+        )
       )
       .withAuthExtras(
         Seq(
@@ -78,7 +82,7 @@ object OpenAIProvider extends ProviderDescriptor:
         if (workloadIdentity.isDefined) Right(Secret(""))
         else ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-      api     <- optionalExtra(context.providerName, section, OpenAIConfig.ApiKey)(OpenAIApi.parse)
+      api     <- optionalExtra(context.providerName, section, OpenAIConfig.ApiSelectionKey)(OpenAIApi.parse)
       summary <- optionalExtra(context.providerName, section, OpenAIConfig.ReasoningSummaryKey)(
         OpenAIReasoningSummary.parse
       )

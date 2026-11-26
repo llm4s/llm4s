@@ -21,12 +21,19 @@ import scala.util.Try
 /**
  * OpenAI's Responses API `Response` as a [[org.llm4s.llmconnect.model.Completion]].
  *
- * Fields are read as leniently as the Chat Completions reply's: one the response omits is absent, not a failure.
+ * Optional fields are read as leniently as the Chat Completions reply's: one the response omits, or gives in a shape
+ * the SDK does not know (`error` as a string, say), is absent, not a failure. A reply too malformed to read at all
+ * (a `status` that is not a string) is a `Left` through [[OpenAIClient.mapError]], never a thrown exception.
  * The estimated cost and the request's adjustments are the client's to add.
  */
 private[provider] object OpenAIResponsesReply:
 
   def completion(response: Response, provider: ProviderId, configuredModel: ModelName): Result[Completion] =
+    Try(read(response, provider, configuredModel)).toEither.left
+      .map(OpenAIClient.mapError(_, provider))
+      .flatMap(identity)
+
+  private def read(response: Response, provider: ProviderId, configuredModel: ModelName): Result[Completion] =
     val status = known(response._status()).map(_.asString())
     if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider))
     else
@@ -58,7 +65,7 @@ private[provider] object OpenAIResponsesReply:
 
   /** A `failed` reply's `error`, through the mapping a stream's `error` event takes (a 502 unless it names a status). */
   private def failure(response: Response, provider: ProviderId): LLMError =
-    val error = response.error().toScala
+    val error = known(response._error())
     val fields = Seq(
       error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
       error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString())),
@@ -79,10 +86,8 @@ private[provider] object OpenAIResponsesReply:
     status match
       case Some(s) if s == ResponseStatus.COMPLETED.asString() => FinishReason.Stop
       case Some(s) if s == ResponseStatus.INCOMPLETE.asString() =>
-        response
-          .incompleteDetails()
-          .toScala
-          .flatMap(_.reason().toScala)
+        known(response._incompleteDetails())
+          .flatMap(d => known(d._reason()))
           .map(_.asString()) match
           case Some("max_output_tokens") => FinishReason.Length
           case Some("content_filter")    => FinishReason.Other(ChatCompletionsFinishReason.ContentFilter)

@@ -180,11 +180,11 @@ object OpenAIConfig {
     ProviderConfigKey.optional(OrganizationKey, "the OpenAI organization ID, sent as the OpenAI-Organization header")
 
   /** The provider-specific key naming the API a client speaks, `api`: `responses` or `chat-completions`. */
-  val ApiKey: String = "api"
+  val ApiSelectionKey: String = "api"
 
-  /** The declaration of [[ApiKey]]. */
-  val ApiConfigKey: ProviderConfigKey =
-    ProviderConfigKey.optional(ApiKey, "the OpenAI API the client speaks: responses or chat-completions")
+  /** The declaration of [[ApiSelectionKey]]. */
+  val ApiSelectionConfigKey: ProviderConfigKey =
+    ProviderConfigKey.optional(ApiSelectionKey, "the OpenAI API the client speaks: responses or chat-completions")
 
   /** The provider-specific key naming the reasoning summary to request, `reasoningSummary`. */
   val ReasoningSummaryKey: String = "reasoningSummary"
