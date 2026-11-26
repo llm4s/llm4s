@@ -68,6 +68,7 @@ object DocSnippets {
     "guide/image-generation.md",
     "guide/jev.md",
     "guide/kafka.md",
+    "guide/knowledge-graph.md",
     "guide/media-types.md",
     "guide/modular-rag-example.md",
     "guide/multimodal.md",
