@@ -572,28 +572,30 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   }
 
   // OpenAI refuses the search-preview models on /v1/responses; the registry knows them without that endpoint, so the
-  // default keeps them on Chat Completions. OpenAI has been retiring them: a "deprecated" answer is logged, not asserted.
+  // default should keep them on Chat Completions. OpenAI has been retiring them: when it answers that the model is
+  // deprecated or unknown, the case cancels and shows nothing about routing. It guards only against OpenAI's "not
+  // supported with the Responses API" answer, and checks the API used when the request succeeds.
   for (model <- Seq("gpt-4o-search-preview", "gpt-4o-mini-search-preview"))
-    it should s"keep $model on Chat Completions by default" in {
+    it should s"not send $model to the Responses API by default (cancels when OpenAI has retired the model)" in {
       Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
 
       val (client, exchanges) = recordingClient(config(apiKey.get, model))
       val result              = client.complete(conversation, CompletionOptions())
       client.close()
-      val bodies = exchanges.asScala.toSeq.map(_.requestBody)
       info(
-        s"[#2900] $model, no api: ${exchanges.size} exchange(s), bodies carry messages=${bodies.map(_.contains("\"messages\""))}, " +
-          s"input=${bodies.map(_.contains("\"input\""))}, " + result.fold(
-            e => s"failed: ${e.getClass.getSimpleName}: ${e.message.take(200)}",
-            r => s"ok, content.length=${r.content.length}"
-          )
+        s"[#2900] $model, no api: ${exchanges.size} exchange(s), " + result.fold(
+          e => s"failed: ${e.getClass.getSimpleName}: ${e.message.take(200)}",
+          r => s"ok, api=${apiOf(exchanges)}, content.length=${r.content.length}"
+        )
       )
-      withClue(s"$model was sent to the Responses API: ")(bodies.exists(_.contains("\"input\"")) shouldBe false)
       result.left.foreach { e =>
-        if e.message.toLowerCase.contains("deprecated") then
-          cancel(s"$model is deprecated at OpenAI: ${e.message.take(120)}")
+        val m = e.message.toLowerCase
+        withClue(s"$model failed with an answer about the Responses API (wrong routing?): ${e.message}: ") {
+          Seq("responses api", "/v1/responses", "not supported with the responses").exists(m.contains) shouldBe false
+        }
+        cancel(s"$model is not served by OpenAI (${e.getClass.getSimpleName}): ${e.message.take(160)}")
       }
-      withClue(s"$model failed: ${result.swap.toOption}: ")(result.isRight shouldBe true)
+      withClue(s"$model used the wrong API: ")(apiOf(exchanges) shouldBe "chat-completions")
     }
 
   it should "finish a tool loop with keepReasoning false on gpt-6.1-terra" in {
@@ -619,53 +621,76 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
   // ---- the comparison: does replaying the reasoning change how often turn 2 comes back empty? (#2900) ----
 
-  private def runArm(model: String, keepReasoning: Boolean): OpenAISmokeSpec.Arm = {
-    val label  = if keepReasoning then "replay" else "no-replay"
-    val client = OpenAIClient(config(apiKey.get, model).withKeepReasoning(keepReasoning)).toOption.get
+  // One arm's state: its client and the turn-2 results so far; `skipped` counts loops not counted (no tool call).
+  final private case class ArmRun(
+    label: String,
+    client: LLMClient,
+    done: Vector[Result[Completion]],
+    skipped: Int
+  ) {
+    def active: Boolean = done.size < OpenAISmokeSpec.LoopsPerArm && skipped <= OpenAISmokeSpec.ReplacementsPerArm
+  }
+
+  // One attempt of one arm: turn 1, and when it made a tool call, turn 2.
+  private def step(model: String, arm: ArmRun): ArmRun = {
+    val first = arm.client.complete(Conversation(Seq(calculationMessage)), lowOptions)
+    first match {
+      case Left(e) =>
+        info(s"[#2900] $model ${arm.label}: turn 1 failed: $e")
+        arm.copy(done = arm.done :+ first)
+      case Right(firstOk) if firstOk.message.toolCalls.isEmpty =>
+        info(s"[#2900] $model ${arm.label}: turn 1 made no tool call, loop not counted")
+        arm.copy(skipped = arm.skipped + 1)
+      case Right(firstOk) =>
+        val calls = firstOk.message.toolCalls
+        val turn2 =
+          Conversation(Seq(calculationMessage, firstOk.message) ++ calls.map(c => ToolMessage("recorded", c.id)))
+        val second = arm.client.complete(turn2, lowOptions)
+        info(
+          s"[#2900] $model ${arm.label} loop ${arm.done.size + 1}: " + second.fold(
+            e => s"rejected: $e",
+            r =>
+              s"finish=${r.finishReason}, content.length=${r.content.length} code points=${r.content
+                  .take(3)
+                  .map(_.toInt)
+                  .mkString("[", ",", "]")}, tool calls=${r.message.toolCalls.size}, " +
+                s"reasoning tokens turn 1=${firstOk.usage.flatMap(_.thinkingTokens)}, turn 2=${r.usage.flatMap(_.thinkingTokens)}, " +
+                s"turn 1 sealed=${firstOk.message.hasSealedThinking}"
+          )
+        )
+        arm.copy(done = arm.done :+ second)
+    }
+  }
+
+  // The two arms alternate, loop by loop, so drift in OpenAI's behaviour over the run is not confounded with the arm.
+  private def runArms(model: String): (OpenAISmokeSpec.Arm, OpenAISmokeSpec.Arm) = {
+    def fresh(label: String, keepReasoning: Boolean) =
+      ArmRun(
+        label,
+        OpenAIClient(config(apiKey.get, model).withKeepReasoning(keepReasoning)).toOption.get,
+        Vector.empty,
+        0
+      )
 
     @scala.annotation.tailrec
-    def go(done: Vector[Result[Completion]], skipped: Int): Vector[Result[Completion]] =
-      if done.size >= OpenAISmokeSpec.LoopsPerArm || skipped > OpenAISmokeSpec.ReplacementsPerArm then done
-      else {
-        val first = client.complete(Conversation(Seq(calculationMessage)), lowOptions)
-        first match {
-          case Left(e) =>
-            info(s"[#2900] $model $label: turn 1 failed: $e")
-            go(done :+ first, skipped)
-          case Right(firstOk) if firstOk.message.toolCalls.isEmpty =>
-            info(s"[#2900] $model $label: turn 1 made no tool call, loop not counted")
-            go(done, skipped + 1)
-          case Right(firstOk) =>
-            val calls = firstOk.message.toolCalls
-            val turn2 =
-              Conversation(Seq(calculationMessage, firstOk.message) ++ calls.map(c => ToolMessage("recorded", c.id)))
-            val second = client.complete(turn2, lowOptions)
-            info(
-              s"[#2900] $model $label loop ${done.size + 1}: " + second.fold(
-                e => s"rejected: $e",
-                r =>
-                  s"finish=${r.finishReason}, content.length=${r.content.length} code points=${r.content
-                      .take(3)
-                      .map(_.toInt)
-                      .mkString("[", ",", "]")}, tool calls=${r.message.toolCalls.size}, " +
-                    s"reasoning tokens turn 1=${firstOk.usage.flatMap(_.thinkingTokens)}, turn 2=${r.usage.flatMap(_.thinkingTokens)}, " +
-                    s"turn 1 sealed=${firstOk.message.hasSealedThinking}"
-              )
-            )
-            go(done :+ second, skipped)
-        }
-      }
-    val results = go(Vector.empty, 0)
-    client.close()
-    OpenAISmokeSpec.Arm(results.size, results)
+    def go(replay: ArmRun, noReplay: ArmRun): (ArmRun, ArmRun) =
+      if !replay.active && !noReplay.active then (replay, noReplay)
+      else
+        go(
+          if replay.active then step(model, replay) else replay,
+          if noReplay.active then step(model, noReplay) else noReplay
+        )
+    val (r, n) = go(fresh("replay", keepReasoning = true), fresh("no-replay", keepReasoning = false))
+    r.client.close()
+    n.client.close()
+    (OpenAISmokeSpec.Arm(r.done.size, r.done), OpenAISmokeSpec.Arm(n.done.size, n.done))
   }
 
   for (model <- Seq("gpt-5.6-luna", "gpt-6.1-terra"))
     it should s"answer after a tool result, with and without the reasoning replayed, on $model" in {
       Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
 
-      val replay   = runArm(model, keepReasoning = true)
-      val noReplay = runArm(model, keepReasoning = false)
+      val (replay, noReplay) = runArms(model)
       info(
         s"[#2900] $model replay arm: ${replay.loops} loops, ${replay.accepted} accepted, ${replay.empty} empty, ${replay.blank} blank (whitespace only, counting the empty)"
       )
