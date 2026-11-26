@@ -362,7 +362,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 14
+    scalaBlocks should have size 15
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
