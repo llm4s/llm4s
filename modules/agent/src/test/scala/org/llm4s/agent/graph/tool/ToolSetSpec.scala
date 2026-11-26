@@ -66,6 +66,25 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("multipleOf")
   }
 
+  private def patterned(pattern: String): AgentTool[ujson.Value] =
+    AgentTool.fromToolFunction(
+      ToolFunction[String](
+        "go",
+        "d",
+        Schema.`object`[String]("o").withRequiredField("id", Schema.string("id").withPattern(pattern)),
+        _ => Right("x")
+      )
+    )
+
+  it should "accept a tool whose argument has a pattern, and refuse one whose pattern does not compile (#2954)" in {
+    ToolSet.of(patterned("^[a-z0-9_-]+$")).isRight shouldBe true
+    val error = ToolSet.of(patterned("[a-z")).left.value
+    error shouldBe a[ValidationError]
+    error.message should include(
+      "tool 'go': unsupported schema keyword at $.properties.id.pattern (Invalid regex syntax"
+    )
+  }
+
   it should "refuse a schema keyword the validator does not support" in {
     val error = ToolSet.of(refusingValidator, tool("a")).left.value
     error.message should include("'a'")

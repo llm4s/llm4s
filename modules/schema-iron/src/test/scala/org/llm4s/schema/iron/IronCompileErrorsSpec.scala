@@ -42,14 +42,41 @@ class IronCompileErrorsSpec extends AnyFlatSpec with Matchers {
     errors should include("refinedSchemaOf")
   }
 
-  "Match" should "be refused, saying that core's StringSchema has no pattern" in {
+  "Match" should "compile on a String, alone and beside length constraints (#2954)" in {
+    scala.compiletime.testing.typeCheckErrors(
+      "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[String :| Match[\"[a-z]+\"]]"
+    ) shouldBe empty
+    scala.compiletime.testing.typeCheckErrors(
+      "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[String :| (MinLength[1] & Match[\"[a-z]+\"])]"
+    ) shouldBe empty
+  }
+
+  it should "be refused when there are two, since a JSON Schema string has one pattern" in {
     val errors = messages(
       scala.compiletime.testing.typeCheckErrors(
-        "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[String :| Match[\"[a-z]+\"]]"
+        "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[String :| (Match[\"[a-z]+\"] & Match[\".{3}\"])]"
       )
     )
-    errors should include("Match[\"[a-z]+\"]")
-    errors should include("StringSchema has no pattern")
+    errors should include("Cannot describe the Iron constraint")
+    errors should include("it has more than one Match")
+  }
+
+  it should "be refused when its expression is not a regular expression, not left to fail at run time" in {
+    val errors = messages(
+      scala.compiletime.testing.typeCheckErrors(
+        "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[String :| Match[\"[a-z\"]]"
+      )
+    )
+    errors should include("Cannot describe the Iron constraint Match[\"[a-z\"]")
+    errors should include("its expression is not a regular expression")
+  }
+
+  it should "be refused on a collection, which has no pattern" in {
+    messages(
+      scala.compiletime.testing.typeCheckErrors(
+        "import io.github.iltotore.iron.*; import io.github.iltotore.iron.constraint.all.*; import org.llm4s.schema.*; SchemaOf[List[String] :| Match[\"a\"]]"
+      )
+    ) should include("it is not a length constraint, the only kind")
   }
 
   "A negation other than Not[Empty] and Not[Blank]" should "be refused" in {

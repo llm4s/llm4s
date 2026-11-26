@@ -388,7 +388,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 - **Sum types.** uPickle writes a case with fields as an object with its tag under `"$type"` (or the trait's `@upickle.implicits.key`), and a case without fields as its tag alone; the `anyOf` describes exactly that (see [Sum types](#sum-types)).
 - **Enums.** uPickle writes a case as its name, or as its `@upickle.implicits.key("...")` when the case (an enum case or a case object) has one, and the `enum` list in the schema holds exactly those strings.
 - **`Long`.** uPickle writes a `Long` beyond 2^53 (9007199254740992) in either direction as a JSON *string*, because a JSON number that large loses precision in many readers; it reads both forms back. The schema says `integer`, so a value written that large does not match it. A model answering the schema writes a number, which reads back; if your values can be that large and you validate what uPickle writes, describe the field as a string yourself.
-- **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (llm4s-core's schema model has no `pattern`), so give such a field a `@description` that asks for a number.
+- **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (the derivation writes no `pattern` for it), so give such a field a `@description` that asks for a number.
 - **Defaults.** uPickle leaves out a field that equals its default when it writes, and reads a missing field as the default. The schema still lists the field: `completeStructured` sends the strict schema, in which every property is required (a model must answer every field), so a field with a default is asked for like any other.
 
 ## Strict mode
@@ -504,10 +504,11 @@ Iron's own `iron-upickle` module defines the same `ReadWriter`; import one of th
 | the same | `Double`, `Float` | `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` |
 | `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `String` | `minLength`, `maxLength` |
 | `Not[Blank]` | `String` | `minLength: 1`; that it is not only whitespace is checked when the reply is read |
+| `Match` (one) | `String` | `pattern`, anchored at both ends: `Match["[a-z]+"]` is `^(?:[a-z]+)$`, since Iron matches the whole string and JSON Schema finds the expression anywhere |
 | `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `List`, `Seq`, `Vector`, `Set` | `minItems`, `maxItems` |
 | `C1 & C2` of the above | | both; of two bounds of one kind, the tighter |
 
-Every other constraint is refused at compile time with a message naming it, rather than left out of the schema without a word: `Match` (llm4s-core's `StringSchema` has no `pattern` yet), `Multiple`, `StartWith`, `ForAll` and the rest, a union other than the `>=` and `<=` Iron builds, `Not` of anything but `Empty` and `Blank`, and a constraint on any other type, such as `BigDecimal`, which is written as a JSON string. To use one of them, describe the type with a `given SchemaOf` of your own, which is taken as it is. A provider may or may not enforce these keywords while it generates; the `ReadWriter` enforces the constraint on every reply.
+Every other constraint is refused at compile time with a message naming it, rather than left out of the schema without a word: `Multiple`, `StartWith`, `ForAll` and the rest, a second `Match` on one string (a JSON Schema string has one `pattern`), a `Match` whose expression does not compile, a union other than the `>=` and `<=` Iron builds, `Not` of anything but `Empty` and `Blank`, and a constraint on any other type, such as `BigDecimal`, which is written as a JSON string. To use one of them, describe the type with a `given SchemaOf` of your own, which is taken as it is. A provider may or may not enforce these keywords while it generates; the `ReadWriter` enforces the constraint on every reply.
 
 ## Compile time
 

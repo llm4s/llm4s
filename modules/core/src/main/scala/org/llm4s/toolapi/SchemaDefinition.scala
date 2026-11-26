@@ -29,13 +29,15 @@ sealed trait SchemaDefinition[T] {
  * @param enumValues   Restricts valid values to this closed set
  * @param minLength    Minimum allowed string length
  * @param maxLength    Maximum allowed string length
+ * @param pattern      A regular expression the string must match, written as JSON Schema `pattern`: see `withPattern`
  */
 @Stable
 final case class StringSchema private (
   description: String,
   enumValues: Option[Seq[String]],
   minLength: Option[Int],
-  maxLength: Option[Int]
+  maxLength: Option[Int],
+  pattern: Option[String]
 ) extends SchemaDefinition[String] {
   def toJsonSchema(strict: Boolean): ujson.Value = {
     val base = ujson.Obj(
@@ -46,6 +48,7 @@ final case class StringSchema private (
     enumValues.foreach(values => base("enum") = ujson.Arr(values.map(ujson.Str(_)): _*))
     minLength.foreach(min => base("minLength") = ujson.Num(min))
     maxLength.foreach(max => base("maxLength") = ujson.Num(max))
+    pattern.foreach(regex => base("pattern") = ujson.Str(regex))
 
     base
   }
@@ -74,6 +77,32 @@ final case class StringSchema private (
 
   /** Set or clear the maximum allowed string length (inclusive). */
   def withMaxLength(max: Option[Int]): StringSchema = copy(maxLength = max)
+
+  /**
+   * Require the string to match a regular expression, written to the schema as JSON Schema `pattern`.
+   *
+   * The match is JSON Schema's: the expression may be found anywhere in the string, so `[a-z]+` accepts
+   * `"Crypt Door"` (it finds `rypt`). Anchor an expression that must cover the whole string:
+   * `withPattern("^[a-z0-9_-]+$")`.
+   *
+   * The expression is sent to the provider as written and is not compiled here, so nothing here throws. An agent
+   * refuses to build (a `Left`) with a tool or an output schema whose pattern its argument validator cannot check.
+   * For the default validator that is one that is not a valid `java.util.regex` expression, is empty, is longer
+   * than 1000 characters or has a shape known to backtrack catastrophically, such as `(a+)+`: the rules of
+   * [[org.llm4s.security.RegexSafetyManager.safeCompile]].
+   *
+   * On the dialect: JSON Schema names ECMA-262 regular expressions, and a provider that enforces the pattern reads
+   * it in its own way, while llm4s checks it with `java.util.regex`. Keep to what they share: literals, character
+   * classes, groups, alternation, quantifiers and the anchors `^` and `$`. Among the differences, `$` in Java also
+   * matches before a final line terminator (`^[a-z]+$` accepts `"abc\n"`), and possessive quantifiers, inline flags
+   * such as `(?i)`, `\A`, `\z` and `\Q...\E` are Java's alone.
+   *
+   * @param regex the regular expression
+   */
+  def withPattern(regex: String): StringSchema = copy(pattern = Some(regex))
+
+  /** Set or clear the pattern (see the other `withPattern`); `None` lifts the restriction. */
+  def withPattern(regex: Option[String]): StringSchema = copy(pattern = regex)
 }
 
 object StringSchema {
@@ -83,9 +112,19 @@ object StringSchema {
     description: String,
     enumValues: Option[Seq[String]] = None,
     minLength: Option[Int] = None,
-    maxLength: Option[Int] = None
+    maxLength: Option[Int] = None,
+    pattern: Option[String] = None
   ): StringSchema =
-    new StringSchema(description, enumValues, minLength, maxLength)
+    new StringSchema(description, enumValues, minLength, maxLength, pattern)
+
+  /** The `apply` of 1.0.0, from before `pattern` (#2954): 1.x keeps its signature. */
+  def apply(
+    description: String,
+    enumValues: Option[Seq[String]],
+    minLength: Option[Int],
+    maxLength: Option[Int]
+  ): StringSchema =
+    new StringSchema(description, enumValues, minLength, maxLength, None)
 }
 
 /**
@@ -538,8 +577,9 @@ object AnyOfSchema {
 }
 
 /**
- * A JSON Schema written out as JSON, for what the other cases cannot express: `$ref`, `oneOf`, `pattern`, a
- * free-form object, a schema received from elsewhere (an MCP server's).
+ * A JSON Schema written out as JSON, for what the other cases cannot express: `$ref`, `oneOf`, `format`, a
+ * free-form object, a schema received from elsewhere (an MCP server's). A string's `pattern` no longer needs it
+ * (`StringSchema.withPattern`), and an agent's default argument validator checks one written here.
  *
  * It is emitted as it was written, whatever `strict` is: nothing in it is made required or nullable. Whether a
  * provider accepts it, and whether an agent's argument validator supports its keywords, is for the caller to know.

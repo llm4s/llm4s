@@ -7,7 +7,8 @@ import org.llm4s.toolapi.{ ArraySchema, IntegerSchema, NumberSchema, SchemaDefin
 /**
  * The JSON Schema bounds a constraint stands for, worked out at compile time by [[IronMacros]]. An integer's bounds
  * are inclusive (`exclusiveMinimum` and `exclusiveMaximum` are only set for `Double` and `Float`); a string's
- * `minLength`/`maxLength` are an array's `minItems`/`maxItems`.
+ * `minLength`/`maxLength` are an array's `minItems`/`maxItems`. `pattern` is a string's alone: the expression of
+ * its `Match`, anchored at both ends (#2954).
  */
 final private[iron] case class Bounds(
   minimum: Option[Double],
@@ -15,7 +16,8 @@ final private[iron] case class Bounds(
   exclusiveMinimum: Option[Double],
   exclusiveMaximum: Option[Double],
   minLength: Option[Int],
-  maxLength: Option[Int]
+  maxLength: Option[Int],
+  pattern: Option[String] = None
 )
 
 private[iron] object IronSchemas {
@@ -45,7 +47,9 @@ private[iron] object IronSchemas {
         .withMaximum(bounds.maximum)
         .withExclusiveMinimum(bounds.exclusiveMinimum)
         .withExclusiveMaximum(bounds.exclusiveMaximum)
-    case s: StringSchema   => s.withMinLength(bounds.minLength).withMaxLength(bounds.maxLength)
+    case s: StringSchema =>
+      val sized = s.withMinLength(bounds.minLength).withMaxLength(bounds.maxLength)
+      bounds.pattern.fold(sized)(sized.withPattern)
     case s: ArraySchema[?] => s.withMinItems(bounds.minLength).withMaxItems(bounds.maxLength)
     case other =>
       throw new IllegalStateException(
@@ -71,6 +75,7 @@ private[iron] object IronSchemas {
       case Some(ujson.Str("string")) =>
         set("minLength", bounds.minLength.map(_.toDouble))
         set("maxLength", bounds.maxLength.map(_.toDouble))
+        bounds.pattern.foreach(regex => out("pattern") = ujson.Str(regex))
       case Some(ujson.Str("array")) =>
         set("minItems", bounds.minLength.map(_.toDouble))
         set("maxItems", bounds.maxLength.map(_.toDouble))

@@ -461,6 +461,38 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     requests.get() shouldBe 2
   }
 
+  "A string pattern" should "be stated in the schema, checked, and named in the corrective request (#2954)" in {
+    val client = answers("""{"id":"Crypt Door"}""", """{"id":"crypt_door"}""")
+    val result = built(Agent.builder("dm", client).withOutput(locationSchema)).run("where next?").value
+
+    result.decodeOutput[Location] shouldBe Right(Location("crypt_door"))
+    client.callCount shouldBe 2
+    client.sent(0).head.content should include(""""pattern":"^[a-z0-9_-]+$"""")
+    client.sent(1).last.content should include("""$.id: "Crypt Door" does not match the pattern ^[a-z0-9_-]+$""")
+  }
+
+  it should "be accepted in a raw schema, which 1.0.0 refused to build (#2954)" in {
+    val raw: SchemaDefinition[ujson.Value] = org.llm4s.toolapi.Schema.raw(
+      ujson.Obj(
+        "type"       -> "object",
+        "properties" -> ujson.Obj("id" -> ujson.Obj("type" -> "string", "pattern" -> "^[a-z0-9_-]+$")),
+        "required"   -> ujson.Arr("id")
+      )
+    )
+    val client = answers("""{"id":"Crypt Door"}""", """{"id":"crypt_door"}""")
+    val result = built(Agent.builder("dm", client).withOutput(raw)).run("where next?").value
+    result.answer shouldBe Some("""{"id":"crypt_door"}""")
+    client.callCount shouldBe 2
+  }
+
+  it should "refuse the build, as a Left naming it, when it is not a regular expression (#2954)" in {
+    val bad =
+      ObjectSchema[Location]("A location", Seq(PropertyDefinition("id", StringSchema("id").withPattern("[a-z"))))
+    val message = Agent.builder("dm", answers()).withOutput(bad).build().left.map(_.message).swap.getOrElse("")
+    message should include("its schema keyword $.properties.id.pattern (Invalid regex syntax")
+    message should include("cannot be checked")
+  }
+
   "build" should "refuse a schema that is not a JSON object" in {
     val refused = Agent.builder("extractor", answers()).withOutput(StringSchema("a name")).build()
     refused.left.map(_.message).swap.getOrElse("") should include("object")
@@ -550,6 +582,14 @@ object AgentOutputSpec {
       PropertyDefinition("customer", StringSchema("who is billed")),
       PropertyDefinition("total", NumberSchema("the amount", minimum = Some(0)))
     )
+  )
+
+  final case class Location(id: String) derives ReadWriter
+
+  /** A location named by an id of a fixed format (#2954). */
+  val locationSchema: ObjectSchema[Location] = ObjectSchema[Location](
+    "A location",
+    Seq(PropertyDefinition("id", StringSchema("lower_snake_case id").withPattern("^[a-z0-9_-]+$")))
   )
 
   /** An Invoice schema that lists only the customer and allows other keys, so the type's reader must check the total. */
