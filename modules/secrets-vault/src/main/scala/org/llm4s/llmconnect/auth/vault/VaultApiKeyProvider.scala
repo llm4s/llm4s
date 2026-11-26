@@ -34,7 +34,9 @@ import scala.util.Try
  *
  * Errors never hold the key or the Vault token: an `AuthenticationError` when Vault refuses the token (401, 403), a
  * `NotFoundError` when there is no secret at the path, a `ConfigurationError` when the secret has no usable string
- * field, a `ServiceError` for any other status, and the HTTP client's own error when Vault cannot be reached.
+ * field (a missing or blank field, more than one line, a control character other than a tab or a character above
+ * U+00FF), a `ServiceError` for any other status, and the HTTP client's own error when Vault cannot be reached. The
+ * key is trimmed and a leading byte-order mark dropped before use.
  *
  * It depends on no Vault SDK: one `GET` with llm4s's own HTTP client. Close it to close the HTTP client it created;
  * one passed to `VaultApiKeyProvider(settings, httpClient)` stays the caller's to close.

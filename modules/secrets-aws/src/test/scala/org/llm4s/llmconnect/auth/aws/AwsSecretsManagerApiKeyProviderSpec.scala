@@ -335,12 +335,12 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     key(provider(settings("llm4s/bom"))) shouldBe "sk-aws-bom-key"
   }
 
-  it should "refuse a key holding a control or non-ASCII character, naming the kind, without the key (#3109)" in {
+  it should "refuse a key holding a control character or one above U+00FF, naming the kind, without the key (#3109)" in {
     val cases = Seq(
-      "tab"      -> secretString("sk-tab\tsecret-value")                  -> "a control character at position 7",
-      "nul"      -> secretString("sk-nul\u0000secret-value")              -> "a control character at position 7",
-      "nonascii" -> secretString("sk-caf\u00e9secret-value")              -> "a non-ASCII character at position 7",
-      "field"    -> secretString("""{"apiKey":"sk-tab\tsecret-value"}""") -> "a control character at position 7"
+      "esc"      -> secretString("sk-esc\u001bsecret-value") -> "a control character at position 7",
+      "nul"      -> secretString("sk-nul\u0000secret-value") -> "a control character at position 7",
+      "nonascii" -> secretString("sk-caf\u017esecret-value") -> "a character above U+00FF at position 7",
+      "field" -> secretString("{\"apiKey\":\"sk-esc\\u001bsecret-value\"}") -> "a control character at position 7"
     )
     cases.foreach { case ((name, body), reason) =>
       replies.put(s"llm4s/chars-$name", 200 -> body)

@@ -220,7 +220,7 @@ client call fails with it.
 |:----------|:------|:--------------------|
 | Store refuses the caller | `AuthenticationError` on 401 or 403, with Vault's `errors` text | `AuthenticationError` on 401, 403 or an auth error type such as `AccessDeniedException`, `ExpiredTokenException`, `InvalidSignatureException` |
 | No such secret | `NotFoundError` on 404 | `NotFoundError` on `ResourceNotFoundException` (also a missing version stage) |
-| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, more than one line, or a control or non-ASCII character | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, more than one line, or a control or non-ASCII character |
+| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, more than one line, or a control character (not a tab) or a character above U+00FF | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, more than one line, or a control character (not a tab) or a character above U+00FF |
 | Any other answer | `ServiceError` with the status | `ServiceError` with the status |
 | Store unreachable or timed out | the HTTP client's own error | the HTTP client's own error |
 

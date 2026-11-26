@@ -98,17 +98,39 @@ class ApiKeyProviderSpec extends AnyWordSpec with Matchers with EitherValues:
 
     "drop a leading byte-order mark, which Windows editors write (#3109)" in {
       key(ApiKeyProvider.file(tempFile("\uFEFFsk-bom-key-00001\r\n"))) shouldBe "sk-bom-key-00001"
+      key(ApiKeyProvider.file(tempFile("\n \uFEFFsk-bom-key-00002\n"))) shouldBe "sk-bom-key-00002"
       ApiKeyProvider.file(tempFile("\uFEFF\n")).current().left.value.message should include("is empty")
     }
 
-    "fail for a key holding a control or non-ASCII character, naming the kind, without echoing it (#3109)" in {
+    "fail for a UTF-16 key file, saying to save it as UTF-8 (#3109)" in {
+      Seq(StandardCharsets.UTF_16LE -> Array(0xff, 0xfe), StandardCharsets.UTF_16BE -> Array(0xfe, 0xff)).foreach {
+        case (charset, bom) =>
+          val file = Files.createTempFile("llm4s-key", ".txt")
+          file.toFile.deleteOnExit()
+          Files.write(file, bom.map(_.toByte) ++ "sk-utf16-key-0001\r\n".getBytes(charset))
+          val error = ApiKeyProvider.file(file).current().left.value
+          withClue(charset) {
+            error shouldBe a[ConfigurationError]
+            error.message should include(file.toString)
+            error.message should include("is UTF-16 encoded; save it as UTF-8")
+          }
+      }
+    }
+
+    "keep a key holding a tab or a Latin-1 character, which the JDK HTTP client sends (#3109)" in {
+      key(ApiKeyProvider.file(tempFile("sk-tab\tkey-0001\n"))) shouldBe "sk-tab\tkey-0001"
+      key(ApiKeyProvider.file(tempFile("sk-caf\u00e9-key-0001"))) shouldBe "sk-caf\u00e9-key-0001"
+      key(ApiKeyProvider.file(tempFile("sk-nbsp\u00a0key-0001"))) shouldBe "sk-nbsp\u00a0key-0001"
+    }
+
+    "fail for a key holding a control character or one above U+00FF, naming the kind, without echoing it (#3109)" in {
       val cases = Seq(
-        "sk-tab\tkey-0001"      -> "a control character at position 7",
-        "sk-nul\u0000key-0001"  -> "a control character at position 7",
-        "sk-del\u007fkey-0001"  -> "a control character at position 7",
-        "sk-caf\u00e9-key-0001" -> "a non-ASCII character at position 7",
-        "sk-bom\uFEFFkey-0001"  -> "a non-ASCII character at position 7",
-        "sk-nbsp\u00a0key-0001" -> "a non-ASCII character at position 8"
+        "sk-nul\u0000key-0001"    -> "a control character at position 7 of the trimmed key",
+        "sk-esc\u001bkey-0001"    -> "a control character at position 7 of the trimmed key",
+        "sk-del\u007fkey-0001"    -> "a control character at position 7 of the trimmed key",
+        "sk-bom\uFEFFkey-0001"    -> "a character above U+00FF at position 7 of the trimmed key",
+        "sk-zcaron\u017ekey-0001" -> "a character above U+00FF at position 10 of the trimmed key",
+        "  sk-ab\u0001key-0001"   -> "a control character at position 6 of the trimmed key"
       )
       cases.foreach { case (content, reason) =>
         val file  = tempFile(content)

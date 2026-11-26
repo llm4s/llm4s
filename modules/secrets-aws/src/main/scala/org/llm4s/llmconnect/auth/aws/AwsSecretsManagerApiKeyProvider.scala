@@ -38,8 +38,9 @@ import scala.util.Try
  *
  * Errors never hold the key or a credential: an `AuthenticationError` when AWS refuses the credentials or denies
  * access, a `NotFoundError` when there is no such secret or version stage, a `ConfigurationError` when the secret has
- * no usable string (binary only, a missing or blank field, more than one line), a `ServiceError` for any other
- * answer, and the HTTP client's own error when Secrets Manager cannot be reached.
+ * no usable string (binary only, a missing or blank field, more than one line, a control character other than a tab
+ * or a character above U+00FF), a `ServiceError` for any other answer, and the HTTP client's own error when Secrets
+ * Manager cannot be reached. The key is trimmed and a leading byte-order mark dropped before use.
  *
  * It depends on no AWS SDK: one `POST` with llm4s's own HTTP client, signed with Signature Version 4. Getting the
  * credentials - from an instance profile, IRSA or an assumed role - stays the caller's job. Close the provider to

@@ -55,32 +55,34 @@ object ApiKeyProvider:
    * rewrites - in place, or by swapping a symbolic link - is therefore sent from the next request on.
    *
    * A leading byte-order mark, which Windows editors write, is dropped. A missing or unreadable file, one that is
-   * not a regular file, a blank one, one over 64 KiB, one holding more than one line or one holding a control or
-   * non-ASCII character is a `ConfigurationError` naming the path; the file's content is never put in an error or a
-   * log.
+   * not a regular file, a blank one, one over 64 KiB, a UTF-16 one, one holding more than one line, or one holding a
+   * control character other than a tab or a character above U+00FF is a `ConfigurationError` naming the path; the
+   * file's content is never put in an error or a log.
    */
   def file(path: Path): ApiKeyProvider = new KeyFile(path)
 
   /**
-   * `raw` without a leading byte-order mark (U+FEFF, which `trim` keeps), trimmed: the key text every key source
-   * sends (#3109).
+   * `raw` trimmed, without a leading byte-order mark (U+FEFF, which `trim` keeps), and trimmed again, so a BOM
+   * after leading whitespace is dropped too: the key text every key source sends (#3109).
    */
-  private[llm4s] def keyText(raw: String): String = raw.stripPrefix("\uFEFF").trim
+  private[llm4s] def keyText(raw: String): String = raw.trim.stripPrefix("\uFEFF").trim
 
   /**
-   * Why `key` cannot be sent in an HTTP header, or `None`. A line break, another control character or a character
-   * outside printable ASCII would be refused by the HTTP client on every request, with an error that names no key
-   * source, so each key source refuses it when it reads the key (#3109). The reason names the kind of character
-   * and its position, never the key.
+   * Why `key` cannot be sent in an HTTP header, or `None`. A line break, a control character other than a tab, or
+   * a character above U+00FF is refused by every HTTP client llm4s sends through (the JDK `HttpClient` and the
+   * OkHttp client of the OpenAI and Anthropic SDKs), on every request and with an error that names no key source,
+   * so each key source refuses it when it reads the key (#3109). A tab and a Latin-1 character (U+0080 to U+00FF)
+   * are left alone: the JDK client sends them. The reason names the kind of character and its position in the
+   * trimmed key, never the key.
    */
   private[llm4s] def keyFault(key: String): Option[String] =
     // A line break in a header value would be refused by the HTTP client, or split the header.
     if key.exists(c => c == '\n' || c == '\r') then Some("holds more than one line")
     else
-      val at = key.indexWhere(c => c < ' ' || c > '~')
+      val at = key.indexWhere(c => (c < ' ' && c != '\t') || c == '\u007f' || c > '\u00ff')
       Option.when(at >= 0) {
-        val kind = if key(at) < ' ' || key(at) == '\u007f' then "a control character" else "a non-ASCII character"
-        s"holds $kind at position ${at + 1}; a key is printable ASCII"
+        val kind = if key(at) > '\u00ff' then "a character above U+00FF" else "a control character"
+        s"holds $kind at position ${at + 1} of the trimmed key, which no HTTP header can carry"
       }
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -95,6 +97,16 @@ object ApiKeyProvider:
   final private case class Stamp(modified: FileTime, size: Long, identity: Option[AnyRef])
 
   final private case class Read(stamp: Stamp, key: ApiKey)
+
+  /**
+   * Whether `bytes` start with a UTF-16 byte-order mark (FF FE or FE FF), as Windows PowerShell 5's `>` and
+   * `Out-File` write. Read as UTF-8 such a file is mojibake, so it is refused with a reason that says how to fix it.
+   */
+  private def isUtf16(bytes: Array[Byte]): Boolean =
+    bytes.length >= 2 && {
+      val (a, b) = (bytes(0) & 0xff, bytes(1) & 0xff)
+      (a == 0xff && b == 0xfe) || (a == 0xfe && b == 0xff)
+    }
 
   final private class KeyFile(path: Path) extends ApiKeyProvider:
     private val last         = new AtomicReference[Option[Read]](None)
@@ -125,8 +137,9 @@ object ApiKeyProvider:
         Try(Using.resource(Files.newInputStream(path))(_.readNBytes(MaxKeyFileBytes + 1))).toEither.left
           .map(e => failure(s"cannot be read (${e.getClass.getSimpleName})"))
           .flatMap { bytes =>
-            val key = keyText(new String(bytes, StandardCharsets.UTF_8))
+            lazy val key = keyText(new String(bytes, StandardCharsets.UTF_8))
             if bytes.length > MaxKeyFileBytes then Left(failure(s"is larger than $MaxKeyFileBytes bytes"))
+            else if isUtf16(bytes) then Left(failure("is UTF-16 encoded; save it as UTF-8"))
             else if key.isEmpty then Left(failure("is empty"))
             else
               keyFault(key) match

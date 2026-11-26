@@ -209,11 +209,11 @@ class VaultApiKeyProviderSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     key(provider(settings("bom"))) shouldBe "sk-vault-bom-key"
   }
 
-  it should "refuse a key holding a control or non-ASCII character, naming the kind, without the key (#3109)" in {
+  it should "refuse a key holding a control character or one above U+00FF, naming the kind, without the key (#3109)" in {
     val cases = Seq(
-      "tab"      -> "sk-tab\tsecret-value"     -> "a control character at position 7",
+      "esc"      -> "sk-esc\u001bsecret-value" -> "a control character at position 7",
       "nul"      -> "sk-nul\u0000secret-value" -> "a control character at position 7",
-      "nonascii" -> "sk-caf\u00e9secret-value" -> "a non-ASCII character at position 7"
+      "nonascii" -> "sk-caf\u017esecret-value" -> "a character above U+00FF at position 7"
     )
     cases.foreach { case ((name, value), reason) =>
       replies.put(s"/v1/secret/data/chars-$name", 200 -> kv2("apiKey" -> value))
