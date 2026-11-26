@@ -91,7 +91,7 @@ object HTTPTool {
     .withProperty(
       Schema.property(
         "body",
-        Schema.string("Request body (for POST, PUT, PATCH)")
+        Schema.string("Request body (for POST, PUT, PATCH or DELETE)")
       )
     )
     .withProperty(
@@ -325,6 +325,10 @@ object HTTPTool {
     // Validate method
     if (!config.isMethodAllowed(method)) {
       Left(s"HTTP method '$method' is not allowed. Allowed: ${config.allowedMethods.mkString(", ")}")
+    } else if (body.isDefined && !KeyedMethods.contains(method.toUpperCase(Locale.ROOT))) {
+      Left(
+        s"HTTP method '${method.toUpperCase(Locale.ROOT)}' must not carry a request body; use POST, PUT, PATCH or DELETE"
+      )
     } else {
       if (config.timeout <= Duration.Zero)
         Left(s"TIMEOUT: HttpConfig.timeout must be positive (got ${config.timeout}), so no request was sent")

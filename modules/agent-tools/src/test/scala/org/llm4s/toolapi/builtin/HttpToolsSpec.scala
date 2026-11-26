@@ -1,9 +1,13 @@
 package org.llm4s.toolapi.builtin
 
+import com.sun.net.httpserver.HttpServer
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.http._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
 
 class HttpToolsSpec extends AnyFlatSpec with Matchers {
 
@@ -108,6 +112,17 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
     config.isDomainAllowed("other.com") shouldBe false
   }
 
+  it should "not let a www allowlist entry admit every subdomain of its bare host" in {
+    val config = HttpConfig.restricted(Seq("www.example.com"))
+
+    config.isDomainAllowed("example.com") shouldBe true
+    config.isDomainAllowed("www.example.com") shouldBe true
+    config.isDomainAllowed("WWW.Example.COM") shouldBe true
+    config.isDomainAllowed("api.www.example.com") shouldBe true
+    config.isDomainAllowed("api.example.com") shouldBe false
+    config.isDomainAllowed("evil.example.com") shouldBe false
+  }
+
   it should "validate methods" in {
     // Default config now only allows GET and HEAD for security (read-only by default)
     val defaultConfig = HttpConfig()
@@ -192,6 +207,43 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
             )
         }
       )
+  }
+
+  it should "reject a GET with a body before opening a connection" in {
+    val hits   = new AtomicInteger(0)
+    val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    server.createContext(
+      "/",
+      exchange => {
+        hits.incrementAndGet()
+        exchange.sendResponseHeaders(200, -1)
+        exchange.close()
+      }
+    )
+    server.start()
+    try
+      HTTPTool
+        .createSafe(HttpConfig(blockedDomains = Seq.empty, blockInternalIPs = false))
+        .fold(
+          e => fail(s"Tool creation failed: ${e.formatted}"),
+          tool => {
+            val params = ujson.Obj(
+              "url"    -> s"http://127.0.0.1:${server.getAddress.getPort}/",
+              "method" -> "GET",
+              "body"   -> "{}"
+            )
+            tool
+              .handler(SafeParameterExtractor(params))
+              .left
+              .map(_.message)
+              .fold(
+                err => err should include("must not carry a request body"),
+                result => fail(s"Expected Left but got Right: $result")
+              )
+          }
+        )
+    finally server.stop(0)
+    hits.get() shouldBe 0
   }
 
   it should "reject invalid URLs" in {
