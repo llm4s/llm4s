@@ -274,7 +274,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     denied(read(config, t.resolve("secret/x.txt")))
   }
 
-  it should "list an entry that links out of the allowed directory as a link, without following it" in {
+  it should "not list an entry that links out of the allowed directory" in {
     val t = newRoot()
     file(t.resolve("outside/secret.txt"), "SECRET-THAT-HAS-A-SIZE")
     file(t.resolve("data/ok.txt"), "ok")
@@ -283,9 +283,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     val entries = list(allowing(t.resolve("data"), followSymlinks = true), t.resolve("data"))
       .fold(e => fail(e), _.entries)
 
-    val outLink = entries.find(_.name == "out.txt").getOrElse(fail("the link is not listed"))
-    outLink.isSymlink shouldBe true
-    outLink.size shouldBe 0L
+    entries.find(_.name == "out.txt") shouldBe None
     entries.find(_.name == "ok.txt").map(_.size) shouldBe Some(2L)
   }
 
@@ -341,7 +339,7 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     read(config, spelled).map(_.content) shouldBe Right("inside")
     info(config, spelled).map(_.path) shouldBe Right(t.resolve("data/secret.txt").toString)
     list(config, t.resolve("data/linksub/..")).map(_.entries.map(_.name).toSet) shouldBe
-      Right(Set("secret.txt", "linksub"))
+      Right(Set("secret.txt"))
     write(WriteConfig(allowedPaths = Seq(t.resolve("data").toString)), t.resolve("data/linksub/../pwn.txt"), "x")
       .map(_.path) shouldBe Right(t.resolve("data/pwn.txt").toString)
     Files.exists(t.resolve("outside/pwn.txt")) shouldBe false

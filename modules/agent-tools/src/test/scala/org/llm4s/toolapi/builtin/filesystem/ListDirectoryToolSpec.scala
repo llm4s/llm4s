@@ -6,8 +6,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.{ Files, Path }
+import java.nio.file.attribute.PosixFilePermissions
 import scala.jdk.CollectionConverters._
-import scala.util.Using
+import scala.util.{ Try, Using }
 
 /**
  * The `list_directory` tool's limits, ordering, counts, sizes and errors (#2236). Symbolic links and path-policy
@@ -36,13 +37,22 @@ class ListDirectoryToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
       Using.resource(Files.walk(root))(_.iterator().asScala.toList.reverse.foreach(p => Files.deleteIfExists(p)))
 
   // Blocked paths are emptied so the test does not depend on where the platform puts its temporary directory
-  private def tool: ToolFunction[ListDirectoryResult] =
+  private def toolWith(config: FileConfig): ToolFunction[ListDirectoryResult] =
     ListDirectoryTool
-      .createSafe(FileConfig(allowedPaths = Some(Seq(tempDir.toString)), blockedPaths = Seq.empty))
+      .createSafe(config)
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
-  private def list(params: (String, ujson.Value)*): Either[String, ListDirectoryResult] =
+  private def tool: ToolFunction[ListDirectoryResult] =
+    toolWith(FileConfig(allowedPaths = Some(Seq(tempDir.toString)), blockedPaths = Seq.empty))
+
+  private def listWith(
+    tool: ToolFunction[ListDirectoryResult],
+    params: (String, ujson.Value)*
+  ): Either[String, ListDirectoryResult] =
     tool.handler(SafeParameterExtractor(ujson.Obj.from(params))).left.map(_.message)
+
+  private def list(params: (String, ujson.Value)*): Either[String, ListDirectoryResult] =
+    listWith(tool, params: _*)
 
   private def listOk(params: (String, ujson.Value)*): ListDirectoryResult =
     list(params: _*).fold(err => fail(s"Expected Right but got Left: $err"), identity)
@@ -105,6 +115,45 @@ class ListDirectoryToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     result.entries.last.name shouldBe "file-099.txt"
     result.truncated shouldBe true
     result.totalFiles shouldBe 100
+  }
+
+  it should "treat a max_entries below 1 as 1" in {
+    file("a.txt")
+    file("b.txt")
+
+    val result = listOk("path" -> tempDir.toString, "max_entries" -> 0)
+
+    result.entries.map(_.name) shouldBe Seq("a.txt")
+    result.truncated shouldBe true
+  }
+
+  it should "not describe entries the file policy blocks" in {
+    file("visible.txt", bytes = 12)
+    val blocked = dir(".blocked")
+    Files.write(blocked.resolve("secret.txt"), "secret".getBytes("UTF-8"))
+
+    val blockingTool = toolWith(
+      FileConfig(allowedPaths = Some(Seq(tempDir.toString)), blockedPaths = Seq(blocked.toString))
+    )
+    val result = listWith(blockingTool, "path" -> tempDir.toString, "include_hidden" -> true)
+      .fold(err => fail(s"Expected Right but got Left: $err"), identity)
+
+    result.entries.map(_.name) shouldBe Seq("visible.txt")
+    result.totalFiles shouldBe 1
+  }
+
+  it should "not fail the whole listing when a child's attributes cannot be read" in {
+    assume(Try(Files.getPosixFilePermissions(tempDir)).isSuccess, "POSIX permissions only")
+    assume(System.getProperty("user.name") != "root", "root can stat through a directory without execute permission")
+    val original = Files.getPosixFilePermissions(tempDir)
+    file("a.txt")
+
+    Files.setPosixFilePermissions(tempDir, PosixFilePermissions.fromString("r--r--r--"))
+    try {
+      val result = listOk("path" -> tempDir.toString)
+      result.entries shouldBe empty
+      result.truncated shouldBe false
+    } finally Files.setPosixFilePermissions(tempDir, original)
   }
 
   it should "report a file's length in bytes and a directory's size as 0" in {
