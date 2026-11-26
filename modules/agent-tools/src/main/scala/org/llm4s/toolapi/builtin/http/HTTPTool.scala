@@ -98,7 +98,7 @@ object HTTPTool {
       Schema.property(
         "content_type",
         Schema
-          .string("Content-Type header (default: application/json for POST/PUT/PATCH)")
+          .string("Content-Type header (default: application/json for POST, PUT, PATCH or DELETE)")
           .withEnum(Seq("application/json", "application/x-www-form-urlencoded", "text/plain", "application/xml"))
       )
     )
@@ -133,7 +133,10 @@ object HTTPTool {
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))
 
-  /** Methods that write, and so carry an agent call's idempotency key (#1740). */
+  /**
+   * Methods that write, and so carry an agent call's idempotency key (#1740). They are also the only methods a
+   * request body is sent with (#3048): `HttpURLConnection` sends any request whose body is written as a `POST`.
+   */
   private val KeyedMethods: Set[String] = Set("POST", "PUT", "PATCH", "DELETE")
 
   /**
@@ -500,9 +503,12 @@ object HTTPTool {
         // Set headers
         headers.foreach(h => h.foreach { case (k, v) => connection.setRequestProperty(k, v) })
 
-        // Set content type for requests with body
+        // Set content type for requests with body: `content_type`, else a caller-set `Content-Type` header, else
+        // JSON for every method that may carry one. Without one, HttpURLConnection labels a written body
+        // application/x-www-form-urlencoded (a DELETE's did, #3048).
+        val headerSetsContentType = headers.exists(_.keys.exists(k => headerKey(k) == "content-type"))
         val effectiveContentType = contentType.orElse(
-          if (Seq("POST", "PUT", "PATCH").contains(method.toUpperCase(Locale.ROOT))) Some("application/json")
+          if (!headerSetsContentType && KeyedMethods.contains(method.toUpperCase(Locale.ROOT))) Some("application/json")
           else None
         )
         effectiveContentType.foreach(ct => connection.setRequestProperty("Content-Type", ct))
