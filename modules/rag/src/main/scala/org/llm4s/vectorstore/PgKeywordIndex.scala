@@ -107,7 +107,7 @@ final class PgKeywordIndex private (
               docs.foreach { doc =>
                 stmt.setString(1, doc.id)
                 stmt.setString(2, doc.content)
-                stmt.setString(3, metadataToJson(doc.metadata))
+                stmt.setString(3, PgMetadataJson.write(doc.metadata))
                 stmt.addBatch()
               }
               stmt.executeBatch()
@@ -232,7 +232,7 @@ final class PgKeywordIndex private (
                   KeywordDocument(
                     id = rs.getString("id"),
                     content = rs.getString("content"),
-                    metadata = jsonToMetadata(rs.getString("metadata"))
+                    metadata = PgMetadataJson.read(rs.getString("metadata"))
                   )
                 )
               } else None
@@ -372,7 +372,7 @@ final class PgKeywordIndex private (
         id = rs.getString("id"),
         content = rs.getString("content"),
         score = rs.getDouble("score"),
-        metadata = jsonToMetadata(rs.getString("metadata")),
+        metadata = PgMetadataJson.read(rs.getString("metadata")),
         highlights = highlights
       )
     }
@@ -420,30 +420,6 @@ final class PgKeywordIndex private (
     case other      => stmt.setString(index, other.toString)
   }
 
-  private def metadataToJson(metadata: Map[String, String]): String =
-    if (metadata.isEmpty) "{}"
-    else {
-      val entries = metadata.map { case (k, v) =>
-        val escapedKey   = k.replace("\\", "\\\\").replace("\"", "\\\"")
-        val escapedValue = v.replace("\\", "\\\\").replace("\"", "\\\"")
-        s""""$escapedKey":"$escapedValue""""
-      }
-      s"{${entries.mkString(",")}}"
-    }
-
-  private def jsonToMetadata(json: String): Map[String, String] =
-    if (json == null || json.isEmpty || json == "{}") Map.empty
-    else {
-      val pattern = """"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"""".r
-      pattern
-        .findAllMatchIn(json)
-        .map { m =>
-          val key   = m.group(1).replace("\\\"", "\"").replace("\\\\", "\\")
-          val value = m.group(2).replace("\\\"", "\"").replace("\\\\", "\\")
-          key -> value
-        }
-        .toMap
-    }
 }
 
 object PgKeywordIndex {

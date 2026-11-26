@@ -108,7 +108,7 @@ final class PgVectorStore private (
             case Some(c) => stmt.setString(4, c)
             case None    => stmt.setNull(4, java.sql.Types.VARCHAR)
           }
-          stmt.setString(5, metadataToJson(record.metadata))
+          stmt.setString(5, PgMetadataJson.write(record.metadata))
           stmt.executeUpdate()
           ()
         }
@@ -144,7 +144,7 @@ final class PgVectorStore private (
                   case Some(c) => stmt.setString(4, c)
                   case None    => stmt.setNull(4, java.sql.Types.VARCHAR)
                 }
-                stmt.setString(5, metadataToJson(record.metadata))
+                stmt.setString(5, PgMetadataJson.write(record.metadata))
                 stmt.addBatch()
               }
               stmt.executeBatch()
@@ -467,7 +467,7 @@ final class PgVectorStore private (
     PostgresVectorHelpers.stringToEmbedding(embeddingStr).map { embedding =>
       val content      = Option(rs.getString("content")).filter(_.nonEmpty)
       val metadataJson = rs.getString("metadata")
-      val metadata     = jsonToMetadata(metadataJson)
+      val metadata     = PgMetadataJson.read(metadataJson)
 
       VectorRecord(
         id = rs.getString("id"),
@@ -519,16 +519,6 @@ final class PgVectorStore private (
     case other      => stmt.setString(index, other.toString)
   }
 
-  private def metadataToJson(metadata: Map[String, String]): String =
-    if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
-
-  private def jsonToMetadata(json: String): Map[String, String] =
-    if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      val pattern = """"([^"]+)":\s*"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
 }
 
 object PgVectorStore {
