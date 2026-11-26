@@ -1,5 +1,7 @@
 # OpenAI Responses API, PR 4 (the default for api.openai.com) Implementation Plan
 
+> **Overtaken during execution** in several places (routing rule 6, the Scalafix umbrellas, the registry data patches): the design doc, `docs/superpowers/specs/2026-11-26-openai-responses-api-design.md`, records what was built.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** An `openai` client that points at api.openai.com uses the Responses API without being told to, the model registry decides the exceptions, every entry point can pin either API, and a thread can be told not to keep reasoning.

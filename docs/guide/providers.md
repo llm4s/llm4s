@@ -167,31 +167,43 @@ everything else stays on Chat Completions, as in 1.0.x
 ([#2900](https://github.com/llm4s/llm4s/issues/2900)).
 
 The client decides once, when it is built, and logs the choice and the reason at INFO, for example
-`... client for model gpt-4o uses chat-completions: the model registry does not list gpt-4o for /v1/responses; set
-api = responses to use it there`. The first rule that matches wins:
+`OpenAI client for model gpt-4-turbo uses chat-completions: the model registry does not list gpt-4-turbo for
+/v1/responses; set api = responses to use it there`. The first rule that matches wins:
 
 | # | When | API |
 |---|---|---|
 | 1 | Azure OpenAI (`provider = "azure"`) | Chat Completions |
 | 2 | The section sets `api` (or the `OpenAIConfig` was built with `withApi`) | As set |
 | 3 | The provider is not `openai` (Requesty), or an `OpenAIConfig` built in code belongs to another provider (one pointed at OpenRouter) | Chat Completions |
-| 4 | The model registry marks the model `mode: responses`, a model OpenAI serves only there (the pro, codex and deep-research models: `o3-pro`, `gpt-5-pro`, `gpt-5-codex`, `o3-deep-research`) | Responses, wherever `baseUrl` points |
+| 4 | The model registry marks the model `mode: responses`, a model OpenAI serves only there (the pro, codex and deep-research models: `o1-pro`, `o3-pro`, `gpt-5-pro`, `gpt-5.5-pro`, `gpt-5-codex`, `gpt-5.3-codex`, `o3-deep-research`, `o4-mini-deep-research`, ...) | Responses, wherever `baseUrl` points, even a gateway or proxy, and with an `openai/` prefix |
 | 5 | `baseUrl` is not OpenAI's own `https://api.openai.com` (a proxy, a gateway, a mock server, or a regional host such as `eu.api.openai.com`) | Chat Completions |
 | 6 | The model registry knows the model and does not list `/v1/responses` for it | Chat Completions |
 | 7 | Otherwise: the registry lists `/v1/responses` for the model, or does not know it | Responses |
 
 On `https://api.openai.com/v1`, with `api` unset, that means:
 
-- **Responses:** `gpt-4.1`, the gpt-5 family (`gpt-5`, `gpt-5-mini`, ...), the GPT 5.6, 6 and 6.1 models
-  (`gpt-5.6-terra`, `gpt-6-astra`, `gpt-6.1-sol`, ...) and `o3`, which the bundled registry lists for
-  `/v1/responses`; and a model id the registry does not know, such as a model newer than the bundled data or a
-  fine-tune (`ft:gpt-4o:my-org::abc123`).
-- **Chat Completions:** `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, and the
-  dated audio-preview snapshots (`gpt-4o-audio-preview-2024-12-17`, `gpt-4o-audio-preview-2025-06-03`,
-  `gpt-4o-mini-audio-preview-2024-12-17`). The bundled registry knows these but does not list `/v1/responses` for
-  them. The rule takes the registry's word because some such models are not served there: on 2026-11-26 OpenAI
-  refused `gpt-4o-search-preview` and `gpt-4o-mini-search-preview` on the Responses API with a 400 ("not supported
-  with the Responses API"), and it has since retired both.
+- **Responses:** `gpt-4o` and `gpt-4o-mini` (and the snapshots `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`,
+  `gpt-4o-mini-2024-07-18`), `gpt-4.1`, the gpt-5 family (`gpt-5`, `gpt-5-mini`, ...), the GPT 5.6, 6 and 6.1
+  models (`gpt-5.6-terra`, `gpt-6-astra`, `gpt-6.1-sol`, ...) and `o3`, which the registry lists for
+  `/v1/responses`; and a model id the registry does not know, such as a model newer than the bundled data.
+- **Chat Completions:** the models the registry knows and does not list there: `gpt-4-turbo`, `gpt-4`,
+  `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots
+  (`gpt-4o-audio-preview-2024-12-17`, `gpt-4o-audio-preview-2025-06-03`, `gpt-4o-mini-audio-preview-2024-12-17`),
+  the `gpt-audio` family and the search models (`gpt-4o-search-preview`, `gpt-5-search-api`, ...).
+- **A fine-tune** follows the registry's `ft:` entry for its base, else its base model's entry: the bundled `ft:`
+  entries (`ft:gpt-4o-mini-2024-07-18`, `ft:gpt-4.1-2025-04-14`, `ft:o4-mini-2025-04-16`, ...) list no endpoints,
+  so `ft:gpt-4o-mini-2024-07-18:my-org::abc123` stays on Chat Completions. A fine-tune of a base the registry does
+  not know is unknown, and uses Responses.
+
+The bundled LiteLLM data is wrong about some of these, so llm4s corrects it with patch entries
+([Model Metadata](../reference/model-metadata#embedded-overrides)). On 2026-11-26 every OpenAI chat model in the
+registry was sent one request on `/v1/responses`: `gpt-4o`, `gpt-4o-mini` and their three snapshots answered,
+though LiteLLM lists no endpoints for them, so a patch lists `/v1/responses`; the `gpt-audio` models were refused
+("not supported with the Responses API") though LiteLLM lists it, so a patch removes it, as it does for
+`gpt-audio-mini-2025-10-06`, which could not be called but is the same family. The search models and `gpt-audio-1.5`
+were refused too, and the registry already does not list them. `o1`, `o3-mini`, `o4-mini`, `gpt-4-turbo`,
+`gpt-4`, `gpt-3.5-turbo` and `gpt-4o-2024-05-13` could not be called with that account: they stay on Chat
+Completions because the data does not list them, unverified.
 
 A model id the registry does not hold is treated as unknown and uses the Responses API on api.openai.com: an undated
 alias of a preview model (`gpt-4o-audio-preview`; only its dated snapshots are in the registry), or a snapshot newer
@@ -199,9 +211,17 @@ than the bundled data. If such a model is served on Chat Completions only, set `
 section, or add it to a model registry of your own.
 
 To move a model that stays on Chat Completions to the Responses API, set `api = "responses"` on its section, or use
-a [model registry of your own](../reference/model-metadata#your-own-metadata) whose entry for the model lists
+a [model registry of your own](../reference/model-metadata#endpoints-and-the-openai-api) whose entry for the model lists
 `/v1/responses` in `supported_endpoints` (it replaces the bundled catalogue, so it must hold every model you use).
 To keep 1.0.x behaviour for every model, set `api = "chat-completions"`: the request is then what 1.0.x sent.
+
+Another base URL (rule 5) keeps a model on Chat Completions, with one exception: a responses-only model (rule 4)
+uses the Responses API behind a gateway or proxy too, with or without an `openai/` prefix, because OpenAI's Chat
+Completions cannot serve it. A gateway that bridges Chat Completions for such a model needs
+`api = "chat-completions"` on the section.
+
+Routing follows the model data, so a later refresh of the bundled data may move more models between the APIs; the
+release notes will say so.
 
 The section keys that choose the API and the reasoning settings, all optional:
 
@@ -325,9 +345,10 @@ The stored reasoning travels on llm4s's Scala message types. The message views o
 Kotlin API, which wraps it) and of Spring AI do not carry it, so a conversation rebuilt through them is sent without
 it.
 
-On `gpt-5.6-luna` a tool loop's final reply after a tool result was sometimes empty, equally often with the reasoning
-sent back and with `keepReasoning = false` (measured on 2026-11-26): that is the model's behaviour, not a consequence
-of keeping reasoning.
+On `gpt-5.6-luna` on the Responses API, a tool loop's final reply after a tool result was sometimes empty, equally
+often with the reasoning sent back and with `keepReasoning = false` (measured on 2026-11-26). That compares sending
+the reasoning back with not sending it, both on the Responses API: it is the model's behaviour there, not a
+consequence of keeping reasoning, and says nothing about how 1.0.x on Chat Completions behaved.
 
 ### What differs on the Responses API
 

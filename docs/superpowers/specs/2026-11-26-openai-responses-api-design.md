@@ -41,12 +41,23 @@ by the maintainer yet.
    with the Responses API", and so did `gpt-audio-1.5`; `gpt-4o` answered 200 (OpenAI has since retired the two
    search-preview models: a later run on 2026-11-26 got 404 "has been deprecated"). The bundled file has 48 OpenAI chat
    entries with no `supported_endpoints`. **This narrows decision 1**: the models the registry knows but does not list
-   (`gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini`, `o4-mini`, the dated preview snapshots) stay on Chat Completions until
-   the data lists the endpoint or the section sets `api = "responses"`. A model id the registry does not hold (an
-   undated alias such as `gpt-4o-audio-preview`, a newer snapshot) uses Responses.
+   stay on Chat Completions until the data lists the endpoint or the section sets `api = "responses"`. The `gpt-4o`
+   and `gpt-4o-mini` ids verified live (`gpt-4o`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini`,
+   `gpt-4o-mini-2024-07-18`) are listed by an llm4s patch entry (see the probe under Routing), so they do use
+   Responses. What stays on Chat Completions without live verification, because this account could not call it:
+   `gpt-3.5-turbo*`, `gpt-4`, `gpt-4-turbo*`, `gpt-4o-2024-05-13`, the dated audio-preview snapshots, `o1*`,
+   `o3-mini*` and `o4-mini*`. A model id the registry does not hold (an undated alias such as
+   `gpt-4o-audio-preview`, a newer snapshot) uses Responses.
 - **P5. Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
    message views dropping thinking blocks when a caller rebuilds a conversation; `DeterministicCompressor` unsealing
    tool-call-only messages; Azure OpenAI on Responses; OpenAI's hosted tools.
+- **P6. A responses-only model uses Responses behind any base URL** (rule 4 before rule 5): a model the registry marks
+   `mode: responses` (the pro, codex and deep-research models: `o1-pro`, `o3-pro`, `gpt-5-pro`, `gpt-5.5-pro`,
+   `gpt-5-codex`, `gpt-5.3-codex`, `o3-deep-research`, `o4-mini-deep-research`, ...) goes to `/v1/responses` even on a
+   gateway or proxy base URL, with or without an `openai/` prefix, because OpenAI's Chat Completions cannot serve it;
+   a gateway that bridges Chat Completions for such a model needs `api = "chat-completions"`. **For the maintainer to
+   confirm.** The alternative: leave every non-OpenAI base URL on Chat Completions (rule 5 before rule 4), so a
+   gateway user opts in with `api = "responses"` and nothing changes behind a gateway.
 
 ## Goals
 
@@ -101,18 +112,34 @@ by the maintainer yet.
 | 6 | The registry knows the model and its entry does not list `/v1/responses`, whether it lists other endpoints or none | Chat Completions |
 | 7 | Otherwise: the entry lists `/v1/responses`, or the registry does not know the model | Responses |
 
-- The per-model facts come from the model registry (decision 2), looked up as `OpenAIReasoning.openAIEntry` (an
+- The per-model facts come from the model registry (decision 2), looked up as `OpenAIReasoning.describingEntry` (an
   entry whose `litellm_provider` is `openai`, `azure` or `text-completion-openai`); a lookup that fails counts as a model the registry does not know. There is no model
   list in `llm4s-openai`. A registry of the user's own (`llm4s.modelRegistry`) that lists `/v1/responses` for a
   model opts it in.
 - Rule 6 is data-positive (P4): 48 older chat entries list no endpoints, and some of them (the search
   previews) are refused on `/v1/responses`.
+- A fine-tune (`ft:<base>:<org>:<suffix>:<id>`) is looked up as `OpenAIReasoning.describingEntry` finds it: the id as
+  given, then the registry's `ft:<base>` entry, then the base's own entry (dated, then undated). The bundled `ft:`
+  entries list no endpoints, so a fine-tune they cover stays on Chat Completions; one none of these resolve is unknown.
+- **The probe, 2026-11-26.** `POST /v1/responses` (`store: false`, 16 output tokens) for all 92 OpenAI chat-mode ids
+  in the bundled registry. Listed for `/v1/responses` and answered 200: 36. Listed but refused with 400 "not
+  supported with the Responses API": `gpt-audio`, `gpt-audio-2025-08-28`, `gpt-audio-mini`,
+  `gpt-audio-mini-2025-12-15`. Listed, 404 (no access): 16, `gpt-audio-mini-2025-10-06` among them. Not listed but
+  answered 200: `gpt-4o`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini`, `gpt-4o-mini-2024-07-18`. Not
+  listed and refused: the six search ids (`gpt-4o-search-preview`, `gpt-4o-mini-search-preview`, their 2025-03-11
+  snapshots, `gpt-5-search-api`, `gpt-5-search-api-2025-10-14`) and `gpt-audio-1.5`. Not listed, 404: 24, among them
+  `gpt-3.5-turbo*`, `gpt-4`, `gpt-4-turbo*`, `gpt-4o-2024-05-13`, the audio-preview snapshots, `o1*`, `o3-mini*`,
+  `o4-mini*`. The registry is corrected from it by `"llm4s_patch": true` entries in `llm4s_model_overrides.json`
+  that set only `supported_endpoints`: the five `gpt-4o` ids gain `/v1/responses`, the five `gpt-audio` ids lose it
+  (`gpt-audio-mini-2025-10-06` unprobed, patched as its family). `OpenAIApiRoutingGoldenSpec` pins the API of every
+  OpenAI chat and responses-mode id (84 Responses, 36 Chat Completions), so a data refresh that moves one fails.
 - OpenAI's regional hosts (`us.`, `eu.`, `ae.api.openai.com`) are not treated as the default base URL, so they stay
   on Chat Completions unless `api` is set.
 - **Verified live on 2026-11-26** (slice 4, `OpenAISmokeSpec`, request bodies read from a `ProviderExchangeSink`): with no `api`,
   `gpt-6.1-terra` went to Responses (`input` in the body, reasoning tokens reported, no adjustment); `gpt-6.1-terra` with
   `api = "chat-completions"` went to Chat Completions (`messages`, an `Adjusted` adjustment, 0 reasoning tokens);
-  `gpt-4o-mini`, no `api`, went to Chat Completions. `gpt-4o-search-preview` and `gpt-4o-mini-search-preview`
+  `gpt-4o-mini`, no `api`, went to Chat Completions (before the patch that lists it; it now uses Responses).
+  `gpt-4o-search-preview` and `gpt-4o-mini-search-preview`
   could not be tried: OpenAI answered 404 "has been deprecated" for both, so whether a search-preview model still works
   on the default client was not shown, and neither request body was recorded (the failed exchange carried none).
 - With `api` set explicitly the request goes where it was told and OpenAI's error is reported. An explicit `api` on
@@ -321,6 +348,8 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 
 ## Carried into later slices
 
+(A 46-minute gap seen in one live run was the test machine asleep, not a hung request.)
+
 Open after slice 4:
 - The follow-ups of P5: the Java facade (and so the Kotlin API, which wraps it) and Spring AI message views drop opaque blocks when a caller
   rebuilds a conversation; `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's
@@ -329,8 +358,6 @@ Open after slice 4:
 - Verify live what an in-stream error looks like on the wire (flat or nested): one probe (an image part with an unreachable URL, streamed on `gpt-4.1-mini`) was refused with an HTTP-level `Invalid request: Failed to download file.` before any event, 0 chunks, so it did not answer this.
 - `response.output_item.added` already carrying arguments would double them in a consumer that accumulates chunks.
 - Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses: not examined in slice 4's live run.
-- A failed reply (HTTP 200, `status: failed`) with `invalid_encrypted_content` gets no remedy hint; only an HTTP error
-  or an in-stream error event does.
 - Chat Completions' fake-streaming route lets a throwing `onChunk` escape (pre-existing).
 
 ## Left to the builder

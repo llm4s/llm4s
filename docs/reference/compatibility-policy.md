@@ -94,7 +94,12 @@ What it does **not** cover:
   minor releases, and a pattern that binds its fields by position stops compiling when it does: since 1.0.0,
   `OpenAIConfig` has gone from 11 fields to 14 and `ModelMetadata` from 8 to 9. Each gain is listed
   in the [Migration Guide](migration), and `Llm4sMigrateFrom_1_0` rewrites such a pattern
-  ([Scalafix](scalafix#one-umbrella-rule-per-starting-version)). Read the fields by name to avoid it.
+  ([Scalafix](scalafix#one-umbrella-rule-per-starting-version)). Read the fields by name to avoid it. This
+  exclusion was introduced with 1.1.0; the policy as published at 1.0.0 did not state it.
+- Which provider endpoint a client calls by default. A minor release may change it, as 1.1.0 moves an `openai`
+  client on api.openai.com to the Responses API ([Migration Guide](migration)); such a change is announced with a
+  *Breaking changes* line in the CHANGELOG and comes with a setting that restores the previous behaviour (there,
+  `api = "chat-completions"`).
 
 ---
 

@@ -18,10 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `StringSchema.withPattern(regex)`, written as JSON Schema `pattern`; an agent's argument validator checks it (found anywhere in the string unless anchored, with `java.util.regex`) for tool arguments and `withOutput` answers, so a raw schema using `pattern` now builds, and `llm4s-schema-iron` derives it from `Match` ([#2954](https://github.com/llm4s/llm4s/issues/2954); [Custom Tools](docs/guide/custom-tools.md#string-patterns)).
+- **Added** `ModelMode.Responses` and `ModelMetadata.supportedEndpoints`, read from the bundled model data's `mode` and `supported_endpoints`; llm4s's overrides correct the endpoints of the `gpt-4o` and `gpt-audio` models ([#2900](https://github.com/llm4s/llm4s/issues/2900); [Model Metadata](docs/reference/model-metadata.md#endpoints-and-the-openai-api)).
 
 ### Providers
 
-- **Changed** an `openai` section on api.openai.com uses OpenAI's Responses API for a model the model registry lists for `/v1/responses` or does not know (`gpt-4.1`, the gpt-5 family, `o3`): reasoning works with tools, a turn's reasoning is kept across the thread (`keepReasoning`), and `streamComplete` streams natively; `api = "chat-completions"` keeps 1.0.x behaviour.
+- **Changed** an `openai` section on api.openai.com uses OpenAI's Responses API for a model the model registry lists for `/v1/responses` or does not know (`gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, the gpt-5 family, `o3`; `gpt-4-turbo`, `o1`, `o4-mini` and the `gpt-audio` models stay on Chat Completions): reasoning works with tools, a turn's reasoning is kept across the thread (`keepReasoning`), and `streamComplete` streams natively; `api = "chat-completions"` keeps 1.0.x behaviour.
   The section keys `api`, `reasoningSummary` and `keepReasoning` have Java, Kotlin and Spring settings ([#2900](https://github.com/llm4s/llm4s/issues/2900); [migration](docs/reference/migration.md#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900)).
 - **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
 
