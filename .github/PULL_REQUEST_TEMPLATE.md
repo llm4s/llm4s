@@ -7,6 +7,17 @@
 ## How was this tested?
 <!-- Describe what you tested and how. Include relevant commands or test names. -->
 
+## Release impact
+<!-- Pick one and add the matching label. See https://llm4s.org/contribute/release#merging-after-10 -->
+
+- [ ] `semver:patch` — a fix, docs, tests, build, or `private[llm4s]` code only
+- [ ] `semver:minor` — adds or deprecates API, or changes an `@Experimental` type or a Beta/Experimental module
+- [ ] `semver:major` — breaks a `@Stable` API (not merged until 2.0)
+
+If this touches a `@Stable` API: the old API still compiles and behaves the same (no changed signature or default,
+no new ambiguous overload or wildcard-importable `given`, no renamed config key, no change to stored JSON), and
+anything replaced is `@deprecated` rather than changed.
+
 ## Checklist
 
 - [ ] I have read the [Contributing Guide](https://llm4s.org/reference/contributing)
