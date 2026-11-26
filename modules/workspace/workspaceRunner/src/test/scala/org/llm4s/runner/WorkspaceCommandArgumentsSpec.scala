@@ -1044,6 +1044,100 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refusal("findstr", "x", "a,b.txt") shouldBe None
   }
 
+  it should "judge every part of a built-in's argument that cmd.exe reads as a name (#3052)" in inWorkspace { fx =>
+    // `copy` splits a source at `+` and concatenates the parts, and a built-in reads an unquoted `/` inside an
+    // argument as a switch, so `a.txt+../outside/secret.txt` reads `../outside/secret.txt` and `../workspace`
+    // names `..`, while the whole argument reads as a path inside the workspace.
+    val root = fx.root.toRealPath()
+    def refusal(program: String, args: String*) =
+      CommandPolicy.refusal(program, args, isWindows = true, root, root, Map.empty).map(_.code)
+    Seq(
+      Seq("copy", "a.txt+../outside/secret.txt", "c.txt"),
+      Seq("copy", "a.txt+sub/../../outside/secret.txt", "c.txt"),
+      Seq("copy", "a.txt", "c.txt+../outside/secret.txt"),
+      Seq("copy", "a.txt+b.txt+../outside/secret.txt", "c.txt"),
+      Seq("copy", "/b", "a.txt+../outside/secret.txt", "c.txt"),
+      Seq("copy", "../outside/secret.txt+a.txt", "c.txt"),
+      Seq("type", "a.txt+../outside/secret.txt"),
+      Seq("dir", "a+.."),
+      Seq("dir", "../workspace"),
+      Seq("type", "../workspace/a.txt"),
+      Seq("copy", "../workspace/a.txt", "c.txt"),
+      Seq("move", "a.txt", "../workspace/m.txt"),
+      Seq("copy", "a.txt+../workspace/b.txt", "c.txt"),
+      Seq("type", "//server/share/x"),
+      Seq("copy", "a.txt+//server/share/x", "c.txt")
+    ).foreach { command =>
+      withClue(s"${command.mkString(" ")}: ") {
+        refusal(command.head, command.tail: _*) shouldBe Some(PathEscape)
+      }
+    }
+    // Each part is also held to the device and trailing-dot rules, and a write may not reach `.git` through one
+    refusal("copy", "con+a.txt", "c.txt") shouldBe Some(ArgumentNotAllowed)
+    refusal("copy", "a.txt+nul", "c.txt") shouldBe Some(ArgumentNotAllowed)
+    refusal("copy", "a.txt", "c.txt+.git/config") shouldBe Some(ArgumentNotAllowed)
+    // Controls: concatenation inside the workspace, a name holding `+`, a name before a switch, and a program that is
+    // not a built-in, which gets its arguments from the C runtime and opens `a+b.txt` whole
+    refusal("copy", "a.txt+b.txt", "c.txt") shouldBe None
+    refusal("copy", "/b", "a.txt+sub/Main.scala", "c.txt") shouldBe None
+    refusal("copy", "a.txt", "+", "b.txt", "c.txt") shouldBe None
+    refusal("type", "c++.txt") shouldBe None
+    refusal("dir", "sub/w") shouldBe None
+    refusal("findstr", "x", "a+b.txt") shouldBe None
+    refusal("findstr", "x", "../workspace/a.txt") shouldBe None
+    // Off Windows nothing goes through cmd.exe, and `cp` opens its operands whole
+    CommandPolicy.refusal("cp", Seq("a.txt+../outside/x", "c.txt"), isWindows = false, root, root, Map.empty) shouldBe
+      None
+  }
+
+  it should "judge every part of a built-in's argument through executeCommand too (#3052)" in inWorkspace { fx =>
+    val rw = fx.interface(ReadWrite, windows = true)
+    refuses(rw, "copy a.txt+../outside/secret.txt c.txt", PathEscape)
+    refuses(rw, "copy a.txt + b.txt+../outside/secret.txt c.txt", PathEscape)
+    refuses(fx.interface(ReadOnly, windows = true), "dir ../workspace", PathEscape)
+    passesPolicy(rw, "copy a.txt+b.txt c.txt")
+  }
+
+  it should "refuse a copy whose '+' part is a root-relative, drive, UNC or device path on a Windows host (#3052)" in
+    inWorkspace { fx =>
+      assume(isWindowsHost, "these are paths only on Windows")
+      val rw    = fx.interface(ReadWrite, windows = true)
+      val out   = fx.outside.toString
+      val drive = fx.root.getRoot.toString.take(2) // `C:`
+      val other = if (drive.equalsIgnoreCase("Z:")) "Y:" else "Z:"
+      Seq(
+        "copy 'a.txt+\\Windows\\win.ini' c.txt",
+        s"copy 'a.txt+\\${out.drop(3)}\\secret.txt' c.txt", // root-relative: the workspace's drive
+        s"copy 'a.txt+$out\\secret.txt' c.txt",
+        s"copy 'a.txt+$drive..\\outside\\secret.txt' c.txt", // drive-relative from the working directory
+        s"copy 'a.txt+${other}secret.txt' c.txt",            // drive-relative on another drive
+        "copy 'a.txt+\\\\server\\share\\secret.txt' c.txt",
+        "copy 'a.txt+\\\\?\\UNC\\server\\share\\secret.txt' c.txt",
+        s"copy 'a.txt+\\\\?\\$out\\secret.txt' c.txt",
+        s"copy 'a.txt+\\\\.\\$out\\secret.txt' c.txt",
+        s"copy 'a.txt+\\??\\$out\\secret.txt' c.txt",
+        s"copy a.txt 'c.txt+$out\\secret.txt'",
+        "copy '..\\workspace\\a.txt+..\\outside\\secret.txt' c.txt",
+        s"type 'a.txt+$out\\secret.txt'"
+      ).foreach(command => refuses(rw, command, PathEscape))
+      // `dir ..\\outside/..\\workspace` reads `..\\outside` and a switch; the whole argument names the workspace
+      refuses(rw, "dir '..\\outside/..\\workspace'", PathEscape)
+      // A UNC or device path anywhere is refused without being looked up, so no host it names is contacted
+      Seq("type '\\\\server\\share\\x'", "type //server/share/x", "copy a.txt+//server/share/x c.txt")
+        .foreach(command => refuses(rw, command, PathEscape))
+    }
+
+  it should "concatenate only the workspace's files with copy on a Windows host (#3052)" in inWorkspace { fx =>
+    assume(isWindowsHost, "cmd.exe runs the built-ins only on Windows")
+    val rw = fx.interface(ReadWrite, windows = true)
+    refuses(rw, s"copy 'a.txt+${fx.outside}\\secret.txt' out.txt", PathEscape)
+    Files.exists(fx.root.resolve("out.txt")) shouldBe false
+    val copied = rw.executeCommand("copy /b a.txt+b.txt c.txt", None, Some(30.seconds), None)
+    withClue(s"stderr: ${copied.stderr}\n")(copied.exitCode shouldBe 0)
+    new String(Files.readAllBytes(fx.root.resolve("c.txt")), StandardCharsets.UTF_8) shouldBe
+      "b\na\na\nc\nb\na\na\nc\n"
+  }
+
   it should "type only the checked file when a delimiter is refused on a Windows host" in inWorkspace { fx =>
     assume(isWindowsHost, "cmd.exe runs the built-ins only on Windows")
     val ws = fx.interface(ReadOnly, windows = true)

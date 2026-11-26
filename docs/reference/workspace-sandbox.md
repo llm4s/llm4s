@@ -6,7 +6,7 @@ search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
 cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
-cites_issues: [3046, 3047, 3053]
+cites_issues: [3046, 3047, 3052, 3053]
 ---
 
 # Workspace Sandbox Configuration
@@ -343,7 +343,19 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
   inside. `echo` may still print `,`, `=` and parentheses. Programs that are not built-ins (`findstr`) get their
   arguments from the C runtime, which splits on space and tab only, so `findstr x a,b.txt` runs. A wildcard in the last
   component (`dir .*`) can match the `..` entry, but `dir` only lists it and `type` and `findstr` cannot read a
-  directory, so it is not refused.
+  directory, so it is not refused;
+- on Windows, a built-in's argument is also judged by each name cmd.exe may read inside it
+  ([#3052](https://github.com/llm4s/llm4s/issues/3052)): `copy` splits a source at `+` and concatenates the parts,
+  so `copy a.txt+\Windows\win.ini out.txt` read `\Windows\win.ini` although the argument checked was a relative
+  name inside; and a built-in reads an unquoted `/` inside an argument as the start of a switch, so `dir ../w` lists
+  `..`. Every part between `+` signs, and the part before an argument's or a part's first `/` (when the `/` is not
+  its first character), is held to the path rule, the device and trailing-dot rules and the `.git` rule like a
+  whole argument, with every form above (drive, drive-relative, root-relative, device-namespace). `copy a.txt+b.txt
+  c.txt` still concatenates;
+- on Windows, a string starting with two separators (`\\server\share\f`, `//server/share/f`, `\\?\C:\x`) is
+  refused (`PATH_ESCAPE_ATTEMPT`) without being looked up, so checking a command never makes the runner connect to a
+  host an argument names ([#3052](https://github.com/llm4s/llm4s/issues/3052)). A workspace on a UNC share is still
+  reached through relative paths.
 
 A working directory, or a file operation's path, that is not a valid path (a NUL character, or on Windows a `:` or
 wildcard in it) is refused with `PATH_ESCAPE_ATTEMPT` rather than failing with an exception.
@@ -460,7 +472,7 @@ through one fails rather than leading elsewhere; `mkdir` and `touch` make direct
 path rule already takes a missing component as a directory to be made; `chmod` changes no name; the read-only programs
 and the read subcommands of `git` change nothing; Windows `copy` and `move` take one source argument (a wildcard's
 matches go into the destination, which no other argument goes through, and `copy a+b dest` concatenates into one
-file; the `,` of `move a,b dest` is refused). A program added with `WORKSPACE_EXTRA_COMMANDS` is not modelled (see
+file, each part held to the path rule; the `,` of `move a,b dest` is refused). A program added with `WORKSPACE_EXTRA_COMMANDS` is not modelled (see
 [Adding programs to the allowlist](#adding-programs-to-the-allowlist)).
 
 ### Option values
