@@ -107,7 +107,7 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
 
 | Setting | Meaning | Default |
 |:--------|:--------|:--------|
-| `address` | Vault's base URL, `http(s)://host:port`, without `/v1` | required |
+| `address` | Vault's base URL, `http(s)://host:port[/prefix]`, without `/v1`; no user info, query or fragment; `http` only for a loopback host unless `withCleartext(true)` | required |
 | `token` | the Vault token, a `Secret`, sent as `X-Vault-Token` | required |
 | `path` | the secret's path inside the mount, such as `llm4s/openai` | required |
 | `field` | the key of the secret's data that holds the API key | required |
@@ -116,13 +116,16 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
 | `withNamespace(ns)` | Enterprise or HCP namespace, sent as `X-Vault-Namespace`; takes a `String` or an `Option` | none |
 | `withRefreshInterval(d)` | how long a key is used before it is read again | 5 minutes |
 | `withRequestTimeout(d)` | how long one read may take | 10 seconds |
+| `withCleartext(b)` | accepts an `http://` address whose host is not loopback; the token and the secret then cross the network unencrypted | off |
 
 Mount and path lose surrounding slashes, each path segment is URL-encoded, and the version read is always the latest.
 The module has no `reference.conf` and no config keys: you build `VaultSettings` in code, from wherever your
 application keeps the Vault address and token.
 
 `VaultApiKeyProvider(settings)` returns a `Result`: a `ConfigurationError` that names the setting when the address is not
-an http(s) URL, the token is blank or spans lines, the mount, path, field or namespace is blank, or an interval or
+an http(s) URL, holds user info, a query or a fragment, or is `http` to a host that is not loopback without
+`withCleartext(true)` (the token and the secret would travel unencrypted; `localhost`, 127.0.0.0/8 and `::1` need no opt-in),
+the token is blank or spans lines, the mount, path, field or namespace is blank, or an interval or
 timeout is not positive. It does not contact Vault; the first `current()` does. `VaultApiKeyProvider(settings,
 httpClient)` reads through an `Llm4sHttpClient` you supply, for a proxy or custom TLS, and leaves it open when the
 provider is closed.
@@ -180,21 +183,24 @@ long-lived credentials and add `.withSessionToken(Secret(token))` for temporary 
 | `region` | such as `eu-west-1`; picks the endpoint and is part of the signature | required |
 | `credentials` | an `AwsCredentials`, or `withCredentials(() => Result[AwsCredentials])`, called once per read | required |
 | `secretId` | the secret's name or ARN | required |
-| `withField(f)` | the key of a JSON-object `SecretString` that holds the key; takes a `String` or an `Option` | none: the whole `SecretString` is the key |
+| `withField(f)` | the key of a JSON-object `SecretString` that holds the key; takes a `String` or an `Option` | none: the whole `SecretString` is the key, so a JSON-object secret is refused until you name its field |
 | `withVersionStage(s)` | the version stage read | `AWSCURRENT` (`DefaultVersionStage`) |
-| `withEndpoint(url)` | `http(s)://host[:port]` with no path, for a VPC or FIPS endpoint; takes a `String` or an `Option` | `https://secretsmanager.<region>.amazonaws.com`, `.amazonaws.com.cn` for a `cn-` region |
+| `withEndpoint(url)` | `http(s)://host[:port]` with no user info, path, query or fragment, for a VPC or FIPS endpoint; `http` only for a loopback host unless `withCleartext(true)`; takes a `String` or an `Option` | `https://secretsmanager.<region>.amazonaws.com`, `.amazonaws.com.cn` for a `cn-` region |
 | `withRefreshInterval(d)` | how long a key is used before it is read again | 5 minutes |
 | `withRequestTimeout(d)` | how long one read may take | 10 seconds |
+| `withCleartext(b)` | accepts an `http://` endpoint whose host is not loopback; the signed request, including the session token header, and the secret then cross the network unencrypted | off |
 
 There is no `reference.conf` and there are no config keys. `AwsSecretsManagerApiKeyProvider(settings)` returns a
 `ConfigurationError` for an invalid region, a blank secret id, field or stage, an endpoint that is not an http(s) URL
-without a path, or a non-positive interval or timeout. Nothing is contacted, and the credentials function is not called,
+without user info, a path, a query or a fragment, an `http` endpoint to a host that is not loopback without
+`withCleartext(true)`, or a non-positive interval or timeout. Nothing is contacted, and the credentials function is not called,
 until the first `current()`. As with Vault, `apply(settings, httpClient)` takes your `Llm4sHttpClient`.
 
 ## When the key is read
 
-The two providers behave the same way (`VaultApiKeyProvider.scala:53-68`,
-`AwsSecretsManagerApiKeyProvider.scala:63-78`).
+The two providers behave the same way (`VaultApiKeyProvider.scala:61-66`,
+`AwsSecretsManagerApiKeyProvider.scala:72-77`).
+Both sit on the single-flight cache that `CachingAccessTokenProvider` uses.
 
 - **Lazily.** The first `current()` reads the key, on the request path. Building the provider reads nothing.
 - **Cached for `refreshInterval`.** Later calls return the cached key without contacting the store. After the interval,
@@ -202,11 +208,18 @@ The two providers behave the same way (`VaultApiKeyProvider.scala:53-68`,
   background refresh and no early re-read: the provider has no invalidate method, and a request rejected as
   unauthorized does not trigger one. If the old key is revoked at once on rotation, requests fail until the interval
   ends, so choose an interval shorter than your rotation overlap.
-- **One read at a time.** Concurrent callers wait for a single read and share its result. A caller can therefore wait up
-  to `requestTimeout` for a read in progress.
-- **A failed read is a `Left`, and is retried on the next call.** The expired key is not served in its place, because
-  a rotated-out key may already be revoked. A failure is never cached, so a store that comes back is used at the next
-  request. Nothing retries within one read.
+- **One read at a time.** Concurrent callers wait for a single read and share its result, a failure included. A caller
+  can therefore wait up to `requestTimeout` for a read in progress, and no longer: when the store is down, the callers
+  queued behind a read get its failure at once instead of each making an attempt in turn. No monitor is held across
+  the read, so a virtual thread waiting on it is not pinned to its carrier.
+- **A failed read is a `Left`, shared for a moment.** The expired key is not served in its place, because a rotated-out
+  key may already be revoked. The failure is returned, without contacting the store, to calls in the next second when
+  it is retryable (network, timeout, 429, 5xx) and in the next five seconds otherwise (a refused token or credentials,
+  a missing secret, an unusable value); the first call after that reads again, so a store that comes back is used
+  within that window. Nothing retries within one read.
+- **A cancelled caller leaves at once.** A caller interrupted during its read, or while it waits for another caller's,
+  gets a `CancelledError` with its interrupt flag set. A cancellation is never shared or cached: the read in progress
+  carries on for the other callers, and the next caller makes its own.
 - **Credentials too.** For AWS, `credentials()` runs inside each read, not each request, so with the default interval a
   function is called at most once per `refreshInterval`. A function that throws or returns a `Left` fails that read
   with a `ConfigurationError`; the credentials are checked for blank parts and line breaks before AWS is contacted.
@@ -220,7 +233,7 @@ client call fails with it.
 |:----------|:------|:--------------------|
 | Store refuses the caller | `AuthenticationError` on 401 or 403, with Vault's `errors` text | `AuthenticationError` on 401, 403 or an auth error type such as `AccessDeniedException`, `ExpiredTokenException`, `InvalidSignatureException` |
 | No such secret | `NotFoundError` on 404 | `NotFoundError` on `ResourceNotFoundException` (also a missing version stage) |
-| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, or more than one line | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, or more than one line |
+| Secret has no usable key | `ConfigurationError`: field missing, not a string, blank, not JSON, or more than one line | `ConfigurationError`: binary-only secret, no `SecretString`, field missing or blank, `SecretString` not JSON, a JSON-object `SecretString` with no `withField`, or more than one line |
 | Any other answer | `ServiceError` with the status | `ServiceError` with the status |
 | Store unreachable or timed out | the HTTP client's own error | the HTTP client's own error |
 
@@ -245,7 +258,8 @@ alone. A provider lives as long as the client that uses it, so close it when the
 
 The addresses are settings, so a test points the provider at a local server; the modules' own specs
 (`VaultApiKeyProviderSpec`, `AwsSecretsManagerApiKeyProviderSpec`) run against a JDK `HttpServer` this way, and AWS's
-checks every request's signature. Use `http://` and an `endpoint` for AWS only in tests.
+checks every request's signature. An `http://` address to a loopback host (`localhost`, 127.0.0.0/8, `::1`) works without any opt-in, which is all a test
+needs; for AWS, set an `endpoint` as well.
 
 ```scala
 import com.sun.net.httpserver.HttpServer

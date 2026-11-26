@@ -3,16 +3,16 @@ package org.llm4s.llmconnect.auth.aws
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, NotFoundError, ServiceError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, SingleFlightCache }
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.{ Clock, Instant }
-import java.util.concurrent.atomic.AtomicReference
 import scala.util.Try
 
 /**
@@ -21,9 +21,17 @@ import scala.util.Try
  * Secrets Operator to write the key to a file (`apiKeyFile`).
  *
  * The key is read on the first `current()`, then reused for [[AwsSecretsManagerSettings.refreshInterval]], then read
- * again, so a key rotated in Secrets Manager is sent from the first request after the interval. Concurrent callers
- * share one read. A read that fails is a `Left` and is tried again on the next call; the last key is not served after
- * its interval, since a rotated-out key may already be revoked.
+ * again, so a key rotated in Secrets Manager is sent from the first request after the interval. The last key is not
+ * served after its interval, even when the read that would replace it fails, since a rotated-out key may already be
+ * revoked.
+ *
+ * Concurrent callers share one read, and its failure: a read that fails is a `Left` for the callers waiting behind it
+ * and for those arriving in the next second (a retryable error: network, timeout, 429, 5xx) or five seconds (anything
+ * else, such as refused credentials or a missing secret); the first call after that reads again. So an outage costs
+ * the callers queued behind a read one [[AwsSecretsManagerSettings.requestTimeout]], not one each in turn. A caller
+ * interrupted while it reads, or while it waits for another caller's read, gets a `CancelledError` at once with its
+ * interrupt flag set; a cancellation is never shared or cached. No monitor is held across the read, so a virtual
+ * thread is not pinned by it.
  *
  * {{{
  * for
@@ -38,7 +46,7 @@ import scala.util.Try
  *
  * Errors never hold the key or a credential: an `AuthenticationError` when AWS refuses the credentials or denies
  * access, a `NotFoundError` when there is no such secret or version stage, a `ConfigurationError` when the secret has
- * no usable string (binary only, a missing or blank field, more than one line), a `ServiceError` for any other
+ * no usable string (binary only, a missing or blank field, a JSON object read without `withField`, more than one line), a `ServiceError` for any other
  * answer, and the HTTP client's own error when Secrets Manager cannot be reached.
  *
  * It depends on no AWS SDK: one `POST` with llm4s's own HTTP client, signed with Signature Version 4. Getting the
@@ -57,26 +65,16 @@ final class AwsSecretsManagerApiKeyProvider private (
 
   import AwsSecretsManagerApiKeyProvider.*
 
-  private val cached = new AtomicReference[Option[Cached]](None)
-  private val lock   = new Object
-  private val uri    = URI.create(settings.endpointUrl + "/")
+  // One read in flight, its key cached for the interval, its failure shared briefly, a cancellation never.
+  private val keys = new SingleFlightCache[ApiKey](Operation, clock)
+  private val uri  = URI.create(settings.endpointUrl + "/")
 
   override def current(): Result[ApiKey] =
-    fresh().map(Right(_)).getOrElse {
-      lock.synchronized {
-        // Another caller may have read the key while this one waited.
-        fresh().map(Right(_)).getOrElse {
-          val readAt = clock.instant()
-          read(readAt).map { key =>
-            cached.set(Some(Cached(key, readAt.plusNanos(settings.refreshInterval.toNanos))))
-            key
-          }
-        }
-      }
+    keys.get { () =>
+      // Taken before the read: it dates the signature, and the interval counts from when AWS was asked.
+      val readAt = clock.instant()
+      read(readAt).map(key => key -> readAt.plusNanos(settings.refreshInterval.toNanos))
     }
-
-  private def fresh(): Option[ApiKey] =
-    cached.get().collect { case c if clock.instant().isBefore(c.expires) => c.key }
 
   private def read(at: Instant): Result[ApiKey] =
     for
@@ -119,12 +117,27 @@ final class AwsSecretsManagerApiKeyProvider private (
     text match
       case None if binary => Left(failure("holds only SecretBinary, not a SecretString"))
       case None           => Left(failure("came back with no SecretString"))
-      case Some(secret) =>
+      case Some(secret)   =>
+        // Without a field the whole string is sent as the key: a JSON object (the console's key/value secret) would
+        // leak its sibling fields to the vendor. Only the key names are reported, never a value.
+        val objectKeys =
+          if settings.field.isEmpty then Try(ujson.read(secret.trim)).toOption.flatMap(_.objOpt).map(_.value.keys.toSeq)
+          else None
         settings.field
           .fold(Option(secret))(field => Try(ujson.read(secret)(field)).toOption.flatMap(_.strOpt))
           .map(_.trim)
           .filter(_.nonEmpty)
           .toRight(failure(settings.field.fold("has a blank SecretString")(f => s"has no non-blank string field '$f'")))
+          .flatMap { key =>
+            objectKeys.fold[Result[String]](Right(key)) { keys =>
+              Left(
+                failure(
+                  s"is a JSON object (keys: ${keys.mkString(", ")}), not a key: " +
+                    "choose the field that holds the API key with withField"
+                )
+              )
+            }
+          }
           .flatMap { key =>
             // A line break in a header value would be refused by the HTTP client, or split the header.
             if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
@@ -155,7 +168,8 @@ final class AwsSecretsManagerApiKeyProvider private (
   /** Closes the HTTP client this provider created; one the caller passed in is left open. */
   override def close(): Unit = if ownsClient then http.close()
 
-  override def toString: String = s"AwsSecretsManagerApiKeyProvider(${settings.endpointUrl}, ${settings.location})"
+  override def toString: String =
+    s"AwsSecretsManagerApiKeyProvider(${Redaction.url(settings.endpointUrl)}, ${settings.location})"
 
 @Experimental
 object AwsSecretsManagerApiKeyProvider:
@@ -177,7 +191,8 @@ object AwsSecretsManagerApiKeyProvider:
     "SignatureDoesNotMatch"
   )
 
-  final private case class Cached(key: ApiKey, expires: Instant)
+  /** The operation a `CancelledError` names when a caller is interrupted reading the key or waiting for a read. */
+  private val Operation = "aws-secrets-manager.read-api-key"
 
   /**
    * A provider reading the key `settings` locates, over an HTTP client of its own that

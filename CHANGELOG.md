@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Behaviour, no signature: an `openai` section on api.openai.com sends a model the registry lists for `/v1/responses`, or does not know, to the Responses API (`api = "chat-completions"` restores 1.0.x), and a positional pattern on `OpenAIConfig` or `ModelMetadata` needs a `_` per new field, which `Llm4sMigrateFrom_1_0` adds ([migration](docs/reference/migration.md#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900)) [#2900](https://github.com/llm4s/llm4s/issues/2900).
 - `llm4s-schema-derivation` (Experimental): a `@description`, `@toolName` or `@upickle.implicits.key` whose argument is not a constant string is now a compile error where the schema, partial type or tool is derived; it was silently ignored ([#2951](https://github.com/llm4s/llm4s/issues/2951); [migration](docs/reference/migration.md#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951)).
+- `llm4s-secrets-vault` and `llm4s-secrets-aws` (experimental), behaviour: an `http://` Vault address or AWS endpoint whose host is not loopback is refused unless the settings call `withCleartext(true)`, as is user info in either; a JSON-object `SecretString` read without `withField` is a `ConfigurationError`; and a failed read is shared for 1 or 5 seconds, not retried by the next call
+  ([migration](docs/reference/migration.md#secret-providers-refuse-cleartext-http-and-a-json-object-secret-without-a-field-and-share-a-failed-read-3102)) [#3102](https://github.com/llm4s/llm4s/issues/3102).
 
 ### Core
 
@@ -43,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `UrlLoader` and the other loaders using its client no longer send the caller's `Authorization`, `Cookie`,
   `Proxy-Authorization` or other credential headers to a different origin a redirect leads to, and refuse an `https`
   to `http` redirect when credentials were supplied, as the HTTP tool does [#2997](https://github.com/llm4s/llm4s/issues/2997).
+
+### Configuration
+
+- **Fixed** `VaultApiKeyProvider` and `AwsSecretsManagerApiKeyProvider` during a store outage: the callers queued behind a failed read share its failure instead of each waiting out their own timeout in turn, a cancelled caller leaves at once with a `CancelledError`, and no monitor is held across the read (they share `CachingAccessTokenProvider`'s cache) [#3102](https://github.com/llm4s/llm4s/issues/3102).
+- **Fixed** `AwsSecretsManagerApiKeyProvider` no longer sends a whole JSON key/value secret to the vendor as the API key when `withField` is not set: it is a `ConfigurationError` naming the object's keys [#3102](https://github.com/llm4s/llm4s/issues/3102).
+- **Changed** `VaultSettings` and `AwsSecretsManagerSettings` refuse cleartext `http` to a non-loopback host (`withCleartext(true)` allows it) and user info, and no `toString` or error prints a password given in the URL [#3102](https://github.com/llm4s/llm4s/issues/3102).
 
 ### Build & tooling
 

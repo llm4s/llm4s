@@ -55,8 +55,9 @@ class VaultApiKeyProviderIntegrationSpec extends AnyWordSpec with Matchers with 
     "read the API key Vault holds and, after the refresh interval, the rotated one" in withVault { (address, token) =>
       val path = s"$prefix/openai"
       write(address, token, path, "apiKey" -> "sk-it-first-key", "note" -> "other field")
-      val settings = VaultSettings(address, Secret(token), path, "apiKey").withRefreshInterval(500.millis)
-      val keys     = VaultApiKeyProvider(settings).fold(e => fail(e.formatted), identity)
+      val settings =
+        VaultSettings(address, Secret(token), path, "apiKey").withCleartext(true).withRefreshInterval(500.millis)
+      val keys = VaultApiKeyProvider(settings).fold(e => fail(e.formatted), identity)
 
       keys.current().map(_.asKey) shouldBe Right("sk-it-first-key")
       write(address, token, path, "apiKey" -> "sk-it-rotated-key")
@@ -72,7 +73,7 @@ class VaultApiKeyProviderIntegrationSpec extends AnyWordSpec with Matchers with 
       val path = s"$prefix/forbidden"
       write(address, token, path, "apiKey" -> "sk-it-forbidden-key")
       val badToken = "hvs.llm4s-it-not-a-token"
-      val keys = VaultApiKeyProvider(VaultSettings(address, Secret(badToken), path, "apiKey"))
+      val keys = VaultApiKeyProvider(VaultSettings(address, Secret(badToken), path, "apiKey").withCleartext(true))
         .fold(e => fail(e.formatted), identity)
 
       val error = keys.current().left.toOption.getOrElse(fail("a refused token read a key"))
@@ -83,8 +84,9 @@ class VaultApiKeyProviderIntegrationSpec extends AnyWordSpec with Matchers with 
     }
 
     "answer a path with no secret with a NotFoundError" in withVault { (address, token) =>
-      val keys = VaultApiKeyProvider(VaultSettings(address, Secret(token), s"$prefix/missing", "apiKey"))
-        .fold(e => fail(e.formatted), identity)
+      val keys =
+        VaultApiKeyProvider(VaultSettings(address, Secret(token), s"$prefix/missing", "apiKey").withCleartext(true))
+          .fold(e => fail(e.formatted), identity)
 
       keys.current().left.toOption.getOrElse(fail("read a key that does not exist")) shouldBe a[NotFoundError]
       keys.close()

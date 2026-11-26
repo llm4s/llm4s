@@ -55,7 +55,7 @@ class AwsSecretsManagerApiKeyProviderIntegrationSpec extends AnyWordSpec with Ma
   }
 
   private def settings(endpoint: String, id: String): AwsSecretsManagerSettings =
-    AwsSecretsManagerSettings(region, credentials, id).withEndpoint(endpoint)
+    AwsSecretsManagerSettings(region, credentials, id).withEndpoint(endpoint).withCleartext(true)
 
   "AwsSecretsManagerApiKeyProvider" should {
 
