@@ -144,7 +144,7 @@ private[provider] object OpenAIResponsesRequest:
             ResponseInputItem.FunctionCallOutput
               .builder()
               .callId(tool.toolCallId.asString)
-              .output(tool.parts.map(PartEncoding.textOnly).mkString)
+              .output(tool.content)
               .build()
           )
         )

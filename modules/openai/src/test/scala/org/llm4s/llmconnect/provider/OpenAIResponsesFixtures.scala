@@ -20,3 +20,19 @@ object OpenAIResponsesFixtures:
     s"""{"id":"resp_1","object":"response","created_at":1700000000,"status":"$status","model":"gpt-4o",""" +
       s""""output":[$output],"usage":$Usage,"parallel_tool_calls":true,"tool_choice":"auto","tools":[],""" +
       s""""error":null,"incomplete_details":null$more}"""
+
+  /** One `function_call` output item. */
+  def functionCall(callId: String, name: String, arguments: String): String =
+    val quoted = ujson.Str(arguments).render()
+    s"""{"type":"function_call","id":"fc_$callId","call_id":"$callId","name":"$name","arguments":$quoted,""" +
+      s""""status":"completed"}"""
+
+  /** One `reasoning` output item with no summary. */
+  def reasoningItem(id: String): String =
+    s"""{"type":"reasoning","id":"$id","summary":[]}"""
+
+  /** One output message item of one `refusal` part. */
+  def refusal(text: String): String =
+    val quoted = ujson.Str(text).render()
+    s"""{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[""" +
+      s"""{"type":"refusal","refusal":$quoted}]}"""

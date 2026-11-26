@@ -299,7 +299,7 @@ final class OpenAIClient private[provider] (
       body = serialize(params._body())
       response <- call("response")(transport.createResponse(params))
       completion <- OpenAIResponsesReply
-        .completion(response, provider)
+        .completion(response, provider, modelName)
         .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
         .flatMap(filteredReply)
     } yield (body, serialize(response), completion)
@@ -968,19 +968,11 @@ final class OpenAIClient private[provider] (
    */
   private def extractCitations(message: ChatCompletionMessage): List[Citation] =
     known(message._annotations()).map(_.asScala.toList).getOrElse(List.empty).flatMap { annotation =>
-      for {
-        cited <- known(annotation._urlCitation())
-        url   <- known(cited._url()).filter(_.nonEmpty)
-      } yield Citation(
-        url = url,
-        title = known(cited._title()),
-        startIndex = known(cited._startIndex()).flatMap(citationIndex),
-        endIndex = known(cited._endIndex()).flatMap(citationIndex)
-      )
+      known(annotation._urlCitation()).flatMap { cited =>
+        OpenAIClient
+          .citationOf(known(cited._url()), known(cited._title()), known(cited._startIndex()), known(cited._endIndex()))
+      }
     }
-
-  private def citationIndex(index: java.lang.Long): Option[Int] =
-    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
@@ -1014,11 +1006,9 @@ final class OpenAIClient private[provider] (
         val function = known(ftc._function())
         val name     = function.flatMap(f => known(f._name())).getOrElse("")
         val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
-        for {
-          calls     <- done
-          _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
-          arguments <- ToolCallRules.parseArguments(name, raw)
-        } yield calls :+ ToolCall(id = ToolCallId(known(ftc._id()).getOrElse("")), name = name, arguments = arguments)
+        done.flatMap(calls =>
+          OpenAIClient.toolCallOf(known(ftc._id()).getOrElse(""), name, raw, finishReason).map(calls :+ _)
+        )
       }
 
   private def recordExchange(
@@ -1054,6 +1044,43 @@ final class OpenAIClient private[provider] (
  */
 object OpenAIClient {
   import org.llm4s.syntax.toResult
+
+  /**
+   * One tool call, its `raw` arguments parsed once as RFC 0009 asks (shared by Chat Completions and Responses): not
+   * a JSON object is the malformed-tool-call error, blank arguments are `{}` only after a clean finish.
+   */
+  private[provider] def toolCallOf(
+    id: String,
+    name: String,
+    raw: String,
+    finishReason: FinishReason
+  ): Result[ToolCall] =
+    for {
+      _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
+      arguments <- ToolCallRules.parseArguments(name, raw)
+    } yield ToolCall(id = ToolCallId(id), name = name, arguments = arguments)
+
+  /**
+   * A `url_citation` as a [[org.llm4s.llmconnect.model.Citation]]: none without a non-empty `url` (one is never made
+   * up), an index not at least zero and within `Int` read as absent.
+   */
+  private[provider] def citationOf(
+    url: Option[String],
+    title: Option[String],
+    startIndex: Option[java.lang.Long],
+    endIndex: Option[java.lang.Long]
+  ): Option[Citation] =
+    url.filter(_.nonEmpty).map { u =>
+      Citation(
+        url = u,
+        title = title,
+        startIndex = startIndex.flatMap(citationIndex),
+        endIndex = endIndex.flatMap(citationIndex)
+      )
+    }
+
+  private def citationIndex(index: java.lang.Long): Option[Int] =
+    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   /**
    * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service

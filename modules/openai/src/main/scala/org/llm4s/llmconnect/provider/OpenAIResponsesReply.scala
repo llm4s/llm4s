@@ -1,9 +1,15 @@
 package org.llm4s.llmconnect.provider
 
 import com.openai.core.JsonField
-import com.openai.models.responses.{ Response, ResponseStatus, ResponseUsage }
-import org.llm4s.error.ServiceError
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, TokenUsage }
+import com.openai.models.responses.{
+  Response,
+  ResponseOutputItem,
+  ResponseOutputMessage,
+  ResponseStatus,
+  ResponseUsage
+}
+import org.llm4s.error.{ LLMError, ServiceError }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Citation, Completion, FinishReason, TokenUsage, ToolCall }
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 
@@ -20,48 +26,113 @@ import scala.util.Try
  */
 private[provider] object OpenAIResponsesReply:
 
-  def completion(response: Response, provider: ProviderId): Result[Completion] =
-    val status = known(response._status())
-    if status.exists(_.asString() == ResponseStatus.FAILED.asString()) then
-      val reason = response.error().toScala.map(_.message()).getOrElse("the response failed")
-      Left(ServiceError(502, provider, reason))
+  def completion(response: Response, provider: ProviderId, configuredModel: ModelName): Result[Completion] =
+    val status = known(response._status()).map(_.asString())
+    if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider))
     else
-      val text    = outputText(response)
-      val usage   = known(response._usage()).map(tokenUsage)
-      val message = AssistantMessage(text = if text.isEmpty then None else Some(text), toolCalls = Seq.empty)
-      val completion = Completion(
-        id = known(response._id()).getOrElse(""),
-        created = known(response._createdAt())
-          .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
-          .getOrElse(Instant.EPOCH),
-        model = known(response._model()).flatMap(modelOf).map(ModelName(_)).getOrElse(ModelName("")),
-        message = message,
-        usage = usage,
-        finishReason =
-          if status.exists(_.asString() == ResponseStatus.COMPLETED.asString()) then FinishReason.Stop
-          else FinishReason.Unknown,
-        servedTier = known(response._serviceTier()).flatMap(t => OpenAIServiceTier.served(t.asString()))
-      )
-      Right(completion)
+      val items    = outputItems(response)
+      val finish   = finishReason(status, response)
+      val messages = items.filter(_.isMessage).map(_.asMessage())
+      val text     = messages.flatMap(messageTexts).mkString
+      // a filtered reply's calls are not read: the filter fails the reply (`OpenAIClient.filteredReply`)
+      val calls =
+        if ChatCompletionsFinishReason.isFiltered(finish) then Right(Seq.empty)
+        else toolCalls(items, finish)
+      calls.flatMap { toolCalls =>
+        val message = AssistantMessage(text = if text.isEmpty then None else Some(text), toolCalls = toolCalls)
+        ToolCallRules.checked(
+          Completion(
+            id = known(response._id()).getOrElse(""),
+            created = known(response._createdAt())
+              .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
+              .getOrElse(Instant.EPOCH),
+            model = known(response._model()).flatMap(modelOf).map(ModelName(_)).getOrElse(configuredModel),
+            message = message,
+            usage = known(response._usage()).map(tokenUsage),
+            citations = messages.flatMap(citations).toList,
+            finishReason = if toolCalls.nonEmpty && finish == FinishReason.Stop then FinishReason.ToolCalls else finish,
+            servedTier = known(response._serviceTier()).flatMap(t => OpenAIServiceTier.served(t.asString()))
+          )
+        )
+      }
+
+  /** A `failed` reply's `error`, through the mapping a stream's `error` event takes (a 502 unless it names a status). */
+  private def failure(response: Response, provider: ProviderId): LLMError =
+    val error = response.error().toScala
+    val fields = Seq(
+      error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
+      error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
+    ).flatten
+    OpenAICompatibleClient
+      .streamedError(ujson.Obj.from(fields), provider)
+      .getOrElse(ServiceError(502, provider, "the response failed"))
+
+  /** `completed` is `Stop`; `incomplete` is `Length` at the output limit and the content filter's at the filter. */
+  private def finishReason(status: Option[String], response: Response): FinishReason =
+    status match
+      case Some(s) if s == ResponseStatus.COMPLETED.asString() => FinishReason.Stop
+      case Some(s) if s == ResponseStatus.INCOMPLETE.asString() =>
+        response
+          .incompleteDetails()
+          .toScala
+          .flatMap(_.reason().toScala)
+          .map(_.asString()) match
+          case Some("max_output_tokens") => FinishReason.Length
+          case Some("content_filter")    => FinishReason.Other(ChatCompletionsFinishReason.ContentFilter)
+          case _                         => FinishReason.Unknown
+      case _ => FinishReason.Unknown
+
+  /** The `function_call` items as tool calls, in output order, read as Chat Completions' are. */
+  private def toolCalls(items: Seq[ResponseOutputItem], finish: FinishReason): Result[Seq[ToolCall]] =
+    // an item of a type the SDK does not know is neither: `isFunctionCall` is false, and nothing throws
+    items
+      .filter(_.isFunctionCall)
+      .map(_.asFunctionCall())
+      .foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (done, call) =>
+        done.flatMap { calls =>
+          OpenAIClient
+            .toolCallOf(
+              known(call._callId()).getOrElse(""),
+              known(call._name()).getOrElse(""),
+              known(call._arguments()).getOrElse(""),
+              finish
+            )
+            .map(calls :+ _)
+        }
+      }
+
+  private def outputItems(response: Response): Seq[ResponseOutputItem] =
+    known(response._output()).map(_.asScala.toSeq).getOrElse(Seq.empty)
 
   private def modelOf(model: com.openai.models.ResponsesModel): Option[String] =
     model.string().toScala.orElse(model.chat().toScala.map(_.asString())).orElse(model.only().toScala.map(_.asString()))
 
-  /** The `output_text` parts of the output messages, concatenated. */
-  private def outputText(response: Response): String =
-    known(response._output())
-      .map(_.asScala.toSeq)
-      .getOrElse(Seq.empty)
-      .filter(_.isMessage)
-      .flatMap(item => messageTexts(item.asMessage()))
-      .mkString
+  /** Every `output_text` and `refusal` part of the message, in order: a refusal is the model's answer, not a filter. */
+  private def messageTexts(item: ResponseOutputMessage): Seq[String] =
+    contents(item).flatMap { c =>
+      if c.isOutputText then known(c.asOutputText()._text())
+      else if c.isRefusal then known(c.asRefusal()._refusal())
+      else None
+    }
 
-  private def messageTexts(item: com.openai.models.responses.ResponseOutputMessage): Seq[String] =
-    known(item._content())
-      .map(_.asScala.toSeq)
-      .getOrElse(Seq.empty)
-      .filter(_.isOutputText)
-      .flatMap(c => known(c.asOutputText()._text()))
+  /** The `url_citation` annotations of the message's `output_text` parts, as `OpenAIClient` reads Chat Completions'. */
+  private def citations(item: ResponseOutputMessage): Seq[Citation] =
+    contents(item).filter(_.isOutputText).flatMap { c =>
+      known(c.asOutputText()._annotations()).map(_.asScala.toSeq).getOrElse(Seq.empty).flatMap { annotation =>
+        if annotation.isUrlCitation then
+          val cited = annotation.asUrlCitation()
+          OpenAIClient.citationOf(
+            known(cited._url()),
+            known(cited._title()),
+            known(cited._startIndex()),
+            known(cited._endIndex())
+          )
+        else None
+      }
+    }
+
+  private def contents(item: ResponseOutputMessage): Seq[ResponseOutputMessage.Content] =
+    known(item._content()).map(_.asScala.toSeq).getOrElse(Seq.empty)
 
   /** OpenAI counts reasoning inside `output_tokens`; `TokenUsage.completionTokens` never includes thinking. */
   private def tokenUsage(u: ResponseUsage): TokenUsage =

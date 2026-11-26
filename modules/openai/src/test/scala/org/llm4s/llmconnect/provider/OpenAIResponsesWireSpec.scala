@@ -1,12 +1,13 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.error.ServiceError
+import org.llm4s.error.{ ContentFilteredError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
 import org.llm4s.error.{ LLMError, UnsupportedContentPartError }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
+  FinishReason,
   ContentPart,
   Conversation,
   ReasoningEffort,
@@ -38,7 +39,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 
 /** `OpenAIClient` on the Responses API over the real `openai-java` transport, against a local HTTP server. */
 final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with EitherValues:
-  import OpenAIResponsesFixtures.{ reply, message => outputMessage }
+  import OpenAIResponsesFixtures.{ functionCall, reasoningItem, refusal, reply, message => outputMessage }
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -337,4 +338,120 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     val exact = send(hello, CompletionOptions(maxTokens = Some(16)))
     exact.body("max_output_tokens").num shouldBe 16
     exact.completion.adjustments shouldBe empty
+  }
+
+  // ---- the whole reply ----
+
+  private def answer(body: String): Either[LLMError, org.llm4s.llmconnect.model.Completion] =
+    var out = Option.empty[Either[LLMError, org.llm4s.llmconnect.model.Completion]]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(new AtomicReference[Seen](), exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+    } { baseUrl =>
+      val client = responsesClient(baseUrl)
+      out = Some(client.complete(hello, CompletionOptions()))
+      client.close()
+    }
+    out.get
+
+  it should "read function_call items as tool calls, in output order" in {
+    val completion = answer(
+      reply(
+        functionCall("call_1", "get_weather", """{"city":"Paris"}""") + "," +
+          functionCall("call_2", "get_time", """{"zone":"CET"}""")
+      )
+    ).value
+    completion.toolCalls.map(_.id.asString) shouldBe Seq("call_1", "call_2")
+    completion.toolCalls.map(_.name) shouldBe Seq("get_weather", "get_time")
+    completion.toolCalls.map(_.arguments.render()) shouldBe Seq("""{"city":"Paris"}""", """{"zone":"CET"}""")
+    completion.finishReason shouldBe FinishReason.ToolCalls
+  }
+
+  it should "fail on function_call arguments that are not JSON as the Chat Completions path does" in {
+    val error = answer(reply(functionCall("call_1", "get_weather", "{not json"))).left.value
+    error shouldBe a[ProcessingError]
+    error.message should include("malformed tool call 'get_weather'")
+  }
+
+  it should "ignore reasoning items and item types it does not map" in {
+    val completion = answer(
+      reply(
+        Seq(
+          reasoningItem("rs_1"),
+          """{"type":"web_search_call","id":"ws_1","status":"completed"}""",
+          """{"type":"not_a_real_item"}""",
+          outputMessage("hi")
+        ).mkString(",")
+      )
+    ).value
+    completion.content shouldBe "hi"
+    completion.message.thinking shouldBe empty
+    completion.finishReason shouldBe FinishReason.Stop
+  }
+
+  it should "deliver a refusal's text as the content" in {
+    val completion = answer(reply(refusal("I can't help with that."))).value
+    completion.content shouldBe "I can't help with that."
+    completion.finishReason shouldBe FinishReason.Stop
+  }
+
+  it should "report an incomplete reply at max_output_tokens as Length, with the text so far" in {
+    val completion = answer(
+      reply(
+        outputMessage("so far"),
+        status = "incomplete",
+        extra = """"incomplete_details":{"reason":"max_output_tokens"}"""
+      )
+    ).value
+    completion.finishReason shouldBe FinishReason.Length
+    completion.content shouldBe "so far"
+  }
+
+  it should "report an incomplete reply at the content filter as a ContentFilteredError carrying the usage" in {
+    val error = answer(
+      reply(outputMessage("cut"), status = "incomplete", extra = """"incomplete_details":{"reason":"content_filter"}""")
+    ).left.value
+    error shouldBe a[ContentFilteredError]
+    error.asInstanceOf[ContentFilteredError].usage.map(_.totalTokens) shouldBe Some(15)
+  }
+
+  it should "report a failed reply as its mapped error" in {
+    val error = answer(
+      reply("", status = "failed", extra = """"error":{"code":"server_error","message":"boom"}""")
+    ).left.value
+    error shouldBe a[ServiceError]
+    error.asInstanceOf[ServiceError].status shouldBe 502
+    error.message should include("boom")
+  }
+
+  it should "read url_citation annotations as citations" in {
+    val item =
+      """{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"output_text",""" +
+        """"text":"hi","annotations":[{"type":"url_citation","url":"https://example.com","title":"Example",""" +
+        """"start_index":0,"end_index":2},{"type":"url_citation","url":"","title":"none","start_index":0,""" +
+        """"end_index":1}]}]}"""
+    val completion = answer(reply(item)).value
+    completion.citations.map(_.url) shouldBe Seq("https://example.com")
+    completion.citations.map(_.title) shouldBe Seq(Some("Example"))
+    completion.citations.map(c => (c.startIndex, c.endIndex)) shouldBe Seq((Some(0), Some(2)))
+  }
+
+  it should "report the cached input tokens" in {
+    val body = reply(outputMessage("hi")).replace(""""cached_tokens":0""", """"cached_tokens":5""")
+    answer(body).value.usage.flatMap(_.cachedTokens) shouldBe Some(5)
+  }
+
+  it should "fall back to the configured model when the reply omits model" in {
+    val body = ujson.read(reply(outputMessage("hi")))
+    body.obj.remove("model")
+    answer(body.render()).value.model shouldBe ModelName("gpt-4o")
+  }
+
+  it should "send a tool result of several text parts as the parts joined as ToolMessage.content joins them" in {
+    val tool = ToolMessage(Seq(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("call_1"))
+    val sent = send(
+      Conversation(Seq(UserMessage("go"), AssistantMessage(None, Seq(call1)), tool))
+    )
+    sent.body("input")(2)("output").str shouldBe tool.content
+    sent.body("input")(2)("output").str should not be "ab"
   }
