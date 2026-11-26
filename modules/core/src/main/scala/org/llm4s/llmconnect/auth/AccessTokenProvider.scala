@@ -1,15 +1,14 @@
 package org.llm4s.llmconnect.auth
 
 import org.llm4s.annotation.{ Experimental, Stable }
-import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError }
+import org.llm4s.error.AuthenticationError
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
-import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.*
-import scala.util.{ Try, Using }
+import scala.util.Try
 
 /**
  * A bearer token and when it stops being valid. The value is a `Secret`, as a key is: build it with
@@ -85,71 +84,16 @@ final class CachingAccessTokenProvider(
   clock: Clock = Clock.systemUTC()
 ) extends AccessTokenProvider:
 
-  final private case class Cached(token: AccessToken, refreshAt: Instant)
-
-  final private case class Failed(error: LLMError, until: Instant)
-
-  @volatile private var cached: Option[Cached] = None
-  @volatile private var failed: Option[Failed] = None
-  // Not `synchronized`: the fetch is blocking I/O, and a monitor pins a virtual thread's carrier
-  // for its whole duration, which can starve the very I/O the holder waits on.
-  private val lock = new ReentrantLock()
-
-  // Interruptible: a caller cancelled while it waits behind another caller's fetch returns at once
-  // with `CancelledError` and its interrupt flag set again, as llm4s cancellation expects.
-  private def locked[A](onInterrupt: => A)(body: => A): A =
-    CancelledError.catchInterrupt(lock.lockInterruptibly()) match
-      case Left(_) =>
-        Thread.currentThread().interrupt()
-        onInterrupt
-      case Right(()) =>
-        Using.resource((() => lock.unlock()): AutoCloseable)(_ => body)
+  // The cache, the single in-flight fetch, the shared failure and the cancellation rules are SingleFlightCache's.
+  private val tokens = new SingleFlightCache[AccessToken](CachingAccessTokenProvider.Operation, clock)
 
   def current(): Result[Secret] =
-    fresh() match
-      case Some(value) => Right(value)
-      case None =>
-        locked[Result[Secret]](Left(CancelledError(CachingAccessTokenProvider.Operation))) {
-          fresh() match
-            case Some(value) => Right(value)
-            case None =>
-              recentFailure() match
-                case Some(error) => Left(error)
-                case None =>
-                  CancelledError.attempt(CachingAccessTokenProvider.Operation)(
-                    CachingAccessTokenProvider.guarded(fetch())
-                  ) match
-                    case Right(token) =>
-                      cached = Some(Cached(token, refreshAt(token)))
-                      failed = None
-                      Right(token.value)
-                    case Left(cancelled: CancelledError) =>
-                      // Caller-local: this thread was cancelled, not the exchange. Sharing it would
-                      // hand a cancellation to callers nobody interrupted.
-                      if !Thread.currentThread().isInterrupted then Thread.currentThread().interrupt()
-                      Left(cancelled)
-                    case Left(error) =>
-                      failed = Some(Failed(error, clock.instant().plusMillis(failureTtl(error).toMillis)))
-                      Left(error)
-        }
+    tokens
+      .get(() => CachingAccessTokenProvider.guarded(fetch()).map(token => token -> refreshAt(token)))
+      .map(_.value)
 
   /** Interrupted while waiting for the lock, it returns without dropping anything, the flag set again. */
-  override def invalidate(rejected: Secret): Unit =
-    locked(()) {
-      if cached.exists(_.token.value == rejected) then
-        cached = None
-        failed = None
-    }
-
-  private def failureTtl(error: LLMError): FiniteDuration =
-    if error.isRetryable then CachingAccessTokenProvider.TransientFailureTtl
-    else CachingAccessTokenProvider.FailureTtl
-
-  private def recentFailure(): Option[LLMError] =
-    failed.collect { case Failed(error, until) if clock.instant().isBefore(until) => error }
-
-  private def fresh(): Option[Secret] =
-    cached.collect { case Cached(token, at) if clock.instant().isBefore(at) => token.value }
+  override def invalidate(rejected: Secret): Unit = tokens.invalidateIf(_.value == rejected)
 
   private def refreshAt(token: AccessToken): Instant =
     val now      = clock.instant()
@@ -180,7 +124,7 @@ object CachingAccessTokenProvider:
   private[llm4s] val Operation: String = "workload-identity.token"
 
   /** How long a rejected fetch (not recoverable) is shared with the callers that arrive meanwhile. */
-  private[auth] val FailureTtl: FiniteDuration = 5.seconds
+  private[auth] val FailureTtl: FiniteDuration = SingleFlightCache.FailureTtl
 
   /** How long a transient failure (a recoverable error) is shared with the callers that arrive meanwhile. */
-  private[auth] val TransientFailureTtl: FiniteDuration = 1.second
+  private[auth] val TransientFailureTtl: FiniteDuration = SingleFlightCache.TransientFailureTtl

@@ -193,8 +193,9 @@ until the first `current()`. As with Vault, `apply(settings, httpClient)` takes 
 
 ## When the key is read
 
-The two providers behave the same way (`VaultApiKeyProvider.scala:53-68`,
-`AwsSecretsManagerApiKeyProvider.scala:63-78`).
+The two providers behave the same way (`VaultApiKeyProvider.scala:57-65`,
+`AwsSecretsManagerApiKeyProvider.scala:67-76`).
+Both sit on the single-flight cache that `CachingAccessTokenProvider` uses.
 
 - **Lazily.** The first `current()` reads the key, on the request path. Building the provider reads nothing.
 - **Cached for `refreshInterval`.** Later calls return the cached key without contacting the store. After the interval,
@@ -202,11 +203,18 @@ The two providers behave the same way (`VaultApiKeyProvider.scala:53-68`,
   background refresh and no early re-read: the provider has no invalidate method, and a request rejected as
   unauthorized does not trigger one. If the old key is revoked at once on rotation, requests fail until the interval
   ends, so choose an interval shorter than your rotation overlap.
-- **One read at a time.** Concurrent callers wait for a single read and share its result. A caller can therefore wait up
-  to `requestTimeout` for a read in progress.
-- **A failed read is a `Left`, and is retried on the next call.** The expired key is not served in its place, because
-  a rotated-out key may already be revoked. A failure is never cached, so a store that comes back is used at the next
-  request. Nothing retries within one read.
+- **One read at a time.** Concurrent callers wait for a single read and share its result, a failure included. A caller
+  can therefore wait up to `requestTimeout` for a read in progress, and no longer: when the store is down, the callers
+  queued behind a read get its failure at once instead of each making an attempt in turn. No monitor is held across
+  the read, so a virtual thread waiting on it is not pinned to its carrier.
+- **A failed read is a `Left`, shared for a moment.** The expired key is not served in its place, because a rotated-out
+  key may already be revoked. The failure is returned, without contacting the store, to calls in the next second when
+  it is retryable (network, timeout, 429, 5xx) and in the next five seconds otherwise (a refused token or credentials,
+  a missing secret, an unusable value); the first call after that reads again, so a store that comes back is used
+  within that window. Nothing retries within one read.
+- **A cancelled caller leaves at once.** A caller interrupted during its read, or while it waits for another caller's,
+  gets a `CancelledError` with its interrupt flag set. A cancellation is never shared or cached: the read in progress
+  carries on for the other callers, and the next caller makes its own.
 - **Credentials too.** For AWS, `credentials()` runs inside each read, not each request, so with the default interval a
   function is called at most once per `refreshInterval`. A function that throws or returns a `Left` fails that read
   with a `ConfigurationError`; the credentials are checked for blank parts and line breaks before AWS is contacted.

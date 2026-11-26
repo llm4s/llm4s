@@ -1,11 +1,19 @@
 package org.llm4s.llmconnect.auth.aws
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, LLMError, NotFoundError, ServiceError }
+import org.llm4s.error.{
+  AuthenticationError,
+  CancelledError,
+  ConfigurationError,
+  LLMError,
+  NotFoundError,
+  ServiceError
+}
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.MutableClock
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.asKey
+import org.llm4s.types.ProviderModelTypes.{ asKey, ApiKey }
+import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,7 +21,7 @@ import org.scalatest.matchers.should.Matchers
 import java.net.{ InetSocketAddress, URI }
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, Executors, TimeUnit }
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -41,6 +49,10 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
   @volatile private var signatureValid: Boolean          = false
   @volatile private var delayMillis: Long                = 0L
 
+  /** A request counts `arrived` down, then waits for `gate` before it is answered. */
+  @volatile private var arrived: CountDownLatch      = new CountDownLatch(0)
+  @volatile private var gate: Option[CountDownLatch] = None
+
   private val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
   server.setExecutor(Executors.newFixedThreadPool(8))
   server.createContext(
@@ -55,6 +67,8 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
       lastBody = body
       lastPath = exchange.getRequestURI.getRawPath
       signatureValid = validSignature(exchange, headers, payload)
+      arrived.countDown()
+      gate.foreach(_.await(20, TimeUnit.SECONDS))
       if (delayMillis > 0) Thread.sleep(delayMillis)
       val (status, reply) = Option(replies.get(id)).getOrElse(
         400 -> """{"__type":"ResourceNotFoundException","message":"Secrets Manager can't find the specified secret."}"""
@@ -225,7 +239,7 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     hits(id) shouldBe 1
   }
 
-  it should "fail, not serve the expired key, when a read after the interval fails, and recover on the next call" in {
+  it should "fail, not serve the expired key, when a read after the interval fails, and recover once the store does" in {
     val id    = "llm4s/outage"
     val clock = new MutableClock(Start)
     replies.put(id, 200 -> secretString("sk-before-outage"))
@@ -242,7 +256,109 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     assertNoSecrets(e, "sk-before-outage")
 
     replies.put(id, 200 -> secretString("sk-after-outage"))
+    clock.advance(1.second) // the failure is shared for a moment: see the tests below
     key(p) shouldBe "sk-after-outage"
+  }
+
+  it should "make one read, not one per caller, when concurrent callers meet a failing store" in {
+    val id = "llm4s/outage-convoy"
+    replies.put(id, 500 -> """{"__type":"InternalServiceError","message":"An error occurred on the server side."}""")
+    val p       = provider(settings(id))
+    val pool    = Executors.newFixedThreadPool(8)
+    val start   = new CountDownLatch(1)
+    val results = new ConcurrentHashMap[Int, Result[ApiKey]]()
+    delayMillis = 100
+    (1 to 8).foreach(i =>
+      pool.execute { () =>
+        start.await()
+        results.put(i, p.current())
+      }
+    )
+    start.countDown()
+    pool.shutdown()
+    pool.awaitTermination(10, TimeUnit.SECONDS) shouldBe true
+    delayMillis = 0
+
+    results.size shouldBe 8
+    val errors = results.values.toArray(Array.empty[Result[ApiKey]]).toSeq.flatMap(_.left.toOption)
+    errors.size shouldBe 8
+    errors.distinct.size shouldBe 1
+    errors.head shouldBe a[ServiceError]
+    errors.head.asInstanceOf[ServiceError].status shouldBe 500
+    hits(id) shouldBe 1
+  }
+
+  it should "share a refused read for five seconds, then read again and return a recovered store's key" in {
+    val id    = "llm4s/failure-window"
+    val clock = new MutableClock(Start)
+    replies.put(id, 400 -> """{"__type":"AccessDeniedException","message":"not authorized"}""")
+    val p = provider(settings(id), clock)
+
+    val first = p.current().left.toOption.get
+    first shouldBe a[AuthenticationError]
+    replies.put(id, 200 -> secretString("sk-after-refusal"))
+    p.current() shouldBe Left(first)
+    clock.advance(5.seconds - 1.milli)
+    p.current() shouldBe Left(first)
+    hits(id) shouldBe 1
+
+    clock.advance(1.milli)
+    key(p) shouldBe "sk-after-refusal"
+    hits(id) shouldBe 2
+  }
+
+  it should "share a transient failure for one second only" in {
+    val id    = "llm4s/transient-window"
+    val clock = new MutableClock(Start)
+    replies.put(id, 500 -> """{"__type":"InternalServiceError","message":"An error occurred on the server side."}""")
+    val p = provider(settings(id), clock)
+
+    val first = p.current().left.toOption.get
+    first.isRetryable shouldBe true
+    replies.put(id, 200 -> secretString("sk-after-blip"))
+    clock.advance(1.second - 1.milli)
+    p.current() shouldBe Left(first)
+    hits(id) shouldBe 1
+
+    clock.advance(1.milli)
+    key(p) shouldBe "sk-after-blip"
+    hits(id) shouldBe 2
+  }
+
+  it should "return a cancellation, the interrupt flag set, to a caller interrupted while it waits for a read" in {
+    val id = "llm4s/interrupted"
+    replies.put(id, 200 -> secretString("sk-slow-read-key"))
+    val p       = provider(settings(id))
+    val release = new CountDownLatch(1)
+    arrived = new CountDownLatch(1)
+    gate = Some(release)
+
+    val reader = new AtomicReference[Option[Result[ApiKey]]](None)
+    val waiter = new AtomicReference[Option[(Result[ApiKey], Boolean)]](None)
+    val first  = new Thread(() => reader.set(Some(p.current())))
+    val second = new Thread(() => waiter.set(Some((p.current(), Thread.currentThread().isInterrupted))))
+    first.start()
+    arrived.await(10, TimeUnit.SECONDS) shouldBe true // the read is in flight, held by the store
+    second.start()
+    val parked   = Set(Thread.State.WAITING, Thread.State.TIMED_WAITING, Thread.State.BLOCKED)
+    val deadline = System.nanoTime() + 10.seconds.toNanos
+    while (!parked(second.getState) && System.nanoTime() < deadline) Thread.onSpinWait()
+    parked(second.getState) shouldBe true
+
+    second.interrupt()
+    second.join(5000)
+    val outcome = waiter.get
+    release.countDown()
+    gate = None
+    first.join(10000)
+    second.join(10000)
+
+    outcome.map(_._1.left.toOption.map(_.getClass)) shouldBe Some(Some(classOf[CancelledError]))
+    outcome.map(_._2) shouldBe Some(true)
+    reader.get.map(_.map(_.asKey)) shouldBe Some(Right("sk-slow-read-key")) // the read itself is untouched
+    hits(id) shouldBe 1
+    key(p) shouldBe "sk-slow-read-key" // and nothing of the cancellation was cached
+    hits(id) shouldBe 1
   }
 
   it should "report refused credentials and denied access as an AuthenticationError without the credentials" in {
