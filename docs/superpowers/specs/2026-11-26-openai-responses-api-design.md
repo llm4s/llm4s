@@ -221,6 +221,12 @@ exists and already round-trips. A test pins that a stored message carrying one r
   finish reason. `response.failed` and `error` end the stream with the mapped error; text already delivered stays
   delivered.
 - A stream that ends with no terminal event is `OpenAIClient.unfinished`, as now.
+- Verified live on 2026-11-26 against OpenAI: on `gpt-4o-mini` a plain-text stream arrived as many content chunks
+  whose concatenation equals the final content, the finish reason on the last chunk. On `gpt-6.1-terra` and
+  `gpt-5.6-luna` at effort low a streamed tool call carried its call's id on every delta chunk, the ids equal to the
+  completion's, with reasoning tokens and a sealed reasoning block; a streamed tool loop on both sent that block back
+  and the second streamed turn was accepted. On `gpt-5.6-luna` with `reasoningSummary = auto`, summary text arrived as
+  thinking deltas.
 
 ## Errors, logging, metrics
 
@@ -267,13 +273,6 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
    live suite.
 
 ## Carried into later slices
-
-Slice 3 (streaming):
-- Native streaming must emit summary text as `thinkingDelta`, and build the opaque blocks from the terminal event's response through `OpenAIResponsesReply` (not `StreamingAccumulator`'s thinking text, which would drop them).
-- A parity test that a streamed and an unstreamed completion of the same reply have equal messages.
-- A failed reply's `invalid_prompt` and image error codes are still a 502 `ServiceError`, which invites retries of a request that cannot succeed: give them a 400-class error where `response.failed` shares the mapping.
-- A 200 reply that maps to a `Left` (failed, content filter, malformed tool call) is recorded in the exchange log with no request or response body: record both.
-- In the faked stream the first chunk carries the finish reason and later tool calls follow it; native streaming must end with the finish reason.
 
 Slice 4 (the default):
 - Add `OpenAIApi` and `OpenAIReasoningSummary` to the compatibility policy's "Sealed types that may gain a case" table.
