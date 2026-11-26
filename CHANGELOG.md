@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
-- **Added** an `openai` section with `api = "responses"` uses OpenAI's Responses API, where reasoning and tools work together, a turn's reasoning is kept across the thread's requests, and `reasoningSummary` asks for summary text; streaming there is one call delivered in chunks until native streaming lands ([#2900](https://github.com/llm4s/llm4s/issues/2900)).
+- **Added** an `openai` section with `api = "responses"` uses OpenAI's Responses API, where reasoning and tools work together, a turn's reasoning is kept across the thread's requests, and `reasoningSummary` asks for summary text; `streamComplete` there streams text, tool-call arguments and reasoning summaries ([#2900](https://github.com/llm4s/llm4s/issues/2900)).
 - **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
 
 ### Observability

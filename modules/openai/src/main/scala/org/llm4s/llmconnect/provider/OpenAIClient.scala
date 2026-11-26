@@ -10,7 +10,7 @@ import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.{ OkHttpClient, OpenAIOkHttpClient }
 import com.openai.client.{ OpenAIClient => SdkClient, OpenAIClientImpl }
-import com.openai.core.{ ClientOptions, JsonField, ObjectMappers, RequestOptions, Timeout }
+import com.openai.core.{ ClientOptions, JsonField, JsonValue, ObjectMappers, RequestOptions, Timeout }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.credential.BearerTokenCredential
 import com.openai.errors.{
@@ -37,7 +37,7 @@ import com.openai.models.chat.completions.{
   ChatCompletionUserMessageParam
 }
 import com.openai.models.completions.CompletionUsage
-import com.openai.models.responses.{ Response, ResponseCreateParams }
+import com.openai.models.responses.{ Response, ResponseCreateParams, ResponseStreamEvent }
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
@@ -88,6 +88,9 @@ private[provider] trait OpenAIClientTransport {
 
   /** `POST /responses`, OpenAI's Responses API. */
   def createResponse(params: ResponseCreateParams): Response
+
+  /** `POST /responses` with `stream: true`: the Responses API's server-sent events. */
+  def createResponseStream(params: ResponseCreateParams): StreamResponse[ResponseStreamEvent]
 
   /** `GET /models/<model>`, for `validate()`: returns when the service has `model`, and throws as a completion does. */
   def retrieveModel(model: String): Unit
@@ -239,32 +242,29 @@ final class OpenAIClient private[provider] (
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics(completeAndRecord(conversation, options)(_ => ()))
 
-  /** One recorded completion call; `deliver` sees the completion before its exchange is recorded. */
+  /** A failed call's error, and the request and reply bodies it has to record (none before a reply was read). */
+  final private case class Failed(error: LLMError, bodies: Option[(String, String)])
+
+  /** One recorded completion call; `deliver` sees the completion before its exchange is recorded, a throw a `Left`. */
   private def completeAndRecord(conversation: Conversation, options: CompletionOptions)(
     deliver: Completion => Unit
   ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    val result = for {
-      transformed <- TransformationResult.transform(
-        modelName,
-        options,
-        conversation.messages,
-        OpenAIModelRules.transformer(registryService),
-        dropUnsupported = true
-      )
-      adjustments = openAIAdjustments(options, transformed) ++
-        (if (api == OpenAIApi.Responses)
-           OpenAIResponsesRequest.adjustments(transformed.options, omitsSampling(transformed.options))
-         else Nil)
-      transformedConversation = conversation.withMessages(transformed.messages)
+    val result: Either[Failed, Completion] = for {
+      request <- transformedRequest(conversation, options).left.map(Failed(_, None))
+      (transformedConversation, transformedOptions, adjustments) = request
       exchange <- api match {
-        case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformed.options, adjustments)
+        case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformedOptions, adjustments)
         case OpenAIApi.ChatCompletions =>
-          completeOnChatCompletions(transformedConversation, transformed.options, adjustments)
+          completeOnChatCompletions(transformedConversation, transformedOptions, adjustments).left
+            .map(Failed(_, None))
       }
       (body, responseBody, completion) = exchange
-      _                                = deliver(completion)
+      // on Responses the reply was read, so a consumer's failure keeps both bodies in the exchange
+      _ <- call("delivery")(deliver(completion)).left.map(
+        Failed(_, Option.when(api == OpenAIApi.Responses)((body, responseBody)))
+      )
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -273,8 +273,32 @@ final class OpenAIClient private[provider] (
       )
     } yield completion
 
-    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
+    result.left.foreach(failed =>
+      recordExchange(startedAt, failed.bodies.map(_._1), failed.bodies.map(_._2), Left(failed.error))
+    )
+    result.left.map(_.error)
   }
+
+  /** The conversation and options the model's rules leave, and the adjustments the request reports. */
+  private def transformedRequest(
+    conversation: Conversation,
+    options: CompletionOptions
+  ): Result[(Conversation, CompletionOptions, Seq[RequestAdjustment])] =
+    TransformationResult
+      .transform(
+        modelName,
+        options,
+        conversation.messages,
+        OpenAIModelRules.transformer(registryService),
+        dropUnsupported = true
+      )
+      .map { transformed =>
+        val adjustments = openAIAdjustments(options, transformed) ++
+          (if (api == OpenAIApi.Responses)
+             OpenAIResponsesRequest.adjustments(transformed.options, omitsSampling(transformed.options))
+           else Nil)
+        (conversation.withMessages(transformed.messages), transformed.options, adjustments)
+      }
 
   /** One Chat Completions call: the request body, the reply's JSON and the `Completion`. */
   private def completeOnChatCompletions(
@@ -295,22 +319,33 @@ final class OpenAIClient private[provider] (
       completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
     } yield (body, serialize(response), completion)
 
-  /** One Responses API call, step for step as [[completeOnChatCompletions]]. */
+  /**
+   * One Responses API call, step for step as [[completeOnChatCompletions]], except that a reply that maps to an error
+   * keeps the request and reply bodies for the exchange log.
+   */
   private def completeOnResponses(
     conversation: Conversation,
     options: CompletionOptions,
     adjustments: Seq[RequestAdjustment]
-  ): Result[(String, String, Completion)] =
+  ): Either[Failed, (String, String, Completion)] =
     for {
-      params <- OpenAIResponsesRequest.build(responsesSettings(options), conversation, options)
+      params <- OpenAIResponsesRequest
+        .build(responsesSettings(options), conversation, options)
+        .left
+        .map(Failed(_, None))
       _    = adjustmentLog.record(model, adjustments)
       body = serialize(params._body())
-      response <- call("response")(transport.createResponse(params))
-      completion <- OpenAIResponsesReply
-        .completion(response, provider, modelName, replayOrigin)
-        .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
-        .flatMap(filteredReply)
-    } yield (body, serialize(response), completion)
+      response <- call("response")(transport.createResponse(params)).left.map(Failed(_, None))
+      responseBody = serialize(response)
+      completion <- responsesCompletion(response, adjustments).left.map(Failed(_, Some((body, responseBody))))
+    } yield (body, responseBody, completion)
+
+  /** A Responses reply as `complete` returns it: priced, with the request's adjustments, failing when filtered. */
+  private def responsesCompletion(response: Response, adjustments: Seq[RequestAdjustment]): Result[Completion] =
+    OpenAIResponsesReply
+      .completion(response, provider, modelName, replayOrigin)
+      .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
+      .flatMap(filteredReply)
 
   private def reasoningSummary: Option[org.llm4s.llmconnect.config.OpenAIReasoningSummary] = config match
     case openAI: OpenAIConfig => openAI.reasoningSummary
@@ -331,9 +366,55 @@ final class OpenAIClient private[provider] (
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    // A Responses stream is one unstreamed call delivered as chunks, until native streaming lands.
-    if (api == OpenAIApi.Responses) completeAndRecord(conversation, options)(emitCompletionAsChunks(_, onChunk))
-    else streamOnChatCompletions(conversation, options, onChunk)
+    if (api == OpenAIApi.ChatCompletions) streamOnChatCompletions(conversation, options, onChunk)
+    // a model that cannot stream natively answers one unstreamed call, delivered as chunks
+    else if (OpenAIModelRules.transformer(registryService).requiresFakeStreaming(modelName))
+      completeAndRecord(conversation, options)(emitCompletionAsChunks(_, onChunk))
+    else streamOnResponses(conversation, options, onChunk)
+  }
+
+  /**
+   * A Responses API stream: its events delivered as chunks as they arrive ([[OpenAIResponsesStream]]), and the
+   * completion built from its terminal event's `Response` as `complete` builds it. Only then is the finish chunk
+   * delivered; one exchange is recorded, with the events received so far.
+   */
+  private def streamOnResponses(
+    conversation: Conversation,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = {
+    val startedAt = Instant.now()
+    transformedRequest(conversation, options)
+      .flatMap((c, o, adjustments) => OpenAIResponsesRequest.build(responsesSettings(o), c, o).map((_, adjustments)))
+      .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
+      .flatMap { (params, adjustments) =>
+        adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
+        val rawEvents = StringBuilder()
+        val stream    = new OpenAIResponsesStream(onChunk)
+        // `onChunk` runs inside `call`, so a caller's failure is a `Left` too, with the stream closed
+        val attempt = callMapping("response stream", OpenAIClient.mapResponsesStreamError(_, provider)) {
+          Using.resource(transport.createResponseStream(params)) { response =>
+            response.stream().forEach { event =>
+              rawEvents.append(serialize(event)).append('\n')
+              stream.accept(event)
+            }
+          }
+        }
+        // the body the SDK sends: `createStreaming` adds `stream: true`
+        val body = serialize(params._body().toBuilder().putAdditionalProperty("stream", JsonValue.from(true)).build())
+        recordingExchange(startedAt, Some(body)) {
+          attempt
+            .flatMap(_ => stream.streamError.map(OpenAIResponsesReply.errorOf(_, provider)).toLeft(()))
+            .flatMap(_ =>
+              stream.terminal.toRight(OpenAIClient.unfinished(config.endpointUrl.map(_.asUrl).getOrElse(displayName)))
+            )
+            .flatMap(responsesCompletion(_, adjustments))
+            .flatMap(c => call("response stream")(stream.finish(c.finishReason)).map(_ => c))
+        }(
+          successResponse = _ => Some(rawEvents.result()),
+          failureResponse = Option.when(rawEvents.nonEmpty)(rawEvents.result())
+        )
+      }
   }
 
   private def streamOnChatCompletions(
@@ -382,9 +463,12 @@ final class OpenAIClient private[provider] (
   }
 
   /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
-  private def call[A](what: String)(body: => A): Result[A] =
+  private def call[A](what: String)(body: => A): Result[A] = callMapping(what, OpenAIClient.mapError(_, provider))(body)
+
+  /** [[call]] with `mapping` for the failure; the Responses stream reads an `SseException` through its error table. */
+  private def callMapping[A](what: String, mapping: Throwable => LLMError)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      val error = OpenAIClient.mapError(e, provider)
+      val error = mapping(e)
       e match {
         // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
         // may repeat a credential: only the redacted error is logged, not the exception.
@@ -1205,11 +1289,25 @@ object OpenAIClient {
    * states and otherwise making it a 502.
    */
   private def streamError(sse: SseException, provider: ProviderId): LLMError =
+    streamErrorObject(sse)
+      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
+      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /** The `error` object an `SseException` carries (or, should the SDK change, the whole event). */
+  private def streamErrorObject(sse: SseException): Option[ujson.Value] =
     Try(ObjectMappers.jsonMapper().writeValueAsString(sse.body())).toOption
       .flatMap(body => BoundedJson.read(body).toOption)
       .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
-      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
-      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /**
+   * A failure of a Responses stream: the error object an `SseException` carries goes through the Responses error table
+   * ([[OpenAIResponsesReply.errorOf]], as an `error` event's is); any other failure is mapped as [[mapError]] does.
+   */
+  private[provider] def mapResponsesStreamError(e: Throwable, provider: ProviderId): LLMError = e match {
+    case sse: SseException =>
+      streamErrorObject(sse).fold(mapError(e, provider))(OpenAIResponsesReply.errorOf(_, provider))
+    case _ => mapError(e, provider)
+  }
 
   /**
    * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,
@@ -1328,6 +1426,9 @@ private[provider] object OpenAIClientTransport {
 
       override def createResponse(params: ResponseCreateParams): Response =
         requestOpts.fold(client.responses().create(params))(o => client.responses().create(params, o))
+
+      override def createResponseStream(params: ResponseCreateParams): StreamResponse[ResponseStreamEvent] =
+        streamOpts.fold(client.responses().createStreaming(params))(o => client.responses().createStreaming(params, o))
 
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
@@ -1628,6 +1729,10 @@ private[provider] object OpenAIClientTransport {
           refresh()
           underlying.createResponse(params)
         }
+        override def createResponseStream(params: ResponseCreateParams): StreamResponse[ResponseStreamEvent] = {
+          refresh()
+          underlying.createResponseStream(params)
+        }
         override def retrieveModel(model: String): Unit = { refresh(); underlying.retrieveModel(model) }
         override def listModels(): Unit                 = { refresh(); underlying.listModels() }
         override def close(): Unit                      = underlying.close()
@@ -1674,6 +1779,8 @@ private[provider] object OpenAIClientTransport {
         override def createResponse(params: ResponseCreateParams): Response = rejected(
           underlying.createResponse(params)
         )
+        override def createResponseStream(params: ResponseCreateParams): StreamResponse[ResponseStreamEvent] =
+          rejected(underlying.createResponseStream(params))
         override def retrieveModel(model: String): Unit = rejected(underlying.retrieveModel(model))
         override def listModels(): Unit                 = rejected(underlying.listModels())
         override def close(): Unit                      = underlying.close()

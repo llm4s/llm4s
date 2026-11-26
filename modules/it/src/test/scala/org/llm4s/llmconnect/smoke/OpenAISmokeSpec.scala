@@ -341,6 +341,157 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     }
   }
 
+  // ---- streamComplete on the Responses API (#2900): deltas as they arrive, the Completion from the terminal event ----
+
+  private def streamed(
+    client: LLMClient,
+    conversation: Conversation,
+    options: CompletionOptions
+  ): (Result[Completion], Vector[StreamedChunk]) = {
+    val collected = Vector.newBuilder[StreamedChunk]
+    val result    = client.streamComplete(conversation, options)(collected += _)
+    (result, collected.result())
+  }
+
+  // One line per chunk: which delta kinds it carried and its finish reason. Goes in a failure's clue.
+  private def chunkShape(chunks: Seq[StreamedChunk]): String =
+    chunks.zipWithIndex
+      .map { case (c, i) =>
+        val kinds = Seq(
+          c.contentDelta.filter(_.nonEmpty).map(_ => "content"),
+          c.toolCallDelta.map(t => s"tool(${t.id})"),
+          c.thinkingDelta.filter(_.nonEmpty).map(_ => "thinking")
+        ).flatten
+        s"$i:[${kinds.mkString(",")}]${c.finishReason.fold("")(f => s" finish=$f")}"
+      }
+      .mkString("; ")
+
+  private def logStream(model: String, result: Result[Completion], chunks: Seq[StreamedChunk]): Unit =
+    info(
+      s"$model streamed: ${chunks.size} chunks, ${chunks.count(_.hasContent)} content, " +
+        s"${chunks.count(_.toolCallDelta.isDefined)} tool-call, ${chunks.count(_.hasThinking)} thinking, " +
+        result.fold(
+          e => s"failed: $e",
+          r => s"finish=${r.finishReason}, usage=${r.usage}"
+        )
+    )
+
+  it should "stream text on the Responses API on gpt-4o-mini" in {
+    Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+    val model  = "gpt-4o-mini"
+    val client = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+    val ask =
+      Conversation(Seq(UserMessage("In four or five sentences, explain what a hash map is and why lookups are fast.")))
+    val (result, chunks) = streamed(client, ask, CompletionOptions())
+    client.close()
+
+    logStream(model, result, chunks)
+    withClue(s"$model stream failed: ${result.swap.toOption}; chunks: ${chunkShape(chunks)}: ") {
+      val completion = result.value
+      withClue(s"chunks: ${chunkShape(chunks)}: ") {
+        chunks.flatMap(_.contentDelta).mkString shouldBe completion.content
+        chunks.count(_.hasContent) should be > 1
+        chunks.init.forall(_.finishReason.isEmpty) shouldBe true
+        chunks.last.finishReason shouldBe Some(completion.finishReason)
+      }
+    }
+  }
+
+  for (model <- Seq("gpt-6.1-terra", "gpt-5.6-luna")) {
+    it should s"stream a tool call with reasoning on the Responses API on $model" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val client           = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val (result, chunks) = streamed(client, Conversation(Seq(calculationMessage)), lowOptions)
+      client.close()
+
+      logStream(model, result, chunks)
+      withClue(s"$model stream failed: ${result.swap.toOption}; chunks: ${chunkShape(chunks)}: ")(
+        result.isRight shouldBe true
+      )
+      val completion = result.value
+      val calls      = completion.message.toolCalls
+      if (calls.isEmpty) cancel(s"$model made no tool call, content: ${completion.content}")
+      withClue(s"$model chunks: ${chunkShape(chunks)}: ") {
+        val toolDeltas = chunks.flatMap(_.toolCallDelta)
+        toolDeltas should not be empty
+        toolDeltas.forall(_.id.asString.nonEmpty) shouldBe true
+        toolDeltas.map(_.id).toSet shouldBe calls.map(_.id).toSet
+        chunks.flatMap(_.contentDelta).mkString shouldBe completion.content
+        chunks.init.forall(_.finishReason.isEmpty) shouldBe true
+        chunks.last.finishReason shouldBe Some(completion.finishReason)
+      }
+      val reasoningTokens = completion.usage.flatMap(_.thinkingTokens).exists(_ > 0)
+      if (!reasoningTokens || !completion.message.hasSealedThinking)
+        cancel(
+          s"$model made tool calls but returned reasoning tokens=$reasoningTokens, " +
+            s"sealed reasoning block=${completion.message.hasSealedThinking}"
+        )
+    }
+
+    it should s"stream a tool loop that sends its reasoning back on the Responses API on $model" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val client           = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val (first, chunks1) = streamed(client, Conversation(Seq(calculationMessage)), lowOptions)
+      logStream(model, first, chunks1)
+      val firstOk =
+        withClue(
+          s"Responses streamed turn 1 on $model failed: ${first.swap.toOption}; chunks: ${chunkShape(chunks1)}: "
+        )(
+          first.value
+        )
+      val calls = firstOk.message.toolCalls
+      if (calls.isEmpty) {
+        client.close()
+        cancel(s"$model made no tool call on turn 1, content: ${firstOk.content}")
+      }
+      val opaque = firstOk.message.thinking.collect {
+        case ThinkingBlock.Opaque(provider, _) if provider == ProviderId("openai") => provider
+      }
+      val kinds = firstOk.message.thinking.map(_.getClass.getSimpleName)
+      info(s"$model streamed turn 1: ${calls.size} tool call(s), ${opaque.size} opaque openai block(s), blocks=$kinds")
+      if (opaque.isEmpty) {
+        client.close()
+        cancel(s"$model returned no reasoning item on turn 1 (thinking blocks: $kinds), so none could be sent back")
+      }
+
+      val turn2 =
+        Conversation(Seq(calculationMessage, firstOk.message) ++ calls.map(c => ToolMessage("recorded", c.id)))
+      val (second, chunks2) = streamed(client, turn2, lowOptions)
+      client.close()
+      logStream(model, second, chunks2)
+      acceptedReply(model, second)
+    }
+  }
+
+  it should "stream reasoning summary text when reasoningSummary is auto on gpt-5.6-luna" in {
+    Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+    val model            = "gpt-5.6-luna"
+    val cfg              = responsesConfig(apiKey.get, model).withReasoningSummary(Some(OpenAIReasoningSummary.Auto))
+    val client           = OpenAIClient(cfg).toOption.get
+    val (result, chunks) = streamed(client, Conversation(Seq(calculationMessage)), lowOptions)
+    client.close()
+
+    logStream(model, result, chunks)
+    result.left.foreach { e =>
+      if {
+        val m = e.message.toLowerCase
+        m.contains("verif") && m.contains("organi")
+      } then cancel(s"$model summary request refused: ${e.message}")
+    }
+    withClue(s"$model stream failed: ${result.swap.toOption}; chunks: ${chunkShape(chunks)}: ")(
+      result.isRight shouldBe true
+    )
+    withClue(s"$model chunks: ${chunkShape(chunks)}: ") {
+      chunks.flatMap(_.thinkingDelta).mkString should not be empty
+      chunks.init.forall(_.finishReason.isEmpty) shouldBe true
+      chunks.last.finishReason shouldBe Some(result.value.finishReason)
+    }
+  }
+
   it should "complete a plain request on the Responses API on a non-reasoning model" in {
     Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
 

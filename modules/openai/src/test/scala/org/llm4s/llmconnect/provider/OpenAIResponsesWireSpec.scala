@@ -9,7 +9,8 @@ import org.llm4s.error.{
   ProcessingError,
   RateLimitError,
   ServiceError,
-  UnsupportedContentPartError
+  UnsupportedContentPartError,
+  ValidationError
 }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -20,7 +21,6 @@ import org.llm4s.llmconnect.model.{
   ReasoningEffort,
   RequestAdjustment,
   RequestOption,
-  StreamedChunk,
   ResponseFormat,
   ServiceTier,
   SystemMessage,
@@ -44,7 +44,6 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
-import scala.collection.mutable.ListBuffer
 
 /** `OpenAIClient` on the Responses API over the real `openai-java` transport, against a local HTTP server. */
 final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with EitherValues:
@@ -546,8 +545,120 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
 
   it should "report a failed reply whose error has a code and no message with the code in the message" in {
     val error = answer(reply("", status = "failed", extra = """"error":{"code":"invalid_prompt"}""")).left.value
-    error shouldBe a[ServiceError]
+    error shouldBe a[ValidationError]
     error.message should include("invalid_prompt")
+  }
+
+  private def failedWith(code: String): LLMError =
+    answer(reply("", status = "failed", extra = s""""error":{"code":"$code","message":"msg for $code"}""")).left.value
+
+  private def requestFaults = Seq(
+    "invalid_prompt",
+    "data_residency_mismatch",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_url",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "invalid_image_mode",
+    "image_file_too_large",
+    "unsupported_image_media_type",
+    "empty_image_file",
+    "failed_to_download_image",
+    "image_file_not_found"
+  )
+
+  it should "report a failed reply the request can never satisfy as a 400-class error, not a 502" in {
+    requestFaults.foreach { code =>
+      val error = failedWith(code)
+      withClue(code) {
+        error shouldBe a[ValidationError]
+        error.isRetryable shouldBe false
+        error.message should include(s"msg for $code")
+      }
+    }
+  }
+
+  it should "report a failed reply with a policy code as a non-retryable ContentFilteredError naming the code" in {
+    Seq("bio_policy", "misalignment_policy_violation", "image_content_policy_violation").foreach { code =>
+      val error = failedWith(code)
+      withClue(code) {
+        error shouldBe a[ContentFilteredError]
+        error.isRetryable shouldBe false
+        error.message should include(code)
+      }
+    }
+  }
+
+  it should "attach the reply's usage to a policy refusal, and none when the reply reports none" in {
+    val body      = reply("", status = "failed", extra = """"error":{"code":"bio_policy","message":"refused"}""")
+    val withUsage = answer(body).left.value
+    withUsage shouldBe a[ContentFilteredError]
+    withUsage.asInstanceOf[ContentFilteredError].usage.map(_.totalTokens) shouldBe Some(15)
+
+    val json = ujson.read(body)
+    json.obj.remove("usage")
+    val noUsage = answer(json.render()).left.value
+    noUsage shouldBe a[ContentFilteredError]
+    noUsage.asInstanceOf[ContentFilteredError].usage shouldBe None
+  }
+
+  it should "keep a failed reply about the service itself a retryable 502 ServiceError" in {
+    Seq(
+      "server_error",
+      "vector_store_timeout"
+    )
+      .foreach { code =>
+        val error = failedWith(code)
+        withClue(code) {
+          error shouldBe a[ServiceError]
+          error.asInstanceOf[ServiceError].status shouldBe 502
+          error.isRetryable shouldBe true
+        }
+      }
+  }
+
+  private def recordedOnComplete(
+    body: String
+  ): (Either[LLMError, org.llm4s.llmconnect.model.Completion], Seq[ProviderExchange]) =
+    val recorded = scala.collection.mutable.ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit = recorded += exchange
+    var out = Option.empty[Either[LLMError, org.llm4s.llmconnect.model.Completion]]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(new AtomicReference[Seen](), exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+    } { baseUrl =>
+      val config = configFor(baseUrl, "gpt-4o").withApi(OpenAIApi.Responses)
+      val client =
+        OpenAIClient(config, LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))).value
+      out = Some(client.complete(hello, CompletionOptions()))
+      client.close()
+    }
+    (out.get, recorded.toSeq)
+
+  it should "record the request and the reply for a 200 reply that maps to an error" in {
+    val replies = Seq(
+      "failed" -> reply("", status = "failed", extra = """"error":{"code":"server_error","message":"boom"}"""),
+      "content filter" -> reply(
+        outputMessage("cut"),
+        status = "incomplete",
+        extra = """"incomplete_details":{"reason":"content_filter"}"""
+      ),
+      "bad arguments" -> reply(functionCall("call_1", "get_weather", "{not json"))
+    )
+    replies.foreach { case (label, body) =>
+      val (result, recorded) = recordedOnComplete(body)
+      withClue(label) {
+        result.isLeft shouldBe true
+        recorded should have size 1
+        recorded.head.requestBody should include("hello")
+        recorded.head.responseBody.getOrElse("") should include("resp_")
+        recorded.head.errorMessage should not be empty
+      }
+    }
   }
 
   it should "read an incomplete reply whose incomplete_details is not an object as an Unknown finish" in {
@@ -624,103 +735,4 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     )
     sent.body("input")(2)("output").str shouldBe tool.content
     sent.body("input")(2)("output").str should not be "ab"
-  }
-
-  /** One `streamComplete` call against a server answering `status` with `body`; the chunks, the result and the log. */
-  final private case class Streamed(
-    result: Either[LLMError, org.llm4s.llmconnect.model.Completion],
-    chunks: List[StreamedChunk],
-    exchanges: List[ProviderExchange],
-    seen: Option[Seen]
-  ):
-    def request: Seen = seen.getOrElse(fail("no request reached the server"))
-
-  private def streamed(
-    body: String,
-    status: Int = 200,
-    options: CompletionOptions = CompletionOptions(),
-    model: String = "gpt-4o"
-  ): Streamed =
-    val seen      = new AtomicReference[Seen]()
-    val chunks    = ListBuffer.empty[StreamedChunk]
-    val exchanges = ListBuffer.empty[ProviderExchange]
-    val sink = new ProviderExchangeSink:
-      override def record(exchange: ProviderExchange): Unit = exchanges += exchange
-    var out = Option.empty[Either[LLMError, org.llm4s.llmconnect.model.Completion]]
-    LocalProviderTestServer.withServer("/") { exchange =>
-      capture(seen, exchange)
-      LocalProviderTestServer.sendJsonResponse(exchange, status, body)
-    } { baseUrl =>
-      val client = OpenAIClient(
-        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
-        LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
-      ).value
-      out = Some(client.streamComplete(hello, options)(chunks += _))
-      client.close()
-    }
-    Streamed(out.get, chunks.toList, exchanges.toList, Option(seen.get()))
-
-  it should "answer streamComplete with one unstreamed call, delivered as chunks" in {
-    val s          = streamed(reply(outputMessage("hi")))
-    val completion = s.result.value
-    completion.content shouldBe "hi"
-    s.chunks.flatMap(_.contentDelta).mkString shouldBe "hi"
-    s.chunks.last.finishReason shouldBe Some(FinishReason.Stop)
-    s.request.path shouldBe "/v1/responses"
-    s.request.body.obj.keySet should not contain "stream"
-  }
-
-  it should "give a streamed completion the same message, reasoning included, as complete does" in {
-    val body =
-      reply(
-        reasoningItem("rs_1", summary = Seq("Thinking.")) + "," +
-          functionCall("call_1", "get_weather", """{"city":"Paris"}""")
-      )
-    val s                  = streamed(body, model = "gpt-6.1-terra")
-    val streamedCompletion = s.result.value
-    streamedCompletion.message.hasSealedThinking shouldBe true
-    streamedCompletion.message.thinkingBinding shouldBe defined
-    var unstreamed = Option.empty[org.llm4s.llmconnect.model.Completion]
-    LocalProviderTestServer.withServer("/") { exchange =>
-      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
-    } { baseUrl =>
-      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
-      unstreamed = client.complete(hello, CompletionOptions()).toOption
-      client.close()
-    }
-    streamedCompletion.message shouldBe unstreamed.get.message
-  }
-
-  it should "report the same adjustments on a streamed completion as complete does" in {
-    val s = streamed(
-      reply(outputMessage("hi")),
-      options = CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.25)
-    )
-    s.result.value.adjustments.collect { case RequestAdjustment.Dropped(option, _) =>
-      option
-    } should contain theSameElementsAs Seq(RequestOption.PresencePenalty, RequestOption.FrequencyPenalty)
-  }
-
-  it should "deliver a streamed reply's tool calls through the chunks" in {
-    val s = streamed(reply(functionCall("call_1", "get_weather", """{"city":"Paris"}""")))
-    s.result.value.toolCalls.map(_.id.asString) shouldBe Seq("call_1")
-    val calls = s.chunks.flatMap(_.toolCallDelta)
-    calls.map(_.id.asString) shouldBe Seq("call_1")
-    calls.map(_.name) shouldBe Seq("get_weather")
-    calls.map(_.arguments.render()) shouldBe Seq("""{"city":"Paris"}""")
-    s.chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
-  }
-
-  it should "record the Responses request and reply in the exchange log, once, and a 500 as one failed exchange" in {
-    val ok = streamed(reply(outputMessage("hi")))
-    ok.exchanges should have size 1
-    ok.exchanges.head.requestBody should include("store")
-    ok.exchanges.head.responseBody.getOrElse("") should include("resp_1")
-
-    val failed = streamed("""{"error":{"message":"boom","type":"server_error"}}""", status = 500)
-    failed.result.isLeft shouldBe true
-    failed.chunks shouldBe empty
-    failed.exchanges should have size 1
-    failed.exchanges.head.errorMessage shouldBe defined
-    failed.exchanges.head.responseBody shouldBe None
   }

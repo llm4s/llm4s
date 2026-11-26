@@ -221,11 +221,25 @@ exists and already round-trips. A test pins that a stored message carrying one r
   finish reason. `response.failed` and `error` end the stream with the mapped error; text already delivered stays
   delivered.
 - A stream that ends with no terminal event is `OpenAIClient.unfinished`, as now.
+- Verified live on 2026-11-26 against OpenAI: on `gpt-4o-mini` a plain-text stream arrived as many content chunks
+  whose concatenation equals the final content, the finish reason on the last chunk. On `gpt-6.1-terra` and
+  `gpt-5.6-luna` at effort low a streamed tool call carried its call's id on every delta chunk, the ids equal to the
+  completion's, with reasoning tokens and a sealed reasoning block; a streamed tool loop on both sent that block back
+  and the second streamed turn was accepted; on `gpt-5.6-luna` that reply was empty (one chunk, no content, finish `Stop`), the second such observation after a replay (the first is recorded under "Reasoning across turns"), which PR 4's live comparison measures. On `gpt-5.6-luna` with `reasoningSummary = auto`, summary text arrived as
+  thinking deltas.
 
 ## Errors, logging, metrics
 
 Unchanged in kind: `mapError`, `recordExchange` (the body is the Responses request and reply), `completeWithMetrics`.
 The exchange log's format does not change; its content for OpenAI does, which the migration note says.
+
+The code of a `failed` reply's `error`, or of an `error` event (also one the SDK throws as an `SseException`), is classified:
+- request-fault codes (`invalid_prompt`, the image codes, `data_residency_mismatch`) are a non-retryable 400-class error;
+- policy refusals (`bio_policy`, `misalignment_policy_violation`, `image_content_policy_violation`) are a `ContentFilteredError`, carrying the reply's usage when it reports one;
+- `rate_limit_exceeded` is a `RateLimitError`;
+- service codes are a retryable 502.
+
+A 200 reply that maps to an error keeps its request and response bodies in the exchange log on the Responses path.
 
 ## Testing
 
@@ -268,13 +282,6 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 
 ## Carried into later slices
 
-Slice 3 (streaming):
-- Native streaming must emit summary text as `thinkingDelta`, and build the opaque blocks from the terminal event's response through `OpenAIResponsesReply` (not `StreamingAccumulator`'s thinking text, which would drop them).
-- A parity test that a streamed and an unstreamed completion of the same reply have equal messages.
-- A failed reply's `invalid_prompt` and image error codes are still a 502 `ServiceError`, which invites retries of a request that cannot succeed: give them a 400-class error where `response.failed` shares the mapping.
-- A 200 reply that maps to a `Left` (failed, content filter, malformed tool call) is recorded in the exchange log with no request or response body: record both.
-- In the faked stream the first chunk carries the finish reason and later tool calls follow it; native streaming must end with the finish reason.
-
 Slice 4 (the default):
 - Add `OpenAIApi` and `OpenAIReasoningSummary` to the compatibility policy's "Sealed types that may gain a case" table.
 - The Java facade (`ClientBuilds`), the Kotlin DSL and Spring/Quarkus flat keys (`ProviderConfigParser`) cannot set `api`: they need a way to opt out before the default flips.
@@ -287,6 +294,11 @@ Slice 4 (the default):
 - The Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller rebuilds a conversation.
 - `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's `None` into `Some("")` and so unseals it.
 - Hosted tools would need a reasoning item anchored to a non-function item.
+- Verify live what an in-stream error looks like on the wire (flat or nested).
+- `response.output_item.added` already carrying arguments would double them in a consumer that accumulates chunks.
+- Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses.
+- A migration note: a streamed chunk's id is the response id (`resp_...`), and failed-reply codes map to `ValidationError`, `ContentFilteredError` or a rate-limit error.
+- Chat Completions' fake-streaming route lets a throwing `onChunk` escape (pre-existing).
 
 ## Left to the builder
 

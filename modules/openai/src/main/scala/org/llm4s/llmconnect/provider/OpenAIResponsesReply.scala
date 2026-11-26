@@ -9,7 +9,7 @@ import com.openai.models.responses.{
   ResponseStatus,
   ResponseUsage
 }
-import org.llm4s.error.{ LLMError, ServiceError }
+import org.llm4s.error.{ ContentFilteredError, LLMError, ServiceError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Citation, Completion, FinishReason, TokenUsage, ToolCall }
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
@@ -79,23 +79,80 @@ private[provider] object OpenAIResponsesReply:
         )
       }
 
-  /** A `failed` reply's `error`, through the mapping a stream's `error` event takes (a 502 unless it names a status). */
+  /** A `failed` reply's `error` (a refusal with the reply's usage), through the mapping a stream's `error` event takes (a 502 unless it names a status). */
   private def failure(response: Response, provider: ProviderId): LLMError =
     val error = known(response._error())
-    val fields = Seq(
-      error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
-      error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString())),
-      error.flatMap(e => known(e._code())).flatMap(c => statusOf(c.asString())).map("status_code" -> ujson.Num(_))
-    ).flatten
+    errorOf(
+      ujson.Obj.from(
+        Seq(
+          error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
+          error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
+        ).flatten
+      ),
+      provider
+    ) match
+      // a refusal carries the usage the reply reports, as the reply the content filter stops does (tracing bills it)
+      case refused: ContentFilteredError =>
+        refused.withUsage(Try(known(response._usage()).map(tokenUsage)).toOption.flatten)
+      case other => other
+
+  /**
+   * The error an object of a `code` and a `message` states: a failed reply's `error`, or a stream's `error` event. It
+   * is a 502 unless the code names a status ([[statusOf]]): `rate_limit_exceeded` is a `RateLimitError` and a request fault a 400.
+   */
+  private[provider] def errorOf(error: ujson.Value, provider: ProviderId): LLMError =
+    val code   = error.objOpt.flatMap(_.get("code")).flatMap(_.strOpt)
+    val status = code.flatMap(statusOf)
+    code.flatMap(filtered(_, provider)).getOrElse(statusError(error, status, provider))
+
+  /**
+   * A policy refusal as a `ContentFilteredError` (not retryable, as the reply the content filter stops). Its message
+   * is the shared one, which names the code; the service's own message is not part of the type's constructor.
+   */
+  private def filtered(code: String, provider: ProviderId): Option[LLMError] =
+    code match
+      case "image_content_policy_violation"               => Some(ContentFilteredError.prompt(provider, code))
+      case "bio_policy" | "misalignment_policy_violation" => Some(ContentFilteredError.reply(provider, code))
+      case _                                              => None
+
+  private def statusError(error: ujson.Value, status: Option[Int], provider: ProviderId): LLMError =
+    val fields =
+      error.objOpt.fold(Seq.empty[(String, ujson.Value)])(_.toSeq) ++ status.map("status_code" -> ujson.Num(_))
     OpenAICompatibleClient
       .streamedError(ujson.Obj.from(fields), provider)
       .getOrElse(ServiceError(502, provider, "the response failed"))
 
-  /** The HTTP status of the one `error.code` that names one; `server_error` and every other code stay a 502. */
+  /**
+   * The HTTP status an `error.code` names: 429 for `rate_limit_exceeded`, and 400 for each code that says the request
+   * or its input can never succeed (`invalid_prompt`, the image codes and `data_residency_mismatch`), so it is not
+   * retried. `failed_to_download_image` is a 400 deliberately: OpenAI classes it as an input error, and an unreachable
+   * URL is the caller's to fix. `server_error` and `vector_store_timeout` stay a 502; the policy codes are
+   * [[filtered]].
+   */
   private def statusOf(code: String): Option[Int] =
     code match
-      case "rate_limit_exceeded" => Some(429)
-      case _                     => None
+      case "rate_limit_exceeded"          => Some(429)
+      case c if RequestFaults.contains(c) => Some(400)
+      case _                              => None
+
+  /** The `ResponseError.Code`s that describe the caller's prompt or images, never the service. */
+  private val RequestFaults: Set[String] = Set(
+    "invalid_prompt",
+    "data_residency_mismatch",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_url",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "invalid_image_mode",
+    "image_file_too_large",
+    "unsupported_image_media_type",
+    "empty_image_file",
+    "failed_to_download_image",
+    "image_file_not_found"
+  )
 
   /** `completed` is `Stop`; `incomplete` is `Length` at the output limit and the content filter's at the filter. */
   private def finishReason(status: Option[String], response: Response): FinishReason =
