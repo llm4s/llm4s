@@ -86,14 +86,13 @@ final class VaultApiKeyProvider private (
         Try(ujson.read(response.body)).toOption
           .flatMap(json => Try(dataOf(json)(settings.field)).toOption)
           .flatMap(_.strOpt)
-          .map(_.trim)
+          .map(ApiKeyProvider.keyText)
           .filter(_.nonEmpty)
           .toRight(failure(s"has no non-blank string field '${settings.field}'"))
           .flatMap { key =>
-            // A line break in a header value would be refused by the HTTP client, or split the header.
-            if key.exists(c => c == '\n' || c == '\r') then
-              Left(failure(s"field '${settings.field}' holds more than one line"))
-            else Right(ApiKey(key))
+            ApiKeyProvider.keyFault(key) match
+              case Some(reason) => Left(failure(s"field '${settings.field}' $reason"))
+              case None         => Right(ApiKey(key))
           }
       case 404 =>
         Left(NotFoundError(s"Vault has no secret at ${settings.mount}/${settings.path}", settings.location))

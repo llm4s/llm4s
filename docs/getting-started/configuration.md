@@ -210,9 +210,9 @@ llm4s.providers.openai-main {
 }
 ```
 
-The file holds the key alone (surrounding whitespace is trimmed). It is read when the section is
-loaded - a missing, unreadable or empty file fails the load with a `ConfigurationError` naming the
-path - and the client checks it again before every request (one `stat`), re-reading it whenever its
+The file holds the key alone (surrounding whitespace and a leading byte-order mark are dropped). It
+is read when the section is loaded - a missing, unreadable or empty file, or a key with a control or
+non-ASCII character, fails the load with a `ConfigurationError` naming the path - and the client checks it again before every request (one `stat`), re-reading it whenever its
 modification time, size or identity changes. A key rewritten in place, or swapped in through a
 symbolic link as Kubernetes does, is sent from the next request on, without rebuilding the client or
 restarting the application. The INFO line names the file, never the key.

@@ -204,6 +204,30 @@ class VaultApiKeyProviderSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     }
   }
 
+  it should "drop a leading byte-order mark from the key (#3109)" in {
+    replies.put("/v1/secret/data/bom", 200 -> kv2("apiKey" -> "\uFEFFsk-vault-bom-key"))
+    key(provider(settings("bom"))) shouldBe "sk-vault-bom-key"
+  }
+
+  it should "refuse a key holding a control or non-ASCII character, naming the kind, without the key (#3109)" in {
+    val cases = Seq(
+      "tab"      -> "sk-tab\tsecret-value"     -> "a control character at position 7",
+      "nul"      -> "sk-nul\u0000secret-value" -> "a control character at position 7",
+      "nonascii" -> "sk-caf\u00e9secret-value" -> "a non-ASCII character at position 7"
+    )
+    cases.foreach { case ((name, value), reason) =>
+      replies.put(s"/v1/secret/data/chars-$name", 200 -> kv2("apiKey" -> value))
+      val error = provider(settings(s"chars-$name")).current().left.toOption.get
+      withClue(name) {
+        error shouldBe a[ConfigurationError]
+        error.message should include(s"secret/chars-$name")
+        error.message should include("field 'apiKey'")
+        error.message should include(reason)
+        assertNoSecrets(error, "secret-value")
+      }
+    }
+  }
+
   it should "report an unreachable Vault as the HTTP client's error, without the token" in {
     val closed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
     val port   = closed.getAddress.getPort
