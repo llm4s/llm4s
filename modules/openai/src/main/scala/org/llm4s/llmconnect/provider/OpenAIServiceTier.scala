@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.openai.models.chat.completions.ChatCompletionCreateParams
+import com.openai.models.responses.ResponseCreateParams
 import org.llm4s.llmconnect.model.{ CompletionOptions, RequestAdjustment, RequestOption, ServiceTier }
 import org.llm4s.model.UnmappedOptions
 
@@ -31,6 +32,10 @@ private[provider] object OpenAIServiceTier {
       case Some(tier) if provider == "openai" || provider == "azure" => (Some(value(tier)), Nil)
       case Some(_) => (None, UnmappedOptions.serviceTier(displayName, options))
     }
+
+  /** The tier [[plan]] chose, as the Responses API's `service_tier`. */
+  def onResponses(tier: Option[ChatCompletionCreateParams.ServiceTier]): Option[ResponseCreateParams.ServiceTier] =
+    tier.map(t => ResponseCreateParams.ServiceTier.of(t.asString()))
 
   private def value(tier: ServiceTier): ChatCompletionCreateParams.ServiceTier = tier match {
     case ServiceTier.Auto       => ChatCompletionCreateParams.ServiceTier.AUTO

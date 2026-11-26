@@ -10,8 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 1.0.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- `llm4s-schema-derivation` (Experimental): a `@description`, `@toolName` or `@upickle.implicits.key` whose argument is not a constant string is now a compile error where the schema, partial type or tool is derived; it was silently ignored ([#2951](https://github.com/llm4s/llm4s/issues/2951); [migration](docs/reference/migration.md#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951)).
+
 ### Providers
 
+- **Added** an `openai` section with `api = "responses"` uses OpenAI's Responses API, where reasoning and tools work together, a turn's reasoning is kept across the thread's requests, and `reasoningSummary` asks for summary text; `streamComplete` there streams text, tool-call arguments and reasoning summaries ([#2900](https://github.com/llm4s/llm4s/issues/2900)).
 - **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
 
 ### Observability
@@ -21,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent runtime
 
 - **Added** `AgentBuilder.withOutput` takes a schema whose root is an `anyOf` of objects, so an agent answers with a sealed trait or an enum with fields (`withOutput(SchemaOf[Turn].definition)`, `decodeOutput[Turn]`): the union is sent inside an envelope object and stored, checked and decoded without it; a root still refused says what to do instead ([#2953](https://github.com/llm4s/llm4s/issues/2953); [guide](docs/guide/agents/index.md#a-union-as-the-answer)).
+
+### Tools
+
+- **Fixed** `SchemaOf`, `PartialOf` and derived tools read a `@description`, `@toolName` or key given as any constant string: a literal, a `final val` or `inline val`, a `+` of constants, or an `s"..."` of constants. Only a single literal was read, and anything else was dropped without a warning ([#2951](https://github.com/llm4s/llm4s/issues/2951); [Derived schemas](docs/guide/derived-schemas.md#descriptions)).
 
 ### Build & tooling
 

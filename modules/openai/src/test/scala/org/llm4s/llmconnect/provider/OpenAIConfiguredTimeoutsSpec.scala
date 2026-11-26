@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
   EmbeddingModelConfig,
   EmbeddingProviderConfig,
+  OpenAIApi,
   OpenAIConfig,
   ProviderTimeouts
 }
@@ -129,6 +130,45 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     } { baseUrl =>
       val client = OpenAIClient(
         openAIConfig(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
+      ).value
+      try {
+        val result = client.streamComplete(hello, CompletionOptions())(_ => ())
+        result.value.content shouldBe "hi"
+      } finally client.close()
+    }
+  }
+
+  "A configured stream timeout on the Responses API" should "end a stream that stalls after its first event" in {
+    val first = OpenAIResponsesFixtures.sse(OpenAIResponsesFixtures.textDelta("hi"))
+    LocalProviderTestServer.withServer("/")(LocalProviderTestServer.streamThenHold(_, first)) { baseUrl =>
+      val client = OpenAIClient(
+        openAIConfig(baseUrl, ProviderTimeouts(request = Some(20.seconds), stream = Some(500.millis)))
+          .withApi(OpenAIApi.Responses)
+      ).value
+      try {
+        val started = System.nanoTime()
+        val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
+        val elapsed = (System.nanoTime() - started).nanos
+
+        result.isLeft shouldBe true
+        // the 20s request timeout would end it later than the stream's 500ms (the SDK retries a timed-out call)
+        elapsed should be < 15.seconds
+      } finally client.close()
+    }
+  }
+
+  "The request and stream timeouts on the Responses API" should "be independent: a short request timeout does not cut a longer stream" in {
+    import OpenAIResponsesFixtures.*
+    LocalProviderTestServer.withServer("/") { exchange =>
+      Thread.sleep(800)
+      LocalProviderTestServer.sendSseResponse(
+        exchange,
+        sse(textDelta("hi"), completed(reply(OpenAIResponsesFixtures.message("hi"))))
+      )
+    } { baseUrl =>
+      val client = OpenAIClient(
+        openAIConfig(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
+          .withApi(OpenAIApi.Responses)
       ).value
       try {
         val result = client.streamComplete(hello, CompletionOptions())(_ => ())
