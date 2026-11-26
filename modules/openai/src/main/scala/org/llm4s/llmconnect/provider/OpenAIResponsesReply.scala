@@ -61,11 +61,18 @@ private[provider] object OpenAIResponsesReply:
     val error = response.error().toScala
     val fields = Seq(
       error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
-      error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
+      error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString())),
+      error.flatMap(e => known(e._code())).flatMap(c => statusOf(c.asString())).map("status_code" -> ujson.Num(_))
     ).flatten
     OpenAICompatibleClient
       .streamedError(ujson.Obj.from(fields), provider)
       .getOrElse(ServiceError(502, provider, "the response failed"))
+
+  /** The HTTP status of the one `error.code` that names one; `server_error` and every other code stay a 502. */
+  private def statusOf(code: String): Option[Int] =
+    code match
+      case "rate_limit_exceeded" => Some(429)
+      case _                     => None
 
   /** `completed` is `Stop`; `incomplete` is `Length` at the output limit and the content filter's at the filter. */
   private def finishReason(status: Option[String], response: Response): FinishReason =

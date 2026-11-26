@@ -1,9 +1,15 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.error.{ ContentFilteredError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
-import org.llm4s.error.{ LLMError, UnsupportedContentPartError }
+import org.llm4s.error.{
+  ContentFilteredError,
+  LLMError,
+  ProcessingError,
+  RateLimitError,
+  ServiceError,
+  UnsupportedContentPartError
+}
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
@@ -422,6 +428,20 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     error shouldBe a[ServiceError]
     error.asInstanceOf[ServiceError].status shouldBe 502
     error.message should include("boom")
+  }
+
+  it should "report a failed reply with rate_limit_exceeded as a RateLimitError, keeping the message" in {
+    val error = answer(
+      reply("", status = "failed", extra = """"error":{"code":"rate_limit_exceeded","message":"slow down"}""")
+    ).left.value
+    error shouldBe a[RateLimitError]
+    error.message should include("slow down")
+  }
+
+  it should "report a failed reply with no error object as the default message" in {
+    val error = answer(reply("", status = "failed")).left.value
+    error shouldBe a[ServiceError]
+    error.message should include("the response failed")
   }
 
   it should "read url_citation annotations as citations" in {
