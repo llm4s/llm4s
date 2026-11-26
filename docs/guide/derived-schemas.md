@@ -304,7 +304,7 @@ def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
   } yield invoice
 ```
 
-As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
+`A` is a case class, or a [sum type whose cases all have fields](#an-agent-that-answers-with-a-sum-type): `build` refuses any other type with a `Left` that says what to do instead.
 
 ## Sum types
 
@@ -342,6 +342,25 @@ Sum types nest: a case class field, a `List` or an `Option` of a sum type is des
 OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStructuredOf` asks for a sum type wrapped in an object, `{"value": <the case>}`, sends that schema as a `ResponseFormat.JsonSchema`, and reads the reply's `value` into the type: the caller never sees the wrapper. A case class that holds a sum type is an object already and is sent as it is. A case class without one goes through `completeStructured` as before. The wrapped schema is within the subset OpenAI's strict mode accepts (`anyOf` below the root, `additionalProperties: false` and every property required on each object), and Gemini accepts it too; the module's tests check both the subset and the round trip with uPickle for every case.
 
 In `llm4s-core`'s schema model a sum type is an `AnyOfSchema`: `SchemaOf[Action].definition` is one, and writes the same JSON as `SchemaOf[Action].toJsonSchema()`. A tool's parameters may hold a sum type (a field, a `List` or an `Option` of one), and each value is checked against the cases. They cannot be one: a tool's arguments are a JSON object, so `Tool.of[Action, R]` returns a `Left`.
+
+### An agent that answers with a sum type
+
+An agent's answer can be a sum type whose cases all have fields, so that each case is a JSON object: pass its schema to `withOutput` and read the case with `decodeOutput`.
+
+```scala
+import org.llm4s.agent.Agent
+
+def decideWithAgent(client: LLMClient, message: String): Result[Action] =
+  for {
+    agent  <- Agent.builder("support", client).withOutput(SchemaOf[Action].definition).build()
+    result <- agent.run(message)
+    action <- result.decodeOutput[Action]
+  } yield action
+```
+
+The agent asks the model for `{"answer": <the case>}`, as `completeStructuredOf` asks for `{"value": ...}`, and removes that envelope before the answer is checked: `result.answer`, the stored message, `withOutputCheck`, the output guardrails and `decodeOutput` all have the case's own JSON. An answer that matches no case goes back to the model once, with the closest case's problems. See [a union as the answer](agents/#a-union-as-the-answer).
+
+A sum type with a case that has no fields (a `case object`, or an enum case without parameters) is not all objects, and `build` refuses it. Make it a field of a case class, `case class Decision(action: Action) derives SchemaOf, ReadWriter`, and read `decodeOutput[Decision].map(_.action)`.
 
 ## Named tuples
 

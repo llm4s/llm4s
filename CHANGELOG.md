@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `TRACING_MODE=file` in `llm4s-observability-otel`: each trace appended to `<dir>/<trace-id>.jsonl` as OTLP JSON Lines, unplaced events to one shared file per run, with no tracing service ([#2948](https://github.com/llm4s/llm4s/issues/2948); [Trace files](docs/getting-started/configuration.md#trace-files-no-tracing-service)).
 
+### Agent runtime
+
+- **Added** `AgentBuilder.withOutput` takes a schema whose root is an `anyOf` of objects, so an agent answers with a sealed trait or an enum with fields (`withOutput(SchemaOf[Turn].definition)`, `decodeOutput[Turn]`): the union is sent inside an envelope object and stored, checked and decoded without it; a root still refused says what to do instead ([#2953](https://github.com/llm4s/llm4s/issues/2953); [guide](docs/guide/agents/index.md#a-union-as-the-answer)).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

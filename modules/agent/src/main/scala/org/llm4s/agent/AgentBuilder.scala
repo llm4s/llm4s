@@ -218,7 +218,20 @@ final class AgentBuilder private (
    * answer ends the turn with `Left(GraphError.OutputInvalid)`, the turn removed and both calls counted.
    * A rule the schema cannot express is an application check, which shares that retry: [[withOutputCheck]].
    * Read the answer with [[AgentResult.decodeOutput]]. The format belongs to this agent only: a handoff
-   * target answers in its own. [[build]] refuses a schema whose root is not an object, one with a keyword
+   * target answers in its own.
+   *
+   * The schema's root is an object, or a union of objects (#2953): an `anyOf` whose alternatives are all object
+   * schemas, as `SchemaOf` derives for a sealed trait or an enum whose cases all have fields, so
+   * `withOutput(SchemaOf[Turn].definition)` and `decodeOutput[Turn]` answer with one of several shapes. A union is
+   * asked for inside an envelope object, `{"answer": <one alternative>}`, because a strict response format needs an
+   * object at its root; the envelope is removed before the answer is checked, so the answer stored, given to
+   * [[withOutputCheck]] and the output guardrails, and decoded is the alternative's JSON alone. Only the model's own
+   * text shows it: the `TextDelta`s of [[withStreaming]], and the partial answer of a turn cut off at the output
+   * limit. See [[org.llm4s.agent.graph.toolloop.OutputFormat]].
+   *
+   * [[build]] refuses any other root - a string, an array, an `anyOf` with an alternative that is not an object,
+   * such as a sealed trait with a `case object` - and says so: make that value a property of an object schema (a case
+   * class with the one field) and read the property from the decoded answer. It also refuses a schema with a keyword
    * the tool argument validator cannot check, and a format whose prompt section alone is over
    * [[withMaxPromptSectionTokens]], which the section counts against with the middleware's.
    */

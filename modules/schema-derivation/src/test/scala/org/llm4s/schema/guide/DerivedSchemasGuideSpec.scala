@@ -91,6 +91,15 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         case Right(Action.Reply(text))       => text
         case Left(error)                     => error.message
       }
+
+    import org.llm4s.agent.Agent
+
+    def decideWithAgent(client: LLMClient, message: String): Result[Action] =
+      for {
+        agent  <- Agent.builder("support", client).withOutput(SchemaOf[Action].definition).build()
+        result <- agent.run(message)
+        action <- result.decodeOutput[Action]
+      } yield action
   }
 
   // ---- Named tuples
@@ -336,7 +345,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 13
+    scalaBlocks should have size 14
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -439,6 +448,12 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     import Quickstart.*
     val reply = """{"vendor":"Acme","amount":1250.0,"currency":"GBP"}"""
     Agents.extractWithAgent(new Scripted(reply), "Acme bills GBP 1250") shouldBe Right(Invoice("Acme", 1250.0, "GBP"))
+  }
+
+  it should "answer with a case of the guide's sum type, asked for in an envelope" in {
+    import SumTypes.*
+    val reply = """{"answer":{"$type":"Escalate","team":"Billing"}}"""
+    decideWithAgent(new Scripted(reply), "I was charged twice") shouldBe Right(Action.Escalate(Team.Billing))
   }
 
   "A type the module does not know" should "be described by the given the guide defines, and round-trip" in {
