@@ -137,6 +137,44 @@ class WriteFileToolSpec extends AnyFlatSpec with Matchers with EitherValues with
     names shouldBe empty
   }
 
+  it should "create the staging file owner-only, before any content is written" in {
+    val target = existing("private.txt", "secret")
+    val temp   = WriteFileTool.stagingPath(target)
+    Using.resource(WriteFileTool.openStaging(temp)) { _ =>
+      assume(Try(Files.getPosixFilePermissions(temp)).isSuccess, "POSIX permissions only")
+      PosixFilePermissions.toString(Files.getPosixFilePermissions(temp)) shouldBe "rw-------"
+    }
+    Files.deleteIfExists(temp)
+  }
+
+  it should "keep a private original private when it replaces it" in {
+    val target = existing("private.txt", "secret")
+    assume(Try(Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"))).isSuccess)
+    write(config(), ujson.Obj("path" -> target.toString, "content" -> "new secret")).isRight shouldBe true
+    PosixFilePermissions.toString(Files.getPosixFilePermissions(target)) shouldBe "rw-------"
+  }
+
+  it should "refuse the replace, keeping the original, when its access rights cannot be copied" in {
+    val target = existing("data.txt", "ORIGINAL")
+    val result = WriteFileTool.replace(
+      target,
+      "new".getBytes(StandardCharsets.UTF_8),
+      (_, _) => throw new java.nio.file.AccessDeniedException("permissions")
+    )
+    result.isFailure shouldBe true
+    Files.readString(target) shouldBe "ORIGINAL"
+    names shouldBe Set("data.txt")
+  }
+
+  it should "stage under a bounded name, so a target with a long name can be replaced" in {
+    val name   = "n" * 250 + ".txt"
+    val target = existing(name, "ORIGINAL")
+    WriteFileTool.stagingPath(target).getFileName.toString.length should be < 64
+    write(config(), ujson.Obj("path" -> target.toString, "content" -> "replaced")).isRight shouldBe true
+    Files.readString(target) shouldBe "replaced"
+    names shouldBe Set(name)
+  }
+
   it should "refuse to replace a directory" in {
     val target = Files.createDirectory(dir.resolve("sub"))
     write(config(), ujson.Obj("path" -> target.toString, "content" -> "x")).isLeft shouldBe true

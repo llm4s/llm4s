@@ -7,12 +7,13 @@ import upickle.default._
 import java.nio.{ ByteBuffer, CharBuffer }
 import java.nio.channels.{ FileChannel, WritableByteChannel }
 import java.nio.charset.{ CharacterCodingException, Charset, CodingErrorAction }
-import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.{ AclFileAttributeView, BasicFileAttributes, PosixFilePermissions }
 import java.nio.file.{
   FileAlreadyExistsException,
   FileSystemException,
   Files,
   LinkOption,
+  OpenOption,
   Path,
   Paths,
   StandardCopyOption,
@@ -200,7 +201,8 @@ object WriteFileTool {
    *    through. If the write fails, the partial file is removed.
    *  - An overwrite is staged: the content goes to a new temporary file in the same directory, which then replaces
    *    the target in one atomic rename. A failed or interrupted write leaves the original whole and no temporary
-   *    file behind. The replacement keeps the original's POSIX permissions where the file system has them.
+   *    file behind. The temporary file is owner-only while it is written (POSIX), and the replacement gets the
+   *    original's POSIX permissions (or, on Windows, its ACL); if they cannot be copied, nothing is replaced.
    *  - An append adds to the file in place (`APPEND`), so concurrent appends are not lost; it is not atomic.
    */
   private[builtin] def writeResolved(
@@ -231,21 +233,23 @@ object WriteFileTool {
     }
 
   /** Replaces the regular file `real` with `content`: writes a temporary sibling and renames it over `real`. */
-  private def replace(real: Path, content: Array[Byte]): Try[Unit] =
+  private[builtin] def replace(
+    real: Path,
+    content: Array[Byte],
+    copyAccess: (Path, Path) => Unit = copyAccessRights
+  ): Try[Unit] =
     Try(Files.readAttributes(real, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)).flatMap { attributes =>
       if (!attributes.isRegularFile)
         Failure(new FileSystemException(real.toString, null, "not a regular file, so it is not replaced"))
       else {
-        val permissions = Try(Files.getPosixFilePermissions(real, LinkOption.NOFOLLOW_LINKS)).toOption
-        val temp        = real.resolveSibling(s".${real.getFileName}.llm4s-${UUID.randomUUID()}.tmp")
+        val temp = stagingPath(real)
         val staged = Try {
-          Using.resource(
-            FileChannel.open(temp, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW, LinkOption.NOFOLLOW_LINKS)
-          ) { channel =>
+          Using.resource(openStaging(temp)) { channel =>
             writeAll(channel, content)
             channel.force(true)
           }
-          permissions.foreach(p => Try(Files.setPosixFilePermissions(temp, p)))
+          // the replacement gets the original's access rights, or the write fails: never wider ones
+          copyAccess(real, temp)
           Files.move(temp, real, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
           ()
         }
@@ -253,6 +257,41 @@ object WriteFileTool {
         staged
       }
     }
+
+  /** A staging name in `real`'s directory whose length does not depend on `real`'s (a name may be up to 255 bytes). */
+  private[builtin] def stagingPath(real: Path): Path =
+    real.resolveSibling(s".llm4s-write-${UUID.randomUUID()}.tmp")
+
+  private val OwnerOnly = PosixFilePermissions.fromString("rw-------")
+
+  /**
+   * Creates the staging file, owner-only from the moment it exists where the file system has POSIX permissions, so
+   * no other user can open it while the content is written (the process umask can only narrow this further).
+   */
+  private[builtin] def openStaging(temp: Path): FileChannel = {
+    val options = new java.util.HashSet[OpenOption]()
+    options.add(StandardOpenOption.WRITE)
+    options.add(StandardOpenOption.CREATE_NEW)
+    options.add(LinkOption.NOFOLLOW_LINKS)
+    if (supportsPosix(temp)) FileChannel.open(temp, options, PosixFilePermissions.asFileAttribute(OwnerOnly))
+    else FileChannel.open(temp, options)
+  }
+
+  private def supportsPosix(path: Path): Boolean =
+    path.getFileSystem.supportedFileAttributeViews().contains("posix")
+
+  /**
+   * Gives `temp` the access rights of `original`: its POSIX permissions, or, on a file system with ACLs and no POSIX
+   * permissions (Windows), its ACL. Throws when they cannot be read or set, so the replace is refused rather than
+   * leaving a file with different rights.
+   */
+  private def copyAccessRights(original: Path, temp: Path): Unit =
+    if (supportsPosix(original))
+      Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(original, LinkOption.NOFOLLOW_LINKS))
+    else
+      Option(Files.getFileAttributeView(original, classOf[AclFileAttributeView], LinkOption.NOFOLLOW_LINKS))
+        .zip(Option(Files.getFileAttributeView(temp, classOf[AclFileAttributeView], LinkOption.NOFOLLOW_LINKS)))
+        .foreach { case (from, to) => to.setAcl(from.getAcl) }
 
   private def writeAll(channel: WritableByteChannel, content: Array[Byte]): Unit = {
     val bytes = ByteBuffer.wrap(content)
