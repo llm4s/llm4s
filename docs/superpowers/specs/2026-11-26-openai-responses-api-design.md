@@ -18,26 +18,33 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
    `llm4s-openai`: its `mode` and `supported_endpoints` say which API a model is served on (2026-11-26). LiteLLM's
    routing behaviour (Chat Completions by default, Responses per request) is not followed; see Approaches.
 
-Recorded by PR 4's plan (`docs/superpowers/plans/2026-11-26-openai-responses-api-pr4.md`); each is **the plan's call,
-for the maintainer to confirm**:
+## Proposed by the implementation plans, for the maintainer to confirm
 
-3. **`keepReasoning`**: `OpenAIConfig.keepReasoning`, default `true`, section key `keepReasoning`. When `false` a
+Recorded by PR 4's plan (`docs/superpowers/plans/2026-11-26-openai-responses-api-pr4.md`). None of these is decided
+by the maintainer yet.
+
+- **P1. `keepReasoning`**: `OpenAIConfig.keepReasoning`, default `true`, section key `keepReasoning`. When `false` a
    request sends no `include`, a reply's reasoning items are not stored as opaque blocks (summary text still is), and
    stored `openai` opaque blocks are not sent back. It is the size knob and the recovery hatch.
-4. **A rejected reasoning item is an explanatory error, with no automatic retry**: OpenAI's message, then the likely
+- **P2. A rejected reasoning item is an explanatory error, with no automatic retry**: OpenAI's message, then the likely
    causes (another key or organisation, a moved model alias, an old thread) and the two remedies (`keepReasoning =
    false`, or continuing from an edited turn). A silent retry would hide that a thread's reasoning has gone and would
    double the request.
-5. **Positional patterns on growth-safe classes are outside the source promise**: the compatibility policy says so,
-   the migration guide notes each gain (`OpenAIConfig` 11 to 14 fields, `ModelMetadata` 8 to 9), and the Scalafix
-   umbrellas rewrite them (`PositionalPatternsGainFields` in `Llm4sMigrateFrom_1_0` and every older umbrella).
-6. **Routing is data-positive**: a model the registry knows but does not list for `/v1/responses`, whether it lists
+- **P3. Positional patterns on growth-safe classes are outside the source promise**: the compatibility policy says
+   so, the migration guide notes each gain (`OpenAIConfig` 11 to 14 fields, `ModelMetadata` 8 to 9), and the Scalafix
+   umbrellas rewrite them with `PositionalPatternsGainFields`: `Llm4sMigrateFrom_1_0` and `Llm4sMigrateFrom_0_7` both
+   classes, `Llm4sMigrateFrom_0_6` and `Llm4sMigrateFrom_0_5` only `OpenAIConfig` (to its current 14 fields), since
+   0.5.1's and 0.6.0's `ModelMetadata` had two fields since removed.
+- **P4. Routing is data-positive**: a model the registry knows but does not list for `/v1/responses`, whether it lists
    other endpoints or none, stays on Chat Completions. Live evidence (2026-11-26, `POST /v1/responses`, `store:
    false`): `gpt-4o-search-preview`, `gpt-4o-mini-search-preview` and `gpt-5-search-api` answered 400 "not supported
-   with the Responses API", and so did `gpt-audio-1.5`; `gpt-4o` answered 200. The bundled file has 48 OpenAI chat
-   entries with no `supported_endpoints`, so `gpt-4o`, `o1`, `o3-mini`, `o4-mini` and their generation stay on Chat
-   Completions until the data lists the endpoint or the section sets `api = "responses"`; this narrows decision 1.
-7. **Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
+   with the Responses API", and so did `gpt-audio-1.5`; `gpt-4o` answered 200 (OpenAI has since retired the two
+   search-preview models: a later run on 2026-11-26 got 404 "has been deprecated"). The bundled file has 48 OpenAI chat
+   entries with no `supported_endpoints`. **This narrows decision 1**: the models the registry knows but does not list
+   (`gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini`, `o4-mini`, the dated preview snapshots) stay on Chat Completions until
+   the data lists the endpoint or the section sets `api = "responses"`. A model id the registry does not hold (an
+   undated alias such as `gpt-4o-audio-preview`, a newer snapshot) uses Responses.
+- **P5. Left out of this PR, as follow-ups** (issues for the maintainer to file): the Java facade's and Spring AI's
    message views dropping thinking blocks when a caller rebuilds a conversation; `DeterministicCompressor` unsealing
    tool-call-only messages; Azure OpenAI on Responses; OpenAI's hosted tools.
 
@@ -95,10 +102,10 @@ for the maintainer to confirm**:
 | 7 | Otherwise: the entry lists `/v1/responses`, or the registry does not know the model | Responses |
 
 - The per-model facts come from the model registry (decision 2), looked up as `OpenAIReasoning.openAIEntry` (an
-  `openai` or `azure` entry); a lookup that fails counts as a model the registry does not know. There is no model
+  entry whose `litellm_provider` is `openai`, `azure` or `text-completion-openai`); a lookup that fails counts as a model the registry does not know. There is no model
   list in `llm4s-openai`. A registry of the user's own (`llm4s.modelRegistry`) that lists `/v1/responses` for a
   model opts it in.
-- Rule 6 is data-positive (decision 6): 48 older chat entries list no endpoints, and some of them (the search
+- Rule 6 is data-positive (P4): 48 older chat entries list no endpoints, and some of them (the search
   previews) are refused on `/v1/responses`.
 - OpenAI's regional hosts (`us.`, `eu.`, `ae.api.openai.com`) are not treated as the default base URL, so they stay
   on Chat Completions unless `api` is set.
@@ -285,11 +292,11 @@ A 200 reply that maps to an error keeps its request and response bodies in the e
 - **Live** (`modules/it`, `@Cloud`, `OpenAISmokeSpec`): on `gpt-6.1-terra` and `gpt-5.6-luna`, a tool call at
   effort `low` with reasoning tokens reported, sync and streamed; a two-turn tool loop that sends the encrypted
   reasoning back; the unsealed case from "Reasoning across turns"; one non-reasoning model.
-- `DocumentedProviderConfigSpec` loads the documented `api` and `reasoningSummary` keys.
+- `DocumentedProviderConfigSpec` loads the documented `api`, `reasoningSummary` and `keepReasoning` keys.
 
 ## Docs and release notes
 
-- `docs/guide/providers.md` and `docs/getting-started/configuration.md`: which API a section uses, the two keys,
+- `docs/guide/providers.md` and `docs/getting-started/configuration.md`: which API a section uses, the three keys,
   what differs (penalties, reasoning with tools, encrypted reasoning in stored threads).
 - CHANGELOG, Providers: one **Changed** entry. No `@Stable` API breaks, but the wire and a positional pattern
   change, so, as 1.0.0 listed its default changes, *Breaking changes* gets one "Behaviour, no signature" line, and
@@ -315,7 +322,7 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 ## Carried into later slices
 
 Open after slice 4:
-- The follow-ups of decision 7: the Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller
+- The follow-ups of P5: the Java facade (and so the Kotlin API, which wraps it) and Spring AI message views drop opaque blocks when a caller
   rebuilds a conversation; `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's
   `None` into `Some("")` and so unseals it; Azure OpenAI on Responses; hosted tools, which would need a reasoning item
   anchored to a non-function item.

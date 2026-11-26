@@ -141,14 +141,18 @@ and, in the Experimental `llm4s-schema-derivation`,
 with no `api` set, and a model the bundled model registry lists for `/v1/responses` or does not know: `gpt-4.1`,
 the gpt-5 family, the GPT 5.6, 6 and 6.1 models, `o3`, a fine-tune id, a model newer than the bundled data. That
 covers a section in `application.conf`, an `OpenAIConfig` built in code, and the Java builder (`Llm4s.openAi()`),
-the Kotlin DSL (`openAi { }`) and the Spring Boot starter (`llm4s.provider=openai`). Such a client now calls
+the Kotlin DSL (`openAi { }`), and the Spring Boot starter and the Quarkus extension (the flat `llm4s.provider=openai`
+or a section `llm4s.providers.<name>.provider=openai`). Such a client now calls
 OpenAI's Responses API (`/v1/responses`) instead of Chat Completions; OpenAI's pro, codex and deep-research models,
 which it serves only there, go to it wherever the base URL points.
 
 **Not affected:** a model the registry knows but does not list for `/v1/responses` (`gpt-4o`, `gpt-4o-mini`,
-`gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, the search and audio-preview models), another
-base URL (a proxy, a gateway, OpenAI's regional hosts), Requesty, OpenRouter and Azure OpenAI. These stay on Chat
-Completions and send what 1.0.x sent. [Which API a section uses](../guide/providers#which-api-a-section-uses) has
+`gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, the dated audio-preview snapshots such as
+`gpt-4o-audio-preview-2024-12-17`), another base URL (a proxy, a gateway, OpenAI's regional hosts), Requesty,
+OpenRouter and Azure OpenAI. These stay on Chat Completions and send what 1.0.x sent. A model id the registry does
+not hold, such as the undated alias `gpt-4o-audio-preview` or a snapshot newer than the bundled data, is unknown to
+it and uses the Responses API on api.openai.com; if that model is served on Chat Completions only, set
+`api = "chat-completions"` on its section (or add it to a model registry of your own). [Which API a section uses](../guide/providers#which-api-a-section-uses) has
 the rules, and how to move one of these models to the Responses API (`api = "responses"`, or a model registry of
 your own that lists `/v1/responses` for it).
 
@@ -163,7 +167,8 @@ your own that lists `/v1/responses` for it).
 - A reasoning model's reasoning is kept on the thread: each reasoning item is stored on the assistant message as an
   encrypted opaque thinking block and sent back on later requests to the same model. Stored threads and checkpoints
   grow by one such item per reasoning turn. `keepReasoning = false` on the section (`withKeepReasoning(false)` in
-  code) turns it off; an error from OpenAI refusing a stored item says so and names that setting
+  code) turns it off; when OpenAI answers a request with an error refusing a stored item, the error says so and
+  names that setting
   ([Reasoning kept across a thread](../guide/providers#reasoning-kept-across-a-thread)).
 - `Completion.id` and each streamed chunk's `id` are the response id (`resp_...`), not `chatcmpl-...`.
 - A reply that fails with an error code is reported by what the code means: `rate_limit_exceeded` as a
@@ -171,19 +176,21 @@ your own that lists `/v1/responses` for it).
   `ValidationError`, a policy refusal (`bio_policy`, ...) as a `ContentFilteredError`, any other as a `ServiceError`
   502 ([the list](../guide/providers#what-differs-on-the-responses-api)).
 
-**To keep 1.0.x behaviour,** set `api = "chat-completions"` on the section; the request is then what 1.0.x sent:
-
-```hocon
-llm4s.providers.openai-main {
-  provider = "openai"
-  model    = "gpt-5.6-terra"
-  api      = "chat-completions"
-}
-```
-
-In code it is `config.withApi(OpenAIApi.ChatCompletions)`; in Java `Llm4s.openAi().api("chat-completions")`; in
-Kotlin `api = "chat-completions"` in the `openAi { }` block; in Spring `llm4s.api=chat-completions`. The value is
+**To keep 1.0.x behaviour,** set `api` to `chat-completions`; the request is then what 1.0.x sent. The value is
 exactly `chat-completions` or `responses`; any other fails the load.
+
+| Entry point | The line |
+|---|---|
+| HOCON section (`application.conf`) | `api = "chat-completions"` in `llm4s.providers.<name> { ... }` |
+| `OpenAIConfig` in code | `config.withApi(OpenAIApi.ChatCompletions)` |
+| Java builder | `Llm4s.openAi().api("chat-completions")` |
+| Kotlin DSL | `api = "chat-completions"` in the `openAi { }` block |
+| Spring Boot, flat keys | `llm4s.api=chat-completions` |
+| Spring Boot, named section | `llm4s.providers.<name>.api=chat-completions` |
+| Quarkus, named section | `llm4s.providers.<name>.api=chat-completions` |
+
+Once any `llm4s.providers.*` property is set, Spring ignores the flat keys, so a named-section application sets `api`
+in the section.
 
 **Positional patterns.** `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning` (11 fields to 14), and
 `ModelMetadata` gained `supportedEndpoints` (8 to 9). Both are growth-safe classes, built with `apply` and `with*`

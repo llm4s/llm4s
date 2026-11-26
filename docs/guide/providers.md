@@ -186,10 +186,17 @@ On `https://api.openai.com/v1`, with `api` unset, that means:
   (`gpt-5.6-terra`, `gpt-6-astra`, `gpt-6.1-sol`, ...) and `o3`, which the bundled registry lists for
   `/v1/responses`; and a model id the registry does not know, such as a model newer than the bundled data or a
   fine-tune (`ft:gpt-4o:my-org::abc123`).
-- **Chat Completions:** `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, the
-  search models (`gpt-4o-search-preview`, `gpt-5-search-api`) and the audio-preview models. The bundled registry
-  knows these but does not list `/v1/responses` for them, and OpenAI answers the search models on the Responses API
-  with a 400 ("not supported with the Responses API", requests sent on 2026-11-26).
+- **Chat Completions:** `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o3-mini`, `o4-mini`, and the
+  dated audio-preview snapshots (`gpt-4o-audio-preview-2024-12-17`, `gpt-4o-audio-preview-2025-06-03`,
+  `gpt-4o-mini-audio-preview-2024-12-17`). The bundled registry knows these but does not list `/v1/responses` for
+  them. The rule takes the registry's word because some such models are not served there: on 2026-11-26 OpenAI
+  refused `gpt-4o-search-preview` and `gpt-4o-mini-search-preview` on the Responses API with a 400 ("not supported
+  with the Responses API"), and it has since retired both.
+
+A model id the registry does not hold is treated as unknown and uses the Responses API on api.openai.com: an undated
+alias of a preview model (`gpt-4o-audio-preview`; only its dated snapshots are in the registry), or a snapshot newer
+than the bundled data. If such a model is served on Chat Completions only, set `api = "chat-completions"` on its
+section, or add it to a model registry of your own.
 
 To move a model that stays on Chat Completions to the Responses API, set `api = "responses"` on its section, or use
 a [model registry of your own](../reference/model-metadata#your-own-metadata) whose entry for the model lists
@@ -309,13 +316,18 @@ So a stored thread, and an agent's checkpoints, grow by one encrypted item per r
 items are not stored (a summary still is), and reasoning stored earlier is not sent back.
 
 OpenAI can refuse a stored item, for example after the thread moves to another API key or organisation, or when
-the model alias now points at another snapshot. The request then fails, and the error carries OpenAI's message
-followed by what happened and the two ways on: set `keepReasoning = false` on the section (or `withKeepReasoning(false)`
+the model alias now points at another snapshot. When OpenAI answers the request with an error for it, the error
+carries OpenAI's message followed by what happened and the two ways on: set `keepReasoning = false` on the section (or `withKeepReasoning(false)`
 on the `OpenAIConfig`), or continue the thread from an edited turn. llm4s does not retry without the reasoning on its
 own.
 
-The stored reasoning travels on llm4s's Scala message types. The Java facade's and Spring AI's message views do not
-carry it, so a conversation rebuilt through them is sent without it.
+The stored reasoning travels on llm4s's Scala message types. The message views of the Java facade (and so of the
+Kotlin API, which wraps it) and of Spring AI do not carry it, so a conversation rebuilt through them is sent without
+it.
+
+On `gpt-5.6-luna` a tool loop's final reply after a tool result was sometimes empty, equally often with the reasoning
+sent back and with `keepReasoning = false` (measured on 2026-11-26): that is the model's behaviour, not a consequence
+of keeping reasoning.
 
 ### What differs on the Responses API
 

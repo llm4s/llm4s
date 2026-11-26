@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
-- **Added** the umbrella Scalafix rule `Llm4sMigrateFrom_1_0`, for code on 1.0.x: it runs `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9), and the older umbrellas widen an `OpenAIConfig` pattern to the current 14 ([#2900](https://github.com/llm4s/llm4s/issues/2900); [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#one-umbrella-rule-per-starting-version)).
+- **Added** the umbrella Scalafix rule `Llm4sMigrateFrom_1_0`, for code on 1.0.x: it runs `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9), and the older umbrellas widen an `OpenAIConfig` pattern to the current 14 (0.7's also `ModelMetadata`) ([#2900](https://github.com/llm4s/llm4s/issues/2900); [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#one-umbrella-rule-per-starting-version)).
 
 ## [1.0.0] - 2026-11-25
 
