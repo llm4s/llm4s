@@ -82,9 +82,10 @@ object ReadFileTool {
     ).withHandler { extractor =>
       for {
         pathStr <- extractor.getString("path")
-        maxLines = extractor.getInt("max_lines").toOption
-        encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
-        result <- readFile(pathStr, maxLines, encoding, config).left.map(ToolHandlerError.failed)
+        // absent or null is the default; a wrong type refuses the call
+        maxLines <- extractor.getOptionalInt("max_lines")
+        encoding <- extractor.getOptionalString("encoding").map(_.getOrElse("UTF-8"))
+        result   <- readFile(pathStr, maxLines, encoding, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
 
