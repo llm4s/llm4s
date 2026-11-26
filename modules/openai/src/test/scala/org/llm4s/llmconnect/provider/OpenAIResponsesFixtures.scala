@@ -27,9 +27,16 @@ object OpenAIResponsesFixtures:
     s"""{"type":"function_call","id":"fc_$callId","call_id":"$callId","name":"$name","arguments":$quoted,""" +
       s""""status":"completed"}"""
 
-  /** One `reasoning` output item with no summary. */
-  def reasoningItem(id: String): String =
-    s"""{"type":"reasoning","id":"$id","summary":[]}"""
+  /** The default `encrypted` of [[reasoningItem]]: `enc-<id>`. */
+  val DefaultEncrypted: Option[String] = Some("")
+
+  /** One `reasoning` output item: with `encrypted_content` unless `encrypted` is `None`, and one summary part per text. */
+  def reasoningItem(id: String, encrypted: Option[String] = DefaultEncrypted, summary: Seq[String] = Nil): String =
+    val parts = summary.map(t => s"""{"type":"summary_text","text":${ujson.Str(t).render()}}""").mkString(",")
+    val enc = encrypted
+      .map(e => if encrypted.eq(DefaultEncrypted) then "enc-" + id else e)
+      .fold("")(e => s""","encrypted_content":${ujson.Str(e).render()}""")
+    s"""{"type":"reasoning","id":"$id","summary":[$parts]$enc}"""
 
   /** One output message item of one `refusal` part. */
   def refusal(text: String): String =

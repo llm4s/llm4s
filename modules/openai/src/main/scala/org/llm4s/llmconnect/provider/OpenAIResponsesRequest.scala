@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.openai.core.ObjectMappers
 import com.openai.models.Reasoning
 import com.openai.models.responses.{
+  ResponseIncludable,
   EasyInputMessage,
   FunctionTool,
   ResponseCreateParams,
@@ -14,6 +15,7 @@ import com.openai.models.responses.{
   ResponseInputText,
   ResponseTextConfig
 }
+import org.llm4s.llmconnect.config.OpenAIReasoningSummary
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
@@ -27,7 +29,6 @@ import org.llm4s.llmconnect.model.{
   ToolMessage,
   UserMessage
 }
-import org.llm4s.llmconnect.provider.PartEncoding
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.syntax.toLLMError
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -39,7 +40,7 @@ import scala.util.Try
 /**
  * A conversation and its options as OpenAI's Responses API request (`POST /responses`).
  *
- * Every request sends `store: false`, and no `previous_response_id` or `include`: the conversation travels whole in
+ * Every request sends `store: false`, and no `previous_response_id`, and `include` only to ask a reasoning model for its encrypted reasoning: the conversation travels whole in
  * `input`, and OpenAI keeps nothing. System messages are input messages in their own position, never `instructions`.
  */
 private[provider] object OpenAIResponsesRequest:
@@ -52,13 +53,19 @@ private[provider] object OpenAIResponsesRequest:
    * @param effort the `reasoning.effort` to send, from `OpenAIReasoning.plan`
    * @param serviceTier the `service_tier` to send
    * @param omitsSampling whether `temperature` and `top_p` are left out (a reasoning model that restricts sampling)
+   * @param reasons whether the request goes to a reasoning model: it then asks for `reasoning.encrypted_content`
+   * @param summary the `reasoning.summary` to ask for, sent only when `reasons`
+   * @param origin the provider and model whose sealed reasoning this request may carry back
    */
   final case class Settings(
     model: String,
     provider: ProviderId,
     effort: Option[com.openai.models.ReasoningEffort],
     serviceTier: Option[ResponseCreateParams.ServiceTier],
-    omitsSampling: Boolean
+    omitsSampling: Boolean,
+    reasons: Boolean,
+    summary: Option[OpenAIReasoningSummary],
+    origin: ReplayOrigin
   )
 
   /** OpenAI rejects a `max_output_tokens` below this. */
@@ -92,7 +99,7 @@ private[provider] object OpenAIResponsesRequest:
   def build(settings: Settings, conversation: Conversation, options: CompletionOptions): Result[ResponseCreateParams] =
     PartEncoding
       .check(settings.provider, conversation.messages, userPart(settings), PartEncoding.textOnly)
-      .flatMap(_ => items(settings, conversation.messages))
+      .flatMap(_ => items(settings, ThinkingReplay.replayableOrigin(settings.origin, conversation.messages)))
       .flatMap { items =>
         Try {
           val builder = ResponseCreateParams
@@ -104,13 +111,25 @@ private[provider] object OpenAIResponsesRequest:
           if !settings.omitsSampling then
             options.temperature.foreach(t => builder.temperature(t))
             options.topP.foreach(p => builder.topP(p))
-          settings.effort.foreach(e => builder.reasoning(Reasoning.builder().effort(e).build()))
+          val summary = if settings.reasons then settings.summary else None
+          if settings.effort.isDefined || summary.isDefined then
+            val reasoning = Reasoning.builder()
+            settings.effort.foreach(e => reasoning.effort(e))
+            summary.foreach(s => reasoning.summary(reasoningSummary(s)))
+            builder.reasoning(reasoning.build())
+          if settings.reasons then builder.addInclude(ResponseIncludable.REASONING_ENCRYPTED_CONTENT)
           settings.serviceTier.foreach(t => builder.serviceTier(t))
           options.tools.map(_.toolDefinition(strict = true)).foreach(t => builder.addTool(functionTool(t)))
           options.responseFormat.foreach(f => builder.text(textConfig(f)))
           builder.build()
         }.toEither.left.map(_.toLLMError)
       }
+
+  private def reasoningSummary(summary: OpenAIReasoningSummary): Reasoning.Summary =
+    summary match
+      case OpenAIReasoningSummary.Auto     => Reasoning.Summary.AUTO
+      case OpenAIReasoningSummary.Concise  => Reasoning.Summary.CONCISE
+      case OpenAIReasoningSummary.Detailed => Reasoning.Summary.DETAILED
 
   private def items(settings: Settings, messages: Seq[Message]): Result[Vector[ResponseInputItem]] =
     // the SDK builders throw on malformed content (a null text): inside the Result
@@ -126,18 +145,7 @@ private[provider] object OpenAIResponsesRequest:
           case parts =>
             val mapped = parts.map(userPart(settings))
             Vector(easy(EasyInputMessage.Role.USER, _.contentOfResponseInputMessageContentList(mapped.asJava)))
-      case AssistantMessage(text, toolCalls, _, _) => // earlier reasoning is never sent in this release
-        val said = text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector
-        said ++ toolCalls.map { call =>
-          ResponseInputItem.ofFunctionCall(
-            ResponseFunctionToolCall
-              .builder()
-              .callId(call.id.asString)
-              .name(call.name)
-              .arguments(call.arguments.render())
-              .build()
-          )
-        }
+      case assistant: AssistantMessage => assistantItems(assistant)
       case tool: ToolMessage =>
         Vector(
           ResponseInputItem.ofFunctionCallOutput(
@@ -148,6 +156,29 @@ private[provider] object OpenAIResponsesRequest:
               .build()
           )
         )
+
+  /**
+   * An assistant turn's items, in order: the reasoning items with no anchor, its text, then each tool call preceded by
+   * the reasoning items stored with that call's id. A stored item whose call the message no longer has is not sent.
+   */
+  private def assistantItems(message: AssistantMessage): Vector[ResponseInputItem] =
+    val reasoning  = OpenAIReasoningItems.stored(message.thinking)
+    val unanchored = reasoning.filter(_.before.isEmpty).map(s => ResponseInputItem.ofReasoning(s.item))
+    val said =
+      message.text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector
+    val calls = message.toolCalls.flatMap { call =>
+      val anchored =
+        reasoning.filter(_.before.contains(call.id.asString)).map(s => ResponseInputItem.ofReasoning(s.item))
+      anchored :+ ResponseInputItem.ofFunctionCall(
+        ResponseFunctionToolCall
+          .builder()
+          .callId(call.id.asString)
+          .name(call.name)
+          .arguments(call.arguments.render())
+          .build()
+      )
+    }
+    unanchored.toVector ++ said ++ calls
 
   /** Text, an image by URL or inline, a PDF inline or uploaded to this provider; anything else is refused up front. */
   private def userPart(settings: Settings): PartialFunction[ContentPart, ResponseInputContent] =

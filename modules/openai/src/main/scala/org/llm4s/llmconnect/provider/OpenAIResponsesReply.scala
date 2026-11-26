@@ -29,12 +29,22 @@ import scala.util.Try
  */
 private[provider] object OpenAIResponsesReply:
 
-  def completion(response: Response, provider: ProviderId, configuredModel: ModelName): Result[Completion] =
-    Try(read(response, provider, configuredModel)).toEither.left
+  def completion(
+    response: Response,
+    provider: ProviderId,
+    configuredModel: ModelName,
+    origin: ReplayOrigin
+  ): Result[Completion] =
+    Try(read(response, provider, configuredModel, origin)).toEither.left
       .map(OpenAIClient.mapError(_, provider))
       .flatMap(identity)
 
-  private def read(response: Response, provider: ProviderId, configuredModel: ModelName): Result[Completion] =
+  private def read(
+    response: Response,
+    provider: ProviderId,
+    configuredModel: ModelName,
+    origin: ReplayOrigin
+  ): Result[Completion] =
     val status = known(response._status()).map(_.asString())
     if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider))
     else
@@ -48,7 +58,11 @@ private[provider] object OpenAIResponsesReply:
         if ChatCompletionsFinishReason.isFiltered(finish) then Right(Seq.empty)
         else toolCalls(items, finish)
       calls.flatMap { toolCalls =>
-        val message = AssistantMessage(text = if text.isEmpty then None else Some(text), toolCalls = toolCalls)
+        val message = ThinkingReplay.bindOrigin(
+          origin,
+          AssistantMessage(text = if text.isEmpty then None else Some(text), toolCalls = toolCalls)
+            .withThinking(OpenAIReasoningItems.blocks(items))
+        )
         ToolCallRules.checked(
           Completion(
             id = known(response._id()).getOrElse(""),

@@ -176,7 +176,9 @@ final class OpenAIClient private[provider] (
 
   protected def clientDescription: String = s"$displayName client for model $model"
   private def providerName: String        = provider.asString
-  protected def modelName: ModelName      = ModelName(model)
+  // sealed reasoning is replayed only to the provider and model this client is configured for
+  private val replayOrigin           = ReplayOrigin(providerName, model)
+  protected def modelName: ModelName = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -305,10 +307,14 @@ final class OpenAIClient private[provider] (
       body = serialize(params._body())
       response <- call("response")(transport.createResponse(params))
       completion <- OpenAIResponsesReply
-        .completion(response, provider, modelName)
+        .completion(response, provider, modelName, replayOrigin)
         .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
         .flatMap(filteredReply)
     } yield (body, serialize(response), completion)
+
+  private def reasoningSummary: Option[org.llm4s.llmconnect.config.OpenAIReasoningSummary] = config match
+    case openAI: OpenAIConfig => openAI.reasoningSummary
+    case _                    => None
 
   private def responsesSettings(options: CompletionOptions): OpenAIResponsesRequest.Settings =
     OpenAIResponsesRequest.Settings(
@@ -316,7 +322,10 @@ final class OpenAIClient private[provider] (
       provider = provider,
       effort = reasoningEffortFor(options),
       serviceTier = OpenAIServiceTier.onResponses(serviceTierPlan(options)._1),
-      omitsSampling = omitsSampling(options)
+      omitsSampling = omitsSampling(options),
+      reasons = isReasoningRequest(options),
+      summary = reasoningSummary,
+      origin = replayOrigin
     )
 
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(

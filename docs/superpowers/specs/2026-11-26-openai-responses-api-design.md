@@ -177,8 +177,12 @@ checked per model by the builder rather than inherited from the Chat Completions
   input item sent back without the reasoning item that preceded it, and returns the final answer. Slice 1's tool loop
   needs no decision; unsealed turns can be sent as items. One of four runs of the luna case failed before request
   acceptance could be told from the model not calling the tool; the case now cancels in that situation.
-- **To verify live in slice 2**: that an interleaved reply (two tool calls, each with its own reasoning item) is
-  accepted back in its original order, and that a reasoning item is accepted with its `id` under `store: false`.
+- **Verified live on 2026-11-26** (slice 2; `gpt-6.1-terra`, `gpt-5.6-luna`, `store: false`): a reply with one tool call
+  and one reasoning item, sent back with its `id` and `encrypted_content`, was accepted on both models, and so was the
+  same turn edited so its reasoning was dropped. An interleaved reply (two calls, each with its own reasoning) did not
+  occur in these runs; it is covered by wire tests only. `reasoningSummary = auto` returned summary text as thinking on both models. One
+  `gpt-5.6-luna` run returned an accepted but empty turn 2 (no text, no tool call) after its reasoning was replayed; it
+  was not reproduced, and the live turn-2 assertions check acceptance only.
 - Reasoning summaries are opt-in: section key `reasoningSummary = "auto" | "concise" | "detailed"`
   (`OpenAIConfig.reasoningSummary`), unset by default, sent as `reasoning.summary`. *My call*: OpenAI answers a summary request from an unverified organisation with a 400, which would
   break every reasoning request for those accounts if llm4s asked by default. Without it, a turn has reasoning
@@ -264,10 +268,9 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 
 ## Carried into later slices
 
-Slice 2 (reasoning):
-- `reasoningSummary` is accepted and not yet read.
-
 Slice 3 (streaming):
+- Native streaming must emit summary text as `thinkingDelta`, and build the opaque blocks from the terminal event's response through `OpenAIResponsesReply` (not `StreamingAccumulator`'s thinking text, which would drop them).
+- A parity test that a streamed and an unstreamed completion of the same reply have equal messages.
 - A failed reply's `invalid_prompt` and image error codes are still a 502 `ServiceError`, which invites retries of a request that cannot succeed: give them a 400-class error where `response.failed` shares the mapping.
 - A 200 reply that maps to a `Left` (failed, content filter, malformed tool call) is recorded in the exchange log with no request or response body: record both.
 - In the faked stream the first chunk carries the finish reason and later tool calls follow it; native streaming must end with the finish reason.
@@ -277,6 +280,13 @@ Slice 4 (the default):
 - The Java facade (`ClientBuilds`), the Kotlin DSL and Spring/Quarkus flat keys (`ProviderConfigParser`) cannot set `api`: they need a way to opt out before the default flips.
 - `docs/guide/providers.md`'s extras table lists neither new key.
 - Adding two fields to `OpenAIConfig` breaks positional patterns on it at source (11 to 13 fields): state in the compatibility policy that positional patterns on growth-safe (private-constructor) classes are outside the source promise, add a migration note, and decide whether `Llm4sMigrateFrom_1_0` gets a `PositionalPatternsGainFields` entry (maintainer to confirm).
+- A setting that keeps reasoning out of stored history and requests: size, and an escape hatch when OpenAI rejects an old encrypted item after a key, organisation or snapshot change (`ReplayOrigin` excludes key and endpoint).
+- Decide what the client does on such a rejection: an error that names the cause, possibly one retry without reasoning.
+- A live comparison of the empty-turn-2 rate with and without replay on `gpt-5.6-luna`.
+- Document checkpoint growth from encrypted reasoning.
+- The Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller rebuilds a conversation.
+- `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's `None` into `Some("")` and so unseals it.
+- Hosted tools would need a reasoning item anchored to a non-function item.
 
 ## Left to the builder
 

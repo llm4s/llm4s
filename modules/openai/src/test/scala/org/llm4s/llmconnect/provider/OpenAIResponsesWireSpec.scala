@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.error.{
   ContentFilteredError,
   LLMError,
@@ -80,8 +80,13 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
   private def configFor(baseUrl: String, model: String): OpenAIConfig =
     OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl(s"$baseUrl/v1")).value
 
-  private def responsesClient(baseUrl: String, model: String = "gpt-4o"): OpenAIClient =
-    OpenAIClient(configFor(baseUrl, model).withApi(OpenAIApi.Responses)).value
+  private def responsesClient(
+    baseUrl: String,
+    model: String = "gpt-4o",
+    summary: Option[OpenAIReasoningSummary] = None
+  ): OpenAIClient =
+    val config = configFor(baseUrl, model).withApi(OpenAIApi.Responses)
+    OpenAIClient(summary.fold(config)(config.withReasoningSummary)).value
 
   "OpenAIClient on the Responses API" should "post to <baseUrl>/responses with store false and read the reply" in {
     val seen = new AtomicReference[Seen]()
@@ -166,7 +171,8 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
   private def send(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
-    model: String = "gpt-4o"
+    model: String = "gpt-4o",
+    summary: Option[OpenAIReasoningSummary] = None
   ): Sent =
     val seen = new AtomicReference[Seen]()
     var out  = Option.empty[Sent]
@@ -174,7 +180,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       capture(seen, exchange)
       LocalProviderTestServer.sendJsonResponse(exchange, 200, reply(outputMessage("ok")))
     } { baseUrl =>
-      val client = responsesClient(baseUrl, model)
+      val client = responsesClient(baseUrl, model, summary)
       val result = client.complete(conversation, options)
       client.close()
       out = Some(Sent(result, Option(seen.get())))
@@ -318,6 +324,45 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     sent.completion.adjustments shouldBe empty
   }
 
+  it should "ask for encrypted reasoning from a reasoning model" in {
+    val sent = send(hello, model = "gpt-6.1-terra")
+    sent.body("include").arr.map(_.str).toSeq shouldBe Seq("reasoning.encrypted_content")
+    sent.body("store").bool shouldBe false
+  }
+
+  it should "not ask a non-reasoning model for encrypted reasoning" in {
+    val sent = send(hello, summary = Some(OpenAIReasoningSummary.Auto))
+    sent.body.obj.keySet should not contain "include"
+    sent.body.obj.keySet should not contain "reasoning"
+  }
+
+  it should "send the configured reasoning summary beside the effort" in {
+    val low  = CompletionOptions().withReasoning(ReasoningEffort.Low)
+    val sent = send(hello, low, model = "gpt-6.1-terra", summary = Some(OpenAIReasoningSummary.Auto))
+    sent.body("reasoning")("summary").str shouldBe "auto"
+    sent.body("reasoning")("effort").str shouldBe "low"
+    List(
+      OpenAIReasoningSummary.Auto     -> "auto",
+      OpenAIReasoningSummary.Concise  -> "concise",
+      OpenAIReasoningSummary.Detailed -> "detailed"
+    )
+      .foreach { case (summary, wire) =>
+        send(hello, low, model = "gpt-6.1-terra", summary = Some(summary))
+          .body("reasoning")("summary")
+          .str shouldBe wire
+        val alone = send(hello, model = "gpt-6.1-terra", summary = Some(summary)).body("reasoning")
+        alone.obj.keySet shouldBe Set("summary")
+        alone("summary").str shouldBe wire
+      }
+  }
+
+  it should "send no reasoning summary unless one is configured, and none to a non-reasoning model" in {
+    send(hello, model = "gpt-6.1-terra").body.obj.keySet should not contain "reasoning"
+    val low = CompletionOptions().withReasoning(ReasoningEffort.Low)
+    send(hello, low, model = "gpt-6.1-terra").body("reasoning").obj.keySet should not contain "summary"
+    send(hello, summary = Some(OpenAIReasoningSummary.Auto)).body.obj.keySet should not contain "reasoning"
+  }
+
   it should "send the service tier, and none when unset" in {
     send(hello, CompletionOptions().withServiceTier(ServiceTier.Flex)).body("service_tier").str shouldBe "flex"
     send(hello, CompletionOptions().withServiceTier(ServiceTier.Priority)).body("service_tier").str shouldBe "priority"
@@ -411,8 +456,37 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       )
     ).value
     completion.content shouldBe "hi"
-    completion.message.thinking shouldBe empty
+    completion.message.thinking.map(_.getClass) shouldBe Seq(classOf[ThinkingBlock.Opaque])
     completion.finishReason shouldBe FinishReason.Stop
+  }
+
+  it should "carry a reply's reasoning on the assistant message, bound to this provider and model" in {
+    var out = Option.empty[org.llm4s.llmconnect.model.Completion]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        reply(
+          reasoningItem("rs_1", summary = Seq("Thinking it through.")) + "," +
+            functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+        )
+      )
+    } { baseUrl =>
+      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
+      out = client.complete(hello, CompletionOptions()).toOption
+      client.close()
+    }
+    val completion = out.get
+    completion.thinking shouldBe Some("Thinking it through.")
+    completion.message.hasSealedThinking shouldBe true
+    completion.message.thinkingBinding shouldBe defined
+    completion.toolCalls.map(_.name) shouldBe Seq("get_weather")
+  }
+
+  it should "report no thinking for a reply without reasoning items" in {
+    val completion = answer(reply(outputMessage("hi"))).value
+    completion.message.thinking shouldBe empty
+    completion.message.thinkingBinding shouldBe None
   }
 
   it should "deliver a refusal's text as the content" in {
@@ -564,7 +638,8 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
   private def streamed(
     body: String,
     status: Int = 200,
-    options: CompletionOptions = CompletionOptions()
+    options: CompletionOptions = CompletionOptions(),
+    model: String = "gpt-4o"
   ): Streamed =
     val seen      = new AtomicReference[Seen]()
     val chunks    = ListBuffer.empty[StreamedChunk]
@@ -577,7 +652,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       LocalProviderTestServer.sendJsonResponse(exchange, status, body)
     } { baseUrl =>
       val client = OpenAIClient(
-        configFor(baseUrl, "gpt-4o").withApi(OpenAIApi.Responses),
+        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
         LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
       ).value
       out = Some(client.streamComplete(hello, options)(chunks += _))
@@ -593,6 +668,27 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     s.chunks.last.finishReason shouldBe Some(FinishReason.Stop)
     s.request.path shouldBe "/v1/responses"
     s.request.body.obj.keySet should not contain "stream"
+  }
+
+  it should "give a streamed completion the same message, reasoning included, as complete does" in {
+    val body =
+      reply(
+        reasoningItem("rs_1", summary = Seq("Thinking.")) + "," +
+          functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+      )
+    val s                  = streamed(body, model = "gpt-6.1-terra")
+    val streamedCompletion = s.result.value
+    streamedCompletion.message.hasSealedThinking shouldBe true
+    streamedCompletion.message.thinkingBinding shouldBe defined
+    var unstreamed = Option.empty[org.llm4s.llmconnect.model.Completion]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+    } { baseUrl =>
+      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
+      unstreamed = client.complete(hello, CompletionOptions()).toOption
+      client.close()
+    }
+    streamedCompletion.message shouldBe unstreamed.get.message
   }
 
   it should "report the same adjustments on a streamed completion as complete does" in {
