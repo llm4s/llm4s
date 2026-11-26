@@ -61,6 +61,29 @@ final class OpenAIReasoningItemsSpec extends AnyFlatSpec with Matchers:
     toText.map(_._2.obj.keySet) shouldBe Seq(Set("item"), Set("item"))
   }
 
+  it should "anchor each run of reasoning items to the call that ends it" in {
+    val found = opaque(
+      OpenAIReasoningItems.blocks(
+        output(
+          reasoningItem("rs_1"),
+          reasoningItem("rs_2"),
+          functionCall("call_1", "get_weather", "{}"),
+          reasoningItem("rs_3"),
+          functionCall("call_2", "get_time", "{}")
+        )
+      )
+    )
+    found.map(_._2("before").str) shouldBe Seq("call_1", "call_1", "call_2")
+  }
+
+  it should "leave a reasoning item unanchored when an item that is not a call follows it" in {
+    val search = """{"type":"web_search_call","id":"ws_1","status":"completed"}"""
+    val found = opaque(
+      OpenAIReasoningItems.blocks(output(reasoningItem("rs_1"), search, functionCall("call_1", "get_weather", "{}")))
+    )
+    found.map(_._2.obj.keySet) shouldBe Seq(Set("item"))
+  }
+
   it should "keep a summary as text, before its opaque block" in {
     val blocks = OpenAIReasoningItems.blocks(output(reasoningItem("rs_1", summary = Seq("First.", "Second."))))
     blocks.head shouldBe ThinkingBlock.Text("First.\n\nSecond.")

@@ -15,8 +15,9 @@ import scala.util.Try
  * Each item with `encrypted_content` is kept as a `ThinkingBlock.Opaque` of provider `openai` whose data is the
  * envelope `{"item": <the item as returned>, "before": "<call_id>"}`; `before` is the `call_id` of the
  * `function_call` that follows it in the output, looking past any reasoning items between, and is absent when the
- * next other item is anything else. A reasoning item that comes after the turn's text with no later call is therefore
- * sent before the text. An item's summary text is a `ThinkingBlock.Text` before its opaque block. Nothing here throws: what cannot be read is left out.
+ * next other item is anything else (a search call, say). A reasoning item that comes after the turn's text with no
+ * later call is therefore sent before the text. An item's summary text is a `ThinkingBlock.Text` before its opaque
+ * block. Nothing here throws: what cannot be read is left out.
  */
 private[provider] object OpenAIReasoningItems:
 

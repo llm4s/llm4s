@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAICon
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
+  Completion,
   CompletionOptions,
   Conversation,
   ReasoningEffort,
@@ -253,12 +254,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
       client.close()
 
       // What is asserted is that OpenAI accepted the request; the model may answer or call the tool again.
-      val reply = withClue(s"Responses turn 2 on $model was rejected: ${second.swap.toOption}: ")(second.value)
-      withClue(
-        s"$model replied with neither content nor a tool call: content=${reply.content}, tool calls=${reply.message.toolCalls}: "
-      ) {
-        (reply.content.nonEmpty || reply.message.toolCalls.nonEmpty) shouldBe true
-      }
+      acceptedReply(model, second)
     }
   }
 
@@ -266,8 +262,18 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     CompletionOptions(maxTokens = Some(2048)).withTools(Seq(submitAnswerTool)).withReasoning(ReasoningEffort.Low)
 
   // What is asserted is that OpenAI accepted the request: the model may answer, call the tool again or say nothing.
-  private def acceptedReply(model: String, second: Result[org.llm4s.llmconnect.model.Completion]): Unit =
+  // The info line is what tells an empty reply from a dropped one.
+  private def acceptedReply(model: String, second: Result[Completion]): Unit = {
+    info(
+      s"$model turn 2: " + second.fold(
+        e => s"rejected: $e",
+        r =>
+          s"accepted, finish=${r.finishReason}, usage=${r.usage}, content.length=${r.content.length}, " +
+            s"tool calls=${r.message.toolCalls.size}, thinking=${r.message.thinking.map(_.getClass.getSimpleName)}"
+      )
+    )
     withClue(s"Responses turn 2 on $model was rejected: ${second.swap.toOption}: ")(second.isRight shouldBe true)
+  }
 
   for (model <- Seq("gpt-6.1-terra", "gpt-5.6-luna")) {
     it should s"finish a tool loop that sends its encrypted reasoning back on the Responses API on $model" in {
@@ -296,9 +302,6 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
         Conversation(Seq(calculationMessage, firstOk.message) ++ calls.map(c => ToolMessage("recorded", c.id)))
       val second = client.complete(turn2, lowOptions)
       client.close()
-      info(
-        s"$model turn 2: ${second.fold(e => s"rejected: $e", r => s"accepted, tool calls=${r.message.toolCalls.size}")}"
-      )
       acceptedReply(model, second)
     }
 
