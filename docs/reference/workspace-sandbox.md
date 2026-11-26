@@ -6,6 +6,7 @@ search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
 cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
+cites_issues: [3046, 3053]
 ---
 
 # Workspace Sandbox Configuration
@@ -33,6 +34,8 @@ When running the workspace runner (e.g. in Docker):
 | `WORKSPACE_PATH` | Workspace root directory | `/workspace` |
 | `WORKSPACE_SANDBOX_PROFILE` | Sandbox profile: `permissive` or `locked`; any other value stops the runner | `permissive` |
 | `WORKSPACE_SANDBOX_CONFIG` | The whole `WorkspaceSandboxConfig` as JSON, used in place of the profile; setting it with `WORKSPACE_SANDBOX_PROFILE`, or an invalid one, stops the runner. `ContainerisedWorkspace(..., sandboxConfig = Some(...))` sets it | none |
+| `LLM4S_RUNNER_TOKEN` | The token every WebSocket handshake must carry as `Authorization: Bearer <token>`, at least 32 characters; unset or shorter, the runner does not start. `ContainerisedWorkspace` makes a random one per container. Never passed to a command | none (required) |
+| `LLM4S_RUNNER_IDLE_TIMEOUT_SECONDS` | How long the runner waits with no client connected before it exits, in whole seconds; `0` never exits. `ContainerisedWorkspace(..., idleTimeout = ...)` sets it | `300` |
 | `WORKSPACE_EXTRA_COMMANDS` | Programs added to the profile's `allowedCommands`, separated by commas or whitespace (for example `sbt`); a name that is not a bare program name, is a `.bat` / `.cmd` batch file, or is a shell, interpreter, launcher, loader or other program that runs another (in any case, with or without `.exe` / `.com` or a version), stops the runner, as does any name with the `locked` profile, which runs no command | none |
 
 These variables are the only things that decide what the runner enforces.
@@ -760,6 +763,52 @@ every mount. The runner logs at startup whether commands get cgroups and, if not
 before. Off by default. A program that calls `clone3` with `CLONE_INTO_CGROUP` itself can still start a process in
 another cgroup of the container; no allowlisted program does.
 
+## Who can reach the runner
+
+The runner's WebSocket gives whoever opens it the whole command set: reading and writing the mounted host directory,
+and every allowlisted command. Rewriting `build.sbt` there runs code on the host at its next build. So only the
+client that started the container may open it ([#3046](https://github.com/llm4s/llm4s/issues/3046)):
+
+- **Loopback only.** `ContainerisedWorkspace` publishes the port as `-p 127.0.0.1:<hostPort>:8080`, so no other
+  machine can reach it. Inside the container the runner listens on `0.0.0.0`, for Docker to forward to.
+- **A token per container.** The client makes 32 random bytes, passes them as `LLM4S_RUNNER_TOKEN` in the `docker`
+  CLI's environment (`-e LLM4S_RUNNER_TOKEN`, no value on the command line), and sends
+  `Authorization: Bearer <token>` on every handshake. The runner compares it in constant time and refuses a
+  handshake without it (401) before any socket opens, so another user or process on the host cannot drive it. A
+  runner started without a token does not start. The token is removed from every command's environment.
+- **No browsers.** A handshake with an `Origin` header is refused (403) whatever it carries. Browsers do not apply
+  the same-origin policy to WebSockets, so without this a web page the developer visits could try
+  `ws://localhost:<hostPort>/ws`.
+
+The runner's `GET /` answers without a token: it returns a fixed banner and nothing about the workspace.
+
+What the token does not cover: anyone who can run `docker` on the host can read it with `docker inspect`, or
+`docker exec` into the container. Docker access is root on the host anyway.
+
+### Container lifetime
+
+A container never outlives its client for long ([#3053](https://github.com/llm4s/llm4s/issues/3053)):
+
+- It starts with `--rm --init`, so a stopped container is removed and a signal reaches the runner.
+- A failed start (a busy port leaves the container created but not started) runs `docker rm -f`.
+  `stopContainer()` (or `close()`, since `ContainerisedWorkspace` is `AutoCloseable`) runs `docker stop`, then
+  `docker rm -f` whatever `stop` did.
+- A JVM shutdown hook removes the container when the JVM exits without stopping it.
+- The runner exits after `idleTimeout` (`LLM4S_RUNNER_IDLE_TIMEOUT_SECONDS`, 5 minutes by default) with no client
+  connected, which covers a client killed with `SIGKILL`, where no hook runs.
+
+The runner ends a connection after 30 seconds with no message, and kills its commands. That happens after a long GC
+pause, a debugger stop or a laptop asleep. The client then reconnects with backoff, for about 16 seconds. It also
+drops and reconnects a connection whose heartbeats the runner has not answered for 20 seconds (a hung runner), and
+gives up after three such connections in a row.
+
+- A read (explore, read, search, snapshot, workspace info) whose connection closed before its response is sent again.
+- A file change or an execute command in flight fails with `WorkspaceAgentException` code `CONNECTION_CLOSED`. It
+  is not sent again, because it may have run.
+- When no reconnection succeeds, the client removes the container, and every later call fails with code
+  `WORKSPACE_UNAVAILABLE`. A call before `startContainer()` or after `stopContainer()` fails with
+  `WORKSPACE_NOT_RUNNING`.
+
 ## Container egress
 
 With `networkAllowed = false` (the default, and every built-in profile's) the container has no network out
@@ -817,8 +866,11 @@ Run the containerized runner with locked sandbox:
 
 2. Run the container (replace `TAG` and the host path to your workspace):
    ```bash
-   docker run --rm -e WORKSPACE_SANDBOX_PROFILE=locked --cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1 -v /path/to/workspace:/workspace -p 8080:8080 llm4s/workspace-runner:TAG
+   export LLM4S_RUNNER_TOKEN="$(openssl rand -base64 32)"
+   docker run --rm --init -e LLM4S_RUNNER_TOKEN -e WORKSPACE_SANDBOX_PROFILE=locked --cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1 -v /path/to/workspace:/workspace -p 127.0.0.1:8080:8080 llm4s/workspace-runner:TAG
    ```
+   The port is published on the loopback only, and a client must send `Authorization: Bearer $LLM4S_RUNNER_TOKEN`
+   on its handshake ([Who can reach the runner](#who-can-reach-the-runner)).
    On Windows with Docker Desktop, use a path Docker can mount (e.g. `C:\Users\you\workspace` or `//c/Users/you/workspace` depending on your setup).
 
 ## Phased Implementation Plan

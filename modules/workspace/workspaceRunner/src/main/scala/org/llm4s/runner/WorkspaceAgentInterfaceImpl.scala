@@ -1708,6 +1708,8 @@ class WorkspaceAgentInterfaceImpl(
     // (`cat`, `sort`, `wc`, `grep x` with no file) gets end-of-file at once instead of waiting on an open pipe until
     // the command timeout (#1728).
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
+    // the runner's token never reaches a command: with it, a command could drive the runner over loopback (#3046)
+    builder.environment().remove(RunnerHandshake.TokenEnvVar): Unit
     env.foreach { case (k, v) => builder.environment().put(k, v) }
     // The program may start another by name (`#!/usr/bin/env x`, sbt starting java), searching PATH from the
     // workspace: give it only the PATH entries the runner itself would search (#1792). No entry left: the system

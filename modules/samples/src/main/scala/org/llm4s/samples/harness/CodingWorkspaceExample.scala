@@ -64,8 +64,8 @@ object CodingWorkspaceExample {
     val workspace = new ContainerisedWorkspace(root.toString, image, port)
     if (!workspace.startContainer()) Left(ValidationError("workspace", s"could not start a container from $image"))
     else
-      // the container is stopped whatever happens
-      Using.resource(new AutoCloseable { def close(): Unit = workspace.stopContainer(): Unit }) { _ =>
+      // the container is stopped and removed whatever happens
+      Using.resource(workspace) { _ =>
         for {
           asked <- processOne(client, workspace, dir)
           _     <- asked.fold[Result[Unit]](Right(()))(processTwo(client, workspace, dir, _))

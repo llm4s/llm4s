@@ -18,14 +18,20 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
         "docker",
         "run",
         "-d",
+        "--rm",
+        "--init",
         "--name",
         "ws-test",
         "-p",
-        "18080:8080",
+        "127.0.0.1:18080:8080",
         "--cap-add",
         "NET_ADMIN",
         "-e",
         "LLM4S_NO_EGRESS=1",
+        "-e",
+        "LLM4S_RUNNER_TOKEN",
+        "-e",
+        "LLM4S_RUNNER_IDLE_TIMEOUT_SECONDS=300",
         "-v",
         "/tmp/ws:/workspace",
         "llm4s/workspace-runner:dev"
@@ -46,6 +52,22 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
     // #1761: an interpreter or a batch file neither
     args(Set("sbt", "python3")) shouldBe Left("'python3' runs other programs, so it cannot be added to the allowlist")
     args(Set("build.bat")).isLeft shouldBe true
+  }
+
+  it should "publish the port on the host's loopback only, and name the token without its value (#3046)" in {
+    val built = args(Set.empty).fold(fail(_), identity)
+    built.sliding(2).toSeq should contain(Seq("-p", "127.0.0.1:18080:8080"))
+    built.sliding(2).toSeq should contain(Seq("-e", "LLM4S_RUNNER_TOKEN"))
+    built.exists(_.startsWith("LLM4S_RUNNER_TOKEN=")) shouldBe false
+  }
+
+  it should "remove the container when it stops, and pass the idle timeout in whole seconds, rounded up (#3053)" in {
+    import scala.concurrent.duration._
+    val built = ContainerisedWorkspace
+      .dockerRunArgs("ws-test", 18080, 8080, "/tmp/ws", "img", Set.empty, None, idleTimeout = 1500.millis)
+      .fold(fail(_), identity)
+    built.take(5) shouldBe Seq("docker", "run", "-d", "--rm", "--init")
+    built.sliding(2).toSeq should contain(Seq("-e", "LLM4S_RUNNER_IDLE_TIMEOUT_SECONDS=2"))
   }
 
   "CodeGenExample" should "add sbt to the runner's allowlist and ask for one program per command" in {
@@ -76,7 +98,7 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
     val asked = ContainerisedWorkspace
       .dockerRunArgs("ws-test", 18080, 8080, "/tmp/ws", "img", Set.empty, None, commandCgroups = true)
       .fold(fail(_), identity)
-    asked.slice(7, 12) shouldBe Seq(
+    asked.slice(9, 14) shouldBe Seq(
       "--cgroupns=private",
       "--cap-add",
       "SYS_ADMIN",

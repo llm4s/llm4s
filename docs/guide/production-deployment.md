@@ -538,21 +538,24 @@ val clientLayer: ZLayer[Scope, LLMError, LLMClient] =
 
 ### Workspace Execution
 
-For workspace-based execution (containerized command execution), the `ContainerisedWorkspace` manages its own lifecycle:
+For workspace-based execution (containerized command execution), `ContainerisedWorkspace` is `AutoCloseable`:
+`close()` stops and removes its container.
 
 ```scala
 import scala.util.Using
 import org.llm4s.workspace.ContainerisedWorkspace
 
-// ContainerisedWorkspace does not extend AutoCloseable — define a Releasable
-implicit val workspaceReleasable: Using.Releasable[ContainerisedWorkspace] =
-  (ws: ContainerisedWorkspace) => ws.stopContainer()
-
 Using.resource(new ContainerisedWorkspace("/app/workspace", "llm4s-runner:latest", 8090)) { workspace =>
-  // Run an allowlisted program inside the isolated container: a program and its arguments, not shell text
-  workspace.executeCommand("ls -la src")
+  if (workspace.startContainer())
+    // Run an allowlisted program inside the isolated container: a program and its arguments, not shell text
+    workspace.executeCommand("ls -la src")
 }
 ```
+
+The container's port is published on `127.0.0.1` only, and the runner opens a WebSocket only for the token the client
+made for that container, so nothing else on the host can drive it. A container never outlives its client for long: it
+starts with `--rm`, a JVM shutdown hook removes it, and the runner exits by itself after `idleTimeout` (5 minutes by
+default) with no client connected. See [Workspace sandbox](../reference/workspace-sandbox#who-can-reach-the-runner).
 
 ---
 

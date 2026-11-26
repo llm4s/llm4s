@@ -258,6 +258,22 @@ Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both e
 | An AWS secret whose `SecretString` is a JSON object, read without `withField`, was sent whole as the API key | A `ConfigurationError` naming the object's keys. Add `.withField("apiKey")` with the key that holds the API key |
 | A failed read was tried again by the very next `current()` | The failure is returned to every caller for 1 second (a retryable error) or 5 seconds (any other), then the next call reads again. A caller interrupted while waiting gets a `CancelledError` |
 
+## The workspace runner needs a token, and its container is published on loopback only (#3046, #3053)
+
+`llm4s-workspace-client` and the workspace-runner image are experimental. Use the client and the image from the same
+release: an older client cannot open this image's WebSocket, and an older image, which this client still drives, has
+none of the protections. With `ContainerisedWorkspace`, nothing changes in your code.
+
+| Before (1.0.0) | After |
+|---|---|
+| `docker run ... -p 8080:8080` published the runner on every host interface | `ContainerisedWorkspace` publishes `-p 127.0.0.1:<hostPort>:8080`. A runner started by hand should do the same |
+| The runner's `/ws` accepted any connection | The runner does not start without `LLM4S_RUNNER_TOKEN` (32 characters or more), and refuses a handshake without `Authorization: Bearer <token>` (401) or with an `Origin` header (403). `ContainerisedWorkspace` makes a random token per container |
+| A container ran on after its client's JVM died | It starts with `--rm --init`, a shutdown hook removes it, and the runner exits after `LLM4S_RUNNER_IDLE_TIMEOUT_SECONDS` (default 300, `0` never) with no client connected. `ContainerisedWorkspace` gains `idleTimeout` (last parameter, default 5 minutes) |
+| A dropped connection made every later call throw `RuntimeException("WebSocket is not connected ...")` | The client reconnects. A call fails with `WorkspaceAgentException`: `CONNECTION_CLOSED` for a change or command in flight, `WORKSPACE_UNAVAILABLE` once reconnection failed (the container is then removed), `WORKSPACE_NOT_RUNNING` before start or after stop |
+| `stopContainer()` skipped `docker rm` when `docker stop` failed | It always runs `docker rm -f`. `ContainerisedWorkspace` is `AutoCloseable`, so `Using.resource(workspace)` needs no `Releasable` |
+
+To run the image by hand, see [Workspace sandbox](workspace-sandbox#example-locked-down-sandbox).
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

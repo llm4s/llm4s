@@ -6,6 +6,7 @@ search_title: "LLM4S security reference: threat model and mitigations"
 parent: Reference
 nav_order: 16
 cites_closed_issues: [1408, 1715, 1721, 1756, 1761, 1766, 1776, 1790, 1805, 1807, 1845, 2306]
+cites_issues: [3046, 3053]
 ---
 
 # Security Reference
@@ -124,6 +125,13 @@ links out of the workspace, and any path argument can name a file outside it
 ([#1715](https://github.com/llm4s/llm4s/issues/1715)).
 
 **Mitigation (implemented):**
+- Only the client that started the container can reach the runner
+  ([#3046](https://github.com/llm4s/llm4s/issues/3046)). Its port is published on `127.0.0.1` only. Every WebSocket
+  handshake must carry a random per-container token (`LLM4S_RUNNER_TOKEN`), compared in constant time, and a
+  handshake with an `Origin` header (a browser's) is refused. A container's runner exits once no client has been
+  connected for its idle timeout, and the client removes the container on stop, on a failed start and at JVM exit
+  ([#3053](https://github.com/llm4s/llm4s/issues/3053)). See
+  [Who can reach the runner](workspace-sandbox#who-can-reach-the-runner).
 - Every check below applies to both ways a command reaches the runner: a direct `executeCommand`, and the WebSocket
   protocol that `ContainerisedWorkspace` uses, which until [#1756](https://github.com/llm4s/llm4s/issues/1756) ran the
   raw command string through `sh -c` with the client's environment and skipped all of them. Both now share one
