@@ -8,7 +8,7 @@ permalink: /contribute/release
 redirect_from:
   - /reference/release
   - /reference/release.html
-cites_open_issues: [2330]
+cites_open_issues: [2330, 3112]
 cites_closed_issues: [1150, 1152, 1281, 2778, 2785]
 ---
 
@@ -528,12 +528,12 @@ Most changes that look breaking can ship in a minor release. Add the replacement
 old one with `@deprecated("use X", since = "1.N")`, and leave it in place until 2.0. The patterns, such as an overload
 in place of a new parameter, or a `with*` setter in place of a new constructor field, are in
 [Changing a Frozen API without breaking it](../reference/compatibility-policy#changing-a-frozen-api-without-breaking-it).
-The deletion becomes a line in the 2.0 tracking issue, not a pull request.
+The deletion becomes a line in the [2.0 tracking issue](https://github.com/llm4s/llm4s/issues/3112), not a pull request.
 
 ### Parking a real break
 
-A `semver:major` pull request stays open with that label, or is closed with its plan recorded in the 2.0 tracking
-issue. There is no `2.x` branch until 2.0 is planned: such a branch has to take every merge from `main` and quickly
+A `semver:major` pull request stays open with that label, or is closed with its plan recorded in the [2.0 tracking issue](https://github.com/llm4s/llm4s/issues/3112).
+There is no `2.x` branch until 2.0 is planned: such a branch has to take every merge from `main` and quickly
 falls behind. When 2.0 starts, `main` becomes 2.0, the deprecated APIs are removed, and the latest 1.x line goes on
 from a `release/1.N.x` branch.
 
