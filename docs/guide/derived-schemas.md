@@ -282,7 +282,7 @@ def cancelTool(service: CustomerService): Result[ToolFunction[Cancellation]] =
 
 Methods inherited from `Any`, `Object`, `Product`, `Equals` and `Serializable`, synthetic, private, protected and extension methods, `val`s and methods marked `@notATool` are left out; the tools come in the order of their names. A parameter with a default value is still required, as a case class field with one is.
 
-Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, and a `@toolName` providers do not accept. Mark a method the model should not call `@notATool`.
+Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, a `@toolName` providers do not accept, and a `@toolName` or `@description` that is not a [constant string](#descriptions). Mark a method the model should not call `@notATool`.
 
 Scaladoc is read from the source when the service is compiled in the same run as the call to `Tools.derive`, with no compiler flag. For a service compiled separately (another module of your build, or a library), the compiler reads Scaladoc from its TASTy only when asked: add `scalacOptions += "-Xread-docs"` to the project that calls `Tools.derive`. Without it such a service's tools fall back to their names, unless `@description` describes them. A method that overrides another without Scaladoc or annotations of its own takes those of the method it overrides, so `Tool.fromMethod(live.cancelOrder)` on the implementing class describes the tool as the trait does.
 
@@ -376,7 +376,31 @@ val lookup: Result[ToolFunction[(high: Double, low: Double)]] =
 
 ## Descriptions
 
-The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
+The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
+
+The annotation is read at compile time, so its text must be a constant string the compiler can work out. That is more than a literal, so a limit can live in one place:
+
+```scala
+object Limits {
+  final val MaxNarration = 750 // a constant: declared without a type
+  inline val Tone        = "second person, present tense"
+}
+
+case class Answer(
+  @description("at most " + Limits.MaxNarration + " characters") narration: String,
+  @description(s"written in the ${Limits.Tone}") reply: String,
+  @description(Limits.Tone) tone: String
+) derives SchemaOf
+```
+
+| Accepted | Example |
+|---|---|
+| a string literal | `"Total amount"` |
+| a `final val` or `inline val` declared without a type | `Limits.Tone` |
+| a `+` of such constants, numbers and other primitives included | `"at most " + Limits.MaxNarration` |
+| an `s"..."` interpolation whose arguments are all such constants | `s"at most ${Limits.MaxNarration}"` |
+
+Anything else is a compile error where the schema is derived, naming the type and the field; it is never silently ignored: a `def`, a `val` that is not `final`, a `final val` with a declared type (`final val Max: Int = 750` is not a constant to the compiler), an `f"..."` or `raw"..."` interpolation, or a method call such as `.trim`. The same rule holds for a `@description` or `@toolName` on a method or parameter a tool is derived from, and for `@upickle.implicits.key` (for which uPickle's own derivation takes only a literal).
 
 ## How it agrees with uPickle
 

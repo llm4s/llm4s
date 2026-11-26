@@ -131,6 +131,18 @@ and [`CachedEmbeddingClient`'s key function takes the request](#cachedembeddingc
 From 0.7.0 to 1.0.0, [an error's `provider` is a `ProviderId`](#an-errors-provider-is-a-providerid-2936), the one
 source break, and three behaviour changes:
 [a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
+After 1.0.0, in the Experimental `llm4s-schema-derivation`,
+[an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951).
+
+## An annotation that is not a constant string is a compile error (#2951)
+
+In `llm4s-schema-derivation` (Experimental), `@description`, `@toolName` and `@upickle.implicits.key` now accept any
+constant string: a literal, a `final val` or `inline val` declared without a type, a `+` of such constants, or an
+`s"..."` interpolation whose arguments are all such constants. Before, only a single literal was read and anything else
+was silently ignored, so the field was described by its name. An argument that is still not a constant (a `def`, a
+`val` that is not `final`, a `final val` with a declared type, an `f"..."` interpolation) now fails to compile where
+the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
+(`final val Limit = 750`, without `: Int`), or write the text out.
 
 ## An error's `provider` is a `ProviderId` (#2936)
 
