@@ -36,6 +36,44 @@ class GrowthSafeToolTypesSpec extends AnyFlatSpec with Matchers {
     inaccessible(scala.compiletime.testing.typeCheckErrors("""s.copy(description = "d")"""))
   }
 
+  it should "carry a pattern, set and cleared through withPattern (#2954)" in {
+    val s = StringSchema("id").withPattern("^[a-z0-9_-]+$")
+    s.pattern shouldBe Some("^[a-z0-9_-]+$")
+    s shouldBe StringSchema("id", None, None, None, Some("^[a-z0-9_-]+$"))
+    s shouldBe StringSchema("id", pattern = Some("^[a-z0-9_-]+$"))
+    s.withPattern(None) shouldBe StringSchema("id")
+    s.withPattern(Some("^a")).pattern shouldBe Some("^a")
+    s.withMinLength(1).withDescription("d").pattern shouldBe Some("^[a-z0-9_-]+$")
+    StringSchema("id").pattern shouldBe None
+  }
+
+  it should "write the pattern as JSON Schema pattern, after the lengths, strict or not (#2954)" in {
+    val s = StringSchema("id").withMinLength(1).withMaxLength(40).withPattern("^[a-z0-9_-]+$")
+    val expected =
+      """{"type":"string","description":"id","minLength":1,"maxLength":40,"pattern":"^[a-z0-9_-]+$"}"""
+    ujson.write(s.toJsonSchema(strict = false)) shouldBe expected
+    ujson.write(s.toJsonSchema(strict = true)) shouldBe expected
+  }
+
+  it should "write a schema with no pattern exactly as 1.0.0 did (#2954)" in {
+    ujson.write(StringSchema("s").toJsonSchema(false)) shouldBe """{"type":"string","description":"s"}"""
+    ujson.write(StringSchema("s", Some(Seq("a")), Some(1), Some(2)).toJsonSchema(false)) shouldBe
+      """{"type":"string","description":"s","enum":["a"],"minLength":1,"maxLength":2}"""
+  }
+
+  it should "keep 1.0.0's four-argument apply (#2954)" in {
+    // the overload 1.0.0 published, which MiMa holds: found by its exact parameter types, by reflection
+    val apply4 = StringSchema.getClass.getMethod(
+      "apply",
+      classOf[String],
+      classOf[Option[?]],
+      classOf[Option[?]],
+      classOf[Option[?]]
+    )
+    apply4.invoke(StringSchema, "d", None, Some(1), None) shouldBe StringSchema("d").withMinLength(1)
+    StringSchema("d", None, Some(1), None) shouldBe StringSchema("d").withMinLength(1)
+  }
+
   "NumberSchema" should "default everything but the description" in {
     NumberSchema("n") shouldBe NumberSchema("n", false, None, None, None, None, None)
   }

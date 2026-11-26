@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `llm4s-schema-derivation` (Experimental): a `@description`, `@toolName` or `@upickle.implicits.key` whose argument is not a constant string is now a compile error where the schema, partial type or tool is derived; it was silently ignored ([#2951](https://github.com/llm4s/llm4s/issues/2951); [migration](docs/reference/migration.md#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951)).
 
+### Core
+
+- **Added** `StringSchema.withPattern(regex)`, written as JSON Schema `pattern`; an agent's argument validator checks it (found anywhere in the string unless anchored, with `java.util.regex`) for tool arguments and `withOutput` answers, so a raw schema using `pattern` now builds, and `llm4s-schema-iron` derives it from `Match` ([#2954](https://github.com/llm4s/llm4s/issues/2954); [Custom Tools](docs/guide/custom-tools.md#string-patterns)).
+
 ### Providers
 
 - **Added** an `openai` section with `api = "responses"` uses OpenAI's Responses API, where reasoning and tools work together, a turn's reasoning is kept across the thread's requests, and `reasoningSummary` asks for summary text; `streamComplete` there streams text, tool-call arguments and reasoning summaries ([#2900](https://github.com/llm4s/llm4s/issues/2900)).

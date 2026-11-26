@@ -21,7 +21,7 @@ final case class Order(
 final case class Note(text: String :| Match["[a-z]+"])
 
 object Notes {
-  // A constraint the module refuses, described by a hand-written given instead, which is taken as it is
+  // A constraint described by a hand-written given instead of the module's, which is taken as it is
   given SchemaOf[String :| Match["[a-z]+"]] = SchemaOf.string("lower-case letters")
   given SchemaOf[Note]                      = SchemaOf.derived[Note]
 }

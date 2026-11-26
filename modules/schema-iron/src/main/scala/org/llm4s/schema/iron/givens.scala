@@ -27,13 +27,16 @@ import upickle.default.ReadWriter
  *    inclusive one it equals (`Greater[0]` as `minimum: 1`), which every provider accepts.
  *  - on `String`: `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` and `Not[Blank]`, as `minLength` and
  *    `maxLength`. `Not[Blank]` is described as `minLength: 1`, which every non-blank string meets; that the string
- *    must not be only whitespace is checked when the reply is read.
+ *    must not be only whitespace is checked when the reply is read. And one `Match`, as `pattern` (#2954): Iron
+ *    matches the whole string and JSON Schema finds the expression anywhere, so `Match["[a-z]+"]` is written
+ *    `^(?:[a-z]+)$`. The expression is `java.util.regex`'s, and is sent as it is: JSON Schema names ECMA-262, so
+ *    keep to what the two share if a provider is to enforce it.
  *  - on `List`, `Seq`, `Vector` and `Set`: `MinLength`, `MaxLength`, `FixedLength` and `Not[Empty]`, as `minItems`
  *    and `maxItems`.
  *  - a conjunction `C1 & C2` of these, as both bounds; two bounds of one kind keep the tighter.
  *
- * Any other constraint, `Match` among them (core's `StringSchema` has no `pattern` yet), and a constraint on any other
- * type, is refused at compile time with a message naming it, rather than left out of the schema without a word.
+ * Any other constraint (`Multiple`, `StartWith`, a second `Match`), and a constraint on any other type, is refused
+ * at compile time with a message naming it, rather than left out of the schema without a word.
  *
  * The bounds are written into the schema `A`'s own `SchemaOf` builds, so the field keeps its description, and an
  * `Option[A :| C]`, a `List[A :| C]` or a case class holding one is derived as usual.

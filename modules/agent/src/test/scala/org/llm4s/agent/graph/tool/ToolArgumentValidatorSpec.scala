@@ -167,12 +167,90 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     check(schema, bad) shouldBe Vector(List.fill(depth)("x").mkString("$.", ".", "") + ": expected string, got integer")
   }
 
-  "unsupported" should "name the path of an unsupported keyword" in {
+  it should "check pattern as JSON Schema does: found anywhere in the string unless anchored (#2954)" in {
+    val anchored = StringSchema("id").withPattern("^[a-z0-9_-]+$").toJsonSchema(true)
+    check(anchored, ujson.Str("crypt_door")) shouldBe Vector.empty
+    check(anchored, ujson.Str("Crypt Door")) shouldBe
+      Vector("$: \"Crypt Door\" does not match the pattern ^[a-z0-9_-]+$")
+    val unanchored = StringSchema("id").withPattern("[a-z]+").toJsonSchema(true)
+    check(unanchored, ujson.Str("Crypt Door")) shouldBe Vector.empty
+    check(unanchored, ujson.Str("123")) shouldBe Vector("$: \"123\" does not match the pattern [a-z]+")
+  }
+
+  it should "check the pattern of a raw schema, at its path, beside the other string keywords (#2954)" in {
+    val schema = Schema
+      .raw(
+        ujson.Obj(
+          "type"       -> "object",
+          "properties" -> ujson.Obj("id" -> ujson.Obj("type" -> "string", "maxLength" -> 3, "pattern" -> "^[a-z]+$"))
+        )
+      )
+      .toJsonSchema(true)
+    v.unsupported(schema) shouldBe Vector.empty
+    check(schema, obj("id" -> "abc")) shouldBe Vector.empty
+    check(schema, obj("id" -> "AB12")) shouldBe Vector(
+      "$.id: length 4 is above maxLength 3",
+      "$.id: \"AB12\" does not match the pattern ^[a-z]+$"
+    )
+  }
+
+  it should "apply pattern only to strings, and to a nullable string's value (#2954)" in {
+    check(obj("pattern" -> "^a"), ujson.Num(1)) shouldBe Vector.empty
+    val nullable = NullableSchema(StringSchema("s").withPattern("^a")).toJsonSchema(true)
+    check(nullable, ujson.Null) shouldBe Vector.empty
+    check(nullable, ujson.Str("b")) shouldBe Vector("$: \"b\" does not match the pattern ^a")
+  }
+
+  it should "shorten a long value in a pattern violation, keeping the pattern (#2954)" in {
+    val problems = check(obj("type" -> "string", "pattern" -> "^[a-z]+$"), ujson.Str("A" * 500))
+    problems should have size 1
+    problems.head should endWith("does not match the pattern ^[a-z]+$")
+    problems.head.length should be < 200
+  }
+
+  it should "fail closed, not hang or throw, when a pattern backtracks without end (#2954)" in {
+    // not refused by the pre-screen, exponential on this input: the step budget stops it
+    val pattern = "^" + "a*" * 12 + "b$"
+    val schema  = obj("type" -> "string", "pattern" -> pattern)
+    v.unsupported(schema) shouldBe Vector.empty
+    val problems = check(schema, ujson.Str("a" * 200))
+    problems should have size 1
+    problems.head should startWith(s"$$: could not be checked against the pattern $pattern (")
+    problems.head should include("complexity budget")
+  }
+
+  it should "report a pattern that is not a regular expression as a violation, never throw (#2954)" in {
+    val problems = check(obj("type" -> "string", "pattern" -> "[a-z"), ujson.Str("a"))
+    problems should have size 1
+    problems.head should startWith("$: could not be checked against the pattern [a-z")
+  }
+
+  "unsupported" should "accept a pattern, in a StringSchema and in a raw schema (#2954)" in {
+    val built = ObjectSchema[Unit]("o", Seq.empty)
+      .withRequiredField("id", StringSchema("id").withPattern("^[a-z0-9_-]+$"))
+      .toJsonSchema(true)
+    v.unsupported(built) shouldBe Vector.empty
+    v.unsupported(obj("type" -> "string", "pattern" -> "^a")) shouldBe Vector.empty
+  }
+
+  it should "refuse a pattern that is not a string, does not compile, or is a known backtracking shape (#2954)" in {
+    v.unsupported(obj("type" -> "string", "pattern" -> 1)) shouldBe Vector("$.pattern")
+    val invalid = v.unsupported(obj("properties" -> obj("q" -> obj("type" -> "string", "pattern" -> "[a-z"))))
+    invalid should have size 1
+    invalid.head should startWith("$.properties.q.pattern (Invalid regex syntax")
+    val redos = v.unsupported(obj("type" -> "string", "pattern" -> "(a+)+$"))
+    redos should have size 1
+    redos.head should startWith("$.pattern (")
+    redos.head should include("ReDoS")
+    v.unsupported(obj("type" -> "string", "pattern" -> "")) should have size 1
+  }
+
+  it should "name the path of an unsupported keyword" in {
     val schema = obj(
       "type"       -> "object",
-      "properties" -> obj("q" -> obj("type" -> "string", "pattern" -> "^a"))
+      "properties" -> obj("q" -> obj("type" -> "string", "format" -> "email"))
     )
-    v.unsupported(schema) shouldBe Vector("$.properties.q.pattern")
+    v.unsupported(schema) shouldBe Vector("$.properties.q.format")
   }
 
   it should "find unsupported keywords under items and root" in {
@@ -486,8 +564,8 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
 
   "unsupported" should "accept anyOf, look inside its alternatives, and refuse one that is not a non-empty array" in {
     v.unsupported(nameOrPoint) shouldBe Vector.empty
-    v.unsupported(obj("anyOf" -> ujson.Arr(obj("type" -> "string", "pattern" -> "a")))) shouldBe
-      Vector("$.anyOf[0].pattern")
+    v.unsupported(obj("anyOf" -> ujson.Arr(obj("type" -> "string", "format" -> "a")))) shouldBe
+      Vector("$.anyOf[0].format")
     v.unsupported(obj("anyOf" -> ujson.Arr())) shouldBe Vector("$.anyOf")
     v.unsupported(obj("anyOf" -> "string")) shouldBe Vector("$.anyOf")
   }

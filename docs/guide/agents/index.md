@@ -225,6 +225,11 @@ the schema, no retry is spent on it - the same limit would cut the second answer
 `AgentStatus.Truncated(partialAnswer)` as any agent's does, never `OutputInvalid`. `decodeOutput` on such a result is
 a `Left` saying the output limit cut the answer off. The same holds for `withOutputCheck` and `withOutputJsonCheck`.
 
+A string's format belongs in the schema: `Schema.string("the location's id").withPattern("^[a-z0-9_-]+$")` is
+shown to the model as JSON Schema `pattern` and checked like any other keyword, so an answer with `"Crypt Door"`
+is sent back with `$.id: "Crypt Door" does not match the pattern ^[a-z0-9_-]+$`. See
+[String patterns](../custom-tools#string-patterns) for how a pattern is matched.
+
 A rule the schema cannot express - an id that must name another element of the same document, a total that must
 match its lines - is an application check, `withOutputCheck`. It runs on the decoded answer once the schema accepts
 it and returns the answer's problems, worded for the model; an empty result accepts the answer:
@@ -485,7 +490,8 @@ The pieces:
   and `approved`.
 - **`ToolSet.of(tools*)`** is the only way to build a `ToolSet`, and returns a `Result`: it refuses, in one
   `ValidationError` listing every problem, an invalid or duplicate tool name, an argument schema whose root is not
-  an object, and a schema keyword the argument validator does not check. `withToolSet(tools)` takes the set.
+  an object, and a schema keyword the argument validator does not check, which includes a `pattern` it cannot
+  compile ([String patterns](../custom-tools#string-patterns)). `withToolSet(tools)` takes the set.
 
 A tool answers with a `ToolOutcome`:
 

@@ -4,6 +4,7 @@ import io.github.iltotore.iron.constraint.any.{ DescribedAs, Not, StrictEqual, T
 import io.github.iltotore.iron.constraint.char.Whitespace
 import io.github.iltotore.iron.constraint.collection.{ ForAll, Length }
 import io.github.iltotore.iron.constraint.numeric.{ Greater, Less }
+import io.github.iltotore.iron.constraint.string.Match as IronMatch
 
 import scala.quoted.*
 
@@ -60,8 +61,8 @@ private[iron] object IronMacros {
     val supported =
       "llm4s-schema-iron describes Greater, GreaterEqual, Less, LessEqual, StrictEqual, Positive, Positive0, Negative, " +
         "Negative0 and Interval on Int, Long, Double and Float; MinLength, MaxLength, FixedLength and Not[Empty] on " +
-        "String, List, Seq, Vector and Set; Not[Blank] on String; and & of these. Match is not described yet: " +
-        "llm4s-core's StringSchema has no pattern. To describe the type yourself, define a given SchemaOf of it."
+        "String, List, Seq, Vector and Set; Not[Blank] and one Match on String; and & of these. " +
+        "To describe the type yourself, define a given SchemaOf of it."
 
     def refuse(part: TypeRepr, why: String): Nothing =
       report.errorAndAbort(
@@ -88,6 +89,7 @@ private[iron] object IronMacros {
     val strictEqual = TypeRepr.of[StrictEqual[0]].typeSymbol
     val length      = TypeRepr.of[Length[True]].typeSymbol
     val not         = TypeRepr.of[Not[True]].typeSymbol
+    val matching    = TypeRepr.of[IronMatch[""]].typeSymbol
     val truth       = TypeRepr.of[True]
     val blank       = TypeRepr.of[ForAll[Whitespace]]
 
@@ -167,7 +169,36 @@ private[iron] object IronMacros {
         ))
         if (empty || (kind == Kind.Text && negated =:= blank)) Range(Some((BigDecimal(1), true)), None)
         else refuse(t, "only Not[Empty], and Not[Blank] on a String, are described")
-      case _ => refuse(t, s"it is not a length constraint, the only kind a ${short(refined)} has")
+      // a string's Match says nothing of its length: `patterns` reads it
+      case u if kind == Kind.Text && isA(u, matching) => Unbounded
+      case _ =>
+        val kinds =
+          if (kind == Kind.Text) "a length constraint or a Match, the only kinds"
+          else "a length constraint, the only kind"
+        refuse(t, s"it is not $kinds a ${short(refined)} has")
+    }
+
+    // The expressions of the `Match`es in a string's constraint, each a literal that java.util.regex compiles
+    def patterns(t: TypeRepr): List[String] = undescribed(t) match {
+      case AndType(l, r) => patterns(l) ++ patterns(r)
+      case u if isA(u, matching) =>
+        argument(u).dealias match {
+          case ConstantType(StringConstant(regex)) =>
+            scala.util.Try(java.util.regex.Pattern.compile(regex)).failed.toOption.foreach { e =>
+              val why = Option(e.getMessage).flatMap(_.linesIterator.nextOption()).getOrElse(e.getClass.getSimpleName)
+              refuse(t, s"its expression is not a regular expression ($why)")
+            }
+            List(regex)
+          case v => refuse(t, s"its expression ${short(v)} is not a literal string")
+        }
+      case _ => Nil
+    }
+
+    // Iron's Match is `String.matches`, the whole string; JSON Schema's pattern is found anywhere: so it is anchored
+    def anchored(t: TypeRepr): Option[String] = patterns(t).distinct match {
+      case Nil          => None
+      case regex :: Nil => Some(s"^(?:$regex)$$")
+      case _            => refuse(t, "it has more than one Match, and a JSON Schema string has one pattern")
     }
 
     val bounds = kind match {
@@ -179,7 +210,15 @@ private[iron] object IronMacros {
         Bounds(inclusive(r.lower), inclusive(r.upper), exclusive(r.lower), exclusive(r.upper), None, None)
       case Kind.Text | Kind.Items =>
         val r = lengths(constraint)
-        Bounds(None, None, None, None, lengthOf(wholeLower(r.lower, -1)), lengthOf(wholeUpper(r.upper, Int.MaxValue)))
+        Bounds(
+          None,
+          None,
+          None,
+          None,
+          lengthOf(wholeLower(r.lower, -1)),
+          lengthOf(wholeUpper(r.upper, Int.MaxValue)),
+          if (kind == Kind.Text) anchored(constraint) else None
+        )
     }
 
     '{
@@ -189,7 +228,8 @@ private[iron] object IronMacros {
         ${ Expr(bounds.exclusiveMinimum) },
         ${ Expr(bounds.exclusiveMaximum) },
         ${ Expr(bounds.minLength) },
-        ${ Expr(bounds.maxLength) }
+        ${ Expr(bounds.maxLength) },
+        ${ Expr(bounds.pattern) }
       )
     }
   }

@@ -47,6 +47,14 @@ object IronFixtures {
   ) derives SchemaOf,
         ReadWriter
 
+  final case class Patterned(
+    @description("The location's id") id: String :| Match["[a-z0-9_-]+"],
+    slug: String :| (Match["[a-z]+(-[a-z]+)*"] & MinLength[3] & MaxLength[20]),
+    either: String :| Match["cat|dog"],
+    maybe: Option[String :| Match["[A-Z]{3}"]]
+  ) derives SchemaOf,
+        ReadWriter
+
   final case class Wrapped(
     maybe: Option[Int :| Positive],
     each: List[String :| Not[Blank]]

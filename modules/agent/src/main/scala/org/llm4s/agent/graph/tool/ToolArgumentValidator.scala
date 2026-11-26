@@ -1,21 +1,30 @@
 package org.llm4s.agent.graph.tool
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.security.RegexSafetyManager
 
 /**
  * Checks raw tool-call arguments against the JSON Schema a tool sent to the provider.
  *
  * The default implementation supports exactly the subset core's `SchemaDefinition` emits:
  * `type` (a string or an array of strings), `description` (ignored), `properties`, `required`,
- * `additionalProperties` (boolean), `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
+ * `additionalProperties` (boolean), `enum`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`,
  * `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems`,
  * `uniqueItems` and `anyOf` (a value must satisfy at least one alternative). A property that is not
  * required may be `null`, which is how a client that sends tools strict has the model leave it out.
  * Any other keyword, which only a `RawJsonSchema` writes, and a supported one with a malformed value (a bound that is not
  * a number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`,
  * a `required` that is not an array of strings, an `enum` that is not an array, `properties` that
- * is not an object), is reported by [[unsupported]] so a tool set can refuse it when it is built,
- * rather than silently skip the constraint on every call.
+ * is not an object, a `pattern` that cannot be compiled), is reported by [[unsupported]] so a tool set can refuse
+ * it when it is built, rather than silently skip the constraint on every call.
+ *
+ * `pattern` (#2954) is matched as JSON Schema says, anywhere in the string unless the expression is anchored, but
+ * with `java.util.regex` rather than ECMA-262, through [[org.llm4s.security.RegexSafetyManager]]: a pattern that
+ * is not valid there, is empty, is longer than 1000 characters or has a shape known to backtrack catastrophically
+ * is reported by [[unsupported]], with the reason after its path. A match is bounded: one that exceeds the
+ * manager's step budget, or a string of more than 100000 characters, is a violation saying the value could not be
+ * checked, never a hang and never a pass.
  */
 @Experimental
 trait ToolArgumentValidator {
@@ -49,6 +58,7 @@ object ToolArgumentValidator {
     "enum",
     "minLength",
     "maxLength",
+    "pattern",
     "minimum",
     "maximum",
     "exclusiveMinimum",
@@ -60,6 +70,9 @@ object ToolArgumentValidator {
     "uniqueItems",
     "anyOf"
   )
+
+  /** How much of a string a pattern violation quotes. */
+  private val MaxQuotedCodePoints = 80
 
   private val JsonTypes: Set[String] =
     Set("string", "number", "integer", "boolean", "array", "object", "null")
@@ -112,6 +125,14 @@ object ToolArgumentValidator {
                   value match {
                     case ujson.Num(n) if n >= 0 && isWhole(n) => Vector.empty
                     case _                                    => Vector(s"$path.$key")
+                  }
+                case "pattern" =>
+                  value match {
+                    case ujson.Str(regex) =>
+                      RegexSafetyManager
+                        .safeCompile(regex)
+                        .fold(e => Vector(s"$path.pattern (${reason(e)})"), _ => Vector.empty)
+                    case _ => Vector(s"$path.pattern")
                   }
                 case "required" =>
                   value match {
@@ -289,8 +310,27 @@ object ToolArgumentValidator {
         intKeyword(fields, "maxLength")
           .filter(length > _)
           .map(m => s"$path: length $length is above maxLength ${num(m)}")
-          .toVector
+          .toVector ++
+        fields.get("pattern").collect { case ujson.Str(regex) => regex }.toVector.flatMap { regex =>
+          // JSON Schema's match: found anywhere in the string. Compiled on each check; a pattern is short.
+          RegexSafetyManager.safeCompile(regex).flatMap(RegexSafetyManager.safeFind(_, s)) match {
+            case Right(true)  => Vector.empty
+            case Right(false) => Vector(s"$path: ${quoted(s, length)} does not match the pattern $regex")
+            case Left(e)      => Vector(s"$path: could not be checked against the pattern $regex (${reason(e)})")
+          }
+        }
     }
+
+    /** The reason of a `RegexSafetyManager` refusal, without the error's own framing. */
+    private def reason(error: LLMError): String = error match {
+      case v: ValidationError if v.violations.nonEmpty => v.violations.mkString("; ")
+      case other                                       => other.message
+    }
+
+    /** `s` as JSON, cut to `MaxQuotedCodePoints` so the pattern after it survives a caller's truncation. */
+    private def quoted(s: String, codePoints: Int): String =
+      if (codePoints <= MaxQuotedCodePoints) ujson.write(ujson.Str(s))
+      else ujson.write(ujson.Str(s.substring(0, s.offsetByCodePoints(0, MaxQuotedCodePoints)))) + "..."
 
     private def numberViolations(
       fields: scala.collection.Map[String, ujson.Value],
