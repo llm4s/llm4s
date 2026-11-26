@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/changelog-fragments.sh (#3121): `assemble` folds sample fragments into a CHANGELOG with today's
 # layout (a missing area heading goes in its place, fragments follow the entries already there in issue order, a
-# breaking line goes under ### Breaking changes) and deletes them; it leaves the real CHANGELOG.md byte for byte as it
-# was apart from the folded lines; and `check` fails each kind of malformed fragment with a message naming it.
+# breaking line goes under ### Breaking changes) and deletes them; it only adds the folded lines (and a heading) to the
+# real CHANGELOG.md; and `check` fails each kind of malformed fragment with a message naming it.
 #
 # Usage: scripts/test-changelog-fragments.sh
 set -uo pipefail
@@ -119,16 +119,29 @@ printf '# Changelog\n\n## [Unreleased]\n\n### Core\n\n- **Added** a core thing %
   "$(link 6)" "$(link 5)" > "$WORK/expected-empty.md"
 diff -u "$WORK/expected-empty.md" "$E/CHANGELOG.md" > "$WORK/diff" && ok || { ko "headings created in order:"; cat "$WORK/diff"; }
 
-# The real CHANGELOG.md: folding one fragment adds exactly its line and changes nothing else.
+# The real CHANGELOG.md, whatever [Unreleased] holds now: folding one fragment only adds lines (its entry, and the
+# `### Tools` heading with its blank lines when the list is not there yet) and removes or changes nothing.
 R="$WORK/real"
 mkdir -p "$R/changelog.d/tools"
 cp "$REPO_ROOT/CHANGELOG.md" "$R/"
 echo "- **Fixed** a sample $(link 99999)." > "$R/changelog.d/tools/99999.md"
 "$SCRIPT" assemble --root "$R" > /dev/null 2>&1
 changed="$(diff "$REPO_ROOT/CHANGELOG.md" "$R/CHANGELOG.md" | grep '^[<>]')"
-added="$(grep -c . <<< "$changed")"
-[ "$changed" = "> - **Fixed** a sample $(link 99999)." ] && ok ||
-  ko "folding into the real CHANGELOG.md changes more than the one line ($added lines differ)"
+removed="$(grep -c '^<' <<< "$changed")"
+unexpected="$(grep '^>' <<< "$changed" | grep -vxF -e '> ' -e '>' -e '> ### Tools' -e "> - **Fixed** a sample $(link 99999).")"
+[ "$removed" -eq 0 ] && [ -z "$unexpected" ] && grep -qxF "> - **Fixed** a sample $(link 99999)." <<< "$changed" && ok ||
+  ko "folding into the real CHANGELOG.md changes more than the entry (and its heading): $changed"
+# ... and into a fixed copy of it whose [Unreleased] is empty, as just after a release: the heading is created too.
+awk '/^## \[Unreleased\]/ { print; print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip' \
+  "$REPO_ROOT/CHANGELOG.md" > "$R/CHANGELOG.md"
+cp "$R/CHANGELOG.md" "$WORK/released.md"
+echo "- **Fixed** a sample $(link 99999)." > "$R/changelog.d/tools/99999.md"
+"$SCRIPT" assemble --root "$R" > /dev/null 2>&1
+entry="- **Fixed** a sample $(link 99999)."
+ENTRY="$entry" awk '{ print } /^## \[Unreleased\]/ { print ""; print "### Tools"; print ""; print ENVIRON["ENTRY"] }' \
+  "$WORK/released.md" > "$WORK/expected-released.md"
+diff -u "$WORK/expected-released.md" "$R/CHANGELOG.md" > "$WORK/diff" && ok ||
+  { ko "folding into an empty [Unreleased] adds more than the heading and the entry:"; cat "$WORK/diff"; }
 
 # The repository's own fragments pass.
 "$SCRIPT" check > "$WORK/out" 2>&1 && ok || { ko "the repository's fragments fail check:"; cat "$WORK/out"; }
