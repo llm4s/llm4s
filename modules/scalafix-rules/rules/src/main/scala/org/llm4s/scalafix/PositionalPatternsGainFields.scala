@@ -52,6 +52,22 @@ class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
 object PositionalPatternsGainFields {
 
   /**
+   * Each type's extractor arity on main among the types that gained fields in a minor release, by its 1.0.0 symbol.
+   * Every map below takes such a type from its arity in its release to this one, in one pass (a pass cannot chain
+   * 9 to 11 to 14: its patches are all computed on the original tree), so the next field gained is one change here,
+   * which every umbrella picks up. `ModelMetadata` is in only [[arity10]]: 0.5.1's and 0.6.0's had ten fields, two of
+   * them since removed, so a pattern on it is not widened by a `_`.
+   */
+  private val current: Map[String, Int] = Map(
+    "org/llm4s/llmconnect/config/OpenAIConfig" -> 14,
+    "org/llm4s/model/ModelMetadata"            -> 9
+  )
+
+  /** `old` (a type's arity in some release) as `(old, current)` pairs. */
+  private def toCurrent(old: Map[String, Int]): Map[String, (Int, Int)] =
+    old.map { case (owner, before) => owner -> (before -> current(owner)) }
+
+  /**
    * Each type's extractor arity in 0.5.1 and on main, by its 0.5.1 symbol. Found by comparing every case class and
    * enum case of the 0.5.1 sources of core, the provider modules, rag and agent with main; in each, the new fields
    * follow the old ones. `ServiceError` had a hand-written four-field `unapply`, which is gone. A type whose arity was
@@ -83,7 +99,6 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/config/GeminiConfig"                      -> (6  -> 9),
     "org/llm4s/llmconnect/config/MistralConfig"                     -> (6  -> 8),
     "org/llm4s/llmconnect/config/OpenAICompatibleConfig"            -> (9  -> 11),
-    "org/llm4s/llmconnect/config/OpenAIConfig"                      -> (9  -> 11),
     "org/llm4s/llmconnect/config/VertexAIConfig"                    -> (8  -> 10),
     "org/llm4s/llmconnect/config/ZaiConfig"                         -> (6  -> 8),
     "org/llm4s/llmconnect/provider/OpenAICompatibleClient.Settings" -> (8  -> 9),
@@ -102,7 +117,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),
     "org/llm4s/trace/TraceEvent.TokenUsageRecorded"                 -> (4  -> 5),
     "org/llm4s/vectorstore/VectorStoreFactory.Config"               -> (4  -> 5)
-  )
+  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 9))
 
   /**
    * Each type's extractor arity in 0.6.0 and on main, where 0.6.0's differs from 0.5.1's: a pattern written against
@@ -111,16 +126,18 @@ object PositionalPatternsGainFields {
   val arity06: Map[String, (Int, Int)] = Map(
     "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 11),
     "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
-  )
+  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 11))
 
   /**
    * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
    * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900).
-   * Run alone, by [[Llm4sMigrateFrom_1_0]]: 0.5.1's and 0.6.0's maps stay as they were.
+   * 0.7.0 had the same arities, so [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
    */
-  val arity10: Map[String, (Int, Int)] = Map(
-    "org/llm4s/llmconnect/config/OpenAIConfig" -> (11 -> 14),
-    "org/llm4s/model/ModelMetadata"            -> (8  -> 9)
+  val arity10: Map[String, (Int, Int)] = toCurrent(
+    Map(
+      "org/llm4s/llmconnect/config/OpenAIConfig" -> 11,
+      "org/llm4s/model/ModelMetadata"            -> 8
+    )
   )
 
   /** The maps the rule of [[Llm4sMigrateFrom_0_5]] and [[Llm4sMigrateFrom_0_6]] reads. */

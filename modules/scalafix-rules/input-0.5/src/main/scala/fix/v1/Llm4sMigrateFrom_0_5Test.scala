@@ -32,4 +32,9 @@ object Llm4sMigrateFrom_0_5Test {
   def header(config: OpenAIConfig): String = "Bearer " + config.apiKey
 
   def promptBudget(client: org.llm4s.llmconnect.LLMClient): Int = client.getContextWindow() - client.getReserveCompletion()
+
+  // A positional pattern on OpenAIConfig gets a `_` for each field added since 0.5, and the model keeps its place.
+  def modelLength(config: OpenAIConfig): Int = config match {
+    case OpenAIConfig(_, model, _, _, _, _, _, _, _) => model.toString.length
+  }
 }
