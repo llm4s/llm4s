@@ -18,14 +18,14 @@ import scala.util.control.NonFatal
  *      they are ever compiled.
  *   2. A hard execution bound ([[safeFind]]) caps the number of
  *      character accesses the backtracking engine may perform for a single
- *      match. Catastrophic backtracking explores an exponential number of paths,
- *      each of which reads characters, so a step ceiling deterministically
- *      bounds worst-case runtime - even for dangerous patterns the pre-screen
- *      misses - without relying on thread interruption or wall-clock timeouts.
+ *      match, without relying on thread interruption or wall-clock timeouts.
  *
- * The step bound is the real security boundary: any pattern that reaches the
- * matching helpers is safe regardless of how it was constructed. The shape
- * blocklist is only a fast early-reject and must not be relied on for safety.
+ * The step bound is the real security boundary, and [[safeCompile]]'s structural check is what makes it sound
+ * (#3051): the bound counts reads, and the engine could otherwise do unbounded work without reading, in many required
+ * iterations of a loop whose body matches the empty string (`(){2000000000}b`) or across many ways of matching the
+ * empty string at the end of the input (`(?:|)(?:|)...b`). With every pattern refused that can take more than 1000
+ * steps at one position without a read, the work between two reads is bounded. The shape blocklist is only a fast
+ * early-reject and must not be relied on for safety.
  *
  * Every refusal is a `Left` of [[org.llm4s.error.ValidationError]], for the field `pattern` or `input`; nothing
  * here throws.
@@ -70,6 +70,14 @@ object RegexSafetyManager {
    * alternatives do not overlap, such as `(foo|bar)+`, compiles. The pre-screen is only an early reject: bound
    * matching with [[safeFind]].
    *
+   * It also returns a `Left` for a pattern whose matching the step bound of [[safeFind]] could not bound (#3051): one
+   * that can take more than 1000 steps at one position without reading the input, such as many required iterations
+   * of something that can match the empty string (`(){5000}`) or many ways in a row to match it (`(?:|)`,
+   * `(\s*)?` or `(?:a?)*` repeated); a lookbehind longer than 64 characters, unbounded, or holding another
+   * lookaround, which the engine retries from each earlier position without reading; and comments mode or canonical
+   * equivalence (`(?x)`, `Pattern.COMMENTS`, `Pattern.CANON_EQ`), whose syntax the check does not follow. One empty-matching part, such as `(\s*)?`, `(a|)?`
+   * or `(a?)*`, or a few in a row, compiles.
+   *
    * @param pattern the regular expression to compile
    * @param flags `java.util.regex.Pattern` flags, such as `Pattern.CASE_INSENSITIVE`; 0 by default
    * @return the compiled `Pattern`, or a [[org.llm4s.error.ValidationError]] for the field `pattern` whose message
@@ -79,6 +87,9 @@ object RegexSafetyManager {
     for {
       _ <- validatePattern(pattern)
       p <- compileSafely(pattern, flags)
+      // no repetition limit here, unlike the workspace runner's: a counted repetition over a body that reads costs
+      // reads, which the budget counts, and a schema's `.{0,4096}` is ordinary
+      _ <- RegexShape.refusal(pattern, flags, Int.MaxValue).fold[Result[Unit]](Right(()))(refusedPattern)
     } yield p
 
   /**

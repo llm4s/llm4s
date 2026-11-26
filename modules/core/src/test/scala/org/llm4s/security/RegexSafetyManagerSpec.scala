@@ -98,4 +98,219 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     val compiled = RegexSafetyManager.safeCompile("(get|post)+", Pattern.CASE_INSENSITIVE).toOption.get
     RegexSafetyManager.safeFind(compiled, "GETPOST /") shouldBe Right(true)
   }
+
+  // #3051: the budget counts reads, and these patterns work without reading. `(){2000000000}b` took 18 s on a
+  // 40-character line with 40 reads counted; `(?:|)` repeated tries 2^n empty paths on an empty input, as does
+  // `(?:a?)*` repeated (measured on JDK 21: 25 copies took 366 ms on an empty string with no read, 18 took 13 ms).
+  it should "refuse a pattern that can take many steps without reading the input" in {
+    Seq(
+      "(){2000000000}b",
+      "(){5000}b",
+      "(?:(){100}){100}",
+      "(?:|)" * 40 + "b",
+      "(?:(?=x)|)" * 30 + "b",
+      "(?:a?)*" * 20 + "b",
+      "(?:a?){0,40}b",
+      "(a?)\\Q\\E{0,40}",
+      "(?x)a"
+    ).foreach { pattern =>
+      withClue(pattern) {
+        val refused = RegexSafetyManager.safeCompile(pattern).left.toOption
+        refused shouldBe a[Some[?]]
+        refused.get.message should startWith("Invalid pattern:")
+      }
+    }
+    RegexSafetyManager.safeCompile("a", Pattern.COMMENTS).isLeft shouldBe true
+  }
+
+  it should "accept ordinary patterns, schema-style optional and empty-matching parts among them" in {
+    Seq(
+      "^[a-z0-9_-]+$",
+      "^.{0,4096}$",
+      "(\\w)\\1+",
+      "(foo|)bar",
+      "^\\+?\\d{1,3}(?:[ -]?\\d{2,4})?$",
+      "[^/]*\\.md",
+      "(\\s*)?",
+      "^(\\s*)?$",
+      "(a|)?",
+      "^(\\s*,\\s*)?$",
+      "^(?:\\s*\\w+\\s*)?$",
+      "^(-?\\d*)?(\\.\\d*)?$",
+      "^(\\+\\d{1,3}\\s?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}$",
+      "^(\\w*)(\\s*)(\\w*)$",
+      "(a?)*b",
+      "(a?|b?)c",
+      "\\b+",
+      ".{0,4096}(\\s*)?.{0,4096}"
+    ).foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
+  }
+
+  // Codex on #3135: a `b` after the chain hid the blow-up, because on an empty input the JDK's minimum-length check
+  // fails the match before trying any path. A failing zero-width suffix is tried on every path: `(?:a?)?` repeated 25
+  // times then `(?!$)` took 1.7 s without a read.
+  it should "refuse a long chain of optional empty-matching parts before a failing zero-width suffix" in {
+    for {
+      unit   <- Seq("(?:a?)?", "(\\s*)?", "(a|)?", "(?:a?)*", "(?:a?){0,2}", "(?:|)")
+      suffix <- Seq("(?!)", "(?!$)")
+    } {
+      val pattern = unit * 40 + suffix
+      withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
+    }
+  }
+
+  it should "accept only chains that match quickly, with nothing read, before a failing zero-width suffix" in {
+    // for each part, the longest chain the check accepts (up to 60) must finish at once on an empty and a short input:
+    // a model that undercounts a part's empty matches accepts a chain that takes seconds, and the guard fails it
+    val units = Seq(
+      "(?:a?)?",
+      "(\\s*)?",
+      "(a|)?",
+      "(?:a?)*",
+      "(?:a?){0,2}",
+      "(?:|)",
+      "(?:a|)",
+      "(?:a?)",
+      "(?:a?){3}",
+      "(?:a?)+",
+      "(?=a?)",
+      "(?:\\b)*",
+      "(a?)\\1",
+      // the audit of #3135: constructs that may move or retry without reading
+      "(a?)(?:\\1)?",
+      "(?:\\G)?",
+      "(?:\\G|)",
+      "(?:\\R)?",
+      "(?:\\X)?",
+      "\\p{L}?",
+      "(?i:a?)?",
+      "(?iu:\u00e9?)?",
+      "(?:(?=a?)a?)?",
+      "(?:(?=a?))*",
+      "(?>a?)?",
+      "(?>(?:a?)*)",
+      "(?:a?)?+",
+      "(?<=a{0,64})",
+      "(?<!\\d{1,3})"
+    )
+    for {
+      unit   <- units
+      suffix <- Seq("(?!)", "(?!$)", "b")
+    } {
+      val accepted = (1 to 60).takeWhile(n => RegexSafetyManager.safeCompile(unit * n + suffix).isRight)
+      accepted.lastOption.foreach { n =>
+        val pattern = Pattern.compile(unit * n + suffix)
+        withClue(s"$unit x$n $suffix") {
+          withinGuard {
+            RegexSafetyManager.safeFind(pattern, "")
+            RegexSafetyManager.safeFind(pattern, "xyz", 100000L)
+          }
+        }
+      }
+    }
+  }
+
+  // Codex on #3135: the JDK tries a lookbehind's body from each earlier position its length allows, moving back
+  // without reading, and nested lookarounds multiply the scans: this ran past 12 s on a 1000-character line.
+  it should "refuse a long or unbounded lookbehind, and one holding another lookaround" in {
+    val nested = (1 to 4).foldLeft("")((p, _) => "(?<!" + p + "(?!)a{0,1000})")
+    Seq(
+      "$" + nested,
+      "(?<!(?!)a{0,1000})",
+      "(?<=a{0,65})x",
+      "(?<=(?=a)a)x",
+      "(?<=a\\X)x",
+      "(a)(?<=\\1)x"
+    ).foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
+    Seq("(?<=\\d{1,3})x", "(?<!\\\\)\"", "(?<=^|,)\\w+", "(?<=a{0,64})x", "(?<![a-z]{2})\\d")
+      .foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
+  }
+
+  it should "bound the longest accepted chain of lookbehinds on a long line" in {
+    val unit     = "(?<=a{0,64})"
+    val accepted = (1 to 60).takeWhile(n => RegexSafetyManager.safeCompile(unit * n + "(?!)").isRight)
+    accepted should not be empty
+    val pattern = Pattern.compile(unit * accepted.last + "(?!)")
+    withinGuard(RegexSafetyManager.safeFind(pattern, "a" * 1000))
+    withinGuard(RegexSafetyManager.safeFind(pattern, "x" * 1000))
+  }
+
+  // Codex on #3135: `(?i){2147483647}` kept the check's own loop running 2^31 times, since its body costs nothing and
+  // the cost never grew. The check's work must be bounded by the pattern's length, never by a number written in it.
+  private def countsAndNesting = Seq(
+    "(?i){2147483647}",
+    "(?:){2147483647}",
+    "(?=){2147483647}",
+    "(?i){0,2147483647}",
+    "(?:(?i){2147483647}){2147483647}",
+    "(?:(?:){2147483647}){2147483647}x",
+    "(" * 499 + "a" + ")" * 499,
+    "(?:" * 240 + "a" + ")" * 240,
+    "(?=" * 240 + ")" * 240,
+    "(?<=" * 190 + "a" + ")" * 190,
+    "[" * 499 + "a" + "]" * 499,
+    "(?:a|" * 160 + ")" * 160,
+    "a?" * 500
+  )
+
+  it should "check a pattern in time bounded by its length, whatever counts or nesting it writes" in {
+    countsAndNesting.foreach(pattern =>
+      withClue(pattern.take(40))(withinGuard(RegexSafetyManager.safeCompile(pattern)))
+    )
+  }
+
+  it should "check a deeply nested pattern without overflowing a small stack" in {
+    countsAndNesting.foreach { pattern =>
+      withClue(pattern.take(40)) {
+        @volatile var escaped: Option[Throwable] = None
+        val thread =
+          new Thread(null, () => RegexShape.refusal(pattern, 0, Int.MaxValue): Unit, "small-stack-shape", 256L * 1024)
+        thread.setUncaughtExceptionHandler((_, e) => escaped = Some(e))
+        thread.start()
+        thread.join(5000)
+        thread.isAlive shouldBe false
+        escaped shouldBe None
+      }
+    }
+  }
+
+  // Codex on #3135: an inline flag cost nothing, so this passed the check, yet the JDK runs every required iteration
+  // whatever the body does: 5.2 s on an empty input with no read. Every iteration is now at least one step.
+  it should "refuse many required iterations of a part that does nothing" in {
+    Seq("(?i){2147483647}" * 50 + "(?!)", "(?i){1001}(?!)", "(?:){1001}(?!)", "(?:^){1001}(?!)")
+      .foreach(pattern => withClue(pattern.take(40))(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
+  }
+
+  it should "match every accepted repetition of a zero-width part quickly before a failing suffix" in {
+    val units    = Seq("(?i)", "(?:)", "()", "^", "$", "\\b", "\\B", "\\G", "(?=)", "(?!x)", "(?<=)", "(?<!x)")
+    val counts   = Seq("1", "10", "100", "499", "999", "1000", "0,999", "0,2147483647", "2147483647")
+    var accepted = 0
+    for {
+      unit  <- units
+      count <- counts
+      n     <- Seq(1, 2, 10, 50)
+    } {
+      val source = s"(?:$unit){$count}" * n + "(?!)"
+      RegexSafetyManager.safeCompile(source).foreach { pattern =>
+        accepted += 1
+        withClue(source.take(60)) {
+          withinGuard {
+            RegexSafetyManager.safeFind(pattern, "")
+            RegexSafetyManager.safeFind(pattern, "xyz", 100000L)
+          }
+        }
+      }
+    }
+    accepted should be > 0
+  }
+
+  // Runs `body` on a daemon thread and fails if it has not finished within the guard, rather than hanging the suite.
+  private def withinGuard(body: => Any): Unit = {
+    @volatile var done = false
+    val thread         = new Thread(() => { body; done = true }, "regex-guard")
+    thread.setDaemon(true)
+    thread.start()
+    thread.join(5000)
+    if (!done) fail("did not finish within the 5 s guard")
+  }
 }
