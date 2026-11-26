@@ -8,6 +8,7 @@ import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -164,7 +165,8 @@ final class AwsSecretsManagerApiKeyProvider private (
   /** Closes the HTTP client this provider created; one the caller passed in is left open. */
   override def close(): Unit = if ownsClient then http.close()
 
-  override def toString: String = s"AwsSecretsManagerApiKeyProvider(${settings.endpointUrl}, ${settings.location})"
+  override def toString: String =
+    s"AwsSecretsManagerApiKeyProvider(${Redaction.url(settings.endpointUrl)}, ${settings.location})"
 
 @Experimental
 object AwsSecretsManagerApiKeyProvider:

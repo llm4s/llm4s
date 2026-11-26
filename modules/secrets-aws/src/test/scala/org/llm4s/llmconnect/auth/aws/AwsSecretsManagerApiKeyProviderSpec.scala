@@ -537,6 +537,39 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     }
   }
 
+  it should "refuse cleartext http to a host that is not loopback unless allowCleartext is set" in {
+    val good = settings("llm4s/openai")
+    val e    = AwsSecretsManagerApiKeyProvider(good.withEndpoint("http://secrets.internal:4566")).left.toOption.get
+    e shouldBe a[ConfigurationError]
+    e.message should include("withCleartext")
+    e.message should include("endpoint")
+    assertNoSecrets(e)
+    val optedIn = good.withEndpoint("http://secrets.internal").withCleartext(true)
+    AwsSecretsManagerApiKeyProvider(optedIn).isRight shouldBe true
+    (good.withEndpoint("http://secrets.internal").toString should not).include("cleartext")
+    optedIn.toString should include("cleartext")
+    AwsSecretsManagerApiKeyProvider(good.withEndpoint("https://secrets.internal:4566")).isRight shouldBe true
+    Seq("http://localhost:4566", "http://LOCALHOST", "http://127.0.0.1:4566", "http://127.8.9.10", "http://[::1]:4566")
+      .foreach(addr => withClue(addr)(AwsSecretsManagerApiKeyProvider(good.withEndpoint(addr)).isRight shouldBe true))
+    Seq("http://127.0.0.1.example.com", "http://128.0.0.1", "http://[::2]", "http://localhost.example.com")
+      .foreach(addr => withClue(addr)(AwsSecretsManagerApiKeyProvider(good.withEndpoint(addr)).isLeft shouldBe true))
+  }
+
+  it should "refuse userinfo and a fragment in the endpoint without printing them" in {
+    val good = settings("llm4s/openai")
+    (good.withEndpoint("https://alice:hunter2pw@secrets.internal").toString should not).include("hunter2pw")
+    Seq(
+      "https://alice:hunter2pw@secrets.internal",
+      "https://alice@secrets.internal?x=hunter2pw",
+      "https://secrets.internal#hunter2pw"
+    ).foreach { addr =>
+      val e = AwsSecretsManagerApiKeyProvider(good.withEndpoint(addr)).left.toOption.get
+      e shouldBe a[ConfigurationError]
+      e.message should include("endpoint")
+      (e.message should not).include("hunter2pw")
+    }
+  }
+
   it should "default to the region's public endpoint, the China partition's for a cn- region" in {
     AwsSecretsManagerSettings("us-east-1", credentials, "id").endpointUrl shouldBe
       "https://secretsmanager.us-east-1.amazonaws.com"

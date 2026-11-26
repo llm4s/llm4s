@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.auth.{ ApiKeyProvider, SingleFlightCache }
 import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -129,7 +130,8 @@ final class VaultApiKeyProvider private (
   /** Closes the HTTP client this provider created; one the caller passed in is left open. */
   override def close(): Unit = if ownsClient then http.close()
 
-  override def toString: String = s"VaultApiKeyProvider(${settings.address}, ${settings.location})"
+  override def toString: String =
+    s"VaultApiKeyProvider(${Redaction.url(settings.address)}, ${settings.location})"
 
 @Experimental
 object VaultApiKeyProvider:

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.auth.aws
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 import java.net.URI
 import scala.concurrent.duration.*
@@ -30,9 +31,14 @@ import scala.util.Try
  *                        secret, whose whole string is the key (a JSON-object `SecretString` with no field is refused)
  * @param versionStage    the version stage read: `AWSCURRENT` by default, the version rotation last promoted
  * @param endpoint        the Secrets Manager endpoint; `https://secretsmanager.<region>.amazonaws.com` by default,
- *                        set for a VPC endpoint or a FIPS endpoint
+ *                        set for a VPC endpoint or a FIPS endpoint; no user info, path, query or fragment. `http` is
+ *                        refused unless the host is loopback or `allowCleartext` is set
  * @param refreshInterval how long a key read from Secrets Manager is used before it is read again
  * @param requestTimeout  how long one read from Secrets Manager may take
+ * @param allowCleartext  accepts an `http://` endpoint whose host is not loopback. Off by default: with it on, the
+ *                        signed request (including the session token header) and the secret in the reply cross the
+ *                        network unencrypted, readable and alterable by anything on the path. Loopback
+ *                        (`localhost`, 127.0.0.0/8, `::1`) needs no opt-in
  */
 @Experimental
 final case class AwsSecretsManagerSettings private (
@@ -43,7 +49,8 @@ final case class AwsSecretsManagerSettings private (
   versionStage: String,
   endpoint: Option[String],
   refreshInterval: FiniteDuration,
-  requestTimeout: FiniteDuration
+  requestTimeout: FiniteDuration,
+  allowCleartext: Boolean
 ):
 
   /** Fixed credentials, used for every read. */
@@ -77,6 +84,12 @@ final case class AwsSecretsManagerSettings private (
   def withRequestTimeout(requestTimeout: FiniteDuration): AwsSecretsManagerSettings =
     copy(requestTimeout = requestTimeout)
 
+  /**
+   * Accepts, or again refuses, an `http://` endpoint whose host is not loopback. With it on the session token
+   * header and the secret travel unencrypted, so use it only on a network you trust end to end.
+   */
+  def withCleartext(allowed: Boolean): AwsSecretsManagerSettings = copy(allowCleartext = allowed)
+
   /** The endpoint requests go to: [[endpoint]], else the region's public one. */
   def endpointUrl: String = endpoint.getOrElse {
     val domain = if region.startsWith("cn-") then "amazonaws.com.cn" else "amazonaws.com"
@@ -88,7 +101,8 @@ final case class AwsSecretsManagerSettings private (
 
   override def toString: String =
     s"AwsSecretsManagerSettings($region, credentials=***, $location, versionStage=$versionStage, " +
-      s"endpoint=$endpointUrl, refreshInterval=$refreshInterval, requestTimeout=$requestTimeout)"
+      s"endpoint=${Redaction.url(endpointUrl)}, refreshInterval=$refreshInterval, requestTimeout=$requestTimeout" +
+      (if allowCleartext then ", cleartext=allowed)" else ")")
 
 object AwsSecretsManagerSettings:
 
@@ -111,8 +125,23 @@ object AwsSecretsManagerSettings:
       DefaultVersionStage,
       None,
       DefaultRefreshInterval,
-      DefaultRequestTimeout
+      DefaultRequestTimeout,
+      false
     )
+
+  /**
+   * Whether `host`, as `URI.getHost` returns it, is a loopback literal: `localhost` (any case), an IPv4 address in
+   * 127.0.0.0/8 or the IPv6 `::1`. Decided from the text alone, with no DNS lookup, so a name that merely resolves to
+   * a loopback address is not one.
+   */
+  private[aws] def isLoopbackHost(host: String): Boolean =
+    val h = host.stripPrefix("[").stripSuffix("]").toLowerCase(java.util.Locale.ROOT)
+    h == "localhost" || h == "::1" || (h match
+      case Ipv4(a, b, c, d) => a == "127" && Seq(b, c, d).forall(_.toInt <= 255)
+      case _                => false
+    )
+
+  private val Ipv4 = """(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})""".r
 
   private val RegionPattern = "[a-z0-9]+(-[a-z0-9]+)+".r
 
@@ -129,14 +158,25 @@ object AwsSecretsManagerSettings:
     def invalid(what: String)      = Left(ConfigurationError(s"AWS Secrets Manager settings: $what"))
     def httpUrl(url: String): Boolean = Try(new URI(url)).toOption.exists { u =>
       Set("http", "https").contains(Option(u.getScheme).getOrElse("")) && u.getHost != null &&
-      Option(u.getRawPath).forall(_.isEmpty) && u.getRawQuery == null
+      Option(u.getRawPath).forall(_.isEmpty) && u.getRawQuery == null && u.getRawFragment == null &&
+      u.getRawUserInfo == null
     }
+    def cleartext(url: String): Boolean =
+      Try(new URI(url)).toOption.exists(u => u.getScheme == "http" && !isLoopbackHost(u.getHost))
     if !RegionPattern.matches(region) then invalid(s"region '$region' is not an AWS region such as us-east-1")
     else if secretId.isEmpty then invalid("secretId is blank")
     else if settings.field.exists(_.trim.isEmpty) then invalid("field is blank")
     else if stage.isEmpty then invalid("versionStage is blank")
     else if endpoint.exists(e => !httpUrl(e)) then
-      invalid(s"endpoint '${endpoint.getOrElse("")}' is not an http(s) URL with no path")
+      invalid(
+        s"endpoint '${Redaction.url(endpoint.getOrElse(""))}' is not an http(s) URL with no user info, path, " +
+          "query or fragment"
+      )
+    else if !settings.allowCleartext && endpoint.exists(cleartext) then
+      invalid(
+        s"endpoint '${Redaction.url(endpoint.getOrElse(""))}' is http to a host that is not loopback, so the " +
+          "request and the secret would travel unencrypted: use https, or withCleartext(true) on a network you trust"
+      )
     else if settings.refreshInterval <= Duration.Zero then
       invalid(s"refreshInterval must be positive, got ${settings.refreshInterval}")
     else if settings.requestTimeout <= Duration.Zero then

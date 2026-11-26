@@ -357,6 +357,43 @@ class VaultApiKeyProviderSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     }
   }
 
+  private def vaultAt(a: String): VaultSettings = VaultSettings(a, Secret(VaultToken), "p", "f")
+
+  it should "refuse cleartext http to a host that is not loopback unless allowCleartext is set" in {
+    val e = VaultApiKeyProvider(vaultAt("http://vault.internal:8200")).left.toOption.get
+    e shouldBe a[ConfigurationError]
+    e.message should include("withCleartext")
+    e.message should include("address")
+    assertNoSecrets(e)
+    VaultApiKeyProvider(vaultAt("http://vault.internal:8200").withCleartext(true)).isRight shouldBe true
+    (vaultAt("http://vault.internal:8200").toString should not).include("cleartext")
+    vaultAt("http://vault.internal:8200").withCleartext(true).toString should include("cleartext")
+    Seq("https://vault.internal:8200", "https://vault.internal/proxy").foreach { addr =>
+      VaultApiKeyProvider(vaultAt(addr)).isRight shouldBe true
+    }
+    Seq("http://localhost:8200", "http://LOCALHOST", "http://127.0.0.1:8200", "http://127.8.9.10", "http://[::1]:8200")
+      .foreach(addr => withClue(addr)(VaultApiKeyProvider(vaultAt(addr)).isRight shouldBe true))
+    Seq("http://127.0.0.1.example.com", "http://128.0.0.1", "http://[::2]", "http://localhost.example.com")
+      .foreach(addr => withClue(addr)(VaultApiKeyProvider(vaultAt(addr)).isLeft shouldBe true))
+  }
+
+  it should "refuse userinfo, a query and a fragment in the address without printing them" in {
+    val withUser = vaultAt("https://alice:hunter2pw@vault:8200")
+    (withUser.toString should not).include("hunter2pw")
+    Seq("https://alice:hunter2pw@vault:8200", "https://alice@vault:8200?x=hunter2pw").foreach { addr =>
+      val e = VaultApiKeyProvider(vaultAt(addr)).left.toOption.get
+      e shouldBe a[ConfigurationError]
+      (e.message should not).include("hunter2pw")
+    }
+    Seq("https://vault:8200?x=1", "https://vault:8200/#frag", "https://vault:8200#frag").foreach { addr =>
+      val e = VaultApiKeyProvider(vaultAt(addr)).left.toOption.get
+      e shouldBe a[ConfigurationError]
+      e.message should include("address")
+    }
+    val e = VaultApiKeyProvider(vaultAt("https://vault:8200?token=hunter2pw")).left.toOption.get
+    (e.message should not).include("hunter2pw")
+  }
+
   it should "never print the token" in {
     val s = settings("llm4s/openai").withNamespace(None)
     (s.toString should not).include(VaultToken)

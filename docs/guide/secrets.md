@@ -107,7 +107,7 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
 
 | Setting | Meaning | Default |
 |:--------|:--------|:--------|
-| `address` | Vault's base URL, `http(s)://host:port`, without `/v1` | required |
+| `address` | Vault's base URL, `http(s)://host:port[/prefix]`, without `/v1`; no user info, query or fragment; `http` only for a loopback host unless `withCleartext(true)` | required |
 | `token` | the Vault token, a `Secret`, sent as `X-Vault-Token` | required |
 | `path` | the secret's path inside the mount, such as `llm4s/openai` | required |
 | `field` | the key of the secret's data that holds the API key | required |
@@ -116,13 +116,16 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
 | `withNamespace(ns)` | Enterprise or HCP namespace, sent as `X-Vault-Namespace`; takes a `String` or an `Option` | none |
 | `withRefreshInterval(d)` | how long a key is used before it is read again | 5 minutes |
 | `withRequestTimeout(d)` | how long one read may take | 10 seconds |
+| `withCleartext(b)` | accepts an `http://` address whose host is not loopback; the token and the secret then cross the network unencrypted | off |
 
 Mount and path lose surrounding slashes, each path segment is URL-encoded, and the version read is always the latest.
 The module has no `reference.conf` and no config keys: you build `VaultSettings` in code, from wherever your
 application keeps the Vault address and token.
 
 `VaultApiKeyProvider(settings)` returns a `Result`: a `ConfigurationError` that names the setting when the address is not
-an http(s) URL, the token is blank or spans lines, the mount, path, field or namespace is blank, or an interval or
+an http(s) URL, holds user info, a query or a fragment, or is `http` to a host that is not loopback without
+`withCleartext(true)` (the token and the secret would travel unencrypted; `localhost`, 127.0.0.0/8 and `::1` need no opt-in),
+the token is blank or spans lines, the mount, path, field or namespace is blank, or an interval or
 timeout is not positive. It does not contact Vault; the first `current()` does. `VaultApiKeyProvider(settings,
 httpClient)` reads through an `Llm4sHttpClient` you supply, for a proxy or custom TLS, and leaves it open when the
 provider is closed.
@@ -182,13 +185,15 @@ long-lived credentials and add `.withSessionToken(Secret(token))` for temporary 
 | `secretId` | the secret's name or ARN | required |
 | `withField(f)` | the key of a JSON-object `SecretString` that holds the key; takes a `String` or an `Option` | none: the whole `SecretString` is the key, so a JSON-object secret is refused until you name its field |
 | `withVersionStage(s)` | the version stage read | `AWSCURRENT` (`DefaultVersionStage`) |
-| `withEndpoint(url)` | `http(s)://host[:port]` with no path, for a VPC or FIPS endpoint; takes a `String` or an `Option` | `https://secretsmanager.<region>.amazonaws.com`, `.amazonaws.com.cn` for a `cn-` region |
+| `withEndpoint(url)` | `http(s)://host[:port]` with no user info, path, query or fragment, for a VPC or FIPS endpoint; `http` only for a loopback host unless `withCleartext(true)`; takes a `String` or an `Option` | `https://secretsmanager.<region>.amazonaws.com`, `.amazonaws.com.cn` for a `cn-` region |
 | `withRefreshInterval(d)` | how long a key is used before it is read again | 5 minutes |
 | `withRequestTimeout(d)` | how long one read may take | 10 seconds |
+| `withCleartext(b)` | accepts an `http://` endpoint whose host is not loopback; the signed request, including the session token header, and the secret then cross the network unencrypted | off |
 
 There is no `reference.conf` and there are no config keys. `AwsSecretsManagerApiKeyProvider(settings)` returns a
 `ConfigurationError` for an invalid region, a blank secret id, field or stage, an endpoint that is not an http(s) URL
-without a path, or a non-positive interval or timeout. Nothing is contacted, and the credentials function is not called,
+without user info, a path, a query or a fragment, an `http` endpoint to a host that is not loopback without
+`withCleartext(true)`, or a non-positive interval or timeout. Nothing is contacted, and the credentials function is not called,
 until the first `current()`. As with Vault, `apply(settings, httpClient)` takes your `Llm4sHttpClient`.
 
 ## When the key is read
@@ -253,7 +258,8 @@ alone. A provider lives as long as the client that uses it, so close it when the
 
 The addresses are settings, so a test points the provider at a local server; the modules' own specs
 (`VaultApiKeyProviderSpec`, `AwsSecretsManagerApiKeyProviderSpec`) run against a JDK `HttpServer` this way, and AWS's
-checks every request's signature. Use `http://` and an `endpoint` for AWS only in tests.
+checks every request's signature. An `http://` address to a loopback host (`localhost`, 127.0.0.0/8, `::1`) works without any opt-in, which is all a test
+needs; for AWS, set an `endpoint` as well.
 
 ```scala
 import com.sun.net.httpserver.HttpServer
