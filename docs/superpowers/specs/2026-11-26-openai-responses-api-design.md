@@ -1,7 +1,7 @@
 # OpenAI Responses API in `llm4s-openai`, the default for api.openai.com, sliced
 
 Issue #2900 (option 2 of #2886). It builds on #2944 (#2940), which makes the Chat Completions tool rule one rule by
-generation; this work starts from `main` after #2944 merges. Nothing here is built yet.
+generation; this work starts from `main` after #2944 merges. Slices 1 to 3 are merged (#2957, #2959, #2961); slice 4 is this PR.
 
 ## Intent
 
@@ -102,6 +102,12 @@ for the maintainer to confirm**:
   previews) are refused on `/v1/responses`.
 - OpenAI's regional hosts (`us.`, `eu.`, `ae.api.openai.com`) are not treated as the default base URL, so they stay
   on Chat Completions unless `api` is set.
+- **Verified live on 2026-11-26** (slice 4, `OpenAISmokeSpec`, request bodies read from a `ProviderExchangeSink`): with no `api`,
+  `gpt-6.1-terra` went to Responses (`input` in the body, reasoning tokens reported, no adjustment); `gpt-6.1-terra` with
+  `api = "chat-completions"` went to Chat Completions (`messages`, an `Adjusted` adjustment, 0 reasoning tokens);
+  `gpt-4o-mini`, no `api`, went to Chat Completions. `gpt-4o-search-preview` and `gpt-4o-mini-search-preview`
+  could not be tried: OpenAI answered 404 "has been deprecated" for both, so whether a search-preview model still works
+  on the default client was not shown, and neither request body was recorded (the failed exchange carried none).
 - With `api` set explicitly the request goes where it was told and OpenAI's error is reported. An explicit `api` on
   an `OpenAIConfig` is honoured by whichever client is built from it, a Requesty-labelled one included: a caller who
   builds the config in code and sets it has asked for it. Only the `openai` descriptor declares the section key.
@@ -203,6 +209,11 @@ checked per model by the builder rather than inherited from the Chat Completions
   occur in these runs; it is covered by wire tests only. `reasoningSummary = auto` returned summary text as thinking on both models. One
   `gpt-5.6-luna` run returned an accepted but empty turn 2 (no text, no tool call) after its reasoning was replayed; it
   was not reproduced, and the live turn-2 assertions check acceptance only.
+- **Measured live on 2026-11-26** (slice 4, default client, effort low, `keepReasoning` true against false, five
+  counted loops per arm, every turn 2 accepted; "empty" is no text and no tool call). Run 1 `gpt-5.6-luna`: replay 3
+  empty of 5, no-replay 3 of 5. Run 2 `gpt-5.6-luna`: replay 1 of 5, no-replay 1 of 5. Run 1 and run 2 `gpt-6.1-terra`:
+  replay 0 of 5 and 0 of 5, no-replay 0 of 5 and 0 of 5. Most non-empty `gpt-5.6-luna` replies were the one character
+  `0`, and on `gpt-6.1-terra` the replay arm answered in a sentence in 9 of 10 loops against `0` in all 10 no-replay loops.
 - Reasoning summaries are opt-in: section key `reasoningSummary = "auto" | "concise" | "detailed"`
   (`OpenAIConfig.reasoningSummary`), unset by default, sent as `reasoning.summary`. *My call*: OpenAI answers a summary request from an unverified organisation with a 400, which would
   break every reasoning request for those accounts if llm4s asked by default. Without it, a turn has reasoning
@@ -304,14 +315,13 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 ## Carried into later slices
 
 Open after slice 4:
-- A live comparison of the empty-turn-2 rate with and without replay on `gpt-5.6-luna` (PR 4's live verification).
 - The follow-ups of decision 7: the Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller
   rebuilds a conversation; `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's
   `None` into `Some("")` and so unseals it; Azure OpenAI on Responses; hosted tools, which would need a reasoning item
   anchored to a non-function item.
-- Verify live what an in-stream error looks like on the wire (flat or nested).
+- Verify live what an in-stream error looks like on the wire (flat or nested): one probe (an image part with an unreachable URL, streamed on `gpt-4.1-mini`) was refused with an HTTP-level `Invalid request: Failed to download file.` before any event, 0 chunks, so it did not answer this.
 - `response.output_item.added` already carrying arguments would double them in a consumer that accumulates chunks.
-- Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses.
+- Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses: not examined in slice 4's live run.
 - A failed reply (HTTP 200, `status: failed`) with `invalid_encrypted_content` gets no remedy hint; only an HTTP error
   or an in-stream error event does.
 - Chat Completions' fake-streaming route lets a throwing `onChunk` escape (pre-existing).
