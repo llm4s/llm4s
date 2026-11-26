@@ -330,6 +330,32 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     }
   }
 
+  it should "drop a leading byte-order mark from the key (#3109)" in {
+    replies.put("llm4s/bom", 200 -> secretString("\uFEFFsk-aws-bom-key"))
+    key(provider(settings("llm4s/bom"))) shouldBe "sk-aws-bom-key"
+  }
+
+  it should "refuse a key holding a control or non-ASCII character, naming the kind, without the key (#3109)" in {
+    val cases = Seq(
+      "tab"      -> secretString("sk-tab\tsecret-value")                  -> "a control character at position 7",
+      "nul"      -> secretString("sk-nul\u0000secret-value")              -> "a control character at position 7",
+      "nonascii" -> secretString("sk-caf\u00e9secret-value")              -> "a non-ASCII character at position 7",
+      "field"    -> secretString("""{"apiKey":"sk-tab\tsecret-value"}""") -> "a control character at position 7"
+    )
+    cases.foreach { case ((name, body), reason) =>
+      replies.put(s"llm4s/chars-$name", 200 -> body)
+      val s =
+        if name == "field" then settings(s"llm4s/chars-$name").withField("apiKey") else settings(s"llm4s/chars-$name")
+      val e = error(provider(s))
+      withClue(name) {
+        e shouldBe a[ConfigurationError]
+        e.message should include(s.location)
+        e.message should include(reason)
+        assertNoSecrets(e, "secret-value")
+      }
+    }
+  }
+
   it should "refuse unusable credentials before contacting AWS, naming the part, not its value" in {
     replies.put("llm4s/creds", 200 -> secretString("sk-never-read"))
     val cases = Seq[(() => org.llm4s.types.Result[AwsCredentials], String)](

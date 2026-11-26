@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `StringSchema.withPattern(regex)`, written as JSON Schema `pattern`; an agent's argument validator checks it (found anywhere in the string unless anchored, with `java.util.regex`) for tool arguments and `withOutput` answers, so a raw schema using `pattern` now builds, and `llm4s-schema-iron` derives it from `Match` ([#2954](https://github.com/llm4s/llm4s/issues/2954); [Custom Tools](docs/guide/custom-tools.md#string-patterns)).
 - **Added** `ModelMode.Responses` and `ModelMetadata.supportedEndpoints`, read from the bundled model data's `mode` and `supported_endpoints`; llm4s's overrides correct the endpoints of the `gpt-4o` and `gpt-audio` models ([#2900](https://github.com/llm4s/llm4s/issues/2900); [Model Metadata](docs/reference/model-metadata.md#endpoints-and-the-openai-api)).
+- **Fixed** a key read from `apiKeyFile`, Vault or AWS Secrets Manager drops a leading byte-order mark, and one holding a control or non-ASCII character fails when it is read with a `ConfigurationError` naming the file or secret and the kind of character, never the key; it used to fail every request with an HTTP client error naming no key source [#3109](https://github.com/llm4s/llm4s/issues/3109).
 
 ### Providers
 

@@ -54,11 +54,34 @@ object ApiKeyProvider:
    * the last read. A key that Vault Agent, the Secrets Store CSI driver or a Kubernetes secret volume
    * rewrites - in place, or by swapping a symbolic link - is therefore sent from the next request on.
    *
-   * A missing or unreadable file, one that is not a regular file, a blank one, one over 64 KiB or one holding
-   * more than one line is a `ConfigurationError` naming the path; the file's content is never put in an
-   * error or a log.
+   * A leading byte-order mark, which Windows editors write, is dropped. A missing or unreadable file, one that is
+   * not a regular file, a blank one, one over 64 KiB, one holding more than one line or one holding a control or
+   * non-ASCII character is a `ConfigurationError` naming the path; the file's content is never put in an error or a
+   * log.
    */
   def file(path: Path): ApiKeyProvider = new KeyFile(path)
+
+  /**
+   * `raw` without a leading byte-order mark (U+FEFF, which `trim` keeps), trimmed: the key text every key source
+   * sends (#3109).
+   */
+  private[llm4s] def keyText(raw: String): String = raw.stripPrefix("\uFEFF").trim
+
+  /**
+   * Why `key` cannot be sent in an HTTP header, or `None`. A line break, another control character or a character
+   * outside printable ASCII would be refused by the HTTP client on every request, with an error that names no key
+   * source, so each key source refuses it when it reads the key (#3109). The reason names the kind of character
+   * and its position, never the key.
+   */
+  private[llm4s] def keyFault(key: String): Option[String] =
+    // A line break in a header value would be refused by the HTTP client, or split the header.
+    if key.exists(c => c == '\n' || c == '\r') then Some("holds more than one line")
+    else
+      val at = key.indexWhere(c => c < ' ' || c > '~')
+      Option.when(at >= 0) {
+        val kind = if key(at) < ' ' || key(at) == '\u007f' then "a control character" else "a non-ASCII character"
+        s"holds $kind at position ${at + 1}; a key is printable ASCII"
+      }
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -102,14 +125,15 @@ object ApiKeyProvider:
         Try(Using.resource(Files.newInputStream(path))(_.readNBytes(MaxKeyFileBytes + 1))).toEither.left
           .map(e => failure(s"cannot be read (${e.getClass.getSimpleName})"))
           .flatMap { bytes =>
-            val key = new String(bytes, StandardCharsets.UTF_8).trim
+            val key = keyText(new String(bytes, StandardCharsets.UTF_8))
             if bytes.length > MaxKeyFileBytes then Left(failure(s"is larger than $MaxKeyFileBytes bytes"))
             else if key.isEmpty then Left(failure("is empty"))
-            // A line break in a header value would be refused by the HTTP client, or split the header.
-            else if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
             else
-              warnIfShared()
-              Right(ApiKey(key))
+              keyFault(key) match
+                case Some(reason) => Left(failure(reason))
+                case None =>
+                  warnIfShared()
+                  Right(ApiKey(key))
           }
 
     /**

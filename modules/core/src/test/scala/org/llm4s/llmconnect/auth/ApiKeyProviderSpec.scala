@@ -96,6 +96,32 @@ class ApiKeyProviderSpec extends AnyWordSpec with Matchers with EitherValues:
       (error.message should not).include("sk-line")
     }
 
+    "drop a leading byte-order mark, which Windows editors write (#3109)" in {
+      key(ApiKeyProvider.file(tempFile("\uFEFFsk-bom-key-00001\r\n"))) shouldBe "sk-bom-key-00001"
+      ApiKeyProvider.file(tempFile("\uFEFF\n")).current().left.value.message should include("is empty")
+    }
+
+    "fail for a key holding a control or non-ASCII character, naming the kind, without echoing it (#3109)" in {
+      val cases = Seq(
+        "sk-tab\tkey-0001"      -> "a control character at position 7",
+        "sk-nul\u0000key-0001"  -> "a control character at position 7",
+        "sk-del\u007fkey-0001"  -> "a control character at position 7",
+        "sk-caf\u00e9-key-0001" -> "a non-ASCII character at position 7",
+        "sk-bom\uFEFFkey-0001"  -> "a non-ASCII character at position 7",
+        "sk-nbsp\u00a0key-0001" -> "a non-ASCII character at position 8"
+      )
+      cases.foreach { case (content, reason) =>
+        val file  = tempFile(content)
+        val error = ApiKeyProvider.file(file).current().left.value
+        withClue(reason) {
+          error shouldBe a[ConfigurationError]
+          error.message should include(file.toString)
+          error.message should include(reason)
+          (error.message should not).include("key-0001")
+        }
+      }
+    }
+
     "refuse a file larger than the size limit, without echoing its content" in {
       val content = "SECRETCONTENT" + ("a" * ApiKeyProvider.MaxKeyFileBytes)
       val error   = ApiKeyProvider.file(tempFile(content)).current().left.value

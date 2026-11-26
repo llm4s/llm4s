@@ -122,13 +122,13 @@ final class AwsSecretsManagerApiKeyProvider private (
       case Some(secret) =>
         settings.field
           .fold(Option(secret))(field => Try(ujson.read(secret)(field)).toOption.flatMap(_.strOpt))
-          .map(_.trim)
+          .map(ApiKeyProvider.keyText)
           .filter(_.nonEmpty)
           .toRight(failure(settings.field.fold("has a blank SecretString")(f => s"has no non-blank string field '$f'")))
           .flatMap { key =>
-            // A line break in a header value would be refused by the HTTP client, or split the header.
-            if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
-            else Right(ApiKey(key))
+            ApiKeyProvider.keyFault(key) match
+              case Some(reason) => Left(failure(reason))
+              case None         => Right(ApiKey(key))
           }
 
   private def failure(reason: String): ConfigurationError =
