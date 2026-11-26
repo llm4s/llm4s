@@ -82,11 +82,24 @@ private[provider] object OpenAIResponsesReply:
   /** A `failed` reply's `error`, through the mapping a stream's `error` event takes (a 502 unless it names a status). */
   private def failure(response: Response, provider: ProviderId): LLMError =
     val error = known(response._error())
-    val fields = Seq(
-      error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
-      error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString())),
-      error.flatMap(e => known(e._code())).flatMap(c => statusOf(c.asString())).map("status_code" -> ujson.Num(_))
-    ).flatten
+    errorOf(
+      ujson.Obj.from(
+        Seq(
+          error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
+          error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
+        ).flatten
+      ),
+      provider
+    )
+
+  /**
+   * The error an object of a `code` and a `message` states: a failed reply's `error`, or a stream's `error` event. It
+   * is a 502 unless the code names a status ([[statusOf]]), so `rate_limit_exceeded` is a `RateLimitError` in both.
+   */
+  private[provider] def errorOf(error: ujson.Value, provider: ProviderId): LLMError =
+    val status = error.objOpt.flatMap(_.get("code")).flatMap(_.strOpt).flatMap(statusOf)
+    val fields =
+      error.objOpt.fold(Seq.empty[(String, ujson.Value)])(_.toSeq) ++ status.map("status_code" -> ujson.Num(_))
     OpenAICompatibleClient
       .streamedError(ujson.Obj.from(fields), provider)
       .getOrElse(ServiceError(502, provider, "the response failed"))

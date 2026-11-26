@@ -1,7 +1,6 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.error.{
   ContentFilteredError,
@@ -20,7 +19,6 @@ import org.llm4s.llmconnect.model.{
   ReasoningEffort,
   RequestAdjustment,
   RequestOption,
-  StreamedChunk,
   ResponseFormat,
   ServiceTier,
   SystemMessage,
@@ -44,7 +42,6 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
-import scala.collection.mutable.ListBuffer
 
 /** `OpenAIClient` on the Responses API over the real `openai-java` transport, against a local HTTP server. */
 final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with EitherValues:
@@ -624,103 +621,4 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     )
     sent.body("input")(2)("output").str shouldBe tool.content
     sent.body("input")(2)("output").str should not be "ab"
-  }
-
-  /** One `streamComplete` call against a server answering `status` with `body`; the chunks, the result and the log. */
-  final private case class Streamed(
-    result: Either[LLMError, org.llm4s.llmconnect.model.Completion],
-    chunks: List[StreamedChunk],
-    exchanges: List[ProviderExchange],
-    seen: Option[Seen]
-  ):
-    def request: Seen = seen.getOrElse(fail("no request reached the server"))
-
-  private def streamed(
-    body: String,
-    status: Int = 200,
-    options: CompletionOptions = CompletionOptions(),
-    model: String = "gpt-4o"
-  ): Streamed =
-    val seen      = new AtomicReference[Seen]()
-    val chunks    = ListBuffer.empty[StreamedChunk]
-    val exchanges = ListBuffer.empty[ProviderExchange]
-    val sink = new ProviderExchangeSink:
-      override def record(exchange: ProviderExchange): Unit = exchanges += exchange
-    var out = Option.empty[Either[LLMError, org.llm4s.llmconnect.model.Completion]]
-    LocalProviderTestServer.withServer("/") { exchange =>
-      capture(seen, exchange)
-      LocalProviderTestServer.sendJsonResponse(exchange, status, body)
-    } { baseUrl =>
-      val client = OpenAIClient(
-        configFor(baseUrl, model).withApi(OpenAIApi.Responses),
-        LlmClientOptions().withExchangeLogging(ProviderExchangeLogging.Enabled(sink))
-      ).value
-      out = Some(client.streamComplete(hello, options)(chunks += _))
-      client.close()
-    }
-    Streamed(out.get, chunks.toList, exchanges.toList, Option(seen.get()))
-
-  it should "answer streamComplete with one unstreamed call, delivered as chunks" in {
-    val s          = streamed(reply(outputMessage("hi")))
-    val completion = s.result.value
-    completion.content shouldBe "hi"
-    s.chunks.flatMap(_.contentDelta).mkString shouldBe "hi"
-    s.chunks.last.finishReason shouldBe Some(FinishReason.Stop)
-    s.request.path shouldBe "/v1/responses"
-    s.request.body.obj.keySet should not contain "stream"
-  }
-
-  it should "give a streamed completion the same message, reasoning included, as complete does" in {
-    val body =
-      reply(
-        reasoningItem("rs_1", summary = Seq("Thinking.")) + "," +
-          functionCall("call_1", "get_weather", """{"city":"Paris"}""")
-      )
-    val s                  = streamed(body, model = "gpt-6.1-terra")
-    val streamedCompletion = s.result.value
-    streamedCompletion.message.hasSealedThinking shouldBe true
-    streamedCompletion.message.thinkingBinding shouldBe defined
-    var unstreamed = Option.empty[org.llm4s.llmconnect.model.Completion]
-    LocalProviderTestServer.withServer("/") { exchange =>
-      LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
-    } { baseUrl =>
-      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
-      unstreamed = client.complete(hello, CompletionOptions()).toOption
-      client.close()
-    }
-    streamedCompletion.message shouldBe unstreamed.get.message
-  }
-
-  it should "report the same adjustments on a streamed completion as complete does" in {
-    val s = streamed(
-      reply(outputMessage("hi")),
-      options = CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.25)
-    )
-    s.result.value.adjustments.collect { case RequestAdjustment.Dropped(option, _) =>
-      option
-    } should contain theSameElementsAs Seq(RequestOption.PresencePenalty, RequestOption.FrequencyPenalty)
-  }
-
-  it should "deliver a streamed reply's tool calls through the chunks" in {
-    val s = streamed(reply(functionCall("call_1", "get_weather", """{"city":"Paris"}""")))
-    s.result.value.toolCalls.map(_.id.asString) shouldBe Seq("call_1")
-    val calls = s.chunks.flatMap(_.toolCallDelta)
-    calls.map(_.id.asString) shouldBe Seq("call_1")
-    calls.map(_.name) shouldBe Seq("get_weather")
-    calls.map(_.arguments.render()) shouldBe Seq("""{"city":"Paris"}""")
-    s.chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
-  }
-
-  it should "record the Responses request and reply in the exchange log, once, and a 500 as one failed exchange" in {
-    val ok = streamed(reply(outputMessage("hi")))
-    ok.exchanges should have size 1
-    ok.exchanges.head.requestBody should include("store")
-    ok.exchanges.head.responseBody.getOrElse("") should include("resp_1")
-
-    val failed = streamed("""{"error":{"message":"boom","type":"server_error"}}""", status = 500)
-    failed.result.isLeft shouldBe true
-    failed.chunks shouldBe empty
-    failed.exchanges should have size 1
-    failed.exchanges.head.errorMessage shouldBe defined
-    failed.exchanges.head.responseBody shouldBe None
   }

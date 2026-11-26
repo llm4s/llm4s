@@ -44,6 +44,10 @@ object OpenAISdkFixtures {
         params: com.openai.models.responses.ResponseCreateParams
       ): com.openai.models.responses.Response =
         throw new UnsupportedOperationException("not used in this test")
+      override def createResponseStream(
+        params: com.openai.models.responses.ResponseCreateParams
+      ): StreamResponse[com.openai.models.responses.ResponseStreamEvent] =
+        throw new UnsupportedOperationException("not used in this test")
       override def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk] =
         streaming(params)
     }

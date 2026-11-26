@@ -55,6 +55,10 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
       params: com.openai.models.responses.ResponseCreateParams
     ): com.openai.models.responses.Response =
       throw new RuntimeException("stub transport invoked")
+    override def createResponseStream(
+      params: com.openai.models.responses.ResponseCreateParams
+    ): StreamResponse[com.openai.models.responses.ResponseStreamEvent] =
+      throw new RuntimeException("stub transport invoked")
 
     var completeCalls       = 0
     var streamCompleteCalls = 0

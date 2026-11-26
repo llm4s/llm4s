@@ -61,3 +61,47 @@ object OpenAIResponsesFixtures:
   /** One output message item holding the given parts. */
   def messageOf(parts: String*): String =
     s"""{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[${parts.mkString(",")}]}"""
+
+  /**
+   * An event stream as the Responses API sends it: `event: <type>` and `data: <json>` per event, each event numbered by
+   * its position in `sequence_number`, and no `[DONE]`.
+   */
+  def sse(events: String*): String =
+    events.zipWithIndex.map { (event, i) =>
+      s"event: ${ujson.read(event)("type").str}\ndata: ${event.stripSuffix("}")},\"sequence_number\":$i}\n\n"
+    }.mkString
+
+  /** `response.created`, carrying the response in progress with no output yet. */
+  def created(): String = s"""{"type":"response.created","response":${reply("", status = "in_progress")}}"""
+
+  def textDelta(delta: String, itemId: String = "msg_1", outputIndex: Int = 0): String =
+    s"""{"type":"response.output_text.delta","item_id":"$itemId","output_index":$outputIndex,"content_index":0,""" +
+      s""""delta":${ujson.Str(delta).render()},"logprobs":[]}"""
+
+  /** `response.output_item.added` opening a `function_call` item with no arguments yet. */
+  def callAdded(callId: String, name: String, itemId: String, outputIndex: Int): String =
+    s"""{"type":"response.output_item.added","output_index":$outputIndex,"item":{"type":"function_call",""" +
+      s""""id":"$itemId","call_id":"$callId","name":"$name","arguments":"","status":"in_progress"}}"""
+
+  def argumentsDelta(delta: String, itemId: String, outputIndex: Int): String =
+    s"""{"type":"response.function_call_arguments.delta","item_id":"$itemId","output_index":$outputIndex,""" +
+      s""""delta":${ujson.Str(delta).render()}}"""
+
+  def summaryDelta(delta: String, itemId: String = "rs_1"): String =
+    s"""{"type":"response.reasoning_summary_text.delta","item_id":"$itemId","output_index":0,"summary_index":0,""" +
+      s""""delta":${ujson.Str(delta).render()}}"""
+
+  def refusalDelta(delta: String): String =
+    s"""{"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,""" +
+      s""""delta":${ujson.Str(delta).render()}}"""
+
+  /** `response.completed` wrapping a full [[reply]]. */
+  def completed(response: String): String = s"""{"type":"response.completed","response":$response}"""
+
+  def incomplete(response: String): String = s"""{"type":"response.incomplete","response":$response}"""
+
+  def failed(response: String): String = s"""{"type":"response.failed","response":$response}"""
+
+  /** A stream's `error` event. */
+  def errorEvent(code: String, message: String): String =
+    s"""{"type":"error","code":"$code","message":${ujson.Str(message).render()},"param":null}"""
