@@ -225,7 +225,7 @@ exists and already round-trips. A test pins that a stored message carrying one r
   whose concatenation equals the final content, the finish reason on the last chunk. On `gpt-6.1-terra` and
   `gpt-5.6-luna` at effort low a streamed tool call carried its call's id on every delta chunk, the ids equal to the
   completion's, with reasoning tokens and a sealed reasoning block; a streamed tool loop on both sent that block back
-  and the second streamed turn was accepted. On `gpt-5.6-luna` with `reasoningSummary = auto`, summary text arrived as
+  and the second streamed turn was accepted; on `gpt-5.6-luna` that reply was empty (one chunk, no content, finish `Stop`), the second such observation after a replay (the first is recorded under "Reasoning across turns"), which PR 4's live comparison measures. On `gpt-5.6-luna` with `reasoningSummary = auto`, summary text arrived as
   thinking deltas.
 
 ## Errors, logging, metrics
