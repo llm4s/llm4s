@@ -14,6 +14,9 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
 
 1. **Responses is the default for api.openai.com now**, for every model, not only the restricted ones and not as a
    later flip (2026-11-26).
+2. **The per-model facts come from the LiteLLM model file llm4s already bundles**, not from a list kept in
+   `llm4s-openai`: its `mode` and `supported_endpoints` say which API a model is served on (2026-11-26). LiteLLM's
+   routing behaviour (Chat Completions by default, Responses per request) is not followed; see Approaches.
 
 ## Goals
 
@@ -25,7 +28,8 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
 
 ## Non-goals
 
-- Azure OpenAI and Requesty on Responses. Both stay on Chat Completions (see Routing).
+- Azure OpenAI and Requesty on Responses. Both stay on Chat Completions (see Routing), including the Azure
+  entries the model file marks `mode: responses`, which stay unusable as they are today.
 - OpenAI's hosted tools (web search, file search, code interpreter, computer use), background mode, the
   Conversations API, `previous_response_id`.
 - A public `responses()` entry point. The surface stays `LLMClient`.
@@ -64,10 +68,18 @@ also where OpenAI ships new features. `llm4s-openai` should speak it, and use it
 | `azure` (`AzureConfig`) | Chat Completions | no such field |
 
 - The comparison is on the normalised base URL (trailing slash, case of the host).
-- A model OpenAI does not serve on `/v1/responses` stays on Chat Completions when `api` is unset:
-  `OpenAIModelRules.chatCompletionsOnly(modelId)`. The builder establishes the list from OpenAI's model pages and
-  dates it in the Scaladoc, as `toolsOnChatCompletions` is; the audio-preview and search-preview models are the
-  expected members. With `api = "responses"` set explicitly the request is sent and OpenAI's error is reported.
+- With `api` unset, two facts from the model registry (decision 2) adjust the table for an `openai` client, looked
+  up as `registryService.lookup(ProviderId("openai"), model)`:
+  - **`mode: responses`** (28 OpenAI entries in the bundled file: the pro, codex, deep-research and healthcare
+    models, each listing only `/v1/responses`): Responses, whatever the base URL. Chat Completions cannot serve
+    these, so a gateway that fronts one must speak Responses.
+  - **`supported_endpoints` present and without `/v1/responses`** (one chat entry today, `gpt-audio-1.5`): Chat
+    Completions, even on the default base URL.
+  - A model the registry does not know, or an entry that lists no endpoints (48 older chat entries), follows the
+    table: Responses on the default base URL.
+- With `api` set explicitly the request goes where it was told and OpenAI's error is reported.
+- There is no model list in `llm4s-openai` for this. A registry override (`Llm4sConfig.modelRegistryService()`'s
+  user file) corrects a wrong or missing entry, as it does for capabilities.
 - Section key: `api = "responses"` or `api = "chat-completions"`, a declared extra of the `openai` descriptor
   (`ProviderConfigKey.optional`), never a field of `NamedProviderConfig`. Any other value fails the section load,
   naming both values.
@@ -82,6 +94,13 @@ skipped too. On Chat Completions the rule applies as #2944 leaves it.
 
 ## API surface (all in frozen modules)
 
+- `llm4s-core`, `org.llm4s.model`: `ModelMode.Responses` (name `responses`; today that value parses to
+  `ModelMode.Unknown`). `ModelMode` is listed under the compatibility policy's "Sealed types that may gain a case".
+  `ModelMetadata` gains `supportedEndpoints: Seq[String]`, read from `supported_endpoints`, empty when the entry
+  lists none, with `withSupportedEndpoints` and the previous `apply` kept as a forwarding overload. Entries of other
+  providers with `mode: responses` (Azure, Perplexity and others) become `ModelMode.Responses` too; the builder
+  checks nothing in the repo relied on their being `Unknown`.
+
 - `org.llm4s.llmconnect.config.OpenAIApi` in `llm4s-openai-compatible`, beside `OpenAIConfig`: a `@Stable` `enum`
   with `ChatCompletions` and `Responses`. *My call*: `@Stable` rather than `@Experimental`, since a config value
   users write into `application.conf` should not change in a minor release.
@@ -94,7 +113,8 @@ skipped too. On Chat Completions the rule applies as #2944 leaves it.
   no filter.
 - `OpenAIConfig.ApiKey` / `ApiConfigKey` and `ReasoningSummaryKey` / `ReasoningSummaryConfigKey`, as
   `OrganizationKey` / `OrganizationConfigKey` are; both are extras of the `openai` descriptor only.
-- Nothing else public. No core change: `ThinkingBlock.Opaque` and `ThinkingReplay` already exist.
+- Nothing else public. Core changes nothing for reasoning: `ThinkingBlock.Opaque` and `ThinkingReplay` already
+  exist.
 
 ## Structure
 
@@ -239,10 +259,10 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 2. **Reasoning across turns.** `include`, opaque blocks with their anchors, binding and replay, sending
    `reasoningSummary`, the second live verification.
 3. **Streaming.**
-4. **The default.** Routing by base URL, `chatCompletionsOnly`, the docs, CHANGELOG and migration note, the full
+4. **The default.** `ModelMode.Responses` and `ModelMetadata.supportedEndpoints` in core, routing by base URL and
+   by the registry, the docs, CHANGELOG and migration note, the full
    live suite.
 
 ## Left to the builder
 
-File and method factoring inside `org.llm4s.llmconnect.provider`; what the two paths share; the exact
-`chatCompletionsOnly` list; test fixtures; wording of errors, log lines and docs.
+File and method factoring inside `org.llm4s.llmconnect.provider`; what the two paths share; test fixtures; wording of errors, log lines and docs.
