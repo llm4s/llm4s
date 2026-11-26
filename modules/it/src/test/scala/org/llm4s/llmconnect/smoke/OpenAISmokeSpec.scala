@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.types.ProviderModelTypes.BaseUrl
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   ReasoningEffort,
   StreamedChunk,
+  ThinkingBlock,
   ToolMessage,
   UserMessage
 }
@@ -257,6 +258,82 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
         s"$model replied with neither content nor a tool call: content=${reply.content}, tool calls=${reply.message.toolCalls}: "
       ) {
         (reply.content.nonEmpty || reply.message.toolCalls.nonEmpty) shouldBe true
+      }
+    }
+  }
+
+  private def lowOptions: CompletionOptions =
+    CompletionOptions(maxTokens = Some(2048)).withTools(Seq(submitAnswerTool)).withReasoning(ReasoningEffort.Low)
+
+  // What is asserted is that OpenAI accepted the request: the model may answer, call the tool again or say nothing.
+  private def acceptedReply(model: String, second: Result[org.llm4s.llmconnect.model.Completion]): Unit =
+    withClue(s"Responses turn 2 on $model was rejected: ${second.swap.toOption}: ")(second.isRight shouldBe true)
+
+  for (model <- Seq("gpt-6.1-terra", "gpt-5.6-luna")) {
+    it should s"finish a tool loop that sends its encrypted reasoning back on the Responses API on $model" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val client  = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val first   = client.complete(Conversation(Seq(calculationMessage)), lowOptions)
+      val firstOk = withClue(s"Responses turn 1 on $model failed: ${first.swap.toOption}: ")(first.value)
+      val calls   = firstOk.message.toolCalls
+      if (calls.isEmpty) {
+        client.close()
+        cancel(s"$model made no tool call on turn 1, content: ${firstOk.content}")
+      }
+      val opaque = firstOk.message.thinking.collect {
+        case ThinkingBlock.Opaque(provider, _) if provider == ProviderId("openai") => provider
+      }
+      val kinds = firstOk.message.thinking.map(_.getClass.getSimpleName)
+      info(s"$model turn 1: ${calls.size} tool call(s), ${opaque.size} opaque openai block(s), blocks=$kinds")
+      if (opaque.isEmpty) {
+        client.close()
+        cancel(s"$model returned no reasoning item on turn 1 (thinking blocks: $kinds), so none could be sent back")
+      }
+      withClue(s"$model turn 1 thinking blocks: $kinds: ")(firstOk.message.hasSealedThinking shouldBe true)
+
+      val turn2 =
+        Conversation(Seq(calculationMessage, firstOk.message) ++ calls.map(c => ToolMessage("recorded", c.id)))
+      val second = client.complete(turn2, lowOptions)
+      client.close()
+      info(
+        s"$model turn 2: ${second.fold(e => s"rejected: $e", r => s"accepted, tool calls=${r.message.toolCalls.size}")}"
+      )
+      acceptedReply(model, second)
+    }
+
+    it should s"finish the same loop after the turn was edited, without its reasoning, on $model" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val client  = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val first   = client.complete(Conversation(Seq(calculationMessage)), lowOptions)
+      val firstOk = withClue(s"Responses turn 1 on $model failed: ${first.swap.toOption}: ")(first.value)
+      val calls   = firstOk.message.toolCalls
+      if (calls.isEmpty) {
+        client.close()
+        cancel(s"$model made no tool call on turn 1, content: ${firstOk.content}")
+      }
+      val edited = firstOk.message.withContent(firstOk.message.content + " ")
+      val turn2  = Conversation(Seq(calculationMessage, edited) ++ calls.map(c => ToolMessage("recorded", c.id)))
+      val second = client.complete(turn2, lowOptions)
+      client.close()
+      acceptedReply(model, second)
+    }
+
+    it should s"report reasoning summary text when reasoningSummary is auto on $model" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val cfg    = responsesConfig(apiKey.get, model).withReasoningSummary(Some(OpenAIReasoningSummary.Auto))
+      val client = OpenAIClient(cfg).toOption.get
+      val result = client.complete(Conversation(Seq(calculationMessage)), lowOptions)
+      client.close()
+      result.left.foreach { e =>
+        if e.message.toLowerCase.contains("verif") then cancel(s"$model summary request refused: ${e.message}")
+      }
+      val completion = withClue(s"Responses summary request on $model failed: ${result.swap.toOption}: ")(result.value)
+      info(s"$model summary: ${completion.thinking.map(_.take(80))}")
+      withClue(s"$model returned no summary text, blocks=${completion.message.thinking}: ") {
+        completion.thinking.exists(_.nonEmpty) shouldBe true
       }
     }
   }

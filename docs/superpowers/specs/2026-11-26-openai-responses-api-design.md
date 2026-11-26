@@ -177,8 +177,10 @@ checked per model by the builder rather than inherited from the Chat Completions
   input item sent back without the reasoning item that preceded it, and returns the final answer. Slice 1's tool loop
   needs no decision; unsealed turns can be sent as items. One of four runs of the luna case failed before request
   acceptance could be told from the model not calling the tool; the case now cancels in that situation.
-- **To verify live in slice 2**: that an interleaved reply (two tool calls, each with its own reasoning item) is
-  accepted back in its original order, and that a reasoning item is accepted with its `id` under `store: false`.
+- **Verified live on 2026-11-26** (slice 2; `gpt-6.1-terra`, `gpt-5.6-luna`, `store: false`): a reply with one tool call
+  and one reasoning item, sent back with its `id` and `encrypted_content`, was accepted on both models, and so was the
+  same turn edited so its reasoning was dropped. An interleaved reply (two calls, each with its own reasoning) did not
+  occur in these runs; it is covered by wire tests only. `reasoningSummary = auto` returned summary text as thinking on both models.
 - Reasoning summaries are opt-in: section key `reasoningSummary = "auto" | "concise" | "detailed"`
   (`OpenAIConfig.reasoningSummary`), unset by default, sent as `reasoning.summary`. *My call*: OpenAI answers a summary request from an unverified organisation with a 400, which would
   break every reasoning request for those accounts if llm4s asked by default. Without it, a turn has reasoning
@@ -264,10 +266,8 @@ Four PRs, each green on its own, the default flipped last so `main` is releasabl
 
 ## Carried into later slices
 
-Slice 2 (reasoning):
-- `reasoningSummary` is accepted and not yet read.
-
 Slice 3 (streaming):
+- A reasoning item that follows the turn's text with no later call is sent before the text (the envelope has no position for it).
 - A failed reply's `invalid_prompt` and image error codes are still a 502 `ServiceError`, which invites retries of a request that cannot succeed: give them a 400-class error where `response.failed` shares the mapping.
 - A 200 reply that maps to a `Left` (failed, content filter, malformed tool call) is recorded in the exchange log with no request or response body: record both.
 - In the faked stream the first chunk carries the finish reason and later tool calls follow it; native streaming must end with the finish reason.
