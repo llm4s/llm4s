@@ -283,6 +283,18 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     s.result.left.value.isRetryable shouldBe false
   }
 
+  it should "fail a response.failed with bio_policy as a ContentFilteredError, keeping the text delivered" in {
+    val s = streamed(
+      sse(
+        textDelta("so far"),
+        failed(reply("", status = "failed", extra = """"error":{"code":"bio_policy","message":"refused"}"""))
+      )
+    )
+    s.result.left.value shouldBe a[ContentFilteredError]
+    s.chunks.flatMap(_.contentDelta) shouldBe Seq("so far")
+    s.chunks.flatMap(_.finishReason) shouldBe empty
+  }
+
   it should "fail with the mapped error on an error event" in {
     val s = streamed(sse(textDelta("so far"), errorEvent("server_error", "boom")))
     s.result.left.value.message should include("boom")

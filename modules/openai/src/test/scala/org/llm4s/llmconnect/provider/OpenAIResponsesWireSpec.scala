@@ -554,6 +554,7 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
 
   private def requestFaults = Seq(
     "invalid_prompt",
+    "data_residency_mismatch",
     "invalid_image",
     "invalid_image_format",
     "invalid_base64_image",
@@ -561,7 +562,6 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     "image_too_large",
     "image_too_small",
     "image_parse_error",
-    "image_content_policy_violation",
     "invalid_image_mode",
     "image_file_too_large",
     "unsupported_image_media_type",
@@ -581,13 +581,21 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     }
   }
 
+  it should "report a failed reply with a policy code as a non-retryable ContentFilteredError naming the code" in {
+    Seq("bio_policy", "misalignment_policy_violation", "image_content_policy_violation").foreach { code =>
+      val error = failedWith(code)
+      withClue(code) {
+        error shouldBe a[ContentFilteredError]
+        error.isRetryable shouldBe false
+        error.message should include(code)
+      }
+    }
+  }
+
   it should "keep a failed reply about the service itself a retryable 502 ServiceError" in {
     Seq(
       "server_error",
-      "vector_store_timeout",
-      "data_residency_mismatch",
-      "bio_policy",
-      "misalignment_policy_violation"
+      "vector_store_timeout"
     )
       .foreach { code =>
         val error = failedWith(code)
