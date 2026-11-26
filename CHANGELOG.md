@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `StringSchema.withPattern(regex)`, written as JSON Schema `pattern`; an agent's argument validator checks it (found anywhere in the string unless anchored, with `java.util.regex`) for tool arguments and `withOutput` answers, so a raw schema using `pattern` now builds, and `llm4s-schema-iron` derives it from `Match` ([#2954](https://github.com/llm4s/llm4s/issues/2954); [Custom Tools](docs/guide/custom-tools.md#string-patterns)).
 
+### Providers
+
+- **Fixed** `llm4s-openai` calls tools on `gpt-6.1-terra`, `gpt-5.6-terra` and `gpt-5.6-luna`: a request with tools to a GPT 5.6, 6 or 6.1 model is sent `reasoning_effort: none` (reported as a `RequestAdjustment`), as `gpt-6-luna`'s already was. 1.0.0 refused `gpt-6.1-terra` with a `ValidationError` and sent the gpt-5.6 models an effort OpenAI rejects with tools [#2940](https://github.com/llm4s/llm4s/issues/2940).
+
+### Observability
+
+- **Added** `TRACING_MODE=file` in `llm4s-observability-otel`: each trace appended to `<dir>/<trace-id>.jsonl` as OTLP JSON Lines, unplaced events to one shared file per run, with no tracing service ([#2948](https://github.com/llm4s/llm4s/issues/2948); [Trace files](docs/getting-started/configuration.md#trace-files-no-tracing-service)).
+
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).

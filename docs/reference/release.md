@@ -8,8 +8,8 @@ permalink: /contribute/release
 redirect_from:
   - /reference/release
   - /reference/release.html
-cites_open_issues: [1281, 2330]
-cites_closed_issues: [1150, 1152, 2778, 2785]
+cites_open_issues: [2330]
+cites_closed_issues: [1150, 1152, 1281, 2778, 2785]
 ---
 
 # Release Process

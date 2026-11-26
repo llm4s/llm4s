@@ -63,6 +63,7 @@ Each row is something a module does only when you use it. "Configured by" is whe
 | Response cache (`CachingLLMClient`, `CachedEmbeddingClient`) | Nothing | - | - | Completions and embeddings in process memory, until evicted or cleared |
 | Provider exchange logging (`llm4s-core`) | Nothing over the network | A JSON Lines file, or your sink | `llm4s.exchangeLogging` (off by default) | Raw request and response bodies, in the file |
 | Tracing backends (`llm4s-observability`, `-observability-otel`) | Trace events, including content (see below) | Langfuse (`https://cloud.langfuse.com` by default) or an OTLP collector (`http://localhost:4317` by default) | `llm4s.tracing.langfuse`, `llm4s.tracing.opentelemetry` | In the backend |
+| File tracing (`llm4s-observability-otel`, `TRACING_MODE=file`) | Nothing over the network | OTLP JSON Lines files in a local directory (`./llm4s-traces` by default) | `llm4s.tracing.file` | Spans, and content only with `captureContent`, in the files until you delete them |
 | Metrics (`llm4s-observability-prometheus`) | Counters and histograms labelled by provider, model, operation, status and error type: no content | Scraped from the `/metrics` endpoint you start | `llm4s.metrics` | No |
 
 ## Logging and tracing defaults
@@ -73,6 +74,7 @@ Each row is something a module does only when you use it. "Configured by" is whe
 | `noop` tracing | Off | None |
 | `langfuse` tracing | Off | The agent's query, completion content, tool input and output, and a finished run's messages; the run's `RunConfig.principal` as the trace's `userId`, when the run has one. Traces are sent `public: false` - readable only by members of your Langfuse project - unless `llm4s.tracing.langfuse.public = true`, which lets anyone holding a trace's URL read it without signing in |
 | `opentelemetry` tracing | Off | None unless `llm4s.tracing.opentelemetry.captureContent = true` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`); then the query, prompts and completions (`gen_ai.input.messages` / `gen_ai.output.messages`) and tool input and output, secrets redacted and each truncated to 1000 characters. Custom event data is always recorded (an agent's carries no content) |
+| `file` tracing | Off | As `opentelemetry` tracing, with `llm4s.tracing.file.captureContent` (bound to the same variable): none unless it is `true`. The files are plain text on local disk, kept until you delete them |
 | Provider exchange logging | Off | Request and response bodies. The file sink redacts credentials by pattern, not personal data; a sink you write gets the bodies untouched. See [Provider Exchange Logging](observability/provider-exchange-logging) |
 | SLF4J logs from the OpenAI-compatible, Gemini and Vertex AI clients | At `DEBUG` only | Request and response bodies, truncated, with credentials redacted by pattern |
 

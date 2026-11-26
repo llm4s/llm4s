@@ -87,12 +87,13 @@ prompts and the model's answers, so read its privacy notes before enabling it.
 
 ## Tracing for Observability
 
-LLM4S supports five tracing backends:
+LLM4S supports six tracing backends:
 
 | Mode | Use Case | Configuration | Module |
 |------|----------|---------------|--------|
 | `langfuse` | Production LLM observability | `TRACING_MODE=langfuse` | `llm4s-observability` |
 | `opentelemetry` | Integration with existing APM | `TRACING_MODE=opentelemetry` | `llm4s-observability-otel` |
+| `file` | Each trace in a local OTLP JSON Lines file, no service needed ([Trace files](../../getting-started/configuration#trace-files-no-tracing-service)) | `TRACING_MODE=file` | `llm4s-observability-otel` |
 | `console` (default) | Local development/debugging; metadata only unless `llm4s.tracing.console.captureContent = true` | `TRACING_MODE=console` | `llm4s-core` |
 | `noop` | Disabled | `TRACING_MODE=noop` | `llm4s-core` |
 | `collector` | In-process queryable store | Programmatic (see below) | `llm4s-observability` |
@@ -136,6 +137,12 @@ llm4s {
     opentelemetry {
       serviceName    = ${?OTEL_SERVICE_NAME}
       endpoint       = ${?OTEL_EXPORTER_OTLP_ENDPOINT}
+      captureContent = false  # ${?OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT}
+    }
+
+    file {
+      dir            = "llm4s-traces"  # ${?LLM4S_TRACE_DIR}
+      serviceName    = ${?OTEL_SERVICE_NAME}
       captureContent = false  # ${?OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT}
     }
   }

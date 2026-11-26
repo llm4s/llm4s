@@ -281,22 +281,67 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     }
   }
 
-  it should "refuse a request with tools to gpt-6.1-terra before sending it (#2886)" in {
-    val requests = new java.util.concurrent.atomic.AtomicInteger()
+  it should "send gpt-6.1-terra and the gpt-5.6 models a request with tools at reasoning_effort none (#2940)" in {
+    val withEffort = CompletionOptions().withTools(Seq(noopTool)).withReasoning(ReasoningEffort.Low)
+    val noEffort   = CompletionOptions().withTools(Seq(noopTool))
+    for {
+      model   <- Seq("gpt-6.1-terra", "gpt-5.6-terra", "gpt-5.6-luna")
+      options <- Seq(withEffort, noEffort)
+    } withClue(s"$model, reasoning ${options.reasoning}: ") {
+      val seen = new AtomicReference[Seen]()
+      LocalProviderTestServer.withServer("/") { exchange =>
+        capture(seen, exchange)
+        LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", model))
+      } { baseUrl =>
+        val client =
+          OpenAIClient(OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl(baseUrl)).value).value
+        val completion = client.complete(hello, options).value
+        client.close()
+
+        val body = seen.get().body
+        body("reasoning_effort").str shouldBe "none"
+        body("tools").arr should have size 1
+        completion.adjustments.map(_.option) should contain(org.llm4s.llmconnect.model.RequestOption.Reasoning)
+      }
+    }
+  }
+
+  it should "stream to gpt-6.1-terra with tools at reasoning_effort none (#2940)" in {
+    val seen = new AtomicReference[Seen]()
+    val event =
+      """{"id":"t1","created":0,"model":"gpt-6.1-terra","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}"""
     LocalProviderTestServer.withServer("/") { exchange =>
-      requests.incrementAndGet()
-      LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "x"))
+      capture(seen, exchange)
+      LocalProviderTestServer.sendSseResponse(exchange, s"data: $event\n\ndata: [DONE]\n\n")
     } { baseUrl =>
       val client = OpenAIClient(
         OpenAIConfig.fromValues(ModelName("gpt-6.1-terra"), Secret("sk-test"), BaseUrl(baseUrl)).value
       ).value
-      val options = CompletionOptions().withTools(Seq(noopTool))
-      val sync    = client.complete(hello, options)
-      val stream  = client.streamComplete(hello, options)(_ => ())
+      val completion = client.streamComplete(hello, CompletionOptions().withTools(Seq(noopTool)))(_ => ()).value
       client.close()
 
-      Seq(sync, stream).foreach(_.left.value.message should include("Responses API"))
-      requests.get() shouldBe 0
+      seen.get().body("reasoning_effort").str shouldBe "none"
+      completion.content shouldBe "hi"
+    }
+  }
+
+  it should "leave the effort of a gpt-5.6 model alone when the request has no tools (#2940)" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        LocalProviderTestServer.openAICompletion("hi", "gpt-5.6-terra")
+      )
+    } { baseUrl =>
+      val client = OpenAIClient(
+        OpenAIConfig.fromValues(ModelName("gpt-5.6-terra"), Secret("sk-test"), BaseUrl(baseUrl)).value
+      ).value
+      client.complete(hello, CompletionOptions().withReasoning(ReasoningEffort.High)).value
+      client.close()
+
+      seen.get().body("reasoning_effort").str shouldBe "high"
     }
   }
 
