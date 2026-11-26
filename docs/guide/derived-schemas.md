@@ -282,7 +282,7 @@ def cancelTool(service: CustomerService): Result[ToolFunction[Cancellation]] =
 
 Methods inherited from `Any`, `Object`, `Product`, `Equals` and `Serializable`, synthetic, private, protected and extension methods, `val`s and methods marked `@notATool` are left out; the tools come in the order of their names. A parameter with a default value is still required, as a case class field with one is.
 
-Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, and a `@toolName` providers do not accept. Mark a method the model should not call `@notATool`.
+Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, a `@toolName` providers do not accept, and a `@toolName` or `@description` that is not a [constant string](#descriptions). Mark a method the model should not call `@notATool`.
 
 Scaladoc is read from the source when the service is compiled in the same run as the call to `Tools.derive`, with no compiler flag. For a service compiled separately (another module of your build, or a library), the compiler reads Scaladoc from its TASTy only when asked: add `scalacOptions += "-Xread-docs"` to the project that calls `Tools.derive`. Without it such a service's tools fall back to their names, unless `@description` describes them. A method that overrides another without Scaladoc or annotations of its own takes those of the method it overrides, so `Tool.fromMethod(live.cancelOrder)` on the implementing class describes the tool as the trait does.
 
@@ -304,7 +304,7 @@ def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
   } yield invoice
 ```
 
-As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
+`A` is a case class, or a [sum type whose cases all have fields](#an-agent-that-answers-with-a-sum-type): `build` refuses any other type with a `Left` that says what to do instead.
 
 ## Sum types
 
@@ -343,6 +343,25 @@ OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStr
 
 In `llm4s-core`'s schema model a sum type is an `AnyOfSchema`: `SchemaOf[Action].definition` is one, and writes the same JSON as `SchemaOf[Action].toJsonSchema()`. A tool's parameters may hold a sum type (a field, a `List` or an `Option` of one), and each value is checked against the cases. They cannot be one: a tool's arguments are a JSON object, so `Tool.of[Action, R]` returns a `Left`.
 
+### An agent that answers with a sum type
+
+An agent's answer can be a sum type whose cases all have fields, so that each case is a JSON object: pass its schema to `withOutput` and read the case with `decodeOutput`.
+
+```scala
+import org.llm4s.agent.Agent
+
+def decideWithAgent(client: LLMClient, message: String): Result[Action] =
+  for {
+    agent  <- Agent.builder("support", client).withOutput(SchemaOf[Action].definition).build()
+    result <- agent.run(message)
+    action <- result.decodeOutput[Action]
+  } yield action
+```
+
+The agent asks the model for `{"answer": <the case>}`, as `completeStructuredOf` asks for `{"value": ...}`, and removes that envelope before the answer is checked: `result.answer`, the stored message, `withOutputCheck`, the output guardrails and `decodeOutput` all have the case's own JSON. An answer that matches no case goes back to the model once, with the closest case's problems. See [a union as the answer](agents/#a-union-as-the-answer).
+
+A sum type with a case that has no fields (a `case object`, or an enum case without parameters) is not all objects, and `build` refuses it. Make it a field of a case class, `case class Decision(action: Action) derives SchemaOf, ReadWriter`, and read `decodeOutput[Decision].map(_.action)`.
+
 ## Named tuples
 
 For two or three fields wanted once, at one call site, a Scala 3.7 named tuple does without the case class. `SchemaOf` describes it as the case class with the same fields, and `org.llm4s.schema.namedtuples` provides the uPickle `ReadWriter` that uPickle itself lacks; import it explicitly.
@@ -376,7 +395,31 @@ val lookup: Result[ToolFunction[(high: Double, low: Double)]] =
 
 ## Descriptions
 
-The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
+The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
+
+The annotation is read at compile time, so its text must be a constant string the compiler can work out. That is more than a literal, so a limit can live in one place:
+
+```scala
+object Limits {
+  final val MaxNarration = 750 // a constant: declared without a type
+  inline val Tone        = "second person, present tense"
+}
+
+case class Answer(
+  @description("at most " + Limits.MaxNarration + " characters") narration: String,
+  @description(s"written in the ${Limits.Tone}") reply: String,
+  @description(Limits.Tone) tone: String
+) derives SchemaOf
+```
+
+| Accepted | Example |
+|---|---|
+| a string literal | `"Total amount"` |
+| a `final val` or `inline val` declared without a type | `Limits.Tone` |
+| a `+` of such constants, numbers and other primitives included | `"at most " + Limits.MaxNarration` |
+| an `s"..."` interpolation whose arguments are all such constants | `s"at most ${Limits.MaxNarration}"` |
+
+Anything else is a compile error where the schema is derived, naming the type and the field; it is never silently ignored: a `def`, a `val` that is not `final`, a `final val` with a declared type (`final val Max: Int = 750` is not a constant to the compiler), an `f"..."` or `raw"..."` interpolation, or a method call such as `.trim`. The same rule holds for a `@description` or `@toolName` on a method or parameter a tool is derived from, and for `@upickle.implicits.key` (for which uPickle's own derivation takes only a literal).
 
 ## How it agrees with uPickle
 
@@ -388,7 +431,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 - **Sum types.** uPickle writes a case with fields as an object with its tag under `"$type"` (or the trait's `@upickle.implicits.key`), and a case without fields as its tag alone; the `anyOf` describes exactly that (see [Sum types](#sum-types)).
 - **Enums.** uPickle writes a case as its name, or as its `@upickle.implicits.key("...")` when the case (an enum case or a case object) has one, and the `enum` list in the schema holds exactly those strings.
 - **`Long`.** uPickle writes a `Long` beyond 2^53 (9007199254740992) in either direction as a JSON *string*, because a JSON number that large loses precision in many readers; it reads both forms back. The schema says `integer`, so a value written that large does not match it. A model answering the schema writes a number, which reads back; if your values can be that large and you validate what uPickle writes, describe the field as a string yourself.
-- **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (llm4s-core's schema model has no `pattern`), so give such a field a `@description` that asks for a number.
+- **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (the derivation writes no `pattern` for it), so give such a field a `@description` that asks for a number.
 - **Defaults.** uPickle leaves out a field that equals its default when it writes, and reads a missing field as the default. The schema still lists the field: `completeStructured` sends the strict schema, in which every property is required (a model must answer every field), so a field with a default is asked for like any other.
 
 ## Strict mode
@@ -504,10 +547,11 @@ Iron's own `iron-upickle` module defines the same `ReadWriter`; import one of th
 | the same | `Double`, `Float` | `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` |
 | `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `String` | `minLength`, `maxLength` |
 | `Not[Blank]` | `String` | `minLength: 1`; that it is not only whitespace is checked when the reply is read |
+| `Match` (one) | `String` | `pattern`, anchored at both ends: `Match["[a-z]+"]` is `^(?:[a-z]+)$`, since Iron matches the whole string and JSON Schema finds the expression anywhere |
 | `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `List`, `Seq`, `Vector`, `Set` | `minItems`, `maxItems` |
 | `C1 & C2` of the above | | both; of two bounds of one kind, the tighter |
 
-Every other constraint is refused at compile time with a message naming it, rather than left out of the schema without a word: `Match` (llm4s-core's `StringSchema` has no `pattern` yet), `Multiple`, `StartWith`, `ForAll` and the rest, a union other than the `>=` and `<=` Iron builds, `Not` of anything but `Empty` and `Blank`, and a constraint on any other type, such as `BigDecimal`, which is written as a JSON string. To use one of them, describe the type with a `given SchemaOf` of your own, which is taken as it is. A provider may or may not enforce these keywords while it generates; the `ReadWriter` enforces the constraint on every reply.
+Every other constraint is refused at compile time with a message naming it, rather than left out of the schema without a word: `Multiple`, `StartWith`, `ForAll` and the rest, a second `Match` on one string (a JSON Schema string has one `pattern`), a `Match` whose expression does not compile, a union other than the `>=` and `<=` Iron builds, `Not` of anything but `Empty` and `Blank`, and a constraint on any other type, such as `BigDecimal`, which is written as a JSON string. To use one of them, describe the type with a `given SchemaOf` of your own, which is taken as it is. A provider may or may not enforce these keywords while it generates; the `ReadWriter` enforces the constraint on every reply.
 
 ## Compile time
 

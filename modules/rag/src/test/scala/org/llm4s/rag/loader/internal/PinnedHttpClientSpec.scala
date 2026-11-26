@@ -17,6 +17,14 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
 
   private val timeout = 5.seconds
 
+  private val credentialHeaders = Seq(
+    "Authorization"       -> "Bearer secret-token",
+    "Proxy-Authorization" -> "Basic cHJveHk=",
+    "Cookie"              -> "session=abc",
+    "X-Api-Key"           -> "k-123",
+    "Private-Token"       -> "p-456"
+  )
+
   private def get(url: String, policy: UrlPolicy = loopbackPolicy, headers: Seq[(String, String)] = Seq.empty) =
     PinnedHttpClient.get(url, headers, timeout, policy)
 
@@ -115,6 +123,72 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
         other.requests shouldBe empty
       }
     }
+  }
+
+  it should "keep the caller's credential headers on a same-origin redirect" in {
+    withServer("/from" -> redirect("/to"), "/to" -> Reply(200, "arrived")) { server =>
+      get(s"${server.baseUrl}/from", headers = credentialHeaders :+ ("User-Agent" -> "ua/1")).isRight shouldBe true
+      val Seq(first, second) = server.requests
+      first.headers.get("authorization") shouldBe Some("Bearer secret-token")
+      second.headers.get("authorization") shouldBe Some("Bearer secret-token")
+      second.headers.get("x-api-key") shouldBe Some("k-123")
+    }
+  }
+
+  it should "not send credential headers to another origin a redirect leads to (#2997)" in {
+    withServer("/x" -> Reply(200, "other")) { other =>
+      withServer("/start" -> redirect(s"${other.baseUrl}/x")) { server =>
+        get(s"${server.baseUrl}/start", headers = credentialHeaders :+ ("User-Agent" -> "ua/1"))
+          .map(_.body) shouldBe Right("other")
+
+        server.requests.head.headers.get("authorization") shouldBe Some("Bearer secret-token")
+        val seen = other.requests.head
+        seen.userAgent shouldBe Some("ua/1")
+        Seq("authorization", "proxy-authorization", "cookie", "x-api-key", "private-token").foreach { name =>
+          withClue(name)(seen.headers.get(name) shouldBe None)
+        }
+      }
+    }
+  }
+
+  it should "keep credentials withheld once a redirect chain has left the origin, even back on it" in {
+    withServer() { first =>
+      withServer("/x" -> redirect(s"${first.baseUrl}/missing")) { other =>
+        withServer("/start" -> redirect(s"${other.baseUrl}/x")) { start =>
+          get(s"${start.baseUrl}/start", headers = credentialHeaders).map(_.status) shouldBe Right(404)
+          first.requests.head.headers.get("authorization") shouldBe None
+        }
+      }
+    }
+  }
+
+  it should "treat credential header names as credentials whatever their case, and not ordinary headers" in {
+    Seq("Authorization", "proxy-authorization", "COOKIE", "Cookie2", "X-Api-Key", "Private-Token", "X-Auth-Token")
+      .foreach(h => withClue(h)(PinnedHttpClient.isCredentialHeader(h) shouldBe true))
+    Seq("User-Agent", "Accept", "Accept-Language", "If-None-Match")
+      .foreach(h => withClue(h)(PinnedHttpClient.isCredentialHeader(h) shouldBe false))
+  }
+
+  it should "count only an https to http redirect as a downgrade" in {
+    import java.net.URI
+    PinnedHttpClient.isDowngrade(URI.create("https://a.test/"), URI.create("http://a.test/")) shouldBe true
+    PinnedHttpClient.isDowngrade(URI.create("HTTPS://a.test/"), URI.create("HTTP://b.test/")) shouldBe true
+    PinnedHttpClient.isDowngrade(URI.create("https://a.test/"), URI.create("https://b.test/")) shouldBe false
+    PinnedHttpClient.isDowngrade(URI.create("http://a.test/"), URI.create("https://a.test/")) shouldBe false
+    PinnedHttpClient.isDowngrade(URI.create("http://a.test/"), URI.create("http://b.test/")) shouldBe false
+  }
+
+  it should "compare origins with the default port filled in and host case ignored" in {
+    import java.net.URI
+    PinnedHttpClient.Origin.of(URI.create("http://A.test/x")) shouldBe PinnedHttpClient.Origin.of(
+      URI.create("http://a.test:80/y")
+    )
+    PinnedHttpClient.Origin.of(URI.create("https://a.test/")) should not be PinnedHttpClient.Origin.of(
+      URI.create("http://a.test/")
+    )
+    PinnedHttpClient.Origin.of(URI.create("http://a.test:8080/")) should not be PinnedHttpClient.Origin.of(
+      URI.create("http://a.test/")
+    )
   }
 
   it should "stop after too many redirects, and fail a redirect without a Location" in {

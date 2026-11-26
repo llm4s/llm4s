@@ -13,6 +13,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
 
+import org.llm4s.error.ServiceError
+import org.llm4s.testkit.LocalProviderTestServer
+
 import scala.collection.mutable.ListBuffer
 
 final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -151,5 +154,22 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     recorded.head.provider.asString shouldBe "openai"
     recorded.head.responseBody shouldBe empty
     recorded.head.errorMessage.value should include("stream connection failed")
+  }
+
+  it should "return a retryable 502 ServiceError for a mid-stream error object, whatever its code" in {
+    val body = "data: {\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"slow down\"}}\n\n"
+    var out  = Option.empty[org.llm4s.types.Result[org.llm4s.llmconnect.model.Completion]]
+    LocalProviderTestServer.withServer("/")(exchange => LocalProviderTestServer.sendSseResponse(exchange, body)) {
+      baseUrl =>
+        val client = OpenAIClient(
+          OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-api-key"), BaseUrl(s"$baseUrl/v1")).value
+        ).value
+        out = Some(client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ()))
+        client.close()
+    }
+    val error = out.get.left.value
+    error shouldBe a[ServiceError]
+    error.asInstanceOf[ServiceError].status shouldBe 502
+    error.isRetryable shouldBe true
   }
 }

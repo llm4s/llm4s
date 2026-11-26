@@ -95,7 +95,7 @@ throws.
 
 | You need | Use |
 |---|---|
-| text | `Schema.string("...")`, with `.withEnum(Seq("a", "b"))` for a fixed set of values |
+| text | `Schema.string("...")`, with `.withEnum(Seq("a", "b"))` for a fixed set of values, `.withMinLength(n)`, `.withMaxLength(n)` and `.withPattern(regex)` for a [format](#string-patterns) |
 | a whole number | `Schema.integer("...")`, with `.withMinimum(min).withMaximum(max)` |
 | a decimal number | `Schema.number("...")` |
 | true or false | `Schema.boolean("...")` |
@@ -133,6 +133,31 @@ An optional field reaches the model in one of two ways. `toolDefinition(strict =
 `required`, and the model omits it. `toolDefinition(strict = true)`, which the OpenAI-compatible clients send, must
 list every property as required, so it marks the optional ones as nullable and the model sends `null` instead. Read
 an optional parameter with `getOptional*`: it returns `None` for both.
+
+### String patterns
+
+`Schema.string("The location's id").withPattern("^[a-z0-9_-]+$")` requires the text to match a regular expression.
+It is written to the schema as JSON Schema `pattern`, so the model is shown the format, and an agent checks it with
+the other keywords: on a tool call's arguments before the tool runs, and on an answer given a schema with
+`withOutput`. A value that does not match goes back to the model with a message it can act on, such as
+`$.id: "Crypt Door" does not match the pattern ^[a-z0-9_-]+$`. A `pattern` in a `Schema.raw` schema is checked the
+same way.
+
+- **Anchor it.** As in JSON Schema, the expression may be found anywhere in the text: `[a-z0-9_-]+` accepts
+  `"Crypt Door"`, because it finds `rypt`. Write `^...$` when the whole text must match.
+- **Keep to the common dialect.** JSON Schema names ECMA-262 regular expressions, and a provider that enforces the
+  pattern while it generates reads it in its own way; llm4s checks it with `java.util.regex`. Literals, character
+  classes, groups, alternation, quantifiers and the anchors `^` and `$` mean the same in both. Inline flags such as
+  `(?i)`, possessive quantifiers, `\A` and `\z` are Java's alone, and Java's `$` also matches before a final line
+  break.
+- **A pattern that cannot be checked is refused when the agent is built**, with a `Left` naming it: one that is not
+  a valid expression, is empty or longer than 1000 characters, or has a shape known to backtrack catastrophically,
+  such as `(a+)+`. Matching is bounded too, so a value that would take too long to check, or text longer than
+  100000 characters, counts as not matching.
+
+No provider client removes `pattern` from the schema it sends: like `minLength`, it reaches the provider as written,
+which may enforce it, ignore it or, in a strict structured-output mode, refuse some expressions. The check above
+runs on every reply either way.
 
 ## 3. Reading arguments
 

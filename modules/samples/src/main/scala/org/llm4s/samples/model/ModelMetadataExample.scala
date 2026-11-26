@@ -67,7 +67,7 @@ object ModelMetadataExample extends App:
       logger.info("-" * 80)
       val openaiModels = for
         allOpenAI  <- service.listByProvider(ProviderId("openai"))
-        chatModels <- Right(allOpenAI.filter(_.mode == ModelMode.Chat))
+        chatModels <- Right(allOpenAI.filter(m => m.mode == ModelMode.Chat || m.mode == ModelMode.Responses))
       yield chatModels
 
       openaiModels match
@@ -88,7 +88,7 @@ object ModelMetadataExample extends App:
         case Right(models) =>
           logger.info("Found {} models with vision support:", models.size)
           models
-            .filter(_.mode == ModelMode.Chat) // Only chat models
+            .filter(m => m.mode == ModelMode.Chat || m.mode == ModelMode.Responses) // Only text-generation models
             .take(5)
             .foreach { model =>
               val provider = model.provider

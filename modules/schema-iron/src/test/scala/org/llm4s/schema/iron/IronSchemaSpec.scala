@@ -96,6 +96,39 @@ class IronSchemaSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  "A Match constraint" should "be a pattern anchored at both ends, since Iron matches the whole string (#2954)" in {
+    both[Patterned].foreach { schema =>
+      property(schema, "id") shouldBe
+        ujson.Obj("type" -> "string", "description" -> "The location's id", "pattern" -> "^(?:[a-z0-9_-]+)$")
+      val slug = property(schema, "slug").obj
+      slug("minLength") shouldBe ujson.Num(3)
+      slug("maxLength") shouldBe ujson.Num(20)
+      slug("pattern") shouldBe ujson.Str("^(?:[a-z]+(-[a-z]+)*)$")
+      // the group keeps an alternation whole: ^cat|dog$ would accept "catalogue"
+      property(schema, "either")("pattern") shouldBe ujson.Str("^(?:cat|dog)$")
+    }
+    ujson.write(SchemaOf[Patterned].toJsonSchema()("properties")("maybe")) should include(
+      """"pattern":"^(?:[A-Z]{3})$""""
+    )
+  }
+
+  it should "write the same document whether it is built from core's model or as JSON" in {
+    ujson.write(SchemaOf[Patterned].definition.toJsonSchema(true)) shouldBe
+      ujson.write(SchemaOf[Patterned].toJsonSchema())
+    ujson.write(SchemaOf[Patterned].definition.toJsonSchema(false)) shouldBe
+      ujson.write(SchemaOf[Patterned].toJsonSchema(strict = false))
+  }
+
+  it should "accept, found anywhere as JSON Schema matches, exactly the strings Iron's whole-string match accepts" in {
+    import io.github.iltotore.iron.*
+    import io.github.iltotore.iron.constraint.all.*
+    val pattern =
+      java.util.regex.Pattern.compile(SchemaOf[Patterned].toJsonSchema()("properties")("either")("pattern").str)
+    List("cat", "dog", "catalogue", "hotdog", "", "cat dog", "Cat").foreach { value =>
+      withClue(value)(pattern.matcher(value).find() shouldBe value.refineEither[Match["cat|dog"]].isRight)
+    }
+  }
+
   "A refined type inside an Option or a List" should "keep its bounds there" in {
     val schema = SchemaOf[Wrapped].toJsonSchema()
     property(schema, "maybe") shouldBe ujson.Obj(

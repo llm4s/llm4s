@@ -85,6 +85,17 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     client.completed.get shouldBe 0
   }
 
+  // #2953: deltas are the model's own text, so a union's envelope is in them; the answer has it removed
+  it should "send a union answer's text as the model wrote it, envelope included, and store the answer without it" in {
+    import AgentUnionOutputSpec.{ reply, turnSchema, Reply, Turn }
+    val chunks      = Seq("""{"answer":""", reply.take(10), reply.drop(10), "}")
+    val (result, c) = streamed(Agent.builder("dm", Streaming(chunks)).withStreaming().withOutput(turnSchema), "wave")
+
+    c.all.collect { case AgentEvents.TextDelta(d) => d.text } shouldBe chunks.toVector
+    result.map(_.answer) shouldBe Right(Some(reply))
+    result.flatMap(_.decodeOutput[Turn]) shouldBe Right(Reply("Nothing happens."))
+  }
+
   it should "send thinking as ThinkingDelta" in {
     val (_, c) = streamed(Agent.builder("assistant", Streaming(Seq("ok"), thinking = Seq("hmm"))).withStreaming(), "hi")
     c.all.collect { case AgentEvents.ThinkingDelta(d) => d.text } shouldBe Vector("hmm")

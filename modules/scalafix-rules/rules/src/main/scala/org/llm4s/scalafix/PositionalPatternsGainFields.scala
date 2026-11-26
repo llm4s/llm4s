@@ -22,8 +22,15 @@ import scalafix.v1._
  * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). `AgentResult`'s six, the same in
  * 0.5.1 and 0.6.0, gain `runUsage` (#2922). A pattern with any other number of arguments is left
  * alone.
+ *
+ * [[Llm4sMigrateFrom_1_0]] runs it with [[PositionalPatternsGainFields.arity10]]: since 1.0.0, `OpenAIConfig` gained
+ * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900).
  */
-class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
+class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
+    extends SemanticRule("PositionalPatternsGainFields") {
+
+  /** The rule of 0.5.x and 0.6.x code: [[PositionalPatternsGainFields.arity]] and [[PositionalPatternsGainFields.arity06]]. */
+  def this() = this(PositionalPatternsGainFields.since05)
 
   override def description: String =
     "Adds a _ for each field appended since llm4s 0.5.1 (or 0.6.0) to positional patterns on the types that gained fields"
@@ -34,7 +41,7 @@ class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainF
       Migration
         .symbolOf(p.fun)
         .map(s => Migration.owner(s))
-        .flatMap(PositionalPatternsGainFields.gained(_, args.size))
+        .flatMap(PositionalPatternsGainFields.gained(maps, _, args.size))
         .collect {
           case added if args.nonEmpty && !args.exists(_.is[Pat.SeqWildcard]) => Patch.addRight(args.last, ", _" * added)
         }
@@ -43,6 +50,22 @@ class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainF
 }
 
 object PositionalPatternsGainFields {
+
+  /**
+   * Each type's extractor arity on main among the types that gained fields in a minor release, by its 1.0.0 symbol.
+   * Every map below takes such a type from its arity in its release to this one, in one pass (a pass cannot chain
+   * 9 to 11 to 14: its patches are all computed on the original tree), so the next field gained is one change here,
+   * which every umbrella picks up. `ModelMetadata` is in only [[arity10]]: 0.5.1's and 0.6.0's had ten fields, two of
+   * them since removed, so a pattern on it is not widened by a `_`.
+   */
+  private val current: Map[String, Int] = Map(
+    "org/llm4s/llmconnect/config/OpenAIConfig" -> 14,
+    "org/llm4s/model/ModelMetadata"            -> 9
+  )
+
+  /** `old` (a type's arity in some release) as `(old, current)` pairs. */
+  private def toCurrent(old: Map[String, Int]): Map[String, (Int, Int)] =
+    old.map { case (owner, before) => owner -> (before -> current(owner)) }
 
   /**
    * Each type's extractor arity in 0.5.1 and on main, by its 0.5.1 symbol. Found by comparing every case class and
@@ -76,7 +99,6 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/config/GeminiConfig"                      -> (6  -> 9),
     "org/llm4s/llmconnect/config/MistralConfig"                     -> (6  -> 8),
     "org/llm4s/llmconnect/config/OpenAICompatibleConfig"            -> (9  -> 11),
-    "org/llm4s/llmconnect/config/OpenAIConfig"                      -> (9  -> 11),
     "org/llm4s/llmconnect/config/VertexAIConfig"                    -> (8  -> 10),
     "org/llm4s/llmconnect/config/ZaiConfig"                         -> (6  -> 8),
     "org/llm4s/llmconnect/provider/OpenAICompatibleClient.Settings" -> (8  -> 9),
@@ -95,7 +117,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),
     "org/llm4s/trace/TraceEvent.TokenUsageRecorded"                 -> (4  -> 5),
     "org/llm4s/vectorstore/VectorStoreFactory.Config"               -> (4  -> 5)
-  )
+  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 9))
 
   /**
    * Each type's extractor arity in 0.6.0 and on main, where 0.6.0's differs from 0.5.1's: a pattern written against
@@ -104,9 +126,24 @@ object PositionalPatternsGainFields {
   val arity06: Map[String, (Int, Int)] = Map(
     "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 11),
     "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
+  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 11))
+
+  /**
+   * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
+   * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900).
+   * 0.7.0 had the same arities, so [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
+   */
+  val arity10: Map[String, (Int, Int)] = toCurrent(
+    Map(
+      "org/llm4s/llmconnect/config/OpenAIConfig" -> 11,
+      "org/llm4s/model/ModelMetadata"            -> 8
+    )
   )
 
-  /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */
-  def gained(owner: String, size: Int): Option[Int] =
-    List(arity, arity06).flatMap(_.get(owner)).collectFirst { case (before, after) if before == size => after - before }
+  /** The maps the rule of [[Llm4sMigrateFrom_0_5]] and [[Llm4sMigrateFrom_0_6]] reads. */
+  private[scalafix] val since05: List[Map[String, (Int, Int)]] = List(arity, arity06)
+
+  /** The number of fields a pattern of `size` arguments on `owner` lacks, if a map in `maps` has its arity. */
+  def gained(maps: List[Map[String, (Int, Int)]], owner: String, size: Int): Option[Int] =
+    maps.flatMap(_.get(owner)).collectFirst { case (before, after) if before == size => after - before }
 }

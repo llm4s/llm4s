@@ -99,6 +99,8 @@ object PlatformTests {
       "org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec"
     ),
     "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
+    // The file tracing mode creates its directory and appends trace files under a file lock (#2948).
+    "traceOpentelemetry" -> Seq("org.llm4s.trace.FileTracingSpec"),
     "doctor" -> Seq(
       "org.llm4s.doctor.DoctorSpec",
       "org.llm4s.doctor.DoctorClassLoaderSpec"

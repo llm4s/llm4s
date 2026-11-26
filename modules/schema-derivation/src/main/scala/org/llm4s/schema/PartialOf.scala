@@ -130,9 +130,8 @@ private[schema] object PartialMacros {
     def fieldKey(owner: Symbol, field: Symbol): String =
       owner.primaryConstructor.paramSymss.flatten
         .find(_.name == field.name)
-        .flatMap(_.annotations.collectFirst {
-          case Apply(Select(New(tpt), _), List(Literal(StringConstant(key)))) if tpt.tpe.typeSymbol == keySym => key
-        })
+        .flatMap(_.getAnnotation(keySym))
+        .map(a => ConstantStrings.read(a, s"Cannot derive PartialOf[${owner.typeRef.show}]", s"field ${field.name}"))
         .getOrElse(field.name)
 
     // The partial type of a value of type `tpe`, and the shape that reads it. `seen` stops a recursive type, which

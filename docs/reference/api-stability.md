@@ -5,8 +5,7 @@ description: "How LLM4S checks binary compatibility with MiMa: stability tiers i
 search_title: "LLM4S API stability and binary compatibility (MiMa)"
 parent: Reference
 nav_order: 12
-cites_open_issues: [1281]
-cites_closed_issues: [1266, 1818, 2357, 2369, 2778, 2781, 2785]
+cites_closed_issues: [1266, 1281, 1818, 2357, 2369, 2778, 2781, 2785]
 cites_issues: [2835]
 ---
 
@@ -133,7 +132,9 @@ An entry that no longer matches a failing type fails the check, so a converted t
 
 An `enum` case with fields is held to the same rule ([#2781](https://github.com/llm4s/llm4s/issues/2781)):
 `case Done(output: String)` compiles to a case class with a public constructor, `apply` and `copy`, and is matched
-positionally, so it cannot gain a field either. A case cannot have a private constructor and a companion `apply`, so
+positionally, so it cannot gain a field either. (A growth-safe class gains fields in a minor release; a positional
+pattern on one is outside the source promise, see [What the promise covers](compatibility-policy#what-the-promise-covers),
+but its constructor and `copy` stay private, which an enum case's cannot.) A case cannot have a private constructor and a companion `apply`, so
 a case that may grow holds one growth-safe class, and is read by name through it:
 
 ```scala

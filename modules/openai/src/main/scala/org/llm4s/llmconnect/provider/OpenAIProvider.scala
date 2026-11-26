@@ -2,12 +2,20 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ConfigurationError
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.auth.AuthConfig
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
+import org.llm4s.llmconnect.config.{
+  ContextWindowResolver,
+  OpenAIApi,
+  OpenAIConfig,
+  OpenAIReasoningSummary,
+  OpenAIWorkloadIdentity,
+  ProviderConfig
+}
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
   ProviderConfigContext,
@@ -50,7 +58,14 @@ object OpenAIProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
-      .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
+      .withExtras(
+        Seq(
+          OpenAIConfig.OrganizationConfigKey,
+          OpenAIConfig.ApiSelectionConfigKey,
+          OpenAIConfig.ReasoningSummaryConfigKey,
+          OpenAIConfig.KeepReasoningConfigKey
+        )
+      )
       .withAuthExtras(
         Seq(
           ProviderConfigKey.required(IdentityProviderIdKey, "the OpenAI workload identity provider id"),
@@ -69,6 +84,13 @@ object OpenAIProvider extends ProviderDescriptor:
         if (workloadIdentity.isDefined) Right(Secret(""))
         else ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      api     <- optionalExtra(context.providerName, section, OpenAIConfig.ApiSelectionKey)(OpenAIApi.parse)
+      summary <- optionalExtra(context.providerName, section, OpenAIConfig.ReasoningSummaryKey)(
+        OpenAIReasoningSummary.parse
+      )
+      keep <- optionalExtra(context.providerName, section, OpenAIConfig.KeepReasoningKey)(
+        parseBoolean(_, OpenAIConfig.KeepReasoningKey)
+      )
       config <- OpenAIConfig
         .fromValues(
           section.model,
@@ -79,7 +101,24 @@ object OpenAIProvider extends ProviderDescriptor:
         )
         .left
         .map(ProviderConfig.inSection(context.providerName, AuthSectionKeys))
-    yield config
+    yield config.withApi(api).withReasoningSummary(summary).withKeepReasoning(keep.getOrElse(true))
+
+  /** `true` or `false`, as a section's extra carries a HOCON boolean; anything else is a refusal naming `key`. */
+  private def parseBoolean(value: String, key: String): Result[Boolean] =
+    value.trim.toLowerCase(java.util.Locale.ROOT) match
+      case "true"  => Right(true)
+      case "false" => Right(false)
+      case other =>
+        Left(ConfigurationError(s"Unknown OpenAI $key '$other': expected 'true' or 'false'", List(key)))
+
+  /** An optional extra `key` of the section, parsed; a value `parse` refuses is an error naming the section. */
+  private def optionalExtra[A](providerName: String, section: NamedProviderConfig, key: String)(
+    parse: String => Result[A]
+  ): Result[Option[A]] =
+    section.extra(key) match
+      case None => Right(None)
+      case Some(value) =>
+        parse(value).map(Some(_)).left.map(ProviderConfig.inSection(providerName))
 
   private def workloadIdentityOf(
     providerName: String,

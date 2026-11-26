@@ -329,8 +329,9 @@ Stay where you are, or keep the client next to LLM4S, when:
 
 - **You need an endpoint LLM4S does not wrap.** LLM4S covers chat completion, embeddings, image generation and
   speech. Both clients also wrap OpenAI endpoints such as files, fine-tuning, batches and moderations, and
-  openai-scala-client the Responses API and Anthropic's Managed Agents ([sttp-ai][s-basics],
-  [openai-scala-client][c-readme]). LLM4S has none of these.
+  openai-scala-client the Responses API as its own API and Anthropic's Managed Agents ([sttp-ai][s-basics],
+  [openai-scala-client][c-readme]). LLM4S has none of these as an API of its own (its OpenAI client speaks the
+  Responses API, behind `LLMClient`).
 - **You build for Scala 2.12 or 2.13.** Both clients publish for 2.12, 2.13 and 3; LLM4S is published for Scala 3 <!-- doc-support: ignore -->
   only, on JDK 21. A 2.13 project can call it through the TASTy reader, with limits <!-- doc-support: ignore -->
   ([Using LLM4S from Scala 2.13](../getting-started/scala-2-13)); a 2.12 project cannot. <!-- doc-support: ignore -->

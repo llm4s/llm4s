@@ -701,5 +701,80 @@
     "vertex_ai/claude-sonnet-5@default": {
         "llm4s_patch": true,
         "supports_budget_thinking": false
+    },
+    "gpt-audio": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/realtime",
+            "/v1/batch"
+        ]
+    },
+    "gpt-audio-2025-08-28": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/realtime",
+            "/v1/batch"
+        ]
+    },
+    "gpt-audio-mini": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/realtime",
+            "/v1/batch"
+        ]
+    },
+    "gpt-audio-mini-2025-10-06": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/realtime",
+            "/v1/batch"
+        ]
+    },
+    "gpt-audio-mini-2025-12-15": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/realtime",
+            "/v1/batch"
+        ]
+    },
+    "gpt-4o": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
+    },
+    "gpt-4o-2024-08-06": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
+    },
+    "gpt-4o-2024-11-20": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
+    },
+    "gpt-4o-mini": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
+    },
+    "gpt-4o-mini-2024-07-18": {
+        "llm4s_patch": true,
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/responses"
+        ]
     }
 }

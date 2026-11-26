@@ -225,6 +225,11 @@ the schema, no retry is spent on it - the same limit would cut the second answer
 `AgentStatus.Truncated(partialAnswer)` as any agent's does, never `OutputInvalid`. `decodeOutput` on such a result is
 a `Left` saying the output limit cut the answer off. The same holds for `withOutputCheck` and `withOutputJsonCheck`.
 
+A string's format belongs in the schema: `Schema.string("the location's id").withPattern("^[a-z0-9_-]+$")` is
+shown to the model as JSON Schema `pattern` and checked like any other keyword, so an answer with `"Crypt Door"`
+is sent back with `$.id: "Crypt Door" does not match the pattern ^[a-z0-9_-]+$`. See
+[String patterns](../custom-tools#string-patterns) for how a pattern is matched.
+
 A rule the schema cannot express - an id that must name another element of the same document, a total that must
 match its lines - is an application check, `withOutputCheck`. It runs on the decoded answer once the schema accepts
 it and returns the answer's problems, worded for the model; an empty result accepts the answer:
@@ -254,6 +259,55 @@ answer as `ujson.Value` instead. An answer that does not read as the check's typ
 a check on an agent with no `withOutput`. A check has only the answer: one that depends on application state closes
 over it, and there is no variant that takes the run's context. Keep it fast and free of side effects, since `recover`
 may run it again; it must not throw.
+
+#### A union as the answer
+
+The schema's root is an object, or a union of objects: an `anyOf` whose alternatives are all object schemas. That is
+what `SchemaOf` derives for a sealed trait or an enum whose cases all have fields, so an agent can answer with one
+of several shapes, each with its own required fields:
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.SchemaDefinition
+import upickle.default.ReadWriter
+
+sealed trait Turn derives ReadWriter
+case class Scene(location: String, exits: List[String]) extends Turn
+case class Reply(text: String)                         extends Turn
+val turnSchema: SchemaDefinition[Turn] = ??? // SchemaOf[Turn].definition, or Schema.anyOf of two ObjectSchemas
+
+for {
+  agent  <- Agent.builder("dungeon-master", client).withOutput(turnSchema).build()
+  result <- agent.run("look around")
+  turn   <- result.decodeOutput[Turn]
+} yield turn match {
+  case Scene(location, exits) => s"$location, exits ${exits.mkString(", ")}"
+  case Reply(text)            => text
+}
+```
+
+A strict response format needs an object at its root, so the agent asks the model for the union inside an envelope
+object, `{"answer": <one alternative>}`, with every alternative as strict as you wrote it. The system prompt and
+the `responseFormat` both carry that envelope schema, for every provider. The envelope is removed when the answer is
+checked, so you never handle it:
+
+- `result.answer`, the stored message, a later turn's history, `withOutputCheck`, `withOutputJsonCheck`, the output
+  guardrails and `decodeOutput` all have the alternative's JSON alone.
+- An answer that is one of the alternatives without the envelope is accepted as it is. A model that is not held to
+  the format, on a call that offers tools or with a provider that only states the schema, may leave it out.
+- An answer that matches no alternative goes back to the model once, like any invalid answer, with the problems of
+  the closest alternative at the paths of the text the model wrote (`$.answer.exits: ...`).
+- What is never stored shows the model's own text, envelope included: the live `TextDelta`s of `withStreaming()`,
+  and the partial answer of a turn cut off at the output limit (`AgentStatus.Truncated`). Show a streamed union from
+  the result, not from its deltas.
+
+The envelope's property is `answer`; if an alternative has a property of that name, it is `final_answer` instead, so
+an envelope is never mistaken for an alternative.
+
+`build()` refuses any other root with a `Left` that says what to do: a string, a number, an array, or an `anyOf` with
+an alternative that is not an object, such as a sealed trait with a `case object`. Make that value a property of an
+object schema - a case class with the one field, `case class Decision(action: Action)` - and read the property from
+the decoded answer.
 
 ---
 
@@ -436,7 +490,8 @@ The pieces:
   and `approved`.
 - **`ToolSet.of(tools*)`** is the only way to build a `ToolSet`, and returns a `Result`: it refuses, in one
   `ValidationError` listing every problem, an invalid or duplicate tool name, an argument schema whose root is not
-  an object, and a schema keyword the argument validator does not check. `withToolSet(tools)` takes the set.
+  an object, and a schema keyword the argument validator does not check, which includes a `pattern` it cannot
+  compile ([String patterns](../custom-tools#string-patterns)). `withToolSet(tools)` takes the set.
 
 A tool answers with a `ToolOutcome`:
 

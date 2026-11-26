@@ -88,6 +88,10 @@ val local = Llm4s.ollama {
 *From the `Llm4s.openAi` KDoc and the "The Kotlin DSL" block in [java.md](java#the-kotlin-dsl); `Llm4s.ollama` takes
 `model` and an optional `baseUrl` (`ClientDsl.kt`, `OllamaSpec`).*
 
+The `openAi { }` block also has `api` (`"responses"` or `"chat-completions"`; unset, the client chooses OpenAI's API
+from the model registry), `keepReasoning` and `reasoningSummary`, the Java builder's settings of the same names
+([Which API a section uses](providers#which-api-a-section-uses)).
+
 If you already have a `JLlmClient`, for example one from `JLlm4s.ollama()...build().get()` or
 `createClient(ProviderConfig)`, `Llm4s.wrapClient(client)` wraps it; closing the wrapper closes it.
 

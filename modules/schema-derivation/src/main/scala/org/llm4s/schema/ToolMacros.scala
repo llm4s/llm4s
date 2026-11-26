@@ -78,19 +78,16 @@ private[schema] object ToolMacros {
 
     private def show(t: TypeRepr): String = t.show(using Printer.TypeReprShortCode)
 
-    private def stringArgument(symbol: Symbol, annotation: Symbol, where: String): Option[String] =
-      symbol.getAnnotation(annotation).map {
-        case Apply(_, List(Literal(StringConstant(text)))) => text
-        case _ =>
-          report.errorAndAbort(s"Cannot derive a tool from $where: @${annotation.name} must be given a string literal")
-      }
+    // Any constant string, and a compile error when it is not one (#2951)
+    private def stringArgument(symbol: Symbol, annotation: Symbol, where: String, of: String): Option[String] =
+      symbol.getAnnotation(annotation).map(a => ConstantStrings.read(a, s"Cannot derive a tool from $where", of))
 
     // The method and those it overrides, nearest first: a method without Scaladoc or annotations of its own takes
     // those of the method it implements.
     private def overridden(method: Symbol): List[Symbol] = method :: method.allOverriddenSymbols.toList
 
     private def annotated(method: Symbol, annotation: Symbol, at: String): Option[String] =
-      overridden(method).flatMap(m => stringArgument(m, annotation, at)).headOption
+      overridden(method).flatMap(m => stringArgument(m, annotation, at, "the method")).headOption
 
     // ---- Tool.fromMethod
 
@@ -269,7 +266,7 @@ private[schema] object ToolMacros {
       val descriptions = names.map { n =>
         overridden(method)
           .flatMap(_.paramSymss.flatten.find(p => p.isTerm && p.name == n))
-          .flatMap(p => stringArgument(p, descriptionAnnotation, s"$at, parameter $n"))
+          .flatMap(p => stringArgument(p, descriptionAnnotation, at, s"parameter $n"))
           .headOption
           .orElse(paramDocs.get(n))
       }

@@ -179,6 +179,10 @@ context window set without a reserve keeps a quarter of itself for the reply, up
 otherwise use, as a section's `contextWindow` does. `metrics(MetricsCollector)` makes the client report every call, as
 [`createClient(config, metrics)`](#recording-metrics) does.
 
+`openAi()` also takes `api("responses")` or `api("chat-completions")` (unset, the client chooses OpenAI's API from
+the model registry), `keepReasoning(false)` and `reasoningSummary("concise")`, the section keys `api`,
+`keepReasoning` and `reasoningSummary` ([Which API a section uses](providers#which-api-a-section-uses)).
+
 `build()` sends no request and does not throw. A required field left out - or set to `null` or a blank string, as
 `System.getenv` returns for a variable that is not set - is a failed result of kind `VALIDATION` whose message names
 it (`Field 'apiKey' is required`), as is a value out of range, such as a context window of zero. A builder is

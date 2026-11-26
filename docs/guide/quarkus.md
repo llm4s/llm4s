@@ -107,6 +107,9 @@ llm4s.providers.main.model=llama3.2
 - **Keys.** A section with no `api-key` uses the vendor's shared key, `llm4s.credentials.<provider>.api-key`, and then
   the vendor's conventional environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). Keep a real key out of
   `application.properties`: rely on the variable, or write `api-key=${MY_KEY}`.
+- **OpenAI's API.** An `openai` section also takes `api` (`responses` or `chat-completions`; unset, the client
+  chooses from the model registry), `keep-reasoning` and `reasoning-summary`
+  ([Which API a section uses](providers#which-api-a-section-uses)).
 - **Embeddings.** `llm4s.embeddings.model=<provider>/<model>` (for example `ollama/nomic-embed-text`) makes a
   `JEmbeddingClient` bean; that provider's settings are `llm4s.embeddings.<provider>.*`
   (`llm4s.embeddings.ollama.base-url`).

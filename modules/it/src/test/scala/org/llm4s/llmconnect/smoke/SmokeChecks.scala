@@ -77,8 +77,15 @@ object Outcome {
  * @param options              options that switch reasoning on and leave room for the answer after the thinking
  * @param expectsThinkingText  true when the provider returns the reasoning text itself (`Completion.thinking`);
  *                             false when it only reports reasoning tokens
+ * @param prompt               what the check asks; a model that decides when to reason (gpt-5.6-luna) reports zero
+ *                             reasoning tokens for a trivial greeting, so such a spec supplies one that needs thought
  */
-final case class ReasoningSetup(client: LLMClient, options: CompletionOptions, expectsThinkingText: Boolean)
+final case class ReasoningSetup(
+  client: LLMClient,
+  options: CompletionOptions,
+  expectsThinkingText: Boolean,
+  prompt: String = "Say hi in one word"
+)
 
 /** An answer shaped like the structured-output schema the contract asks for. */
 final case class Verdict(color: String, count: Int)
@@ -444,7 +451,7 @@ object SmokeChecks {
       Capability.Reasoning,
       for {
         completion <- setup.client
-          .complete(Conversation(Seq(UserMessage("Say hi in one word"))), setup.options)
+          .complete(Conversation(Seq(UserMessage(setup.prompt))), setup.options)
           .left
           .map(e => s"the call failed (was the reasoning option rejected?): ${e.message}")
         _ <- Either.cond(
