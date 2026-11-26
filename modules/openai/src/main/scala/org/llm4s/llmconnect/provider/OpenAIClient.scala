@@ -176,7 +176,9 @@ final class OpenAIClient private[provider] (
 
   protected def clientDescription: String = s"$displayName client for model $model"
   private def providerName: String        = provider.asString
-  protected def modelName: ModelName      = ModelName(model)
+  // sealed reasoning is replayed only to the provider and model this client is configured for
+  private val replayOrigin           = ReplayOrigin(providerName, config.model.asString)
+  protected def modelName: ModelName = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -305,7 +307,7 @@ final class OpenAIClient private[provider] (
       body = serialize(params._body())
       response <- call("response")(transport.createResponse(params))
       completion <- OpenAIResponsesReply
-        .completion(response, provider, modelName)
+        .completion(response, provider, modelName, replayOrigin)
         .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
         .flatMap(filteredReply)
     } yield (body, serialize(response), completion)

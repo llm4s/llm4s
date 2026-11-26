@@ -456,8 +456,37 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       )
     ).value
     completion.content shouldBe "hi"
-    completion.message.thinking shouldBe empty
+    completion.message.thinking.map(_.getClass) shouldBe Seq(classOf[ThinkingBlock.Opaque])
     completion.finishReason shouldBe FinishReason.Stop
+  }
+
+  it should "carry a reply's reasoning on the assistant message, bound to this provider and model" in {
+    var out = Option.empty[org.llm4s.llmconnect.model.Completion]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        reply(
+          reasoningItem("rs_1", summary = Seq("Thinking it through.")) + "," +
+            functionCall("call_1", "get_weather", """{"city":"Paris"}""")
+        )
+      )
+    } { baseUrl =>
+      val client = responsesClient(baseUrl, model = "gpt-6.1-terra")
+      out = client.complete(hello, CompletionOptions()).toOption
+      client.close()
+    }
+    val completion = out.get
+    completion.thinking shouldBe Some("Thinking it through.")
+    completion.message.hasSealedThinking shouldBe true
+    completion.message.thinkingBinding shouldBe defined
+    completion.toolCalls.map(_.name) shouldBe Seq("get_weather")
+  }
+
+  it should "report no thinking for a reply without reasoning items" in {
+    val completion = answer(reply(outputMessage("hi"))).value
+    completion.message.thinking shouldBe empty
+    completion.message.thinkingBinding shouldBe None
   }
 
   it should "deliver a refusal's text as the content" in {
