@@ -113,8 +113,66 @@ class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit wit
       "(a?)\\1+",
       "(|x|)",
       "(a?|b?)c",
-      "(?:a?)?" * 30 + "b"
+      "(?:a?)" * 30 + "(?!)"
     ).foreach(pattern => withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
+  }
+
+  // Codex on #3135: a `b` after the chain hid the blow-up, because on an empty input the JDK's minimum-length check
+  // fails the match before trying any path. A failing zero-width suffix is tried on every path: `(?:a?)?` repeated 25
+  // times then `(?!$)` took 1.7 s without a read.
+  it should "refuse a long chain of optional empty-matching parts before a failing zero-width suffix" in {
+    for {
+      unit   <- Seq("(?:a?)?", "(\\s*)?", "(a|)?", "(?:a?)*", "(?:a?){0,2}", "(?:|)")
+      suffix <- Seq("(?!)", "(?!$)")
+    } {
+      val pattern = unit * 40 + suffix
+      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
+    }
+  }
+
+  it should "accept only chains that match quickly, with nothing read, before a failing zero-width suffix" in {
+    // for each part, the longest chain the check accepts (up to 60) must finish at once on an empty and a short input:
+    // a model that undercounts a part's empty matches accepts a chain that takes seconds, and the guard fails it
+    val units = Seq(
+      "(?:a?)?",
+      "(\\s*)?",
+      "(a|)?",
+      "(?:a?)*",
+      "(?:a?){0,2}",
+      "(?:|)",
+      "(?:a|)",
+      "(?:a?)",
+      "(?:a?){3}",
+      "(?:a?)+",
+      "(?=a?)",
+      "(?:\\b)*",
+      "(a?)\\1"
+    )
+    for {
+      unit   <- units
+      suffix <- Seq("(?!)", "(?!$)", "b")
+    } {
+      val accepted = (1 to 60).takeWhile(n => WorkspaceRegexSafetyManager.safeCompile(unit * n + suffix).isRight)
+      accepted.lastOption.foreach { n =>
+        val pattern = Pattern.compile(unit * n + suffix)
+        withClue(s"$unit x$n $suffix") {
+          withinGuard {
+            WorkspaceRegexSafetyManager.safeFind(pattern, "")
+            WorkspaceRegexSafetyManager.safeFind(pattern, "xyz", maxSteps = 100000L)
+          }
+        }
+      }
+    }
+  }
+
+  // Runs `body` on a daemon thread and fails if it has not finished within the guard, rather than hanging the suite.
+  private def withinGuard(body: => Any): Unit = {
+    @volatile var done = false
+    val thread         = new Thread(() => { body; done = true }, "regex-guard")
+    thread.setDaemon(true)
+    thread.start()
+    thread.join(5000)
+    if (!done) fail("did not finish within the 5 s guard")
   }
 
   it should "refuse a counted repetition above the limit, comments mode and canonical equivalence" in {

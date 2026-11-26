@@ -72,10 +72,10 @@ object RegexSafetyManager {
    *
    * It also returns a `Left` for a pattern whose matching the step bound of [[safeFind]] could not bound (#3051): one
    * that can take more than 1000 steps at one position without reading the input, such as many required iterations
-   * of something that can match the empty string (`(){5000}`) or many ways in a row to match it (`(?:|)` or
-   * `(?:a?)*` repeated); and comments mode or canonical equivalence (`(?x)`, `Pattern.COMMENTS`,
-   * `Pattern.CANON_EQ`), whose syntax the check does not follow. A bounded use of an empty-matching part, such as
-   * `(\s*)?`, `(a|)?` or `(a?)*`, compiles.
+   * of something that can match the empty string (`(){5000}`) or many ways in a row to match it (`(?:|)`,
+   * `(\s*)?` or `(?:a?)*` repeated); and comments mode or canonical equivalence (`(?x)`, `Pattern.COMMENTS`,
+   * `Pattern.CANON_EQ`), whose syntax the check does not follow. One empty-matching part, such as `(\s*)?`, `(a|)?`
+   * or `(a?)*`, or a few in a row, compiles.
    *
    * @param pattern the regular expression to compile
    * @param flags `java.util.regex.Pattern` flags, such as `Pattern.CASE_INSENSITIVE`; 0 by default

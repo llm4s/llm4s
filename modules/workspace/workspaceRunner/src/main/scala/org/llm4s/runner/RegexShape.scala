@@ -21,11 +21,12 @@ import scala.util.boundary.break
  * string, and `f`, the steps it can take at one position without reading (each atom, assertion or alternative tried
  * counts one). A sequence multiplies: what follows a part is tried once for each way that part matched empty. An
  * alternation adds. A repetition over a body that cannot match empty adds at most one way (skipping it), since every
- * iteration reads. Over a body that can, the required iterations are counted one by one, each optional iteration of
- * a bounded `{n,m}` and an unbounded `*`, `+`, `{n,}` doubles the ways, as `java.util.regex` was measured to (it ends
- * an unbounded loop on an iteration that matched empty, so such a loop counts once), and a `?` keeps them as they are
- * (measured: the JDK does not try the skip after the body matched empty). The estimate is checked at every point a
- * match can resume after a read: each suffix of every sequence.
+ * iteration reads. Over a body that can, the required iterations are counted one by one, and each optional iteration
+ * (a `?`, the rest of a bounded `{n,m}`, and an unbounded `*`, `+`, `{n,}`, which the JDK ends on an iteration that
+ * matched empty, so it counts once) adds a way: the body's empty match and the skip are both tried when what follows
+ * fails. Measured on JDK 21 with a failing `(?!)` after the chain and an empty input: `(?:a?)?`, `(\s*)?`, `(a|)?`,
+ * `(?:a?)*` and `(?:a?){0,2}` each double the time per copy, while `(?:a|)`, `(?:a?)` and `(?:a?){3}` stay flat.
+ * The estimate is checked at every point a match can resume after a read: each suffix of every sequence.
  *
  * The threshold is 1000 steps, the size of the longest pattern accepted: so between two counted reads the engine does
  * at most about one more walk over a pattern of the longest size, and the step budget stays a bound on the time up to
@@ -174,22 +175,21 @@ private[runner] object RegexShape {
     private def quantified(): Cost = {
       var cost = atom()
       while (peek == '?' || peek == '*' || peek == '+' || peek == '{') {
-        val question   = peek == '?'
         val (min, max) = quantifier()
-        cost = checked(repeated(cost, min, max, question))
+        cost = checked(repeated(cost, min, max))
         if (peek == '?' || peek == '+') pos += 1 // reluctant or possessive
       }
       cost
     }
 
-    /** `body{min,max}` (`max` None when unbounded); `question` for a `?`. */
-    private def repeated(body: Cost, min: Long, max: Option[Long], question: Boolean): Cost =
+    /** `body{min,max}` (`max` None when unbounded). */
+    private def repeated(body: Cost, min: Long, max: Option[Long]): Cost =
       if (!body.nullable)
         // every iteration reads; at one position only the first is tried, and the loop can be skipped when min is 0
         Cost(if (min == 0) 1 else 0, add(body.f, 1))
-      else if (question) Cost(body.e, add(body.f, 1))
       else {
-        // each required iteration in turn, then each optional one, which may be taken or skipped
+        // each required iteration in turn, then each optional one (a `?` is one), which may be taken or skipped: two
+        // more ways, the body's empty match and the skip, both tried by the JDK when what follows fails
         val optional = Cost(add(body.e, 1), add(body.f, 1))
         val extra    = max.fold(1L)(m => m - min) // an unbounded loop ends on an iteration that matched empty
         var cost     = Cost(1, 0)

@@ -152,9 +152,9 @@ other request waits for them. Each is bounded ([#3051](https://github.com/llm4s/
   changes nothing.
 - **Pattern shape.** A regex is refused, and searched or replaced as literal text instead, when it can take more
   than 1000 steps at one position without reading the line: many required iterations of something that can match
-  the empty string (`(){1000}`), or many ways in a row to match it (`(?:|)` or `(?:a?)*` repeated). The per-line
+  the empty string (`(){1000}`), or many ways in a row to match it (`(?:|)`, `(\s*)?` or `(?:a?)*` repeated). The per-line
   step budget counts reads, so it could not bound those. A counted repetition above 1000 and comments mode (`(?x)`)
-  are refused too. A bounded use such as `(\s*)?` or `(a?)*` is fine.
+  are refused too. One `(\s*)?` or `(a?)*`, or a few in a row, is fine.
 - **Response size.** `contextLines` is clamped to 0..20. A matched line longer than 1000 characters is cut to 1000 around
   its first match, a context line to its first 1000. Matches stop being added, with `isTruncated` set, before their
   text would exceed `maxOutputSize`.
