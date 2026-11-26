@@ -64,6 +64,7 @@ class OpenAIConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     config.withApi(None).api shouldBe None
     config.withReasoningSummary(None).reasoningSummary shouldBe None
     config.toString should include("api=Some(Responses)")
+    config.toString should include("reasoningSummary=Some(Auto)")
   }
 
   test("OpenAIApi.parse reads the two config values and refuses anything else, naming both") {

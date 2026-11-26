@@ -235,7 +235,12 @@ final class OpenAIClient private[provider] (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = completeWithMetrics {
+  ): Result[Completion] = completeWithMetrics(completeAndRecord(conversation, options)(_ => ()))
+
+  /** One recorded completion call; `deliver` sees the completion before its exchange is recorded. */
+  private def completeAndRecord(conversation: Conversation, options: CompletionOptions)(
+    deliver: Completion => Unit
+  ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
     val result = for {
@@ -257,6 +262,7 @@ final class OpenAIClient private[provider] (
           completeOnChatCompletions(transformedConversation, transformed.options, adjustments)
       }
       (body, responseBody, completion) = exchange
+      _                                = deliver(completion)
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -316,6 +322,16 @@ final class OpenAIClient private[provider] (
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    // A Responses stream is one unstreamed call delivered as chunks, until native streaming lands.
+    if (api == OpenAIApi.Responses) completeAndRecord(conversation, options)(emitCompletionAsChunks(_, onChunk))
+    else streamOnChatCompletions(conversation, options, onChunk)
+  }
+
+  private def streamOnChatCompletions(
+    conversation: Conversation,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints.
     // Only a failure before the call is recorded here: executeFakeStreaming/executeNativeStreaming
