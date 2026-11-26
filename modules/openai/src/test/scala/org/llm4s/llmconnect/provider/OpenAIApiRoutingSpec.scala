@@ -41,16 +41,17 @@ final class OpenAIApiRoutingSpec extends AnyFlatSpec with Matchers with EitherVa
   private def requestyConfig(model: String): OpenAIConfig =
     config(model, BaseUrl("https://router.requesty.ai/v1")).withExplicitProviderId(requesty)
 
-  // In the bundled registry, gpt-4.1, gpt-5, gpt-6.1-terra and o3 list /v1/responses; gpt-4o, gpt-4o-mini, o4-mini
-  // and gpt-4o-search-preview list no endpoints; gpt-audio-1.5 lists only /v1/chat/completions.
+  // In the registry (the bundled data with llm4s's patches), gpt-4o, gpt-4o-mini, gpt-4.1, gpt-5, gpt-6.1-terra and o3
+  // list /v1/responses; gpt-4-turbo, o4-mini and gpt-4o-search-preview list no endpoints; gpt-audio-1.5 lists only
+  // /v1/chat/completions, and the gpt-audio models list other endpoints but not /v1/responses.
   "OpenAIApiRouting" should "use Responses on OpenAI's own base URL for a model the registry lists for /v1/responses" in {
-    Seq("gpt-4.1", "gpt-5", "gpt-6.1-terra", "o3").foreach { model =>
+    Seq("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5", "gpt-6.1-terra", "o3").foreach { model =>
       withClue(model)(resolve(config(model)).api shouldBe OpenAIApi.Responses)
     }
   }
 
   it should "use Chat Completions on OpenAI's own base URL for a known model the registry does not list for /v1/responses" in {
-    Seq("gpt-4o", "gpt-4o-mini", "o4-mini", "gpt-4o-search-preview", "gpt-audio-1.5").foreach { model =>
+    Seq("gpt-4-turbo", "o4-mini", "gpt-4o-search-preview", "gpt-audio-1.5", "gpt-audio").foreach { model =>
       withClue(model)(resolve(config(model)).api shouldBe OpenAIApi.ChatCompletions)
     }
   }
@@ -96,11 +97,36 @@ final class OpenAIApiRoutingSpec extends AnyFlatSpec with Matchers with EitherVa
     resolve(config("gpt-4o-search-preview")).api shouldBe OpenAIApi.ChatCompletions
   }
 
-  it should "use Responses for a model the registry does not know" in {
-    resolve(config("ft:gpt-4o:acme::abc")).api shouldBe OpenAIApi.Responses
+  it should "use Responses for a model the registry does not know, a fine-tune of an unknown base among them" in {
+    resolve(config("ft:gpt-9-nova:acme::abc")).api shouldBe OpenAIApi.Responses
     resolve(config("gpt-9-nova-2031")).api shouldBe OpenAIApi.Responses
     // and Chat Completions for it elsewhere: an unknown model is not responses-only
-    resolve(config("ft:gpt-4o:acme::abc", gateway)).api shouldBe OpenAIApi.ChatCompletions
+    resolve(config("ft:gpt-9-nova:acme::abc", gateway)).api shouldBe OpenAIApi.ChatCompletions
+  }
+
+  it should "route a fine-tune by the registry's ft: entry for its base, which lists no endpoints" in {
+    val choice = resolve(config("ft:gpt-4o-mini-2024-07-18:acme::x"))
+    choice.api shouldBe OpenAIApi.ChatCompletions
+    choice.reason should include("ft:gpt-4o-mini-2024-07-18")
+    resolve(config("openai/ft:gpt-4.1-2025-04-14:acme:support:9AbC")).api shouldBe OpenAIApi.ChatCompletions
+  }
+
+  it should "route a fine-tune the registry has no ft: entry for by its base model" in {
+    // no ft:gpt-5-mini-2025-08-07 entry; the base lists /v1/responses
+    val listed = resolve(config("ft:gpt-5-mini-2025-08-07:acme::x"))
+    listed.api shouldBe OpenAIApi.Responses
+    listed.reason should include("the model registry lists")
+    listed.reason should include("gpt-5-mini-2025-08-07")
+    // no ft:gpt-4o-2024-05-13 entry; the base lists no endpoints
+    resolve(config("ft:gpt-4o-2024-05-13:acme::x")).api shouldBe OpenAIApi.ChatCompletions
+  }
+
+  it should "look a model up ignoring case and a router prefix" in {
+    resolve(config("GPT-6.1-TERRA")).api shouldBe OpenAIApi.Responses
+    resolve(config("openai/gpt-4.1")).api shouldBe OpenAIApi.Responses
+    resolve(config("openai/gpt-4-turbo")).api shouldBe OpenAIApi.ChatCompletions
+    // a prefixed responses-only model is responses-only behind a gateway too
+    resolve(config("openai/o1-pro", gateway)).api shouldBe OpenAIApi.Responses
   }
 
   it should "treat a registry that fails as one that does not know the model" in {
@@ -138,14 +164,14 @@ final class OpenAIApiRoutingSpec extends AnyFlatSpec with Matchers with EitherVa
     file.toFile.deleteOnExit()
     Files.writeString(
       file,
-      """{"gpt-4o": {"litellm_provider": "openai", "mode": "chat",
+      """{"gpt-4-turbo": {"litellm_provider": "openai", "mode": "chat",
         |  "supported_endpoints": ["/v1/chat/completions", "/v1/responses"], "max_input_tokens": 128000}}""".stripMargin,
       StandardCharsets.UTF_8
     ): Unit
     val overridden = ModelRegistryService.fromFile(file.toString).value
-    // the bundled entry lists no endpoints: Chat Completions; the override opts gpt-4o in
-    resolve(config("gpt-4o")).api shouldBe OpenAIApi.ChatCompletions
-    resolve(config("gpt-4o"), reg = overridden).api shouldBe OpenAIApi.Responses
+    // the bundled entry lists no endpoints: Chat Completions; the override opts gpt-4-turbo in
+    resolve(config("gpt-4-turbo")).api shouldBe OpenAIApi.ChatCompletions
+    resolve(config("gpt-4-turbo"), reg = overridden).api shouldBe OpenAIApi.Responses
     Files.deleteIfExists(file): Unit
   }
 
@@ -173,8 +199,8 @@ final class OpenAIApiRoutingSpec extends AnyFlatSpec with Matchers with EitherVa
     resolve(requestyConfig("gpt-4o"), requesty).reason should include("requesty")
     resolve(config("o1-pro", gateway)).reason should include("o1-pro is served only on the Responses API")
     resolve(config("gpt-4o", gateway)).reason should include("not OpenAI's (https://gateway.example/v1)")
-    resolve(config("gpt-4o")).reason shouldBe
-      "the model registry does not list gpt-4o for /v1/responses; set api = responses to use it there"
+    resolve(config("gpt-4-turbo")).reason shouldBe
+      "the model registry does not list gpt-4-turbo for /v1/responses; set api = responses to use it there"
     resolve(config("gpt-6.1-terra")).reason shouldBe "the model registry lists gpt-6.1-terra for /v1/responses"
     resolve(config("gpt-9-nova-2031")).reason shouldBe
       "the model registry does not know gpt-9-nova-2031, and this is OpenAI's own API"

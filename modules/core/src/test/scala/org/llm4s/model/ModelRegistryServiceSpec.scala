@@ -417,6 +417,44 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     sonnet.supportsOutputConfig shouldBe Some(true)
     sonnet.supportsAdaptiveThinking shouldBe Some(true)
 
+  // OpenAI answered POST /v1/responses for these on 2026-11-26 while litellm listed none of its endpoints for them
+  it should "list /v1/responses for the gpt-4o models OpenAI serves there, keeping their litellm limits and prices" in:
+    val service = defaultService()
+    val raw = ujson
+      .read(
+        scala.io.Source
+          .fromInputStream(getClass.getResourceAsStream(ModelRegistryConfig.DefaultResourcePath), "UTF-8")
+          .mkString
+      )
+      .obj
+    for id <- List("gpt-4o", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20", "gpt-4o-mini", "gpt-4o-mini-2024-07-18") do
+      withClue(id) {
+        val metadata = service.lookup(ModelName(id)).toOption.get
+        metadata.supportedEndpoints shouldBe Seq("/v1/chat/completions", "/v1/responses")
+        metadata.maxInputTokens shouldBe raw(id).obj.get("max_input_tokens").map(_.num.toInt)
+        metadata.maxInputTokens should not be empty
+        metadata.pricing.inputCostPerToken should not be empty
+        metadata.pricing.inputCostPerToken shouldBe raw(id).obj.get("input_cost_per_token").map(_.num)
+        metadata.capabilities.supportsFunctionCalling shouldBe Some(true)
+      }
+
+  // OpenAI refused these on /v1/responses on 2026-11-26 ("not supported with the Responses API"), litellm lists it
+  it should "not list /v1/responses for the gpt-audio models, keeping their other endpoints in order" in:
+    val service = defaultService()
+    for id <- List(
+        "gpt-audio",
+        "gpt-audio-2025-08-28",
+        "gpt-audio-mini",
+        "gpt-audio-mini-2025-10-06",
+        "gpt-audio-mini-2025-12-15"
+      )
+    do
+      withClue(id) {
+        val metadata = service.lookup(ModelName(id)).toOption.get
+        metadata.supportedEndpoints shouldBe Seq("/v1/chat/completions", "/v1/realtime", "/v1/batch")
+        metadata.pricing.inputCostPerToken should not be empty
+      }
+
   private def defaultServiceResult(): Result[ModelRegistryService] =
     ModelRegistryTestSupport.defaultServiceResult()
 

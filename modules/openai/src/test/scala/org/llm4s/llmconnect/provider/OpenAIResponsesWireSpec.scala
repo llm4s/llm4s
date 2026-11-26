@@ -599,7 +599,8 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     "unsupported_image_media_type",
     "empty_image_file",
     "failed_to_download_image",
-    "image_file_not_found"
+    "image_file_not_found",
+    "invalid_encrypted_content"
   )
 
   it should "report a failed reply the request can never satisfy as a 400-class error, not a 502" in {

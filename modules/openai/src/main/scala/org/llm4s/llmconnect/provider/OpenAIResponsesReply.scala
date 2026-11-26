@@ -34,9 +34,10 @@ private[provider] object OpenAIResponsesReply:
     provider: ProviderId,
     configuredModel: ModelName,
     origin: ReplayOrigin,
-    keepReasoning: Boolean
+    keepReasoning: Boolean,
+    carriedReasoning: Boolean = false
   ): Result[Completion] =
-    Try(read(response, provider, configuredModel, origin, keepReasoning)).toEither.left
+    Try(read(response, provider, configuredModel, origin, keepReasoning, carriedReasoning)).toEither.left
       .map(OpenAIClient.mapError(_, provider))
       .flatMap(identity)
 
@@ -45,10 +46,11 @@ private[provider] object OpenAIResponsesReply:
     provider: ProviderId,
     configuredModel: ModelName,
     origin: ReplayOrigin,
-    keepReasoning: Boolean
+    keepReasoning: Boolean,
+    carriedReasoning: Boolean
   ): Result[Completion] =
     val status = known(response._status()).map(_.asString())
-    if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider))
+    if status.contains(ResponseStatus.FAILED.asString()) then Left(failure(response, provider, carriedReasoning))
     else
       val items    = outputItems(response)
       val finish   = finishReason(status, response)
@@ -81,18 +83,20 @@ private[provider] object OpenAIResponsesReply:
         )
       }
 
-  /** A `failed` reply's `error` (a refusal with the reply's usage), through the mapping a stream's `error` event takes (a 502 unless it names a status). */
-  private def failure(response: Response, provider: ProviderId): LLMError =
+  /**
+   * A `failed` reply's `error` (a refusal with the reply's usage), through the mapping a stream's `error` event takes
+   * (a 502 unless it names a status), with the rejected-reasoning hint when the request `carriedReasoning`
+   * ([[OpenAIReasoningRejection]]).
+   */
+  private def failure(response: Response, provider: ProviderId, carriedReasoning: Boolean): LLMError =
     val error = known(response._error())
-    errorOf(
-      ujson.Obj.from(
-        Seq(
-          error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
-          error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
-        ).flatten
-      ),
-      provider
-    ) match
+    val fields = ujson.Obj.from(
+      Seq(
+        error.flatMap(e => known(e._message())).map("message" -> ujson.Str(_)),
+        error.flatMap(e => known(e._code())).map(c => "code" -> ujson.Str(c.asString()))
+      ).flatten
+    )
+    OpenAIClient.explained(errorOf(fields, provider), fields, carriedReasoning) match
       // a refusal carries the usage the reply reports, as the reply the content filter stops does (tracing bills it)
       case refused: ContentFilteredError =>
         refused.withUsage(Try(known(response._usage()).map(tokenUsage)).toOption.flatten)
@@ -126,7 +130,8 @@ private[provider] object OpenAIResponsesReply:
 
   /**
    * The HTTP status an `error.code` names: 429 for `rate_limit_exceeded`, and 400 for each code that says the request
-   * or its input can never succeed (`invalid_prompt`, the image codes and `data_residency_mismatch`), so it is not
+   * or its input can never succeed (`invalid_prompt`, the image codes, `data_residency_mismatch` and
+   * `invalid_encrypted_content`, a replayed reasoning item OpenAI cannot read), so it is not
    * retried. `failed_to_download_image` is a 400 deliberately: OpenAI classes it as an input error, and an unreachable
    * URL is the caller's to fix. `server_error` and `vector_store_timeout` stay a 502; the policy codes are
    * [[filtered]].
@@ -153,7 +158,8 @@ private[provider] object OpenAIResponsesReply:
     "unsupported_image_media_type",
     "empty_image_file",
     "failed_to_download_image",
-    "image_file_not_found"
+    "image_file_not_found",
+    "invalid_encrypted_content"
   )
 
   /** `completed` is `Stop`; `incomplete` is `Length` at the output limit and the content filter's at the filter. */

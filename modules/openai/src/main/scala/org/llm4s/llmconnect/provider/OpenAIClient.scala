@@ -341,13 +341,21 @@ final class OpenAIClient private[provider] (
         transport.createResponse(params)
       ).left.map(Failed(_, None))
       responseBody = serialize(response)
-      completion <- responsesCompletion(response, adjustments).left.map(Failed(_, Some((body, responseBody))))
+      completion <- responsesCompletion(response, adjustments, OpenAIReasoningRejection.carriesReasoning(params)).left
+        .map(Failed(_, Some((body, responseBody))))
     } yield (body, responseBody, completion)
 
-  /** A Responses reply as `complete` returns it: priced, with the request's adjustments, failing when filtered. */
-  private def responsesCompletion(response: Response, adjustments: Seq[RequestAdjustment]): Result[Completion] =
+  /**
+   * A Responses reply as `complete` returns it: priced, with the request's adjustments, failing when filtered. A
+   * `failed` reply to a request that `carriedReasoning` is explained as [[OpenAIReasoningRejection]] says.
+   */
+  private def responsesCompletion(
+    response: Response,
+    adjustments: Seq[RequestAdjustment],
+    carriedReasoning: Boolean
+  ): Result[Completion] =
     OpenAIResponsesReply
-      .completion(response, provider, modelName, replayOrigin, keepReasoning)
+      .completion(response, provider, modelName, replayOrigin, keepReasoning, carriedReasoning)
       .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
       .flatMap(filteredReply)
 
@@ -422,7 +430,7 @@ final class OpenAIClient private[provider] (
             .flatMap(_ =>
               stream.terminal.toRight(OpenAIClient.unfinished(config.endpointUrl.map(_.asUrl).getOrElse(displayName)))
             )
-            .flatMap(responsesCompletion(_, adjustments))
+            .flatMap(responsesCompletion(_, adjustments, carried))
             .flatMap(c => call("response stream")(stream.finish(c.finishReason)).map(_ => c))
         }(
           successResponse = _ => Some(rawEvents.result()),

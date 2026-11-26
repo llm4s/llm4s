@@ -46,17 +46,39 @@ private[provider] object OpenAIReasoning {
    * `o4-mini` does. The registry is asked for the base as named - usually a dated snapshot such
    * as `o4-mini-2025-04-16` - then for it without its date, before the name fallback.
    */
-  def support(model: String, registry: ModelRegistryService): Support = {
+  def support(model: String, registry: ModelRegistryService): Support =
+    candidates(model, withFineTuneEntry = false).iterator
+      .map(registrySupport(_, registry))
+      .collectFirst { case Some(known) => known }
+      .getOrElse(if (namedLikeReasoningModel(baseModel(model))) Support.Reasoning else Support.Unknown)
+
+  /**
+   * The ids the registry is asked for `model`, in order: as named; for a fine-tune, with `withFineTuneEntry` the
+   * registry's `ft:<base>` entry (the bundled data has one per fine-tunable model, such as
+   * `ft:gpt-4o-mini-2024-07-18`), then the base as named and without its date.
+   */
+  private def candidates(model: String, withFineTuneEntry: Boolean): Seq[String] = {
     val base = baseModel(model)
     // Only a fine-tune's base is also tried undated: stripping a date-like tail from any other
     // id (an Azure deployment called `chat-0613`) could let the registry's fuzzy lookup match
     // an unrelated model.
-    val candidates = if (base == model) Seq(model) else Seq(model, base, undated(base)).distinct
-    candidates.iterator
-      .map(registrySupport(_, registry))
-      .collectFirst { case Some(known) => known }
-      .getOrElse(if (namedLikeReasoningModel(base)) Support.Reasoning else Support.Unknown)
+    if (base == model) Seq(model)
+    else {
+      val fineTuneEntry = if (withFineTuneEntry) Seq(s"ft:$base") else Nil
+      (Seq(model) ++ fineTuneEntry ++ Seq(base, undated(base))).distinct
+    }
   }
+
+  /**
+   * The registry's OpenAI or Azure entry that describes `model`, and the id it was found under: the model as named,
+   * or for a fine-tune the registry's `ft:<base>` entry, else its base's own entry (see [[candidates]]). `None` when
+   * none of these resolves, so a fine-tune of a model the registry does not know is unknown. [[OpenAIApiRouting]]
+   * routes by it.
+   */
+  def describingEntry(model: String, registry: ModelRegistryService): Option[(String, ModelMetadata)] =
+    candidates(model, withFineTuneEntry = true).iterator
+      .flatMap(id => openAIEntry(id, registry).map(id -> _))
+      .nextOption()
 
   /** The registry's answer for `model`, if it resolves `model` to an OpenAI or Azure entry. */
   private def registrySupport(model: String, registry: ModelRegistryService): Option[Support] =
@@ -129,16 +151,11 @@ private[provider] object OpenAIReasoning {
    * The registry's capabilities for `model`, tried as [[support]] tries it: as named, then a fine-tune's base, dated
    * and undated. `None` when the registry does not resolve it to an OpenAI or Azure model.
    */
-  def capabilities(model: String, registry: ModelRegistryService): Option[ModelCapabilities] = {
-    val base       = baseModel(model)
-    val candidates = if (base == model) Seq(model) else Seq(model, base, undated(base)).distinct
-    candidates.iterator
-      .flatMap(m =>
-        registry.lookup(ModelName(m)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString))
-      )
+  def capabilities(model: String, registry: ModelRegistryService): Option[ModelCapabilities] =
+    candidates(model, withFineTuneEntry = false).iterator
+      .flatMap(openAIEntry(_, registry))
       .map(_.capabilities)
       .nextOption()
-  }
 
   /** What to send as `reasoning_effort`, and what of `reasoning` and `thinking` was not sent as asked. */
   final case class EffortPlan(effort: Option[SdkReasoningEffort], adjustments: List[RequestAdjustment])

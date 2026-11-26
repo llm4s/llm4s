@@ -381,11 +381,11 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
 
   private def plain: Conversation = Conversation(Seq(UserMessage("go")))
 
-  private def refused(conversation: Conversation, body: String, stream: Boolean = false) =
+  private def refused(conversation: Conversation, body: String, stream: Boolean = false, status: Int = 400) =
     var out = Option.empty[Either[org.llm4s.error.LLMError, Completion]]
     LocalProviderTestServer.withServer("/") { exchange =>
       exchange.getRequestBody.readAllBytes()
-      LocalProviderTestServer.sendJsonResponse(exchange, 400, body)
+      LocalProviderTestServer.sendJsonResponse(exchange, status, body)
     } { baseUrl =>
       val client  = clientFor(baseUrl, Terra)
       val options = CompletionOptions(maxTokens = Some(64))
@@ -405,8 +405,35 @@ final class OpenAIResponsesReplaySpec extends AnyFlatSpec with Matchers with Eit
     error.message should include("could not be verified")
     error.message should include("keepReasoning")
     error.message should include("withKeepReasoning(false)")
+    error.message should include(".keepReasoning(false)")
+    error.message should include("llm4s.keep-reasoning=false")
     error.message should include("API key or organisation")
     info(error.message)
+  }
+
+  // the same rejection as a 200 reply whose status is `failed`
+  private lazy val failedReply =
+    reply(
+      "",
+      status = "failed",
+      extra =
+        """"error":{"code":"invalid_encrypted_content","message":"The encrypted content gAAA could not be verified."}"""
+    )
+
+  it should "say it when the rejection arrives as a failed reply, as a non-retryable 400-class error" in {
+    val error = refused(carrying, failedReply, status = 200)
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.isRetryable shouldBe false
+    error.message should include("could not be verified")
+    error.message should include("keepReasoning")
+  }
+
+  it should "leave a failed reply with that code to a request that carried no reasoning item without the hint" in {
+    val error = refused(plain, failedReply, status = 200)
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.isRetryable shouldBe false
+    error.message should include("could not be verified")
+    (error.message should not).include("keepReasoning")
   }
 
   it should "say it on a streamed request too" in {

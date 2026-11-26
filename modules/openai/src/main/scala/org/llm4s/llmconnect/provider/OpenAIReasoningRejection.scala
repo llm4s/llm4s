@@ -11,7 +11,8 @@ import scala.util.Try
 /**
  * OpenAI refusing a reasoning item a thread stored: the error says so, and what to do. The hint is added only to a
  * request that carried a `reasoning` input item, and only to an error whose code or message names encrypted content;
- * any other error is the one the client reports without it.
+ * any other error is the one the client reports without it. It reaches every way the rejection arrives: an HTTP 400,
+ * a 200 reply whose status is `failed`, and a stream's `error` event or `response.failed`.
  */
 private[provider] object OpenAIReasoningRejection:
 
@@ -22,7 +23,8 @@ private[provider] object OpenAIReasoningRejection:
     " OpenAI rejected reasoning stored on this thread. " +
       "Likely causes: it was produced with a different API key or organisation than the one now in use, " +
       "the model alias now points at another snapshot, or the thread is old. " +
-      "To continue, set keepReasoning = false on the provider section (or withKeepReasoning(false) on the OpenAIConfig), " +
+      "To continue, set keepReasoning = false on the provider section (or withKeepReasoning(false) on the OpenAIConfig, " +
+      ".keepReasoning(false) on the Java builder, llm4s.keep-reasoning=false in Spring), " +
       "or continue the thread from an edited turn."
 
   /** Whether the built request sends at least one `reasoning` input item. */

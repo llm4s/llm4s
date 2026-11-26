@@ -168,6 +168,28 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "bind the flat llm4s.api and llm4s.keep-reasoning through Spring's property binding" in {
+    runner
+      .withPropertyValues(
+        "llm4s.provider=openai",
+        "llm4s.model=gpt-4o",
+        "llm4s.api-key=sk-x",
+        "llm4s.api=chat-completions",
+        "llm4s.keep-reasoning=false"
+      )
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        val config = parsed(ctx.getBean(classOf[Llm4sProperties])).asInstanceOf[OpenAIConfig]
+        config.api shouldBe Some(org.llm4s.llmconnect.config.OpenAIApi.ChatCompletions)
+        config.keepReasoning shouldBe false
+      }
+    runner.withPropertyValues("llm4s.provider=openai", "llm4s.model=gpt-4o", "llm4s.api-key=sk-x").run { ctx =>
+      val config = parsed(ctx.getBean(classOf[Llm4sProperties])).asInstanceOf[OpenAIConfig]
+      config.api shouldBe None
+      config.keepReasoning shouldBe true
+    }
+  }
+
   it should "report the flat key that is missing when it fails to start" in {
     runner.withPropertyValues("llm4s.provider=openai", "llm4s.model=gpt-4o").run { ctx =>
       Iterator

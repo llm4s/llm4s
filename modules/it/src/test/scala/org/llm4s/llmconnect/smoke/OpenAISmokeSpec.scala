@@ -4,7 +4,7 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, ModelNotFoundError }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig, OpenAIReasoningSummary }
 import org.llm4s.llmconnect.{
   LLMClient,
@@ -531,7 +531,10 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     else s"unclear (${bodies.size} exchange(s))"
   }
 
-  it should "use the Responses API by default for a listed model and Chat Completions when told to or for an unlisted one" in {
+  // gpt-4o-mini is listed for /v1/responses by an llm4s patch (OpenAI served it there on 2026-11-26). No model this
+  // account can call is known to the registry and unlisted, so the "known but unlisted stays on Chat Completions"
+  // side is covered by OpenAIApiRoutingSpec and OpenAIApiRoutingGoldenSpec, not live.
+  it should "use the Responses API by default for listed models and Chat Completions when told to" in {
     Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
 
     val key = apiKey.get
@@ -550,7 +553,13 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
         lowOptions,
         Conversation(Seq(calculationMessage))
       ),
-      ("gpt-4o-mini, no api", "chat-completions", config(key, "gpt-4o-mini"), CompletionOptions(), conversation)
+      (
+        "gpt-4o-mini (listed by patch), no api",
+        "responses",
+        config(key, "gpt-4o-mini"),
+        CompletionOptions(),
+        conversation
+      )
     )
     cases.foreach { case (label, expected, cfg, options, ask) =>
       val (client, exchanges) = recordingClient(cfg)
@@ -573,8 +582,9 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
   // OpenAI refuses the search-preview models on /v1/responses; the registry knows them without that endpoint, so the
   // default should keep them on Chat Completions. OpenAI has been retiring them: when it answers that the model is
-  // deprecated or unknown, the case cancels and shows nothing about routing. It guards only against OpenAI's "not
-  // supported with the Responses API" answer, and checks the API used when the request succeeds.
+  // deprecated or does not exist, the case cancels and shows nothing about routing. Any other failure (an answer
+  // about the Responses API, a 401, 429, 5xx or timeout) fails the case with OpenAI's message; a success checks the
+  // API used.
   for (model <- Seq("gpt-4o-search-preview", "gpt-4o-mini-search-preview"))
     it should s"not send $model to the Responses API by default (cancels when OpenAI has retired the model)" in {
       Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
@@ -593,7 +603,11 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
         withClue(s"$model failed with an answer about the Responses API (wrong routing?): ${e.message}: ") {
           Seq("responses api", "/v1/responses", "not supported with the responses").exists(m.contains) shouldBe false
         }
-        cancel(s"$model is not served by OpenAI (${e.getClass.getSimpleName}): ${e.message.take(160)}")
+        val retired = e match
+          case _: ModelNotFoundError => true
+          case _                     => Seq("deprecated", "does not exist").exists(m.contains)
+        if retired then cancel(s"$model is not served by OpenAI (${e.getClass.getSimpleName}): ${e.message.take(160)}")
+        else fail(s"$model failed (${e.getClass.getSimpleName}): ${e.message}")
       }
       withClue(s"$model used the wrong API: ")(apiOf(exchanges) shouldBe "chat-completions")
     }
