@@ -5,8 +5,8 @@ description: "The LLM4S roadmap as of November 2026, with 1.0 released: current 
 search_title: "LLM4S roadmap: 1.0 and what comes after"
 parent: Reference
 nav_order: 5
-cites_open_issues: [874, 1281]
-cites_closed_issues: [1126, 1127, 1133, 1242, 1266, 2273, 2290]
+cites_open_issues: [874]
+cites_closed_issues: [1126, 1127, 1133, 1242, 1266, 1281, 2273, 2290]
 ---
 
 # LLM4S Roadmap
