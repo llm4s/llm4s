@@ -58,7 +58,9 @@ import scala.util.{ Try, Using }
  *     with each such character replaced by `_`, it leads outside. An argument holding a NUL character, or on Windows a
  *     `"` (which the argv parser and cmd.exe delete, so `"..\x` opens `..\x`), or, for a built-in run through
  *     `cmd.exe /c`, a character cmd.exe splits the argument at (`a.txt,..\x`, see [[cmdSyntaxRefusal]]), is refused
- *     (`ARGUMENT_NOT_ALLOWED`), and
+ *     (`ARGUMENT_NOT_ALLOWED`). A built-in's argument is also judged by each name cmd.exe may read in it: the parts
+ *     `copy` concatenates at `+` and the part before a `/` that starts a switch ([[cmdNames]], #3052). On Windows a
+ *     string starting with two separators (UNC, `\\?\`) is refused without being looked up. And
  *     a check that fails with an exception refuses the command rather than throwing it. A wildcard in the last
  *     component (`.*`, `.?`) can match the `..` entry, but `dir` only lists that entry and `type` / `findstr` cannot
  *     read a directory, so it is not refused; a wildcard is not allowed in an earlier component.
@@ -588,7 +590,7 @@ private[runner] object CommandPolicy {
     }
 
     runtimeForm.orElse(
-      candidates(program, args, options, switches)
+      candidates(program, args, options, switches, builtin)
         .flatMap { case (arg, candidate) =>
           candidateForm(candidate).map(notAllowed(program, arg, _))
         }
@@ -1098,7 +1100,8 @@ private[runner] object CommandPolicy {
     else {
       val budget   = new Budget(MaxPathSteps)
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
-      indexedCandidates(program, args, ProgramOptions.getOrElse(program, Options()), switches)
+      val builtin  = isWindows && WindowsBuiltins.contains(program)
+      indexedCandidates(program, args, ProgramOptions.getOrElse(program, Options()), switches, builtin)
         .map { case (_, arg, candidate) => arg -> namesGitMetadata(base, candidate, realRoot, budget) }
         .collectFirst {
           case (_, Left(_))       => tooCostly(program)
@@ -1185,7 +1188,7 @@ private[runner] object CommandPolicy {
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
       val strings =
         if (program == "sort" && !isWindows) sortCandidates(args)
-        else indexedCandidates(program, args, options, switches)
+        else indexedCandidates(program, args, options, switches, isWindows && WindowsBuiltins.contains(program))
       // An operand that names a link itself is judged by the directory holding it, not by where the link leads.
       val links: Set[Int] =
         if (isWindows) Set.empty
@@ -1194,7 +1197,8 @@ private[runner] object CommandPolicy {
         .collect { case (i, arg, candidate) if !links.contains(i) => (arg, candidate) }
         .map { case (arg, candidate) =>
           val judged =
-            verdict(workDir, candidate, realRoot, budget)
+            (if (isWindows && isUncForm(candidate)) Some(Outside) else None)
+              .orElse(verdict(workDir, candidate, realRoot, budget))
               .orElse(unparseableVerdict(workDir, candidate, isWindows, realRoot, budget))
               .orElse(
                 if (isWindows) msysDrivePath(candidate).flatMap(verdict(workDir, _, realRoot, budget)) else None
@@ -1208,6 +1212,17 @@ private[runner] object CommandPolicy {
         .orElse(if (program == "cp") cpDestinationRefusal(args, isWindows, workDir, realRoot, budget) else None)
         .orElse(sequenceRefusal(program, args, isWindows, workDir, budget))
     }
+
+  /**
+   * On Windows, a string starting with two separators (`\\server\share\x`, `//server/share/x`, `\\?\C:\x`,
+   * `\\.\C:\x`): a UNC path on another machine, or a name in the device namespace. It is outside the workspace,
+   * and the path rule refuses it without looking it up, so checking a command never makes the runner connect to a
+   * host the argument names (#3052).
+   */
+  private def isUncForm(candidate: String): Boolean = {
+    def separator(c: Char) = c == '\\' || c == '/'
+    candidate.length >= 2 && separator(candidate.charAt(0)) && separator(candidate.charAt(1))
+  }
 
   /**
    * The strings in `args` that the program might open as a path, each with the argument it came from.
@@ -1230,16 +1245,18 @@ private[runner] object CommandPolicy {
     program: String,
     args: Seq[String],
     options: Options,
-    switches: Boolean
+    switches: Boolean,
+    builtin: Boolean
   ): Iterator[(String, String)] =
-    indexedCandidates(program, args, options, switches).map { case (_, arg, candidate) => (arg, candidate) }
+    indexedCandidates(program, args, options, switches, builtin).map { case (_, arg, candidate) => (arg, candidate) }
 
   /** [[candidates]], each with the index in `args` of the argument it came from. */
   private def indexedCandidates(
     program: String,
     args: Seq[String],
     options: Options,
-    switches: Boolean
+    switches: Boolean,
+    builtin: Boolean
   ): Iterator[(Int, String, String)] = {
     // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
     // next-but-one tail, is checked; so is `D:file` in `/G:D:file`). For a validated native findstr switch,
@@ -1276,8 +1293,27 @@ private[runner] object CommandPolicy {
       }
 
     loop(args.toList.zipWithIndex, afterDashes = false, Nil).iterator.flatMap { case (i, arg, all) =>
-      all().map(candidate => (i, arg, candidate))
+      val strings = if (builtin) all().flatMap(c => Iterator.single(c) ++ cmdNames(c)) else all()
+      strings.map(candidate => (i, arg, candidate))
     }
+  }
+
+  /**
+   * The other names cmd.exe may read in a built-in's argument `arg`, besides `arg` itself (#3052). `copy` splits a
+   * source at `+` and concatenates the parts (`copy a.txt+\Windows\win.ini out.txt` reads `\Windows\win.ini`), so
+   * every part between `+` signs is a name; this is applied to every built-in, which refuses only a part that leads
+   * outside. A built-in also reads an unquoted `/` inside an argument as the start of a switch (`dir ../w` lists `..`
+   * wide), so the part before an argument's (or a part's) first `/`, when it is not at the start, is a name too.
+   */
+  private[runner] def cmdNames(arg: String): Seq[String] = {
+    val parts = arg +: arg.split('+').toSeq.filter(_.nonEmpty)
+    parts
+      .flatMap { part =>
+        val slash = part.indexOf('/')
+        if (slash > 0) Seq(part, part.substring(0, slash)) else Seq(part)
+      }
+      .distinct
+      .filterNot(_ == arg)
   }
 
   /**
