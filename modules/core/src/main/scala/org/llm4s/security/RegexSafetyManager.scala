@@ -21,10 +21,11 @@ import scala.util.control.NonFatal
  *      match, without relying on thread interruption or wall-clock timeouts.
  *
  * The step bound is the real security boundary, and [[safeCompile]]'s structural check is what makes it sound
- * (#3051): the bound counts reads, and the engine could otherwise work without reading, in a loop whose body matches
- * the empty string (`(){2000000000}b`) or across empty alternatives at the end of the input (`(?:|)(?:|)...b`).
- * With those shapes refused, every loop iteration reads a character and the work between two reads is bounded by
- * the pattern's size. The shape blocklist is only a fast early-reject and must not be relied on for safety.
+ * (#3051): the bound counts reads, and the engine could otherwise do unbounded work without reading, in many required
+ * iterations of a loop whose body matches the empty string (`(){2000000000}b`) or across many ways of matching the
+ * empty string at the end of the input (`(?:|)(?:|)...b`). With every pattern refused that can take more than 1000
+ * steps at one position without a read, the work between two reads is bounded. The shape blocklist is only a fast
+ * early-reject and must not be relied on for safety.
  *
  * Every refusal is a `Left` of [[org.llm4s.error.ValidationError]], for the field `pattern` or `input`; nothing
  * here throws.
@@ -69,10 +70,12 @@ object RegexSafetyManager {
    * alternatives do not overlap, such as `(foo|bar)+`, compiles. The pre-screen is only an early reject: bound
    * matching with [[safeFind]].
    *
-   * It also returns a `Left` for a pattern whose matching the step bound of [[safeFind]] could not bound (#3051): a
-   * quantifier applied to something that can match the empty string (`(a?)*`, `(){1000}`, `\b+`), an alternation
-   * with more than one alternative that can (`(a?|b?)`), or comments mode or canonical equivalence (`(?x)`,
-   * `Pattern.COMMENTS`, `Pattern.CANON_EQ`), whose syntax the check does not follow.
+   * It also returns a `Left` for a pattern whose matching the step bound of [[safeFind]] could not bound (#3051): one
+   * that can take more than 1000 steps at one position without reading the input, such as many required iterations
+   * of something that can match the empty string (`(){5000}`) or many ways in a row to match it (`(?:|)` or
+   * `(?:a?)*` repeated); and comments mode or canonical equivalence (`(?x)`, `Pattern.COMMENTS`,
+   * `Pattern.CANON_EQ`), whose syntax the check does not follow. A bounded use of an empty-matching part, such as
+   * `(\s*)?`, `(a|)?` or `(a?)*`, compiles.
    *
    * @param pattern the regular expression to compile
    * @param flags `java.util.regex.Pattern` flags, such as `Pattern.CASE_INSENSITIVE`; 0 by default

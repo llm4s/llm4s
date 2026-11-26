@@ -150,10 +150,11 @@ other request waits for them. Each is bounded ([#3051](https://github.com/llm4s/
 
 - **Time.** A request that is still matching 10 seconds after it started fails with `TIMEOUT`; a `modifyFile` that does
   changes nothing.
-- **Pattern shape.** A regex is refused, and searched or replaced as literal text instead, when it has a quantifier
-  over something that can match the empty string (`(a?)*`, `(){1000}`), an alternation with more than one such
-  alternative (`(a?|b?)`), a counted repetition above 1000, or comments mode (`(?x)`). These are the shapes whose
-  matching the per-line step budget could not bound, since the budget counts reads of the line.
+- **Pattern shape.** A regex is refused, and searched or replaced as literal text instead, when it can take more
+  than 1000 steps at one position without reading the line: many required iterations of something that can match
+  the empty string (`(){1000}`), or many ways in a row to match it (`(?:|)` or `(?:a?)*` repeated). The per-line
+  step budget counts reads, so it could not bound those. A counted repetition above 1000 and comments mode (`(?x)`)
+  are refused too. A bounded use such as `(\s*)?` or `(a?)*` is fine.
 - **Response size.** `contextLines` is clamped to 0..20. A matched line longer than 1000 characters is cut to 1000 around
   its first match, a context line to its first 1000. Matches stop being added, with `isTruncated` set, before their
   text would exceed `maxOutputSize`.

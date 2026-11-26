@@ -10,9 +10,9 @@ import scala.util.control.NonFatal
  * ReDoS is mitigated by three complementary defences:
  *
  *   1. A pre-screen ([[safeCompile]]) rejects null/empty/oversized patterns, well-known catastrophic-backtracking
- *      shapes, and every pattern [[RegexShape]] cannot prove bounded: a quantifier over something that can match the
- *      empty string, an alternation with more than one such alternative, or a counted repetition above
- *      [[MaxRepetition]] (#3051).
+ *      shapes, every pattern [[RegexShape]] finds can take more than 1000 steps at one position without reading
+ *      (many required iterations of an empty-matching body, or many ways in a row to match empty), and a counted
+ *      repetition above [[MaxRepetition]] (#3051).
  *   2. A hard execution bound ([[safeFind]]/[[safeReplaceAll]]/[[safeReplaceFirst]]) caps the number of character
  *      accesses the backtracking engine may perform for a single operation. [[RegexShape]] is what makes this sound:
  *      with its shapes refused, the engine cannot do unbounded work between two reads.

@@ -8,27 +8,43 @@ import scala.util.boundary.break
 /**
  * The structural check that makes the step budget of [[WorkspaceRegexSafetyManager]] a sound bound (#3051).
  *
- * The budget counts reads of the input, so it bounds a match only if the engine cannot do unbounded work between two
- * reads. It can when a loop's body can match the empty string: `(){2000000000}b` iterates two billion times without
- * reading a character. It can also at the end of the input, where every atom fails without a read: there
- * `(?:|)(?:|)...(?:|)b` tries 2^n empty paths on an empty line. This check refuses both, so every iteration of every
- * loop consumes, and so reads, at least one character, and every part of the pattern has at most one way to match
- * the empty string. The work between two reads is then bounded by the pattern's size.
+ * The budget counts reads of the input, so it bounds a match only if the engine cannot do much work between two
+ * reads. Two kinds of pattern can:
+ *   - a repetition whose body can match the empty string and whose count the engine must reach:
+ *     `(){2000000000}b` iterates two billion times without reading a character;
+ *   - many ways to match the empty string, tried one after another where every atom fails without a read (at the end
+ *     of the input, or before a `$`): `(?:|)` repeated 40 times then `b` tries 2^40 paths on an empty line, and
+ *     `(?:a?)*` repeated so does too.
  *
- * It refuses:
- *   - a quantifier (`?`, `*`, `+`, `{n,m}`) applied to something that can match the empty string;
- *   - an alternation with more than one alternative that can match the empty string;
- *   - a counted repetition above `maxRepetition`;
+ * So the check estimates, for each position, how many steps the engine can take there without reading, and refuses a
+ * pattern whose estimate exceeds [[MaxSilentSteps]]. Each part has two numbers: `e`, the ways it can match the empty
+ * string, and `f`, the steps it can take at one position without reading (each atom, assertion or alternative tried
+ * counts one). A sequence multiplies: what follows a part is tried once for each way that part matched empty. An
+ * alternation adds. A repetition over a body that cannot match empty adds at most one way (skipping it), since every
+ * iteration reads. Over a body that can, the required iterations are counted one by one, each optional iteration of
+ * a bounded `{n,m}` and an unbounded `*`, `+`, `{n,}` doubles the ways, as `java.util.regex` was measured to (it ends
+ * an unbounded loop on an iteration that matched empty, so such a loop counts once), and a `?` keeps them as they are
+ * (measured: the JDK does not try the skip after the body matched empty). The estimate is checked at every point a
+ * match can resume after a read: each suffix of every sequence.
+ *
+ * The threshold is 1000 steps, the size of the longest pattern accepted: so between two counted reads the engine does
+ * at most about one more walk over a pattern of the longest size, and the step budget stays a bound on the time up to
+ * that factor. An ordinary pattern, even one with `(\s*)?` or `(a|)?` in it, estimates a few steps; what is refused
+ * grows exponentially or with a large required count.
+ *
+ * It also refuses:
+ *   - a counted repetition above `maxRepetition` (the workspace runner's cap; core passes `Int.MaxValue`);
  *   - comments mode (`x`) and canonical equivalence (`c`, `CANON_EQ`), whose syntax this check does not follow.
  *
- * Something that can match the empty string is an empty group, an anchor or boundary (`^`, `$`, `\b`, `\A`, ...), a
- * lookaround, a quantified item whose minimum is 0, a backreference to a group that can, and anything made only of
- * those. The pattern is parsed after `Pattern.compile` accepted it, so its syntax is valid; anything this parser does
- * not follow is refused rather than guessed at.
+ * The pattern is parsed after `Pattern.compile` accepted it, so its syntax is valid; anything this parser does not
+ * follow is refused rather than guessed at.
  *
  * NOTE: kept in step with `org.llm4s.security.RegexShape` in `core`, which this module cannot depend on.
  */
 private[runner] object RegexShape {
+
+  /** The most steps a pattern may take at one position without reading the input. */
+  val MaxSilentSteps = 1000L
 
   /** `None` when `pattern`, compiled with `flags`, has a bounded shape; otherwise the reason it is refused. */
   def refusal(pattern: String, flags: Int, maxRepetition: Int): Option[String] =
@@ -43,6 +59,27 @@ private[runner] object RegexShape {
 
   private val CommentsMode = "Comments mode (the `x` flag) is not supported in a pattern"
   private val CanonEq      = "Canonical equivalence (the `c` flag, CANON_EQ) is not supported in a pattern"
+
+  private val TooManySilentSteps =
+    s"The pattern can take more than $MaxSilentSteps steps at one position without reading the input, which the " +
+      "step budget cannot bound: a repetition of something that can match the empty string, such as `(){5000}`, or " +
+      "many ways to match it in a row, such as `(?:|)` or `(?:a?)*` repeated"
+
+  /** Ways to match the empty string (`e`) and steps without a read (`f`), both saturating just above the limit. */
+  final private case class Cost(e: Long, f: Long) {
+    def nullable: Boolean = e > 0
+  }
+
+  private val Cap = MaxSilentSteps + 1
+
+  private def add(a: Long, b: Long): Long = math.min(Cap, a + b)
+  private def mul(a: Long, b: Long): Long = if (a == 0 || b == 0) 0 else math.min(Cap, a * b)
+
+  /** `first` then `rest`: what follows is tried once for each way `first` matched empty. */
+  private def andThen(first: Cost, rest: Cost): Cost = Cost(mul(first.e, rest.e), add(first.f, mul(first.e, rest.f)))
+
+  private val Consuming = Cost(0, 1)
+  private val ZeroWidth = Cost(1, 1)
 
   /**
    * `pattern` with each `\Q...\E` quotation replaced by the escaped characters it stands for, as `Pattern` itself does
@@ -76,7 +113,7 @@ private[runner] object RegexShape {
       out.toString
     }
 
-  /** A recursive-descent reading of `src` that answers, for each part, whether it can match the empty string. */
+  /** A recursive-descent reading of `src` that gives each part its [[Cost]]. */
   final private class Parser(src: String, maxRepetition: Int)(using boundary.Label[Option[String]]) {
     private var pos          = 0
     private var groupsOpened = 0
@@ -84,6 +121,8 @@ private[runner] object RegexShape {
     private val named        = mutable.Map.empty[String, Int]
 
     private def refuse(reason: String): Nothing = break(Some(reason))
+
+    private def checked(c: Cost): Cost = if (c.f > MaxSilentSteps) refuse(TooManySilentSteps) else c
 
     private def peek: Int = if (pos < src.length) src.charAt(pos).toInt else -1
 
@@ -113,77 +152,91 @@ private[runner] object RegexShape {
       if (pos < src.length) refuse(s"Unexpected '${src.charAt(pos)}' at index $pos")
     }
 
-    /** Alternatives separated by `|`; at most one of them may match the empty string. */
-    private def alternation(): Boolean = {
-      var empty = if (sequence()) 1 else 0
+    /** Alternatives separated by `|`: each is tried, a step even when empty, so their ways and steps add. */
+    private def alternation(): Cost = {
+      def tried(c: Cost) = Cost(c.e, add(c.f, 1))
+      var cost           = tried(sequence())
       while (peek == '|') {
         pos += 1
-        if (sequence()) empty += 1
+        val alternative = tried(sequence())
+        cost = Cost(add(cost.e, alternative.e), add(cost.f, alternative.f))
       }
-      if (empty > 1)
-        refuse(
-          "An alternation with more than one alternative that can match the empty string, such as `(a?|b?)` or " +
-            "`(|x|)`, is not supported"
-        )
-      empty > 0
+      checked(cost)
     }
 
-    private def sequence(): Boolean = {
-      var empty = true
-      while (peek != -1 && peek != '|' && peek != ')')
-        if (!quantified()) empty = false
-      empty
+    /** Parts in a row; every suffix is checked, since a match can resume at any part after a read. */
+    private def sequence(): Cost = {
+      val parts = mutable.ArrayBuffer.empty[Cost]
+      while (peek != -1 && peek != '|' && peek != ')') parts += quantified()
+      parts.foldRight(Cost(1, 0))((part, rest) => checked(andThen(part, rest)))
     }
 
-    private def quantified(): Boolean = {
-      var empty = atom()
+    private def quantified(): Cost = {
+      var cost = atom()
       while (peek == '?' || peek == '*' || peek == '+' || peek == '{') {
-        if (empty)
-          refuse(
-            "A quantifier applied to something that can match the empty string, such as `(a?)*` or `(){1000}`, " +
-              "is not supported"
-          )
-        empty = quantifier() == 0
+        val question   = peek == '?'
+        val (min, max) = quantifier()
+        cost = checked(repeated(cost, min, max, question))
         if (peek == '?' || peek == '+') pos += 1 // reluctant or possessive
       }
-      empty
+      cost
     }
 
-    /** One quantifier; its minimum. */
-    private def quantifier(): Long =
+    /** `body{min,max}` (`max` None when unbounded); `question` for a `?`. */
+    private def repeated(body: Cost, min: Long, max: Option[Long], question: Boolean): Cost =
+      if (!body.nullable)
+        // every iteration reads; at one position only the first is tried, and the loop can be skipped when min is 0
+        Cost(if (min == 0) 1 else 0, add(body.f, 1))
+      else if (question) Cost(body.e, add(body.f, 1))
+      else {
+        // each required iteration in turn, then each optional one, which may be taken or skipped
+        val optional = Cost(add(body.e, 1), add(body.f, 1))
+        val extra    = max.fold(1L)(m => m - min) // an unbounded loop ends on an iteration that matched empty
+        var cost     = Cost(1, 0)
+        var i        = 0L
+        while (i < extra && cost.f <= MaxSilentSteps) { cost = andThen(optional, cost); i += 1 }
+        i = 0L
+        while (i < min && cost.f <= MaxSilentSteps) { cost = andThen(body, cost); i += 1 }
+        cost
+      }
+
+    /** One quantifier: its minimum and its maximum, None when unbounded. */
+    private def quantifier(): (Long, Option[Long]) =
       next() match {
-        case '?' | '*' => 0L
-        case '+'       => 1L
+        case '?' => (0L, Some(1L))
+        case '*' => (0L, None)
+        case '+' => (1L, None)
         case _ =>
           val bounds = takeUntil('}').split(",", -1).toList
           val parsed = bounds.map(b => if (b.isEmpty) None else b.toLongOption.orElse(refuse(s"Bad repetition {$b}")))
           parsed.flatten.find(_ > maxRepetition).foreach { n =>
             refuse(s"A counted repetition above $maxRepetition, such as {$n}, is not supported")
           }
-          parsed.headOption.flatten.getOrElse(refuse("A counted repetition needs a minimum"))
+          val min = parsed.headOption.flatten.getOrElse(refuse("A counted repetition needs a minimum"))
+          (min, if (parsed.size == 1) Some(min) else parsed(1))
       }
 
-    /** One atom; whether it can match the empty string. */
-    private def atom(): Boolean =
+    /** One atom and its cost. */
+    private def atom(): Cost =
       next() match {
         case '('       => group()
-        case '['       => charClass(); false
+        case '['       => charClass(); Consuming
         case '\\'      => escape()
-        case '^' | '$' => true
+        case '^' | '$' => ZeroWidth
         case c if c.isHighSurrogate && peek != -1 && peek.toChar.isLowSurrogate =>
-          pos += 1; false
-        case _ => false
+          pos += 1; Consuming
+        case _ => Consuming
       }
 
-    private def group(): Boolean =
+    private def group(): Cost =
       if (peek != '?') capturing(None)
       else {
         pos += 1
         next() match {
           case ':' | '>' => closed(alternation())
-          case '=' | '!' => closed(alternation()); true
+          case '=' | '!' => lookaround()
           case '<' if peek == '=' || peek == '!' =>
-            pos += 1; closed(alternation()); true
+            pos += 1; lookaround()
           case '<' => capturing(Some(takeUntil('>')))
           case _ =>
             pos -= 1
@@ -191,34 +244,41 @@ private[runner] object RegexShape {
         }
       }
 
+    /** Zero-width; its body is tried each time it is reached. */
+    private def lookaround(): Cost = {
+      val body = closed(alternation())
+      checked(Cost(1, add(body.f, 1)))
+    }
+
     /** `(?flags)`, zero-width, or `(?flags:...)`, a group. */
-    private def inlineFlags(): Boolean = {
+    private def inlineFlags(): Cost = {
       val flags = new StringBuilder
       while (peek != -1 && "idmsuxUc-".indexOf(peek) >= 0) flags.append(next())
       if (flags.indexOf("x") >= 0) refuse(CommentsMode)
       if (flags.indexOf("c") >= 0) refuse(CanonEq)
       next() match {
-        case ')' => true
+        case ')' => Cost(1, 0)
         case ':' => closed(alternation())
         case c   => refuse(s"Unsupported group construct '(?${flags}$c'")
       }
     }
 
-    private def capturing(name: Option[String]): Boolean = {
+    private def capturing(name: Option[String]): Cost = {
       groupsOpened += 1
       val n = groupsOpened
       name.foreach(named(_) = n)
-      val empty = closed(alternation())
-      nullable(n) = empty
-      empty
+      val cost = closed(alternation())
+      nullable(n) = cost.nullable
+      cost
     }
 
-    private def closed(empty: Boolean): Boolean = { expect(')'); empty }
+    private def closed(cost: Cost): Cost = { expect(')'); cost }
 
     /** A backreference can match the empty string unless its group is closed and cannot. */
-    private def backreference(group: Option[Int]): Boolean = group.flatMap(nullable.get).getOrElse(true)
+    private def backreference(group: Option[Int]): Cost =
+      if (group.flatMap(nullable.get).getOrElse(true)) ZeroWidth else Consuming
 
-    private def escape(): Boolean =
+    private def escape(): Cost =
       next() match {
         case d if d >= '1' && d <= '9' =>
           // as `Pattern` reads it: further digits while the number still names a group opened so far
@@ -231,24 +291,24 @@ private[runner] object RegexShape {
         case '0' =>
           var digits = 0
           while (digits < 3 && peek >= '0' && peek <= '7') { pos += 1; digits += 1 }
-          false
+          Consuming
         case 'k' =>
           expect('<')
           backreference(named.get(takeUntil('>')))
         case 'x' =>
           if (peek == '{') skipPast('}') else skip(2)
-          false
-        case 'u' => skip(4); false
-        case 'c' => skip(1); false
-        case 'N' => skipPast('}'); false
+          Consuming
+        case 'u' => skip(4); Consuming
+        case 'c' => skip(1); Consuming
+        case 'N' => skipPast('}'); Consuming
         case 'p' | 'P' =>
           if (peek == '{') skipPast('}') else skip(1)
-          false
+          Consuming
         case 'b' =>
           if (peek == '{') skipPast('}')
-          true
-        case 'B' | 'A' | 'G' | 'Z' | 'z' => true
-        case _                           => false // a class such as \d or \R, or an escaped character
+          ZeroWidth
+        case 'B' | 'A' | 'G' | 'Z' | 'z' => ZeroWidth
+        case _                           => Consuming // a class such as \d or \R, or an escaped character
       }
 
     /** A character class, after its `[`: a `]` first in it (after any `^`) is a literal, as `Pattern` reads it. */

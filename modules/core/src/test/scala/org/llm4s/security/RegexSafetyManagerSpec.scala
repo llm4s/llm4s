@@ -99,18 +99,19 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     RegexSafetyManager.safeFind(compiled, "GETPOST /") shouldBe Right(true)
   }
 
-  // #3051: the budget counts reads, and these shapes work without reading. `(){2000000000}b` took 18 s on a
-  // 40-character line with 40 reads counted; `(?:|)` repeated tries 2^n empty paths on an empty input.
-  it should "refuse a pattern whose matching the step budget cannot bound" in {
+  // #3051: the budget counts reads, and these patterns work without reading. `(){2000000000}b` took 18 s on a
+  // 40-character line with 40 reads counted; `(?:|)` repeated tries 2^n empty paths on an empty input, as does
+  // `(?:a?)*` repeated (measured on JDK 21: 25 copies took 366 ms on an empty string with no read, 18 took 13 ms).
+  it should "refuse a pattern that can take many steps without reading the input" in {
     Seq(
       "(){2000000000}b",
-      "(?:a?){3}b",
-      "(?=a)*b",
-      "\\b+",
-      "(a?)\\1+",
-      "(a?)\\Q\\E*",
+      "(){5000}b",
+      "(?:(){100}){100}",
       "(?:|)" * 40 + "b",
-      "(a?|b?)c",
+      "(?:(?=x)|)" * 30 + "b",
+      "(?:a?)*" * 20 + "b",
+      "(?:a?){0,40}b",
+      "(a?)\\Q\\E{0,40}",
       "(?x)a"
     ).foreach { pattern =>
       withClue(pattern) {
@@ -122,8 +123,26 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     RegexSafetyManager.safeCompile("a", Pattern.COMMENTS).isLeft shouldBe true
   }
 
-  it should "accept ordinary patterns, a long counted repetition among them" in {
-    Seq("^[a-z0-9_-]+$", "^.{0,4096}$", "(\\w)\\1+", "(foo|)bar", "^\\+?\\d{1,3}(?:[ -]?\\d{2,4})?$", "[^/]*\\.md")
-      .foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
+  it should "accept ordinary patterns, schema-style optional and empty-matching parts among them" in {
+    Seq(
+      "^[a-z0-9_-]+$",
+      "^.{0,4096}$",
+      "(\\w)\\1+",
+      "(foo|)bar",
+      "^\\+?\\d{1,3}(?:[ -]?\\d{2,4})?$",
+      "[^/]*\\.md",
+      "(\\s*)?",
+      "^(\\s*)?$",
+      "(a|)?",
+      "^(\\s*,\\s*)?$",
+      "^(?:\\s*\\w+\\s*)?$",
+      "^(-?\\d*)?(\\.\\d*)?$",
+      "^(\\+\\d{1,3}\\s?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}$",
+      "^(\\w*)(\\s*)(\\w*)$",
+      "(a?)*b",
+      "(a?|b?)c",
+      "\\b+",
+      ".{0,4096}(\\s*)?.{0,4096}"
+    ).foreach(pattern => withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
   }
 }

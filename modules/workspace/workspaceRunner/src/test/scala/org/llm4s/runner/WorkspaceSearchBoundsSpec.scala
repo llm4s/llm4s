@@ -105,10 +105,11 @@ class WorkspaceSearchBoundsSpec extends AnyFlatSpec with TestTimeLimit with Matc
     val regex = RegexReplaceOperation(pattern = "x*", replacement = "R" * 1000, flags = Some("g"))
     refusal(workspace().modifyFile("grow.txt", List(regex))).code shouldBe "SIZE_LIMIT_EXCEEDED"
     Files.readAllBytes(root.resolve("grow.txt")) shouldBe before
-    // the literal fallback is bounded the same way: a refused pattern is replaced as text, here 1100 times
-    write("grow-literal.txt", Seq("(){5}" * 1100))
+    // the literal fallback is bounded the same way: a refused pattern is replaced as text, here 200 times
+    WorkspaceRegexSafetyManager.safeCompile("(){1000}").isLeft shouldBe true
+    write("grow-literal.txt", Seq("(){1000}" * 200))
     val literalBefore = Files.readAllBytes(root.resolve("grow-literal.txt"))
-    val literal       = RegexReplaceOperation(pattern = "(){5}", replacement = "R" * 1000, flags = Some("g"))
+    val literal       = RegexReplaceOperation(pattern = "(){1000}", replacement = "R" * 6000, flags = Some("g"))
     refusal(workspace().modifyFile("grow-literal.txt", List(literal))).code shouldBe "SIZE_LIMIT_EXCEEDED"
     Files.readAllBytes(root.resolve("grow-literal.txt")) shouldBe literalBefore
   }

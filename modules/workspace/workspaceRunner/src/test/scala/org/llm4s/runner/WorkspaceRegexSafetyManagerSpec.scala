@@ -86,30 +86,35 @@ class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit wit
 
   // #3051: the step budget counts reads, so a loop whose body matches the empty string ran unbounded under it:
   // `(){2000000000}b` took 18 s on a 40-character line with 40 reads counted.
-  "WorkspaceRegexSafetyManager.safeCompile" should "refuse a quantifier over something that can match the empty string" in {
+  "WorkspaceRegexSafetyManager.safeCompile" should "refuse a pattern that can take many steps without reading" in {
     Seq(
-      "(){2000000000}b",
-      "(){1000}b",
-      "(?:){5}",
-      "(a?){3}b",
-      "(?:a|){2,}b",
-      "(?:a*)?",
-      "(?=a)*b",
-      "\\b+",
-      "^*a",
-      "(a)?\\2*",
-      "(a?)\\1+",
-      "(?<n>a?)\\k<n>{2}",
-      "(a?)\\Q\\E*", // `\Q\E` is removed before parsing, so this is `(a?)*`
-      "((?:)|x)+"
+      "(){2000000000}b", // over the count cap, and a required count over an empty body
+      "(){1000}b",       // within the cap, but 1000 required iterations that read nothing
+      "(?:(){100}){100}",
+      // on an empty line every one of 2^n empty paths is tried without a single read
+      "(?:|)" * 40 + "b",
+      "(?:(?=x)|)" * 30 + "b",
+      "(?:a?)*" * 20 + "b",
+      "(?:a?){0,40}b",
+      "(a?)\\Q\\E{0,40}" // `\Q\E` is removed before parsing, so this is `(a?){0,40}`
     ).foreach(pattern => withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true))
   }
 
-  it should "refuse an alternation with more than one alternative that can match the empty string" in {
-    // on an empty line every one of 2^n empty paths is tried without a single read
-    Seq("(?:|)" * 40 + "b", "(?:(?=x)|)" * 30 + "b", "(a?|b?)c", "(|x|)", "a?|b?").foreach { pattern =>
-      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
-    }
+  it should "accept a repetition or alternation of something that can match the empty string, when it is bounded" in {
+    // a `?`, a small count or one unbounded loop over a body that matches empty takes a few steps without reading
+    Seq(
+      "(\\s*)?",
+      "(a|)?",
+      "^(\\s*,\\s*)?$",
+      "(a?)*b",
+      "(?:a|){2,}b",
+      "(a?){3}b",
+      "\\b+",
+      "(a?)\\1+",
+      "(|x|)",
+      "(a?|b?)c",
+      "(?:a?)?" * 30 + "b"
+    ).foreach(pattern => withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isRight shouldBe true))
   }
 
   it should "refuse a counted repetition above the limit, comments mode and canonical equivalence" in {
