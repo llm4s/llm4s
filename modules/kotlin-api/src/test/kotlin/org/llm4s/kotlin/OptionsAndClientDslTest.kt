@@ -192,12 +192,12 @@ class OptionsAndClientDslTest {
 
     @Test
     fun `a bad api or reasoning summary throws LLMException naming the field`() {
-        val api = assertFailsWith<LLMException> { Llm4s.openAi { apiKey = "k"; model = "gpt-4o"; api = "chat" } }
-        assertTrue(api.message!!.contains("api") && api.message!!.contains("chat-completions"), api.message)
-        val summary = assertFailsWith<LLMException> {
+        val apiError = assertFailsWith<LLMException> { Llm4s.openAi { apiKey = "k"; model = "gpt-4o"; api = "chat" } }
+        assertTrue(apiError.message!!.contains("api") && apiError.message!!.contains("chat-completions"), apiError.message)
+        val summaryError = assertFailsWith<LLMException> {
             Llm4s.openAi { apiKey = "k"; model = "gpt-4o"; reasoningSummary = "long" }
         }
-        assertTrue(summary.message!!.contains("reasoningSummary") && summary.message!!.contains("detailed"), summary.message)
+        assertTrue(summaryError.message!!.contains("reasoningSummary") && summaryError.message!!.contains("detailed"), summaryError.message)
     }
 
     @Test
