@@ -246,7 +246,10 @@ final class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = openAIAdjustments(options, transformed)
+      adjustments = openAIAdjustments(options, transformed) ++
+        (if (api == OpenAIApi.Responses)
+           OpenAIResponsesRequest.adjustments(transformed.options, omitsSampling(transformed.options))
+         else Nil)
       transformedConversation = conversation.withMessages(transformed.messages)
       exchange <- api match {
         case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformed.options, adjustments)
@@ -304,9 +307,9 @@ final class OpenAIClient private[provider] (
   private def responsesSettings(options: CompletionOptions): OpenAIResponsesRequest.Settings =
     OpenAIResponsesRequest.Settings(
       model = model,
-      providerName = providerName,
+      provider = provider,
       effort = reasoningEffortFor(options),
-      serviceTier = None, // the Responses form of OpenAIServiceTier arrives with the rest of the request mapping
+      serviceTier = OpenAIServiceTier.onResponses(serviceTierPlan(options)._1),
       omitsSampling = omitsSampling(options)
     )
 

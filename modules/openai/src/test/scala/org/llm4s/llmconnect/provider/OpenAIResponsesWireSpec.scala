@@ -3,7 +3,26 @@ package org.llm4s.llmconnect.provider
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.error.{ LLMError, UnsupportedContentPartError }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  CompletionOptions,
+  ContentPart,
+  Conversation,
+  ReasoningEffort,
+  RequestAdjustment,
+  RequestOption,
+  ResponseFormat,
+  ServiceTier,
+  SystemMessage,
+  ThinkingBlock,
+  ToolCall,
+  ToolCallId,
+  ToolMessage,
+  UserMessage
+}
+import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer
@@ -12,6 +31,7 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
@@ -115,4 +135,206 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
       error.asInstanceOf[ServiceError].status shouldBe 404
       requests.get() shouldBe 1
     }
+  }
+
+  // ---- the whole request ----
+
+  final private case class Sent(result: Either[LLMError, org.llm4s.llmconnect.model.Completion], seen: Option[Seen]):
+    def body: ujson.Value                                 = seen.getOrElse(fail("no request reached the server")).body
+    def completion: org.llm4s.llmconnect.model.Completion = result.value
+
+  private def send(
+    conversation: Conversation,
+    options: CompletionOptions = CompletionOptions(),
+    model: String = "gpt-4o"
+  ): Sent =
+    val seen = new AtomicReference[Seen]()
+    var out  = Option.empty[Sent]
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, reply(outputMessage("ok")))
+    } { baseUrl =>
+      val client = responsesClient(baseUrl, model)
+      val result = client.complete(conversation, options)
+      client.close()
+      out = Some(Sent(result, Option(seen.get())))
+    }
+    out.get
+
+  private lazy val bytes = IArray[Byte](1, 2, 3)
+
+  private lazy val weatherTool =
+    org.llm4s.toolapi
+      .ToolBuilder[String](
+        "get_weather",
+        "Weather of a city",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
+      )
+      .withHandler(_ => Right("ok"))
+      .build()
+      .fold(e => fail(e.formatted), identity)
+
+  it should "send a system message as an input message with role system, in its position" in {
+    val sent = send(Conversation(Seq(UserMessage("a"), SystemMessage("be brief"), UserMessage("b"))))
+    sent.body("input").arr.map(_("role").str).toSeq shouldBe Seq("user", "system", "user")
+    sent.body("input")(1)("content").str shouldBe "be brief"
+    sent.body.obj.keySet should not contain "instructions"
+  }
+
+  it should "send an image by URL and inline, and a PDF inline and by file id" in {
+    val parts = Vector(
+      ContentPart.Text("look"),
+      ContentPart.image(MediaSource.Url(URI.create("https://example.com/cat.png")), MediaType.Png).value,
+      ContentPart.image(MediaSource.Inline(bytes), MediaType.Png).value,
+      ContentPart.document(MediaSource.Inline(bytes), MediaType.Pdf).value,
+      ContentPart.document(MediaSource.ProviderFile("openai", "file-1"), MediaType.Pdf).value
+    )
+    val sent      = send(Conversation(Seq(UserMessage(parts))))
+    val sentParts = sent.body("input")(0)("content").arr
+    sentParts.map(_("type").str).toSeq shouldBe
+      Seq("input_text", "input_image", "input_image", "input_file", "input_file")
+    sentParts(0)("text").str shouldBe "look"
+    sentParts(1)("image_url").str shouldBe "https://example.com/cat.png"
+    sentParts(2)("image_url").str should startWith("data:image/png;base64,")
+    sentParts(3)("file_data").str should startWith("data:application/pdf;base64,")
+    sentParts(3)("filename").str shouldBe "document.pdf"
+    sentParts(4)("file_id").str shouldBe "file-1"
+  }
+
+  it should "refuse a part it cannot send with an UnsupportedContentPartError, before any request" in {
+    val pdfUrl = ContentPart.document(MediaSource.Url(URI.create("https://x.example/r.pdf")), MediaType.Pdf).value
+    val sent   = send(Conversation(Seq(UserMessage(Vector(pdfUrl)))))
+    sent.result.left.value shouldBe UnsupportedContentPartError(ProviderId("openai"), pdfUrl.kind, "user")
+    sent.seen shouldBe None
+  }
+
+  private lazy val call1 = ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Paris"))
+  private lazy val call2 = ToolCall(ToolCallId("call_2"), "get_time", ujson.Obj("zone" -> "CET"))
+
+  private def kind(item: ujson.Value): String = item.obj.get("type").map(_.str).getOrElse(item("role").str)
+
+  it should "send an assistant turn as its text, then one function_call per tool call, and a tool result as function_call_output" in {
+    val sent = send(
+      Conversation(
+        Seq(
+          UserMessage("go"),
+          AssistantMessage(Some("checking"), Seq(call1, call2)),
+          ToolMessage("18C", ToolCallId("call_1")),
+          ToolMessage("12:00", ToolCallId("call_2")),
+          UserMessage("thanks")
+        )
+      )
+    )
+    val input = sent.body("input").arr
+    input.map(kind).toSeq shouldBe
+      Seq("user", "assistant", "function_call", "function_call", "function_call_output", "function_call_output", "user")
+    input(1)("content").str shouldBe "checking"
+    input(2)("call_id").str shouldBe "call_1"
+    input(2)("name").str shouldBe "get_weather"
+    input(2)("arguments").str shouldBe """{"city":"Paris"}"""
+    input(2).obj.keySet should not contain "id"
+    input(4)("call_id").str shouldBe "call_1"
+    input(4)("output").str shouldBe "18C"
+    input(5)("call_id").str shouldBe "call_2"
+    input(5).obj.keySet should not contain "id"
+  }
+
+  it should "send an assistant turn with tool calls and no text as its function_calls alone" in {
+    val sent = send(
+      Conversation(
+        Seq(UserMessage("go"), AssistantMessage(None, Seq(call1)), ToolMessage("18C", ToolCallId("call_1")))
+      )
+    )
+    sent.body("input").arr.map(kind).toSeq shouldBe Seq("user", "function_call", "function_call_output")
+  }
+
+  it should "send nothing for an assistant turn with no text and no tool calls" in {
+    val sent = send(Conversation(Seq(UserMessage("a"), AssistantMessage(None, Seq.empty), UserMessage("b"))))
+    sent.result.isRight shouldBe true
+    sent.body("input").arr.map(kind).toSeq shouldBe Seq("user", "user")
+  }
+
+  it should "never send an assistant turn's thinking, sealed or not" in {
+    val thinking = Seq(ThinkingBlock.Text("hm", Some("sig")), ThinkingBlock.Opaque(ProviderId("openai"), "blob"))
+    val sent =
+      send(Conversation(Seq(UserMessage("a"), AssistantMessage(Some("hi"), Seq.empty, thinking), UserMessage("b"))))
+    sent.body("input").arr.map(kind).toSeq shouldBe Seq("user", "assistant", "user")
+    (sent.body("input").render() should not).include("reasoning")
+  }
+
+  it should "send tools in the flat function shape" in {
+    val sent = send(hello, CompletionOptions().withTools(Seq(weatherTool)))
+    val tool = sent.body("tools")(0)
+    tool("type").str shouldBe "function"
+    tool("name").str shouldBe "get_weather"
+    tool("description").str shouldBe "Weather of a city"
+    tool("strict").bool shouldBe true
+    tool("parameters")("type").str shouldBe "object"
+    tool.obj.keySet should not contain "function"
+  }
+
+  it should "send a JSON response format as text.format" in {
+    send(hello, CompletionOptions().withResponseFormat(ResponseFormat.Json)).body("text")("format")("type").str shouldBe
+      "json_object"
+
+    val schema = ujson.Obj("type" -> "object", "properties" -> ujson.Obj("a" -> ujson.Obj("type" -> "string")))
+    val format =
+      send(hello, CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema, "answer", strict = false)))
+        .body("text")("format")
+    format("type").str shouldBe "json_schema"
+    format("name").str shouldBe "answer"
+    format("strict").bool shouldBe false
+    format("schema")("properties")("a")("type").str shouldBe "string"
+    format.obj.keySet should not contain "json_schema"
+  }
+
+  it should "send the reasoning effort as reasoning.effort, with tools, as asked" in {
+    val sent = send(
+      hello,
+      CompletionOptions().withTools(Seq(weatherTool)).withReasoning(ReasoningEffort.Low),
+      model = "gpt-6.1-terra"
+    )
+    sent.body("reasoning")("effort").str shouldBe "low"
+    sent.completion.adjustments shouldBe empty
+  }
+
+  it should "send the service tier, and none when unset" in {
+    send(hello, CompletionOptions().withServiceTier(ServiceTier.Flex)).body("service_tier").str shouldBe "flex"
+    send(hello, CompletionOptions().withServiceTier(ServiceTier.Priority)).body("service_tier").str shouldBe "priority"
+    send(hello).body.obj.keySet should not contain "service_tier"
+  }
+
+  it should "not send presence_penalty or frequency_penalty, and report each as Dropped when set" in {
+    val sent =
+      send(hello, CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.25))
+    sent.body.obj.keySet should not contain "presence_penalty"
+    sent.body.obj.keySet should not contain "frequency_penalty"
+    sent.completion.adjustments.collect { case RequestAdjustment.Dropped(option, _) =>
+      option
+    } should contain theSameElementsAs
+      Seq(RequestOption.PresencePenalty, RequestOption.FrequencyPenalty)
+    send(hello).completion.adjustments shouldBe empty
+  }
+
+  it should "send neither temperature nor top_p to a reasoning model that restricts sampling, and report them once" in {
+    val options = CompletionOptions().withTemperature(0.3).withTopP(0.9).withPresencePenalty(0.5)
+    val sent    = send(hello, options, model = "gpt-6.1-terra")
+    sent.body.obj.keySet should not contain "temperature"
+    sent.body.obj.keySet should not contain "top_p"
+    sent.completion.adjustments.collect { case RequestAdjustment.Dropped(option, _) =>
+      option
+    } should contain theSameElementsAs
+      Seq(RequestOption.Temperature, RequestOption.TopP, RequestOption.PresencePenalty)
+  }
+
+  it should "raise a max_output_tokens below 16 to 16 and report it, and send 16 as asked" in {
+    val raised = send(hello, CompletionOptions(maxTokens = Some(15)))
+    raised.body("max_output_tokens").num shouldBe 16
+    raised.completion.adjustments.collect { case RequestAdjustment.Adjusted(option, asked, sent, _) =>
+      (option, asked, sent)
+    } shouldBe Seq((RequestOption.MaxTokens, "15", "16"))
+
+    val exact = send(hello, CompletionOptions(maxTokens = Some(16)))
+    exact.body("max_output_tokens").num shouldBe 16
+    exact.completion.adjustments shouldBe empty
   }

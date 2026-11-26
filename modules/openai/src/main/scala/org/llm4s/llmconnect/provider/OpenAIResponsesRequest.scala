@@ -1,24 +1,36 @@
 package org.llm4s.llmconnect.provider
 
+import com.openai.core.ObjectMappers
 import com.openai.models.Reasoning
 import com.openai.models.responses.{
   EasyInputMessage,
+  FunctionTool,
   ResponseCreateParams,
+  ResponseFunctionToolCall,
   ResponseInputContent,
+  ResponseInputFile,
+  ResponseInputImage,
   ResponseInputItem,
-  ResponseInputText
+  ResponseInputText,
+  ResponseTextConfig
 }
-import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
   ContentPart,
   Conversation,
   Message,
+  RequestAdjustment,
+  RequestOption,
+  ResponseFormat,
   SystemMessage,
+  ToolMessage,
   UserMessage
 }
+import org.llm4s.llmconnect.provider.PartEncoding
+import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.syntax.toLLMError
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import scala.jdk.CollectionConverters._
@@ -36,27 +48,51 @@ private[provider] object OpenAIResponsesRequest:
    * What the client decides before a request is built.
    *
    * @param model the model id
-   * @param providerName the provider, for messages
+   * @param provider the provider, whose own uploaded files a document part may name
    * @param effort the `reasoning.effort` to send, from `OpenAIReasoning.plan`
    * @param serviceTier the `service_tier` to send
    * @param omitsSampling whether `temperature` and `top_p` are left out (a reasoning model that restricts sampling)
    */
   final case class Settings(
     model: String,
-    providerName: String,
+    provider: ProviderId,
     effort: Option[com.openai.models.ReasoningEffort],
     serviceTier: Option[ResponseCreateParams.ServiceTier],
     omitsSampling: Boolean
   )
 
+  /** OpenAI rejects a `max_output_tokens` below this. */
+  val MinOutputTokens = 16
+
+  /**
+   * What this request leaves out or changes beyond what the model rules report: a penalty the caller set (this API
+   * has none; a reasoning model's are already reported with its other sampling), and a token limit raised to
+   * [[MinOutputTokens]].
+   */
+  def adjustments(options: CompletionOptions, omitsSampling: Boolean): Seq[RequestAdjustment] =
+    val penalties =
+      if omitsSampling then Nil
+      else
+        List(
+          RequestOption.PresencePenalty  -> options.presencePenalty.isDefined,
+          RequestOption.FrequencyPenalty -> options.frequencyPenalty.isDefined
+        ).collect { case (option, true) =>
+          RequestAdjustment.Dropped(option, "the Responses API has no such parameter")
+        }
+    val tokens = options.maxTokens.filter(_ < MinOutputTokens).map { asked =>
+      RequestAdjustment.Adjusted(
+        RequestOption.MaxTokens,
+        asked.toString,
+        MinOutputTokens.toString,
+        s"the Responses API rejects a max_output_tokens below $MinOutputTokens"
+      )
+    }
+    penalties ++ tokens
+
   def build(settings: Settings, conversation: Conversation, options: CompletionOptions): Result[ResponseCreateParams] =
-    conversation.messages
-      .foldLeft[Result[Vector[ResponseInputItem]]](Right(Vector.empty)) { (done, message) =>
-        for
-          items <- done
-          item  <- inputItem(settings, message)
-        yield items :+ item
-      }
+    PartEncoding
+      .check(settings.provider, conversation.messages, userPart(settings), PartEncoding.textOnly)
+      .flatMap(_ => items(settings, conversation.messages))
       .flatMap { items =>
         Try {
           val builder = ResponseCreateParams
@@ -64,46 +100,94 @@ private[provider] object OpenAIResponsesRequest:
             .model(settings.model)
             .inputOfResponse(items.asJava)
             .store(false)
-          options.maxTokens.foreach(n => builder.maxOutputTokens(n.toLong))
+          options.maxTokens.foreach(n => builder.maxOutputTokens(math.max(n, MinOutputTokens).toLong))
           if !settings.omitsSampling then
             options.temperature.foreach(t => builder.temperature(t))
             options.topP.foreach(p => builder.topP(p))
           settings.effort.foreach(e => builder.reasoning(Reasoning.builder().effort(e).build()))
           settings.serviceTier.foreach(t => builder.serviceTier(t))
+          options.tools.map(_.toolDefinition(strict = true)).foreach(t => builder.addTool(functionTool(t)))
+          options.responseFormat.foreach(f => builder.text(textConfig(f)))
           builder.build()
         }.toEither.left.map(_.toLLMError)
       }
 
-  private def inputItem(settings: Settings, message: Message): Result[ResponseInputItem] =
+  private def items(settings: Settings, messages: Seq[Message]): Result[Vector[ResponseInputItem]] =
+    // the SDK builders throw on malformed content (a null text): inside the Result
+    Try(messages.toVector.flatMap(inputItems(settings, _))).toEither.left.map(_.toLLMError)
+
+  private def inputItems(settings: Settings, message: Message): Vector[ResponseInputItem] =
     message match
       case SystemMessage(content) =>
-        Right(easy(EasyInputMessage.Role.SYSTEM, _.content(content)))
+        Vector(easy(EasyInputMessage.Role.SYSTEM, _.content(content)))
       case user: UserMessage =>
-        textParts(settings, user.parts).map {
-          case Seq(single) => easy(EasyInputMessage.Role.USER, _.content(single))
-          case texts =>
-            val parts = texts.map(t => ResponseInputContent.ofInputText(ResponseInputText.builder().text(t).build()))
-            easy(EasyInputMessage.Role.USER, _.contentOfResponseInputMessageContentList(parts.asJava))
+        user.parts match
+          case Seq(ContentPart.Text(text)) => Vector(easy(EasyInputMessage.Role.USER, _.content(text)))
+          case parts =>
+            val mapped = parts.map(userPart(settings))
+            Vector(easy(EasyInputMessage.Role.USER, _.contentOfResponseInputMessageContentList(mapped.asJava)))
+      case AssistantMessage(text, toolCalls, _, _) => // earlier reasoning is never sent in this release
+        val said = text.filter(_.nonEmpty).map(t => easy(EasyInputMessage.Role.ASSISTANT, _.content(t))).toVector
+        said ++ toolCalls.map { call =>
+          ResponseInputItem.ofFunctionCall(
+            ResponseFunctionToolCall
+              .builder()
+              .callId(call.id.asString)
+              .name(call.name)
+              .arguments(call.arguments.render())
+              .build()
+          )
         }
-      case AssistantMessage(Some(text), Seq(), _, _) =>
-        Right(easy(EasyInputMessage.Role.ASSISTANT, _.content(text)))
-      case other =>
-        unsupported(settings, s"a ${other.getClass.getSimpleName}")
+      case tool: ToolMessage =>
+        Vector(
+          ResponseInputItem.ofFunctionCallOutput(
+            ResponseInputItem.FunctionCallOutput
+              .builder()
+              .callId(tool.toolCallId.asString)
+              .output(tool.parts.map(PartEncoding.textOnly).mkString)
+              .build()
+          )
+        )
 
-  private def textParts(settings: Settings, parts: Seq[ContentPart]): Result[Seq[String]] =
-    parts.foldLeft[Result[Vector[String]]](Right(Vector.empty)) {
-      case (done, ContentPart.Text(text)) => done.map(_ :+ text)
-      case (done, other) => done.flatMap(_ => unsupported(settings, s"a ${other.getClass.getSimpleName} part"))
-    }
+  /** Text, an image by URL or inline, a PDF inline or uploaded to this provider; anything else is refused up front. */
+  private def userPart(settings: Settings): PartialFunction[ContentPart, ResponseInputContent] =
+    case ContentPart.Text(text) =>
+      ResponseInputContent.ofInputText(ResponseInputText.builder().text(text).build())
+    case ContentPart.Image(MediaSource.Url(uri), _) if PartEncoding.isWebUrl(uri) =>
+      image(uri.toString)
+    case ContentPart.Image(inline: MediaSource.Inline, mediaType) =>
+      image(PartEncoding.dataUrl(inline, mediaType))
+    case ContentPart.Document(inline: MediaSource.Inline, MediaType.Pdf) =>
+      file(_.filename("document.pdf").fileData(PartEncoding.dataUrl(inline, MediaType.Pdf)))
+    case ContentPart.Document(source @ MediaSource.ProviderFile(_, id), MediaType.Pdf)
+        if PartEncoding.isFileOf(settings.provider, source) =>
+      file(_.fileId(id))
+
+  private def image(url: String): ResponseInputContent =
+    ResponseInputContent.ofInputImage(
+      ResponseInputImage.builder().detail(ResponseInputImage.Detail.AUTO).imageUrl(url).build()
+    )
+
+  private def file(set: ResponseInputFile.Builder => ResponseInputFile.Builder): ResponseInputContent =
+    ResponseInputContent.ofInputFile(set(ResponseInputFile.builder()).build())
+
+  // the flat shape: the Chat Completions definition's `function` object, with its `type` beside it
+  private def functionTool(chatDefinition: ujson.Value): FunctionTool =
+    val flat = ujson.Obj("type" -> "function")
+    chatDefinition("function").obj.foreach((k, v) => flat(k) = v)
+    ObjectMappers.jsonMapper().readValue(ujson.write(flat), classOf[FunctionTool])
+
+  private def textConfig(format: ResponseFormat): ResponseTextConfig =
+    val json = format match
+      case ResponseFormat.Json => ujson.Obj("type" -> "json_object")
+      case js: ResponseFormat.JsonSchema =>
+        ujson.Obj(
+          "type"   -> "json_schema",
+          "name"   -> js.name,
+          "schema" -> ujson.read(js.schema.render()),
+          "strict" -> js.strict
+        )
+    ObjectMappers.jsonMapper().readValue(ujson.write(ujson.Obj("format" -> json)), classOf[ResponseTextConfig])
 
   private def easy(role: EasyInputMessage.Role, set: EasyInputMessage.Builder => EasyInputMessage.Builder) =
     ResponseInputItem.ofEasyInputMessage(set(EasyInputMessage.builder().role(role)).build())
-
-  // the rest of the conversation mapping arrives with tool calls, images and documents
-  private def unsupported[A](settings: Settings, what: String): Result[A] =
-    Left(
-      ProcessingError(
-        s"${settings.providerName}-responses-request",
-        s"${settings.providerName} on the Responses API does not yet send $what"
-      )
-    )
