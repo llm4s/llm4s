@@ -8,7 +8,7 @@ permalink: /contribute/release
 redirect_from:
   - /reference/release
   - /reference/release.html
-cites_open_issues: [2330]
+cites_open_issues: [2330, 3112]
 cites_closed_issues: [1150, 1152, 1281, 2778, 2785]
 ---
 
@@ -509,6 +509,69 @@ need a maintainer:
 - **Once the listing exists:** add the Scaladex badge beside the Maven Central one in `README.md`
   (`[![llm4s-core Scala version support](https://index.scala-lang.org/llm4s/llm4s/llm4s-core/latest-by-scala-version.svg)](https://index.scala-lang.org/llm4s/llm4s/llm4s-core)`)
   and a Scaladex link in the installation guide. Until then that badge renders "project not found", so it is not added.
+
+## Merging after 1.0
+
+A minor release is tagged on `main`, so `main` is always the next 1.x minor: everything merged there ships in it.
+Before merging, decide what kind of change the pull request is and label it.
+
+| The pull request | Label | Merged to | Ships in |
+|---|---|---|---|
+| Fixes a bug, or changes docs, tests, the build or `private[llm4s]` code | `semver:patch` | `main`, then cherry-picked to the current `release/1.N.x` branch if it should go out before the next minor | a patch, or the next minor |
+| Adds an API, an overload, a config key, or deprecates something | `semver:minor` | `main` | the next minor |
+| Changes an `@Experimental` type, or a Beta or Experimental module | `semver:minor` | `main`, with a line under the CHANGELOG's *Breaking changes* and a migration note | the next minor |
+| Breaks a `@Stable` API of a frozen module, in source or binary | `semver:major` | **not merged** while 2.0 is not under way | 2.0 |
+
+### Avoid the break first
+
+Most changes that look breaking can ship in a minor release. Add the replacement beside the old API, deprecate the
+old one with `@deprecated("use X", since = "1.N")`, and leave it in place until 2.0. The patterns, such as an overload
+in place of a new parameter, or a `with*` setter in place of a new constructor field, are in
+[Changing a Frozen API without breaking it](../reference/compatibility-policy#changing-a-frozen-api-without-breaking-it).
+The deletion becomes a line in the [2.0 tracking issue](https://github.com/llm4s/llm4s/issues/3112), not a pull request.
+
+### Parking a real break
+
+A `semver:major` pull request stays open with that label, or is closed with its plan recorded in the [2.0 tracking issue](https://github.com/llm4s/llm4s/issues/3112).
+There is no `2.x` branch until 2.0 is planned: such a branch has to take every merge from `main` and quickly
+falls behind. When 2.0 starts, `main` becomes 2.0, the deprecated APIs are removed, and the latest 1.x line goes on
+from a `release/1.N.x` branch.
+
+### Patch releases come from a release branch
+
+Minor releases come at most about once a quarter, and a release about once a month
+([Release cadence](../reference/support-policy#release-cadence)). Most releases in between are patches, and by then
+`main` usually has `semver:minor` changes that a patch must not carry. So a line's patches come from its own branch,
+created from the minor's tag the first time a patch is needed:
+
+```bash
+git switch -c release/1.0.x v1.0.0
+git push -u origin release/1.0.x
+```
+
+- A fix is merged to `main` first, then cherry-picked to the release branch (`git cherry-pick -x <sha>`, signed off
+  with `-s`). A fix that cannot apply to `main`, because the code it fixes is gone, is a pull request against the
+  release branch.
+- The release pull request (the CHANGELOG section, the support table, the [Pre-tag checklist](#pre-tag-checklist))
+  targets the release branch, and the tag `v1.0.1` goes on that branch. Its CHANGELOG section and support table
+  update are then brought into `main` as well, so `main` stays the record of every release.
+- `mimaReportBinaryIssues` compares a release branch with the same baseline as `main`, so a patch stays binary
+  compatible.
+- The release workflow accepts only a tag that is the support table's `latest` line
+  ([Update the support table](#update-the-support-table)), and deploys the docs built from that tag. A security patch
+  to the previous minor, while it is `security-only`, needs that check and the docs deploy changed first.
+
+### What review checks
+
+CI's `mimaReportBinaryIssues` fails a pull request that breaks a `@Stable` type binary-wise. MiMa does **not** catch:
+
+- a source break: a changed default argument, an overload that makes an existing call ambiguous, a new `given` or
+  implicit that a wildcard import pulls in, a type parameter's variance;
+- a behaviour break: a config key renamed without an alias, a changed default, stored JSON written differently
+  ([What the promise covers](../reference/compatibility-policy#what-the-promise-covers)).
+
+The pull request template asks about each of these. A reviewer who finds one relabels the pull request
+`semver:major`.
 
 ## Release readiness: a MiMa dry run
 
