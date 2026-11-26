@@ -16,7 +16,7 @@
 - `llm4s-openai`, `llm4s-openai-compatible` and `llm4s-core` are frozen: `sbt mimaReportBinaryIssues` passes against 1.0.0 with no filter; `sbt stabilityTierCheck` passes. **No new public type or member in this PR**: everything added is `private[provider]`.
 - No change to `llm4s-core`. `ThinkingBlock`'s JSON (`{"type":"opaque","provider":...,"data":...}`) is not touched.
 - Every request still sends `store: false`; no `previous_response_id`. Message, `function_call` and `function_call_output` input items carry no item id. A replayed reasoning item is sent exactly as OpenAI returned it, its `id` included.
-- The opaque block's provider is `ProviderId("openai")`. Its `data` is the JSON object `{"item": <the reasoning item as returned>, "before": "<call_id>"}`, `before` present only when the next output item was a `function_call`.
+- The opaque block's provider is `ProviderId("openai")`. Its `data` is the JSON object `{"item": <the reasoning item as returned>, "before": "<call_id>"}`, `before` is the `call_id` of the next non-reasoning output item when that is a `function_call`; a reasoning item with no non-reasoning item after it is not stored.
 - The Chat Completions path sends no reasoning item and is otherwise unchanged.
 - No `try`/`catch`: `Result[A]`. No infix method calls. Nothing on the reply or request path may throw: a malformed envelope is skipped, not an error.
 - `OpenAIClient.scala` gains only the arguments it passes. Mapping code goes in `OpenAIReasoningItems.scala`, `OpenAIResponsesRequest.scala` and `OpenAIResponsesReply.scala`.
