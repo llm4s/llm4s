@@ -36,3 +36,21 @@ object OpenAIResponsesFixtures:
     val quoted = ujson.Str(text).render()
     s"""{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[""" +
       s"""{"type":"refusal","refusal":$quoted}]}"""
+
+  /** An `output_text` part with no annotations, or with `url_citation`s at the given `(start, end)` indices. */
+  def textPart(text: String, citations: Seq[(Int, Int)] = Seq.empty): String =
+    val quoted = ujson.Str(text).render()
+    val notes = citations
+      .map((s, e) =>
+        s"""{"type":"url_citation","url":"https://example.com","title":"t","start_index":$s,"end_index":$e}"""
+      )
+      .mkString(",")
+    s"""{"type":"output_text","text":$quoted,"annotations":[$notes]}"""
+
+  /** A `refusal` part. */
+  def refusalPart(text: String): String =
+    s"""{"type":"refusal","refusal":${ujson.Str(text).render()}}"""
+
+  /** One output message item holding the given parts. */
+  def messageOf(parts: String*): String =
+    s"""{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[${parts.mkString(",")}]}"""

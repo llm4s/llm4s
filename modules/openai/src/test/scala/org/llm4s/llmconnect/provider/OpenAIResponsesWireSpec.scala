@@ -48,7 +48,16 @@ import scala.collection.mutable.ListBuffer
 
 /** `OpenAIClient` on the Responses API over the real `openai-java` transport, against a local HTTP server. */
 final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with EitherValues:
-  import OpenAIResponsesFixtures.{ functionCall, reasoningItem, refusal, reply, message => outputMessage }
+  import OpenAIResponsesFixtures.{
+    functionCall,
+    messageOf,
+    reasoningItem,
+    refusal,
+    refusalPart,
+    reply,
+    textPart,
+    message => outputMessage
+  }
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -496,6 +505,31 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     completion.citations.map(_.url) shouldBe Seq("https://example.com")
     completion.citations.map(_.title) shouldBe Seq(Some("Example"))
     completion.citations.map(c => (c.startIndex, c.endIndex)) shouldBe Seq((Some(0), Some(2)))
+  }
+
+  it should "locate a citation in the concatenated text of a message's output_text parts" in {
+    val item       = messageOf(textPart("First part. "), textPart("Second [1].", Seq((7, 10))))
+    val completion = answer(reply(item)).value
+    completion.content shouldBe "First part. Second [1]."
+    completion.citations.map(c => (c.startIndex, c.endIndex)) shouldBe Seq((Some(19), Some(22)))
+    completion.content.substring(19, 22) shouldBe "[1]"
+  }
+
+  it should "offset a citation by the text of the output messages before it" in {
+    val first      = messageOf(textPart("Alpha [1].", Seq((6, 9))))
+    val second     = messageOf(textPart("Beta [2].", Seq((5, 8))))
+    val completion = answer(reply(s"$first,$second")).value
+    completion.content shouldBe "Alpha [1].Beta [2]."
+    completion.citations.map(c => (c.startIndex, c.endIndex)) shouldBe Seq((Some(6), Some(9)), Some(15) -> Some(18))
+    completion.content.substring(15, 18) shouldBe "[2]"
+  }
+
+  it should "count a refusal part's text in a later citation's offset" in {
+    val item       = messageOf(refusalPart("No. "), textPart("See [1].", Seq((4, 7))))
+    val completion = answer(reply(item)).value
+    completion.content shouldBe "No. See [1]."
+    completion.citations.map(c => (c.startIndex, c.endIndex)) shouldBe Seq((Some(8), Some(11)))
+    completion.content.substring(8, 11) shouldBe "[1]"
   }
 
   it should "report the cached input tokens" in {

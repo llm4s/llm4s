@@ -277,7 +277,6 @@ Slice 4 (the default):
 - The Java facade (`ClientBuilds`), the Kotlin DSL and Spring/Quarkus flat keys (`ProviderConfigParser`) cannot set `api`: they need a way to opt out before the default flips.
 - `docs/guide/providers.md`'s extras table lists neither new key.
 - Adding two fields to `OpenAIConfig` breaks positional patterns on it at source (11 to 13 fields): state in the compatibility policy that positional patterns on growth-safe (private-constructor) classes are outside the source promise, add a migration note, and decide whether `Llm4sMigrateFrom_1_0` gets a `PositionalPatternsGainFields` entry (maintainer to confirm).
-- Citation indexes are per `output_text` part while the text is concatenated across parts.
 
 ## Left to the builder
 

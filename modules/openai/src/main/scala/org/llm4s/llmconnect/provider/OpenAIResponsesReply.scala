@@ -5,6 +5,7 @@ import com.openai.models.responses.{
   Response,
   ResponseOutputItem,
   ResponseOutputMessage,
+  ResponseOutputText,
   ResponseStatus,
   ResponseUsage
 }
@@ -40,7 +41,8 @@ private[provider] object OpenAIResponsesReply:
       val items    = outputItems(response)
       val finish   = finishReason(status, response)
       val messages = items.filter(_.isMessage).map(_.asMessage())
-      val text     = messages.flatMap(messageTexts).mkString
+      val parts    = messages.flatMap(textParts)
+      val text     = parts.map(_.text).mkString
       // a filtered reply's calls are not read: the filter fails the reply (`OpenAIClient.filteredReply`)
       val calls =
         if ChatCompletionsFinishReason.isFiltered(finish) then Right(Seq.empty)
@@ -56,7 +58,7 @@ private[provider] object OpenAIResponsesReply:
             model = known(response._model()).flatMap(modelOf).map(ModelName(_)).getOrElse(configuredModel),
             message = message,
             usage = known(response._usage()).map(tokenUsage),
-            citations = messages.flatMap(citations).toList,
+            citations = citations(parts).toList,
             finishReason = if toolCalls.nonEmpty && finish == FinishReason.Stop then FinishReason.ToolCalls else finish,
             servedTier = known(response._serviceTier()).flatMap(t => OpenAIServiceTier.served(t.asString()))
           )
@@ -119,29 +121,45 @@ private[provider] object OpenAIResponsesReply:
   private def modelOf(model: com.openai.models.ResponsesModel): Option[String] =
     model.string().toScala.orElse(model.chat().toScala.map(_.asString())).orElse(model.only().toScala.map(_.asString()))
 
+  /** One `output_text` or `refusal` part: its text, and its annotations when it is an `output_text`. */
+  final private case class TextPart(text: String, output: Option[ResponseOutputText])
+
   /** Every `output_text` and `refusal` part of the message, in order: a refusal is the model's answer, not a filter. */
-  private def messageTexts(item: ResponseOutputMessage): Seq[String] =
+  private def textParts(item: ResponseOutputMessage): Seq[TextPart] =
     contents(item).flatMap { c =>
-      if c.isOutputText then known(c.asOutputText()._text())
-      else if c.isRefusal then known(c.asRefusal()._refusal())
+      if c.isOutputText then
+        val output = c.asOutputText()
+        Some(TextPart(known(output._text()).getOrElse(""), Some(output)))
+      else if c.isRefusal then known(c.asRefusal()._refusal()).map(TextPart(_, None))
       else None
     }
 
-  /** The `url_citation` annotations of the message's `output_text` parts, as `OpenAIClient` reads Chat Completions'. */
-  private def citations(item: ResponseOutputMessage): Seq[Citation] =
-    contents(item).filter(_.isOutputText).flatMap { c =>
-      known(c.asOutputText()._annotations()).map(_.asScala.toSeq).getOrElse(Seq.empty).flatMap { annotation =>
-        if annotation.isUrlCitation then
-          val cited = annotation.asUrlCitation()
-          OpenAIClient.citationOf(
-            known(cited._url()),
-            known(cited._title()),
-            known(cited._startIndex()),
-            known(cited._endIndex())
-          )
-        else None
+  /**
+   * The `url_citation` annotations of the `output_text` parts, as `OpenAIClient` reads Chat Completions'. OpenAI's
+   * indices are local to their part, while `Completion.content` is every part's text joined, so each is moved by the
+   * length of the text before its part (refusals included), in UTF-16 code units as `String.length` counts them.
+   */
+  private def citations(parts: Seq[TextPart]): Seq[Citation] =
+    val offsets = parts.scanLeft(0L)((sum, part) => sum + part.text.length)
+    parts.zip(offsets).flatMap { (part, offset) =>
+      part.output.toSeq.flatMap { output =>
+        known(output._annotations()).map(_.asScala.toSeq).getOrElse(Seq.empty).flatMap { annotation =>
+          if annotation.isUrlCitation then
+            val cited = annotation.asUrlCitation()
+            OpenAIClient.citationOf(
+              known(cited._url()),
+              known(cited._title()),
+              known(cited._startIndex()).map(shifted(_, offset)),
+              known(cited._endIndex()).map(shifted(_, offset))
+            )
+          else None
+        }
       }
     }
+
+  /** A part-local index moved by `offset`; an index that is not at least zero stays as it is, for `citationOf` to drop. */
+  private def shifted(index: java.lang.Long, offset: Long): java.lang.Long =
+    if index == null || index.longValue < 0 then index else java.lang.Long.valueOf(index.longValue + offset)
 
   private def contents(item: ResponseOutputMessage): Seq[ResponseOutputMessage.Content] =
     known(item._content()).map(_.asScala.toSeq).getOrElse(Seq.empty)
