@@ -37,6 +37,7 @@ import com.openai.models.chat.completions.{
   ChatCompletionUserMessageParam
 }
 import com.openai.models.completions.CompletionUsage
+import com.openai.models.responses.{ Response, ResponseCreateParams }
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
@@ -51,6 +52,7 @@ import org.llm4s.llmconnect.auth.{
 }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
+  OpenAIApi,
   OpenAIConfig,
   OpenAIWorkloadIdentity,
   ProviderConfig,
@@ -83,6 +85,9 @@ import scala.util.{ Try, Using }
 private[provider] trait OpenAIClientTransport {
   def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion
   def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk]
+
+  /** `POST /responses`, OpenAI's Responses API. */
+  def createResponse(params: ResponseCreateParams): Response
 
   /** `GET /models/<model>`, for `validate()`: returns when the service has `model`, and throws as a completion does. */
   def retrieveModel(model: String): Unit
@@ -154,6 +159,18 @@ final class OpenAIClient private[provider] (
 
   private val displayName: String = OpenAIClient.displayName(provider)
 
+  /** The API this client speaks, resolved once: the Responses API only for an `OpenAIConfig` whose `api` says so. */
+  private val api: OpenAIApi = {
+    val (resolved, reason) = config match {
+      case openAI: OpenAIConfig if openAI.api.contains(OpenAIApi.Responses) =>
+        (OpenAIApi.Responses, "the section sets api = responses")
+      case _: OpenAIConfig => (OpenAIApi.ChatCompletions, "the section sets no api other than chat-completions")
+      case _               => (OpenAIApi.ChatCompletions, s"$displayName speaks Chat Completions only")
+    }
+    logger.info(s"$displayName client for model $model uses ${OpenAIApi.configValue(resolved)}: $reason")
+    resolved
+  }
+
   // The workload-identity ids, which an error built from a remote reply must not repeat; the keys are Secrets.
   OpenAIClient.registerCredentials(config)
 
@@ -218,7 +235,12 @@ final class OpenAIClient private[provider] (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = completeWithMetrics {
+  ): Result[Completion] = completeWithMetrics(completeAndRecord(conversation, options)(_ => ()))
+
+  /** One recorded completion call; `deliver` sees the completion before its exchange is recorded. */
+  private def completeAndRecord(conversation: Conversation, options: CompletionOptions)(
+    deliver: Completion => Unit
+  ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
     val result = for {
@@ -229,22 +251,22 @@ final class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = openAIAdjustments(options, transformed)
+      adjustments = openAIAdjustments(options, transformed) ++
+        (if (api == OpenAIApi.Responses)
+           OpenAIResponsesRequest.adjustments(transformed.options, omitsSampling(transformed.options))
+         else Nil)
       transformedConversation = conversation.withMessages(transformed.messages)
-      params <- buildParams(
-        transformedConversation,
-        transformed.options,
-        OpenAIModelRules.requiresMaxCompletionTokens(model),
-        streaming = false
-      )
-      _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
-      body = serializeParams(params)
-      response   <- call("completion")(transport.createChatCompletion(params))
-      completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
+      exchange <- api match {
+        case OpenAIApi.Responses => completeOnResponses(transformedConversation, transformed.options, adjustments)
+        case OpenAIApi.ChatCompletions =>
+          completeOnChatCompletions(transformedConversation, transformed.options, adjustments)
+      }
+      (body, responseBody, completion) = exchange
+      _                                = deliver(completion)
       _ = recordExchange(
         startedAt,
         Some(body),
-        Some(serialize(response)),
+        Some(responseBody),
         Right(completion)
       )
     } yield completion
@@ -252,9 +274,64 @@ final class OpenAIClient private[provider] (
     result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
+  /** One Chat Completions call: the request body, the reply's JSON and the `Completion`. */
+  private def completeOnChatCompletions(
+    conversation: Conversation,
+    options: CompletionOptions,
+    adjustments: Seq[RequestAdjustment]
+  ): Result[(String, String, Completion)] =
+    for {
+      params <- buildParams(
+        conversation,
+        options,
+        OpenAIModelRules.requiresMaxCompletionTokens(model),
+        streaming = false
+      )
+      _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
+      body = serializeParams(params)
+      response   <- call("completion")(transport.createChatCompletion(params))
+      completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
+    } yield (body, serialize(response), completion)
+
+  /** One Responses API call, step for step as [[completeOnChatCompletions]]. */
+  private def completeOnResponses(
+    conversation: Conversation,
+    options: CompletionOptions,
+    adjustments: Seq[RequestAdjustment]
+  ): Result[(String, String, Completion)] =
+    for {
+      params <- OpenAIResponsesRequest.build(responsesSettings(options), conversation, options)
+      _    = adjustmentLog.record(model, adjustments)
+      body = serialize(params._body())
+      response <- call("response")(transport.createResponse(params))
+      completion <- OpenAIResponsesReply
+        .completion(response, provider, modelName)
+        .map(c => c.withEstimatedCost(estimatedCostOf(c.usage)).withAdjustments(adjustments))
+        .flatMap(filteredReply)
+    } yield (body, serialize(response), completion)
+
+  private def responsesSettings(options: CompletionOptions): OpenAIResponsesRequest.Settings =
+    OpenAIResponsesRequest.Settings(
+      model = model,
+      provider = provider,
+      effort = reasoningEffortFor(options),
+      serviceTier = OpenAIServiceTier.onResponses(serviceTierPlan(options)._1),
+      omitsSampling = omitsSampling(options)
+    )
+
   override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    // A Responses stream is one unstreamed call delivered as chunks, until native streaming lands.
+    if (api == OpenAIApi.Responses) completeAndRecord(conversation, options)(emitCompletionAsChunks(_, onChunk))
+    else streamOnChatCompletions(conversation, options, onChunk)
+  }
+
+  private def streamOnChatCompletions(
+    conversation: Conversation,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints.
     // Only a failure before the call is recorded here: executeFakeStreaming/executeNativeStreaming
@@ -578,7 +655,8 @@ final class OpenAIClient private[provider] (
 
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
-    OpenAIModelRules.forcedToolEffort(model, options) match {
+    // forcedToolEffort is a Chat Completions rule: the Responses API takes the plan's effort as it is
+    (if (api == OpenAIApi.Responses) None else OpenAIModelRules.forcedToolEffort(model, options)) match {
       case Some((effort, adjustments)) => OpenAIReasoning.EffortPlan(Some(effort), adjustments)
       case None                        => OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
     }
@@ -860,6 +938,9 @@ final class OpenAIClient private[provider] (
       .flatMap(ToolCallRules.checked)
   }
 
+  private def estimatedCostOf(usage: Option[TokenUsage]): Option[BigDecimal] =
+    usage.flatMap(u => CostEstimator.estimate(modelName, u))
+
   private def completionOf(
     response: ChatCompletion,
     message: Option[ChatCompletionMessage],
@@ -873,7 +954,7 @@ final class OpenAIClient private[provider] (
     val usage = known(response._usage()).map(toTokenUsage)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(modelName, u))
+    val cost = estimatedCostOf(usage)
 
     Completion(
       id = known(response._id()).getOrElse(""),
@@ -903,19 +984,11 @@ final class OpenAIClient private[provider] (
    */
   private def extractCitations(message: ChatCompletionMessage): List[Citation] =
     known(message._annotations()).map(_.asScala.toList).getOrElse(List.empty).flatMap { annotation =>
-      for {
-        cited <- known(annotation._urlCitation())
-        url   <- known(cited._url()).filter(_.nonEmpty)
-      } yield Citation(
-        url = url,
-        title = known(cited._title()),
-        startIndex = known(cited._startIndex()).flatMap(citationIndex),
-        endIndex = known(cited._endIndex()).flatMap(citationIndex)
-      )
+      known(annotation._urlCitation()).flatMap { cited =>
+        OpenAIClient
+          .citationOf(known(cited._url()), known(cited._title()), known(cited._startIndex()), known(cited._endIndex()))
+      }
     }
-
-  private def citationIndex(index: java.lang.Long): Option[Int] =
-    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
@@ -949,11 +1022,9 @@ final class OpenAIClient private[provider] (
         val function = known(ftc._function())
         val name     = function.flatMap(f => known(f._name())).getOrElse("")
         val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
-        for {
-          calls     <- done
-          _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
-          arguments <- ToolCallRules.parseArguments(name, raw)
-        } yield calls :+ ToolCall(id = ToolCallId(known(ftc._id()).getOrElse("")), name = name, arguments = arguments)
+        done.flatMap(calls =>
+          OpenAIClient.toolCallOf(known(ftc._id()).getOrElse(""), name, raw, finishReason).map(calls :+ _)
+        )
       }
 
   private def recordExchange(
@@ -989,6 +1060,43 @@ final class OpenAIClient private[provider] (
  */
 object OpenAIClient {
   import org.llm4s.syntax.toResult
+
+  /**
+   * One tool call, its `raw` arguments parsed once as RFC 0009 asks (shared by Chat Completions and Responses): not
+   * a JSON object is the malformed-tool-call error, blank arguments are `{}` only after a clean finish.
+   */
+  private[provider] def toolCallOf(
+    id: String,
+    name: String,
+    raw: String,
+    finishReason: FinishReason
+  ): Result[ToolCall] =
+    for {
+      _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
+      arguments <- ToolCallRules.parseArguments(name, raw)
+    } yield ToolCall(id = ToolCallId(id), name = name, arguments = arguments)
+
+  /**
+   * A `url_citation` as a [[org.llm4s.llmconnect.model.Citation]]: none without a non-empty `url` (one is never made
+   * up), an index not at least zero and within `Int` read as absent.
+   */
+  private[provider] def citationOf(
+    url: Option[String],
+    title: Option[String],
+    startIndex: Option[java.lang.Long],
+    endIndex: Option[java.lang.Long]
+  ): Option[Citation] =
+    url.filter(_.nonEmpty).map { u =>
+      Citation(
+        url = u,
+        title = title,
+        startIndex = startIndex.flatMap(citationIndex),
+        endIndex = endIndex.flatMap(citationIndex)
+      )
+    }
+
+  private def citationIndex(index: java.lang.Long): Option[Int] =
+    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   /**
    * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service
@@ -1208,6 +1316,9 @@ private[provider] object OpenAIClientTransport {
 
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
         requestOpts.fold(client.chat().completions().create(params))(o => client.chat().completions().create(params, o))
+
+      override def createResponse(params: ResponseCreateParams): Response =
+        requestOpts.fold(client.responses().create(params))(o => client.responses().create(params, o))
 
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
@@ -1504,6 +1615,10 @@ private[provider] object OpenAIClientTransport {
           refresh()
           underlying.createChatCompletionStream(params)
         }
+        override def createResponse(params: ResponseCreateParams): Response = {
+          refresh()
+          underlying.createResponse(params)
+        }
         override def retrieveModel(model: String): Unit = { refresh(); underlying.retrieveModel(model) }
         override def listModels(): Unit                 = { refresh(); underlying.listModels() }
         override def close(): Unit                      = underlying.close()
@@ -1547,6 +1662,9 @@ private[provider] object OpenAIClientTransport {
           params: ChatCompletionCreateParams
         ): StreamResponse[ChatCompletionChunk] =
           rejected(underlying.createChatCompletionStream(params))
+        override def createResponse(params: ResponseCreateParams): Response = rejected(
+          underlying.createResponse(params)
+        )
         override def retrieveModel(model: String): Unit = rejected(underlying.retrieveModel(model))
         override def listModels(): Unit                 = rejected(underlying.listModels())
         override def close(): Unit                      = underlying.close()

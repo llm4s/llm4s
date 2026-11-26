@@ -5,9 +5,17 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIApi, OpenAIConfig }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  CompletionOptions,
+  Conversation,
+  ReasoningEffort,
+  StreamedChunk,
+  ToolMessage,
+  UserMessage
+}
 import org.llm4s.llmconnect.provider.OpenAIClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
@@ -173,6 +181,97 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
         result.value.message.toolCalls.map(_.name) shouldBe Seq("get_weather")
       }
     }
+  }
+
+  // ---- the Responses API (#2900): /v1/responses, store false, reasoning items never sent back ----
+
+  private def responsesConfig(key: String, model: String): OpenAIConfig =
+    config(key, model).withApi(OpenAIApi.Responses)
+
+  private def submitAnswerTool = org.llm4s.toolapi
+    .ToolBuilder[String](
+      "submit_answer",
+      "Submits the final numeric answer",
+      org.llm4s.toolapi.Schema
+        .`object`[Map[String, Any]]("Arguments")
+        .withProperty(org.llm4s.toolapi.Schema.property("answer", org.llm4s.toolapi.Schema.string("The answer")))
+    )
+    .withHandler(_ => Right("recorded"))
+    .build()
+    .value
+
+  // A calculation before the call, so the model reasons: it skips reasoning for a greeting.
+  private def calculationMessage = UserMessage(
+    "What is the product of the decimal digits of 7^13? Work it out, then call submit_answer with the result."
+  )
+
+  for (model <- Seq("gpt-6.1-terra", "gpt-5.6-luna")) {
+    it should s"call a tool at effort low on the Responses API on $model and report reasoning tokens" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val options =
+        CompletionOptions(maxTokens = Some(2048)).withTools(Seq(submitAnswerTool)).withReasoning(ReasoningEffort.Low)
+      val client = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val result = client.complete(Conversation(Seq(calculationMessage)), options)
+      client.close()
+
+      val completion = withClue(s"Responses complete on $model failed: ${result.swap.toOption}: ")(result.value)
+      val usage      = completion.usage
+      info(s"$model reasoning tokens: ${usage.flatMap(_.thinkingTokens)}")
+      withClue(
+        s"$model answered without the tool: content=${completion.content}, tool calls=${completion.message.toolCalls
+            .map(_.name)}: "
+      ) {
+        completion.message.toolCalls.map(_.name) shouldBe Seq("submit_answer")
+      }
+      withClue(s"$model reported no reasoning tokens, usage=$usage: ") {
+        usage.flatMap(_.thinkingTokens).exists(_ > 0) shouldBe true
+      }
+      completion.adjustments shouldBe empty
+    }
+
+    it should s"finish a tool loop on the Responses API on $model whose second request sends the function_call without its reasoning item" in {
+      Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+      val options =
+        CompletionOptions(maxTokens = Some(2048)).withTools(Seq(submitAnswerTool)).withReasoning(ReasoningEffort.Low)
+      val client  = OpenAIClient(responsesConfig(apiKey.get, model)).toOption.get
+      val first   = client.complete(Conversation(Seq(calculationMessage)), options)
+      val firstOk = withClue(s"Responses turn 1 on $model failed: ${first.swap.toOption}: ")(first.value)
+      val calls   = firstOk.message.toolCalls
+      // The case tests the replay: a model that made no tool call leaves nothing to replay.
+      if (calls.isEmpty) {
+        client.close()
+        cancel(s"$model made no tool call on turn 1, content: ${firstOk.content}")
+      }
+      // Only the function_calls go back, one result each: the reply's reasoning item is not sent in this release.
+      val turn2 = Conversation(
+        Seq(calculationMessage, AssistantMessage(None, calls)) ++ calls.map(call => ToolMessage("recorded", call.id))
+      )
+      val second = client.complete(turn2, options)
+      client.close()
+
+      // What is asserted is that OpenAI accepted the request; the model may answer or call the tool again.
+      val reply = withClue(s"Responses turn 2 on $model was rejected: ${second.swap.toOption}: ")(second.value)
+      withClue(
+        s"$model replied with neither content nor a tool call: content=${reply.content}, tool calls=${reply.message.toolCalls}: "
+      ) {
+        (reply.content.nonEmpty || reply.message.toolCalls.nonEmpty) shouldBe true
+      }
+    }
+  }
+
+  it should "complete a plain request on the Responses API on a non-reasoning model" in {
+    Tier.require(apiKey.isDefined, "OPENAI_API_KEY not set")
+
+    val client = OpenAIClient(responsesConfig(apiKey.get, "gpt-4o-mini")).toOption.get
+    val result = client.complete(conversation, CompletionOptions())
+    client.close()
+
+    withClue(s"Responses plain completion failed: ${result.swap.toOption}: ") {
+      result.isRight shouldBe true
+    }
+    result.value.content should not be empty
   }
 
   it should "return AuthenticationError for invalid key" in {
