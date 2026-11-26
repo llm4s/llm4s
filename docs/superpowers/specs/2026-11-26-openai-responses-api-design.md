@@ -233,6 +233,14 @@ exists and already round-trips. A test pins that a stored message carrying one r
 Unchanged in kind: `mapError`, `recordExchange` (the body is the Responses request and reply), `completeWithMetrics`.
 The exchange log's format does not change; its content for OpenAI does, which the migration note says.
 
+The code of a `failed` reply's `error`, or of an `error` event (also one the SDK throws as an `SseException`), is classified:
+- request-fault codes (`invalid_prompt`, the image codes, `data_residency_mismatch`) are a non-retryable 400-class error;
+- policy refusals (`bio_policy`, `misalignment_policy_violation`, `image_content_policy_violation`) are a `ContentFilteredError`, carrying the reply's usage when it reports one;
+- `rate_limit_exceeded` is a `RateLimitError`;
+- service codes are a retryable 502.
+
+A 200 reply that maps to an error keeps its request and response bodies in the exchange log on the Responses path.
+
 ## Testing
 
 - **Wire**: a new `OpenAIResponsesWireSpec` over a fake `OpenAIClientTransport`, asserting the serialised request
@@ -286,6 +294,11 @@ Slice 4 (the default):
 - The Java facade, Kotlin and Spring AI message views drop opaque blocks when a caller rebuilds a conversation.
 - `DeterministicCompressor`'s `withContent(f(content))` turns a tool-call-only message's `None` into `Some("")` and so unseals it.
 - Hosted tools would need a reasoning item anchored to a non-function item.
+- Verify live what an in-stream error looks like on the wire (flat or nested).
+- `response.output_item.added` already carrying arguments would double them in a consumer that accumulates chunks.
+- Whether the models marked `requiresFakeStreaming` (a Chat Completions rule) can stream on Responses.
+- A migration note: a streamed chunk's id is the response id (`resp_...`), and failed-reply codes map to `ValidationError`, `ContentFilteredError` or a rate-limit error.
+- Chat Completions' fake-streaming route lets a throwing `onChunk` escape (pre-existing).
 
 ## Left to the builder
 

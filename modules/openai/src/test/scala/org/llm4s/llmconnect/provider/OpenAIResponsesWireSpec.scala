@@ -592,6 +592,19 @@ final class OpenAIResponsesWireSpec extends AnyFlatSpec with Matchers with Eithe
     }
   }
 
+  it should "attach the reply's usage to a policy refusal, and none when the reply reports none" in {
+    val body      = reply("", status = "failed", extra = """"error":{"code":"bio_policy","message":"refused"}""")
+    val withUsage = answer(body).left.value
+    withUsage shouldBe a[ContentFilteredError]
+    withUsage.asInstanceOf[ContentFilteredError].usage.map(_.totalTokens) shouldBe Some(15)
+
+    val json = ujson.read(body)
+    json.obj.remove("usage")
+    val noUsage = answer(json.render()).left.value
+    noUsage shouldBe a[ContentFilteredError]
+    noUsage.asInstanceOf[ContentFilteredError].usage shouldBe None
+  }
+
   it should "keep a failed reply about the service itself a retryable 502 ServiceError" in {
     Seq(
       "server_error",

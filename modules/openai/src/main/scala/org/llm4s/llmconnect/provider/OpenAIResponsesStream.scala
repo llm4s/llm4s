@@ -13,7 +13,8 @@ import scala.util.Try
  * to `onChunk` as they arrive, and what the stream must remember to end: the terminal event's `Response`, from which
  * the client builds the final completion exactly as `complete` does, or the error of an `error` event.
  *
- * Text and refusal deltas are `contentDelta`s, reasoning-summary deltas `thinkingDelta`s. A tool call opens with its
+ * Text and refusal deltas are `contentDelta`s, reasoning-summary deltas `thinkingDelta`s (a blank line opens each
+ * summary part after the first of its item, as the final completion joins them). A tool call opens with its
  * `function_call` item (`response.output_item.added`) and continues with argument fragments that name only the item,
  * so the stream keeps each item's call id and name and puts them on every fragment: `StreamingAccumulator` keys calls
  * by id. A fragment is passed on verbatim as a string, as the Chat Completions stream's are. An event the SDK cannot
@@ -25,6 +26,7 @@ final private[provider] class OpenAIResponsesStream(onChunk: StreamedChunk => Un
 
   private val callsByItem  = mutable.Map.empty[String, (String, String)] // item_id -> (call_id, name)
   private val callsByIndex = mutable.Map.empty[Long, (String, String)]   // output_index -> (call_id, name)
+  private val partsBegun   = mutable.Set.empty[String]                   // item ids whose summary has a part begun
   private var responseId   = ""
   private var ended        = Option.empty[Response]
   private var failure      = Option.empty[ujson.Value]
@@ -50,6 +52,10 @@ final private[provider] class OpenAIResponsesStream(onChunk: StreamedChunk => Un
     else if event.isRefusalDelta then content(known(event.asRefusalDelta()._delta()))
     else if event.isReasoningSummaryTextDelta then
       known(event.asReasoningSummaryTextDelta()._delta()).filter(_.nonEmpty).map(d => chunk(thinking = Some(d))).toSeq
+    else if event.isReasoningSummaryPartAdded then
+      // the final completion joins one item's summary parts with a blank line (and two items' summaries with none)
+      val item = known(event.asReasoningSummaryPartAdded()._itemId()).getOrElse("")
+      if partsBegun.add(item) then Seq.empty else Seq(chunk(thinking = Some("\n\n")))
     else if event.isOutputItemAdded then opened(event)
     else if event.isFunctionCallArgumentsDelta then
       val delta = event.asFunctionCallArgumentsDelta()

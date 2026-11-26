@@ -79,7 +79,7 @@ private[provider] object OpenAIResponsesReply:
         )
       }
 
-  /** A `failed` reply's `error`, through the mapping a stream's `error` event takes (a 502 unless it names a status). */
+  /** A `failed` reply's `error` (a refusal with the reply's usage), through the mapping a stream's `error` event takes (a 502 unless it names a status). */
   private def failure(response: Response, provider: ProviderId): LLMError =
     val error = known(response._error())
     errorOf(
@@ -90,7 +90,11 @@ private[provider] object OpenAIResponsesReply:
         ).flatten
       ),
       provider
-    )
+    ) match
+      // a refusal carries the usage the reply reports, as the reply the content filter stops does (tracing bills it)
+      case refused: ContentFilteredError =>
+        refused.withUsage(Try(known(response._usage()).map(tokenUsage)).toOption.flatten)
+      case other => other
 
   /**
    * The error an object of a `code` and a `message` states: a failed reply's `error`, or a stream's `error` event. It

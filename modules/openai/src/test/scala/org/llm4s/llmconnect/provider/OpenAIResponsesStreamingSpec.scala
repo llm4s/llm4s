@@ -20,7 +20,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -30,7 +30,7 @@ import scala.collection.mutable.ListBuffer
 import scala.util.Using
 
 /** `OpenAIClient.streamComplete` on the Responses API over the real `openai-java` transport, against a local server. */
-final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with EitherValues:
+final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues:
   import OpenAIResponsesFixtures.{ message => outputMessage, * }
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
@@ -182,6 +182,51 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     s.completion.message.hasSealedThinking shouldBe true
   }
 
+  it should "separate a reasoning item's summary parts as the final thinking does" in {
+    val s = streamed(
+      sse(
+        summaryPartAdded(0),
+        summaryDelta("First."),
+        summaryPartAdded(1),
+        summaryDelta("Second."),
+        textDelta("4"),
+        completed(reply(reasoningItem("rs_1", summary = Seq("First.", "Second.")) + "," + outputMessage("4")))
+      ),
+      model = "gpt-6.1-terra"
+    )
+    s.chunks.flatMap(_.thinkingDelta) shouldBe Seq("First.", "\n\n", "Second.")
+    s.chunks.flatMap(_.thinkingDelta).mkString shouldBe s.completion.thinking.value
+  }
+
+  it should "emit no separator for a single summary part, or between two reasoning items" in {
+    val one = streamed(
+      sse(
+        summaryPartAdded(0),
+        summaryDelta("Only."),
+        completed(reply(reasoningItem("rs_1", summary = Seq("Only.")) + "," + outputMessage("4")))
+      ),
+      model = "gpt-6.1-terra"
+    )
+    one.chunks.flatMap(_.thinkingDelta) shouldBe Seq("Only.")
+
+    val two = streamed(
+      sse(
+        summaryPartAdded(0, "rs_1"),
+        summaryDelta("First.", "rs_1"),
+        summaryPartAdded(0, "rs_2"),
+        summaryDelta("Second.", "rs_2"),
+        completed(
+          reply(
+            reasoningItem("rs_1", summary = Seq("First.")) + "," + reasoningItem("rs_2", summary = Seq("Second.")) +
+              "," + outputMessage("4")
+          )
+        )
+      ),
+      model = "gpt-6.1-terra"
+    )
+    two.chunks.flatMap(_.thinkingDelta).mkString shouldBe two.completion.thinking.value
+  }
+
   it should "return the same message complete returns for the same reply" in {
     val body = reply(
       reasoningItem("rs_1", summary = Seq("Thinking.")) + "," + outputMessage("Let me check.") + "," +
@@ -291,12 +336,26 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
       )
     )
     s.result.left.value shouldBe a[ContentFilteredError]
+    s.result.left.value.isRetryable shouldBe false
     s.chunks.flatMap(_.contentDelta) shouldBe Seq("so far")
     s.chunks.flatMap(_.finishReason) shouldBe empty
   }
 
+  it should "attach the reply's usage to a response.failed policy refusal, and none when it reports none" in {
+    val body = reply("", status = "failed", extra = """"error":{"code":"bio_policy","message":"refused"}""")
+    val s    = streamed(sse(failed(body)))
+    s.result.left.value.asInstanceOf[ContentFilteredError].usage.map(_.totalTokens) shouldBe Some(15)
+
+    val json = ujson.read(body)
+    json.obj.remove("usage")
+    val bare = streamed(sse(failed(json.render())))
+    bare.result.left.value.asInstanceOf[ContentFilteredError].usage shouldBe None
+  }
+
   it should "fail with the mapped error on an error event" in {
     val s = streamed(sse(textDelta("so far"), errorEvent("server_error", "boom")))
+    s.result.left.value shouldBe a[org.llm4s.error.ServiceError]
+    s.result.left.value.isRetryable shouldBe true
     s.result.left.value.message should include("boom")
     s.chunks.flatMap(_.contentDelta) shouldBe Seq("so far")
     s.chunks.flatMap(_.finishReason) shouldBe empty
@@ -305,6 +364,35 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
   it should "map a rate_limit_exceeded error event to a RateLimitError, as a failed reply's" in {
     val s = streamed(sse(errorEvent("rate_limit_exceeded", "slow down")))
     s.result.left.value shouldBe a[RateLimitError]
+  }
+
+  private def nestedError(code: String): Streamed =
+    val s = streamed(sse(textDelta("so far"), nestedErrorEvent(code, "boom")))
+    s.chunks.flatMap(_.contentDelta) shouldBe Seq("so far")
+    s.chunks.flatMap(_.finishReason) shouldBe empty
+    s.exchanges should have size 1
+    s
+
+  it should "map a nested rate_limit_exceeded error event to a RateLimitError" in {
+    nestedError("rate_limit_exceeded").result.left.value shouldBe a[RateLimitError]
+  }
+
+  it should "map a nested bio_policy error event to a non-retryable ContentFilteredError" in {
+    val error = nestedError("bio_policy").result.left.value
+    error shouldBe a[ContentFilteredError]
+    error.isRetryable shouldBe false
+  }
+
+  it should "map a nested invalid_prompt error event to a non-retryable ValidationError" in {
+    val error = nestedError("invalid_prompt").result.left.value
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.isRetryable shouldBe false
+  }
+
+  it should "map a nested server_error error event to a retryable ServiceError" in {
+    val error = nestedError("server_error").result.left.value
+    error shouldBe a[org.llm4s.error.ServiceError]
+    error.isRetryable shouldBe true
   }
 
   it should "fail as unfinished when the stream ends with no terminal event" in {
@@ -386,4 +474,7 @@ final class OpenAIResponsesStreamingSpec extends AnyFlatSpec with Matchers with 
     val s = quietly(streamed(reply(outputMessage("hi")), model = "o1", json = true, onChunk = throwing))
     s.result.isLeft shouldBe true
     s.exchanges should have size 1
+    // the reply was read, so the exchange keeps both bodies
+    s.exchanges.head.requestBody should not be empty
+    s.exchanges.head.responseBody shouldBe defined
   }

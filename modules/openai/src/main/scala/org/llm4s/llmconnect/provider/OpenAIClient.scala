@@ -261,7 +261,10 @@ final class OpenAIClient private[provider] (
             .map(Failed(_, None))
       }
       (body, responseBody, completion) = exchange
-      _ <- call("delivery")(deliver(completion)).left.map(Failed(_, None))
+      // on Responses the reply was read, so a consumer's failure keeps both bodies in the exchange
+      _ <- call("delivery")(deliver(completion)).left.map(
+        Failed(_, Option.when(api == OpenAIApi.Responses)((body, responseBody)))
+      )
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -389,7 +392,7 @@ final class OpenAIClient private[provider] (
         val rawEvents = StringBuilder()
         val stream    = new OpenAIResponsesStream(onChunk)
         // `onChunk` runs inside `call`, so a caller's failure is a `Left` too, with the stream closed
-        val attempt = call("response stream") {
+        val attempt = callMapping("response stream", OpenAIClient.mapResponsesStreamError(_, provider)) {
           Using.resource(transport.createResponseStream(params)) { response =>
             response.stream().forEach { event =>
               rawEvents.append(serialize(event)).append('\n')
@@ -460,9 +463,12 @@ final class OpenAIClient private[provider] (
   }
 
   /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
-  private def call[A](what: String)(body: => A): Result[A] =
+  private def call[A](what: String)(body: => A): Result[A] = callMapping(what, OpenAIClient.mapError(_, provider))(body)
+
+  /** [[call]] with `mapping` for the failure; the Responses stream reads an `SseException` through its error table. */
+  private def callMapping[A](what: String, mapping: Throwable => LLMError)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      val error = OpenAIClient.mapError(e, provider)
+      val error = mapping(e)
       e match {
         // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
         // may repeat a credential: only the redacted error is logged, not the exception.
@@ -1283,11 +1289,25 @@ object OpenAIClient {
    * states and otherwise making it a 502.
    */
   private def streamError(sse: SseException, provider: ProviderId): LLMError =
+    streamErrorObject(sse)
+      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
+      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /** The `error` object an `SseException` carries (or, should the SDK change, the whole event). */
+  private def streamErrorObject(sse: SseException): Option[ujson.Value] =
     Try(ObjectMappers.jsonMapper().writeValueAsString(sse.body())).toOption
       .flatMap(body => BoundedJson.read(body).toOption)
       .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
-      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
-      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /**
+   * A failure of a Responses stream: the error object an `SseException` carries goes through the Responses error table
+   * ([[OpenAIResponsesReply.errorOf]], as an `error` event's is); any other failure is mapped as [[mapError]] does.
+   */
+  private[provider] def mapResponsesStreamError(e: Throwable, provider: ProviderId): LLMError = e match {
+    case sse: SseException =>
+      streamErrorObject(sse).fold(mapError(e, provider))(OpenAIResponsesReply.errorOf(_, provider))
+    case _ => mapError(e, provider)
+  }
 
   /**
    * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,
