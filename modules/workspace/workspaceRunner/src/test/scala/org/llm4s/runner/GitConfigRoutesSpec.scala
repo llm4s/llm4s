@@ -524,6 +524,23 @@ class GitConfigRoutesSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     repo.ws.executeCommand("git --version", None, Some(30.seconds), None).exitCode shouldBe 0
   }
 
+  it should "not run the manual viewer the configuration names for --help (#3047)" in inRepo { repo =>
+    setup(repo, "config", "man.viewer", "x")
+    setup(repo, "config", "man.x.cmd", s"${repo.marker} man;")
+    controlRuns(repo, repo.root, "ls-files", "--help")
+    val helps = CommandPolicy.GitReadSubcommands.toSeq.sorted.flatMap { sub =>
+      Seq(s"git $sub --help", s"git $sub -h", s"git $sub --help-all")
+    } ++ Seq("git --help", "git -h", "git help ls-files", "git --no-pager ls-files --help")
+    neverRuns(repo, helps ++ reads: _*)
+    helps.foreach { command =>
+      val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
+      withClue(command)(ex.code shouldBe CommandPolicy.ArgumentNotAllowed)
+    }
+    // Any other command in such a repository is refused for its configuration.
+    (the[WorkspaceAgentException] thrownBy repo.ws.executeCommand("git ls-files", None, None, None)).code shouldBe
+      GitSandbox.GitConfigNotAllowed
+  }
+
   it should "run nothing in a repository that arrives with every route planted at once" in inRepo { repo =>
     repo.signedCommit()
     write(repo.root.resolve(".gitattributes"), "* filter=evil diff=evil\n*.md filter=other\n")
@@ -714,6 +731,8 @@ class GitSandboxUnitSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     keys("safe.bareRepository") shouldBe "explicit"
     keys("log.diffMerges") shouldBe "separate"
     keys("merge.default") shouldBe ""
+    keys("help.format") shouldBe "man"
+    keys("man.viewer") shouldBe ""
   }
 
   it should "accept the workspace and the repositories below it, and nothing else, whoever owns them (#2014)" in {
@@ -826,6 +845,10 @@ class GitSandboxUnitSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       "include.path\n/w/x.cfg",
       "includeIf.gitdir:/w/.path\n/w/x.cfg",
       "hook.evil.command\n/x",
+      "man.viewer\nx",
+      "man.x.cmd\ntouch PWNED;",
+      "man.man.path\n/x",
+      "MAN.Viewer\nx",
       "filter.a=b.clean\n/x",
       "diff.a\"b.textconv\n/x",
       "merge.a b.driver\n/x",

@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** the workspace runner could be driven by anything that reached its port, published on every host interface: `ContainerisedWorkspace` publishes it on `127.0.0.1` only, and every handshake must carry a per-container token, with a browser's (`Origin`) refused [#3046](https://github.com/llm4s/llm4s/issues/3046).
   Its container no longer leaks (`--rm`, `docker rm -f` on a failed start and stop, a shutdown hook, `AutoCloseable`, the runner's idle exit), and a dropped connection is reconnected rather than ending the workspace ([#3053](https://github.com/llm4s/llm4s/issues/3053); [sandbox](docs/reference/workspace-sandbox.md#who-can-reach-the-runner)).
+- **Fixed** the workspace runner refuses `--help`, `-h` and `--help-all` on every `git` subcommand: `git ls-files --help` ran the manual viewer a repository's `man.*` configuration names. A repository that sets any `man.*` key now refuses `git` [#3047](https://github.com/llm4s/llm4s/issues/3047).
 
 ### Tools
 

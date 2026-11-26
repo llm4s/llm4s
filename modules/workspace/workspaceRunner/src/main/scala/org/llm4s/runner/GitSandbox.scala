@@ -36,7 +36,8 @@ import scala.util.{ Try, Using }
  *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used),
  *     `log.diffMerges=separate` (git's default, so `-m` and `--diff-merges=on` never re-merge), `merge.default`
  *     empty (a path with no `merge` attribute uses the built-in merge; a `[merge ""]` the empty name would select is
- *     refused by layer 3) and `safe.directory` the workspace (a workspace another user owns is used, #2014,
+ *     refused by layer 3), `help.format=man` and an empty `man.viewer` (no browser or `info` for a manual) and
+ *     `safe.directory` the workspace (a workspace another user owns is used, #2014,
  *     [[safeDirectories]]), and `--no-pager`; and after the subcommand
  *     ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and `--ignore-submodules=all` where it takes them. The
  *     policy refuses the options that would undo them, `--remerge-diff` and `--diff-merges` (which re-merge, running
@@ -49,7 +50,8 @@ import scala.util.{ Try, Using }
  *     `diff.<name>.textconv` and `command` empty, and `merge.<name>.driver` empty (git then cannot start it, and keeps
  *     its own side of the merge). Configuration it cannot account for refuses the command
  *     ([[GitConfigNotAllowed]]): an `include.path` or `includeIf` (an included file may lie in the work tree and change
- *     after the listing), a `hook.*` key (configuration-defined hooks), or a driver name that `-c` cannot express
+ *     after the listing), a `hook.*` key (configuration-defined hooks), a `man.*` key (a manual viewer, which `git
+ *     help` runs; `man.viewer` is a list that `-c` only adds to), or a driver name that `-c` cannot express
  *     exactly, or more than [[MaxDrivers]] drivers. The listing is read as bytes, and a `filter`, `diff` or `merge` subsection is blanked only when every
  *     byte is printable ASCII other than `=` and `"` (0x21-0x7E): a name with any other byte - one that is not UTF-8
  *     (`[filter "\xE9vil"]`), any non-ASCII character, a space or a control character - could reach git as a different
@@ -57,6 +59,8 @@ import scala.util.{ Try, Using }
  *     driver `.gitattributes` names untouched, so it refuses the command instead.
  *
  * Nothing else an allowed subcommand reads names a program it runs: `difftool` and `mergetool` are not allowed;
+ * `git help`, which runs the manual viewer `man.*` names (and which `--help` after a subcommand starts), is refused, as
+ * are `--help`, `-h` and `--help-all` after every subcommand (#3047);
  * `credential.*`, `url.*`, `remote.*`, `http.*` and `core.sshCommand` are reached only by a transport, which layer 1
  * refuses; the pager is switched off; `submodule.<name>.update` is read only by `git submodule`; and the
  * `trailer.<token>.command` programs are run by `git interpret-trailers`, never by a `%(trailers)` format.
@@ -118,7 +122,12 @@ private[runner] object GitSandbox {
     // Empty, not a built-in name: git looks a name up among the repository's own drivers before its built-in ones, so
     // a `[merge "text"]` (or "union", "binary") in .git/config would replace `text`. An empty name selects only a
     // `[merge ""]`, which driverOverrides refuses (isExpressible), and otherwise falls through to the built-in merge.
-    "merge.default" -> ""
+    "merge.default" -> "",
+    // `git help` (which the policy refuses, #3047) would otherwise show a manual with the program `help.format=web` or
+    // `info` starts; `man.viewer` is a list, so the empty value is added to the repository's, which driverOverrides
+    // refuses instead.
+    "help.format" -> "man",
+    "man.viewer"  -> ""
   ) ++ safeDirectories(realRoot).map("safe.directory" -> _)
 
   /**
@@ -245,6 +254,12 @@ private[runner] object GitSandbox {
         refuse(key, "an included file is not listed with the rest, and may lie in the work tree and change.")
       case (key, (section, _, _)) if section == "hook" =>
         refuse(key, "it defines a hook in the configuration, which core.hooksPath does not switch off.")
+      case (key, (section, _, _)) if section == "man" =>
+        refuse(
+          key,
+          "it names a manual viewer (man.viewer, man.<tool>.cmd or .path), a program git help runs, and man.viewer " +
+            "is a list a -c override only adds to."
+        )
       case (key, (section, Some(name), _)) if DriverSections.contains(section) && !isExpressible(name) =>
         refuse(
           key.map(c => if (c >= 0x20 && c < 0x7f) c else '?'),

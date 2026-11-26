@@ -6,7 +6,7 @@ search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
 cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
-cites_issues: [3046, 3053]
+cites_issues: [3046, 3047, 3053]
 ---
 
 # Workspace Sandbox Configuration
@@ -185,7 +185,7 @@ and run a second command as a second request.
 | `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
 | The program is found only where the runner never starts one from: the workspace, the runner's own working or Java directory, or an empty or relative `PATH` entry (see [Program resolution](#program-resolution)) | `EXECUTABLE_NOT_ALLOWED` |
 | The program is found nowhere the runner looks | `EXECUTABLE_NOT_FOUND` |
-| `git` only: the repository's configuration has an `include.path` / `includeIf`, a `hook.*` key, or a driver name that is not printable ASCII (see [git's own files](#gits-own-files)) | `GIT_CONFIG_NOT_ALLOWED` |
+| `git` only: the repository's configuration has an `include.path` / `includeIf`, a `hook.*` or `man.*` key, or a driver name that is not printable ASCII (see [git's own files](#gits-own-files)) | `GIT_CONFIG_NOT_ALLOWED` |
 
 `writeFile` and `modifyFile` refuse a path naming `.git` or a path inside one with `PATH_NOT_ALLOWED`.
 
@@ -627,6 +627,7 @@ files, or a repository cloned into the workspace already hostile, made an allowe
 | `$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, system config | any | `GIT_CONFIG_GLOBAL` the null device, `GIT_CONFIG_NOSYSTEM`, `GIT_ATTR_NOSYSTEM`, `HOME` / `XDG_CONFIG_HOME` an empty directory | `GitSandboxUnitSpec` |
 | `core.pager`, `pager.<cmd>` | a terminal only | `--no-pager`, `GIT_PAGER=cat` | every route at once |
 | `include.path` / `includeIf`, `hook.*` | any | refused (`GIT_CONFIG_NOT_ALLOWED`) | refuse a repository whose configuration includes another file |
+| `man.viewer` with `man.<tool>.cmd`, `help.format=web` / `info` ([#3047](https://github.com/llm4s/llm4s/issues/3047)) | `git help`, which `--help` first after any subcommand (`git ls-files --help`) starts | `--help`, `-h` and `--help-all` refused for every subcommand (`ARGUMENT_NOT_ALLOWED`); `-c help.format=man -c man.viewer=`; any `man.*` key refused (`GIT_CONFIG_NOT_ALLOWED`), since `man.viewer` is a list a `-c` only adds to | not run the manual viewer |
 
 `core.editor`, `sequence.editor`, `alias.*` (which cannot shadow a built-in subcommand), `credential.helper` and
 `core.askPass` are not reached by the allowed subcommands with no transport; the test with every route planted at
@@ -648,8 +649,8 @@ So every `git` the runner starts has:
   `-c diff.external=`, `-c log.showSignature=false`, `gpg.program`, `gpg.openpgp.program`, `gpg.x509.program` and
   `gpg.ssh.program` set to the empty directory (which cannot be run), `-c diff.ignoreSubmodules=all`,
   `-c safe.bareRepository=explicit`, `-c protocol.allow=never`, `-c log.diffMerges=separate` (git's default, so `-m`
-  and `--diff-merges=on` diff a merge against its parents rather than re-merging it) and `-c merge.default=` (a path
-  with no `merge` attribute uses the built-in merge), and `-c safe.directory=<root>` and `-c safe.directory=<root>/*`
+  and `--diff-merges=on` diff a merge against its parents rather than re-merging it), `-c merge.default=` (a path
+  with no `merge` attribute uses the built-in merge), `-c help.format=man` and `-c man.viewer=`, and `-c safe.directory=<root>` and `-c safe.directory=<root>/*`
   with the workspace root's real path (see below). The empty name is used because no driver name is safe by
   itself: a repository's `[merge "text"]` replaces git's built-in `text` driver (and `union`, `binary`) just as it
   defines any other, while a `[merge ""]` it could select is refused (below). Command-line configuration wins over
@@ -667,7 +668,8 @@ So every `git` the runner starts has:
   `-c filter.<name>.clean= -c filter.<name>.smudge= -c filter.<name>.process= -c filter.<name>.required=false`
   (git then passes content through), `-c diff.<name>.textconv= -c diff.<name>.command=`, or
   `-c merge.<name>.driver=` (git cannot start an empty command, and keeps its own side of the merge). An `include.path` or
-  `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a
+  `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, a `man.*` key
+  (a manual viewer `git help` would run), or a
   `filter`, `diff` or `merge` driver name with any byte other than printable ASCII (0x21-0x7E) or with `=` or `"`
   refuses the command (`GIT_CONFIG_NOT_ALLOWED`), as do more than 200 filter, diff and merge drivers together, which
   bounds the command line the runner builds. The listing is read as bytes, so a name that is not UTF-8
