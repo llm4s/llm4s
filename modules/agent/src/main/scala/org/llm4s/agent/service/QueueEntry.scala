@@ -203,8 +203,9 @@ object EntryOutcome:
  * at it and, once closed, its [[EntryOutcome]].
  *
  * An entry is open until it is closed, and only an open entry is ever taken or reclaimed-proof: a closed one is kept
- * for the ticket lifetime after `closedAt`, then reclaimed. While open, `position` is how many of the thread's open
- * entries run before it (`0`: it runs next, or is running), and `leaseHolder` and `leaseExpiresAt` say which worker
+ * for the ticket lifetime after `closedAt`, then reclaimed. While open, `position` is how many of its tenant's open
+ * entries of the thread run before it (`0`: it runs next of them, or is running; another tenant's entries are never
+ * counted, rule 9), and `leaseHolder` and `leaseExpiresAt` say which worker
  * holds it, if one does - a lease that has expired by the store's clock may be taken over.
  *
  * @param maxAttempts the most attempts the entry may make, fixed at submission

@@ -669,7 +669,8 @@ yield (store, agent, submitter)
   settings, as above. All three built-in kinds have one; a store whose backend gave it none answers a
   `ConfigurationError`.
 - **A busy thread is the submission's choice** (`policy` on `submitter.submit`): `BusyThreadPolicy.Reject`, the
-  default, refuses it with `ThreadBusy` while the thread has an open entry or a run holds it; `Enqueue` waits behind
+  default, refuses it with `ThreadBusy` while the thread has an open entry or a run of the submitter's tenant holds
+  it (another tenant's are never reported); `Enqueue` waits behind
   them; `Interrupt` stops the thread's running queued run at its next superstep boundary - its model call cut, tool
   calls already started finished and kept, the rest answered "interrupted" - and runs next, ahead of the queue.
 - **Cancel from any machine** with `submitter.cancel(tenant, CancelTarget.Entry(ticket.entryId))` (or

@@ -190,7 +190,10 @@ should not be - the tool call it died in would only hang again - cancel the entr
 other turns by then, and the entries queued behind it run after it. See
 [Tool Side Effects](index#tool-side-effects) in the agents guide.
 
-**A message for a busy thread** - one with an open entry or a live run - follows the submission's `policy`:
+**A message for a busy thread** - one with an open entry or a live run of the submitter's tenant - follows the
+submission's `policy`. Another tenant's entries and runs on the same thread id are never reported: they do not make
+the thread busy, an `Interrupt` goes ahead of its own tenant's entries only, and a ticket's `position` counts only its
+own tenant's entries. A submission to a thread another tenant already owns is refused with `GraphError.TenantMismatch`.
 
 | `BusyThreadPolicy` | What happens |
 |---|---|

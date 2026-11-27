@@ -75,14 +75,25 @@ final class InMemoryRunQueue private[agent] (
 
   // ---- the run order (rule 5) ----
 
-  private def runOrder(row: Row): (Boolean, Boolean, Long) =
-    (row.attempts.isEmpty, row.policy != BusyThreadPolicy.Interrupt, row.id)
-
+  /**
+   * A thread's open entries in the order they run (rule 5): an attempted entry first; then each tenant's entries
+   * together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its own
+   * tenant's entries only (#3085); within a tenant `Interrupt` entries first, then by id.
+   */
   private def queueOf(threadId: ThreadId): Vector[Row] =
-    openByThread.get(threadId).fold(Vector.empty[Row])(_.toVector.map(rows).sortBy(runOrder))
+    openByThread.get(threadId).fold(Vector.empty[Row]) { ids =>
+      val open   = ids.toVector.map(rows)
+      val oldest = open.groupMapReduce(_.tenantId)(_.id)(math.min)
+      open.sortBy(r => (r.attempts.isEmpty, oldest(r.tenantId), r.policy != BusyThreadPolicy.Interrupt, r.id))
+    }
+
+  /** The thread's open entries of `tenantId`, in the order they run. */
+  private def tenantQueueOf(threadId: ThreadId, tenantId: Option[TenantId]): Vector[Row] =
+    queueOf(threadId).filter(_.tenantId == tenantId)
 
   private def view(row: Row): QueueEntry =
-    val position = Option.when(row.open)(queueOf(row.threadId).indexWhere(_.id == row.id))
+    // only the entry's own tenant's entries are counted (rule 9)
+    val position = Option.when(row.open)(tenantQueueOf(row.threadId, row.tenantId).indexWhere(_.id == row.id))
     QueueEntry.stored(
       EntryId.unsafe(row.id),
       row.threadId,
@@ -117,9 +128,11 @@ final class InMemoryRunQueue private[agent] (
           Right(Ticket(EntryId.unsafe(existing.id), existing.threadId, view(existing).position, existing = true))
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
-        val queued = queueOf(submission.threadId)
-        // Reject: busy with an open entry, or with a live claim of the submitter's tenant - a direct run (W3); another
-        // tenant's claim is never reported (rule 9): its submission is queued, and the worker refuses it as TenantMismatch
+        // only the submitter's tenant's entries are seen (rule 9, #3085): another tenant's are never reported
+        val queued = tenantQueueOf(submission.threadId, submission.tenantId)
+        // Reject: busy with an open entry of the submitter's tenant, or with a live claim of its tenant - a direct run
+        // (W3); another tenant's entry or claim is never reported (rule 9): its submission is queued, and the worker
+        // refuses it as TenantMismatch
         val claimed = liveClaim(submission.threadId, submission.tenantId.map(_.value))
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
@@ -134,14 +147,12 @@ final class InMemoryRunQueue private[agent] (
             if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
             else
               queued
-                .filter(r =>
-                  r.tenantId == submission.tenantId && r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty
-                )
+                .filter(r => r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty)
                 .map(r => closeRow(r, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now))
           if submission.policy == BusyThreadPolicy.Interrupt then
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled (W3)
-            queued.filter(r => r.tenantId == submission.tenantId && r.attempts.nonEmpty && !cancelling(r)).foreach {
-              r => rows.update(r.id, r.copy(stop = Some(StopRequest.Interrupt(EntryId.unsafe(id)))))
+            queued.filter(r => r.attempts.nonEmpty && !cancelling(r)).foreach { r =>
+              rows.update(r.id, r.copy(stop = Some(StopRequest.Interrupt(EntryId.unsafe(id)))))
             }
           val row = Row(
             id,
@@ -199,7 +210,7 @@ final class InMemoryRunQueue private[agent] (
         Left(CancelledError(s"waiting for queue entry ${entryId.value}", Some(interrupted)))
 
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] = withLock(lock) {
-    Right(queueOf(threadId).filter(_.tenantId == tenantId).map(view))
+    Right(tenantQueueOf(threadId, tenantId).map(view))
   }
 
   // ---- leases ----
@@ -305,7 +316,7 @@ final class InMemoryRunQueue private[agent] (
     withLock(lock) {
       val targeted: Result[Vector[Row]] = target match
         case CancelTarget.Entry(id) => found(tenantId, id).map(_ => Vector(rows(id.value)))
-        case CancelTarget.Thread(t) => Right(queueOf(t).filter(_.tenantId == tenantId))
+        case CancelTarget.Thread(t) => Right(tenantQueueOf(t, tenantId))
       targeted.map { targets =>
         // (entry, closed by this call), decided under the lock
         val answered = targets.map { row =>

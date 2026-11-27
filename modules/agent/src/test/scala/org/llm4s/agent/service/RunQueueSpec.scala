@@ -288,6 +288,31 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     flagged.get shouldBe true
   }
 
+  // ---- submitting to another tenant's thread (#3085) ----
+
+  "RunSubmitter.submit" should "refuse a thread another tenant owns, naming only the submitter's tenant" in {
+    val store     = InMemoryCheckpointer()
+    val submitter = new RunSubmitter(store.runQueue, store)
+    val owner     = Some(TenantId("owner"))
+    val stranger  = Some(TenantId("stranger"))
+    // no checkpoint yet: no owner is known, so either tenant's entry is queued
+    submitter.submit(thread, agent, QueuedInput.query("q"), stranger, BusyThreadPolicy.Enqueue).value
+    val claim = store.claim(thread, ClaimRequest(RunId("owner-run"), owner, 30.seconds)).value
+    store
+      .commit(
+        thread,
+        Commit(claim.token, Some(checkpoint("c1", "owner-run", CheckpointStatus.Completed).withTenantId("owner")))
+      )
+      .value
+    store.release(thread, claim.token).value
+    for (policy <- BusyThreadPolicy.values)
+      submitter.submit(thread, agent, QueuedInput.query("q"), stranger, policy).left.value shouldBe
+        GraphError.TenantMismatch(thread.value, Some("stranger"))
+    submitter.submit(thread, agent, QueuedInput.query("q"), None, BusyThreadPolicy.Enqueue).left.value shouldBe
+      GraphError.TenantMismatch(thread.value, None)
+    submitter.submit(thread, agent, QueuedInput.query("q"), owner).value.position shouldBe Some(0)
+  }
+
   // ---- settings ----
 
   "RunQueueSettings" should "default to five attempts, a day's ticket lifetime and the claim's lease" in {

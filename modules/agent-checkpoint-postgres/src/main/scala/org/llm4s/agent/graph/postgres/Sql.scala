@@ -280,13 +280,25 @@ private[postgres] object Sql:
 
   private def queueColumns: String = PostgresRunQueue.Columns
 
-  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
-  val QueueRunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
+  /**
+   * A thread's open entries, the rows aliased `a` and [[queueRanked]], in the order they run (rule 5): attempted first;
+   * then each tenant's entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry
+   * goes ahead of its own tenant's entries only (#3085); within a tenant `Interrupt` entries first, then by id.
+   */
+  def queueRunOrder(a: String): String =
+    s"($a.attempt_count = 0), $a.tenant_first, $a.is_interrupt DESC, $a.entry_id"
 
-  /** The head of `e`'s thread, as a correlated subquery. */
-  def queueHeadOf(t: Tables): String =
-    s"""SELECT h.entry_id FROM ${t.queueEntries} h WHERE h.thread_id = e.thread_id AND h.state = 'open'
-       |ORDER BY $QueueRunOrder LIMIT 1""".stripMargin
+  /**
+   * The open entries `where` selects, each with `tenant_first`, its tenant's oldest open entry among them: computed
+   * once per row set by a window, never by a subquery per row (#3085).
+   */
+  def queueRanked(t: Tables, where: String): String =
+    s"""SELECT *, MIN(entry_id) OVER (PARTITION BY tenant_id) AS tenant_first
+       |FROM ${t.queueEntries} WHERE $where AND state = 'open'""".stripMargin
+
+  /** The head of thread `thread` (a column), as a correlated subquery. */
+  def queueHeadOf(t: Tables, thread: String = "e.thread_id"): String =
+    s"SELECT h.entry_id FROM (${queueRanked(t, s"thread_id = $thread")}) h ORDER BY ${queueRunOrder("h")} LIMIT 1"
 
   /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
   def queueLiveSibling(t: Tables): String =
@@ -301,7 +313,7 @@ private[postgres] object Sql:
     s"SELECT $queueColumns FROM ${t.queueEntries} WHERE key_scope = ? AND submission_key = ? FOR UPDATE"
 
   def openQueueEntries(t: Tables): String =
-    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' ORDER BY $QueueRunOrder"
+    s"SELECT $queueColumns FROM (${queueRanked(t, "thread_id = ?")}) q ORDER BY ${queueRunOrder("q")}"
 
   def nextQueueEntryId(t: Tables): String = s"SELECT nextval('${t.queueEntryIds}')"
   def nextLeaseToken(t: Tables): String   = s"SELECT nextval('${t.queueLeaseTokens}')"
@@ -316,14 +328,16 @@ private[postgres] object Sql:
        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open', ?)""".stripMargin
 
   /**
-   * Candidate heads for `take` past entry id `?` (the agents, the time, that id, then the time again), skipping rows
-   * another worker holds.
+   * Candidate heads for `take` past entry id `?` (the agents twice, the time, that id, then the time again), skipping
+   * rows another worker holds: each thread with an open entry of the agents, its head found once (#3085).
    */
   def queueCandidates(t: Tables): String =
     s"""SELECT e.entry_id, e.thread_id FROM ${t.queueEntries} e
-       |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |WHERE e.entry_id IN (
+       |    SELECT (${queueHeadOf(t, "th.thread_id")})
+       |    FROM (SELECT DISTINCT thread_id FROM ${t.queueEntries} WHERE state = 'open' AND agent_id = ANY(?)) th)
+       |  AND e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
        |  AND e.entry_id > ?
-       |  AND e.entry_id = (${queueHeadOf(t)})
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |ORDER BY e.entry_id
        |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin

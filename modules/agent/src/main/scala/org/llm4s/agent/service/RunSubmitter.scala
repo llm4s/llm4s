@@ -44,7 +44,8 @@ final class RunSubmitter(
 
   /**
    * Queues `input` for `threadId`, run by `agentId` for `tenantId`, and answers its ticket - or, with a `submissionKey`
-   * the tenant's queue already holds for the same submission, that entry's ticket. See [[RunQueue.submit]].
+   * the tenant's queue already holds for the same submission, that entry's ticket. See [[RunQueue.submit]]. A thread
+   * whose latest checkpoint is another tenant's is refused first, `GraphError.TenantMismatch` (#3085).
    * `traceContext` is the submitter's trace position, which every attempt continues ([[Submission.traceContext]]).
    */
   def submit(
@@ -60,11 +61,24 @@ final class RunSubmitter(
     // ticket - only to the submit that closed them - and they are counted here (W3, #2368)
     Submission
       .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts, traceContext)
-      .flatMap(queue.submit)
+      .flatMap(submission => ownedBy(threadId, tenantId).flatMap(_ => queue.submit(submission)))
       .map { ticket =>
         countClosed(ticket.interrupted)
         ticket
       }
+
+  /**
+   * Refuses a submission to a thread another tenant owns - its latest checkpoint records another tenant
+   * (`Checkpointer.owner`) - with `GraphError.TenantMismatch` naming only the submitter's tenant, as the runtime
+   * answers a direct run there (#3085). A thread with no checkpoint yet has no known owner: its entry is queued, and
+   * a worker refuses it at take if another tenant's run created the thread first.
+   */
+  private def ownedBy(threadId: ThreadId, tenantId: Option[TenantId]): Result[Unit] =
+    checkpointer.owner(threadId).flatMap {
+      case Some(owner) if owner.tenantId != tenantId.map(_.value) =>
+        Left(GraphError.TenantMismatch(threadId.value, tenantId.map(_.value)))
+      case _ => Right(())
+    }
 
   /**
    * Cancels `target` - one entry, or every open entry of a thread - for `tenantId`, from any machine (W3, design 4.57),
