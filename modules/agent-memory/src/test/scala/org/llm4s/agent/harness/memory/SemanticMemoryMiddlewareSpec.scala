@@ -695,6 +695,68 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     seen.asScala.collect { case MemoryEvents.Consolidated(c) => c } shouldBe empty
   }
 
+  "A consolidation's summary" should "carry its sources' writer: the middleware's for its own, none for another's (#3035)" in {
+    val old    = Instant.parse("2026-01-01T00:00:00Z")
+    val writer = SemanticMemoryMiddleware.WriterKey
+    val ours = (1 to 3).map(i =>
+      Memory
+        .fromConversation(s"ours $i", "user", Some("a"))
+        .withMetadata(writer, "semantic-memory")
+        .copy(timestamp = old)
+    )
+    val theirs = (1 to 3).map(i => Memory.fromConversation(s"theirs $i", "user", Some("b")).copy(timestamp = old))
+    val m = new SemanticMemoryMiddleware(
+      _ => Right(InMemoryStore.withMemories(ours ++ theirs).value),
+      summarising,
+      new FunctionClient(c =>
+        if c.messages.exists(_.content.contains("ours 1")) then "ours, summed" else "theirs, summed"
+      ),
+      record = None,
+      consolidate = consolidate,
+      clock = later
+    )
+    agentWith(answering("ok"), m).run("hi").value
+    val written = held(m, None).recall(MemoryFilter.All, 10).value
+    written.map(w => w.content -> w.getMetadata(writer)).toSet shouldBe
+      Set("ours, summed" -> Some("semantic-memory"), "theirs, summed" -> None)
+    written.foreach(_.getMetadata(ConsolidationProvenance.Version) shouldBe Some("2"))
+  }
+
+  it should "be refused, its sources kept, when it would merge two writers' memories or is longer than maxRecordChars" in {
+    val writer = SemanticMemoryMiddleware.WriterKey
+    val a      = Memory.userFact("a", Some("u")).withMetadata(writer, "semantic-memory")
+    val b      = Memory.userFact("b", Some("u"))
+    val c      = Memory.userFact("c", Some("u")).withMetadata(writer, "semantic-memory")
+    val plans = Seq(
+      Seq(a.id, b.id) -> "a and b",
+      Seq(a.id, c.id) -> ("a and c, " * 3)
+    )
+    for (remove, summary) <- plans do
+      val replacing = (store: MemoryStore, _: LLMClient) =>
+        new Overlong(
+          SimpleMemoryManager.withStore(store),
+          _ => Right(""),
+          consolidating = Some(view =>
+            view.replace(Seq(Memory.userFact(summary, Some("u"))), remove).map(_ => SimpleMemoryManager.empty)
+          )
+        )
+      val m = new SemanticMemoryMiddleware(
+        _ => Right(InMemoryStore.withMemories(Seq(a, b, c)).value),
+        replacing,
+        answering(),
+        record = Some(MemoryRecording(maxRecordChars = 20)),
+        consolidate = consolidate
+      )
+      val seen = new CopyOnWriteArrayList[StreamEvent]()
+      agentWith(answering("ok"), m).stream(ThreadId("refused"), "hi")(e => seen.add(e): Unit).value.await().value
+      withClue(s"$summary: ") {
+        (contents(held(m, None)) should contain).allOf("a", "b", "c")
+        contents(held(m, None)) should not contain summary
+        seen.asScala.collect { case MemoryEvents.Skipped(s) => s }.toVector shouldBe
+          Vector(MemorySkipped("memory.consolidate", "ValidationError"))
+      }
+  }
+
   "A manager that swallows a cancellation" should "still fail the turn" in {
     // as LLMMemoryManager did in best-effort mode: the task is interrupted, but the manager returns success
     val swallowing = (store: MemoryStore, _: LLMClient) =>

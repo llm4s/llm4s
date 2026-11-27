@@ -18,6 +18,7 @@ import org.llm4s.agent.memory.{
   Memory,
   MemoryBounds,
   MemoryFilter,
+  MemoryId,
   MemoryManager,
   MemoryStore,
   TransactionalMemoryStore
@@ -66,7 +67,8 @@ import scala.util.{ Try, Using }
  *     refused. Each memory is cut to `maxRecordChars`.
  *   - **Consolidation** (`afterAgent`, after recording) runs the manager's `consolidateMemories` on memories older than
  *     `olderThan`; each group it replaces is one effect (`memory.consolidate`, keyed by the group's ids). It needs a
- *     transactional store: on any other, the input is refused.
+ *     transactional store: on any other, the input is refused. A summary carries its sources' writer, and one longer
+ *     than `maxRecordChars` is refused, never cut, so its sources are kept (#3035).
  *   - **Bounds.** Every memory the middleware writes carries [[SemanticMemoryMiddleware.WriterKey]] set to its `id`,
  *     and `bounds` counts only those: every write evicts, in its own transaction, the middleware's own memories of
  *     lowest importance, oldest first, beyond `bounds`, so what it records stays bounded whether or not consolidation
@@ -211,7 +213,7 @@ final class SemanticMemoryMiddleware(
     val view = MemoryView.consolidating(tenant) { (add, remove) =>
       val key = context.run.effectKey("memory.consolidate", remove.map(_.value).distinct.sorted*)
       MemoryEffects
-        .write(context.run, tenant, key, owned)(Right(add.map(m => stamped(cut(m, maxChars))) -> remove))
+        .write(context.run, tenant, key, owned)(summaries(tenant, add, remove, maxChars).map(_ -> remove))
         .map(out => if out.added.nonEmpty || out.removed.nonEmpty || out.evicted > 0 then outcomes.add(out): Unit)
     }
     val cutoff = clock.instant().minusNanos(settings.olderThan.toNanos)
@@ -224,6 +226,46 @@ final class SemanticMemoryMiddleware(
         MemoryConsolidated(done.size, done.map(_.removed.size).sum, done.map(_.evicted).sum)
       )
     result.map(_ => ())
+
+  /**
+   * A group's summaries as written: each carries its sources' writer ([[WriterKey]]), so a summary of this middleware's
+   * memories counts against its bounds and one of another writer's never does (#3035). A group whose sources have
+   * different writers, or whose summary is longer than `maxChars`, is refused, never cut: its sources are kept.
+   */
+  private def summaries(
+    tenant: TenantMemory,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    maxChars: Int
+  ): Result[Seq[Memory]] =
+    tenant
+      .read(store =>
+        remove.distinct.foldLeft[Result[Vector[Memory]]](Right(Vector.empty)) { (acc, id) =>
+          acc.flatMap(found => store.get(id).map(found ++ _))
+        }
+      )
+      .flatMap { sources =>
+        sources.map(_.getMetadata(WriterKey)).distinct match
+          case writers if writers.size > 1 =>
+            Left(ValidationError("consolidate", "a summary would merge memories of different writers: sources kept"))
+          case writers =>
+            val writer = writers.headOption.flatten
+            add.foldLeft[Result[Vector[Memory]]](Right(Vector.empty)) { (acc, summary) =>
+              acc.flatMap { kept =>
+                val length = summary.content.codePointCount(0, summary.content.length)
+                if length > maxChars then
+                  Left(
+                    ValidationError(
+                      "consolidate",
+                      s"a summary of $length characters is longer than maxRecordChars ($maxChars): sources kept"
+                    )
+                  )
+                else
+                  val metadata = writer.fold(summary.metadata - WriterKey)(w => summary.metadata + (WriterKey -> w))
+                  Right(kept :+ summary.copy(metadata = metadata))
+              }
+            }
+      }
 
   /** A failure after the answer: a cancellation is the hook's `Left`; anything else is announced and skipped. */
   private def skip(context: ModelContext, operation: String, result: Result[Unit]): Result[Unit] =

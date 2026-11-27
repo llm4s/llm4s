@@ -220,7 +220,7 @@ them before any limit, count or delete.
 | Filter                                   | SQL                                                               |
 | ---------------------------------------- | ----------------------------------------------------------------- |
 | `All` / `None`                           | no condition / `1 = 0`                                            |
-| `ByEntity(id)`, `ByMetadata(k, v)`       | `metadata ->> ? = ?`, comparing the value as text                 |
+| `ByEntity(id)`, `ByMetadata(k, v)`       | `metadata @> {k: v}` (uses the GIN index), then `metadata ->> ? = ?` as text |
 | `ByConversation(id)`                     | `metadata->>'conversation_id' = ?` (uses its index)               |
 | `HasMetadata(k)`                         | `(metadata -> ?) IS NOT NULL`                                     |
 | `MetadataContains(k, s)`                 | `strpos(metadata ->> ?, ?) > 0`, a literal substring test         |
@@ -234,6 +234,8 @@ them before any limit, count or delete.
 
 Metadata values are compared as the text `->>` gives, and read back the same way, so a number, a boolean or a JSON
 `null` that another writer stored (`{"count": 3}`) matches `ByMetadata("count", "3")` in SQL and in `matches` alike.
+The containment test before it, for the JSON string `v` and, when `v` is the text of one, the number, boolean or
+`null`, lets the `GIN(metadata)` index narrow the rows; the text comparison decides.
 Every condition is guarded against SQL `NULL`, so `Not(MinImportance(0.5))` keeps the memories that have no
 importance, and `Not(ByEntity(e))` those with no entity, as `matches` does.
 

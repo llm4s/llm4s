@@ -369,6 +369,28 @@ it in test scope and extend `VectorStoreContract` or `KeywordIndexContract`; see
 A test that matched the section's old heading, or a memory's line breaks in a rendered context, matches the new text.
 A prompt you build yourself from `getRelevantContext` should fence it the same way, as the
 [guide's example](../guide/agents/memory#injecting-context) does.
+## Consolidation keeps its sources' scope, and never replaces them with a cut summary (#3035)
+
+`llm4s-memory` is Beta, `llm4s-agent-memory` Experimental. No signature changes; which memories are merged, and when a
+summary is kept, do.
+
+| Before (1.0.0) | After |
+|---|---|
+| `LLMMemoryManager.consolidateMemories` grouped entity facts by `entity_id`, knowledge by `source`, tasks by `success` and user facts by `user_id` (those with none together), across conversations; the summary kept the first source's value of each key, so `deleteMatching(MemoryFilter.ByConversation(c))` left `c`'s content inside a summary of another conversation | A group holds memories of one scope: every metadata value except `role`, `chunk_index`, `entity_name` and `entity_type` is equal, so the summary carries each source's `conversation_id`, `user_id`, `entity_id`, `source`, `llm4s.writer` and your own keys, and an erasure by any of them removes it. A user fact with no `user_id` is never consolidated. Groups are smaller, so fewer may reach `minCount` |
+| A summary cut by its token limit, or cut at 2,000 characters, replaced up to 50 sources | A summary whose completion stopped for `FinishReason.Length` (or anything but `Stop` or `Unknown`), is empty, or is longer than `LLMMemoryManager.MaxSummaryChars` (2000) fails its group: the sources are kept, and `strictMode` returns the error |
+| `original_ids` listed the first 10 sources | `original_ids` lists every memory the summary stands for, through earlier summaries, and `consolidation_version` is `2` (`ConsolidationProvenance` names the keys) |
+| `SemanticMemoryMiddleware` stamped every summary with its own `llm4s.writer`, and cut it to `maxRecordChars` | A summary carries its sources' writer, so a summary of another writer's memories is not counted by `bounds`; a group mixing writers, or a summary longer than `maxRecordChars`, is refused and announced by `MemoryEvents.Skipped` |
+
+A summary written by 1.0.0 has no `consolidation_version`. It reads back as before and is never consolidated again, but
+its scope is its first source's, so it may hold another conversation's or user's content. Before relying on an
+erasure, review or delete them:
+
+```scala
+import org.llm4s.agent.memory.{ ConsolidationProvenance, MemoryStore }
+
+def dropLegacySummaries(store: MemoryStore) = store.deleteMatching(ConsolidationProvenance.legacySummaries)
+```
+
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;
