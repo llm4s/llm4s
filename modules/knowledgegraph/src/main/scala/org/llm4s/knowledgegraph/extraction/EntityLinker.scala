@@ -1,6 +1,6 @@
 package org.llm4s.knowledgegraph.extraction
 
-import org.llm4s.knowledgegraph.{ Graph, Node }
+import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.syntax.toResult
@@ -18,6 +18,17 @@ import scala.util.Try
  *     property are merged, with edges rewritten to point at the surviving node.
  *  2. LLM-assisted disambiguation (optional): ambiguous clusters (e.g., "Jobs" vs
  *     "Steve Jobs") are sent to the LLM to confirm or reject merges.
+ *
+ * How nodes merge (#2967):
+ *  - A blank or missing `name` is no name: such a node is keyed by its id, so it merges with nothing by name.
+ *  - The surviving (canonical) id is one of `preferredIds` when the group has one (the ids of a graph built earlier, so
+ *    adding documents never renames a node that already exists), else the smallest id in the deterministic pass and
+ *    the longest name (then the smallest id) in the model-driven one.
+ *  - The canonical node's properties win; a property the canonical node lacks is taken from the others, in id order.
+ *  - Confirmed model merges are grouped transitively (`A = B` and `B = C` merge all three), and each group is merged
+ *    once against the current graph.
+ *  - After rewriting, edges are one per (source, target, relationship), their properties merged as nodes' are. A
+ *    self-loop the rewrite created is dropped; one that was in the graph is kept.
  *
  * @example
  * {{{
@@ -41,49 +52,52 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
    * @param graph The graph whose entities should be linked
    * @return A new graph with duplicate entities merged and edges rewritten
    */
-  def link(graph: Graph): Result[Graph] = {
-    val (afterDeterministic, _) = deterministicMergeWithMapping(graph)
-
-    llmClient match {
-      case Some(client) => llmDisambiguate(afterDeterministic, client)
-      case None         => Right(afterDeterministic)
-    }
-  }
+  def link(graph: Graph): Result[Graph] = linkWithMapping(graph, Set.empty).map(_._1)
 
   /**
    * Links entities in a SourceTrackedGraph, updating provenance mappings to reflect merges.
    *
+   * Every merge, deterministic or model-driven, moves the removed node's sources to the node it merged into, and an
+   * edge's sources are the union over every edge rewritten onto it (#2967, #2962).
+   *
    * @param tracked The source-tracked graph to link
+   * @param preferredIds Ids that stay canonical when they merge with others, such as the node ids of a graph built
+   *                     before; adding documents then never renames a node that already exists
    * @return A new SourceTrackedGraph with entities linked and provenance updated
    */
-  def linkTracked(tracked: SourceTrackedGraph): Result[SourceTrackedGraph] = {
-    val (linkedGraph, idMapping) = deterministicMergeWithMapping(tracked.graph)
+  def linkTracked(tracked: SourceTrackedGraph, preferredIds: Set[String] = Set.empty): Result[SourceTrackedGraph] =
+    linkWithMapping(tracked.graph, preferredIds).map { case (finalGraph, idMapping) =>
+      def canonical(id: String): String = idMapping.getOrElse(id, id)
 
-    val afterDisambiguation: Result[Graph] = llmClient match {
-      case Some(client) => llmDisambiguate(linkedGraph, client)
-      case None         => Right(linkedGraph)
-    }
+      val newNodeSources: Map[String, Set[String]] =
+        tracked.nodeSources.toSeq.groupMapReduce { case (id, _) => canonical(id) }(_._2)(_ ++ _)
 
-    afterDisambiguation.map { finalGraph =>
-      // Union node sources: every old ID that maps to a canonical ID contributes its sources
-      val newNodeSources: Map[String, Set[String]] = idMapping
-        .groupBy(_._2) // group by canonical ID
-        .map { case (canonicalId, mappings) =>
-          val unioned = mappings.keys.flatMap(oldId => tracked.nodeSources.getOrElse(oldId, Set.empty)).toSet
-          canonicalId -> unioned
-        }
-
-      // Rewrite edgeSources keys: replace old node IDs with their canonical IDs
       val newEdgeSources: Map[(String, String, String), Set[String]] =
-        tracked.edgeSources.map { case ((src, tgt, rel), srcs) =>
-          val newKey = (idMapping.getOrElse(src, src), idMapping.getOrElse(tgt, tgt), rel)
-          newKey -> srcs
-        }
+        tracked.edgeSources.toSeq
+          .flatMap { case ((src, tgt, rel), srcs) =>
+            val key = (canonical(src), canonical(tgt), rel)
+            // A self-loop the merge created is no longer an edge of the graph
+            if (src != tgt && key._1 == key._2) None else Some(key -> srcs)
+          }
+          .groupMapReduce(_._1)(_._2)(_ ++ _)
 
       tracked
         .withGraph(finalGraph)
         .withUpdatedNodeSources(newNodeSources)
         .withUpdatedEdgeSources(newEdgeSources)
+    }
+
+  /** Both passes, returning every removed id mapped to the id it ends up merged into. */
+  private def linkWithMapping(graph: Graph, preferredIds: Set[String]): Result[(Graph, Map[String, String])] = {
+    val (afterDeterministic, deterministic) = deterministicMergeWithMapping(graph, preferredIds)
+    val afterModel: Result[(Graph, Map[String, String])] = llmClient match {
+      case Some(client) => llmDisambiguate(afterDeterministic, client, preferredIds)
+      case None         => Right((afterDeterministic, Map.empty))
+    }
+    afterModel.map { case (finalGraph, modelMapping) =>
+      val composed = deterministic.map { case (old, mid) => old -> modelMapping.getOrElse(mid, mid) } ++
+        modelMapping.filterNot { case (id, _) => deterministic.contains(id) }
+      (finalGraph, composed)
     }
   }
 
@@ -97,58 +111,62 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
   /**
    * Deterministic merge that also returns the old-ID → canonical-ID mapping.
    *
-   * Nodes are sorted by ID before grouping so the canonical node (lowest ID) is
-   * chosen deterministically regardless of Map iteration order.
+   * The canonical node of a group is a `preferredIds` member when there is one, else the smallest id, so the choice
+   * does not depend on Map iteration order.
    *
    * @return (merged graph, Map[oldId -> canonicalId])
    */
-  private[extraction] def deterministicMergeWithMapping(graph: Graph): (Graph, Map[String, String]) = {
-    // Sort by ID first so the canonical node (head) is always the lexicographically smallest ID
-    val nodesByKey = graph.nodes.values.toList.sortBy(_.id).groupBy(nodeKey)
+  private[extraction] def deterministicMergeWithMapping(
+    graph: Graph,
+    preferredIds: Set[String] = Set.empty
+  ): (Graph, Map[String, String]) = {
+    val groups = graph.nodes.values.toList.groupBy(nodeKey).values.toList
+    mergeGroups(graph, groups.map(g => chooseCanonical(g, preferredIds, byLongestName = false)))
+  }
 
-    // Build a map from old node ID → canonical node ID (lowest-ID node in group wins)
-    val idMapping: Map[String, String] = nodesByKey.flatMap { case (_, groupNodes) =>
-      val canonicalId = groupNodes.head.id
-      groupNodes.map(n => n.id -> canonicalId)
-    }.toMap
+  /** Orders a group with its canonical node first. */
+  private def chooseCanonical(group: List[Node], preferredIds: Set[String], byLongestName: Boolean): List[Node] = {
+    val sorted = group.sortBy(_.id)
+    val canonical = sorted.filter(n => preferredIds.contains(n.id)) match {
+      case preferred if preferred.nonEmpty => preferred.head
+      case _ if byLongestName              => sorted.maxBy(n => nodeName(n).length) // maxBy keeps the first maximum
+      case _                               => sorted.head
+    }
+    canonical :: sorted.filterNot(_.id == canonical.id)
+  }
 
-    // Merge node properties: later nodes' properties are added (canonical's take precedence on conflict)
-    val mergedNodes = nodesByKey
-      .map { case (_, groupNodes) =>
-        val canonical = groupNodes.head
-        val mergedProps = groupNodes.tail.foldLeft(canonical.properties) { (acc, node) =>
-          node.properties ++ acc // canonical's properties take precedence
+  /**
+   * Merges each group (canonical node first) into its canonical node, against the current graph, and rewrites the
+   * edges. Returns the graph and every removed id mapped to its canonical id.
+   */
+  private def mergeGroups(graph: Graph, groups: List[List[Node]]): (Graph, Map[String, String]) = {
+    val merging                      = groups.filter(_.size > 1)
+    val mapping: Map[String, String] = merging.flatMap(g => g.tail.map(_.id -> g.head.id)).toMap
+    if (mapping.isEmpty) (graph.copy(edges = EntityLinker.rewriteEdges(graph.edges, Map.empty)), Map.empty)
+    else {
+      val mergedNodes = merging.map { g =>
+        val current = g.flatMap(n => graph.nodes.get(n.id))
+        val keep    = current.head
+        val props = current.tail.foldLeft(keep.properties) { (acc, other) =>
+          val conflicting = other.properties.keySet.filter(k => acc.get(k).exists(_ != other.properties(k)))
+          if (conflicting.nonEmpty)
+            logger.debug(
+              s"Merging ${other.id} into ${keep.id}: kept ${keep.id}'s value of ${conflicting.toSeq.sorted.mkString(", ")}"
+            )
+          other.properties ++ acc
         }
-        canonical.copy(properties = mergedProps)
+        keep.id -> keep.copy(properties = props)
       }
-      .map(n => n.id -> n)
-      .toMap
-
-    // Rewrite edges to use canonical IDs and deduplicate
-    val rewrittenEdges = graph.edges
-      .map { edge =>
-        edge.copy(
-          source = idMapping.getOrElse(edge.source, edge.source),
-          target = idMapping.getOrElse(edge.target, edge.target)
-        )
-      }
-      .distinct
-      .filterNot(e => e.source == e.target) // Remove self-loops created by merging
-
-    (Graph(mergedNodes, rewrittenEdges), idMapping)
+      val nodes = (graph.nodes -- mapping.keys) ++ mergedNodes
+      (Graph(nodes, EntityLinker.rewriteEdges(graph.edges, mapping)), mapping)
+    }
   }
 
   /**
    * Builds a canonical key for a node: (lowercased label, normalized name property).
-   * Nodes without a "name" property use their ID as the name component.
+   * Nodes without a non-blank "name" property use their ID as the name component.
    */
-  private def nodeKey(node: Node): (String, String) = {
-    val name = node.properties.get("name") match {
-      case Some(ujson.Str(s)) => normalizeName(s)
-      case _                  => normalizeName(node.id)
-    }
-    (node.label.toLowerCase, name)
-  }
+  private def nodeKey(node: Node): (String, String) = (node.label.toLowerCase, nodeName(node))
 
   /**
    * Normalizes a name for comparison: lowercase, trim, collapse whitespace.
@@ -162,13 +180,17 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
    * Finds nodes of the same label whose names are similar but not identical after
    * normalization, and asks the LLM whether they refer to the same entity.
    */
-  private def llmDisambiguate(graph: Graph, client: LLMClient): Result[Graph] = {
+  private def llmDisambiguate(
+    graph: Graph,
+    client: LLMClient,
+    preferredIds: Set[String]
+  ): Result[(Graph, Map[String, String])] = {
     val candidates = findDisambiguationCandidates(graph)
 
     if (candidates.isEmpty) {
-      Right(graph)
+      Right((graph, Map.empty))
     } else {
-      resolveDisambiguationCandidates(graph, candidates, client)
+      resolveDisambiguationCandidates(graph, candidates, client, preferredIds)
     }
   }
 
@@ -177,9 +199,9 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
    * A candidate pair has names where one is a substring of the other.
    */
   private[extraction] def findDisambiguationCandidates(graph: Graph): List[(Node, Node)] = {
-    val nodesByLabel = graph.nodes.values.toList.groupBy(_.label.toLowerCase)
+    val nodesByLabel = graph.nodes.values.toList.sortBy(_.id).groupBy(_.label.toLowerCase)
 
-    nodesByLabel.values.flatMap { nodes =>
+    nodesByLabel.toList.sortBy(_._1).flatMap { case (_, nodes) =>
       for {
         i <- nodes.indices
         j <- (i + 1) until nodes.size
@@ -187,25 +209,28 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
         b = nodes(j)
         if arePotentialDuplicates(a, b)
       } yield (a, b)
-    }.toList
+    }
   }
 
   /**
    * Two nodes are potential duplicates if they share a label and one's name
-   * is a substring of the other's (after normalization).
+   * is a substring of the other's (after normalization). A node without a non-blank name is never a candidate: its
+   * id is no evidence of what it names.
    */
-  private def arePotentialDuplicates(a: Node, b: Node): Boolean = {
-    val nameA = nodeName(a)
-    val nameB = nodeName(b)
-    if (nameA == nameB) false // Already handled by deterministic merge
-    else nameA.contains(nameB) || nameB.contains(nameA)
-  }
-
-  private def nodeName(node: Node): String =
-    node.properties.get("name") match {
-      case Some(ujson.Str(s)) => normalizeName(s)
-      case _                  => normalizeName(node.id)
+  private def arePotentialDuplicates(a: Node, b: Node): Boolean =
+    (givenName(a), givenName(b)) match {
+      case (Some(nameA), Some(nameB)) if nameA != nameB => // equal names: handled by the deterministic merge
+        nameA.contains(nameB) || nameB.contains(nameA)
+      case _ => false
     }
+
+  /** The normalized `name` property, when it is a non-blank string. */
+  private def givenName(node: Node): Option[String] =
+    node.properties.get("name").collect { case ujson.Str(s) if s.trim.nonEmpty => normalizeName(s) }
+
+  /** The normalized `name` property, or the normalized id when the name is missing, not a string, or blank. */
+  private def nodeName(node: Node): String =
+    givenName(node).getOrElse(normalizeName(node.id))
 
   /**
    * Asks the LLM to resolve ambiguous entity pairs and merges confirmed duplicates.
@@ -213,8 +238,9 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
   private def resolveDisambiguationCandidates(
     graph: Graph,
     candidates: List[(Node, Node)],
-    client: LLMClient
-  ): Result[Graph] = {
+    client: LLMClient,
+    preferredIds: Set[String]
+  ): Result[(Graph, Map[String, String])] = {
     val prompt = buildDisambiguationPrompt(candidates)
     val conversation = Conversation(
       messages = List(
@@ -227,7 +253,7 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
 
     client
       .complete(conversation, CompletionOptions(temperature = Some(0.0)))
-      .flatMap(completion => parseDisambiguationResponse(completion.content, candidates, graph))
+      .map(completion => applyDisambiguationResponse(completion.content, candidates, graph, preferredIds))
   }
 
   private def buildDisambiguationPrompt(candidates: List[(Node, Node)]): String = {
@@ -248,16 +274,16 @@ ${pairs.mkString("\n\n")}"""
   /**
    * Parses the LLM disambiguation response and applies confirmed merges.
    *
-   * Graceful degradation: if the LLM response cannot be parsed (malformed JSON, unexpected
-   * structure, etc.) a warning is logged and the pre-disambiguation graph is returned as
-   * `Right`. Callers cannot distinguish a successful no-op from a parse failure; use
-   * log output to detect issues in production.
+   * Graceful degradation: a reply that is not a JSON object with a `merges` array leaves the graph as it is, with a
+   * warning; within the array, each element is read on its own, so a malformed one is skipped (with a warning) and
+   * the others still apply (#2967).
    */
-  private def parseDisambiguationResponse(
+  private def applyDisambiguationResponse(
     jsonStr: String,
     candidates: List[(Node, Node)],
-    graph: Graph
-  ): Result[Graph] = {
+    graph: Graph,
+    preferredIds: Set[String]
+  ): (Graph, Map[String, String]) = {
     val cleanJson = jsonStr.trim
       .stripPrefix("```json")
       .stripPrefix("```")
@@ -266,56 +292,71 @@ ${pairs.mkString("\n\n")}"""
 
     // The reply is model output: a document nested more than 512 levels deep is refused before it
     // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
-    val merged = BoundedJson.read(cleanJson).flatMap { json =>
-      Try {
-        val merges = json("merges").arr
-
-        // Collect pairs to merge
-        val pairsToMerge = merges.flatMap { m =>
-          val pairIdx = m("pair").num.toInt - 1
-          val doMerge = m("merge").bool
-          if (doMerge && pairIdx >= 0 && pairIdx < candidates.size) {
-            Some(candidates(pairIdx))
-          } else None
-        }.toList
-
-        // Apply merges: for each pair, keep the node with the longer name as canonical
-        pairsToMerge.foldLeft(graph) { case (g, (a, b)) =>
-          val (keep, remove) = if (nodeName(a).length >= nodeName(b).length) (a, b) else (b, a)
-          mergeNodePair(g, keep, remove)
-        }
-      }.toResult
-    }
-    merged match {
-      case Right(updatedGraph) => Right(updatedGraph)
+    val merges = BoundedJson.read(cleanJson).flatMap(json => Try(json("merges").arr.toList).toResult)
+    merges match {
       case Left(error) =>
         logger.warn(
           s"Failed to parse disambiguation response, falling back to pre-disambiguation graph: ${error.message}"
         )
-        Right(graph)
+        (graph, Map.empty)
+      case Right(elements) =>
+        val confirmed = elements.flatMap { m =>
+          Try((m("pair").num.toInt - 1, m("merge").bool)).toOption match {
+            case Some((idx, true)) if idx >= 0 && idx < candidates.size => Some(candidates(idx))
+            case Some(_)                                                => None
+            case None =>
+              logger.warn(s"Skipping a malformed disambiguation element: ${m.toString.take(200)}")
+              None
+          }
+        }
+        val groups = EntityLinker.components(confirmed.map { case (a, b) => (a.id, b.id) }).map { ids =>
+          chooseCanonical(ids.toList.flatMap(graph.nodes.get), preferredIds, byLongestName = true)
+        }
+        mergeGroups(graph, groups)
     }
+  }
+}
+
+private[extraction] object EntityLinker {
+
+  /** The connected components of the pairs, each as a set of ids (union-find with path compression). */
+  def components(pairs: List[(String, String)]): List[Set[String]] = {
+    val parent = scala.collection.mutable.Map.empty[String, String]
+    def find(x: String): String = {
+      val p = parent.getOrElseUpdate(x, x)
+      if (p == x) x
+      else {
+        val root = find(p)
+        parent(x) = root
+        root
+      }
+    }
+    pairs.foreach { case (a, b) =>
+      val (ra, rb) = (find(a), find(b))
+      if (ra != rb) parent(ra) = rb
+    }
+    parent.keys.toList.groupBy(find).values.map(_.toSet).toList
   }
 
   /**
-   * Merges two nodes: keeps the `keep` node, removes the `remove` node,
-   * and rewrites all edges referencing `remove` to reference `keep`.
+   * Rewrites edge endpoints through `mapping`, drops the self-loops the rewrite created (an edge that already was a
+   * self-loop stays), and keeps one edge per (source, target, relationship), in first-seen order, its properties
+   * merged with the first edge's winning.
    */
-  private def mergeNodePair(graph: Graph, keep: Node, remove: Node): Graph = {
-    // Merge properties (keep node's properties take precedence)
-    val mergedProps  = remove.properties ++ keep.properties
-    val mergedNode   = keep.copy(properties = mergedProps)
-    val updatedNodes = (graph.nodes - remove.id) + (keep.id -> mergedNode)
-
-    // Rewrite edges
-    val updatedEdges = graph.edges
-      .map { edge =>
-        val newSource = if (edge.source == remove.id) keep.id else edge.source
-        val newTarget = if (edge.target == remove.id) keep.id else edge.target
-        edge.copy(source = newSource, target = newTarget)
+  def rewriteEdges(edges: List[Edge], mapping: Map[String, String]): List[Edge] = {
+    val rewritten = edges.flatMap { e =>
+      val src = mapping.getOrElse(e.source, e.source)
+      val tgt = mapping.getOrElse(e.target, e.target)
+      if (e.source != e.target && src == tgt) None else Some(e.copy(source = src, target = tgt))
+    }
+    val merged = scala.collection.mutable.LinkedHashMap.empty[(String, String, String), Edge]
+    rewritten.foreach { e =>
+      val key = (e.source, e.target, e.relationship)
+      merged.get(key) match {
+        case Some(first) => merged(key) = first.copy(properties = e.properties ++ first.properties)
+        case None        => merged(key) = e
       }
-      .distinct
-      .filterNot(e => e.source == e.target)
-
-    Graph(updatedNodes, updatedEdges)
+    }
+    merged.values.toList
   }
 }
