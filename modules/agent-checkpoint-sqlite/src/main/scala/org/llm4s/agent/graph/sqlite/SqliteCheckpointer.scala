@@ -275,12 +275,21 @@ final class SqliteCheckpointer private (
         }
         Using.resource(
           c.prepareStatement(
-            """INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json, committed_second, committed_nano)
-            |VALUES (?, ?, ?, ?, ?)""".stripMargin
+            """INSERT INTO llm4s_checkpoint_events
+            |(thread_id, seq, checkpoint_id, record_json, committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
           )
         ) { insert =>
-          stored.foreach { (seq, json) =>
-            bind(insert, threadId.value, seq, json, committedAt.getEpochSecond, committedAt.getNano.toLong)
+          stored.zip(commit.events).foreach { case ((seq, json), draft) =>
+            bind(
+              insert,
+              threadId.value,
+              seq,
+              draft.checkpointId,
+              json,
+              committedAt.getEpochSecond,
+              committedAt.getNano.toLong
+            )
             insert.executeUpdate(): Unit
           }
         }
@@ -507,34 +516,30 @@ final class SqliteCheckpointer private (
     val queued        = queueEvidence(c, threadId)
     val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
     val dropped       = history.filterNot(h => keptPositions(h._1)).map(_._1)
-    val keptIds       = kept.map(_._2).toSet
-    decoding("prune", "event") {
+    val byCheckpoint =
+      if kept.size == history.size then None
+      else
+        query(
+          c,
+          """SELECT MIN(seq) FROM llm4s_checkpoint_events
+            |WHERE thread_id = ? AND checkpoint_id IN (SELECT value FROM json_each(?))""".stripMargin,
+          threadId.value,
+          ujson.write(ujson.Arr.from(kept.map(h => ujson.Str(h._2))))
+        )(rows => Option.when(rows.getObject(1) != null)(rows.getLong(1))).head
+    val byAge = cutoff.map { cut =>
       query(
         c,
-        """SELECT seq, record_json, committed_second, committed_nano FROM llm4s_checkpoint_events
-            |WHERE thread_id = ? ORDER BY seq""".stripMargin,
-        threadId.value
-      ) { rows =>
-        val seq    = rows.getLong(1)
-        val json   = rows.getString(2)
-        val second = rows.getLong(3)
-        (seq, json, Option.when(!rows.wasNull())(Instant.ofEpochSecond(second, rows.getLong(4))))
-      }.map { (seq, json, committed) =>
-        val event = upickle.default.read[EventRecord](json)
-        // a row from before schema 7 has its producer's timestamp in place of its commit time
-        (seq, event, committed.getOrElse(event.timestamp))
-      }
-    }.map { events =>
-      // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-      val byCheckpoint =
-        if kept.size == history.size then None
-        else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
-      val byAge = cutoff.map { cut =>
-        events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
-      }
-      val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-      (dropped, (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
+        """SELECT MIN(seq) FROM llm4s_checkpoint_events WHERE thread_id = ? AND (
+          |committed_second IS NULL OR committed_nano IS NULL OR committed_second > ?
+          |OR (committed_second = ? AND committed_nano >= ?))""".stripMargin,
+        threadId.value,
+        cut.getEpochSecond,
+        cut.getEpochSecond,
+        cut.getNano.toLong
+      )(rows => Option.when(rows.getObject(1) != null)(rows.getLong(1))).head.getOrElse(current.nextSeq)
     }
+    val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+    Right((dropped, (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)))
 
   /**
    * One page of the sweep (design 4.53): the page's thread ids read in one read transaction by the primary key, the

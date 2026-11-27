@@ -48,14 +48,25 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
   /** The file as a version-10 build left it: no stop requests on queue entries (design 4.57). */
   private def asVersionTen(path: Path): Unit =
+    asVersionEleven(path)
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN stop_json",
       "UPDATE llm4s_checkpoint_schema SET version = 10"
     )
 
+  /** The file as a version-11 build left it: event checkpoint ids have not been added yet. */
+  private def asVersionEleven(path: Path): Unit =
+    exec(
+      path,
+      "DROP INDEX llm4s_checkpoint_events_checkpoint",
+      "ALTER TABLE llm4s_checkpoint_events DROP COLUMN checkpoint_id",
+      "UPDATE llm4s_checkpoint_schema SET version = 11"
+    )
+
   /** The file as a version-9 build left it: no run queue and no run ids on history rows (design 4.55). */
   private def asVersionNine(path: Path): Unit =
+    asVersionEleven(path)
     exec(
       path,
       "DROP TABLE llm4s_checkpoint_queue_attempts",
@@ -506,6 +517,127 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.prune(thread, RetentionPolicy(maxAge = Some(30.minutes))).value
     reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
     reopened.eventsAfter(thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
+    reopened.close()
+  }
+
+  "Pruning a thread" should "not decode its events to calculate retention floors" in {
+    val db     = SqliteFiles.fresh()
+    val store  = SqliteFiles.opened(db, ManualClock(start))
+    val thread = ThreadId("retention-no-decode")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c1", None, token)),
+          events = Vector(event("e1").withCheckpointId(Some("c1")))
+        )
+      )
+      .value: Unit
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c2", Some("c1"), token)),
+          events = Vector(event("e2").withCheckpointId(Some("c2")))
+        )
+      )
+      .value: Unit
+
+    exec(
+      db,
+      "UPDATE llm4s_checkpoint_events SET record_json = '{not json' WHERE thread_id = 'retention-no-decode' AND seq = 1"
+    )
+    store.prune(thread, RetentionPolicy().withMaxCheckpoints(1)).value
+
+    store.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
+    scalar(db, "SELECT earliest_seq FROM llm4s_checkpoint_threads WHERE thread_id = 'retention-no-decode'")(
+      _.getLong(1)
+    ) shouldBe 2L
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'retention-no-decode'")(
+      _.getInt(1)
+    ) shouldBe 1
+    scalar(db, "SELECT MIN(seq) FROM llm4s_checkpoint_events WHERE thread_id = 'retention-no-decode'")(
+      _.getLong(1)
+    ) shouldBe 2L
+    store.close()
+  }
+
+  "A version-11 file" should "backfill event checkpoint ids without failing on an undecodable event" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val store  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("event-checkpoint-migration")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c1", None, token)),
+          events = (1 to 257).map(i => event(s"e$i").withCheckpointId(Some("c1"))).toVector
+        )
+      )
+      .value: Unit
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c2", Some("c1"), token)),
+          events = Vector(event("e2").withCheckpointId(Some("c2")))
+        )
+      )
+      .value: Unit
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 1"
+    )(
+      _.getString(1)
+    ) shouldBe "c1"
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 257"
+    )(
+      _.getString(1)
+    ) shouldBe "c1"
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
+    )(
+      _.getString(1)
+    ) shouldBe "c2"
+    store.close()
+
+    exec(
+      db,
+      "UPDATE llm4s_checkpoint_events SET record_json = '{not json' WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
+    )
+    asVersionEleven(db)
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 257"
+    )(
+      _.getString(1)
+    ) shouldBe "c1"
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
+    )(rows => Option(rows.getString(1))) shouldBe None
+    val checkpointPlan = plan(
+      db,
+      (
+        "SELECT MIN(seq) FROM llm4s_checkpoint_events WHERE thread_id = ? AND checkpoint_id IN (SELECT value FROM json_each(?))",
+        Vector(thread.value, "[\"c1\"]")
+      )
+    )
+    checkpointPlan.exists(_.contains("llm4s_checkpoint_events_checkpoint")) shouldBe true
+    reopened.prune(thread, RetentionPolicy().withMaxCheckpoints(1)).value
+    reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
     reopened.close()
   }
 

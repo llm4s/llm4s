@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
-import org.llm4s.agent.graph.Checkpoint
+import org.llm4s.agent.graph.{ Checkpoint, EventRecord }
 
 import org.slf4j.LoggerFactory
 
@@ -32,8 +32,8 @@ import scala.util.{ Try, Using }
  *    backwards - and unique by `(thread, checkpoint id)`, so a read by id and the duplicate-id check use that index.
  *    The checkpoint's status, creation time and (from version 7) commit time sit beside it for retraction and retention.
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
- *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`, and from version 7
- *    when the store committed it, which `prune` judges age by.
+ *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`, from version 7
+ *    when the store committed it, which `prune` judges age by, and from version 12 its checkpoint id for retention.
  *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
  *    per `(thread, effect key)`, with the task it belongs to - its id and, from version 4, its lineage - which
  *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
@@ -52,7 +52,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 11
+  val Current: Int = 12
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -69,7 +69,8 @@ private[sqlite] object SqliteSchema:
     7  -> addThreadRegistry,
     8  -> addReclamation,
     9  -> addRunQueue,
-    10 -> addStopRequests
+    10 -> addStopRequests,
+    11 -> addEventCheckpointIds
   )
 
   /**
@@ -131,6 +132,63 @@ private[sqlite] object SqliteSchema:
    */
   private def addStopRequests(connection: Connection): Unit =
     statements(connection, "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN stop_json TEXT")
+
+  /**
+   * Version 12: events carry their checkpoint id for indexed retention. Decodable legacy events are backfilled in
+   * bounded batches; their producer timestamp fills the commit-time columns only when those columns were absent.
+   */
+  private def addEventCheckpointIds(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_events ADD COLUMN checkpoint_id TEXT")
+    Using.resource(
+      connection.prepareStatement(
+        """UPDATE llm4s_checkpoint_events SET checkpoint_id = ?,
+          |committed_second = COALESCE(committed_second, ?), committed_nano = COALESCE(committed_nano, ?)
+          |WHERE thread_id = ? AND seq = ?""".stripMargin
+      )
+    ) { backfill =>
+      var after = Option.empty[(String, Long)]
+      var done  = false
+      while !done do
+        val cursor = after.fold("")(_ => "WHERE thread_id > ? OR (thread_id = ? AND seq > ?)")
+        val rows = Using.resource(
+          connection.prepareStatement(
+            s"SELECT thread_id, seq, record_json FROM llm4s_checkpoint_events $cursor ORDER BY thread_id, seq LIMIT 256"
+          )
+        ) { select =>
+          after.foreach { (thread, seq) =>
+            select.setString(1, thread)
+            select.setString(2, thread)
+            select.setLong(3, seq)
+          }
+          Using.resource(select.executeQuery()) { result =>
+            val batch = Vector.newBuilder[(String, Long, String)]
+            while result.next() do batch += ((result.getString(1), result.getLong(2), result.getString(3)))
+            batch.result()
+          }
+        }
+        rows.foreach { (thread, seq, json) =>
+          Try(upickle.default.read[EventRecord](json)).toOption match
+            case Some(event) =>
+              backfill.setString(1, event.checkpointId.orNull)
+              backfill.setLong(2, event.timestamp.getEpochSecond)
+              backfill.setLong(3, event.timestamp.getNano.toLong)
+              backfill.setString(4, thread)
+              backfill.setLong(5, seq)
+              backfill.executeUpdate(): Unit
+            case None =>
+              logger.warn(
+                "Event {}/{} cannot be decoded during checkpoint-id migration; leaving metadata unset",
+                thread,
+                seq
+              )
+        }
+        after = rows.lastOption.map { case (thread, seq, _) => thread -> seq }
+        done = rows.isEmpty
+    }
+    statements(
+      connection,
+      "CREATE INDEX llm4s_checkpoint_events_checkpoint ON llm4s_checkpoint_events (thread_id, checkpoint_id, seq)"
+    )
 
   private def addRunQueue(connection: Connection): Unit =
     ensureHistory(connection)

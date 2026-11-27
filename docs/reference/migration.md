@@ -4050,6 +4050,15 @@ A queued run can be cancelled from any machine, and a submission's `BusyThreadPo
 - **A new abstract `RunQueue` method.** `cancel(tenantId, target, reason)` closes an unstarted entry at once and asks a started one to stop; a custom queue implements it, answers the request with every lease it grants or renews (`Lease.stop`) and on `QueueEntry.stopRequest`, and passes `RunQueueContract`'s new cases.
 - **Schemas move on again.** SQLite schema 11 and PostgreSQL schema 5 add each queue entry's stop request. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### SQLite checkpoint events gain checkpoint IDs (#3088)
+
+SQLite schema 12 adds `checkpoint_id` to each event row and indexes `(thread_id, checkpoint_id, seq)` for retention.
+Opening a schema-11 file backfills IDs from decodable event records in bounded batches; an undecodable record is left
+without checkpoint metadata and does not prevent the file from opening. For events from before schema 7, the migration
+copies the producer timestamp into the commit-time columns that were added in schema 7, preserving their age-retention
+fallback. New commits write the checkpoint ID beside the JSON. A build that only knows schema 11 refuses a schema-12
+file, so stop older processes before upgrading every process sharing the file.
+
 ## A workspace container has no egress (#870)
 
 A `ContainerisedWorkspace` whose sandbox allows no network (`networkAllowed = false`, the default, also when no
