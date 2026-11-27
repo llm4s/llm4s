@@ -150,7 +150,25 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val shown = SemanticMemoryMiddleware.fenced("<" * 100, max = 40)
     shown should include("&lt;" * 10 + "\n</untrusted>")
     (shown should not).include("&lt;" * 11)
-    SemanticMemoryMiddleware.fenced("a&b" + "\uD83D\uDE00" * 3, max = 8) should include("\na&amp;b\uD83D\uDE00\n")
+    SemanticMemoryMiddleware.fenced("a&b" + "\uD83D\uDE00" * 3, max = 9) should include("\na&amp;b\uD83D\uDE00\n")
+    // an emoji is two UTF-16 units, as the budget measures them: never half of one, never past the budget
+    val emoji = "\uD83D\uDE00"
+    for max <- 4 to 41 do
+      val section = SemanticMemoryMiddleware.fenced("<" + emoji * 100, max)
+      val open    = section.indexOf('\n', section.indexOf("<untrusted id=")) + 1
+      val inner   = section.substring(open, section.indexOf("\n</untrusted>"))
+      withClue(s"max = $max: ") {
+        inner.length should be <= max
+        inner.length should be >= max - 1
+        // an unpaired surrogate is a code point of its own in 0xD800..0xDFFF
+        inner.codePoints().allMatch(cp => cp < 0xd800 || cp > 0xdfff) shouldBe true
+      }
+  }
+
+  it should "keep an escaped prefix of a long emoji recall within maxChars" in {
+    val section = SemanticMemoryMiddleware.fenced("<" + "\uD83D\uDE00" * 1000, max = 400)
+    (section should not).include("\uD83D\n")
+    section should include("&lt;" + "\uD83D\uDE00" * 198 + "\n</untrusted>")
   }
 
   "Recording" should "store each turn once, cut to maxRecordChars, and announce it with counts only" in {

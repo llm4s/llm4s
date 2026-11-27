@@ -329,7 +329,10 @@ object SemanticMemoryMiddleware:
     val data = Untrusted.text(fitEscaped(recalled, max))
     system"$Heading\n$data".text
 
-  /** `s` cut, on a code-point boundary, so that its escaped form is at most `max` characters long. */
+  /**
+   * `s` cut, on a code-point boundary, so that its escaped form is at most `max` UTF-16 units (`String.length`, what
+   * the section budget measures) long: a supplementary character, kept as two units, counts as two.
+   */
   private def fitEscaped(s: String, max: Int): String =
     var used = 0
     var end  = 0
@@ -339,7 +342,7 @@ object SemanticMemoryMiddleware:
       val cost = cp match
         case '&'       => 5
         case '<' | '>' => 4
-        case _         => 1
+        case _         => Character.charCount(cp)
       if used + cost > max then full = true
       else
         used += cost
