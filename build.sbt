@@ -2769,6 +2769,10 @@ lazy val it = (project in file("modules/it"))
       val dir = (memory / baseDirectory).value / "src" / "test" / "scala" / "org" / "llm4s" / "agent" / "memory"
       Seq(dir / "MemoryStoreFilterFixtures.scala", dir / "TransactionalMemoryStoreContract.scala")
     },
+    // The GraphStore contract Neo4jGraphStoreContractSpec passes (#2970), compiled here the same way
+    Test / unmanagedSources +=
+      (knowledgegraph / baseDirectory).value / "src" / "test" / "scala" / "org" / "llm4s" / "knowledgegraph" /
+        "storage" / "GraphStoreContract.scala",
     itTierCheck := ItTiers.check(
       (Test / definedTests).value.map(_.name),
       (Test / fullClasspath).value.map(_.data),

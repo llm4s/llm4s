@@ -108,6 +108,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
 
   override def query(filter: GraphFilter): Result[Graph] =
     for {
+      _     <- GraphTraversal.checkPropertyFilter(filter)
       graph <- ensureLoaded()
     } yield {
       val nodesByLabel =
@@ -193,18 +194,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
     ensureLoaded()
 
   override def stats(): Result[GraphStats] =
-    for {
-      graph <- ensureLoaded()
-    } yield {
-      val nodeCount = graph.nodes.size.toLong
-      val edgeCount = graph.edges.size.toLong
-      val avgDegree = if (nodeCount > 0) (edgeCount * 2.0) / nodeCount else 0.0
-
-      val densestNodeId = graph.nodes.keys
-        .maxByOption(nodeId => graph.getConnectedEdges(nodeId).size)
-
-      GraphStats(nodeCount, edgeCount, avgDegree, densestNodeId)
-    }
+    ensureLoaded().map(GraphTraversal.stats)
 
   /** Persist graph to file: written beside it, then moved over it, so the file is always whole */
   private def persistGraph(graph: Graph): Result[Unit] = Try {

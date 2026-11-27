@@ -31,8 +31,8 @@ case class TraversalConfig(
  *
  * @param nodeLabel Optional filter by node label
  * @param relationshipType Optional filter by relationship type
- * @param propertyKey Optional property name to filter by
- * @param propertyValue Optional property value to filter by (compared as string)
+ * @param propertyKey Optional property name to filter by; given with `propertyValue` or not at all
+ * @param propertyValue Optional property value to filter by (compared as string); given with `propertyKey` or not at all
  */
 case class GraphFilter(
   nodeLabel: Option[String] = None,
@@ -67,12 +67,20 @@ case class EdgeNodePair(edge: Edge, node: Node)
 /**
  * Abstract interface for persisting and querying Knowledge Graphs.
  *
- * All implementations must:
- * - Return consistent results for the same operations
- * - Use BFS-based traversal by default for consistent result ordering
- * - Return Left(Error) consistently for missing nodes/edges
- * - Support property filtering uniformly or document limitations
- * - Be thread-safe or explicitly document thread-safety guarantees
+ * Every implementation behaves the same way on the points below; `GraphStoreContract` (the knowledgegraph tests,
+ * run against the in-memory, JSON and Neo4j stores) checks them (#2970):
+ * - A relationship type is any non-empty string, spaces, hyphens, digits first and non-ASCII letters included
+ *   (`"WORKS FOR"`, `"works-for"`, `"3D_PRINTS"`), and so is a property key.
+ * - Between two nodes there is at most one edge of each relationship type; edges of different types between the same
+ *   nodes are kept apart. A self-loop (an edge from a node to itself) is an ordinary edge: [[getNeighbors]] returns
+ *   it, once, in every direction.
+ * - [[traverse]] is breadth-first: nodes come in order of depth, and by node id within one depth.
+ * - [[stats]] counts each edge once; `averageDegree` is `2 * edgeCount / nodeCount`, and `densestNodeId` is the node
+ *   with the most incident edges (a self-loop counts once), the smallest id on a tie.
+ * - A [[GraphFilter]] with a `propertyKey` but no `propertyValue`, or the reverse, is a `Left`.
+ * - A missing node is `Right(None)` from [[getNode]], `Right(Seq.empty)` from [[getNeighbors]] and [[traverse]], and
+ *   a `Left` from [[upsertEdge]]; deleting a missing node or edge is `Right(())`.
+ * - Implementations are thread-safe or document that they are not.
  *
  * This trait is designed to be engine-agnostic, allowing implementations
  * for various graph databases (Neo4j, TinkerPop, SPARQL, etc.) while
@@ -131,8 +139,7 @@ trait GraphStore {
    * Queries the graph based on filter criteria.
    * Returns a subgraph matching the filter conditions.
    *
-   * If propertyKey or propertyValue filters are specified but not supported,
-   * the implementation must either apply them or return a clear error.
+   * A property filter needs both `propertyKey` and `propertyValue`: one without the other is a `Left`.
    *
    * @param filter The filter criteria
    * @return Right(subgraph) on success, Left(error) on failure
@@ -141,7 +148,7 @@ trait GraphStore {
 
   /**
    * Traverses the graph starting from a node using BFS.
-   * All implementations must use Breadth-First Search for consistent result ordering.
+   * Nodes come in order of depth, and by node id within one depth, so every implementation returns the same sequence.
    *
    * Missing start node: should return Right(Seq.empty) not an error,
    * since traversal of a non-existent node yields no nodes.

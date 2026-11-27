@@ -69,7 +69,7 @@ object PlatformTests {
     "knowledgegraph" -> Seq(
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec",
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreTest",
-      "org.llm4s.knowledgegraph.storage.GraphStoreConsistencySpec"
+      "org.llm4s.knowledgegraph.storage.JsonGraphStoreContractSpec"
     ),
     "mcp" -> Seq(
       "org.llm4s.mcp.StdioTransportConcurrencySpec",

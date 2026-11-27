@@ -24,6 +24,7 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
     config.password.reveal shouldBe ""
     config.database shouldBe "neo4j"
     config.maxPoolSize shouldBe 10
+    config.connectionTimeout shouldBe scala.concurrent.duration.DurationInt(30).seconds
   }
 
   test("Config: custom values are preserved") {
@@ -83,6 +84,27 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
       error.message should include("authentication failed")
       (error.message should not).include("neo4j-password-0001")
     }
+  }
+
+  test("a store that cannot create its schema is a Left, and the error names the schema (#2970)") {
+    val driver = java.lang.reflect.Proxy
+      .newProxyInstance(
+        getClass.getClassLoader,
+        Array(classOf[org.neo4j.driver.Driver]),
+        (_, method, _) =>
+          if (method.getName == "session") throw new IllegalStateException("permission denied")
+          else null
+      )
+      .asInstanceOf[org.neo4j.driver.Driver]
+    val error = Neo4jGraphStore(driver, "neo4j").left.getOrElse(fail("expected a Left"))
+    error.message should include("llm4s_id")
+    error.message should include("permission denied")
+  }
+
+  test("quote backtick-quotes a name and doubles any backtick in it (#2970)") {
+    Neo4jGraphStore.quote("WORKS FOR") shouldBe "`WORKS FOR`"
+    Neo4jGraphStore.quote("a`b") shouldBe "`a``b`"
+    Neo4jGraphStore.quote("`") shouldBe "````"
   }
 
   // ─── Property encoding (#2969) ────────────────────────────────────────────

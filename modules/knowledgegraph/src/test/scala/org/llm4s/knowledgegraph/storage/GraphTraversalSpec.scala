@@ -116,9 +116,9 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
     graph.visitedIds("root") shouldBe Seq("root", "a", "b", "a1", "a2", "b1")
   }
 
-  test("a different neighbour order gives the matching level order") {
+  test("within a level nodes come by id, whatever the neighbour order (#2970)") {
     val graph = new Fixture(tree.updated("root", Seq("b", "a")))
-    graph.visitedIds("root") shouldBe Seq("root", "b", "a", "b1", "a1", "a2")
+    graph.visitedIds("root") shouldBe Seq("root", "a", "b", "a1", "a2", "b1")
   }
 
   test("a shallower node is never listed after a deeper one") {
@@ -322,10 +322,10 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
     result.last shouldBe s"n$length"
   }
 
-  test("a wide star is traversed once per node, in listed order") {
+  test("a wide star is traversed once per node, in id order") {
     val width  = 20000
     val leaves = (0 until width).map(i => s"leaf$i")
     val graph  = new Fixture(Map("hub" -> leaves))
-    graph.visitedIds("hub") shouldBe ("hub" +: leaves)
+    graph.visitedIds("hub") shouldBe ("hub" +: leaves.sorted)
   }
 }
