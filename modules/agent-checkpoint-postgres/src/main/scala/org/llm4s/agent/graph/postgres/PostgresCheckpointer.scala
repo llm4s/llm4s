@@ -92,7 +92,10 @@ final class PostgresCheckpointer private (
   @volatile private var shut                         = false
   private[postgres] given errorContext: ErrorContext = ErrorContext(config.schema)
   private val callTimeout                            = config.callTimeout
-  private val transactionSetting                     = settings(callTimeout)
+
+  /** How long one sweep call prunes before it hands back its cursor; a spec shortens it to cut a sweep short. */
+  @volatile private[postgres] var sweepBudget: FiniteDuration = config.callTimeout
+  private val transactionSetting                              = settings(callTimeout)
   private val notifier = new ChangeNotifier(
     ChangeNotifier.channelFor(config.schema),
     listenerConnection(dataSource, config),
@@ -387,21 +390,68 @@ final class PostgresCheckpointer private (
    * which a writer with a skewed clock would make too old or too young (rule 1).
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = writing("prune") { c =>
-    lockRow(c, threadId).foreach(pruneRow(c, threadId, _, policy, Set.empty))
+    lockRow(c, threadId).foreach(pruneStep(c, threadId, _, policy, Set.empty, None, Int.MaxValue))
     Right(())
   }
 
   /**
-   * [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest checkpoint each of
-   * `protectedRuns` committed (a sweep's protected thread, design 4.53).
+   * One step of [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest
+   * checkpoint each of `protectedRuns` committed (a sweep's protected thread, design 4.53). Events go first, then
+   * checkpoints, so the floor a prune works towards can always be worked out again from what is stored - the
+   * checkpoints it drops are still there until the events are gone (#3086): a step raises the events' floor towards
+   * it by at most `limit` events, and once it is reached removes at most `limit` of the checkpoints the policy drops,
+   * oldest first. `carried`, the plan an earlier step of the same call worked out, saves reading the history again:
+   * the thread is planned once per call, and a later call plans it again from the rows. With `limit` `Int.MaxValue`
+   * one step is the whole prune, as [[prune]] runs it.
    */
-  private def pruneRow(
+  private def pruneStep(
+    c: Connection,
+    threadId: ThreadId,
+    current: Row,
+    policy: RetentionPolicy,
+    protectedRuns: Set[RunId],
+    carried: Option[RetentionSweep.PrunePlan],
+    limit: Int
+  ): RetentionSweep.Step[RetentionSweep.PrunePlan] =
+    val planned = carried.filter(_.firstSeq == current.firstSeq).getOrElse {
+      val (dropped, floor) = plan(c, threadId, current, policy, protectedRuns)
+      RetentionSweep.PrunePlan(current.firstSeq, floor, dropped)
+    }
+    val target = planned.floor
+    val eventsDone =
+      current.earliestSeq >= target || {
+        val nth =
+          if limit == Int.MaxValue then None
+          else query(c, Sql.eventAtOffset(t), threadId.value, current.earliestSeq, limit)(_.getLong(1)).headOption
+        val to = RetentionSweep.chunkFloor(current.earliestSeq, target, nth)
+        update(c, Sql.deleteEventsBefore(t), threadId.value, to)
+        update(c, Sql.setFloor(t), to, threadId.value)
+        to >= target
+      }
+    if !eventsDone then RetentionSweep.Step.More(Some(planned))
+    else
+      // an open queue entry's evidence is read again in this transaction: an entry opened since the plan keeps its own
+      val queued   = if carried.isEmpty then Set.empty[Long] else queueEvidence(c, threadId)
+      val removing = planned.dropped.take(limit).filterNot(queued).map(java.lang.Long.valueOf).toArray
+      if removing.nonEmpty then update(c, Sql.deleteHistoryAtAny(t), threadId.value, removing)
+      val rest = planned.dropped.drop(limit)
+      if rest.nonEmpty then RetentionSweep.Step.More(Some(planned.copy(dropped = rest)))
+      else RetentionSweep.Step.Done
+
+  private def queueEvidence(c: Connection, threadId: ThreadId): Set[Long] =
+    query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
+
+  /**
+   * What `policy` prunes of the thread: the positions of the checkpoints it drops, oldest first, and the events' floor
+   * it prunes to - worked out while those checkpoints are still stored.
+   */
+  private def plan(
     c: Connection,
     threadId: ThreadId,
     current: Row,
     policy: RetentionPolicy,
     protectedRuns: Set[RunId]
-  ): Unit =
+  ): (Vector[Long], Long) =
     val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
     // oldest first: (position, id, committed at, run)
     val history =
@@ -411,9 +461,9 @@ final class PostgresCheckpointer private (
     val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
     // and an open queue entry's admission evidence (rule 4, design 4.55): the newest checkpoint each of its runs
     // committed, read in this transaction
-    val queued        = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
+    val queued        = queueEvidence(c, threadId)
     val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
-    history.filterNot(h => keptPositions(h._1)).foreach(h => update(c, Sql.deleteHistoryAt(t), threadId.value, h._1))
+    val dropped       = history.filterNot(h => keptPositions(h._1)).map(_._1)
     // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
     val byCheckpoint =
       if kept.size == history.size then None
@@ -428,19 +478,22 @@ final class PostgresCheckpointer private (
         .getOrElse(current.nextSeq)
     }
     val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-    val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
-    update(c, Sql.deleteEventsBefore(t), threadId.value, floor)
-    update(c, Sql.setFloor(t), floor, threadId.value)
+    (dropped, (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
 
   /**
-   * One page of the sweep (design 4.53), in up to three transactions, each bounded as every call is - so a sweep call
-   * returns within three times the store's bound: the page's ids read by the primary key; the guard asked outside any
-   * transaction; then, if the policy reclaims, the page's old tombstones reclaimed under the reclamation lock (taken
-   * exclusively, so no claim creates a row from the mark meanwhile), each row locked in id order as every call locks
-   * rows - skipping a row another call holds, which is in use and so no tombstone to reclaim, for a sweep holding the
-   * reclamation lock never waits on a live thread's commit while every claim of a new id waits on it - and removed
-   * only if it is still only an old tombstone; then the rest of the page pruned, the rows locked in that same order.
-   * Time is the database's.
+   * One page of the sweep (design 4.53). The page's ids are read by the primary key, and the guard asked outside any
+   * transaction. Then, if the policy reclaims, the page's old tombstones are reclaimed in one transaction under the
+   * reclamation lock (taken exclusively, so no claim creates a row from the mark meanwhile), each row locked in id
+   * order as every call locks rows - skipping a row another call holds, which is in use and so no tombstone to
+   * reclaim, for a sweep holding the reclamation lock never waits on a live thread's commit while every claim of a new
+   * id waits on it - and removed only if it is still only an old tombstone. Then the rest of the page is pruned in its
+   * order, each thread in transactions of its own (#3086), each removing at most `RetentionSweep.ChunkRows`
+   * checkpoints or events, so every transaction stays well within the call timeout however large a thread's backlog
+   * is and the page always makes progress. A thread whose prune fails is logged and skipped, and the page still hands
+   * back its cursor; once the call timeout has passed - after the page's first thread, which is always finished - the
+   * page stops after the step in flight and hands back the last thread it finished, so the next call starts with the
+   * one it stopped in. A step's work is never carried between calls: the events' floor is worked out again from the
+   * rows that remain. Time is the database's.
    */
   def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
     reading("sweep") { c =>
@@ -472,19 +525,29 @@ final class PostgresCheckpointer private (
             }
           case _ => Right(Set.empty)
         reclaimed.flatMap { gone =>
-          val pruning = visited.filterNot(gone).sortBy(_.value)
+          // one row locked per transaction, so in the page's own order: its cursor is the last thread finished
           val pruned =
-            if policy.retention == RetentionPolicy.keepAll || pruning.isEmpty then Right(())
+            if policy.retention == RetentionPolicy.keepAll then Right(RetentionSweep.Visited(visited.size, 0, false))
             else
-              writing("sweep") { c =>
-                pruning.foreach { threadId =>
-                  lockRow(c, threadId).foreach { row =>
-                    pruneRow(c, threadId, row, policy.retention, protectedRuns.getOrElse(threadId, Set.empty))
+              RetentionSweep.visit[RetentionSweep.PrunePlan](
+                visited,
+                sweepBudget,
+                s"PostgresCheckpointer(${config.schema})",
+                shut
+              ) { (threadId, floor) =>
+                if gone(threadId) then Right(RetentionSweep.Step.Done)
+                else
+                  writing("sweep") { c =>
+                    Right(
+                      lockRow(c, threadId)
+                        .fold[RetentionSweep.Step[RetentionSweep.PrunePlan]](RetentionSweep.Step.Done) { row =>
+                          val runs = protectedRuns.getOrElse(threadId, Set.empty)
+                          pruneStep(c, threadId, row, policy.retention, runs, floor, RetentionSweep.ChunkRows)
+                        }
+                    )
                   }
-                }
-                Right(())
               }
-          pruned.map(_ => SweepPage(visited.size, gone.size, RetentionSweep.next(page, policy.batchSize)))
+          pruned.map(v => SweepPage(v.examined, gone.size, v.cursor(page, policy.batchSize)))
         }
       }
     }
@@ -1234,6 +1297,8 @@ object PostgresCheckpointer:
     case at: Instant => statement.setObject(index, OffsetDateTime.ofInstant(at, ZoneOffset.UTC))
     case a: Array[String] =>
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))
+    case a: Array[java.lang.Long] =>
+      statement.setArray(index, statement.getConnection.createArrayOf("bigint", a.map(l => l: AnyRef)))
     case other => statement.setObject(index, other)
 
   private[postgres] def update(c: Connection, sql: String, params: Any*): Unit = updated(c, sql, params*): Unit

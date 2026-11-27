@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.encryption.{ EncryptingCheckpointer, EncryptionKey, KeyId, StaticKeySource }
-import org.llm4s.agent.graph.Checkpointer
+import org.llm4s.agent.graph.{ Checkpointer, ThreadId }
 import org.llm4s.agent.testkit.{ CheckpointerContract, ManualClock }
 import org.llm4s.it.tags.Docker
 import org.scalatest.{ BeforeAndAfterAll, Outcome }
@@ -73,6 +73,36 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
     val isolated = PgCheckpointerDb.freshSchema()
     schemas.add(isolated)
     wrapped(open(clock, PostgresCheckpointerConfig(schema = isolated)))
+  }
+
+  // a trigger refusing to delete any of the thread's checkpoints, or its events from a seq on, so its prune fails (#3086)
+  override protected def refuseDeletes(
+    store: Checkpointer,
+    threadId: ThreadId,
+    eventsFrom: Option[Long]
+  ): Option[() => Unit] = {
+    val in      = configOf(store).schema
+    val id      = threadId.value.replace("'", "''")
+    val trigger = s"refuse_prune_${java.util.UUID.randomUUID().toString.replace("-", "")}"
+    val (table, condition) =
+      eventsFrom.fold(("checkpoint_history", ""))(seq => ("checkpoint_events", s" AND OLD.seq >= $seq"))
+    PgCheckpointerDb.execute(
+      s"""CREATE OR REPLACE FUNCTION "$in".refuse_prune() RETURNS trigger LANGUAGE plpgsql AS
+         |$$$$ BEGIN RAISE EXCEPTION 'pruning this thread is refused'; END $$$$""".stripMargin
+    )
+    PgCheckpointerDb.execute(
+      s"""CREATE TRIGGER $trigger BEFORE DELETE ON "$in".$table
+         |FOR EACH ROW WHEN (OLD.thread_id = '$id'$condition) EXECUTE FUNCTION "$in".refuse_prune()""".stripMargin
+    )
+    Some(() => PgCheckpointerDb.execute(s"""DROP TRIGGER $trigger ON "$in".$table"""))
+  }
+
+  override protected def shortenSweepBudget(store: Checkpointer): Boolean = store match {
+    case postgres: PostgresCheckpointer =>
+      postgres.sweepBudget = Duration.Zero
+      true
+    case encrypting: EncryptingCheckpointer => shortenSweepBudget(encrypting.inner)
+    case _                                  => false
   }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {

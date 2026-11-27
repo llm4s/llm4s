@@ -365,6 +365,22 @@ other:
 
 A custom `RunQueue` must follow the same rules. The new `RunQueueContract` cases in `llm4s-agent-testkit` check them.
 
+## A retention sweep page always makes progress, and skips a thread it cannot prune (#3086)
+
+`Checkpointer.sweep`, `SweepPage` and the SQLite and PostgreSQL stores are experimental. No signature changed, and the
+stored schema is the same.
+
+| Before (1.0.0) | After |
+|---|---|
+| A page was pruned in one transaction (one `BEGIN IMMEDIATE` on SQLite), so a large backlog made it time out and roll back on every pass, and on SQLite held up live runs' commits | Each thread is pruned in transactions of its own, each removing at most 1,000 rows: events first, raising the events' floor as it goes, then checkpoints. A replay from a checkpoint about to be pruned may be refused with `ReplayUnavailable` before that checkpoint is removed |
+| One thread whose prune failed failed the whole page, and every later thread went unswept | The thread is logged at WARN and skipped, and the page still returns its `next`. Only a `CancelledError`, or a closed store, fails the call |
+| A page ran until it was done | Once the store's bound has passed (`callTimeout`, SQLite's `busyTimeout`), the page stops after its first thread, and its `next` is the last thread it finished. A caller that pages until `next` is `None` needs no change |
+| `AgentWorker` reclaimed closed queue entries only after the whole sweep succeeded | It reclaims them after every pass, and still reports the sweep's error |
+
+A custom `Checkpointer` should do the same. The new `CheckpointerContract` cases in `llm4s-agent-testkit` check it. A
+store that can make one thread's prune fail overrides `refuseDeletes`, and one whose sweep has a budget overrides
+`shortenSweepBudget`, so those cases run.
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

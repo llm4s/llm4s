@@ -660,6 +660,26 @@ class AgentWorkerSpec
     store.runQueue.entry(None, open).value.isOpen shouldBe true
   }
 
+  it should "reclaim closed entries although a page of the checkpoint sweep failed, and report the sweep's error" in {
+    // #3086: a failing page must not keep the queue's closed entries, inputs included, past their lifetime
+    val clock = new MovableClock(Instant.parse("2026-10-22T12:00:00Z"))
+    val store = InMemoryCheckpointer(clock)
+    val down  = ValidationError("store", "the sweep's page could not be read")
+    val failing = new ForwardingCheckpointer(store) {
+      override def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
+        Left(down)
+    }
+    val worker =
+      AgentWorker(store.runQueue, failing, Seq(QueuedAgent(agentOver(store, answering("x")))), fast).value
+    started.add(worker)
+    val old    = submit(store, thread())
+    val leased = store.runQueue.take(TakeRequest("w", Set(agentId), 30.seconds)).value.value
+    store.runQueue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    clock.advance(25.hours)
+    worker.sweepOnce().left.value shouldBe down
+    store.runQueue.entry(None, old).left.value shouldBe QueueError.TicketExpired(old)
+  }
+
   it should "keep the newest checkpoint of an open entry's runs through a pruning sweep" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)

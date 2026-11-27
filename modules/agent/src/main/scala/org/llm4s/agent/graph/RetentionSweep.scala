@@ -1,9 +1,11 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
+import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -116,6 +118,91 @@ object SweepPage:
  * come next. For stores, not callers.
  */
 private[graph] object RetentionSweep:
+
+  private val logger = LoggerFactory.getLogger("org.llm4s.agent.graph.RetentionSweep")
+
+  /**
+   * The most rows of one thread - checkpoints, or events - one step of a sweep's prune removes, so every step stays
+   * well within a store's bound however large the thread's backlog is (#3086).
+   */
+  val ChunkRows: Int = 1000
+
+  /**
+   * What a SQL store's sweep works out once per thread and call (#3086): for the thread whose first event is
+   * `firstSeq` - so a plan never outlives a delete and re-creation of its id - the events' floor its prune goes to and
+   * the positions of the checkpoints it drops, oldest first, still to remove.
+   */
+  final case class PrunePlan(firstSeq: Long, floor: Long, dropped: Vector[Long])
+
+  /** What one step of a sweep did to a thread: reclaimed its tombstone, finished it, or left more to do. */
+  enum Step[+P]:
+    case Reclaimed extends Step[Nothing]
+    case Done      extends Step[Nothing]
+
+    /**
+     * More to remove; `plan`, what the store worked out for the thread in an earlier step of the same call, saves the
+     * next step working it out again. A store never carries it to another call: one can always rebuild it from what it
+     * holds.
+     */
+    case More[P](plan: Option[P]) extends Step[P]
+
+  /**
+   * The threads of a page a sweep finished (`examined`), the tombstones it reclaimed, and whether it was cut short by
+   * its budget before the rest of the page.
+   */
+  final case class Visited(examined: Int, reclaimed: Int, cutShort: Boolean):
+
+    /**
+     * The page's cursor: the last thread finished when the call was cut short - so the next call, paging after it,
+     * starts with the thread the budget stopped, or stopped before - else as [[next]] has it.
+     */
+    def cursor(page: Vector[ThreadId], batchSize: Int): Option[ThreadId] =
+      if cutShort then Some(page(examined - 1)) else next(page, batchSize)
+
+  /**
+   * Visits `threads` in order, each by `step` - one bounded transaction of the store's, called again with the plan
+   * it returned while it returns [[Step.More]] - so a page always makes progress (#3086): a thread whose step fails
+   * is logged and skipped, and the next pass tries it again. The first thread is always finished; once `budget` has
+   * passed, the page stops - between threads, or after the step in flight inside a later thread - and its cursor is
+   * the last thread it finished, so the next call starts with the one it stopped in. A store's steps leave a thread
+   * in a state any later step, sweep or prune finishes from, so nothing carried between calls is lost. Only a
+   * `CancelledError`, or any failure once `closed` says the store is closed, ends the call with a `Left`.
+   */
+  def visit[P](threads: Vector[ThreadId], budget: FiniteDuration, store: String, closed: => Boolean)(
+    step: (ThreadId, Option[P]) => Result[Step[P]]
+  ): Result[Visited] =
+    val deadline           = System.nanoTime() + budget.toNanos
+    def late: Boolean      = System.nanoTime() - deadline > 0
+    def fatal(e: LLMError) = e.isInstanceOf[CancelledError] || closed
+    // Some(reclaimed) once the thread is done or skipped; None if the budget ran out inside it
+    @tailrec def steps(threadId: ThreadId, plan: Option[P], first: Boolean): Result[Option[Boolean]] =
+      step(threadId, plan) match
+        case Left(e) if fatal(e) => Left(e)
+        case Left(e) =>
+          logger.warn(s"$store: the retention sweep skipped thread ${threadId.value}, whose prune failed: ${e.message}")
+          Right(Some(false))
+        case Right(Step.Reclaimed)                 => Right(Some(true))
+        case Right(Step.Done)                      => Right(Some(false))
+        case Right(Step.More(_)) if !first && late => Right(None)
+        case Right(Step.More(f))                   => steps(threadId, f, first)
+    @tailrec def from(i: Int, reclaimed: Int): Result[Visited] =
+      if i == threads.size then Right(Visited(i, reclaimed, cutShort = false))
+      else if i > 0 && late then Right(Visited(i, reclaimed, cutShort = true))
+      else
+        steps(threads(i), None, first = i == 0) match
+          case Left(e) => Left(e)
+          // the thread it stopped in is not finished: the cursor is the one before it, and the next call resumes it
+          case Right(None)        => Right(Visited(i, reclaimed, cutShort = true))
+          case Right(Some(true))  => from(i + 1, reclaimed + 1)
+          case Right(Some(false)) => from(i + 1, reclaimed)
+    from(0, 0)
+
+  /**
+   * Where one step of a sweep's prune raises a thread's events' floor: towards `target`, by at most [[ChunkRows]]
+   * events - `nth` is the seq of the event [[ChunkRows]] places past the current floor, if there is one.
+   */
+  def chunkFloor(current: Long, target: Long, nth: Option[Long]): Long =
+    math.max(current, nth.fold(target)(math.min(target, _)))
 
   /**
    * The checkpoints `retention` keeps of a history (oldest first, each with its commit time and the `RunId` that
