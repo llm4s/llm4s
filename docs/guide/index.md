@@ -80,6 +80,7 @@ The sidebar groups the guides as [Core](core), [Agents](agents/), [RAG and Data]
   - **Hybrid Search**: BM25 keyword + vector fusion with RRF strategy
   - **Reranking**: Cohere cross-encoder or an LLM reranker
   - **Document Chunking**: Sentence-aware + simple chunking strategies
+- **[Knowledge Graph](knowledge-graph)** - Build and store entity relationships, extract them from documents, and answer questions from graph context
 - **[Document Loaders](document-loaders)** - Load text, files, directories, URLs, a web crawl or S3 into RAG; compose loaders; `ingest`, `sync` and `refresh`; SSRF protection and robots.txt
 - **[Query Transformers](rag-query-transformers)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
 - **[RAG Evaluation](rag-evaluation)** - Measure and improve RAG quality
