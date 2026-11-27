@@ -382,8 +382,9 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
             case BoundAgent.Step.Done(result) => result
             case BoundAgent.Step.Again        => attempt(cutoff, waits)
             case BoundAgent.Step.Busy(busy) =>
-              val until = cutoff.getOrElse(System.nanoTime() + (agent.runtime.claimTtl * 2).toNanos)
-              ChildRunner.pause(until, waits, busy) match
+              val clock = agent.runtime.waitClock
+              val until = cutoff.getOrElse(clock.now() + (agent.runtime.claimTtl * 2).toNanos)
+              ChildRunner.pause(until, waits, busy, clock) match
                 case Left(stop) => Left(stop)
                 case Right(_)   => attempt(Some(until), waits + 1)
       attempt(None, 0)

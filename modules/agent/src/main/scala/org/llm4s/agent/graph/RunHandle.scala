@@ -370,7 +370,7 @@ final private[graph] class DefaultRunHandle[O](
 
   /**
    * Bounds the run's end once its claim is found lost, whatever the run is doing: a virtual thread,
-   * `llm4s-lost-<threadId>`, waits for the result until `deadline` (a `System.nanoTime` value) and, if
+   * `llm4s-lost-<threadId>`, waits for the result until `deadline` (a `clock` value) and, if
    * the run thread has not taken the run to settle it by then, takes it, and only then computes
    * `outcome`, which must neither throw nor wait on the store, and [[finish]]es the run with it. The run
    * thread may be stuck in a store call that ignores interrupts, as a commit can be, even one of its
@@ -380,21 +380,31 @@ final private[graph] class DefaultRunHandle[O](
    * instead ends the run with its own outcome, and the watchdog neither fences nor cuts it. Only the first call
    * starts the thread.
    */
-  private[graph] def endWithin(deadline: Long, outcome: () => RunResult[O], release: () => Unit): Unit =
+  private[graph] def endWithin(
+    deadline: Long,
+    outcome: () => RunResult[O],
+    release: () => Unit,
+    clock: WaitClock = WaitClock.system
+  ): Unit =
     if bounding.compareAndSet(false, true) then
       Thread
         .ofVirtual()
         .name(s"llm4s-lost-${threadId.value}")
         .start { () =>
-          val wait = math.max(0L, deadline - System.nanoTime())
-          DefaultRunHandle.guarded(result.get(wait, TimeUnit.NANOSECONDS)) match
-            // `outcome` fences and cuts the run: only once the watchdog has taken it
-            case Left(_: TimeoutException) if settling.compareAndSet(false, true) =>
-              val settled = outcome()
-              settlingWithoutRunThread()
-              finish(settled, release)
-            // settled first; nothing else interrupts this thread
-            case _ => ()
+          @tailrec def watching(): Unit =
+            // a bound already passed still sees a result already set
+            val wait = math.max(0L, clock.remaining(deadline, WaitClock.Bound.Loss))
+            DefaultRunHandle.guarded(result.get(wait, TimeUnit.NANOSECONDS)) match
+              // `outcome` fences and cuts the run: only once the watchdog has taken it
+              case Left(_: TimeoutException) if clock.remaining(deadline, WaitClock.Bound.Loss) <= 0 =>
+                if settling.compareAndSet(false, true) then
+                  val settled = outcome()
+                  settlingWithoutRunThread()
+                  finish(settled, release)
+              case Left(_: TimeoutException) => watching()
+              // settled first; nothing else interrupts this thread
+              case _ => ()
+          watching()
         }: Unit
 
   private val watchingClose = new AtomicBoolean(false)
@@ -404,7 +414,7 @@ final private[graph] class DefaultRunHandle[O](
    * or an `OnExit` run's exit commit - as [[endWithin]] bounds a lost run's end, and through the same `settling`:
    * a virtual thread, `llm4s-closing-<threadId>`, waits until `closed` (the closing wait returned) or the result is
    * set, and gives the wait up once `stalledSince` - when the commit in flight began, or the last one returned,
-   * as a `System.nanoTime` value, or `None` with none in flight - has stayed the same for `bound` nanoseconds. It
+   * as a `clock` value, or `None` with none in flight - has stayed the same for `bound` nanoseconds. It
    * then takes the run, unless the run thread or the loss watchdog took it first, and only then computes
    * `outcome`, which must neither throw nor wait on the store, and [[finish]]es the run with it. A drain that keeps
    * making progress, however long, is never given up. Only the first call starts the thread.
@@ -414,7 +424,8 @@ final private[graph] class DefaultRunHandle[O](
     stalledSince: () => Option[Long],
     bound: Long,
     outcome: () => RunResult[O],
-    release: () => Unit
+    release: () => Unit,
+    clock: WaitClock = WaitClock.system
   ): Unit =
     if watchingClose.compareAndSet(false, true) then
       val over = CompletableFuture.anyOf(closed, result)
@@ -424,10 +435,14 @@ final private[graph] class DefaultRunHandle[O](
         .start { () =>
           @tailrec def watching(): Unit =
             val since = stalledSince()
-            val wait  = math.max(0L, since.getOrElse(System.nanoTime()) + bound - System.nanoTime())
+            val kind  = if since.isDefined then WaitClock.Bound.Close else WaitClock.Bound.Idle
+            val due   = since.getOrElse(clock.now()) + bound
+            // a bound already passed still sees a closing wait already over
+            val wait = math.max(0L, clock.remaining(due, kind))
             DefaultRunHandle.guarded(over.get(wait, TimeUnit.NANOSECONDS)) match
               // the same commit, still in flight, for the whole bound: given up, unless the run was settled first
-              case Left(_: TimeoutException) if since.isDefined && stalledSince() == since =>
+              case Left(_: TimeoutException)
+                  if since.isDefined && stalledSince() == since && clock.remaining(due, kind) <= 0 =>
                 if settling.compareAndSet(false, true) then
                   val settled = outcome()
                   settlingWithoutRunThread()
