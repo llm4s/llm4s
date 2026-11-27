@@ -185,6 +185,7 @@ sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks
 sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
+sbt generateCiGraph    # rewrite .github/ci-graph.json, the project graph CI selects tests from; Quick Checks fails when stale
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 

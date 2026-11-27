@@ -122,29 +122,30 @@ expect 'no change'             'none'                                    ":"
 
 # Every module modules/it depends on is either reached by the integration decision or listed as not reached.
 label='every module modules/it depends on is classified for the integration decision'
-if out="$(ruby -e '
-  script, sbt = File.read(ARGV[0]), File.read(ARGV[1])
+if out="$(ruby -rjson -e '
+  # The build as sbt loads it, from the committed CI project graph (#3184, `sbt generateCiGraph`), not build.sbt text.
+  script = File.read(ARGV[0])
+  graph  = JSON.parse(File.read(ARGV[1]))["projects"]
   pats = script[/^INTEGRATION=\((.*?)^\)/m, 1].to_s.scan(/'"'"'([^'"'"']+)'"'"'/).flatten.map { |p| Regexp.new(p) }
   unreached = script[/^INTEGRATION_UNREACHED=.([^'"'"']*)/m, 1].to_s.split
-  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h.transform_values { |d| d.squeeze("/") }
-  deps = sbt[/^lazy val it = .*?\.dependsOn\((.*?)\)\s*\.settings/m, 1].to_s.gsub(%r{//[^\n]*}, "").scan(/^\s*(\w+)/).flatten
-  abort "no dependsOn of it in build.sbt" if deps.empty?
+  dirs = graph.transform_values { |p| p["base"] }
+  it   = graph.fetch("it") { abort "no project it in .github/ci-graph.json" }
+  deps = it["deps"].map(&:first)
+  abort "no dependencies of it in .github/ci-graph.json" if deps.empty?
   errs = deps.reject do |d|
     unreached.include?(d) || (dirs[d] && pats.any? { |p| p.match?("#{dirs[d]}/x") })
   end
   errs = errs.map { |d| "#{d}: add its directory to INTEGRATION or its id to INTEGRATION_UNREACHED in scripts/ci-changes.sh" }
-  # sources borrowed with `(<project> / baseDirectory).value / "a" / "b"` in the it project settings
-  block = sbt[/^lazy val it = .*?(?=^lazy val )/m].to_s
-  block.scan(/\((\w+)\s*\/\s*baseDirectory\)\.value((?:\s*\/\s*"[^"]+")+)/).each do |proj, segs|
-    path = ([dirs[proj]] + segs.scan(/"([^"]+)"/).flatten).join("/")
-    next if pats.any? { |p| p.match?("#{path}/x") || p.match?(path) }
+  # sources modules/it compiles from outside its own directory (`Test / unmanagedSources ++= ...`)
+  it["borrowed"].map(&:last).each do |path|
+    next if pats.any? { |p| p.match?(path) }
     errs << "modules/it borrows #{path}: add it to INTEGRATION in scripts/ci-changes.sh"
   end
   puts errs
   extra = unreached.reject { |d| deps.include?(d) }
   puts extra.map { |d| "#{d} is in INTEGRATION_UNREACHED, but modules/it does not depend on it" }
   exit(errs.empty? && extra.empty? ? 0 : 1)
-' "$SCRIPT" "$REPO_ROOT/build.sbt")"; then ok "$label"; else bad "$label" "$out"; fi
+' "$SCRIPT" "$REPO_ROOT/.github/ci-graph.json")"; then ok "$label"; else bad "$label" "$out"; fi
 
 # ci.yml wires the decisions: the `changes` job runs the script into its outputs (all false on a draft), and each
 # gated job reads its own decision.

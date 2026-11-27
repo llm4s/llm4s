@@ -441,6 +441,17 @@ jobs:
             exit 1
           fi
 
+      # The project graph CI selects tests from (#3184): every project's dependencies with their configurations and
+      # the sources it borrows from other modules, as sbt loads them. scripts/ci-changes.sh reads the committed copy
+      # without sbt, so it must match the build: a new module or dependency regenerates it in the same PR.
+      - name: Check the CI project graph is up to date
+        run: |
+          sbt --client generateCiGraph
+          if ! git diff --exit-code -- .github/ci-graph.json; then
+            echo "::error::.github/ci-graph.json is stale: run 'sbt generateCiGraph' and commit it."
+            exit 1
+          fi
+
       # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
       # change that breaks their generation fails here and not on release day. It also fails when a published module has
       # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
