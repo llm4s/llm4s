@@ -386,6 +386,17 @@ trait AgentMiddleware:
   def afterAgent(answer: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(answer))
 
   /**
+   * Whether this middleware's [[afterAgent]] can block or rewrite the final answer (#3231). With streaming
+   * (`withStreaming()`), the answer is then not sent to listeners as the model writes it: the text of a model call that
+   * makes no tool call is held, and the answer is sent as one `TextDelta`, as stored, once every `afterAgent` of the
+   * agent (and, for a handoff target, of the root) has passed it; a blocked answer is never sent. Text the model
+   * writes beside a tool call is sent when the call returns. `false` by default, so a middleware whose `afterAgent`
+   * only reads the answer leaves streaming live; [[GuardrailMiddleware]] and [[GuardrailReviewMiddleware]] are `true`
+   * when they have output guardrails, and a middleware whose `afterAgent` blocks or rewrites should override it too.
+   */
+  def guardsAnswer: Boolean = false
+
+  /**
    * Content for the system prompt of each model request: collected before every model step from the committed
    * state, in stack order, and never stored. Each middleware bounds its own; the agent bounds them all together
    * (`maxPromptSectionTokens`). `Left` fails the run.

@@ -57,6 +57,9 @@ final class GuardrailReviewMiddleware(
   override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
     reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text, context)).map(BoundaryResult(_))
 
+  /** `true` when there are output guardrails: a streamed answer is held until they pass it (#3231). */
+  override def guardsAnswer: Boolean = output.nonEmpty
+
   override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
     reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer, context))
       .map(BoundaryResult(_))

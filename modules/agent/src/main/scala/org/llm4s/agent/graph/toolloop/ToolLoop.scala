@@ -313,12 +313,30 @@ final private[agent] case class ToolResult(
   isError: Boolean
 ) derives ReadWriter
 
-/** One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this attempt's number (from 1). */
+/**
+ * One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this
+ * attempt's number (from 1).
+ *
+ * When a middleware's `afterAgent` guards the answer ([[org.llm4s.agent.graph.middleware.AgentMiddleware.guardsAnswer]]),
+ * `textDelta` holds the text instead of sending it (#3231): the loop sends it once the call returns with tool calls,
+ * and otherwise - the text is the turn's answer - drops it, sending the answer as stored only once every `afterAgent`
+ * has passed it. A blocked or rewritten answer is so never seen by a listener as the model wrote it.
+ */
 @Experimental
-final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
-  def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
+final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int, hold: Boolean):
+  private val held = java.util.concurrent.ConcurrentLinkedQueue[String]()
+
+  def textDelta(text: String): Unit =
+    if hold then held.add(text)
+    else AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
   def thinkingDelta(text: String): Unit =
     AgentEvents.ThinkingDelta.progress(context, events.ThinkingDelta(attempt, text))
+
+  /** Sends the text `textDelta` held, in order: the call returned tool calls, so it is not the turn's answer. */
+  private[toolloop] def release(): Unit =
+    Iterator.continually(held.poll()).takeWhile(_ != null).foreach { text =>
+      AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
+    }
 
 /** The model call: the conversation so far, and the tools on offer, to the model's completion. */
 @Experimental
@@ -336,6 +354,13 @@ trait ModelStep:
    * tracing's `gen_ai.provider.name` (#2275). `None` by default; [[ModelStep.fromClient]] gives its client's.
    */
   def providerId: Option[ProviderId] = None
+
+  /**
+   * Whether this step streams its answer through [[ModelCall.textDelta]]. When a middleware guards the answer (#3231),
+   * the loop then sends the final answer, as stored, as one `TextDelta` once every `afterAgent` has passed it, in
+   * place of the deltas it held. `false` by default; [[ModelStep.fromClient]] gives its `streaming`.
+   */
+  def streams: Boolean = false
 
 @Experimental
 object ModelStep:
@@ -359,6 +384,7 @@ object ModelStep:
     output: Option[ResponseFormat] = None
   ): ModelStep = new ModelStep:
     override def providerId: Option[ProviderId] = client.providerId
+    override def streams: Boolean               = streaming
 
     override def responseFormat(tools: ToolSet): Option[ResponseFormat] =
       if output.isEmpty then options.responseFormat else output.filter(_ => tools.toolFunctions.isEmpty)
@@ -1467,6 +1493,10 @@ object ToolLoop:
     val agent    = nodes.agent
     val tools    = nodes.tools
     val stack    = nodes.stack
+    // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
+    val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
+    // a streamed answer is held until finish has run every afterAgent on it when one of them guards it (#3231)
+    val holdAnswer = boundaryOwners.exists(_.stack.ordered.exists(_.guardsAnswer))
     // the batch's lock schedule, as the model step recorded it: none for an agent without locks
     def scheduledWith(state: ThreadState): LockSchedule =
       nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
@@ -1685,7 +1715,8 @@ object ToolLoop:
           val result = stack.wrapModelCall(req, hooks, check) { r =>
             // every call is checked against the token budget, also a wrapper's second one (#2084)
             hooks.admitted {
-              val (called, took) = ModelContext.timed(callModel(agent.model, agent.id, context, attempts)(r))
+              val (called, took) =
+                ModelContext.timed(callModel(agent.model, agent.id, context, attempts, holdAnswer)(r))
               called.map { (completion, attempt) =>
                 hooks.recordCall(
                   completion,
@@ -1785,15 +1816,16 @@ object ToolLoop:
       modelStep(state, context, Vector.empty)
     )
 
-    // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
-    val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
-
     // the final answer, through every afterAgent; a changed answer replaces the stored message's content, and the
     // hooks' updates commit with it. An output Block (an afterAgent `Left`, or a blank answer) ends the run as a
     // finished failure and retracts the blocked turn: every key the turn wrote returns to its value before the
     // turn (design §4.22), the turn's messages are removed, and the agent and transfer the turn started with are
     // restored - only the usage of its model calls is kept. A middleware question stores nothing but that usage,
     // and the answer is guarded again, with the answers, once it is answered.
+    // the answer the model call held (#3231), as every afterAgent passed it: one TextDelta of the finish task
+    def sendHeld(answer: String, context: RunContext): Unit =
+      if holdAnswer && agent.model.streams then AgentEvents.TextDelta.progress(context, events.TextDelta(1, answer))
+
     def finishStep(state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
       val outcome = for
         history <- state.get(messages)
@@ -1819,8 +1851,10 @@ object ToolLoop:
           case Right(Right((changed, _))) if changed.trim.isEmpty =>
             blocked(ValidationError("tool loop", "afterAgent returned a blank answer"))
           case Right(Right((changed, update))) if changed == assistant.content =>
+            sendHeld(changed, context)
             NodeResult.Continue(completed(update))
           case Right(Right((changed, update))) =>
+            sendHeld(changed, context)
             val replaced = StoredMessage(answerId, assistant.withContent(changed))
             NodeResult.Continue(completed(update).update(messages, MessageUpdate.Replace(answerId, replaced)))
       outcome.fold(NodeResult.Fail(_), identity)
@@ -1948,7 +1982,13 @@ object ToolLoop:
    * bare `InterruptedException` too - restores the interrupt flag and is `Left(CancelledError)`.
    * Either way it is the model's failure, not a wrapper's.
    */
-  private def callModel(model: ModelStep, agent: AgentId, context: RunContext, attempts: AtomicInteger)(
+  private def callModel(
+    model: ModelStep,
+    agent: AgentId,
+    context: RunContext,
+    attempts: AtomicInteger,
+    holdAnswer: Boolean
+  )(
     request: ModelRequest
   ): Result[(Completion, Int)] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
@@ -1956,7 +1996,8 @@ object ToolLoop:
       ToolResultRule.check(request.messages).flatMap { _ =>
         val n = attempts.incrementAndGet()
         AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
-        val result = attempt(model.next(request.sentMessages, request.tools, ModelCall(context, agent, n))) match
+        val call = ModelCall(context, agent, n, holdAnswer)
+        val result = attempt(model.next(request.sentMessages, request.tools, call)) match
           case Right(result) => result
           case Left(thrown) =>
             CancelledError.fromThrowable(thrown, "model") match
@@ -1964,6 +2005,8 @@ object ToolLoop:
                 Thread.currentThread().interrupt()
                 Left(cancellation)
               case None => Failure[Completion](thrown).toResult
+        // a held answer is sent by finish once afterAgent passes it (#3231); text beside tool calls is not the answer
+        result.foreach(completion => if completion.message.toolCalls.nonEmpty then call.release())
         result.map(_ -> n)
       }
 

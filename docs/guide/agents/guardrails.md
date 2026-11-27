@@ -90,6 +90,12 @@ conversation as it was before the turn and the model never sees the blocked answ
 still counts the blocked turn's model calls. A guardrail that transforms (`PIIMasker`) changes the
 stored query or answer instead.
 
+With streaming (`withStreaming()`), an agent with output guardrails does not stream its answer as the model writes
+it: the answer's text is held until the output guardrails have passed it, and is then sent as one `TextDelta`, as
+stored - masked if a guardrail masked it. A blocked answer is never sent to a listener. Text the model writes beside a
+tool call is not the answer and still streams live. A middleware of your own whose `afterAgent` blocks or rewrites the
+answer gets the same by overriding `guardsAnswer` to `true` ([Streaming](streaming#guarded-answers)).
+
 Underneath, a block is the graph runtime's *Block*: the run ends as a finished failure
 (`RunResult.Failed` with a `GuardrailBlocked` error, the thread's checkpoint `Failed`), which
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
