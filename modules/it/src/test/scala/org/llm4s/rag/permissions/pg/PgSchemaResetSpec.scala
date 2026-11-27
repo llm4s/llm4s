@@ -159,6 +159,58 @@ class PgSchemaResetSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
     first.dropSchema() shouldBe Right(())
   }
 
+  it should "delete the rows of tables its names resolve to through search_path, not current_schema()" in {
+    val url   = freshDatabase("searchpath")
+    val table = "path_vectors"
+    val setup = openIndex(url, table) // everything in public
+    ingestSecret(setup)
+    setup.close()
+
+    // An empty schema first on the path: current_schema() is now `app`, but every name still resolves to public.
+    val database = databases.last
+    admin(s"ALTER DATABASE $database SET search_path = app, public")
+    withConnection(url)(conn => Using.resource(conn.createStatement())(_.execute("CREATE SCHEMA app")): Unit)
+    withConnection(url) { conn =>
+      Using.resource(conn.createStatement())(s =>
+        Using.resource(s.executeQuery("SELECT current_schema()")) { rs =>
+          rs.next(); rs.getString(1)
+        }
+      )
+    } shouldBe "app"
+
+    val index = PgSearchIndex.fromJdbcUrl(url, pgUser, pgPassword, table).toOption.get
+    indexes += index
+    index.dropSchema() shouldBe Right(())
+
+    count(url, s"SELECT COUNT(*) FROM public.$table") shouldBe 0
+    count(url, "SELECT COUNT(*) FROM pg_tables WHERE tablename = 'llm4s_collections'") shouldBe 0
+    count(
+      url,
+      s"SELECT COUNT(*) FROM information_schema.columns WHERE table_name = '$table' AND column_name = 'collection_id'"
+    ) shouldBe 0
+  }
+
+  it should "run inside a transaction the caller owns, which then decides to commit or roll it back" in {
+    val url   = freshDatabase("callertx")
+    val table = "tx_vectors"
+    val index = openIndex(url, table)
+    ingestSecret(index)
+
+    withConnection(url) { conn =>
+      conn.setAutoCommit(false)
+      PgSchemaManager.dropSchema(conn, table) shouldBe Right(())
+      conn.rollback()
+    }
+    count(url, s"SELECT COUNT(*) FROM $table WHERE collection_id IS NOT NULL") shouldBe 2
+
+    withConnection(url) { conn =>
+      conn.setAutoCommit(false)
+      PgSchemaManager.dropSchema(conn, table) shouldBe Right(())
+      conn.commit()
+    }
+    count(url, s"SELECT COUNT(*) FROM $table") shouldBe 0
+  }
+
   "runFullMigration" should "never make public a row ingested with permissions that an earlier dropSchema kept" in {
     val url   = freshDatabase("oldshape")
     val table = "old_vectors"

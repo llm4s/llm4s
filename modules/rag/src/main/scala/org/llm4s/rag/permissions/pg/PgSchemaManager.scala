@@ -216,24 +216,34 @@ object PgSchemaManager {
   def migrateExistingVectors(conn: Connection, tableName: String, collectionId: Int): Result[Long] =
     SqlIdentifier.validate(tableName, "pg-schema-migrate").flatMap { _ =>
       inTransaction(conn, "pg-schema-migrate") {
-        val leaf = Using.resource(
-          conn.prepareStatement("SELECT is_leaf FROM llm4s_collections WHERE id = ? FOR SHARE")
-        ) { stmt =>
-          stmt.setInt(1, collectionId)
-          Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getBoolean("is_leaf")) else None)
-        }
-        leaf match {
-          case None => Left(ProcessingError("pg-schema-migrate", s"Collection not found (id $collectionId)"))
-          case Some(false) =>
-            Left(ProcessingError("pg-schema-migrate", s"Cannot migrate into a non-leaf collection (id $collectionId)"))
-          case Some(true) =>
-            Using.resource(conn.prepareStatement(s"""
-              UPDATE $tableName
-              SET collection_id = ?, readable_by = COALESCE(readable_by, '{}')
-              WHERE collection_id IS NULL AND NOT ($OrphanedPermissionRow)
-            """)) { stmt =>
+        val relations = resolve(conn, Seq(CollectionsTable, tableName))
+        (relations.get(CollectionsTable), relations.get(tableName)) match {
+          case (None, _) =>
+            Left(ProcessingError("pg-schema-migrate", s"$CollectionsTable resolves to no table on the search_path"))
+          case (_, None) =>
+            Left(ProcessingError("pg-schema-migrate", s"$tableName resolves to no table on the search_path"))
+          case (Some(collections), Some(table)) =>
+            val leaf = Using.resource(
+              conn.prepareStatement(s"SELECT is_leaf FROM ${collections.sql} WHERE id = ? FOR SHARE")
+            ) { stmt =>
               stmt.setInt(1, collectionId)
-              Right(stmt.executeUpdate().toLong)
+              Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getBoolean("is_leaf")) else None)
+            }
+            leaf match {
+              case None => Left(ProcessingError("pg-schema-migrate", s"Collection not found (id $collectionId)"))
+              case Some(false) =>
+                Left(
+                  ProcessingError("pg-schema-migrate", s"Cannot migrate into a non-leaf collection (id $collectionId)")
+                )
+              case Some(true) =>
+                Using.resource(conn.prepareStatement(s"""
+                  UPDATE ${table.sql}
+                  SET collection_id = ?, readable_by = COALESCE(readable_by, '{}')
+                  WHERE collection_id IS NULL AND NOT ($OrphanedPermissionRow)
+                """)) { stmt =>
+                  stmt.setInt(1, collectionId)
+                  Right(stmt.executeUpdate().toLong)
+                }
             }
         }
       }
@@ -285,9 +295,13 @@ object PgSchemaManager {
       )
 
   private def countOrphanedRows(conn: Connection, tableName: String): Result[Long] = Try {
-    Using.resource(
-      conn.prepareStatement(s"SELECT COUNT(*) FROM $tableName WHERE collection_id IS NULL AND $OrphanedPermissionRow")
-    )(stmt => Using.resource(stmt.executeQuery())(rs => if (rs.next()) rs.getLong(1) else 0L))
+    resolve(conn, Seq(tableName)).get(tableName).fold(0L) { table =>
+      Using.resource(
+        conn.prepareStatement(
+          s"SELECT COUNT(*) FROM ${table.sql} WHERE collection_id IS NULL AND $OrphanedPermissionRow"
+        )
+      )(stmt => Using.resource(stmt.executeQuery())(rs => if (rs.next()) rs.getLong(1) else 0L))
+    }
   }.toEither.left.map(e => ProcessingError("pg-schema-migrate", Redaction.scrubKnown(e.getMessage)))
 
   /**
@@ -324,9 +338,16 @@ object PgSchemaManager {
    * plain `PgVectorStore` on the same table, are kept. The collection table and the vectors table are locked first,
    * so an ingest running meanwhile either finishes before the reset or fails after it.
    *
-   * The collection and principal tables are shared by every `PgSearchIndex` in the database schema. If another
-   * vectors table still holds rows in a collection, the reset is refused and nothing changes: those rows would lose
-   * their collection. Clear that index's collections first (`PgSearchIndex.clearCollection`).
+   * Every name is resolved as the unqualified SQL of an index resolves it, through `search_path`, and the reset then
+   * works on those schema-qualified tables. It refuses, changing nothing, if `tableName` resolves to no table.
+   *
+   * The collection and principal tables are shared by every `PgSearchIndex` that resolves them. If another vectors
+   * table (in a schema on `search_path`, or the collection table's) still holds rows in a collection, the reset is
+   * refused and nothing changes: those rows would lose their collection. Clear that index's collections first
+   * (`PgSearchIndex.clearCollection`).
+   *
+   * On a connection already in a transaction (auto-commit off), the reset runs inside a savepoint and leaves the
+   * commit to the caller.
    *
    * @param conn Database connection
    * @param tableName The name of the vectors table whose permission rows and columns are removed
@@ -335,60 +356,118 @@ object PgSchemaManager {
   def dropSchema(conn: Connection, tableName: String): Result[Unit] =
     SqlIdentifier.validate(tableName, "pg-schema-drop").flatMap { _ =>
       inTransaction(conn, "pg-schema-drop") {
-        if (exists(conn, "SELECT to_regclass('llm4s_collections') IS NOT NULL"))
-          execute(conn, "LOCK TABLE llm4s_collections IN ACCESS EXCLUSIVE MODE")
-        val columns = permissionColumns(conn).getOrElse(tableName.toLowerCase, Set.empty)
-        if (columns.nonEmpty) execute(conn, s"LOCK TABLE $tableName IN ACCESS EXCLUSIVE MODE")
-
-        val others = permissionColumns(conn)
-          .collect {
-            case (table, cols) if table != tableName.toLowerCase && cols.contains("collection_id") => table
-          }
-          .toSeq
-          .sorted
-        val holding = others
-          .filter(t => exists(conn, s"SELECT EXISTS (SELECT 1 FROM ${quoted(t)} WHERE collection_id IS NOT NULL)"))
-
-        if (holding.nonEmpty)
-          Left(
-            ProcessingError(
-              "pg-schema-drop",
-              s"Refusing to drop the permission schema: ${holding.mkString(", ")} still hold rows in its collections, " +
-                "which would be left with no collection and no permissions. Clear those indexes' collections first."
+        val relations = resolve(conn, Seq(CollectionsTable, PrincipalsTable, GroupSequence, tableName))
+        relations.get(tableName) match {
+          case None =>
+            Left(
+              ProcessingError(
+                "pg-schema-drop",
+                s"Refusing to drop the permission schema: $tableName resolves to no table on the search_path, so " +
+                  "its rows in the collections cannot be deleted first."
+              )
             )
-          )
-        else {
-          val owned =
-            if (columns == Set("collection_id", "readable_by"))
-              Some("collection_id IS NOT NULL OR cardinality(readable_by) > 0")
-            else if (columns.contains("collection_id")) Some("collection_id IS NOT NULL")
-            else if (columns.contains("readable_by")) Some("cardinality(readable_by) > 0")
-            else None
-          owned.foreach(where => execute(conn, s"DELETE FROM $tableName WHERE $where"))
-          if (columns.nonEmpty)
-            execute(
-              conn,
-              s"ALTER TABLE $tableName DROP COLUMN IF EXISTS collection_id, DROP COLUMN IF EXISTS readable_by"
-            )
-          execute(conn, s"DROP INDEX IF EXISTS idx_${tableName}_content_fts")
-          execute(conn, "DROP TABLE IF EXISTS llm4s_collections CASCADE")
-          execute(conn, "DROP TABLE IF EXISTS llm4s_principals CASCADE")
-          execute(conn, "DROP SEQUENCE IF EXISTS llm4s_group_id_seq")
-          Right(())
+          case Some(table) =>
+            val collections = relations.get(CollectionsTable)
+            collections.foreach(c => execute(conn, s"LOCK TABLE ${c.sql} IN ACCESS EXCLUSIVE MODE"))
+            val columns = permissionColumns(conn, table)
+            if (columns.nonEmpty) execute(conn, s"LOCK TABLE ${table.sql} IN ACCESS EXCLUSIVE MODE")
+
+            val holding = otherPermissionTables(conn, table, collections.getOrElse(table).schema)
+              .filter(r => exists(conn, s"SELECT EXISTS (SELECT 1 FROM ${r.sql} WHERE collection_id IS NOT NULL)"))
+
+            if (holding.nonEmpty)
+              Left(
+                ProcessingError(
+                  "pg-schema-drop",
+                  s"Refusing to drop the permission schema: ${holding.map(_.display).mkString(", ")} still hold rows " +
+                    "in its collections, which would be left with no collection and no permissions. Clear those " +
+                    "indexes' collections first."
+                )
+              )
+            else {
+              val owned =
+                if (columns == Set("collection_id", "readable_by"))
+                  Some("collection_id IS NOT NULL OR cardinality(readable_by) > 0")
+                else if (columns.contains("collection_id")) Some("collection_id IS NOT NULL")
+                else if (columns.contains("readable_by")) Some("cardinality(readable_by) > 0")
+                else None
+              owned.foreach(where => execute(conn, s"DELETE FROM ${table.sql} WHERE $where"))
+              if (columns.nonEmpty)
+                execute(
+                  conn,
+                  s"ALTER TABLE ${table.sql} DROP COLUMN IF EXISTS collection_id, DROP COLUMN IF EXISTS readable_by"
+                )
+              execute(conn, s"DROP INDEX IF EXISTS ${quoted(table.schema)}.${quoted(s"idx_${table.name}_content_fts")}")
+              collections.foreach(c => execute(conn, s"DROP TABLE IF EXISTS ${c.sql} CASCADE"))
+              relations.get(PrincipalsTable).foreach(p => execute(conn, s"DROP TABLE IF EXISTS ${p.sql} CASCADE"))
+              relations.get(GroupSequence).foreach(s => execute(conn, s"DROP SEQUENCE IF EXISTS ${s.sql}"))
+              Right(())
+            }
         }
       }
     }
 
-  /** The tables of the current schema with a `collection_id` or `readable_by` column, and which of the two. */
-  private def permissionColumns(conn: Connection): Map[String, Set[String]] =
-    Using.resource(conn.prepareStatement("""
-      SELECT table_name, column_name FROM information_schema.columns
-      WHERE table_schema = current_schema() AND column_name IN ('collection_id', 'readable_by')
+  private val CollectionsTable = "llm4s_collections"
+  private val PrincipalsTable  = "llm4s_principals"
+  private val GroupSequence    = "llm4s_group_id_seq"
+
+  /** A relation an unqualified name resolved to: its schema and its name, both as stored in the catalog. */
+  final private case class Relation(schema: String, name: String) {
+    def sql: String     = s"${quoted(schema)}.${quoted(name)}"
+    def display: String = s"$schema.$name"
+  }
+
+  /**
+   * What each of `names` resolves to through `search_path`, as the unqualified SQL of an index resolves it
+   * (`to_regclass`). A name that resolves to nothing is absent from the result. Each name is a validated SQL
+   * identifier or one of this object's constants, so it is safe to inline.
+   */
+  private def resolve(conn: Connection, names: Seq[String]): Map[String, Relation] = {
+    val values = names.map(n => s"('$n')").mkString(", ")
+    Using.resource(conn.prepareStatement(s"""
+      SELECT x.name, n.nspname, c.relname
+      FROM (VALUES $values) AS x(name)
+      JOIN pg_class c ON c.oid = to_regclass(x.name)
+      JOIN pg_namespace n ON n.oid = c.relnamespace
     """)) { stmt =>
       Using.resource(stmt.executeQuery()) { rs =>
-        val found = scala.collection.mutable.ListBuffer.empty[(String, String)]
-        while (rs.next()) found += ((rs.getString("table_name"), rs.getString("column_name")))
-        found.toList.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
+        val found = scala.collection.mutable.Map.empty[String, Relation]
+        while (rs.next()) found(rs.getString("name")) = Relation(rs.getString("nspname"), rs.getString("relname"))
+        found.toMap
+      }
+    }
+  }
+
+  /** Which of `collection_id` and `readable_by` the resolved `table` has. */
+  private def permissionColumns(conn: Connection, table: Relation): Set[String] =
+    Using.resource(conn.prepareStatement("""
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = ? AND table_name = ? AND column_name IN ('collection_id', 'readable_by')
+    """)) { stmt =>
+      stmt.setString(1, table.schema)
+      stmt.setString(2, table.name)
+      Using.resource(stmt.executeQuery()) { rs =>
+        val found = scala.collection.mutable.Set.empty[String]
+        while (rs.next()) found += rs.getString("column_name")
+        found.toSet
+      }
+    }
+
+  /**
+   * The tables other than `table` with a `collection_id` column, in a schema on `search_path` or in
+   * `collectionsSchema`: the ones whose rows may be in the collections a reset drops.
+   */
+  private def otherPermissionTables(conn: Connection, table: Relation, collectionsSchema: String): Seq[Relation] =
+    Using.resource(conn.prepareStatement("""
+      SELECT table_schema, table_name FROM information_schema.columns
+      WHERE column_name = 'collection_id'
+        AND (table_schema = ANY (current_schemas(false)) OR table_schema = ?)
+    """)) { stmt =>
+      stmt.setString(1, collectionsSchema)
+      Using.resource(stmt.executeQuery()) { rs =>
+        val found = scala.collection.mutable.ListBuffer.empty[Relation]
+        while (rs.next()) found += Relation(rs.getString("table_schema"), rs.getString("table_name"))
+        found.toList.distinct.filterNot(_ == table).sortBy(_.display)
       }
     }
 
@@ -403,20 +482,31 @@ object PgSchemaManager {
     Using.resource(conn.prepareStatement(sql))(stmt => stmt.execute(): Unit)
 
   /**
-   * Runs `body` in a transaction on `conn`: committed if it returns `Right`, rolled back if it returns `Left` or
-   * throws. The connection's auto-commit mode is restored afterwards.
+   * Runs `body` atomically on `conn`. With auto-commit on, in a transaction of its own: committed if `body` returns
+   * `Right`, rolled back if it returns `Left` or throws, and auto-commit restored. With auto-commit off the caller
+   * owns the transaction, so `body` runs inside a savepoint instead: released on `Right`, rolled back to on `Left` or
+   * a throw, and the commit is left to the caller.
    */
   private def inTransaction[A](conn: Connection, operation: String)(body: => Result[A]): Result[A] =
     Try {
-      val original = conn.getAutoCommit
-      conn.setAutoCommit(false)
-      val outcome = Try(body).flatMap {
-        case right @ Right(_) => Try(conn.commit()).map(_ => right)
-        case left @ Left(_)   => Try(conn.rollback()).map(_ => left)
+      if (conn.getAutoCommit) {
+        conn.setAutoCommit(false)
+        val outcome = Try(body).flatMap {
+          case right @ Right(_) => Try(conn.commit()).map(_ => right)
+          case left @ Left(_)   => Try(conn.rollback()).map(_ => left)
+        }
+        outcome.failed.foreach(_ => Try(conn.rollback()))
+        Try(conn.setAutoCommit(true))
+        outcome.get
+      } else {
+        val savepoint = conn.setSavepoint()
+        val outcome = Try(body).flatMap {
+          case right @ Right(_) => Try(conn.releaseSavepoint(savepoint)).map(_ => right)
+          case left @ Left(_)   => Try(conn.rollback(savepoint)).map(_ => left)
+        }
+        outcome.failed.foreach(_ => Try(conn.rollback(savepoint)))
+        outcome.get
       }
-      outcome.failed.foreach(_ => Try(conn.rollback()))
-      Try(conn.setAutoCommit(original))
-      outcome.get
     }.toEither.left
       .map(e => ProcessingError(operation, Redaction.scrubKnown(e.getMessage)))
       .flatMap(identity)
