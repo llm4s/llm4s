@@ -232,7 +232,7 @@ final case class LLMMemoryManager(
           metadata = mergeMetadata(group),
           timestamp = group.map(_.timestamp).max,
           importance = group.flatMap(_.importance).maxOption,
-          embedding = None // Will be regenerated if needed
+          embedding = None // a store with an embedding service embeds it on write
         )
 
         // 5. Replace the group with its summary in one write, naming exactly the group's ids: a store

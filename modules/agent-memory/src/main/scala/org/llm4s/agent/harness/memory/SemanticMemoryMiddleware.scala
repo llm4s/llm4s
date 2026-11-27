@@ -308,7 +308,8 @@ object SemanticMemoryMiddleware:
 
   /**
    * `memory` with its content cut to `max` code points. A memory that is cut loses its embedding, which was computed
-   * for the whole text; a store with an embedding service computes it again for what is kept.
+   * for the whole text; a store with an embedding service (`VectorMemoryStore`, `PostgresMemoryStore` given one, or
+   * `InMemoryStore.withEmbeddingService`) computes it again for what is kept when it stores it.
    */
   private[memory] def cut(memory: Memory, max: Int): Memory =
     val kept = clip(memory.content, max)

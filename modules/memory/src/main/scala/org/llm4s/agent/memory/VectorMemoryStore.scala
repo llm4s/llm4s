@@ -127,33 +127,8 @@ final class VectorMemoryStore private (
    * time - one request for a whole large batch could exceed a provider's input limit. Fails if any call fails,
    * throws, or answers with the wrong number of embeddings.
    */
-  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] = {
-    val texts = memories.filter(_.embedding.isEmpty).map(_.content)
-    val embedded =
-      texts.grouped(EmbeddingBatchSize).foldLeft[Result[Vector[Array[Float]]]](Right(Vector.empty)) { (acc, chunk) =>
-        acc.flatMap { done =>
-          Try(embeddingService.embedBatch(chunk))
-            .fold(
-              e => Left(ProcessingError("vector-store", s"Embedding failed: ${Redaction.scrubKnown(e.getMessage)}")),
-              identity
-            )
-            .flatMap { embeddings =>
-              if (embeddings.size == chunk.size) Right(done ++ embeddings)
-              else
-                Left(
-                  ProcessingError(
-                    "vector-store",
-                    s"Embedding service returned ${embeddings.size} embeddings for ${chunk.size} texts"
-                  )
-                )
-            }
-        }
-      }
-    embedded.map { embeddings =>
-      val next = embeddings.iterator
-      memories.map(m => if (m.embedding.isEmpty) m.withEmbedding(next.next()) else m)
-    }
-  }
+  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] =
+    MemoryEmbeddings.embedMissing(embeddingService, memories, "vector-store", EmbeddingBatchSize)
 
   /**
    * Write each memory and replace its full-text entry, in order, reusing three prepared statements. The caller
@@ -172,7 +147,7 @@ final class VectorMemoryStore private (
       memories.foreach { m =>
         stmt.setString(1, m.id.value)
         stmt.setString(2, m.content)
-        stmt.setString(3, m.memoryType.name)
+        stmt.setString(3, MemoryTypeCodec.encode(m.memoryType))
         stmt.setString(4, serializeMetadata(m.metadata))
         stmt.setString(5, m.getMetadata("conversation_id").orNull)
         stmt.setString(6, m.getMetadata("entity_id").orNull)
@@ -553,7 +528,7 @@ final class VectorMemoryStore private (
     Memory(
       id = MemoryId(rs.getString("id")),
       content = rs.getString("content"),
-      memoryType = MemoryType.fromString(rs.getString("memory_type")),
+      memoryType = MemoryTypeCodec.decode(rs.getString("memory_type")),
       metadata = deserializeMetadata(rs.getString("metadata")),
       timestamp = Instant.ofEpochMilli(rs.getLong("timestamp")),
       importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
@@ -574,11 +549,15 @@ final class VectorMemoryStore private (
    */
   private def leafSql(filter: MemoryFilter): Option[Sql] = filter match {
     case MemoryFilter.ByType(memoryType) =>
-      Some(Sql("memory_type = ?", Seq(memoryType.name)))
+      // A custom type is stored as `custom:<name>`, or as its bare name by an older store: both spellings are it
+      MemoryTypeCodec.spellings(memoryType) match {
+        case Seq(only) => Some(Sql("memory_type = ?", Seq(only)))
+        case names     => Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
+      }
 
     case MemoryFilter.ByTypes(types) =>
       // A Seq, not the Set: mapping a Set to "?" would collapse the placeholders into one
-      val names = types.toSeq.map(_.name)
+      val names = types.toSeq.flatMap(MemoryTypeCodec.spellings).distinct
       if (names.isEmpty) Some(Sql("1 = 0", Seq.empty))
       else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 

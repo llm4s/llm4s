@@ -36,8 +36,12 @@ and `llm4s-memory` with them. The package name is unchanged.
 - **Vector Storage (pgvector)**  
   Automatically enables the `pgvector` extension and stores embeddings using PostgreSQL’s `vector` type.
 
+- **Embedded on write**  
+  Given an `EmbeddingService`, the store embeds every memory it writes without an embedding, so what a
+  `MemoryManager` or `SemanticMemoryMiddleware` records is found by `search`.
+
 - **SQL Safety by Design**  
-  Strict validation of table names and metadata keys to prevent SQL injection.
+  Table names are validated; every filter value, metadata keys included, is a bound parameter.
 
 - **Explicit Error Handling**  
   All operations return a `Result` type instead of throwing exceptions.
@@ -131,16 +135,10 @@ If validation fails, configuration throws an `IllegalArgumentException`.
 
 ---
 
-### Metadata Key Validation
+### Metadata Keys
 
-Metadata keys used in filters are validated using:
-
-```
-^[a-zA-Z_][a-zA-Z0-9_]*$
-```
-This prevents unsafe JSON path interpolation.
-
-Invalid keys result in a `ProcessingError`.
+A metadata key in a filter is passed to PostgreSQL as a bound parameter, never written into the SQL, so any key
+works: `user-id`, `a.b` and `x[0]` are ordinary keys.
 
 ---
 
@@ -180,60 +178,79 @@ CREATE INDEX IF NOT EXISTS idx_agent_memories_conversation
 ```
 ## Querying and Filters
 
-`MemoryFilter` values are translated directly into SQL `WHERE` clauses.
+`recall`, `count`, `deleteMatching` and `search` accept every `MemoryFilter` and answer exactly what
+`MemoryFilter.matches` answers, as the in-memory, SQLite and vector stores do. SQL narrows the rows and `matches`
+decides: a filter SQL can say exactly is evaluated by PostgreSQL alone; for one it cannot (a `Custom` predicate, a
+case-insensitive `ContentContains`), the store reads the rows the rest of the filter narrows to and runs `matches` on
+them before any limit, count or delete.
 
-### Supported Filters
+### How filters translate
 
-| Filter          | Scala Example                     | Generated SQL                         |
-| --------------- | --------------------------------- | ------------------------------------- |
-| All             | `MemoryFilter.All`                | `TRUE`                                |
-| None            | `MemoryFilter.None`               | `FALSE`                               |
-| By Entity       | `MemoryFilter.ByEntity(id)`       | `metadata->>'entity_id' = ?`          |
-| By Conversation | `MemoryFilter.ByConversation(id)` | `metadata->>'conversation_id' = ?`    |
-| By Type         | `MemoryFilter.ByType(t)`          | `memory_type = ?`                     |
-| By Types        | `MemoryFilter.ByTypes(ts)`        | `memory_type IN (?, ...)`             |
-| Time Range      | `MemoryFilter.ByTimeRange(a, b)`  | `created_at >= ? AND created_at <= ?` |
-| Importance      | `MemoryFilter.MinImportance(x)`   | `importance >= ?`                     |
-| Metadata        | `MemoryFilter.ByMetadata(k, v)`   | `metadata->>'k' = ?`                  |
-| And             | `MemoryFilter.And(left, right)`   | `(left_sql AND right_sql)`            |
-| Or              | `MemoryFilter.Or(left, right)`    | `(left_sql OR right_sql)`             |
-| Not             | `MemoryFilter.Not(filter)`        | `NOT (filter_sql)`                    |
+| Filter                                   | SQL                                                               |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `All` / `None`                           | no condition / `1 = 0`                                            |
+| `ByEntity(id)`, `ByMetadata(k, v)`       | `metadata ->> ? = ?`, comparing the value as text                 |
+| `ByConversation(id)`                     | `metadata->>'conversation_id' = ?` (uses its index)               |
+| `HasMetadata(k)`                         | `(metadata -> ?) IS NOT NULL`                                     |
+| `MetadataContains(k, s)`                 | `strpos(metadata ->> ?, ?) > 0`, a literal substring test         |
+| `ByType(t)`, `ByTypes(ts)`               | `memory_type IN (?, ...)`                                         |
+| `ByTimeRange(a, b)`                      | `created_at >= ? AND created_at <= ?`                             |
+| `MinImportance(x)`                       | `importance >= ?`                                                 |
+| `ContentContains(s, caseSensitive=true)` | `strpos(content, ?) > 0`                                          |
+| `ContentContains(s)` (ignoring case)     | decided by `matches`: `lower()` follows the database's collation  |
+| `Custom(p)`                              | decided by `matches`                                              |
+| `And`, `Or`, `Not`                       | composed; `Not` only of a condition that is exact                 |
 
-All dynamic values are passed using prepared statements.
+Metadata values are compared as the text `->>` gives, and read back the same way, so a number, a boolean or a JSON
+`null` that another writer stored (`{"count": 3}`) matches `ByMetadata("count", "3")` in SQL and in `matches` alike.
+Every condition is guarded against SQL `NULL`, so `Not(MinImportance(0.5))` keeps the memories that have no
+importance, and `Not(ByEntity(e))` those with no entity, as `matches` does.
 
 ### Compound Filter Examples
 
-Compound filters can be nested arbitrarily:
-
 ```scala
-// Tasks OR Conversations
-val orFilter = MemoryFilter.Or(
-  MemoryFilter.ByType(MemoryType.Task),
-  MemoryFilter.ByType(MemoryType.Conversation)
-)
-// Generated: (memory_type = ? OR memory_type = ?)
-
 // Important tasks only
 val andFilter = MemoryFilter.And(
   MemoryFilter.ByType(MemoryType.Task),
   MemoryFilter.MinImportance(0.8)
 )
-// Generated: (memory_type = ? AND importance >= ?)
 
-// Exclude low-importance items
+// Everything below 0.5 importance, including memories with no importance at all
 val notFilter = MemoryFilter.Not(MemoryFilter.MinImportance(0.5))
-// Generated: NOT (importance >= ?)
 
-// Nested: (A OR B) AND NOT C
-val nested = MemoryFilter.And(
-  MemoryFilter.Or(
-    MemoryFilter.ByType(MemoryType.Task),
-    MemoryFilter.ByType(MemoryType.Conversation)
-  ),
-  MemoryFilter.Not(MemoryFilter.MinImportance(0.9))
+// Delete old memories that a predicate selects: the store reads the rows older than the cutoff and deletes
+// those the predicate accepts
+val cutoff = java.time.Instant.now().minus(java.time.Duration.ofDays(30))
+val stale = MemoryFilter.And(
+  MemoryFilter.ByTimeRange(before = Some(cutoff)),
+  MemoryFilter.Custom(_.importance.forall(_ < 0.3))
 )
-// Generated: ((memory_type = ? OR memory_type = ?) AND NOT (importance >= ?))
 ```
+
+### Memory types
+
+A built-in type is stored as its name (`task`, `user_fact`, ...) and a custom type as `custom:<name>`, keeping its
+case, so `MemoryType.Custom("Report")` reads back as `Custom("Report")` and `Custom("task")` stays apart from
+`Task`. Rows written by 1.0.x hold a custom type's bare name; they read back as that custom type, and `ByType`
+finds them under either spelling.
+
+## Search
+
+With an `EmbeddingService`, `search` embeds the query and returns the `topK` memories nearest to it among those the
+filter accepts; a memory with no embedding is not a candidate. The store embeds what it writes - `store`,
+`storeAll`, `replace` and `applyAtomically` embed every memory without an embedding, in batches, before the
+transaction; `update` embeds again when it changes the content and leaves the embedding as it was. If embedding
+fails, nothing is written.
+
+Rows written before the store embedded what it stores have no embedding. Embed them once with `embedAll`:
+
+```scala
+store.embedAll() // Result[Int]: how many memories were embedded
+```
+
+Without an `EmbeddingService`, `search` is a keyword search, scored as `InMemoryStore` scores it: the share of the
+query's words and phrases that occur in a memory as whole words. It reads every row the filter narrows to, so on a
+large table give the store an embedding service, or a narrow filter.
 
 ## Error Handling
 
@@ -244,11 +261,6 @@ The store follows a functional error handling model.
 - All operations return Result[T]
 
 - Errors are explicit and must be handled by the caller
-
-## Current Limitations
-
-### Semantic Search
-Although the schema supports vector embeddings, calling `search(...)` currently returns a `ProcessingError`. This requires integration with an `EmbeddingService`.
 
 ---
 

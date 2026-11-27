@@ -1188,8 +1188,9 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
     // `TransactionalMemoryStore` unit suite (#1911), when the floor was raised. Floor is the measured
     // value rounded down to the nearest 5. Never lower it. The in-module suite is mock-backed;
     // the real signal is `modules/it`'s `PostgresMemoryStoreSpec`, which runs on every PR
-    // against a pgvector service container (#1149) and is not counted here.
-    coverageFloor(70),
+    // against a pgvector service container (#1149) and is not counted here. 94.70% with the
+    // recording-data-source `PostgresMemoryStoreQueryPlanSpec` (#3030, #3031), when the floor was raised.
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,

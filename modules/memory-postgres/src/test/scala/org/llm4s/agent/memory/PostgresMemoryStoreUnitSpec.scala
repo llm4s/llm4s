@@ -4,7 +4,6 @@ import com.zaxxer.hikari.HikariDataSource
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
 import org.llm4s.error.{ NotFoundError, OptimisticLockFailure }
 import org.llm4s.vectorstore.PostgresVectorHelpers
 
@@ -72,64 +71,6 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     noException should be thrownBy PostgresMemoryStore.Config(tableName = "agent_memories")
   }
 
-  // SQL Filter Tests
-  it should "generate SQL for ByType filter" in {
-    PostgresMemoryStore
-      .filterToSql(MemoryFilter.ByType(MemoryType.Task))
-      .fold(
-        e => fail(e.message),
-        { case (sql, params) =>
-          sql shouldBe "memory_type = ?"
-          params shouldBe Seq(PString("task"))
-        }
-      )
-  }
-
-  it should "generate SQL for ByTypes filter with deterministic order" in {
-    PostgresMemoryStore
-      .filterToSql(MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation)))
-      .fold(
-        e => fail(e.message),
-        { case (sql, params) =>
-          sql shouldBe "memory_type IN (?,?)"
-          params shouldBe Seq(PString("conversation"), PString("task"))
-        }
-      )
-  }
-
-  it should "generate safe interpolated SQL for ByMetadata filter" in {
-    PostgresMemoryStore
-      .filterToSql(MemoryFilter.ByMetadata("session_id", "123"))
-      .fold(
-        e => fail(e.message),
-        { case (sql, params) =>
-          sql shouldBe "metadata->>'session_id' = ?"
-          params shouldBe Seq(PString("123"))
-        }
-      )
-  }
-
-  it should "reject invalid keys in ByMetadata filter" in {
-    val result = PostgresMemoryStore.filterToSql(
-      MemoryFilter.ByMetadata("invalid-key; --", "value")
-    )
-    result.isLeft shouldBe true
-    val error = result.left.toOption.get
-    error.message should include("Invalid metadata key")
-  }
-
-  it should "generate SQL for MinImportance filter" in {
-    PostgresMemoryStore
-      .filterToSql(MemoryFilter.MinImportance(0.8))
-      .fold(
-        e => fail(e.message),
-        { case (sql, params) =>
-          sql shouldBe "importance >= ?"
-          params shouldBe Seq(PDouble(0.8))
-        }
-      )
-  }
-
   // Embedding Tests
   it should "convert embedding array to vector string" in {
     val vec = Array(0.1f, 0.2f, 0.3f)
@@ -155,85 +96,6 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     PostgresVectorHelpers.stringToEmbedding("[not,valid,floats]").isLeft shouldBe true
     PostgresVectorHelpers.stringToEmbedding("[1.0,abc,3.0]").isLeft shouldBe true
     PostgresVectorHelpers.stringToEmbedding("garbage").isLeft shouldBe true
-  }
-
-  it should "generate SQL for None filter" in {
-    PostgresMemoryStore
-      .filterToSql(MemoryFilter.None)
-      .fold(
-        e => fail(e.message),
-        { case (sql, params) =>
-          sql shouldBe "FALSE"
-          params shouldBe Seq.empty
-        }
-      )
-  }
-
-  // Compound Filter Tests
-  it should "generate SQL for And filter" in {
-    val filter = MemoryFilter.And(
-      MemoryFilter.ByType(MemoryType.Task),
-      MemoryFilter.MinImportance(0.5)
-    )
-    val result = PostgresMemoryStore.filterToSql(filter)
-
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "(memory_type = ? AND importance >= ?)"
-    params shouldBe Seq(PString("task"), PDouble(0.5))
-  }
-
-  it should "generate SQL for Or filter" in {
-    val filter = MemoryFilter.Or(
-      MemoryFilter.ByType(MemoryType.Task),
-      MemoryFilter.ByType(MemoryType.Conversation)
-    )
-    val result = PostgresMemoryStore.filterToSql(filter)
-
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "(memory_type = ? OR memory_type = ?)"
-    params shouldBe Seq(PString("task"), PString("conversation"))
-  }
-
-  it should "generate SQL for Not filter" in {
-    val filter = MemoryFilter.Not(MemoryFilter.ByType(MemoryType.Task))
-    val result = PostgresMemoryStore.filterToSql(filter)
-
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "NOT (memory_type = ?)"
-    params shouldBe Seq(PString("task"))
-  }
-
-  it should "generate SQL for nested compound filters" in {
-    // And(Or(A, B), Not(C))
-    val filter = MemoryFilter.And(
-      MemoryFilter.Or(
-        MemoryFilter.ByType(MemoryType.Task),
-        MemoryFilter.ByType(MemoryType.Conversation)
-      ),
-      MemoryFilter.Not(MemoryFilter.MinImportance(0.9))
-    )
-    val result = PostgresMemoryStore.filterToSql(filter)
-
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "((memory_type = ? OR memory_type = ?) AND NOT (importance >= ?))"
-    params shouldBe Seq(PString("task"), PString("conversation"), PDouble(0.9))
-  }
-
-  it should "propagate errors from nested compound filters" in {
-    // And with invalid metadata key should fail
-    val filter = MemoryFilter.And(
-      MemoryFilter.ByType(MemoryType.Task),
-      MemoryFilter.ByMetadata("invalid-key; --", "value")
-    )
-    val result = PostgresMemoryStore.filterToSql(filter)
-
-    result.isLeft shouldBe true
-    val error = result.left.toOption.get
-    error.message should include("Invalid metadata key")
   }
 
   behavior.of("PostgresMemoryStore class execution")
@@ -279,7 +141,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (mockRs.getString(_: String)).expects("id").returning("1")
     (mockRs.getString(_: String)).expects("content").returning("test content")
     (mockRs.getString(_: String)).expects("memory_type").returning("task")
-    (mockRs.getString(_: String)).expects("metadata").returning("""{"key":"val"}""")
+    (mockRs.getString(_: String)).expects("metadata_text").returning("""{"key":"val"}""")
     (mockRs.getTimestamp(_: String)).expects("created_at").returning(Timestamp.from(Instant.now()))
     (mockRs.getDouble(_: String)).expects("importance").returning(0.5)
     (() => mockRs.wasNull()).expects().returning(false)
@@ -408,7 +270,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (mockRs.getString(_: String)).expects("id").returning("mem-cas-1")
     (mockRs.getString(_: String)).expects("content").returning("original content")
     (mockRs.getString(_: String)).expects("memory_type").returning("task")
-    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getString(_: String)).expects("metadata_text").returning("{}")
     (mockRs.getTimestamp(_: String)).expects("created_at").returning(ts)
     (mockRs.getDouble(_: String)).expects("importance").returning(0.0)
     (() => mockRs.wasNull()).expects().returning(true)
@@ -449,7 +311,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (mockRs.getString(_: String)).expects("id").returning("mem-cas-2")
     (mockRs.getString(_: String)).expects("content").returning("original content")
     (mockRs.getString(_: String)).expects("memory_type").returning("task")
-    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getString(_: String)).expects("metadata_text").returning("{}")
     (mockRs.getTimestamp(_: String)).expects("created_at").returning(ts)
     (mockRs.getDouble(_: String)).expects("importance").returning(0.0)
     (() => mockRs.wasNull()).expects().returning(true)

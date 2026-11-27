@@ -45,6 +45,19 @@ private[memory] object KeywordTokens {
       .filter(_.nonEmpty)
       .toSeq
 
+  /** The distinct phrases of `query` that have a word, each as its words: what keyword search looks for. */
+  def searchPhrases(query: String): Seq[Vector[String]] =
+    queryPhrases(query).map(words).filter(_.nonEmpty).distinct
+
+  /**
+   * The keyword-search score of `content` for `phrases` (from [[searchPhrases]], not empty): the share of the phrases
+   * that occur in it as whole words, adjacent and in order. Zero means it does not match.
+   */
+  def score(phrases: Seq[Vector[String]], content: String): Double = {
+    val contentWords = words(content)
+    phrases.count(phrase => contentWords.containsSlice(phrase)).toDouble / phrases.size
+  }
+
   /** The words of `text` in order, folded as FTS5 `unicode61` folds them. */
   def words(text: String): Vector[String] = {
     val out = Vector.newBuilder[String]
