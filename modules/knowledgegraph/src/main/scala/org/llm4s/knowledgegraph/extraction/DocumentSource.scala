@@ -1,6 +1,8 @@
 package org.llm4s.knowledgegraph.extraction
 
+import org.llm4s.error.ValidationError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
+import org.llm4s.types.Result
 
 /**
  * Represents a source document from which knowledge graph entities were extracted.
@@ -14,6 +16,22 @@ case class DocumentSource(
   title: String = "",
   metadata: Map[String, String] = Map.empty
 )
+
+object DocumentSource {
+
+  /**
+   * Checks that every source id is non-blank and that no two sources share one: the id namespaces a document's node
+   * ids, so a shared id would make two documents' entities overwrite each other (#2966).
+   */
+  private[knowledgegraph] def validateIds(sources: Seq[DocumentSource]): Result[Unit] = {
+    val blank      = sources.count(_.id.trim.isEmpty)
+    val duplicates = sources.map(_.id).groupBy(identity).collect { case (id, ids) if ids.size > 1 => id }.toSeq.sorted
+    val problems =
+      (if (blank > 0) Seq(s"$blank source id(s) are blank") else Seq.empty) ++
+        duplicates.map(id => s"source id '$id' is used by more than one document")
+    if (problems.isEmpty) Right(()) else Left(ValidationError("DocumentSource.id", problems))
+  }
+}
 
 /**
  * Represents a violation found during schema validation.
@@ -78,29 +96,6 @@ case class SourceTrackedGraph(
 ) {
 
   /**
-   * Remaps all node IDs in a graph by prefixing them with a namespace string.
-   *
-   * LLM-generated node IDs are arbitrary (often "1", "2", etc.) and will collide
-   * across documents. This ensures each document's nodes occupy a distinct ID space
-   * before being merged into the shared graph.
-   *
-   * @param g         The graph whose IDs should be remapped
-   * @param namespace The prefix to apply (typically the document source ID)
-   * @return A new graph with all node IDs and edge source/target references updated
-   */
-  private def remapIds(g: Graph, namespace: String): Graph = {
-    def remap(id: String): String = s"${namespace}__$id"
-
-    val remappedNodes = g.nodes.map { case (id, node) =>
-      remap(id) -> node.copy(id = remap(id))
-    }
-
-    val remappedEdges = g.edges.map(edge => edge.copy(source = remap(edge.source), target = remap(edge.target)))
-
-    Graph(remappedNodes, remappedEdges)
-  }
-
-  /**
    * Adds a document's extracted graph to this tracked graph, merging nodes/edges
    * and recording provenance.
    *
@@ -114,7 +109,7 @@ case class SourceTrackedGraph(
    * @return A new SourceTrackedGraph with the document incorporated
    */
   def addDocument(docGraph: Graph, source: DocumentSource): SourceTrackedGraph = {
-    val remapped    = remapIds(docGraph, source.id)
+    val remapped    = SourceTrackedGraph.namespaced(docGraph, source.id)
     val mergedGraph = graph.merge(remapped)
 
     val updatedNodeSources = remapped.nodes.keys.foldLeft(nodeSources) { (acc, nodeId) =>
@@ -188,6 +183,29 @@ case class SourceTrackedGraph(
 }
 
 object SourceTrackedGraph {
+
+  /**
+   * Remaps all node IDs in a graph by prefixing them with a namespace string, as `<namespace>__<id>`.
+   *
+   * LLM-generated node IDs are arbitrary (often "1", "2", etc.) and will collide
+   * across documents. This ensures each document's nodes occupy a distinct ID space
+   * before being merged into a shared graph or store.
+   *
+   * @param g         The graph whose IDs should be remapped
+   * @param namespace The prefix to apply (typically the document source ID)
+   * @return A new graph with all node IDs and edge source/target references updated
+   */
+  private[knowledgegraph] def namespaced(g: Graph, namespace: String): Graph = {
+    def remap(id: String): String = s"${namespace}__$id"
+
+    val remappedNodes = g.nodes.map { case (id, node) =>
+      remap(id) -> node.copy(id = remap(id))
+    }
+
+    val remappedEdges = g.edges.map(edge => edge.copy(source = remap(edge.source), target = remap(edge.target)))
+
+    Graph(remappedNodes, remappedEdges)
+  }
 
   /** Creates an empty source-tracked graph. */
   def empty: SourceTrackedGraph = SourceTrackedGraph(Graph.empty, Seq.empty, Map.empty, Map.empty)

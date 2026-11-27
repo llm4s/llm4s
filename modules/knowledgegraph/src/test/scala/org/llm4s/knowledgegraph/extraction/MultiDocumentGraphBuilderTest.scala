@@ -7,7 +7,7 @@ import org.scalamock.scalatest.MockFactory
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation }
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import java.time.Instant
 
 class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockFactory {
@@ -544,5 +544,37 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
       enableEntityLinking = true,
       llmDisambiguation = false
     )
+  }
+
+  private def idCheckBuilder(llmClient: LLMClient): MultiDocumentGraphBuilder =
+    new MultiDocumentGraphBuilder(
+      llmClient,
+      ExtractionConfig(schema = Some(schema), enableCoreference = false, enableEntityLinking = false)
+    )
+
+  test("extractDocuments refuses two documents with the same source id before calling the model (#2966)") {
+    val llmClient = mock[LLMClient]
+    (llmClient.complete _).expects(*, *).never()
+
+    val result = idCheckBuilder(llmClient).extractDocuments(
+      Seq(("Alice works at Acme", DocumentSource("doc-1", "A")), ("Bob lives in Paris", DocumentSource("doc-1", "B")))
+    )
+    result match {
+      case Left(e: ValidationError) => e.message should include("doc-1")
+      case other                    => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  test("extractDocuments refuses a blank source id, and one the existing graph already has") {
+    val llmClient = mock[LLMClient]
+    (llmClient.complete _).expects(*, *).never()
+    val builder  = idCheckBuilder(llmClient)
+    val existing = SourceTrackedGraph.fromGraph(Graph.empty, DocumentSource("doc-1"))
+
+    builder.extractDocuments(Seq(("text", DocumentSource("")))) should matchPattern { case Left(_: ValidationError) => }
+    builder.extractDocuments(Seq(("text", DocumentSource("doc-1"))), Some(existing)) should matchPattern {
+      case Left(_: ValidationError) =>
+    }
+    builder.extractDocument("text", DocumentSource(" ")) should matchPattern { case Left(_: ValidationError) => }
   }
 }

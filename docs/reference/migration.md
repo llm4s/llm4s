@@ -309,6 +309,24 @@ Delete them once: the nodes whose id starts with `community:`, whose label is `C
 Summaries are recomputed per `GraphRAG` instance; storing them outside the graph is tracked in
 [#2981](https://github.com/llm4s/llm4s/issues/2981).
 
+## `KnowledgeGraphGenerator.extract` takes a `DocumentSource` and namespaces node ids (#2966, #2963)
+
+`llm4s-knowledgegraph` is Experimental. The model's node ids are arbitrary (usually `1`, `2`, ...), and
+`KnowledgeGraphGenerator.extract` wrote them to the store unchanged, so a second document on the same store replaced
+the first one's nodes while keeping its edges: "Alice WORKS_FOR Acme" from one document and "Bob" and "Paris" from the
+next became "Bob WORKS_FOR Paris".
+
+| Before (1.0.0) | After |
+|---|---|
+| `generator.extract(text)` | `generator.extract(text, DocumentSource("doc-1"))`; the stored and returned ids are `doc-1__1`, `doc-1__2`, ..., as `MultiDocumentGraphBuilder` already namespaces them |
+| `extract(text, entityTypes, relationTypes)` | `extract(text, source, entityTypes, relationTypes)` |
+| `new KnowledgeGraphGenerator(llmClient)`, which wrote into a private in-memory store | `new FreeFormExtractor(llmClient).extract(text)`, which returns the `Graph` and stores nothing |
+| A failed node write still let every edge write run | No edge is written once a node write has failed |
+| `MultiDocumentGraphBuilder.extractDocuments` accepted blank or repeated source ids, cross-wiring those documents' entities | It returns a `ValidationError` before any extraction when a source id is blank, repeated, or already a source of `existingGraph`; `extractDocument` refuses a blank id |
+
+To re-extract a document into a graph built earlier, build from a `SourceTrackedGraph` without that document, or give
+the new version its own source id.
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.
