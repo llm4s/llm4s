@@ -2542,9 +2542,15 @@ lazy val agentCheckpointPostgres = (project in file("modules/agent-checkpoint-po
 // `TransactionalMemoryStore`. Its own module because `llm4s-memory` depends on core only and `llm4s-agent` must not
 // depend on `llm4s-memory`. Test scope: the agent's test fixtures (`ScriptedLLMClient`), the SQLite checkpointer
 // (a thread restored after the middleware is added, C5) and the testkit's `ReplayContract`. SQLite needs no
-// service, so every suite runs here under `sbt test`.
+// service, so every suite runs here under `sbt test`. `llm4s-prompt` fences what it recalls as untrusted data (#3033).
 lazy val agentMemory = (project in file("modules/agent-memory"))
-  .dependsOn(agent % "compile->compile;test->test", memory, agentTestkit % Test, agentCheckpointSqlite % "test->test")
+  .dependsOn(
+    agent % "compile->compile;test->test",
+    memory,
+    prompt,
+    agentTestkit          % Test,
+    agentCheckpointSqlite % "test->test"
+  )
   .settings(
     name := "llm4s-agent-memory",
     commonSettings,

@@ -1,10 +1,13 @@
 package org.llm4s.agent.memory
 
+import BaseMemoryManagerOps.oneLine
+
 /**
  * LLM prompts for memory consolidation.
  *
  * This object provides prompt templates for consolidating different
- * types of memories using LLM summarization.
+ * types of memories using LLM summarization. Each memory is written on one line, so its text
+ * cannot start a line of the prompt's own (#3033).
  */
 object ConsolidationPrompts {
 
@@ -40,7 +43,7 @@ object ConsolidationPrompts {
     val memoryTexts = memories.zipWithIndex
       .map { case (m, idx) =>
         val role = m.getMetadata("role").getOrElse("unknown")
-        s"${idx + 1}. [$role]: ${m.content}"
+        s"${idx + 1}. [${oneLine(role)}]: ${oneLine(m.content)}"
       }
       .mkString("\n")
 
@@ -65,9 +68,9 @@ object ConsolidationPrompts {
    * @return Prompt string for LLM
    */
   def entityConsolidation(entityName: String, facts: Seq[Memory]): String = {
-    val factTexts = facts.map(m => s"- ${m.content}").mkString("\n")
+    val factTexts = facts.map(m => s"- ${oneLine(m.content)}").mkString("\n")
 
-    s"""Consolidate these facts about "$entityName" into a single comprehensive description.
+    s"""Consolidate these facts about "${oneLine(entityName)}" into a single comprehensive description.
        |Preserve all important information and remove redundancy.
        |
        |Facts:
@@ -89,7 +92,7 @@ object ConsolidationPrompts {
     val knowledgeTexts = memories.zipWithIndex
       .map { case (m, idx) =>
         val source = m.source.getOrElse("unknown")
-        s"${idx + 1}. [from $source]: ${m.content}"
+        s"${idx + 1}. [from ${oneLine(source)}]: ${oneLine(m.content)}"
       }
       .mkString("\n")
 
@@ -113,8 +116,8 @@ object ConsolidationPrompts {
    * @return Prompt string for LLM
    */
   def userFactConsolidation(userId: Option[String], facts: Seq[Memory]): String = {
-    val userLabel = userId.map(id => s"user $id").getOrElse("the user")
-    val factTexts = facts.map(m => s"- ${m.content}").mkString("\n")
+    val userLabel = userId.map(id => s"user ${oneLine(id)}").getOrElse("the user")
+    val factTexts = facts.map(m => s"- ${oneLine(m.content)}").mkString("\n")
 
     s"""Consolidate these facts about $userLabel into a single comprehensive user profile.
        |Preserve all important preferences and information.
@@ -138,7 +141,7 @@ object ConsolidationPrompts {
     val taskTexts = tasks.zipWithIndex
       .map { case (m, idx) =>
         val success = m.getMetadata("success").getOrElse("unknown")
-        s"${idx + 1}. [success: $success] ${m.content}"
+        s"${idx + 1}. [success: $success] ${oneLine(m.content)}"
       }
       .mkString("\n")
 

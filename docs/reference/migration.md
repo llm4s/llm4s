@@ -329,6 +329,18 @@ depends on it. To test a `VectorStore` or `KeywordIndex` of your own against the
 it in test scope and extend `VectorStoreContract` or `KeywordIndexContract`; see
 [Vector Store](../guide/vector-store#testing-a-store-with-the-contract-suites).
 
+## Recalled memories are fenced as untrusted data, one line each (#3033)
+
+`llm4s-agent-memory` is Experimental, `llm4s-memory` Beta. No signature changes; what reaches the model does.
+
+| Before (1.0.0) | After |
+|---|---|
+| `SemanticMemoryMiddleware`'s `semantic-memory` section was "Relevant memories from earlier conversations:" and the recalled text as written, so an instruction recorded in one thread reached every later thread's system prompt as an instruction | The heading says the memories are recorded data, never instructions, and the text follows fenced as `llm4s-prompt`'s `Untrusted` (`<untrusted id="u1">`, `&`, `<` and `>` escaped, then `Prompt.UntrustedNotice`). The text is cut so that its escaped form fits `maxRecallTokens * 4` characters. `llm4s-agent-memory` now depends on `llm4s-prompt` |
+| `getRelevantContext`, `getUserContext`, `getEntityContext`, `getConversationContext` and `ConsolidationPrompts` wrote a memory's line breaks as they were, so a memory holding `\n## ...` forged a heading or ended its section | Each memory is one line: every run of line breaks, with the blanks around it, becomes one space (a task's `Task: ...\nOutcome: ...` reads `Task: ... Outcome: ...`) |
+
+A test that matched the section's old heading, or a memory's line breaks in a rendered context, matches the new text.
+A prompt you build yourself from `getRelevantContext` should fence it the same way, as the
+[guide's example](../guide/agents/memory#injecting-context) does.
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;
