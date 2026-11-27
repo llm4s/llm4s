@@ -3,17 +3,31 @@ package org.llm4s.trace
 import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.sdk.common.CompletableResultCode
+import io.opentelemetry.sdk.trace.`export`.SpanExporter
+import io.opentelemetry.sdk.trace.data.SpanData
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
 import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId }
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.tags.Local
 import scala.concurrent.duration.*
 
 @Local
-class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
+class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
-  val tracing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty)
+  // The span mapping needs no collector: exporting over gRPC to a port with nothing listening waited out the
+  // exporter's retry backoff on close (#3216). Only the construction cases below build the OTLP exporter.
+  private object Discarding extends SpanExporter {
+    def `export`(batch: java.util.Collection[SpanData]): CompletableResultCode = CompletableResultCode.ofSuccess()
+    def flush(): CompletableResultCode                                         = CompletableResultCode.ofSuccess()
+    def shutdown(): CompletableResultCode                                      = CompletableResultCode.ofSuccess()
+  }
+
+  private val tracing = OpenTelemetryTracing.exportingTo("test-service", Discarding)
+
+  override def afterAll(): Unit = tracing.close()
 
   "TracingMode" should "parse opentelemetry strings correctly" in {
     TracingMode.fromString("opentelemetry") shouldBe TracingMode.Named("opentelemetry")
@@ -101,7 +115,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "truncate excessive content in attributes" in {
-    val capturing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty, captureContent = true)
+    val capturing   = OpenTelemetryTracing.exportingTo("test-service", Discarding, captureContent = true)
     val longContent = "a" * 2000
     val event       = TraceEvent.CompletionReceived("id", ModelName("model"), 0, longContent)
 
@@ -122,11 +136,12 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
     val otel = OpenTelemetryTracing.from(config)
     otel should not be null
-
-    val result = otel.traceEvent(TraceEvent.CustomEvent("TestEvent", ujson.Obj()))
-    result shouldBe Right(())
-
+    otel.initializationFailure shouldBe None
+    // No span through it: one exported to a port with nothing listening held `close` for the exporter's retry
+    // backoff, nine seconds (#3216). The in-memory tracing records the same event.
     otel.close()
+
+    tracing.traceEvent(TraceEvent.CustomEvent("TestEvent", ujson.Obj())) shouldBe Right(())
   }
 
   it should "be loaded correctly via Tracing.fromSettings when configured" in {
