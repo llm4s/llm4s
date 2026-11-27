@@ -163,8 +163,8 @@ class EntityLinkerTest extends AnyFunSuite with Matchers with MockFactory {
     val result = linker.link(graph)
 
     result should be(a[Right[_, _]])
-    // Nodes without name property use ID as name; "alice" and "ALICE" normalize to the same
-    result.toOption.get.nodes should have size 1
+    // A node without a name is keyed by its exact id, so it merges with nothing, even an id differing only in case (#2967)
+    result.toOption.get.nodes should have size 2
   }
 
   test("EntityLinker should handle empty graph") {
@@ -433,6 +433,18 @@ class EntityLinkerTest extends AnyFunSuite with Matchers with MockFactory {
     )
     linker.link(graph).toOption.get.nodes.keySet shouldBe Set("a", "b", "c")
     linker.findDisambiguationCandidates(graph) shouldBe empty
+  }
+
+  test("a blank-name node never merges with a node whose name equals its id (#2967)") {
+    val graph = Graph(
+      Map(
+        "alice"    -> person("alice", ""),
+        "other"    -> person("other", "Alice"),
+        "nameless" -> Node("nameless", "Person")
+      ),
+      Nil
+    )
+    new EntityLinker().link(graph).toOption.get.nodes.keySet shouldBe Set("alice", "other", "nameless")
   }
 
   test("a self-loop in the graph survives linking; only one the merge creates is dropped (#2967)") {

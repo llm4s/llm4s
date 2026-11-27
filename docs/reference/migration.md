@@ -385,7 +385,7 @@ level should sort by its own key.
 | After a model-confirmed merge, the kept node listed only its own documents and the rewritten edge had no sources | Every merge moves the removed node's sources to the node it merged into; an edge's sources are the union of every edge rewritten onto it |
 | Two edges rewritten onto one key kept only one edge's sources (#2962) | Their sources are unioned |
 | With three names for one entity, chained merges could bring a removed node back and split its edges | Confirmed pairs are grouped transitively and each group merges once |
-| Nodes with a blank `name` merged into one, and a blank name was a disambiguation candidate for every node | A blank name is no name: the node is keyed by its id and is never a candidate |
+| Nodes with a blank `name` merged into one, a nameless node merged with a node named like its id, or with ids differing only in case, and a blank name was a disambiguation candidate for every node | A blank or missing name is no name: the node is keyed by its exact id, merges with nothing, and is never a candidate |
 | Every self-loop was deleted | Only a self-loop the merge created is dropped |
 | Edges differing only in properties stayed duplicated | One edge per (source, target, relationship), properties merged with the first edge's winning |
 | The canonical id was the smallest, so an incremental build could rename an existing node | `linkTracked(tracked, preferredIds)` keeps a preferred id; `MultiDocumentGraphBuilder` passes the existing graph's ids |

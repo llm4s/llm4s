@@ -163,10 +163,12 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
   }
 
   /**
-   * Builds a canonical key for a node: (lowercased label, normalized name property).
-   * Nodes without a non-blank "name" property use their ID as the name component.
+   * Builds a canonical key for a node: (lowercased label, normalized name property). A node without a non-blank
+   * "name" is keyed by its own id, in a separate variant, so it never shares a key with a named node (an id `alice`
+   * is not the name "Alice") and merges with nothing (#2967).
    */
-  private def nodeKey(node: Node): (String, String) = (node.label.toLowerCase, nodeName(node))
+  private def nodeKey(node: Node): (String, Either[String, String]) =
+    (node.label.toLowerCase, givenName(node).toRight(node.id))
 
   /**
    * Normalizes a name for comparison: lowercase, trim, collapse whitespace.
