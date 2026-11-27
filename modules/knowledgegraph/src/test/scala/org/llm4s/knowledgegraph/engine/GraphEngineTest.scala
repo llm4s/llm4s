@@ -216,4 +216,15 @@ class GraphEngineTest extends AnyFunSuite with Matchers {
     engine.findShortestPaths("a", "a", 5) shouldBe empty
     engine.findAllPaths("a", "a", 5) shouldBe empty
   }
+
+  test("a path along a 10,000-node chain is rebuilt without overflowing the stack (#2974, Codex)") {
+    val n = 10000
+    val g = Graph(
+      (0 until n).map(i => s"n$i" -> Node(s"n$i", "N")).toMap,
+      (0 until n - 1).map(i => Edge(s"n$i", s"n${i + 1}", "NEXT")).toList
+    )
+    val engine = new GraphEngine(g)
+    engine.findShortestPath("n0", s"n${n - 1}").map(_.size) shouldBe Some(n - 1)
+    engine.findShortestPaths("n0", s"n${n - 1}", n, maxPaths = 1).map(_.size) shouldBe List(n - 1)
+  }
 }

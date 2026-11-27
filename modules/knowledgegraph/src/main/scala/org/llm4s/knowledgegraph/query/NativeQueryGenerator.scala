@@ -110,9 +110,12 @@ class NativeQueryGenerator(llmClient: LLMClient) {
       s"Find $dirStr neighbors of node '$nodeId' $relStr within $maxDepth hops".trim
 
     case GraphQuery.FindPath(from, to, maxHops, direction) =>
-      val dirStr =
-        if (direction == org.llm4s.knowledgegraph.storage.Direction.Both) "following edges either way " else ""
-      s"Find paths from node '$from' to node '$to' ${dirStr}within $maxHops hops"
+      val dirStr = direction match {
+        case org.llm4s.knowledgegraph.storage.Direction.Outgoing => "following edges only in their direction"
+        case org.llm4s.knowledgegraph.storage.Direction.Incoming => "following edges only against their direction"
+        case org.llm4s.knowledgegraph.storage.Direction.Both     => "following edges either way"
+      }
+      s"Find paths from node '$from' to node '$to' $dirStr within $maxHops hops"
 
     case GraphQuery.DescribeNode(nodeId, includeNeighbors) =>
       val neighborsStr = if (includeNeighbors) "including neighbors" else ""

@@ -144,10 +144,11 @@ class GraphQAPipeline(
   private def applyRanking(queryResult: GraphQueryResult, entities: Seq[IdentifiedEntity]): GraphQueryResult = {
     val resultIds = queryResult.nodes.map(_.id).toSet
     val pinned    = entities.map(_.nodeId).distinct.filter(resultIds.contains).take(config.maxContextNodes)
+    val others    = queryResult.nodes.map(_.id).filterNot(pinned.toSet.contains)
+    // Pinned first in every case, so a token budget (which keeps a prefix) never cuts an identified entity
     val keptIds: Seq[String] =
-      if (queryResult.nodes.size <= config.maxContextNodes) queryResult.nodes.map(_.id)
+      if (queryResult.nodes.size <= config.maxContextNodes) pinned ++ others
       else {
-        val others = queryResult.nodes.map(_.id).filterNot(pinned.toSet.contains)
         val ordered =
           if (!config.useRanking) others
           else {
@@ -164,7 +165,8 @@ class GraphQAPipeline(
       }
     val kept             = keptIds.toSet
     val pinnedSet        = pinned.toSet
-    val nodes            = queryResult.nodes.filter(n => kept.contains(n.id))
+    val byId             = queryResult.nodes.map(n => n.id -> n).toMap
+    val nodes            = keptIds.flatMap(byId.get)
     val candidates       = queryResult.edges.filter(e => kept.contains(e.source) && kept.contains(e.target))
     val (touching, rest) = candidates.partition(e => pinnedSet.contains(e.source) || pinnedSet.contains(e.target))
     queryResult.copy(

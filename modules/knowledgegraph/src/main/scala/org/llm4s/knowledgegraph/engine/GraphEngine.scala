@@ -164,15 +164,19 @@ class GraphEngine(graph: Graph) {
       val preds = bfs(Vector(startNodeId), 0, Map(startNodeId -> 0), Map.empty)
       if (!preds.contains(endNodeId)) Nil
       else {
-        // Walk back from the end, depth first, stopping at maxPaths
-        def back(node: String, suffix: List[Edge], budget: Int): List[List[Edge]] =
-          if (node == startNodeId) List(suffix)
-          else
-            preds.getOrElse(node, Vector.empty).foldLeft(List.empty[List[Edge]]) { case (found, (e, from)) =>
-              if (found.size >= budget) found
-              else found ++ back(from, e :: suffix, budget - found.size)
-            }
-        back(endNodeId, Nil, maxPaths)
+        // Walk back from the end, depth first with an explicit stack (a path may be thousands of edges long),
+        // stopping at maxPaths
+        @tailrec
+        def back(stack: List[(String, List[Edge])], found: Vector[List[Edge]]): List[List[Edge]] =
+          stack match {
+            case _ if found.size >= maxPaths                   => found.toList
+            case Nil                                           => found.toList
+            case (node, suffix) :: rest if node == startNodeId => back(rest, found :+ suffix)
+            case (node, suffix) :: rest =>
+              val next = preds.getOrElse(node, Vector.empty).toList.map { case (e, from) => (from, e :: suffix) }
+              back(next ++ rest, found)
+          }
+        back(List(endNodeId -> Nil), Vector.empty)
       }
     }
 

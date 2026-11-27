@@ -278,4 +278,26 @@ class GraphQueryFixesSpec extends AnyFunSuite with Matchers {
     )
     GraphRanking.pageRank(g).values.sum shouldBe (1.0 +- 1e-6)
   }
+
+  test("an identified entity late in a broad result survives a tight token budget (#2975, Codex)") {
+    val others = (1 to 40).map(i => Node(f"a$i%02d", "Person", Map("name" -> ujson.Str(s"Someone number $i"))))
+    val s      = store(others :+ person("zed", "Zed"), Nil)
+    val llm    = new ScriptedLLM("""[{"mention": "Zed"}]""", "answer")
+    val config = GraphQAConfig(maxContextTokens = Some(40), includeCitations = false)
+    val r =
+      new GraphQAPipeline(llm, s, config).askWithQuery("Who is Zed?", GraphQuery.FindNodes(label = Some("Person")))
+    r.toOption.get.queryResult.nodes.head.id shouldBe "zed"
+    llm.prompts.last should include("] zed:")
+  }
+
+  test("the native query description names each path direction (#2974, Codex)") {
+    val descriptions = Seq(Direction.Outgoing, Direction.Incoming, Direction.Both).map { d =>
+      val llm = new ScriptedLLM("""{"query": "q", "explanation": ""}""")
+      new NativeQueryGenerator(llm).fromGraphQuery(GraphQuery.FindPath("a", "b", direction = d), QueryLanguage.Cypher)
+      d -> llm.prompts.head
+    }.toMap
+    descriptions(Direction.Outgoing) should include("only in their direction")
+    descriptions(Direction.Incoming) should include("only against their direction")
+    descriptions(Direction.Both) should include("either way")
+  }
 }
