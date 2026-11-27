@@ -253,8 +253,12 @@ final class VertexAIClient private[provider] (
                               refused = Some(filtered)
                             case None =>
                               GeminiBlocked.finishReason(json).foreach(reason => finish = Some(reason))
-                              parseStreamChunk(json, messageId, textLength, callsSeen).foreach {
-                                case (parsed, chunks) =>
+                              GeminiWire.streamChunk(provider, json, messageId, textLength, callsSeen) match {
+                                case Left(unreadable) =>
+                                  // a chunk that cannot be read fails the stream, as the same reply fails `complete`
+                                  refused = Some(unreadable)
+                                case Right(None) => ()
+                                case Right(Some((parsed, chunks))) =>
                                   textLength += parsed.text.length
                                   callsSeen = callsSeen || parsed.calls.nonEmpty
                                   signatures ++= parsed.signatures
@@ -356,73 +360,13 @@ final class VertexAIClient private[provider] (
     options: CompletionOptions,
     thinkingConfig: Option[ujson.Obj]
   ): ujson.Value = {
-    val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
-    var systemInstr      = Option.empty[String]
-    val toolCallIdToName = scala.collection.mutable.Map[String, String]()
-    // The ids of function calls sent with Gemini's own `functionCall.id`: their results echo it back
-    val callIdsSentWithId = scala.collection.mutable.Set[String]()
-
     // Thought signatures are sent back only to the provider and model that produced them; unlike
     // Anthropic's prefix rule, Google wants them PRESERVED when earlier history is pruned or edited
     // (Gemini 3 answers 400 for a missing function-call signature), so the binding is origin-only
     // and a foreign or re-modelled signature is dropped here (see ThinkingReplay.bindOrigin)
     val messages = ThinkingReplay.replayableOrigin(replayOrigin, conversation.messages)
-
-    messages.foreach {
-      case SystemMessage(content) =>
-        systemInstr = Some(content)
-
-      case um: UserMessage =>
-        // checked before the body is built: GeminiParts covers every part
-        contents += ujson.Obj(
-          "role" -> "user",
-          "parts" -> ujson.Arr.from(
-            PartEncoding
-              .withoutBlankText(um.parts)
-              .map(GeminiParts.user(fileUri))
-          )
-        )
-
-      case am: AssistantMessage =>
-        // Tool call IDs map to function names so the following ToolMessages can be keyed by name
-        am.toolCalls.foreach(tc => toolCallIdToName(tc.id.asString) = tc.name)
-        // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
-        // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
-        // goes back verbatim with it
-        // text, then function calls, each part carrying the thought signature Gemini gave it (if it is still valid)
-        val parts = GeminiThoughtSignatures.parts(provider, am)
-        parts.foreach { p =>
-          p.objOpt
-            .flatMap(_.get("functionCall"))
-            .flatMap(_.objOpt)
-            .flatMap(_.get("id"))
-            .flatMap(_.strOpt)
-            .filter(_.nonEmpty)
-            .foreach(callIdsSentWithId += _)
-        }
-        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.text.isDefined))
-          contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
-
-      case tm: ToolMessage =>
-        val toolCallId   = tm.toolCallId
-        val functionName = toolCallIdToName.getOrElse(toolCallId.asString, toolCallId.asString)
-        contents += ujson.Obj(
-          "role" -> "user",
-          "parts" -> ujson.Arr(
-            ujson.Obj(
-              "functionResponse" -> {
-                val response = ujson.Obj(
-                  "name"     -> functionName,
-                  "response" -> ujson.Obj("result" -> tm.content)
-                )
-                // a populated functionCall.id must come back on the matching functionResponse
-                if (callIdsSentWithId.contains(toolCallId.asString)) response("id") = toolCallId.asString
-                response
-              }
-            )
-          )
-        )
-    }
+    // the system instruction and contents, shared with the other client (GeminiWire)
+    val encoded = GeminiWire.encode(provider, messages, fileUri)
 
     // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
     val generationConfig = ujson.Obj()
@@ -439,11 +383,9 @@ final class VertexAIClient private[provider] (
         generationConfig("responseSchema") = js.schema
     }
 
-    val request = ujson.Obj("contents" -> ujson.Arr(contents.toSeq: _*), "generationConfig" -> generationConfig)
+    val request = ujson.Obj("contents" -> ujson.Arr.from(encoded.contents), "generationConfig" -> generationConfig)
 
-    systemInstr.foreach { sysContent =>
-      request("systemInstruction") = ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> sysContent)))
-    }
+    encoded.systemInstruction.foreach(instruction => request("systemInstruction") = instruction)
 
     // Function declarations, and the Google Search grounding tool when the section enables it
     val functions = Option.when(options.tools.nonEmpty)(
@@ -483,6 +425,8 @@ final class VertexAIClient private[provider] (
       GeminiBlocked
         .filtered(json, provider)
         .toLeft(())
+        // a function call without a name is a malformed call, on `complete` as in a stream (#3124)
+        .flatMap(_ => GeminiWire.malformedReply(json).toLeft(()))
         .flatMap(_ => parseCandidate(json))
         .flatMap(c => GeminiBlocked.malformedCall(GeminiBlocked.finishReason(json), "Vertex AI").toLeft(c))
         .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Vertex AI").toLeft(c))
@@ -533,32 +477,6 @@ final class VertexAIClient private[provider] (
         )
       }
     }.toEither.left.map(e => e.toLLMError).flatten
-
-  /**
-   * Parse a streaming chunk into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per function call
-   * (a chunk holds a single call), or one when there is none. `textOffset` is the number of answer-text
-   * characters streamed before this chunk, so a text signature records where it sits.
-   */
-  private def parseStreamChunk(
-    json: ujson.Value,
-    messageId: String,
-    textOffset: Int,
-    callsBefore: Boolean
-  ): Option[(GeminiThoughtSignatures.Parsed, Seq[StreamedChunk])] =
-    Try {
-      val candidates = json("candidates").arr
-      if (candidates.nonEmpty) {
-        val candidate = candidates.head
-        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none: the chunk still ends the stream
-        val parsed =
-          GeminiThoughtSignatures.parse(provider, parts, textOffset, () => UUID.randomUUID().toString)
-        // the finish reason, ToolCalls for a STOP after a function call in this chunk or an earlier one
-        val finishReason = Try(candidate("finishReason").str).toOption
-          .map(raw => GeminiBlocked.mapped(Some(raw), callsBefore || parsed.calls.nonEmpty))
-
-        Some((parsed, GeminiThoughtSignatures.chunks(parsed, messageId, finishReason)))
-      } else None
-    }.toOption.flatten
 
   private def handleErrorResponse(
     statusCode: Int,
