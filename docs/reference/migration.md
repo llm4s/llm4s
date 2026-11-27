@@ -327,6 +327,21 @@ next became "Bob WORKS_FOR Paris".
 To re-extract a document into a graph built earlier, build from a `SourceTrackedGraph` without that document, or give
 the new version its own source id.
 
+## `Neo4jGraphStore` reserves `llm4s_` keys, round-trips properties, and `executeRead` returns `ujson` values (#2969)
+
+`llm4s-knowledgegraph-neo4j` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| A property named `llm4s_id` or `llm4s_label` replaced the node's id or label | A property key starting with `llm4s_` is a `Left` from `upsertNode` and `upsertEdge` |
+| Every number was stored as a float, so a property filter matched `"42.0"` but not `"42"` | Whole numbers are stored as integers: `"42"` matches, as in the in-memory and JSON stores, and `"42.0"` does not |
+| `ujson.Null` was dropped, and arrays and objects were stored and read back as their `toString` | They read back as written: primitive arrays as Neo4j lists, the rest as JSON in `llm4s_json` |
+| `executeRead` returned `List[Map[String, String]]` of driver `toString` output (`"\"Alice\""`, `node<5>`) | It returns `List[Map[String, ujson.Value]]`: `ujson.Str("Alice")`, and a node as an object with `id`, `label` and `properties` |
+
+Read a string column with `row("name").str` instead of stripping quotes. Values written before this release keep
+their stored form: numbers stored as floats still match only `"42.0"` until rewritten, and an array or object stored
+as text reads back as a `ujson.Str`. Re-upsert those nodes to store them in the new form.
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

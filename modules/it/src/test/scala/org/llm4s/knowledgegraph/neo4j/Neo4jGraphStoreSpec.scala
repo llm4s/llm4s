@@ -94,13 +94,13 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     props.contains("city") shouldBe false
   }
 
-  test("upsertNode: ujson.Null properties are skipped explicitly") {
+  test("upsertNode: a ujson.Null property is kept, as the in-memory store keeps it (#2969)") {
     requireNeo4j()
     store.upsertNode(Node("1", "Person", Map("nickname" -> ujson.Null, "name" -> ujson.Str("Alice")))) shouldBe Right(
       ()
     )
     val props = store.getNode("1").toOption.flatten.map(_.properties).getOrElse(Map.empty)
-    props.contains("nickname") shouldBe false
+    props.get("nickname") shouldBe Some(ujson.Null)
     props.get("name") shouldBe Some(ujson.Str("Alice"))
   }
 
@@ -194,17 +194,16 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
       .toSet shouldBe Set("1")
   }
 
-  test("query: filters numeric property values using string semantics") {
+  test("query: filters numeric property values as the in-memory store does (#2969)") {
     requireNeo4j()
     store.upsertNode(Node("1", "Person", Map("age" -> ujson.Num(42))))
     store.upsertNode(Node("2", "Person", Map("age" -> ujson.Num(7))))
-    store
-      .query(GraphFilter(propertyKey = Some("age"), propertyValue = Some("42.0")))
-      .toOption
-      .get
-      .nodes
-      .keys
-      .toSet shouldBe Set("1")
+    store.upsertNode(Node("3", "Person", Map("age" -> ujson.Num(42.5))))
+    def matching(value: String): Set[String] =
+      store.query(GraphFilter(propertyKey = Some("age"), propertyValue = Some(value))).toOption.get.nodes.keySet
+    matching("42") shouldBe Set("1")
+    matching("42.0") shouldBe Set.empty
+    matching("42.5") shouldBe Set("3")
   }
 
   test("query: rejects unsafe propertyKey input") {
@@ -319,17 +318,39 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     requireNeo4j()
     store.upsertNode(Node("1", "Person", Map("name" -> ujson.Str("Alice"))))
     val rows = store.executeRead("MATCH (n:LLM4S) RETURN n.llm4s_id AS id").toOption.get
-    rows should not be empty
-    rows.head("id") should include("1")
+    rows shouldBe List(Map("id" -> ujson.Str("1")))
+  }
+
+  test("executeRead: converts values, nodes and relationships instead of returning driver strings (#2969)") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "Person", Map("name" -> ujson.Str("Alice"), "tags" -> ujson.Arr("a", "b"))))
+    store.upsertNode(Node("2", "Person"))
+    store.upsertEdge(Edge("1", "2", "KNOWS", Map("since" -> ujson.Num(2020))))
+    val row = store
+      .executeRead(
+        "MATCH (a:LLM4S {llm4s_id: '1'})-[r]->(b) RETURN a, r, a.name AS name, a.tags AS tags, 7 AS n, null AS none"
+      )
+      .toOption
+      .get
+      .head
+    row("name") shouldBe ujson.Str("Alice")
+    row("tags") shouldBe ujson.Arr("a", "b")
+    row("n") shouldBe ujson.Num(7)
+    row("none") shouldBe ujson.Null
+    row("a") shouldBe ujson.Obj(
+      "id"         -> "1",
+      "label"      -> "Person",
+      "properties" -> ujson.Obj("name" -> "Alice", "tags" -> ujson.Arr("a", "b"))
+    )
+    row("r") shouldBe ujson.Obj("type" -> "KNOWS", "properties" -> ujson.Obj("since" -> 2020))
   }
 
   test("executeWrite: executes arbitrary write Cypher") {
     requireNeo4j()
     store.upsertNode(Node("1", "A"))
     store.executeWrite("MATCH (n:LLM4S {llm4s_id: '1'}) SET n.custom = 'hello'") shouldBe Right(())
-    store.executeRead("MATCH (n:LLM4S {llm4s_id: '1'}) RETURN n.custom AS v").toOption.get.head("v") should include(
-      "hello"
-    )
+    store.executeRead("MATCH (n:LLM4S {llm4s_id: '1'}) RETURN n.custom AS v").toOption.get.head("v") shouldBe
+      ujson.Str("hello")
   }
 
   // ─── Property type round-trips ────────────────────────────────────────────
@@ -342,5 +363,37 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     retrieved.properties("str") shouldBe ujson.Str("hello")
     retrieved.properties("num") shouldBe ujson.Num(42)
     retrieved.properties("bool") shouldBe ujson.Bool(true)
+  }
+
+  test("property values: null, arrays, objects and large integers round-trip on nodes and edges (#2969)") {
+    requireNeo4j()
+    val props = Map(
+      "null"   -> ujson.Null,
+      "strs"   -> ujson.Arr("a", "b"),
+      "nums"   -> ujson.Arr(1, 2.5),
+      "empty"  -> ujson.Arr(),
+      "mixed"  -> ujson.Arr("a", 1, ujson.Null),
+      "obj"    -> ujson.Obj("k" -> ujson.Arr(1, ujson.Obj("x" -> ujson.Null))),
+      "big"    -> ujson.Num(9007199254740993.0),
+      "real"   -> ujson.Num(0.1),
+      "string" -> ujson.Str("""{"looks":"like json"}""")
+    )
+    store.upsertNode(Node("1", "Test", props)) shouldBe Right(())
+    store.upsertNode(Node("2", "Test")) shouldBe Right(())
+    store.upsertEdge(Edge("1", "2", "R", props)) shouldBe Right(())
+    store.getNode("1").toOption.flatten.map(_.properties) shouldBe Some(props)
+    store.loadAll().toOption.get.edges.map(_.properties) shouldBe List(props)
+  }
+
+  test("a reserved property key is refused and never replaces the node's identity or label (#2969)") {
+    requireNeo4j()
+    store.upsertNode(Node("a", "Person")) shouldBe Right(())
+    store.upsertNode(Node("a", "Person", Map("llm4s_id" -> ujson.Str("b")))).isLeft shouldBe true
+    store.upsertNode(Node("a", "Person", Map("llm4s_label" -> ujson.Str("Robot")))).isLeft shouldBe true
+    store.upsertNode(Node("b", "Person")) shouldBe Right(())
+    store.upsertEdge(Edge("a", "b", "R", Map("llm4s_json" -> ujson.Str("{}")))).isLeft shouldBe true
+    store.getNode("a").toOption.flatten shouldBe Some(Node("a", "Person"))
+    store.getNode("b").toOption.flatten shouldBe Some(Node("b", "Person"))
+    store.loadAll().toOption.get.edges shouldBe empty
   }
 }
