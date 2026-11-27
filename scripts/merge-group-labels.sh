@@ -33,9 +33,10 @@ ref_n="$(sed -nE 's#^(refs/heads/)?gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$#\
 [ -n "$ref_n" ] && numbers+=("$ref_n")
 [ "${#numbers[@]}" -gt 0 ] || say "no pull request found in the group ($HEAD_REF)" unknown
 
-for n in $(printf '%s\n' "${numbers[@]}" | sort -un); do
+mapfile -t unique < <(printf '%s\n' "${numbers[@]}" | sort -un)
+for n in "${unique[@]}"; do
   names="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq '.labels[].name')" ||
     say "the labels of #$n could not be read" unknown
   if grep -qx 'ci:full' <<< "$names"; then say "#$n in the group has ci:full" true; fi
 done
-say "no pull request in the group ($(printf '#%s ' $(printf '%s\n' "${numbers[@]}" | sort -un))) has ci:full" false
+say "no pull request in the group ($(printf '#%s ' "${unique[@]}")) has ci:full" false
