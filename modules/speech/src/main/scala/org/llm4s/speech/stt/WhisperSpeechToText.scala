@@ -1,22 +1,31 @@
 package org.llm4s.speech.stt
 
 import org.llm4s.types.Result
-import org.llm4s.speech.AudioInput
-import org.llm4s.speech.io.WavFileGenerator
+import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ProcessingError }
 import org.llm4s.speech.util.CommandRuns
 import cats.implicits._
 
 import java.nio.file.{ Files, Path }
 import java.io.IOException
-import org.llm4s.error.Safety
-import scala.util.Try
+import java.util.Comparator
+import scala.jdk.CollectionConverters._
+import scala.util.{ Try, Using }
 import scala.sys.process._
 import ujson.Value
 
 /**
- * Enhanced Whisper integration via CLI (whisper.cpp or openai-whisper).
- * Supports various Whisper models and output formats.
+ * Speech-to-text through the openai-whisper command-line program (`pip install openai-whisper`); the
+ * flags are openai-whisper's (`--output_dir`, `--output_format`, `--initial_prompt`, ...), so
+ * whisper.cpp's CLI is not supported.
+ *
+ * Each call runs the program with `--output_dir` set to a fresh temporary directory and `--verbose
+ * False`, reads the transcript from that directory and deletes it: nothing is written into the
+ * working directory or beside the input file. `outputFormat` is `txt` or `json` (`json` whenever word
+ * timestamps are requested); subtitle formats are refused. A language tag is reduced to its primary
+ * language (`en-US` becomes `en`), which is what the program accepts. A failed run reports the exit code
+ * and the end of the program's stderr.
  */
 final class WhisperSpeechToText(
   command: Seq[String] = Seq("whisper"),
@@ -28,82 +37,89 @@ final class WhisperSpeechToText(
   override val supportedFormats: List[String] = List("audio/wav", "audio/mp3", "audio/m4a", "audio/flac", "audio/ogg")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-    val startTime             = System.nanoTime()
-    val wavResult             = inputToWavPath(input)
-    val effectiveOutputFormat = WhisperSpeechToText.effectiveOutputFormat(outputFormat, options)
+    val startTime = System.nanoTime()
+    val format    = WhisperSpeechToText.effectiveOutputFormat(outputFormat, options)
+    for {
+      _       <- WhisperSpeechToText.checkOutputFormat(format)
+      workDir <- WhisperSpeechToText.createWorkDir()
+      // The temporary input and the program's output both live under workDir, which is always removed.
+      transcription = {
+        val outcome = transcribeIn(workDir, input, options, format, startTime)
+        WhisperSpeechToText.deleteRecursively(workDir)
+        outcome
+      }
+      result <- transcription
+    } yield result
+  }
 
-    // Snapshot which sibling output paths already exist, so cleanup below only removes transcript files
-    // this invocation actually created and never touches a user's pre-existing files.
-    val preExistingOutputs: Set[Path] = wavResult.toOption
-      .map { case (path, _) => WhisperSpeechToText.existingGeneratedOutputs(path, effectiveOutputFormat) }
-      .getOrElse(Set.empty)
-
-    val result = for {
-      wavAndTemp <- wavResult
-      args = buildWhisperArgs(wavAndTemp._1, options)
-      stdout <- CommandRuns
-        .stdout(args)
+  private def transcribeIn(
+    workDir: Path,
+    input: AudioInput,
+    options: STTOptions,
+    format: String,
+    startTime: Long
+  ): Result[Transcription] =
+    for {
+      inputPath <- inputToPath(workDir, input)
+      outputDir <- Safety
+        .fromTry(Try(Files.createDirectory(workDir.resolve("out"))))
+        .left
+        .map(_ => ProcessingError.audioValidation("IO error creating the Whisper output directory"))
+      args = WhisperSpeechToText.buildArgs(command, model, outputFormat, inputPath, outputDir, options)
+      completed <- CommandRuns
+        .withStderrTail(args)
         .left
         .map {
           // An interrupt stops the program and is a cancellation, not a failed run (design section 4.4).
           case interrupted: InterruptedException => CancelledError("whisper.transcribe", Some(interrupted))
-          case _: IOException                    => ProcessingError.audioValidation("Whisper CLI not found or IO error")
-          case _: RuntimeException =>
-            ProcessingError.audioValidation("Whisper CLI execution failed with non-zero exit code")
-          case _ => ProcessingError.audioValidation("Whisper CLI execution failed")
+          case e: IOException =>
+            ProcessingError.audioValidation(s"Whisper CLI not found or could not be started: ${e.getMessage}")
+          case e => ProcessingError.audioValidation(s"Whisper CLI execution failed: ${e.getMessage}")
         }
-      output = WhisperSpeechToText.resolveCliOutput(wavAndTemp._1, effectiveOutputFormat, stdout)
+      _ <-
+        if (completed.exitCode == 0) Right(())
+        else
+          Left(
+            ProcessingError.audioValidation(
+              s"Whisper CLI exited with code ${completed.exitCode}" + WhisperSpeechToText.stderrSuffix(completed)
+            )
+          )
+      output <- WhisperSpeechToText
+        .readCliOutput(outputDir, inputPath, format)
+        .toRight(
+          ProcessingError.audioValidation(
+            s"Whisper CLI wrote no .$format transcript to its --output_dir" + WhisperSpeechToText.stderrSuffix(
+              completed
+            )
+          )
+        )
       transcription <- {
         val processingTime = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
-        parseWhisperOutput(output, options).map(_.copy(processingTime = Some(processingTime)))
+        WhisperSpeechToText.toTranscription(output, options).map(_.copy(processingTime = Some(processingTime)))
       }
     } yield transcription
 
-    // Clean up regardless of transcription success or failure: the temp WAV (if we created one) and any
-    // sibling transcript file Whisper newly wrote next to the input. The latter matters for FileAudio inputs,
-    // where the input is a real user file and the generated <stem>.<format> would otherwise be left behind.
-    // Files that already existed before the run (see preExistingOutputs) are preserved.
-    wavResult.foreach { case (path, isTemp) =>
-      if (isTemp) Try(Files.deleteIfExists(path))
-      WhisperSpeechToText.deleteGeneratedOutputs(path, effectiveOutputFormat, preserve = preExistingOutputs)
-    }
-
-    result
-  }
-
-  private def inputToWavPath(input: AudioInput): Result[(Path, Boolean)] =
+  private def inputToPath(workDir: Path, input: AudioInput): Result[Path] =
     input match {
-      case AudioInput.FileAudio(path) => Right((path, false))
+      case AudioInput.FileAudio(path) => Right(path)
       case AudioInput.BytesAudio(bytes, _, _) =>
-        WavFileGenerator.createTempWavFile("llm4s-whisper-").flatMap { tmp =>
-          Safety
-            .fromTry(Try(Files.write(tmp, bytes)))
-            .map(_ => (tmp, true))
-            .left
-            .map(_ => ProcessingError.audioValidation("IO error writing bytes to temp WAV file"))
-        }
+        writeInput(workDir, Files.write(workDir.resolve("input.wav"), bytes), "bytes")
       case AudioInput.StreamAudio(stream, _, _) =>
-        WavFileGenerator.createTempWavFile("llm4s-whisper-").flatMap { tmp =>
-          Safety
-            .fromTry(Try(Files.write(tmp, stream.readAllBytes())))
-            .map(_ => (tmp, true))
-            .left
-            .map(_ => ProcessingError.audioValidation("IO error writing stream to temp WAV file"))
-        }
+        writeInput(workDir, Files.write(workDir.resolve("input.wav"), stream.readAllBytes()), "stream")
     }
 
-  private def buildWhisperArgs(inputPath: Path, options: STTOptions): Seq[String] =
-    WhisperSpeechToText.buildArgs(command, model, outputFormat, inputPath, options)
-
-  private def parseWhisperOutput(
-    output: String,
-    options: STTOptions
-  ): Result[Transcription] =
-    WhisperSpeechToText.toTranscription(output, options)
+  private def writeInput(workDir: Path, write: => Path, what: String): Result[Path] =
+    Safety
+      .fromTry(Try(write))
+      .left
+      .map(_ => ProcessingError.audioValidation(s"IO error writing $what to temp WAV file in $workDir"))
 }
 
 object WhisperSpeechToText {
   import SttJsonSupport._
+
+  /** The output formats whose content is a transcript: subtitle formats carry cue numbers and times. */
+  private[stt] val SupportedOutputFormats: Set[String] = Set("txt", "json")
 
   final private[stt] case class ParsedOutput(
     text: String,
@@ -118,11 +134,21 @@ object WhisperSpeechToText {
   ): String =
     if (options.enableTimestamps) "json" else configuredOutputFormat
 
+  private[stt] def checkOutputFormat(format: String): Result[Unit] =
+    if (SupportedOutputFormats.contains(format)) Right(())
+    else
+      Left(
+        STTError.InvalidInput(
+          s"Whisper output format '$format' is not supported: use ${SupportedOutputFormats.toList.sorted.mkString(" or ")}"
+        )
+      )
+
   private[stt] def buildArgs(
     command: Seq[String],
     model: String,
     configuredOutputFormat: String,
     inputPath: Path,
+    outputDir: Path,
     options: STTOptions
   ): Seq[String] = {
     val effectiveFormat = effectiveOutputFormat(configuredOutputFormat, options)
@@ -131,20 +157,59 @@ object WhisperSpeechToText {
       "--model",
       model,
       "--output_format",
-      effectiveFormat
+      effectiveFormat,
+      "--output_dir",
+      outputDir.toString,
+      // openai-whisper prints progress and every segment to stdout unless told not to.
+      "--verbose",
+      "False"
     )
 
     // Flags follow the openai-whisper CLI dialect (underscored), matching the default `whisper` command:
     // --output_format / --language / --initial_prompt / --word_timestamps. openai-whisper's
-    // --word_timestamps takes an explicit boolean value, hence the trailing "True".
+    // --word_timestamps takes an explicit boolean value, hence the trailing "True". Its --language
+    // accepts a primary language only, so `en-US` is passed as `en`, as the OpenAI client does.
     val optFlags = List(
-      options.language.map(l => Seq("--language", l)),
+      options.language.map(l => Seq("--language", CloudSpeechSupport.primaryLanguage(l))),
       options.prompt.map(p => Seq("--initial_prompt", p)),
       if (options.enableTimestamps) Some(Seq("--word_timestamps", "True")) else None
     ).flatten
 
     baseArgs ++ optFlags.combineAll
   }
+
+  /**
+   * The transcript the program wrote into `outputDir`: `<input stem>.<format>`, which is how
+   * openai-whisper names it, else the only `.<format>` file there. `outputDir` is private to one call,
+   * so nothing else can have written into it.
+   */
+  private[stt] def readCliOutput(outputDir: Path, inputPath: Path, format: String): Option[String] = {
+    val fileName = inputPath.getFileName.toString
+    val stem     = if (fileName.contains(".")) fileName.substring(0, fileName.lastIndexOf('.')) else fileName
+    val expected = outputDir.resolve(s"$stem.$format")
+    def onlyFileOfFormat: Option[Path] =
+      Try(Using.resource(Files.list(outputDir))(_.iterator().asScala.toList)).toOption
+        .map(_.filter(p => Files.isRegularFile(p) && p.getFileName.toString.endsWith(s".$format")))
+        .collect { case single :: Nil => single }
+    Option
+      .when(Files.isRegularFile(expected))(expected)
+      .orElse(onlyFileOfFormat)
+      .flatMap(p => Try(Files.readString(p)).toOption)
+  }
+
+  private[stt] def stderrSuffix(completed: CommandRuns.Completed): String =
+    if (completed.stderrTail.trim.isEmpty) "" else s"; stderr: ${completed.stderrTail.trim}"
+
+  private[stt] def createWorkDir(): Result[Path] =
+    Safety
+      .fromTry(Try(Files.createTempDirectory("llm4s-whisper-")))
+      .left
+      .map(_ => ProcessingError.audioValidation("IO error creating a temporary directory for Whisper"))
+
+  /** Deletes `dir` and everything under it, best effort. */
+  private[stt] def deleteRecursively(dir: Path): Unit =
+    Try(Using.resource(Files.walk(dir))(_.sorted(Comparator.reverseOrder[Path]()).iterator().asScala.toList))
+      .foreach(_.foreach(p => Try(Files.deleteIfExists(p))))
 
   private[stt] def parseOutput(
     output: String,
@@ -194,48 +259,6 @@ object WhisperSpeechToText {
       )
     }
   }
-
-  private[stt] def resolveCliOutput(
-    inputPath: Path,
-    outputFormat: String,
-    stdout: String
-  ): String = {
-    val candidates = outputPathCandidates(inputPath, outputFormat)
-    candidates.collectFirst(Function.unlift(readIfExists)).getOrElse(stdout)
-  }
-
-  /** Candidate sibling output paths that already exist on disk before a run (so they can be preserved). */
-  private[stt] def existingGeneratedOutputs(inputPath: Path, outputFormat: String): Set[Path] =
-    outputPathCandidates(inputPath, outputFormat).filter(p => Files.exists(p)).toSet
-
-  /**
-   * Delete transcript files Whisper generated next to the input, so they don't litter the user's directory.
-   * Paths in `preserve` (typically those that already existed before the run) are left untouched, so a user's
-   * pre-existing transcript/metadata sidecar is never removed.
-   */
-  private[stt] def deleteGeneratedOutputs(
-    inputPath: Path,
-    outputFormat: String,
-    preserve: Set[Path] = Set.empty
-  ): Unit =
-    outputPathCandidates(inputPath, outputFormat)
-      .filterNot(preserve.contains)
-      .foreach(p => Try(Files.deleteIfExists(p)))
-
-  private def outputPathCandidates(inputPath: Path, outputFormat: String): List[Path] = {
-    val fileName = inputPath.getFileName.toString
-    val stem =
-      if (fileName.contains(".")) fileName.substring(0, fileName.lastIndexOf('.'))
-      else fileName
-
-    List(
-      inputPath.resolveSibling(s"$fileName.$outputFormat"),
-      inputPath.resolveSibling(s"$stem.$outputFormat")
-    ).distinct
-  }
-
-  private def readIfExists(path: Path): Option[String] =
-    if (Files.exists(path)) Try(Files.readString(path)).toOption else None
 
   private def extractWordTimestamps(json: Value): List[WordTimestamp] = {
     val rootWords = arrayField(json, "words").flatMap(parseWord)

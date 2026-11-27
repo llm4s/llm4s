@@ -556,6 +556,18 @@ A custom `Checkpointer` should do the same. The new `CheckpointerContract` cases
 store that can make one thread's prune fail overrides `refuseDeletes`, and one whose sweep has a budget overrides
 `shortenSweepBudget`, so those cases run.
 
+## The Whisper engine writes into a temporary directory, and refuses subtitle formats (#3138)
+
+`llm4s-speech` is Beta. No signature changed; `WhisperSpeechToText` behaves differently:
+
+| Before (1.0.0) | After |
+|---|---|
+| The CLI ran without `--output_dir`, so it wrote `<stem>.txt` into the working directory, overwriting a file of that name | Each call passes `--output_dir <fresh temporary directory>` and deletes it afterwards. A wrapper script given as `command` must accept `--output_dir` and `--verbose False` |
+| When no transcript file was found, stdout (the verbose progress log) was returned as the transcript | A `ProcessingError` saying no transcript was written |
+| `outputFormat = "srt"`, `"vtt"` or `"tsv"` returned cue numbers and times as the text | `STTError.InvalidInput`: use `txt` or `json` |
+| `language = Some("en-US")` was passed verbatim and the CLI exited 2 | `--language en`; the transcription still reports `en-US` |
+| A failed run said only "non-zero exit code" | The message has the exit code and the end of stderr |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

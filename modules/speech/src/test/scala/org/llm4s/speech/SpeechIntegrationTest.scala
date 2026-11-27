@@ -56,7 +56,8 @@ class SpeechIntegrationTest extends AnyFunSuite with Matchers {
   }
 
   test("WhisperSpeechToText should build correct CLI arguments") {
-    val stt = new WhisperSpeechToText(PlatformCommands.mockSuccess, model = "large", outputFormat = "json")
+    val stt =
+      new WhisperSpeechToText(org.llm4s.speech.stt.FakeWhisper.command(), model = "large", outputFormat = "json")
     val options = STTOptions(
       language = Some("en"),
       prompt = Some("This is a test"),
