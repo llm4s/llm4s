@@ -24,10 +24,11 @@ import org.llm4s.util.Redaction
 /**
  * Provides Google Cloud OAuth2 access tokens for Vertex AI via ADC.
  *
- * Token resolution order:
- *  1. `GOOGLE_ACCESS_TOKEN` environment variable — direct token; useful for CI and testing.
- *  2. JSON credential file resolved from [[credentialFilePath]], then
- *     `GOOGLE_APPLICATION_CREDENTIALS`, then
+ * Token resolution order (#3126: a configured file is never overridden by the environment):
+ *  1. The JSON credential file at [[credentialFilePath]], when the section configures one.
+ *  2. `GOOGLE_ACCESS_TOKEN` environment variable — direct token; useful for CI and testing. It is cached for
+ *     five minutes only, so a rotated value is picked up.
+ *  3. Application Default Credentials: the JSON credential file at `GOOGLE_APPLICATION_CREDENTIALS`, then
  *     gcloud's well-known `application_default_credentials.json`, found as Google's client
  *     libraries find it: in `$CLOUDSDK_CONFIG` when that is set (any OS), else
  *     `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`. `APPDATA` and `CLOUDSDK_CONFIG`
@@ -35,9 +36,10 @@ import org.llm4s.util.Redaction
  *     [[wellKnownCredentialPath]], not through [[envReader]].
  *     Supports both `authorized_user` (refresh-token flow) and `service_account`
  *     (RS256 JWT assertion flow, no extra dependencies).
- *  3. GCE / GKE metadata server — Workload Identity path for production deployments.
+ *     Then the GCE / GKE metadata server — Workload Identity path for production deployments.
  *
- * Tokens are cached until one minute before expiry to minimise round-trips.
+ * Tokens are cached until one minute before expiry to minimise round-trips. A credential file missing a field its
+ * flow needs is an `AuthenticationError` naming the field, never its value.
  *
  * == Config-boundary exemption ==
  *
@@ -71,7 +73,9 @@ class VertexAIAuthProvider(
   private val logger = LoggerFactory.getLogger(getClass)
 
   @volatile private var cachedToken: Option[CachedToken] = None
-  private val refreshLock                                = new Object
+  // the `quota_project_id` of the `authorized_user` file the cached token came from
+  @volatile private var quotaProjectId: Option[String] = None
+  private val refreshLock                              = new Object
   // Each access token and each signed JWT assertion is registered with KnownSecrets before it is sent, so an
   // error body echoing one is scrubbed; the generation before the previous one is released.
   private val accessTokens = new TokenGenerations
@@ -90,6 +94,21 @@ class VertexAIAuthProvider(
         }
     }
 
+  /**
+   * Drops the cached token when it is still `token`, so the next [[getAccessToken]] fetches a fresh one: for a token
+   * the service refused (HTTP 401), as when it was revoked before its expiry.
+   */
+  private[llm4s] def invalidate(token: String): Unit =
+    refreshLock.synchronized {
+      if (cachedToken.exists(_.token == token)) cachedToken = None
+    }
+
+  /**
+   * The `quota_project_id` of the `authorized_user` credential file the current token came from, which Vertex AI
+   * bills user credentials to through the `x-goog-user-project` header.
+   */
+  private[llm4s] def quotaProject: Option[String] = quotaProjectId
+
   private def fetchAndCacheToken(): Result[String] =
     fetchToken().map { t =>
       accessTokens.rotate(t.token)
@@ -98,20 +117,30 @@ class VertexAIAuthProvider(
     }
 
   private def fetchToken(): Result[CachedToken] =
-    envReader("GOOGLE_ACCESS_TOKEN").filter(_.nonEmpty) match {
-      case Some(tok) =>
-        logger.debug("[VertexAI] Using GOOGLE_ACCESS_TOKEN from environment")
-        Right(CachedToken(tok, Long.MaxValue))
+    credentialFilePath match {
+      case Some(path) => fromFile(path)
       case None =>
-        resolveCredentialFilePath() match {
-          case Some(path) => fileReader(path).flatMap(fetchTokenFromCredentialFile)
-          case None       => fetchTokenFromMetadataServer()
+        envReader("GOOGLE_ACCESS_TOKEN").filter(_.nonEmpty) match {
+          case Some(tok) =>
+            logger.debug("[VertexAI] Using GOOGLE_ACCESS_TOKEN from environment")
+            quotaProjectId = None
+            Right(CachedToken(tok, System.currentTimeMillis() + EnvTokenLife.toMillis))
+          case None =>
+            adcCredentialFilePath() match {
+              case Some(path) => fromFile(path)
+              case None =>
+                quotaProjectId = None
+                fetchTokenFromMetadataServer()
+            }
         }
     }
 
-  private def resolveCredentialFilePath(): Option[String] =
-    credentialFilePath
-      .orElse(envReader("GOOGLE_APPLICATION_CREDENTIALS"))
+  private def fromFile(path: String): Result[CachedToken] =
+    fileReader(path).flatMap(fetchTokenFromCredentialFile)
+
+  private def adcCredentialFilePath(): Option[String] =
+    envReader("GOOGLE_APPLICATION_CREDENTIALS")
+      .filter(_.nonEmpty)
       .orElse {
         wellKnownCredentialPath.filter(p => new java.io.File(p).exists())
       }
@@ -119,18 +148,34 @@ class VertexAIAuthProvider(
   private def fetchTokenFromCredentialFile(content: String): Result[CachedToken] =
     Try(ujson.read(content)).toEither.left.map(_.toLLMError).flatMap { json =>
       Try(json("type").str).toOption match {
-        case Some("authorized_user") => refreshTokenFlow(json)
-        case Some("service_account") => serviceAccountFlow(json)
+        case Some("authorized_user") =>
+          refreshTokenFlow(json).map { token =>
+            quotaProjectId = optionalField(json, "quota_project_id")
+            token
+          }
+        case Some("service_account") =>
+          serviceAccountFlow(json).map { token =>
+            quotaProjectId = None
+            token
+          }
         case Some(other) => Left(AuthenticationError(ProviderId("vertexai"), s"Unsupported credential type: $other"))
         case None        => Left(AuthenticationError(ProviderId("vertexai"), "Credential file missing 'type' field"))
       }
     }
 
-  private def refreshTokenFlow(json: ujson.Value): Result[CachedToken] = {
-    val clientId     = json("client_id").str
-    val clientSecret = Secret(json("client_secret").str)
-    val refreshToken = Secret(json("refresh_token").str)
+  private def refreshTokenFlow(json: ujson.Value): Result[CachedToken] =
+    for {
+      clientId     <- requiredField(json, "authorized_user", "client_id")
+      clientSecret <- requiredField(json, "authorized_user", "client_secret").map(Secret(_))
+      refreshToken <- requiredField(json, "authorized_user", "refresh_token").map(Secret(_))
+      token        <- exchangeRefreshToken(clientId, clientSecret, refreshToken)
+    } yield token
 
+  private def exchangeRefreshToken(
+    clientId: String,
+    clientSecret: Secret,
+    refreshToken: Secret
+  ): Result[CachedToken] = {
     val body =
       s"client_id=${enc(clientId)}&client_secret=${enc(clientSecret.reveal)}" +
         s"&grant_type=refresh_token&refresh_token=${enc(refreshToken.reveal)}"
@@ -163,17 +208,30 @@ class VertexAIAuthProvider(
   }
 
   private def serviceAccountFlow(json: ujson.Value): Result[CachedToken] = {
-    val clientEmail   = json("client_email").str
-    val privateKeyPem = json("private_key").str
-    val tokenUri      = Try(json("token_uri").str).getOrElse(TOKEN_ENDPOINT)
-
+    val tokenUri = optionalField(json, "token_uri").getOrElse(TOKEN_ENDPOINT)
     for {
-      privateKey <- parsePrivateKey(privateKeyPem)
-      jwt = createJwt(clientEmail, privateKey, tokenUri)
-      _   = assertions.rotate(jwt)
+      clientEmail   <- requiredField(json, "service_account", "client_email")
+      privateKeyPem <- requiredField(json, "service_account", "private_key")
+      privateKey    <- parsePrivateKey(privateKeyPem)
+      jwt <- Try(createJwt(clientEmail, privateKey, tokenUri)).toEither.left.map(e =>
+        AuthenticationError(
+          ProviderId("vertexai"),
+          s"Failed to sign the service-account JWT: ${e.getClass.getSimpleName}"
+        )
+      )
+      _ = assertions.rotate(jwt)
       token <- exchangeJwtForToken(jwt, tokenUri)
     } yield token
   }
+
+  /** The string field `name` of a `kind` credential file, or an error naming the field (never a value). */
+  private def requiredField(json: ujson.Value, kind: String, name: String): Result[String] =
+    optionalField(json, name).toRight(
+      AuthenticationError(ProviderId("vertexai"), s"The $kind credential file has no '$name' string field")
+    )
+
+  private def optionalField(json: ujson.Value, name: String): Option[String] =
+    json.objOpt.flatMap(_.get(name)).flatMap(_.strOpt).filter(_.nonEmpty)
 
   private def parsePrivateKey(pem: String): Result[java.security.PrivateKey] =
     Try {
@@ -305,6 +363,9 @@ object VertexAIAuthProvider {
       "No credentials found. Set GOOGLE_ACCESS_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, " +
         "run 'gcloud auth application-default login', or deploy on GCE/GKE for Workload Identity."
     )
+
+  /** How long a `GOOGLE_ACCESS_TOKEN` from the environment is used before the variable is read again. */
+  private[provider] val EnvTokenLife: FiniteDuration = 5.minutes
 
   private[provider] case class CachedToken(token: String, expiresAtMillis: Long) {
     def isExpired: Boolean = System.currentTimeMillis() >= expiresAtMillis

@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigContext, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ ContentPartCase, CredentialsRoundTrip, ProviderModuleChecks }
+import org.llm4s.testkit.{ ContentPartCase, CredentialsRoundTrip, ProviderModuleChecks, ToolResultContract }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
@@ -134,6 +134,42 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   private def geminiClientAt(baseUrl: String): LLMClient =
     assertBuildsClient(GeminiProvider, section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
 
+  /**
+   * `ToolResultContract.cases` in Gemini's wire format, which `assertOneToolResultPerCall` does not read (#3124): every
+   * model turn's `functionCall`s are answered by the next content, a `user` one, with one `functionResponse` per call
+   * in call order, named for it; and every call and result of the conversation is sent natively.
+   */
+  private def assertGeminiToolResults(clientAt: String => LLMClient): Unit =
+    ToolResultContract.cases.foreach { c =>
+      val seen = new java.util.concurrent.atomic.AtomicReference[ujson.Value](ujson.Null)
+      withServer("/") { exchange =>
+        seen.set(ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
+        sendJsonResponse(exchange, 200, geminiReply)
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        withClue(c.name)(client.complete(c.conversation).isRight shouldBe true)
+        client.close()
+      }
+      val contents = seen.get()("contents").arr.toVector
+      def parts(i: Int, key: String): Vector[ujson.Value] =
+        contents(i).obj.get("parts").map(_.arr.toVector).getOrElse(Vector.empty).flatMap(_.obj.get(key))
+      val calls     = contents.indices.map(parts(_, "functionCall"))
+      val responses = contents.indices.map(parts(_, "functionResponse"))
+      withClue(s"'${c.name}': ") {
+        contents.indices.foreach { i =>
+          if (calls(i).nonEmpty) {
+            contents(i)("role").str shouldBe "model"
+            (i + 1) should be < contents.size
+            contents(i + 1)("role").str shouldBe "user"
+            responses(i + 1).map(_("name").str) shouldBe calls(i).map(_("name").str)
+          }
+          if (responses(i).nonEmpty) calls(i - 1) should not be empty
+        }
+        calls.map(_.size).sum shouldBe c.toolCalls
+        responses.map(_.size).sum shouldBe c.toolResults
+      }
+    }
+
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
     (GeminiProvider, "GeminiConfig", "GeminiClient"),
@@ -219,6 +255,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       assertModelCallContract(GeminiContractFixtures.replies)(geminiClientAt)
     }
 
+    "send exactly one tool result per call, a parallel batch in one turn (#3124)" in {
+      assertGeminiToolResults(geminiClientAt)
+    }
+
     "validate by looking its model up with the key (#2830)" in {
       def geminiError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
         sendJsonResponse(
@@ -272,6 +312,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
 
     "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(GeminiContractFixtures.replies)(vertexClientAt)
+    }
+
+    "send exactly one tool result per call, a parallel batch in one turn (#3124)" in {
+      assertGeminiToolResults(vertexClientAt)
     }
 
     "validate by getting the publisher model, with the token a completion carries (#2855)" in {

@@ -74,9 +74,9 @@ class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
 
   // ---- addMessagesToParams via JSON serialisation ----
 
-  "addMessagesToParams" should "inject default system message when conversation has no SystemMessage" in {
+  "addMessagesToParams" should "send no system prompt when the conversation has no SystemMessage (#3125)" in {
     val json = buildParamsJson(Conversation(Seq(UserMessage("hi"))))
-    json should include("You are Claude, a helpful AI assistant.")
+    (json should not).include("\"system\"")
   }
 
   it should "use the explicit system message from conversation" in {
@@ -92,11 +92,23 @@ class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
     json should include("valid JSON only")
   }
 
-  it should "append JSON instruction to default system message when no explicit SystemMessage and ResponseFormat.Json" in {
+  it should "send the JSON instruction alone as the system prompt when there is no SystemMessage" in {
     val opts = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-    val json = buildParamsJson(Conversation(Seq(UserMessage("hi"))), opts)
-    json should include("Claude")
-    json should include("valid JSON only")
+    val body = ujson.read(buildParamsJson(Conversation(Seq(UserMessage("hi"))), opts))
+    body("system").str should startWith("You MUST respond with valid JSON only")
+    (body("system").str should not).include("Claude")
+  }
+
+  it should "append the JSON instruction once, to the last of several system messages" in {
+    val opts = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val body = ujson.read(
+      buildParamsJson(Conversation(Seq(SystemMessage("first"), SystemMessage("second"), UserMessage("hi"))), opts)
+    )
+    val texts = body("system").arr.map(_("text").str).toList
+    texts.head shouldBe "first"
+    texts(1) should startWith("second")
+    texts.count(_.contains("valid JSON only")) shouldBe 1
+    texts(1) should include("valid JSON only")
   }
 
   it should "not modify system message when responseFormat is None" in {

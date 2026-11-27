@@ -44,13 +44,43 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
   // -------- reasoning alone: today's request, and the budget-rejecting exception --------
 
   "A reasoning-only request" should "send the level's budget, as before RFC 0008, to a model that takes one" in {
-    plan("claude-sonnet-4-5", high) shouldBe Plan(Some(Mode.Enabled(32768)), None, Nil)
+    plan("claude-sonnet-4-5", high, maxTokens = 128000) shouldBe Plan(Some(Mode.Enabled(32768)), None, Nil)
     plan("claude-opus-4-6", CompletionOptions().withReasoning(ReasoningEffort.Low)) shouldBe
       Plan(Some(Mode.Enabled(2048)), None, Nil)
   }
 
-  it should "fit the level's budget below max_tokens without reporting it, as before" in {
-    plan("claude-sonnet-4-5", high, maxTokens = 2048) shouldBe Plan(Some(Mode.Enabled(2047)), None, Nil)
+  it should "cap the level's budget at half of max_tokens, leaving room for the answer, and report it (#3125)" in {
+    val reason =
+      "Anthropic takes a budget of at least 1024; capped at half of max_tokens (16000) to leave room for the answer"
+    plan("claude-sonnet-4-5", high, maxTokens = 16000) shouldBe Plan(
+      Some(Mode.Enabled(8000)),
+      None,
+      List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "Budget(32768)", "Budget(8000)", reason))
+    )
+    plan("claude-sonnet-4-5", high.withMaxTokens(4096), maxTokens = 4096).thinking shouldBe Some(Mode.Enabled(2048))
+    // never below Anthropic's minimum
+    plan("claude-sonnet-4-5", high, maxTokens = 1500).thinking shouldBe Some(Mode.Enabled(1024))
+  }
+
+  "An explicit budget" should "be capped at half of a default max_tokens, which the caller did not choose" in {
+    plan("claude-sonnet-4-5", CompletionOptions().withThinking(budget(15000)), maxTokens = 16000).thinking shouldBe
+      Some(Mode.Enabled(8000))
+  }
+
+  it should "be fitted only below an explicit max_tokens" in {
+    val options = CompletionOptions().withThinking(budget(15000)).withMaxTokens(16000)
+    plan("claude-sonnet-4-5", options, maxTokens = 16000).thinking shouldBe Some(Mode.Enabled(15000))
+    plan("claude-sonnet-4-5", options.withMaxTokens(12000), maxTokens = 12000).thinking shouldBe
+      Some(Mode.Enabled(11999))
+  }
+
+  "belowMaxTokens" should "refuse a thinking request whose max_tokens is 1024 or less (#3125)" in {
+    val thinking = plan("claude-sonnet-4-5", high.withMaxTokens(1024), maxTokens = 1024)
+    thinking.thinking shouldBe Some(Mode.Enabled(1024))
+    AnthropicThinking.belowMaxTokens(thinking, 1024).left.map(_.getClass.getSimpleName) shouldBe
+      Left("ValidationError")
+    val fine = plan("claude-sonnet-4-5", high.withMaxTokens(4096), maxTokens = 4096)
+    AnthropicThinking.belowMaxTokens(fine, 4096) shouldBe Right(fine)
   }
 
   it should "send adaptive thinking at that effort to a model that rejects a budget, and report it" in {
@@ -85,10 +115,16 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
   it should "think within the new level's budget where the model takes output_config but not adaptive thinking" in {
     plan("claude-opus-4-5", CompletionOptions().withReasoning(ReasoningEffort.Max)) shouldBe
       Plan(
-        Some(Mode.Enabled(63999)),
+        Some(Mode.Enabled(32000)),
         Some("high"),
         List(
-          RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "claude-opus-4-5 has no max level")
+          RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "claude-opus-4-5 has no max level"),
+          RequestAdjustment.Adjusted(
+            RequestOption.Reasoning,
+            "Budget(65536)",
+            "Budget(32000)",
+            "Anthropic takes a budget of at least 1024; capped at half of max_tokens (64000) to leave room for the answer"
+          )
         )
       )
   }
@@ -173,15 +209,17 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
 
   it should "fit a budget to [1024, max_tokens) and report it, at both ends" in {
     val reason = "Anthropic takes a budget of at least 1024 and below max_tokens (2048)"
-    plan("claude-opus-4-6", CompletionOptions().withThinking(budget(500)), maxTokens = 2048) shouldBe Plan(
+    // an explicit max_tokens: the caller chose both, so the budget may take all but one token
+    val max2048 = CompletionOptions().withMaxTokens(2048)
+    plan("claude-opus-4-6", max2048.withThinking(budget(500)), maxTokens = 2048) shouldBe Plan(
       Some(Mode.Enabled(1024)),
       None,
       List(RequestAdjustment.Adjusted(RequestOption.Thinking, "Budget(500)", "Budget(1024)", reason))
     )
-    plan("claude-opus-4-6", CompletionOptions().withThinking(budget(2048)), maxTokens = 2048).thinking shouldBe
+    plan("claude-opus-4-6", max2048.withThinking(budget(2048)), maxTokens = 2048).thinking shouldBe
       Some(Mode.Enabled(2047))
-    plan("claude-opus-4-6", CompletionOptions().withThinking(budget(1024)), maxTokens = 2048).adjustments shouldBe Nil
-    plan("claude-opus-4-6", CompletionOptions().withThinking(budget(2047)), maxTokens = 2048).adjustments shouldBe Nil
+    plan("claude-opus-4-6", max2048.withThinking(budget(1024)), maxTokens = 2048).adjustments shouldBe Nil
+    plan("claude-opus-4-6", max2048.withThinking(budget(2047)), maxTokens = 2048).adjustments shouldBe Nil
   }
 
   it should "send adaptive thinking to a model that rejects a budget, and report it" in {

@@ -1,7 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
+import org.llm4s.error.ValidationError
 import org.llm4s.model.{ EffortMapping, ModelCapabilities }
+import org.llm4s.types.Result
 
 /**
  * Maps `CompletionOptions.thinking` and `reasoning` onto Anthropic's `thinking` and `output_config.effort`
@@ -14,6 +16,11 @@ import org.llm4s.model.{ EffortMapping, ModelCapabilities }
  *    return a 400) is sent the budget `reasoning` would give, or `Medium`'s, reported `Adjusted`.
  *  - `Budget(n)` is `budget_tokens: n`, fitted to `[1024, max_tokens)` and reported `Adjusted` when fitted. A model
  *    that rejects a budget (`supportsBudgetThinking = Some(false)`) is sent `adaptive`, reported `Adjusted`.
+ *
+ * A budget the caller did not set in full - one from a `reasoning` level, or an explicit `Budget(n)` under the default
+ * `max_tokens` - is capped at half of `max_tokens`, so thinking cannot spend the whole output allowance and leave the
+ * answer empty (#3125), reported `Adjusted`. A budget of 1024 that is not below `max_tokens` is no valid request;
+ * [[belowMaxTokens]] refuses it before anything is sent.
  *
  * `reasoning`, with no `thinking`, keeps today's request: a `budget_tokens` budget from the level. The exception is a
  * model that rejects a budget, which is sent `adaptive` with the level as `output_config.effort`, reported `Adjusted`
@@ -46,6 +53,25 @@ private[provider] object AnthropicThinking {
 
   private val NewLevels: Set[ReasoningEffort] = Set(ReasoningEffort.Minimal, ReasoningEffort.XHigh, ReasoningEffort.Max)
 
+  /** The smallest `budget_tokens` Anthropic takes. */
+  val MinBudget: Int = 1024
+
+  /**
+   * `plan`, or a `ValidationError` when it thinks within a budget that is not below `maxTokens`: with `maxTokens` of
+   * 1024 or less no budget is, and Anthropic answers 400.
+   */
+  def belowMaxTokens(plan: Plan, maxTokens: Int): Result[Plan] =
+    plan.thinking match {
+      case Some(Mode.Enabled(budget)) if budget >= maxTokens =>
+        Left(
+          ValidationError(
+            "maxTokens",
+            s"thinking needs max_tokens above its budget ($budget, at least $MinBudget); max_tokens is $maxTokens"
+          )
+        )
+      case _ => Right(plan)
+    }
+
   def plan(model: String, options: CompletionOptions, maxTokens: Int, caps: Option[ModelCapabilities]): Plan = {
     def flag(f: ModelCapabilities => Option[Boolean]): Option[Boolean] = caps.flatMap(f)
     val rejectsBudget                                                  = flag(_.supportsBudgetThinking).contains(false)
@@ -60,10 +86,21 @@ private[provider] object AnthropicThinking {
       (sent, EffortMapping.level(model, level, sent))
     }
 
-    def fit(tokens: Int): Int = math.max(1024, math.min(tokens, maxTokens - 1))
+    // the room thinking may take: all but one token only when the caller set both the budget and max_tokens
+    def ceiling(explicitBudget: Boolean): Int =
+      if (explicitBudget && options.maxTokens.isDefined) maxTokens - 1 else maxTokens / 2
+
+    def fit(tokens: Int, explicitBudget: Boolean = false): Int =
+      math.max(MinBudget, math.min(tokens, ceiling(explicitBudget)))
+
+    def fitReason(explicitBudget: Boolean): String =
+      if (explicitBudget && options.maxTokens.isDefined)
+        s"Anthropic takes a budget of at least $MinBudget and below max_tokens ($maxTokens)"
+      else
+        s"Anthropic takes a budget of at least $MinBudget; capped at half of max_tokens ($maxTokens) to leave room for the answer"
 
     def fitted(tokens: Int): (Mode, List[RequestAdjustment]) = {
-      val sent = fit(tokens)
+      val sent = fit(tokens, explicitBudget = true)
       val report =
         if (sent == tokens) Nil
         else
@@ -72,8 +109,21 @@ private[provider] object AnthropicThinking {
               RequestOption.Thinking,
               s"Budget($tokens)",
               s"Budget($sent)",
-              s"Anthropic takes a budget of at least 1024 and below max_tokens ($maxTokens)"
+              fitReason(explicitBudget = true)
             )
+          )
+      (Mode.Enabled(sent), report)
+    }
+
+    /** A level's default budget, fitted, and the report when the fitted budget is not the level's. */
+    def levelBudget(level: ReasoningEffort): (Mode, List[RequestAdjustment]) = {
+      val tokens = ReasoningEffort.defaultBudgetTokens(level)
+      val sent   = fit(tokens)
+      val report =
+        if (sent == tokens) Nil
+        else
+          List(
+            RequestAdjustment.Adjusted(RequestOption.Reasoning, s"Budget($tokens)", s"Budget($sent)", fitReason(false))
           )
       (Mode.Enabled(sent), report)
     }
@@ -157,13 +207,14 @@ private[provider] object AnthropicThinking {
             Plan(Some(Mode.Adaptive), Some(sent), exception :: levelReport)
           case Some(level) if NewLevels(level) && takesEffort =>
             val (sent, levelReport) = effortFor(level)
-            val mode =
-              if (flag(_.supportsAdaptiveThinking).contains(true)) Mode.Adaptive
-              else Mode.Enabled(fit(ReasoningEffort.defaultBudgetTokens(level)))
-            Plan(Some(mode), Some(sent), levelReport)
+            val (mode, capReport) =
+              if (flag(_.supportsAdaptiveThinking).contains(true)) (Mode.Adaptive, Nil)
+              else levelBudget(level)
+            Plan(Some(mode), Some(sent), levelReport ++ capReport)
           case Some(level) =>
-            // as before RFC 0008: the level's default budget, fitted as it always was
-            Plan(Some(Mode.Enabled(fit(ReasoningEffort.defaultBudgetTokens(level)))), None, Nil)
+            // the level's default budget, leaving half of max_tokens for the answer
+            val (mode, capReport) = levelBudget(level)
+            Plan(Some(mode), None, capReport)
         }
     }
   }

@@ -31,7 +31,6 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
 
   private val JsonOnly =
     "You MUST respond with valid JSON only. No prose, no markdown, no explanation — only the raw JSON object."
-  private val Default = "You are Claude, a helpful AI assistant."
 
   private def body(conversation: Conversation, opts: CompletionOptions): ujson.Value = {
     val builder = MessageCreateParams.builder().model("claude-3-5-sonnet-20241022").maxTokens(1024)
@@ -73,9 +72,9 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   private val jsonOpts        = CompletionOptions().withResponseFormat(ResponseFormat.Json)
   private lazy val schemaOpts = CompletionOptions().withResponseFormat(schemaFmt)
 
-  "Anthropic JSON injection" should "produce the exact system text for Json on a default system prompt" in {
+  "Anthropic JSON injection" should "send the instruction alone when the conversation has no system prompt" in {
     val b = body(Conversation(Seq(UserMessage("hi"))), jsonOpts)
-    systemText(b) shouldBe s"$Default\n\n$JsonOnly"
+    systemText(b) shouldBe JsonOnly
   }
 
   it should "produce the exact system text for JsonSchema on an explicit system prompt" in {
@@ -87,7 +86,7 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   it should "leave the system text byte-for-byte unchanged when no response format is set" in {
     systemText(body(Conversation(Seq(SystemMessage("Be terse."), UserMessage("hi"))), CompletionOptions())) shouldBe
       "Be terse."
-    systemText(body(Conversation(Seq(UserMessage("hi"))), CompletionOptions())) shouldBe Default
+    body(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).obj.contains("system") shouldBe false
   }
 
   it should "never add the JSON instruction to user-visible messages" in {
@@ -103,10 +102,10 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "emit a single system field with a single instruction when two system messages are given" in {
-    // Anthropic takes one system field; the builder keeps the last one. Either way the instruction
-    // must not be doubled and must be present on the surviving prompt.
+    // both prompts are sent, each its own block (#3125); the instruction once, on the last
     val b = body(Conversation(Seq(SystemMessage("first"), SystemMessage("second"), UserMessage("hi"))), jsonOpts)
     val s = systemText(b)
+    s should startWith("first")
     s should endWith(JsonOnly)
     s.sliding(JsonOnly.length).count(_ == JsonOnly) shouldBe 1
   }

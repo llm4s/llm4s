@@ -133,7 +133,10 @@ source break, and three behaviour changes:
 [a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
 After 1.0.0, [an `openai` section on api.openai.com uses the Responses API](#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900),
 and, in the Experimental `llm4s-schema-derivation`,
-[an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951).
+[an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951);
+in the Beta `llm4s-bedrock`, [web-identity, assume-role and SSO credentials load](#bedrock-loads-web-identity-assume-role-and-sso-credentials-3127);
+[Anthropic sends every system message, and no default one](#anthropic-sends-every-system-message-and-no-default-one-3125);
+and [Vertex AI prefers the configured credential file, and retries a refused token](#vertex-ai-prefers-the-configured-credential-file-and-retries-a-refused-token-3126).
 
 ## An `openai` section on api.openai.com uses the Responses API (#2900)
 
@@ -245,6 +248,41 @@ was silently ignored, so the field was described by its name. An argument that i
 `val` that is not `final`, a `final val` with a declared type, an `f"..."` interpolation) now fails to compile where
 the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
 (`final val Limit = 750`, without `: Int`), or write the text out.
+
+## Vertex AI prefers the configured credential file, and retries a refused token (#3126)
+
+`llm4s-gemini` is frozen, and no signature changed. How a `vertexai` client authenticates changes:
+
+| Before (1.0.0) | After |
+|---|---|
+| `GOOGLE_ACCESS_TOKEN` in the environment was used even when the section set `apiKey` (a credential file), and cached for the life of the process | A configured file always wins. The variable is used only when the section sets no file, before `GOOGLE_APPLICATION_CREDENTIALS`, and read again every five minutes. A deployment that relied on the variable overriding the file now authenticates as the file's principal: remove `apiKey` from the section to keep using the token |
+| A credential file missing `refresh_token`, `private_key` or another field threw `NoSuchElementException` out of `complete` and `validate()` | An `AuthenticationError` naming the field |
+| A token Vertex AI refused with a 401 kept failing until it expired | The token is dropped and the call retried once with a fresh one |
+| An `authorized_user` file's `quota_project_id` was ignored | It is sent as `x-goog-user-project` |
+| `location = "global"` called `global-aiplatform.googleapis.com`, which does not exist | It calls `aiplatform.googleapis.com` |
+
+## Anthropic sends every system message, and no default one (#3125)
+
+`llm4s-anthropic` is frozen, and no signature changed. The request it builds changes in four ways:
+
+| Before (1.0.0) | After |
+|---|---|
+| Of several `SystemMessage`s only the last was sent, so a `HistoryCompressor` digest replaced the agent's own prompt | Each is sent, in order, as its own system text block; the JSON instruction of a `responseFormat` is appended once, to the last, and a cached system prompt's breakpoint goes on the last |
+| A conversation with no `SystemMessage` was sent `You are Claude, a helpful AI assistant.` | No system prompt is sent, as on Bedrock. Add `SystemMessage("You are Claude, a helpful AI assistant.")` to keep the old behaviour |
+| A `reasoning` level's budget, or a `Budget(n)` under the default `max_tokens`, could take all but one token of `max_tokens`, leaving the answer empty | It is capped at half of `max_tokens`, reported `Adjusted` on `Completion.adjustments`. Set `maxTokens` and `Thinking.Budget(n)` together to give thinking more |
+| Thinking with `maxTokens` of 1024 or less was sent and refused by Anthropic (400); a conversation of system messages alone threw `IllegalStateException` | Both return a `ValidationError` before anything is sent |
+
+## Bedrock loads web-identity, assume-role and SSO credentials (#3127)
+
+`llm4s-bedrock` is Beta. It now brings the AWS SDK's `sts`, `sso` and `ssooidc` modules. The SDK loads three
+credential sources through them reflectively, and skipped each one silently while they were missing, unless another
+dependency (such as `llm4s-rag`) brought `sts` in.
+
+| Before (1.0.0) | After |
+|---|---|
+| On EKS with IRSA (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`) the default chain skipped web identity and could use the node's instance role | The pod's service-account role is used. Grant it `bedrock:InvokeModel` (and `InvokeModelWithResponseStream`) if the node role had it instead |
+| A `profile` with `role_arn` or SSO settings failed at the first call | It authenticates as that role or SSO user |
+| `close()` left the profile or default credentials provider open | `close()` closes it |
 
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 

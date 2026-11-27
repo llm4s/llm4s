@@ -265,6 +265,12 @@ final class BedrockClient private[provider] (
   override protected def releaseResources(): Unit = {
     sdkClient.close()
     if (asyncClientStarted) asyncClient.close()
+    // The SDK does not close a credentials provider it was handed; the profile and default chains hold
+    // refresh threads and STS/SSO clients of their own.
+    credentialsProvider match {
+      case closeable: AutoCloseable => closeable.close()
+      case _                        => ()
+    }
   }
 
   private def transformed(

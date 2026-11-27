@@ -50,7 +50,11 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     """{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}"""
 
   /** The request body `complete` sends, and the completion, against a server answering with `usage`. */
-  private def sent(options: CompletionOptions, usage: String = noCacheUsage): (ujson.Value, Completion) = {
+  private def sent(
+    options: CompletionOptions,
+    usage: String = noCacheUsage,
+    conversation: Conversation = conversation
+  ): (ujson.Value, Completion) = {
     val seen   = new AtomicReference[String]()
     val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
     server.createContext(
@@ -86,6 +90,19 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     body("tools").arr.foreach(_.obj.keySet should not contain "cache_control")
     body.obj.keySet should not contain "cache_control"
     completion.adjustments shouldBe Nil
+  }
+
+  it should "send several system prompts as blocks, with the breakpoint on the last only (#3125)" in {
+    val twoSystems = Conversation(Seq(SystemMessage("Be brief."), SystemMessage("Digest."), UserMessage("Hi")))
+    val (body, _)  = sent(CompletionOptions().withPromptCache(PromptCache.default), conversation = twoSystems)
+    body("system") shouldBe ujson.Arr(
+      ujson.Obj("text" -> "Be brief.", "type" -> "text"),
+      ujson.Obj(
+        "text"          -> "Digest.",
+        "type"          -> "text",
+        "cache_control" -> ujson.Obj("type" -> "ephemeral", "ttl" -> "5m")
+      )
+    )
   }
 
   it should "put a breakpoint on the system prompt and the last tool only, by default" in {

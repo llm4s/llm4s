@@ -378,7 +378,8 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     it should "not echo a replayed empty functionCall.id onto a tool result keyed by that empty id" in {
       // The signed part goes back with its `"id":""` verbatim, but an empty id is "no id" everywhere: a caller
       // that hand-builds the tool result with the id it sees on the wire must not get `"id":""` echoed on the
-      // functionResponse, as parse and matchesCall already read an empty id as absent (#1622).
+      // functionResponse, as parse and matchesCall already read an empty id as absent (#1622). The result answers
+      // the call by the id llm4s gave it; one under any other id answers no call and goes as text (#3124).
       val (client, wire) = make("gemini-2.0-flash")
       wire.body = s"""{"candidates":[{"content":{"role":"model","parts":[
         {"functionCall":{"id":"","name":"get_weather","args":{"city":"Paris"}},"thoughtSignature":"SIG-EMPTY-ID"}
@@ -388,7 +389,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       wire.body = response(text("Sunny."))
       val handBuilt =
         Conversation(
-          Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", ToolCallId("")))
+          Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", first.toolCalls.head.id))
         )
       client.complete(handBuilt, CompletionOptions()).value
 
