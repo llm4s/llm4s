@@ -134,7 +134,8 @@ source break, and three behaviour changes:
 After 1.0.0, [an `openai` section on api.openai.com uses the Responses API](#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900),
 and, in the Experimental `llm4s-schema-derivation`,
 [an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951);
-in the Beta `llm4s-bedrock`, [web-identity, assume-role and SSO credentials load](#bedrock-loads-web-identity-assume-role-and-sso-credentials-3127).
+in the Beta `llm4s-bedrock`, [web-identity, assume-role and SSO credentials load](#bedrock-loads-web-identity-assume-role-and-sso-credentials-3127);
+and [Anthropic sends every system message, and no default one](#anthropic-sends-every-system-message-and-no-default-one-3125).
 
 ## An `openai` section on api.openai.com uses the Responses API (#2900)
 
@@ -246,6 +247,17 @@ was silently ignored, so the field was described by its name. An argument that i
 `val` that is not `final`, a `final val` with a declared type, an `f"..."` interpolation) now fails to compile where
 the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
 (`final val Limit = 750`, without `: Int`), or write the text out.
+
+## Anthropic sends every system message, and no default one (#3125)
+
+`llm4s-anthropic` is frozen, and no signature changed. The request it builds changes in four ways:
+
+| Before (1.0.0) | After |
+|---|---|
+| Of several `SystemMessage`s only the last was sent, so a `HistoryCompressor` digest replaced the agent's own prompt | Each is sent, in order, as its own system text block; the JSON instruction of a `responseFormat` is appended once, to the last, and a cached system prompt's breakpoint goes on the last |
+| A conversation with no `SystemMessage` was sent `You are Claude, a helpful AI assistant.` | No system prompt is sent, as on Bedrock. Add `SystemMessage("You are Claude, a helpful AI assistant.")` to keep the old behaviour |
+| A `reasoning` level's budget, or a `Budget(n)` under the default `max_tokens`, could take all but one token of `max_tokens`, leaving the answer empty | It is capped at half of `max_tokens`, reported `Adjusted` on `Completion.adjustments`. Set `maxTokens` and `Thinking.Budget(n)` together to give thinking more |
+| Thinking with `maxTokens` of 1024 or less was sent and refused by Anthropic (400); a conversation of system messages alone threw `IllegalStateException` | Both return a `ValidationError` before anything is sent |
 
 ## Bedrock loads web-identity, assume-role and SSO credentials (#3127)
 

@@ -243,8 +243,6 @@ final class AnthropicClient private[provider] (
       // a tool schema Anthropic cannot take fails the request here too (#2903)
       .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
       .flatMap { (transformed, tools) =>
-        val transformedConversation = conversation.withMessages(transformed.messages)
-
         // Create message parameters builder
         val paramsBuilder = MessageCreateParams
           .builder()
@@ -255,7 +253,15 @@ final class AnthropicClient private[provider] (
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
+        AnthropicThinking
+          .belowMaxTokens(
+            AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities),
+            maxTokens
+          )
+          .map(thinkingPlan => (transformed, tools, paramsBuilder, thinkingPlan))
+      }
+      .flatMap { (transformed, tools, paramsBuilder, thinkingPlan) =>
+        val transformedConversation = conversation.withMessages(transformed.messages)
         applyThinking(paramsBuilder, thinkingPlan)
         val samplingAdjustments = applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -277,9 +283,11 @@ final class AnthropicClient private[provider] (
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
 
-        // Build the parameters
-        val messageParams = paramsBuilder.build()
-        val requestBody   = serializeRequestBody(messageParams)
+        // Build the parameters: a conversation with no turn to send is a Left, not the SDK's exception (#3125)
+        AnthropicClient.built(paramsBuilder).map(params => (transformed, adjustments, params))
+      }
+      .flatMap { (transformed, adjustments, messageParams) =>
+        val requestBody = serializeRequestBody(messageParams)
 
         val messageService = client.messages()
         // Make API call
@@ -343,8 +351,6 @@ curl https://api.anthropic.com/v1/messages \
       // a tool schema Anthropic cannot take fails the request here too (#2903)
       .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
       .flatMap { (transformed, tools) =>
-        val transformedConversation = conversation.withMessages(transformed.messages)
-
         // Build parameters
         val paramsBuilder = MessageCreateParams
           .builder()
@@ -355,7 +361,15 @@ curl https://api.anthropic.com/v1/messages \
         paramsBuilder.maxTokens(maxTokens)
 
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
-        val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
+        AnthropicThinking
+          .belowMaxTokens(
+            AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities),
+            maxTokens
+          )
+          .map(thinkingPlan => (transformed, tools, paramsBuilder, thinkingPlan))
+      }
+      .flatMap { (transformed, tools, paramsBuilder, thinkingPlan) =>
+        val transformedConversation = conversation.withMessages(transformed.messages)
         applyThinking(paramsBuilder, thinkingPlan)
         val samplingAdjustments = applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
@@ -375,9 +389,11 @@ curl https://api.anthropic.com/v1/messages \
         addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
-        // Build the parameters
-        val messageParams = paramsBuilder.build()
-        val requestBody   = serializeRequestBody(messageParams)
+        // Build the parameters: a conversation with no turn to send is a Left, not the SDK's exception (#3125)
+        AnthropicClient.built(paramsBuilder).map(params => (transformed, adjustments, params))
+      }
+      .flatMap { (transformed, adjustments, messageParams) =>
+        val requestBody = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
         val accumulator = StreamingAccumulator(config.model)
@@ -653,8 +669,8 @@ curl https://api.anthropic.com/v1/messages \
     paramsBuilder: MessageCreateParams.Builder,
     options: CompletionOptions
   ): Unit = {
-    // Track if we've seen a system message
-    var hasSystemMessage = false
+    // every system message, in order: each is its own system block (#3125)
+    val systems = mutable.ListBuffer.empty[String]
 
     // a tool_use goes out only with its tool_result, in the user turn straight after it, and a
     // tool_result only right after its tool_use: Anthropic rejects either without the other, and a
@@ -681,8 +697,7 @@ curl https://api.anthropic.com/v1/messages \
     // Process messages in order
     messages.zipWithIndex.foreach {
       case (SystemMessage(content), _) =>
-        setSystem(paramsBuilder, appendJsonInstruction(content, options), options)
-        hasSystemMessage = true
+        systems += content
 
       case (um: UserMessage, _) =>
         flushResults()
@@ -745,23 +760,37 @@ curl https://api.anthropic.com/v1/messages \
     }
     flushResults()
 
-    // Add a default system message if none was provided; the JSON instruction is appended to it as
-    // well so structured-output requests keep the instruction when the caller supplied no system prompt
-    if (!hasSystemMessage) {
-      val base = "You are Claude, a helpful AI assistant."
-      setSystem(paramsBuilder, appendJsonInstruction(base, options), options)
+    // No system prompt is sent when the conversation has none (#3125), except a structured-output request's JSON
+    // instruction, which is appended once, to the last system block.
+    val blocks = systems.toList match {
+      case Nil  => jsonInstruction(options).toList
+      case some => some.init :+ appendJsonInstruction(some.last, options)
     }
+    setSystem(paramsBuilder, blocks, options)
   }
 
-  /** Sets the system prompt, as one block with a `cache_control` breakpoint when `options` caches it. */
-  private def setSystem(paramsBuilder: MessageCreateParams.Builder, system: String, options: CompletionOptions): Unit =
-    AnthropicPromptCache.control(options, PromptCache.Scope.System) match {
-      case None => paramsBuilder.system(system)
-      case Some(control) =>
-        paramsBuilder.systemOfTextBlockParams(
-          List(TextBlockParam.builder().text(system).cacheControl(control).build()).asJava
-        )
+  /**
+   * Sets the system prompt: each of `blocks` as its own text block, the last with a `cache_control` breakpoint when
+   * `options` caches the system prompt. A single uncached block is sent as a plain string, and no blocks send none.
+   */
+  private def setSystem(
+    paramsBuilder: MessageCreateParams.Builder,
+    blocks: List[String],
+    options: CompletionOptions
+  ): Unit = {
+    val control = AnthropicPromptCache.control(options, PromptCache.Scope.System)
+    (blocks, control) match {
+      case (Nil, _)           => ()
+      case (List(only), None) => paramsBuilder.system(only)
+      case _ =>
+        val params = blocks.zipWithIndex.map { (text, index) =>
+          val block = TextBlockParam.builder().text(text)
+          control.filter(_ => index == blocks.size - 1).foreach(block.cacheControl)
+          block.build()
+        }
+        paramsBuilder.systemOfTextBlockParams(params.asJava)
     }
+  }
 
   /** `options`' tools as Anthropic's, or the first that cannot be one. */
   private def anthropicTools(options: CompletionOptions): Result[Seq[Tool]] =
@@ -790,13 +819,16 @@ curl https://api.anthropic.com/v1/messages \
   }
 
   private[provider] def appendJsonInstruction(system: String, options: CompletionOptions): String =
-    options.responseFormat match {
-      case None => system
-      case Some(ResponseFormat.Json) =>
-        s"$system\n\nYou MUST respond with valid JSON only. No prose, no markdown, no explanation — only the raw JSON object."
-      case Some(js: ResponseFormat.JsonSchema) =>
+    jsonInstruction(options).fold(system)(instruction => s"$system\n\n$instruction")
+
+  /** The instruction a structured-output request adds to the system prompt, if `options` asks for JSON. */
+  private def jsonInstruction(options: CompletionOptions): Option[String] =
+    options.responseFormat.map {
+      case ResponseFormat.Json =>
+        "You MUST respond with valid JSON only. No prose, no markdown, no explanation — only the raw JSON object."
+      case js: ResponseFormat.JsonSchema =>
         val schemaStr = js.schema.render()
-        s"$system\n\nYou MUST respond with valid JSON only, conforming exactly to this schema:\n$schemaStr\nNo prose, no markdown, no explanation — only the raw JSON object."
+        s"You MUST respond with valid JSON only, conforming exactly to this schema:\n$schemaStr\nNo prose, no markdown, no explanation — only the raw JSON object."
     }
 
   /**
@@ -1079,6 +1111,18 @@ object AnthropicClient {
     ContentFilteredError.reply(AnthropicProvider.id, reason, cutAfterChars).withUsage(usage)
 
   /** A reply whose `stop_reason` is `refusal` as a `ContentFilteredError`; any other reply unchanged. */
+  /**
+   * The request, or a `ValidationError` when the SDK refuses to build it: a conversation of system messages alone has
+   * no `messages`, which the SDK requires (`IllegalStateException`).
+   */
+  private[provider] def built(builder: MessageCreateParams.Builder): Result[MessageCreateParams] =
+    Try(builder.build()).toEither.left.map(e =>
+      ValidationError(
+        "messages",
+        s"Anthropic needs at least one user, assistant or tool message to send (${e.getMessage})"
+      )
+    )
+
   private[provider] def refused(c: Completion): Result[Completion] =
     c.finishReason match {
       case FinishReason.Other(Refusal) => Left(filtered(Refusal, c.content.length, c.usage))

@@ -75,12 +75,13 @@ val reply = for {
 - **Structured output is a prompt instruction, not an API guarantee.** For `ResponseFormat.Json` or
   `JsonSchema` the client appends "respond with valid JSON only" (and the schema) to the system
   prompt; nothing in the request enforces it, so validate what comes back.
-- **Extended thinking:** `CompletionOptions.reasoning` adds a `thinking` block with a token budget
-  clamped to `[1024, maxTokens - 1]` (`maxTokens` defaults to 2048, since the API requires it). The
-  reply's thinking and redacted-thinking blocks, with their signatures, come back on the message's
-  `thinking` and are replayed on later turns.
-- **A system prompt is always sent.** If the conversation has no system message the client adds
-  `You are Claude, a helpful AI assistant.`
+- **Extended thinking:** `CompletionOptions.reasoning` adds a `thinking` block with the level's token
+  budget, capped at half of `max_tokens` so the answer keeps room (reported `Adjusted`); an explicit
+  `Thinking.Budget(n)` with an explicit `maxTokens` is fitted to `[1024, maxTokens - 1]`. Thinking with
+  `maxTokens` of 1024 or less is a `ValidationError`. The reply's thinking and redacted-thinking blocks,
+  with their signatures, come back on the message's `thinking` and are replayed on later turns.
+- **System prompts:** every system message is sent, in order, as its own system block. A conversation
+  with none sends no system prompt (through 1.0.0 the client added `You are Claude, a helpful AI assistant.`).
 - **Model listing:** the provider can list the models your key can use.
 - **Web search:** `webSearch = true` in a section adds Anthropic's server-side `web_search` tool to every request;
   the sources the answer cites arrive on `Completion.citations` (see

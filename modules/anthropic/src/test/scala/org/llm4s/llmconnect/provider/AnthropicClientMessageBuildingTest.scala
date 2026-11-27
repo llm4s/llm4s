@@ -15,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
  * Tests for the two internal protocol-adaptation methods in AnthropicClient:
  *
  *  - `addMessagesToParams` — converts llm4s message types to the Anthropic API wire
- *    format; handles default system prompt injection, tool calls and their results
+ *    format; handles system prompts, tool calls and their results
  *    as `tool_use` / `tool_result` blocks, and thinking blocks sent back with their
  *    signatures.
  *
@@ -59,10 +59,22 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
   // ---------------------------------------------------------------------------
 
   "addMessagesToParams" should
-    "inject the default system prompt when the conversation has no SystemMessage" in {
+    "send no system prompt when the conversation has no SystemMessage (#3125)" in {
       val json = buildParamsJson(UserMessage("Hello"))
-      json should include("You are Claude, a helpful AI assistant.")
+      (json should not).include("\"system\"")
+      (json should not).include("You are Claude, a helpful AI assistant.")
     }
+
+  it should "send every SystemMessage, in order, as its own system block (#3125)" in {
+    val body = ujson.read(
+      buildParamsJson(
+        SystemMessage("You are the agent."),
+        UserMessage("Hello"),
+        SystemMessage("Digest of earlier turns.")
+      )
+    )
+    body("system").arr.map(_("text").str).toList shouldBe List("You are the agent.", "Digest of earlier turns.")
+  }
 
   it should "use an explicit SystemMessage instead of the default" in {
     val json = buildParamsJson(
@@ -181,5 +193,32 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
     json should include("Hi!")
     json should include("How are you?")
     json should include("I am fine.")
+  }
+
+  // ---------------------------------------------------------------------------
+  // requests refused before anything is sent (#3125)
+  // ---------------------------------------------------------------------------
+
+  // nothing listens on port 1: a request that got as far as the network would be a NetworkError
+  private def offlineClient =
+    new AnthropicClient(testConfig.withBaseUrl(BaseUrl("http://127.0.0.1:1")).withModel(ModelName("claude-sonnet-4-5")))
+
+  private def errorKind(r: org.llm4s.types.Result[Completion]): String =
+    r.left.map(_.getClass.getSimpleName).swap.getOrElse("Right")
+
+  "complete and streamComplete" should "return a ValidationError, not throw, for a conversation of system messages alone" in {
+    val onlySystem = Conversation(Seq(SystemMessage("x")))
+    val client     = offlineClient
+    errorKind(client.complete(onlySystem)) shouldBe "ValidationError"
+    errorKind(client.streamComplete(onlySystem)(_ => ())) shouldBe "ValidationError"
+    client.close()
+  }
+
+  they should "refuse thinking whose max_tokens leaves no budget below it" in {
+    val options = CompletionOptions().withReasoning(ReasoningEffort.High).withMaxTokens(1024)
+    val client  = offlineClient
+    errorKind(client.complete(Conversation(Seq(UserMessage("hi"))), options)) shouldBe "ValidationError"
+    errorKind(client.streamComplete(Conversation(Seq(UserMessage("hi"))), options)(_ => ())) shouldBe "ValidationError"
+    client.close()
   }
 }
