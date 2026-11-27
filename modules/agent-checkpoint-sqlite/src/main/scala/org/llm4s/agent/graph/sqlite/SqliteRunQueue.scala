@@ -80,7 +80,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             submission.threadId.value,
             submission.agentId.value,
             submission.tenantId.map(_.value),
-            ujson.write(QueuedInput.toJson(submission.input)),
+            ujson.write(QueuedInput.toJson(submission.input), escapeUnicode = true),
             submission.policy.toString,
             if submission.policy == BusyThreadPolicy.Interrupt then 1 else 0,
             scope,
@@ -117,7 +117,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     update(
       c,
       "UPDATE llm4s_checkpoint_queue_entries SET stop_json = ? WHERE entry_id = ?",
-      ujson.write(StopRequest.toJson(request)),
+      ujson.write(StopRequest.toJson(request), escapeUnicode = true),
       id
     )
 
@@ -430,7 +430,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         |  lease_expires_nanos = NULL
         |WHERE entry_id = ?""".stripMargin,
       outcome.state,
-      ujson.write(EntryOutcome.toJson(outcome)),
+      ujson.write(EntryOutcome.toJson(outcome), escapeUnicode = true),
       at,
       id
     )

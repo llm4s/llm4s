@@ -143,6 +143,41 @@ class PostgresCheckpointerSpec
     pool.isClosed shouldBe true
   }
 
+  it should "store JSON with non-ASCII escaped, read a row 1.0.0 wrote unescaped, and refuse unstorable text (#3097)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = PostgresSchema.Tables(config.schema)
+    val thread = ThreadId(s"escaped-${java.util.UUID.randomUUID()}")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    val c1 = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "c1",
+      None,
+      thread.value,
+      "rün",
+      CheckpointStatus.Running,
+      Instant.parse("2026-11-27T12:00:00Z"),
+      GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false),
+      None,
+      Some(token)
+    )
+    store.commit(thread, Commit(token, Some(c1), Vector.empty, Vector.empty)).value
+    PgCheckpointerDb.scalar(s"SELECT checkpoint_json FROM ${t.threads} WHERE thread_id = '${thread.value}'")(
+      _.getString(1)
+    ) should include("\\u00fc")
+    // 1.0.0's form, UTF-8 as it is, still reads
+    PgCheckpointerDb.execute(
+      s"UPDATE ${t.threads} SET checkpoint_json = replace(checkpoint_json, '\\u00fc', 'ü') WHERE thread_id = '${thread.value}'"
+    )
+    store.latest(thread).value.value.checkpoint shouldBe c1
+    // text the server cannot hold is refused before it is sent, with a ValidationError rather than a driver error
+    store.runQueue
+      .submit(Submission(ThreadId("nul\u0000"), AgentId.unsafe("a"), QueuedInput.query("q")))
+      .left
+      .value shouldBe a[org.llm4s.error.ValidationError]
+    store.close()
+  }
+
   it should "refuse a running store's writes once a newer build has migrated the schema, reads still answered (#3090)" in {
     val config = fresh()
     val store  = PgCheckpointerDb.store(config)

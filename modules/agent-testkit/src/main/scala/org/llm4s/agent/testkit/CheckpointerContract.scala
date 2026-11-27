@@ -463,6 +463,53 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(s.store.latest(s.thread).value.value, StoredCheckpoint(checkpoint, Vector(write)))
   }
 
+  it should "read back text holding an unpaired surrogate, a NUL and a control character exactly (#3097)" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    // a tool result cut in the middle of an emoji, and a NUL, inside the content: stored as escapes, never as `?`
+    val text  = "cut \uD83D, lone \uDC00, nul \u0000, bell \u0007, emoji \uD83D\uDE00"
+    val value = VersionedJson(1, ujson.Obj("text" -> text))
+    val checkpoint = s
+      .checkpoint("c1", None)
+      .withSnapshot(
+        GraphSnapshot(
+          "g",
+          "v1",
+          "f",
+          0,
+          Map("log" -> value),
+          Vector.empty,
+          Vector.empty,
+          Vector.empty,
+          Vector.empty,
+          false
+        )
+      )
+    val write = PendingWrite("c1", "1.0", "n", Vector(EncodedOperation.Update("log", value)), Vector.empty)
+    val draft = EventDraft("run", Some("c1"), None, None, start, RunEvent.Custom("text", 1, ujson.Obj("text" -> text)))
+    s.commit(token, Some(checkpoint), Vector(write), Vector(draft)).value
+    s.reopened()
+    same(s.store.latest(s.thread).value.value, StoredCheckpoint(checkpoint, Vector(write)))
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.event) shouldBe Vector(draft.event)
+  }
+
+  it should "refuse an id holding a NUL or an unpaired surrogate, storing nothing (#3097)" in {
+    val s = Store()
+    for bad <- Vector("a\u0000b", "a\uD800", "\uDC00a") do
+      s.claim("run", on = ThreadId(bad)).refused shouldBe a[ValidationError]
+      s.claim(bad).refused shouldBe a[ValidationError]
+      s.claim("run", on = newThread(), tenant = Some(bad)).refused shouldBe a[ValidationError]
+    // a paired surrogate is ordinary text
+    val emoji = ThreadId(s"${s.thread.value}-\uD83D\uDE00")
+    val token = s.claim("run", on = emoji).value.token
+    s.commit(token, Some(s.checkpoint("c\u0000", None, on = emoji)), on = emoji).refused shouldBe a[ValidationError]
+    s.commit(token, Some(s.checkpoint("c1", None, on = emoji, runId = "r\uD800")), on = emoji).refused shouldBe
+      a[ValidationError]
+    s.latestId(emoji) shouldBe None
+    s.commit(token, Some(s.checkpoint("c1", None, on = emoji)), on = emoji).value
+    s.latestId(emoji) shouldBe Some("c1")
+  }
+
   // ---- the event log ----
 
   it should "page events after a sequence, ascending, at most `limit` at a time" in {

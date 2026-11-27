@@ -115,7 +115,11 @@ final class PostgresCheckpointer private (
 
   // ---- claims ----
 
-  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
+  // an id this store cannot store exactly is refused before anything is read (#3097)
+  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] =
+    StorableText.ofClaim(threadId, request).toLeft(()).flatMap(_ => claimStorable(threadId, request))
+
+  private def claimStorable(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
     val current = lockOrCreate(c, threadId)
     val now     = clockNow(c)
     current.claim.filter(live => now.isBefore(live.expiresAt)) match
@@ -156,7 +160,10 @@ final class PostgresCheckpointer private (
 
   // ---- data ----
 
-  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
+  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+    StorableText.ofCommit(threadId, commit).toLeft(()).flatMap(_ => commitStorable(threadId, commit))
+
+  private def commitStorable(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
     val rows     = lockRows(c, threadId +: commit.fence.map(_._1).toVector)
     val current  = rows.get(threadId)
     val latestId = current.flatMap(_.checkpointId)
@@ -232,12 +239,16 @@ final class PostgresCheckpointer private (
             record.taskId.value,
             record.lineage,
             commit.token.value,
-            ujson.write(EffectRecord.toJson(record))
+            ujson.write(EffectRecord.toJson(record), escapeUnicode = true)
           )
         }
         val stored = commit.events.zipWithIndex.map { (draft, i) =>
           val seq = row.nextSeq + i
-          (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
+          (
+            seq,
+            draft,
+            upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft), escapeUnicode = true)
+          )
         }
         if stored.nonEmpty then
           Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
@@ -263,7 +274,7 @@ final class PostgresCheckpointer private (
     committedAt: Instant,
     checkpoint: Checkpoint
   ): Unit =
-    val json = ujson.write(Checkpoint.toJson(checkpoint))
+    val json = ujson.write(Checkpoint.toJson(checkpoint), escapeUnicode = true)
     // no checkpoint yet means a new thread under the id (a tombstone's, or none); a retraction below empties the
     // history but leaves the thread the same one
     val fresh = row.checkpointId.isEmpty
@@ -847,6 +858,12 @@ final class PostgresCheckpointer private (
           if !returned then discard(c)
           outcome.toEither.left.map { e =>
             if aborted then failure(operation, timedOut(timeout), Some(e))
+            else if e.isInstanceOf[UnstorableText] then
+              val unstorable = e.asInstanceOf[UnstorableText]
+              ValidationError(
+                s"postgres-checkpointer.$operation",
+                s"parameter ${unstorable.index} ${unstorable.problem}"
+              )
             else if newerSchema(e).isDefined then
               GraphError.UnsupportedStoreSchema(
                 PostgresSchema.description(config.schema),
@@ -946,7 +963,13 @@ final class PostgresCheckpointer private (
       val first = query(c, Sql.nextWritePosition(t), threadId.value)(_.getLong(1)).head
       Using.resource(c.prepareStatement(Sql.insertWrite(t))) { insert =>
         writes.zipWithIndex.foreach { (write, i) =>
-          bind(insert, threadId.value, first + i, write.checkpointId, upickle.default.write(write))
+          bind(
+            insert,
+            threadId.value,
+            first + i,
+            write.checkpointId,
+            upickle.default.write(write, escapeUnicode = true)
+          )
           insert.addBatch()
         }
         insert.executeBatch(): Unit
@@ -1276,6 +1299,10 @@ object PostgresCheckpointer:
       .map(name => s"SET LOCAL $name = $millis")
       .mkString("; ")
 
+  /** A bound text this store refuses to send, and why (#3097): see `StorableText`. */
+  final private[postgres] case class UnstorableText(index: Int, problem: String)
+      extends RuntimeException(s"parameter $index $problem", null, false, false)
+
   /** The SQLSTATE [[schemaGuard]] raises for a schema newer than this build's. */
   private[postgres] val NewerSchemaState: String = "LL4S1"
 
@@ -1361,9 +1388,11 @@ object PostgresCheckpointer:
     }
 
   private def bind1(statement: PreparedStatement, index: Int, value: Any): Unit = value match
-    case s: String   => statement.setString(index, s)
-    case l: Long     => statement.setLong(index, l)
-    case i: Int      => statement.setInt(index, i)
+    // text the server would refuse (NUL) or the driver would change (an unpaired surrogate) is never sent (#3097)
+    case s: String if StorableText.problem(s).isDefined => throw UnstorableText(index, StorableText.problem(s).get)
+    case s: String                                      => statement.setString(index, s)
+    case l: Long                                        => statement.setLong(index, l)
+    case i: Int                                         => statement.setInt(index, i)
     case at: Instant => statement.setObject(index, OffsetDateTime.ofInstant(at, ZoneOffset.UTC))
     case a: Array[String] =>
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))

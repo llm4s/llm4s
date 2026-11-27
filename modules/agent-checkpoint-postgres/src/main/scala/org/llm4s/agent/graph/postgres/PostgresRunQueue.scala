@@ -103,7 +103,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             submission.threadId.value,
             submission.agentId.value,
             submission.tenantId.map(_.value),
-            ujson.write(QueuedInput.toJson(submission.input)),
+            ujson.write(QueuedInput.toJson(submission.input), escapeUnicode = true),
             submission.policy.toString,
             java.lang.Boolean.valueOf(submission.policy == BusyThreadPolicy.Interrupt),
             scope,
@@ -119,7 +119,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   }
 
   private def setStop(c: Connection, id: Long, request: StopRequest): Unit =
-    update(c, Sql.setQueueStop(t), ujson.write(StopRequest.toJson(request)), id)
+    update(c, Sql.setQueueStop(t), ujson.write(StopRequest.toJson(request), escapeUnicode = true), id)
 
   private def same(row: Raw, submission: Submission): Boolean =
     row.threadId == submission.threadId.value && row.agentId == submission.agentId.value &&
@@ -408,7 +408,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       if untaken.isDefined then Sql.closeUntakenQueueEntry(t)
       else if unstarted then Sql.closeUnstartedQueueEntry(t)
       else Sql.closeQueueEntry(t)
-    val params = Vector(outcome.state, ujson.write(EntryOutcome.toJson(outcome)), micros(at), id) ++ untaken.toVector
+    val params = Vector(outcome.state, ujson.write(EntryOutcome.toJson(outcome), escapeUnicode = true), micros(at), id) ++ untaken.toVector
     val closed = updated(c, sql, params*) > 0
     if closed then
       withdrawing.foreach { thread =>
