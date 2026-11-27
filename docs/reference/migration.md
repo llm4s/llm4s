@@ -133,7 +133,8 @@ source break, and three behaviour changes:
 [a cut-off answer ends `Truncated`, Anthropic's `max_tokens` default, and reported penalties](#a-cut-off-answer-ends-truncated-anthropics-max_tokens-default-and-reported-penalties-2933).
 After 1.0.0, [an `openai` section on api.openai.com uses the Responses API](#an-openai-section-on-apiopenaicom-uses-the-responses-api-2900),
 and, in the Experimental `llm4s-schema-derivation`,
-[an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951).
+[an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951);
+in the Beta `llm4s-bedrock`, [web-identity, assume-role and SSO credentials load](#bedrock-loads-web-identity-assume-role-and-sso-credentials-3127).
 
 ## An `openai` section on api.openai.com uses the Responses API (#2900)
 
@@ -245,6 +246,18 @@ was silently ignored, so the field was described by its name. An argument that i
 `val` that is not `final`, a `final val` with a declared type, an `f"..."` interpolation) now fails to compile where
 the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
 (`final val Limit = 750`, without `: Int`), or write the text out.
+
+## Bedrock loads web-identity, assume-role and SSO credentials (#3127)
+
+`llm4s-bedrock` is Beta. It now brings the AWS SDK's `sts`, `sso` and `ssooidc` modules. The SDK loads three
+credential sources through them reflectively, and skipped each one silently while they were missing, unless another
+dependency (such as `llm4s-rag`) brought `sts` in.
+
+| Before (1.0.0) | After |
+|---|---|
+| On EKS with IRSA (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`) the default chain skipped web identity and could use the node's instance role | The pod's service-account role is used. Grant it `bedrock:InvokeModel` (and `InvokeModelWithResponseStream`) if the node role had it instead |
+| A `profile` with `role_arn` or SSO settings failed at the first call | It authenticates as that role or SSO user |
+| `close()` left the profile or default credentials provider open | `close()` closes it |
 
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 

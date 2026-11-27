@@ -28,7 +28,9 @@ describes `main`.
 
 Bedrock has **no single API key**: it authenticates with AWS credentials. When no explicit credentials or
 profile are specified in the section, the AWS SDK default credential chain is used (environment variables
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `~/.aws/credentials`, EC2 instance profile, ECS task role).
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, web identity (EKS IRSA), `~/.aws` profiles including `role_arn` and
+SSO, ECS task role, EC2 instance profile). The module brings the SDK's `sts`, `sso` and `ssooidc` modules, which
+the SDK needs for web identity, assume-role and SSO.
 Therefore, there is no `llm4s.credentials.bedrock` block.
 
 A minimal section needs only `provider`, `model`, and `region`:

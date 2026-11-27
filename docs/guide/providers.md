@@ -848,8 +848,13 @@ llm4s.providers.claude-bedrock {
 
 **Credentials.** Bedrock has no API key: it authenticates with AWS credentials, so there is no
 `llm4s.credentials.bedrock` block and no `apiKey`. The section's explicit `accessKeyId` and `secretAccessKey` are
-used when it sets them; otherwise its `profile`; otherwise the AWS SDK's default credential chain (environment
-variables, `~/.aws/credentials`, an EC2 instance profile, an ECS task role).
+used when it sets them; otherwise its `profile`; otherwise the AWS SDK's default credential chain. These sources
+work, in the chain's order: the `aws.accessKeyId` system properties and the `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` variables; web identity (EKS IRSA: `AWS_WEB_IDENTITY_TOKEN_FILE` and
+`AWS_ROLE_ARN`); a profile in `~/.aws/config` and `~/.aws/credentials`, including `role_arn` (assume-role),
+`credential_process` and SSO (`sso_session`, `sso_start_url`) profiles; an ECS task role; an EC2 instance profile.
+`llm4s-bedrock` brings the SDK's `sts`, `sso` and `ssooidc` modules for web identity, assume-role and SSO; without
+them the SDK skips those sources silently.
 
 | Key | Required | Meaning |
 |---|---|---|

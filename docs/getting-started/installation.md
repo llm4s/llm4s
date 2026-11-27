@@ -515,8 +515,8 @@ llm4s.providers.claude-bedrock {
 }
 ```
 
-Credentials come from the AWS default credential chain (environment variables, `~/.aws`, an
-instance or task role), or from a `profile`, or from explicit `accessKeyId` / `secretAccessKey`
+Credentials come from the AWS default credential chain (environment variables, web identity (EKS
+IRSA), `~/.aws` profiles including `role_arn` and SSO, an instance or task role), or from a `profile`, or from explicit `accessKeyId` / `secretAccessKey`
 (plus `sessionToken` for temporary credentials).
 
 ### For Voyage AI embeddings

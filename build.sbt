@@ -1475,7 +1475,9 @@ lazy val voyage = (project in file("modules/providers/voyage"))
 
 // AWS Bedrock chat (#1008): rebuilt from #1029 as a `ProviderDescriptor` over the Bedrock Converse
 // and ConverseStream APIs. It takes the AWS SDK v2 `bedrockruntime` artifact (Apache-2.0, the same
-// SDK release train as `llm4s-rag`'s S3 client) and nothing else; core gains no dependency.
+// SDK release train as `llm4s-rag`'s S3 client); core gains no dependency. `sts`, `sso` and `ssooidc`
+// are there because the SDK loads web-identity (IRSA), `role_arn` and SSO credentials through them
+// reflectively and silently skips those sources without them (#3127).
 
 lazy val bedrock = (project in file("modules/providers/bedrock"))
   .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
@@ -1491,6 +1493,9 @@ lazy val bedrock = (project in file("modules/providers/bedrock"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.awsBedrockRuntime,
+      Deps.awsSts,
+      Deps.awsSso,
+      Deps.awsSsoOidc,
       Deps.ujson,
       Deps.scalatest % Test,
       Deps.scalamock % Test

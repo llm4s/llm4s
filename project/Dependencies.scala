@@ -302,6 +302,9 @@ object Deps {
   val awsS3             = "software.amazon.awssdk" % "s3"             % Versions.awsSdk
   val awsSts            = "software.amazon.awssdk" % "sts"            % Versions.awsSdk
   val awsBedrockRuntime = "software.amazon.awssdk" % "bedrockruntime" % Versions.awsSdk
+  // The AWS SDK loads SSO profiles and their token refresh through these reflectively (#3127).
+  val awsSso     = "software.amazon.awssdk" % "sso"     % Versions.awsSdk
+  val awsSsoOidc = "software.amazon.awssdk" % "ssooidc" % Versions.awsSdk
 
   // Jlama: in-process inference for llm4s-jlama (#2284)
   val jlamaCore = "com.github.tjake" % "jlama-core" % Versions.jlama
