@@ -31,6 +31,20 @@ class SQLiteFilePermissionsSpec extends AnyFlatSpec with Matchers with BeforeAnd
     got shouldBe "rw-------"
   }
 
+  it should "create the file sqlite-jdbc opens when the path carries URL parameters" in {
+    assume(PrivateSqliteFile.supportsPosix(dir), "the file system has no POSIX permissions (Windows)")
+    // a pragma is taken out of the name; a parameter sqlite-jdbc does not know stays in it
+    val withPragma =
+      SQLiteMemoryStore(s"${dir.resolve("pragma.db")}?journal_mode=WAL").fold(e => fail(e.message), identity)
+    val withOther = SQLiteMemoryStore(s"${dir.resolve("store")}?tenant=alice").fold(e => fail(e.message), identity)
+    val modes     = Seq("pragma.db", "store?tenant=alice").map(name => mode(dir.resolve(name)))
+    val stray     = Files.exists(dir.resolve("store"))
+    withPragma.close()
+    withOther.close()
+    modes shouldBe Seq("rw-------", "rw-------")
+    stray shouldBe false
+  }
+
   "VectorMemoryStore" should "create its database file readable only by its owner" in {
     assume(PrivateSqliteFile.supportsPosix(dir), "the file system has no POSIX permissions (Windows)")
     val db    = dir.resolve("vectors.db")

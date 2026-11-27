@@ -123,7 +123,7 @@ object SQLiteDocumentRegistry {
   private def open(dbPath: String, url: String): Result[SQLiteDocumentRegistry] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      PrivateSqliteFile.prepare(dbPath)
+      PrivateSqliteFile.prepare(dbPath, org.llm4s.vectorstore.SQLiteVectorStore.JdbcPragmas)
       val connection = DriverManager.getConnection(url)
       val created = Try {
         Using.resource(connection.createStatement()) { stmt =>

@@ -564,6 +564,10 @@ final class SQLiteVectorStore private (
 
 object SQLiteVectorStore {
 
+  /** sqlite-jdbc's pragma names: the URL parameters it takes out of a file name (#3087). */
+  private[llm4s] val JdbcPragmas: Set[String] =
+    org.sqlite.SQLiteConfig.Pragma.values.iterator.map(_.pragmaName).toSet
+
   /**
    * Create a file-based SQLite vector store.
    *
@@ -573,7 +577,7 @@ object SQLiteVectorStore {
   def apply(dbPath: String): Result[SQLiteVectorStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      PrivateSqliteFile.prepare(dbPath)
+      PrivateSqliteFile.prepare(dbPath, JdbcPragmas)
       val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
       openOn(dbPath, connection)
     }.toEither.left.map(e => ProcessingError("sqlite-vector-store", s"Failed to create store: ${e.getMessage}"))

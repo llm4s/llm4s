@@ -432,7 +432,7 @@ object SQLiteKeywordIndex {
     validateTableName(tableName).flatMap { validatedTableName =>
       Try {
         Class.forName("org.sqlite.JDBC")
-        PrivateSqliteFile.prepare(path)
+        PrivateSqliteFile.prepare(path, SQLiteVectorStore.JdbcPragmas)
         val connection = DriverManager.getConnection(s"jdbc:sqlite:$path")
         new SQLiteKeywordIndex(connection, validatedTableName)
       }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create index: ${e.getMessage}"))

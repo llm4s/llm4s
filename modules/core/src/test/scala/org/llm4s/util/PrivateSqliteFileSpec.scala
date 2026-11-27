@@ -19,6 +19,8 @@ class PrivateSqliteFileSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
 
   private var dir: Path = scala.compiletime.uninitialized
 
+  private val pragmas = Set("journal_mode", "busy_timeout")
+
   override def beforeEach(): Unit = dir = Files.createTempDirectory("llm4s-private-sqlite")
 
   override def afterEach(): Unit =
@@ -94,16 +96,35 @@ class PrivateSqliteFileSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     Files.exists(db.getParent) shouldBe false
   }
 
-  "PrivateSqliteFile.prepare(dbPath)" should "create the file a plain jdbc:sqlite URL names, without its settings" in {
+  "PrivateSqliteFile.jdbcFileName" should "name the file as sqlite-jdbc does: pragmas removed, other parameters kept" in {
+    PrivateSqliteFile.jdbcFileName("/d/s.db", pragmas) shouldBe Some("/d/s.db")
+    PrivateSqliteFile.jdbcFileName("/d/s.db?journal_mode=WAL", pragmas) shouldBe Some("/d/s.db")
+    PrivateSqliteFile.jdbcFileName("/d/s.db?Journal_Mode=WAL&&busy_timeout=5", pragmas) shouldBe Some("/d/s.db")
+    PrivateSqliteFile.jdbcFileName("/d/store?tenant=alice", pragmas) shouldBe Some("/d/store?tenant=alice")
+    // sqlite-jdbc keeps the parameters it does not know in reverse order
+    PrivateSqliteFile.jdbcFileName("/d/s?a=1&journal_mode=WAL&b=2", pragmas) shouldBe Some("/d/s?b=2&a=1")
+    PrivateSqliteFile.jdbcFileName("/d/s.db?", pragmas) shouldBe Some("/d/s.db")
+    PrivateSqliteFile.jdbcFileName("/d/s.db?=", pragmas) shouldBe None
+  }
+
+  "PrivateSqliteFile.prepare(dbPath)" should "create the file sqlite-jdbc opens, without the pragmas it takes out" in {
     assume(posix, "the file system has no POSIX permissions (Windows)")
     val db = dir.resolve("plain.db")
-    PrivateSqliteFile.prepare(s"$db?journal_mode=WAL")
+    PrivateSqliteFile.prepare(s"$db?journal_mode=WAL", pragmas)
     mode(db) shouldBe "rw-------"
     Using.resource(Files.list(dir))(_.count()) shouldBe 1L
   }
 
-  it should "create nothing for an in-memory or temporary database or a file: URI" in {
-    Seq(":memory:", "", s"file:${dir.resolve("uri.db")}").foreach(p => PrivateSqliteFile.prepare(p))
+  it should "create a file whose name keeps a parameter sqlite-jdbc does not know" in {
+    assume(posix, "the file system has no POSIX permissions (Windows)")
+    PrivateSqliteFile.prepare(s"${dir.resolve("store")}?tenant=alice", pragmas)
+    mode(dir.resolve("store?tenant=alice")) shouldBe "rw-------"
+    Files.exists(dir.resolve("store")) shouldBe false
+  }
+
+  it should "create nothing for an in-memory, temporary or class-path database or a file: URI" in {
+    Seq(":memory:", "", s"file:${dir.resolve("uri.db")}", ":resource:x.db", s"${dir.resolve("m")}?mode=memory")
+      .foreach(p => PrivateSqliteFile.prepare(p, pragmas))
     Using.resource(Files.list(dir))(_.count()) shouldBe 0L
   }
 }

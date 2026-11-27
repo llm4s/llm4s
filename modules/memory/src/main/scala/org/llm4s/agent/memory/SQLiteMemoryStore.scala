@@ -563,6 +563,10 @@ final class SQLiteMemoryStore private (
 
 object SQLiteMemoryStore {
 
+  /** sqlite-jdbc's pragma names: the URL parameters it takes out of a file name (#3087). */
+  private[memory] val JdbcPragmas: Set[String] =
+    org.sqlite.SQLiteConfig.Pragma.values.iterator.map(_.pragmaName).toSet
+
   /**
    * Create a new SQLite memory store.
    *
@@ -587,7 +591,7 @@ object SQLiteMemoryStore {
   ): Result[SQLiteMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      PrivateSqliteFile.prepare(dbPath)
+      PrivateSqliteFile.prepare(dbPath, JdbcPragmas)
       val connection = connect(dbPath)
       // If setting up the schema fails (e.g. the file is not a database) the connection must not leak: an open
       // handle keeps the file locked, which blocks deleting it on Windows.

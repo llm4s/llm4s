@@ -40,13 +40,36 @@ private[llm4s] object PrivateSqliteFile:
   )
 
   /**
-   * [[prepare]] for a store opened by a plain `jdbc:sqlite:<dbPath>` URL. Nothing happens for an in-memory
-   * (`:memory:`) or temporary (empty) database, or a `file:` URI; connection settings after a `?` are not part of
-   * the file's name.
+   * [[prepare]] for a store opened by a plain `jdbc:sqlite:<dbPath>` URL, on the file sqlite-jdbc opens for it
+   * ([[jdbcFileName]]); `pragmaNames` is sqlite-jdbc's `SQLiteConfig.Pragma` names, which core cannot see. Nothing
+   * happens for an in-memory (`:memory:`, `mode=memory`), temporary (empty) or class-path (`:resource:`) database,
+   * or a `file:` URI.
    */
-  def prepare(dbPath: String): Unit =
-    val file = dbPath.takeWhile(_ != '?')
-    if file.nonEmpty && !file.startsWith(":") && !file.startsWith("file:") then Try(Paths.get(file)).foreach(prepare)
+  def prepare(dbPath: String, pragmaNames: Set[String]): Unit =
+    jdbcFileName(dbPath, pragmaNames)
+      .filter(name =>
+        name.nonEmpty && name != ":memory:" && !name.startsWith(":resource:") && !name.startsWith("file:") &&
+          !name.contains("mode=memory")
+      )
+      .flatMap(name => Try(Paths.get(name)).toOption)
+      .foreach(path => prepare(path))
+
+  /**
+   * The file name sqlite-jdbc (3.53.2.0, `SQLiteConnection.extractPragmasFromFilename`) opens for `jdbc:sqlite:<dbPath>`:
+   * each `&`-separated parameter after the first `?` whose key is a pragma is removed, and the others stay in the
+   * name, in reverse order, as `?b&a`. `None` when a parameter has no key, which sqlite-jdbc fails to open.
+   */
+  def jdbcFileName(dbPath: String, pragmaNames: Set[String]): Option[String] =
+    dbPath.indexOf('?') match
+      case -1 => Some(dbPath)
+      case delimiter =>
+        val parameters =
+          dbPath.substring(delimiter + 1).split("&").reverseIterator.map(_.trim).filter(_.nonEmpty).toVector
+        val keys = parameters.map(_.split("=").headOption.map(_.trim.toLowerCase))
+        Option.when(keys.forall(_.isDefined)) {
+          val kept = parameters.zip(keys.flatten).collect { case (parameter, key) if !pragmaNames(key) => parameter }
+          dbPath.substring(0, delimiter) + (if kept.isEmpty then "" else kept.mkString("?", "&", ""))
+        }
 
   /** Creates the database file at `path` owner-only if it is missing, else warns if it is shared (see above). */
   def prepare(path: Path): Unit =
