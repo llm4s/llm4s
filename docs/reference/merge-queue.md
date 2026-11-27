@@ -9,6 +9,7 @@ redirect_from:
   - /reference/merge-queue
   - /reference/merge-queue.html
 cites_closed_issues: [1638]
+cites_open_issues: [3183, 3185, 3186]
 ---
 
 # Protecting `main` from merge skew
@@ -38,6 +39,11 @@ linked: merge `main` into your branch (`git merge --signoff origin/main`), fix t
 
 ## For maintainers: enabling it
 
+**Where it stands (2026-11-27, [#3183](https://github.com/llm4s/llm4s/issues/3183)):** `protect-main` is active with the three required checks below and
+**Require branches to be up to date** off, so no pull request merges with a red or missing `All Tests Pass`, a DCO
+failure or a secret-scan failure. The merge queue (step 3) is not enabled yet: it waits for selective pull request
+runs ([#3185](https://github.com/llm4s/llm4s/issues/3185), [#3186](https://github.com/llm4s/llm4s/issues/3186)), after which the queue is where everything runs before a merge.
+
 This is a repository setting, so it needs an admin; the workflows are ready for it. Two options, which can be used in
 sequence.
 
@@ -57,9 +63,9 @@ trigger, if a required job or anything it needs would be skipped on a merge grou
 
 To enable it:
 
-1. Settings, Rules, Rulesets, `protect-main` (it exists, targets the default branch, and is currently
-   **disabled**): set Enforcement status to **Active**. Keep its `deletion` and `non_fast_forward` rules.
-2. Add **Require status checks to pass**, with the three checks above. Choose GitHub Actions as their source.
+1. Settings, Rules, Rulesets, `protect-main` (it targets the default branch): Enforcement status **Active**, with
+   its `deletion` and `non_fast_forward` rules. Done.
+2. **Require status checks to pass**, with the three checks above (done). Choose GitHub Actions as their source.
    Do not add `OSV-Scanner` (it is path-filtered, so most pull requests never report it), Codecov's statuses (they are
    informational here and are not guaranteed to report on a merge group) or the `DCO` GitHub App's check (it is not known to report on merge groups; the
    workflow's `Check DCO sign-off` covers the same rule).
@@ -89,5 +95,4 @@ It needs nothing from the workflows and can be switched on at once. The cost is 
 open pull request needs "Update branch" and another full CI run (about 20 minutes) before it can merge, so it scales
 poorly at dozens of merges a day. Use it as a stopgap and replace it with the queue (Option 1).
 
-Either way, enabling `protect-main` with required status checks is the prerequisite: while it is disabled, nothing is
-required of a pull request before it merges.
+Either way, `protect-main` with required status checks is the prerequisite; it is in place.
