@@ -41,6 +41,12 @@ import scala.util.chaining.scalaUtilChainingOps
  * lookup attempts a fresh connection.  A refresh that is only cancelled (the thread was interrupted)
  * keeps the client and the tools already fetched.
  *
+ * == Reconnects ==
+ * A tool the registry hands out finds its server's current tool when it is called, so one an agent
+ * took when it was built (`AgentBuilder.withTools(registry)`) follows a reconnect, a `closeMCPClients()`
+ * and the cache TTL. A lost session or a restarted server is recovered by the client itself, which
+ * runs the handshake again (see [[MCPClientImpl]]).
+ *
  * == Lifecycle ==
  * Implements `AutoCloseable`; call `close()` (or use `Using.resource`) to
  * shut down all active MCP transport connections.
@@ -152,20 +158,42 @@ class MCPToolRegistry(
     mcpServers.flatMap(getToolsFromServer)
 
   // Get tools from a specific server (with caching)
-  private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_]] = {
+  private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_]] =
+    currentEntry(server).map(_.tools).getOrElse(Seq.empty)
+
+  // The server's cache entry, refreshed first when it is stale or belongs to a client the registry no longer holds
+  // (closed by closeMCPClients, or evicted after a failure): its tools call through that client.
+  private def currentEntry(server: MCPServerConfig): Option[CachedTools] = {
     val now = System.currentTimeMillis()
     Option(toolCache.get(server.name)) match {
-      case Some(cached) if !cached.isExpired(now, cacheTTL) =>
+      case Some(cached) if !cached.isExpired(now, cacheTTL) && (mcpClients.get(server.name) eq cached.client) =>
         logger.debug(s"Cache hit for server ${server.name}, returning ${cached.tools.size} cached tools")
-        cached.tools
+        Some(cached)
       case Some(_) =>
-        logger.debug(s"Cache expired for server ${server.name}, refreshing tools")
-        refreshToolsFromServer(server, now)
+        logger.debug(s"Cache for server ${server.name} is stale or its client was closed, refreshing tools")
+        refreshToolsFromServer(server, now): Unit
+        Option(toolCache.get(server.name))
       case None =>
         logger.debug(s"No cache entry for server ${server.name}, fetching tools")
-        refreshToolsFromServer(server, now)
+        refreshToolsFromServer(server, now): Unit
+        Option(toolCache.get(server.name))
     }
   }
+
+  /**
+   * `tool` as the registry hands it out (#3072): its handler finds the server's tool of that name when it is
+   * called, through [[currentEntry]], so a tool an agent took when it was built follows a reconnect and the cache
+   * TTL instead of calling through the client of that moment for good.
+   */
+  private def followingReconnects[R](server: MCPServerConfig, tool: ToolFunction[R]): ToolFunction[R] =
+    tool.withHandler { params =>
+      currentEntry(server).flatMap(_.raw.find(_.name == tool.name)) match {
+        // The same server's tool of the same name, from the same client implementation: the same result type.
+        case Some(current) => current.asInstanceOf[ToolFunction[R]].handler(params)
+        case None =>
+          Left(ToolHandlerError.failed(s"MCP server ${server.name} no longer offers the tool ${tool.name}"))
+      }
+    }
 
   // Refresh tools from server and update cache
   private def refreshToolsFromServer(server: MCPServerConfig, timestamp: Long): Seq[ToolFunction[_]] = {
@@ -175,10 +203,11 @@ class MCPToolRegistry(
         logger.trace("{}", ex.getStackTrace)
         SimpleError(ex.getMessage): LLMError
       }
-      tools <- client.getTools()
+      raw <- client.getTools()
     } yield {
-      logger.debug(s"Successfully refreshed ${tools.size} tools from server ${server.name}")
-      toolCache.put(server.name, CachedTools(tools, timestamp))
+      logger.debug(s"Successfully refreshed ${raw.size} tools from server ${server.name}")
+      val tools = raw.map(tool => followingReconnects(server, tool))
+      toolCache.put(server.name, CachedTools(tools, raw, client, timestamp))
       tools
     }
     result.left.foreach {
@@ -339,7 +368,13 @@ object MCPToolRegistry {
 }
 
 // Helper case class for cleaner caching
-private case class CachedTools(tools: Seq[ToolFunction[_]], timestamp: Long) {
+// `tools` are what the registry hands out; `raw` the client's own, which call through `client`.
+private case class CachedTools(
+  tools: Seq[ToolFunction[_]],
+  raw: Seq[ToolFunction[_]],
+  client: MCPClient,
+  timestamp: Long
+) {
   def isExpired(now: Long, ttl: FiniteDuration): Boolean =
     (now - timestamp) >= ttl.toMillis
 }

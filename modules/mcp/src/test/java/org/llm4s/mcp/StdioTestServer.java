@@ -43,6 +43,8 @@ import java.util.regex.Pattern;
  *   <li>{@code --stderr-endless} - on the first request, write 1 MB to stderr with no newline, starting
  *       with a {@code "api_key":"} value and ending {@code tail-SENTINEL}, then exit 1.</li>
  *   <li>{@code --exit=N} - exit N at once.</li>
+ *   <li>{@code --require-init} - answer any request before the first {@code initialize} with a JSON-RPC error, as
+ *       a server that has not been through the handshake does.</li>
  * </ul>
  * Lines are read with {@code readLine}, so CRLF and LF both work; replies end in {@code \n}.
  */
@@ -56,10 +58,11 @@ public final class StdioTestServer {
     Map<String, String> replies = new LinkedHashMap<>();
     boolean ready = false, hello = false, hang = false, exitAfterRead = false, flood = false;
     int delay = 0, stderrKb = 0;
-    boolean dieAfterStderr = false, secretLine = false, endless = false;
+    boolean dieAfterStderr = false, secretLine = false, endless = false, requireInit = false;
     String pidFile = null, gotFile = null;
     for (String a : args) {
       if (a.equals("--ready")) ready = true;
+      else if (a.equals("--require-init")) requireInit = true;
       else if (a.equals("--hello")) hello = true;
       else if (a.equals("--hang")) hang = true;
       else if (a.equals("--exit-after-read")) exitAfterRead = true;
@@ -109,6 +112,7 @@ public final class StdioTestServer {
     }
     String line;
     boolean stderrWritten = false;
+    boolean initialized = false;
     while ((line = in.readLine()) != null) {
       Matcher id = ID.matcher(line);
       if (!id.find()) continue;
@@ -140,6 +144,13 @@ public final class StdioTestServer {
       }
       Matcher method = METHOD.matcher(line);
       String m = method.find() ? method.group(1) : "";
+      if (m.equals("initialize")) initialized = true;
+      else if (requireInit && !initialized) {
+        out.print("{\"jsonrpc\":\"2.0\",\"id\":\"" + id.group(1)
+            + "\",\"error\":{\"code\":-32002,\"message\":\"Server not initialized\"}}\n");
+        out.flush();
+        continue;
+      }
       String reply = replies.containsKey(m) ? replies.get(m) : replies.get("any");
       if (reply == null) continue;
       if (delay > 0) Thread.sleep(ThreadLocalRandom.current().nextInt(delay));

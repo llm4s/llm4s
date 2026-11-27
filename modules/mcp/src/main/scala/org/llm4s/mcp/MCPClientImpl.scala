@@ -26,6 +26,12 @@ import scala.util.{ Failure, Success, Try }
  * "the server could not be reached". An interrupted call returns `Left(CancelledError)` with the thread's
  * interrupt flag still set (design section 4.4).
  *
+ * == Lost sessions ==
+ * When a Streamable HTTP or HTTP+SSE server answers 404 for the client's session (it expired, or the server
+ * restarted), or a stdio server's process has exited and been started again, the client runs the handshake again
+ * and retries the request once (#3072). Only those requests are retried: the server refused them or never
+ * received them, so none had run. A request that failed in any other way may have run and is never re-sent.
+ *
  * == Thread safety ==
  * This class is not thread-safe. Concurrent calls to `initialize`, `getTools`,
  * or `close` from different threads require external synchronisation.
@@ -216,6 +222,25 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private var isTransportInitialized = false
 
   /**
+   * Sends the request `newRequest` builds on `transportImpl`; when the server's session is gone (#3072), runs the
+   * handshake again on the same transport and sends a fresh request once more. Only an [[MCPSessionLost]] is
+   * retried: the server refused that request or never received it, so it did not run. Any other failure, which a
+   * request that may have run can end in, is returned as it is.
+   */
+  private def sendRecovering(
+    transportImpl: MCPTransportImpl,
+    newRequest: () => JsonRpcRequest
+  ): Result[JsonRpcResponse] =
+    transportImpl.sendRequest(newRequest()) match {
+      case Left(lost: MCPSessionLost) =>
+        logger.warn(s"MCP server ${config.name}: ${lost.message}; running the handshake again and retrying once")
+        initialized = false
+        isTransportInitialized = false
+        initialize().flatMap(_ => transportImpl.sendRequest(newRequest()))
+      case other => other
+    }
+
+  /**
    * Retrieves all tools advertised by the MCP server, converting them to
    * `ToolFunction` instances that the agent framework can invoke.
    *
@@ -250,8 +275,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_]]] = {
     val result = for {
-      request    <- MCPClientImpl.listRequest.copy(id = generateId()).asRight[LLMError]
-      response   <- transportImpl.sendRequest(request)
+      response   <- sendRecovering(transportImpl, () => MCPClientImpl.listRequest.copy(id = generateId()))
       toolsValue <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
       tools      <- parseTools(toolsValue)
     } yield tools
@@ -415,7 +439,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private def createMCPToolHandler(toolName: String): SafeParameterExtractor => Either[String, Value] = { params =>
     transport match {
       case Some(transportImpl) =>
-        val callRequest = JsonRpcRequest(
+        def callRequest() = JsonRpcRequest(
           jsonrpc = "2.0",
           id = generateId(),
           method = "tools/call", // method value for executing a specific tool
@@ -427,7 +451,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
           }
         )
 
-        transportImpl.sendRequest(callRequest) match {
+        sendRecovering(transportImpl, () => callRequest()) match {
           case Right(response) =>
             response.result match {
               case Some(result) =>
