@@ -190,15 +190,11 @@ final case class InMemoryStore private (
     memories: Seq[Memory],
     topK: Int
   ): Result[Seq[ScoredMemory]] = {
-    val phrases = KeywordTokens.queryPhrases(query).map(KeywordTokens.words).filter(_.nonEmpty).distinct
+    val phrases = KeywordTokens.searchPhrases(query)
 
     if (phrases.isEmpty) Right(Seq.empty)
     else {
-      val scored = memories.map { memory =>
-        val words   = KeywordTokens.words(memory.content)
-        val matched = phrases.count(phrase => words.containsSlice(phrase))
-        ScoredMemory(memory, matched.toDouble / phrases.size)
-      }
+      val scored = memories.map(memory => ScoredMemory(memory, KeywordTokens.score(phrases, memory.content)))
 
       Right(
         scored

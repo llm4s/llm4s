@@ -246,6 +246,28 @@ was silently ignored, so the field was described by its name. An argument that i
 the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
 (`final val Limit = 750`, without `: Int`), or write the text out.
 
+## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
+
+`llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.
+
+| Before (1.0.0) | After |
+|---|---|
+| `PostgresMemoryStore` and `InMemoryStore.withEmbeddingService` stored a memory's embedding only if the caller set it, so what a `MemoryManager` or `SemanticMemoryMiddleware` recorded was never found by similarity | Given an `EmbeddingService`, both embed every memory they write without an embedding (`store`, `storeAll`, `replace`, `applyAtomically`), and `update` embeds again when it changes the content. A failed embedding call is a `Left` and nothing is written |
+| `PostgresMemoryStore.search` without an `EmbeddingService` returned the newest memories with score 0, whatever the query | A keyword search, scored as `InMemoryStore` scores it; no match is an empty result |
+| `Not(MinImportance(x))`, `Not(ByEntity(e))` and `Not(ByMetadata(k, v))` left out memories without the importance or the key, in `recall`, `count` and `deleteMatching` | They are kept, as `MemoryFilter.matches` keeps them |
+| `HasMetadata`, `MetadataContains`, `ContentContains` and `Custom` were refused with `Unsupported filter`, and `ByMetadata` with a key outside `[a-zA-Z_][a-zA-Z0-9_]*` with `Invalid metadata key` | Every filter and any key is accepted |
+| `PostgresMemoryStore` and `VectorMemoryStore` wrote `MemoryType.Custom("Report")` as `Report` and read it back lower-cased, `Custom("report")`; `Custom("task")` came back as `Task` | A custom type is written as `custom:Report` and read back unchanged. Rows already written as `Report` read back as `Custom("Report")`, and `ByType` finds them under either spelling |
+
+Memories stored in a `PostgresMemoryStore` before this change have no embedding unless you set one, so vector search
+does not return them. Embed them once, with the store opened with its `EmbeddingService`:
+
+```scala
+store.embedAll() // Result[Int]: how many memories were embedded
+```
+
+A store without an `EmbeddingService` now reads every row a filter narrows to for `search`; give it one, or a narrow
+filter, on a large table. See [Postgres Memory Store](postgres-memory-store#search).
+
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;

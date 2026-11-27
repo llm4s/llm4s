@@ -82,7 +82,41 @@ class EmbeddingMemoryStoreSpec extends AnyFlatSpec with Matchers {
       retrieved <- updated.get(memory.id)
     } yield retrieved
 
-    result shouldBe Right(Some(memory))
+    // Stored with the embedding the store computed for it (#3030)
+    result.map(_.map(_.copy(embedding = None))) shouldBe Right(Some(memory))
+    result.toOption.flatten.flatMap(_.embedding).map(_.toSeq) shouldBe Some(Seq(1f, 0f, 0f))
+  }
+
+  it should "embed what it stores, so a memory recorded through a manager is found by similarity (#3030)" in {
+    val service = createMockService()
+    val manager = SimpleMemoryManager.withStore(EmbeddingMemoryStore.empty(service))
+    val result = for {
+      m1 <- manager.recordUserFact("Prefers Scala", Some("user-1"), Some(0.9))
+      embedded = m1.store.asInstanceOf[EmbeddingMemoryStore].all.forall(_.isEmbedded)
+      // A query sharing no word with the memory: only similarity can find it
+      context <- m1.getRelevantContext("favourite language")
+    } yield (embedded, context)
+    result.map(_._1) shouldBe Right(true)
+    result.map(_._2).toOption.get should include("Prefers Scala")
+  }
+
+  it should "embed every memory storeAll stores, and store none if embedding fails" in {
+    val memories = Seq(createMemory("one"), createMemory("two").withEmbedding(Array(0f, 1f, 0f)))
+    val stored   = EmbeddingMemoryStore.empty(createMockService()).storeAll(memories).toOption.get
+    stored.asInstanceOf[EmbeddingMemoryStore].all.forall(_.isEmbedded) shouldBe true
+    stored.get(memories(1).id).toOption.flatten.flatMap(_.embedding).map(_.toSeq) shouldBe Some(Seq(0f, 1f, 0f))
+
+    EmbeddingMemoryStore.empty(createFailingService()).storeAll(memories).isLeft shouldBe true
+  }
+
+  it should "embed a memory again when update changes its content" in {
+    val memory = createMemory("before").withEmbedding(Array(0f, 0f, 1f))
+    val result = for {
+      s1      <- EmbeddingMemoryStore.empty(createMockService()).store(memory)
+      s2      <- s1.update(memory.id, _.copy(content = "after"))
+      updated <- s2.get(memory.id)
+    } yield updated
+    result.toOption.flatten.flatMap(_.embedding).map(_.toSeq) shouldBe Some(Seq(1f, 0f, 0f))
   }
 
   it should "return None for non-existent memory ID" in {
@@ -221,10 +255,10 @@ class EmbeddingMemoryStoreSpec extends AnyFlatSpec with Matchers {
     val memory1 = createMemory("Scala is a programming language")
     val memory2 = createMemory("Java runs on the JVM")
 
+    // Memories already in the wrapped store, never embedded
     val result = for {
-      s1     <- EmbeddingMemoryStore.empty(service).store(memory1)
-      s2     <- s1.store(memory2)
-      scored <- s2.search("Scala", topK = 10)
+      inner  <- InMemoryStore.withMemories(Seq(memory1, memory2))
+      scored <- EmbeddingMemoryStore(inner, service).search("Scala", topK = 10)
     } yield scored
 
     result.isRight shouldBe true

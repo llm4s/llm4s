@@ -7,7 +7,8 @@ import org.llm4s.types.Result
  *
  * This wrapper implements the decorator pattern - it delegates all standard operations
  * to the inner store while overriding `search()` to use vector similarity when embeddings
- * are available.
+ * are available. It embeds every memory it stores without an embedding, and a memory whose content an `update`
+ * changes, so what is recorded through a [[MemoryManager]] is found by similarity.
  *
  * Binary Compatibility Note:
  * This class was extracted from InMemoryStore to preserve the original case class signature
@@ -21,11 +22,21 @@ final class EmbeddingMemoryStore private (
   embeddingService: EmbeddingService
 ) extends MemoryStore {
 
+  /** Store `memory`, embedding it first if it has no embedding: a memory without one is never found by similarity. */
   override def store(memory: Memory): Result[MemoryStore] =
-    inner.store(memory).map {
-      case updated: InMemoryStore => new EmbeddingMemoryStore(updated, embeddingService)
-      case other                  => other
-    }
+    embedded(Seq(memory)).flatMap(ms => inner.store(ms.head)).map(rewrap)
+
+  /** Store `memories`, embedding those without an embedding first, in batches; none is stored if embedding fails. */
+  override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
+    embedded(memories).flatMap(inner.storeAll).map(rewrap)
+
+  private def embedded(memories: Seq[Memory]): Result[Seq[Memory]] =
+    MemoryEmbeddings.embedMissing(embeddingService, memories, "embedding-memory-store")
+
+  private def rewrap(store: MemoryStore): MemoryStore = store match {
+    case updated: InMemoryStore => new EmbeddingMemoryStore(updated, embeddingService)
+    case other                  => other
+  }
 
   override def get(id: MemoryId): Result[Option[Memory]] =
     inner.get(id)
@@ -68,10 +79,14 @@ final class EmbeddingMemoryStore private (
       case other                  => other
     }
 
+  /** Update a memory; one whose content changes is embedded again, unless `updateFn` gave it a new embedding. */
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
-    inner.update(id, updateFn).map {
-      case updated: InMemoryStore => new EmbeddingMemoryStore(updated, embeddingService)
-      case other                  => other
+    inner.get(id).flatMap {
+      case scala.None => inner.update(id, updateFn).map(rewrap) // the inner store reports the missing memory
+      case Some(existing) =>
+        embedded(Seq(MemoryEmbeddings.afterUpdate(existing, updateFn(existing))))
+          .flatMap(ms => inner.update(id, _ => ms.head))
+          .map(rewrap)
     }
 
   override def count(filter: MemoryFilter): Result[Long] =

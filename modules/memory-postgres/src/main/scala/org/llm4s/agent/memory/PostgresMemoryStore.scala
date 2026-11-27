@@ -9,8 +9,11 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
 import java.sql.{ BatchUpdateException, Connection, PreparedStatement, ResultSet, Timestamp }
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
+import scala.collection.mutable
 import scala.util.{ Try, Using }
 
 /**
@@ -72,23 +75,35 @@ final class PostgresMemoryStore private[memory] (
 
   /** Stores `add`, then deletes `remove`, in one transaction. */
   override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
-    Try {
-      withConnection { conn =>
-        inTransaction(conn) {
-          writeAll(conn, add)
-          deleteIds(conn, remove)
+    embedMissing(add).flatMap { adds =>
+      Try {
+        withConnection { conn =>
+          inTransaction(conn) {
+            writeAll(conn, adds)
+            deleteIds(conn, remove)
+          }
         }
-      }
-      this
-    }.toEither.left.map(e =>
-      ProcessingError(
-        "postgres-memory-store",
-        s"Failed to replace memories: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(PostgresMemoryStore.writeCause(e))
+        this
+      }.toEither.left.map(e =>
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to replace memories: ${PostgresMemoryStore.writeFailure(e)}",
+          cause = Some(PostgresMemoryStore.writeCause(e))
+        )
       )
-    )
+    }
 
   override def applyAtomically(
+    key: AppliedWriteKey,
+    token: Long,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    bounds: MemoryBounds
+  ): Result[(TransactionalMemoryStore, AppliedWrite)] =
+    // Embedded before the transaction, so no embedding request runs while the table's advisory lock is held
+    embedMissing(add).flatMap(embedded => applyEmbedded(key, token, embedded, remove, bounds))
+
+  private def applyEmbedded(
     key: AppliedWriteKey,
     token: Long,
     add: Seq[Memory],
@@ -244,35 +259,51 @@ final class PostgresMemoryStore private[memory] (
       }
     }
 
+  /** Store `memory`, embedding it first when it has no embedding and the store has an embedding service. */
   override def store(memory: Memory): Result[MemoryStore] =
-    Try {
-      withConnection(conn => writeAll(conn, Seq(memory)))
-      this
-    }.toEither.left.map(e =>
-      ProcessingError(
-        "postgres-memory-store",
-        s"Failed to store memory: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(PostgresMemoryStore.writeCause(e))
+    embedMissing(Seq(memory)).flatMap { embedded =>
+      Try {
+        withConnection(conn => writeAll(conn, embedded))
+        this
+      }.toEither.left.map(e =>
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to store memory: ${PostgresMemoryStore.writeFailure(e)}",
+          cause = Some(PostgresMemoryStore.writeCause(e))
+        )
       )
+    }
+
+  /**
+   * `memories` with every missing embedding computed by the embedding service, in `embedBatch` calls of at most
+   * [[VectorMemoryStore.EmbeddingBatchSize]] texts; unchanged without a service. A memory stored without an
+   * embedding is never found by vector search.
+   */
+  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] =
+    embeddingService.fold[Result[Seq[Memory]]](Right(memories))(service =>
+      MemoryEmbeddings.embedMissing(service, memories, "postgres-memory-store")
     )
 
   /**
    * Store `memories` in one transaction, on one pooled connection: all of them are stored or, if any write fails,
    * none is. The rows go to the server as JDBC batches of at most `WriteBatchSize` (1000), not one
    * round trip each, and a memory whose id appears twice is written once, as its last occurrence - so a data source
-   * with pgjdbc's `reWriteBatchedInserts=true` can fold a batch into one multi-row insert.
+   * with pgjdbc's `reWriteBatchedInserts=true` can fold a batch into one multi-row insert. With an embedding service,
+   * every memory without an embedding is embedded first; if that fails, none is stored.
    */
   override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
-    Try {
-      if (memories.nonEmpty) withConnection(conn => inTransaction(conn)(writeAll(conn, memories)))
-      this
-    }.toEither.left.map(e =>
-      ProcessingError(
-        "postgres-memory-store",
-        s"Failed to store memories: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(PostgresMemoryStore.writeCause(e))
+    embedMissing(memories).flatMap { embedded =>
+      Try {
+        if (embedded.nonEmpty) withConnection(conn => inTransaction(conn)(writeAll(conn, embedded)))
+        this
+      }.toEither.left.map(e =>
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to store memories: ${PostgresMemoryStore.writeFailure(e)}",
+          cause = Some(PostgresMemoryStore.writeCause(e))
+        )
       )
-    )
+    }
 
   /**
    * Upsert `memories` with one prepared statement, sent as JDBC batches of at most
@@ -306,7 +337,7 @@ final class PostgresMemoryStore private[memory] (
   private def addRow(stmt: PreparedStatement, memory: Memory): Unit = {
     stmt.setString(1, memory.id.value)
     stmt.setString(2, memory.content)
-    stmt.setString(3, memory.memoryType.name)
+    stmt.setString(3, MemoryTypeCodec.encode(memory.memoryType))
     stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
     stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
 
@@ -361,46 +392,64 @@ final class PostgresMemoryStore private[memory] (
       )
       .flatMap(identity)
 
-  override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
-    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
-      Try {
-        withConnection { conn =>
-          val sql = s"SELECT * FROM $tableName WHERE $whereClause ORDER BY created_at DESC LIMIT ?"
+  /**
+   * The columns a row is read with when it is read only to decide `filter`: the embedding only if a `Custom` predicate
+   * may look at it, so a filtered count or delete neither reads nor decodes a vector per row.
+   */
+  private def columnsFor(filter: MemoryFilter): String =
+    if (FilterSupport.readsEmbedding(filter)) "*" else PostgresMemoryStore.ColumnsWithoutEmbedding
 
-          Using.resource(conn.prepareStatement(sql)) { stmt =>
-            params.zipWithIndex.foreach { case (param, idx) =>
-              setParameter(stmt, idx + 1, param)
-            }
-            setParameter(stmt, params.size + 1, SqlParam.PInt(limit))
-
-            Using.resource(stmt.executeQuery()) { rs =>
-              val buffer                  = scala.collection.mutable.ArrayBuffer.empty[Memory]
-              var error: Option[LLMError] = None
-
-              while (rs.next() && error.isEmpty)
-                rowToMemory(rs) match {
-                  case Right(m) => buffer += m
-                  case Left(e)  => error = Some(e)
-                }
-
-              error match {
-                case Some(e) => Left(e)
-                case None    => Right(buffer.toSeq)
-              }
-            }
-          }
-        }
-      }.toEither.left
-        .map[LLMError](e =>
-          ProcessingError(
-            "postgres-memory-store",
-            s"Failed to recall memories: ${Redaction.scrubKnown(e.getMessage)}",
-            cause = Some(e)
-          )
-        )
-        .flatMap(identity)
+  /**
+   * Run `sql` with `params` on `conn` and hand `read` its rows. With `stream`, the rows are fetched
+   * [[PostgresMemoryStore.FetchSize]] at a time, which pgjdbc does only inside a transaction: the caller runs it in
+   * one.
+   */
+  private def runQuery[A](conn: Connection, sql: String, params: Seq[Any], stream: Boolean)(
+    read: Iterator[ResultSet] => A
+  ): A =
+    Using.resource(conn.prepareStatement(sql)) { stmt =>
+      params.zipWithIndex.foreach { case (param, idx) => setParameter(stmt, idx + 1, param) }
+      if (stream) stmt.setFetchSize(PostgresMemoryStore.FetchSize)
+      Using.resource(stmt.executeQuery())(rs => read(Iterator.continually(rs).takeWhile(_.next())))
     }
 
+  /** `body`, with an exception thrown on the way turned into a `ProcessingError` that starts with `failure`. */
+  private def attempt[A](failure: String)(body: => Result[A]): Result[A] =
+    Try(body).toEither.left
+      .map[LLMError](e =>
+        ProcessingError("postgres-memory-store", s"$failure: ${Redaction.scrubKnown(e.getMessage)}", cause = Some(e))
+      )
+      .flatMap(identity)
+
+  /**
+   * The newest memories `filter` accepts, at most `limit`. SQL narrows, `matches` decides (`FilterSupport`): when the
+   * SQL is exact the database applies the limit; otherwise the narrowed rows are streamed newest first and the limit
+   * applies to those `matches` accepts.
+   */
+  override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
+    attempt("Failed to recall memories") {
+      val plan = PostgresMemoryStore.narrowing(filter)
+      withConnection { conn =>
+        if (plan.needsMatches)
+          inTransaction(conn) {
+            val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            runQuery(conn, sql, plan.params, stream = true) { rows =>
+              PostgresMemoryStore.firstN(rows.map(rowToMemory(_)).filter(_.forall(filter.matches)), limit)
+            }
+          }
+        else {
+          val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC LIMIT ?"
+          runQuery(conn, sql, plan.params :+ SqlParam.PInt(limit), stream = false) { rows =>
+            PostgresMemoryStore.firstN(rows.map(rowToMemory(_)), Int.MaxValue)
+          }
+        }
+      }
+    }
+
+  /**
+   * With an embedding service, the `topK` memories `filter` accepts nearest to `query`'s embedding (memories without an
+   * embedding are not candidates). Without one, a keyword search, scored as `InMemoryStore` scores it.
+   */
   override def search(
     query: String,
     topK: Int,
@@ -416,7 +465,7 @@ final class PostgresMemoryStore private[memory] (
           }
         }
       case None =>
-        recall(filter, topK).map(memories => memories.map(m => ScoredMemory(m, 0.0)))
+        keywordSearch(query, topK, filter)
     }
 
   private def performVectorSearch(
@@ -424,64 +473,66 @@ final class PostgresMemoryStore private[memory] (
     topK: Int,
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
-    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
-      Try {
-        withConnection { conn =>
-          val sql =
-            s"""
-               |SELECT *,
-               |       1 - (embedding <=> ?::vector) AS similarity
-               |FROM $tableName
-               |WHERE $whereClause AND embedding IS NOT NULL
-               |ORDER BY embedding <=> ?::vector
-               |LIMIT ?
-             """.stripMargin
+    attempt("Vector search failed") {
+      val plan       = PostgresMemoryStore.narrowing(filter)
+      val conditions = (plan.sql.map(s => s"(${s.clause})").toSeq :+ "embedding IS NOT NULL").mkString(" AND ")
+      val vectorStr  = PostgresVectorHelpers.embeddingToString(queryVector)
+      val sql =
+        s"""
+           |SELECT *,
+           |       1 - (embedding <=> ?::vector) AS similarity
+           |FROM $tableName
+           |WHERE $conditions
+           |ORDER BY embedding <=> ?::vector""".stripMargin
+      val params = (SqlParam.PString(vectorStr) +: plan.params) :+ SqlParam.PString(vectorStr)
 
-          Using.resource(conn.prepareStatement(sql)) { stmt =>
-            val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
+      def scored(rows: Iterator[ResultSet]): Iterator[Result[ScoredMemory]] =
+        rows.map(rs =>
+          rowToMemory(rs).map(memory => ScoredMemory(memory, math.max(0.0, math.min(1.0, rs.getDouble("similarity")))))
+        )
 
-            stmt.setString(1, vectorStr)
-
-            params.zipWithIndex.foreach { case (param, idx) =>
-              setParameter(stmt, idx + 2, param)
+      withConnection { conn =>
+        if (plan.needsMatches)
+          // `matches` decides, so topK applies after it: stream the nearest first and keep the first topK it accepts
+          inTransaction(conn) {
+            runQuery(conn, sql, params, stream = true) { rows =>
+              PostgresMemoryStore.firstN(scored(rows).filter(_.forall(sm => filter.matches(sm.memory))), topK)
             }
+          }
+        else
+          runQuery(conn, s"$sql\nLIMIT ?", params :+ SqlParam.PInt(topK), stream = false) { rows =>
+            PostgresMemoryStore.firstN(scored(rows), Int.MaxValue)
+          }
+      }
+    }
 
-            stmt.setString(params.size + 2, vectorStr)
-            stmt.setInt(params.size + 3, topK)
-
-            Using.resource(stmt.executeQuery()) { rs =>
-              val results                 = scala.collection.mutable.ArrayBuffer.empty[ScoredMemory]
-              var error: Option[LLMError] = None
-
-              while (rs.next() && error.isEmpty)
-                rowToMemory(rs) match {
-                  case Right(memory) =>
-                    val score = rs.getDouble("similarity")
-                    results += ScoredMemory(
-                      memory,
-                      math.max(0.0, math.min(1.0, score))
-                    )
-                  case Left(e) =>
-                    error = Some(e)
-                }
-
-              error match {
-                case Some(e) => Left(e)
-                case None    => Right(results.toSeq)
-              }
+  /**
+   * Keyword search, for a store without an embedding service. A memory's score is the share of the query's phrases
+   * that occur in it as whole words (`KeywordTokens`), exactly as `InMemoryStore` scores it, so both stores find the
+   * same memories; ties go to the newer memory. Every row `filter` narrows to is read, so on a large table give the
+   * store an embedding service, or a narrow filter.
+   */
+  private def keywordSearch(text: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] = {
+    val phrases = KeywordTokens.searchPhrases(text)
+    if (phrases.isEmpty || topK <= 0) Right(Seq.empty)
+    else
+      attempt("Keyword search failed") {
+        val plan = PostgresMemoryStore.narrowing(filter)
+        withConnection { conn =>
+          inTransaction(conn) {
+            val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            runQuery(conn, sql, plan.params, stream = true) { rows =>
+              val memories = rows.map(rowToMemory(_))
+              PostgresMemoryStore.topScored(
+                if (plan.needsMatches) memories.filter(_.forall(filter.matches)) else memories,
+                phrases,
+                topK
+              )
             }
           }
         }
-      }.toEither.left
-        .map[LLMError](e =>
-          ProcessingError(
-            "postgres-memory-store",
-            s"Vector search failed: ${Redaction.scrubKnown(e.getMessage)}",
-            cause = Some(e)
-          )
-        )
-        .flatMap(identity)
-    }
+      }
+  }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
@@ -500,36 +551,50 @@ final class PostgresMemoryStore private[memory] (
       )
     )
 
+  /**
+   * Delete every memory `filter` accepts. When the SQL is exact one `DELETE` does it; otherwise the narrowed rows are
+   * read and those `matches` accepts are deleted by id, in the same transaction.
+   */
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
-    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
-      Try {
-        withConnection { conn =>
-          val sql = s"DELETE FROM $tableName WHERE $whereClause"
-
-          Using.resource(conn.prepareStatement(sql)) { stmt =>
-            params.zipWithIndex.foreach { case (param, idx) =>
-              setParameter(stmt, idx + 1, param)
-            }
-            stmt.executeUpdate()
+    attempt("Failed to delete matching memories") {
+      val plan = PostgresMemoryStore.narrowing(filter)
+      withConnection { conn =>
+        if (plan.needsMatches)
+          inTransaction(conn) {
+            val sql = s"SELECT ${columnsFor(filter)} FROM $tableName ${plan.where}"
+            runQuery(conn, sql, plan.params, stream = true) { rows =>
+              val memories = rows.map(rowToMemory(_, withEmbedding = FilterSupport.readsEmbedding(filter)))
+              PostgresMemoryStore.firstN(memories.filter(_.forall(filter.matches)).map(_.map(_.id)), Int.MaxValue)
+            }.map(ids => deleteAll(conn, ids))
           }
-        }
-        this
-      }.toEither.left.map(e =>
-        ProcessingError(
-          "postgres-memory-store",
-          s"Failed to delete matching memories: ${Redaction.scrubKnown(e.getMessage)}",
-          cause = Some(e)
-        )
-      )
+        else
+          Using.resource(conn.prepareStatement(s"DELETE FROM $tableName ${plan.where}")) { stmt =>
+            plan.params.zipWithIndex.foreach { case (param, idx) => setParameter(stmt, idx + 1, param) }
+            Right(stmt.executeUpdate())
+          }
+      }.map(_ => this)
     }
 
+  /** Delete `ids`, [[PostgresMemoryStore.WriteBatchSize]] at a time. The caller supplies the transaction. */
+  private def deleteAll(conn: Connection, ids: Seq[MemoryId]): Unit =
+    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ANY(?)")) { stmt =>
+      ids.grouped(PostgresMemoryStore.WriteBatchSize).foreach { chunk =>
+        stmt.setArray(1, conn.createArrayOf("text", chunk.map(_.value).toArray[AnyRef]))
+        stmt.executeUpdate(): Unit
+      }
+    }
+
+  /**
+   * Update a memory, guarded by its version. When the content changes and `updateFn` left the embedding as it was, the
+   * embedding - computed for the old content - is dropped, and computed again if the store has an embedding service.
+   */
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     getVersioned(id).flatMap {
       case Some(VersionedMemory(existing, version)) =>
-        val updated = updateFn(existing)
-        Try {
-          withConnection { conn =>
-            val sql = s"""
+        embedMissing(Seq(MemoryEmbeddings.afterUpdate(existing, updateFn(existing)))).map(_.head).flatMap { updated =>
+          Try {
+            withConnection { conn =>
+              val sql = s"""
               UPDATE $tableName SET
                 content = ?,
                 memory_type = ?,
@@ -540,74 +605,136 @@ final class PostgresMemoryStore private[memory] (
                 version = ?
               WHERE id = ? AND version = ?
             """
-            Using.resource(conn.prepareStatement(sql)) { stmt =>
-              stmt.setString(1, updated.content)
-              stmt.setString(2, updated.memoryType.name)
-              stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
-              stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
+              Using.resource(conn.prepareStatement(sql)) { stmt =>
+                stmt.setString(1, updated.content)
+                stmt.setString(2, MemoryTypeCodec.encode(updated.memoryType))
+                stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
+                stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
 
-              updated.importance match {
-                case Some(v) => stmt.setDouble(5, v)
-                case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+                updated.importance match {
+                  case Some(v) => stmt.setDouble(5, v)
+                  case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+                }
+
+                updated.embedding match {
+                  case Some(vec) => stmt.setString(6, PostgresVectorHelpers.embeddingToString(vec))
+                  case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
+                }
+
+                stmt.setLong(7, version + 1)
+                stmt.setString(8, id.value)
+                stmt.setLong(9, version)
+                stmt.executeUpdate()
               }
-
-              updated.embedding match {
-                case Some(vec) => stmt.setString(6, PostgresVectorHelpers.embeddingToString(vec))
-                case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
-              }
-
-              stmt.setLong(7, version + 1)
-              stmt.setString(8, id.value)
-              stmt.setLong(9, version)
-              stmt.executeUpdate()
             }
-          }
-        }.toEither.left
-          .map(e =>
-            ProcessingError(
-              "postgres-memory-store",
-              s"Failed to update memory: ${Redaction.scrubKnown(e.getMessage)}",
-              cause = Some(e)
-            )
-          )
-          .flatMap { rowsAffected =>
-            if (rowsAffected == 0)
-              Left(
-                OptimisticLockFailure(
-                  s"Concurrent modification detected for memory: ${id.value}",
-                  id.value,
-                  version
-                )
+          }.toEither.left
+            .map(e =>
+              ProcessingError(
+                "postgres-memory-store",
+                s"Failed to update memory: ${Redaction.scrubKnown(e.getMessage)}",
+                cause = Some(e)
               )
-            else
-              Right(this)
-          }
+            )
+            .flatMap { rowsAffected =>
+              if (rowsAffected == 0)
+                Left(
+                  OptimisticLockFailure(
+                    s"Concurrent modification detected for memory: ${id.value}",
+                    id.value,
+                    version
+                  )
+                )
+              else
+                Right(this)
+            }
+        }
       case None => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
     }
 
+  /** How many memories `filter` accepts: `COUNT(*)` when the SQL is exact, otherwise the narrowed rows `matches` accepts. */
   override def count(filter: MemoryFilter): Result[Long] =
-    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
-      Try {
-        withConnection { conn =>
-          val sql = s"SELECT COUNT(*) FROM $tableName WHERE $whereClause"
-
-          Using.resource(conn.prepareStatement(sql)) { stmt =>
-            params.zipWithIndex.foreach { case (param, idx) =>
-              setParameter(stmt, idx + 1, param)
-            }
-            Using.resource(stmt.executeQuery()) { rs =>
-              rs.next()
-              rs.getLong(1)
+    attempt("Failed to count memories") {
+      val plan = PostgresMemoryStore.narrowing(filter)
+      withConnection { conn =>
+        if (plan.needsMatches)
+          inTransaction(conn) {
+            val sql = s"SELECT ${columnsFor(filter)} FROM $tableName ${plan.where}"
+            runQuery(conn, sql, plan.params, stream = true) { rows =>
+              val memories = rows.map(rowToMemory(_, withEmbedding = FilterSupport.readsEmbedding(filter)))
+              PostgresMemoryStore.countMatching(memories, filter)
             }
           }
-        }
-      }.toEither.left.map(e =>
-        ProcessingError(
-          "postgres-memory-store",
-          s"Failed to count memories: ${Redaction.scrubKnown(e.getMessage)}",
-          cause = Some(e)
-        )
-      )
+        else
+          runQuery(conn, s"SELECT COUNT(*) FROM $tableName ${plan.where}", plan.params, stream = false) { rows =>
+            Right(rows.next().getLong(1))
+          }
+      }
+    }
+
+  /**
+   * Embed every stored memory that has no embedding, `batchSize` at a time, and return how many were embedded: rows
+   * written before this store embedded what it stores, or by another writer, are otherwise never found by vector
+   * search. Needs an embedding service. A memory whose content changes meanwhile is left for its own write to embed.
+   */
+  def embedAll(batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] =
+    embeddingService match {
+      case None =>
+        Left(ProcessingError("postgres-memory-store", "embedAll needs a store with an embedding service"))
+      case Some(_) if batchSize <= 0 =>
+        Left(ProcessingError("postgres-memory-store", s"embedAll needs a positive batch size, got $batchSize"))
+      case Some(service) =>
+        def unembedded(after: Option[String]): Result[Vector[(String, String)]] =
+          attempt("Failed to read memories to embed") {
+            val sql = s"SELECT id, content FROM $tableName WHERE embedding IS NULL" +
+              after.fold("")(_ => " AND id > ?") + " ORDER BY id LIMIT ?"
+            withConnection { conn =>
+              runQuery(conn, sql, after.map(SqlParam.PString(_)).toSeq :+ SqlParam.PInt(batchSize), stream = false) {
+                rows => Right(rows.map(rs => rs.getString(1) -> rs.getString(2)).toVector)
+              }
+            }
+          }
+
+        def write(rows: Vector[(String, String)], embeddings: Seq[Array[Float]]): Result[Int] =
+          attempt("Failed to store embeddings") {
+            withConnection { conn =>
+              inTransaction(conn) {
+                val sql =
+                  s"UPDATE $tableName SET embedding = ?::vector WHERE id = ? AND content = ? AND embedding IS NULL"
+                Using.resource(conn.prepareStatement(sql)) { stmt =>
+                  rows.zip(embeddings).foreach { case ((id, content), embedding) =>
+                    stmt.setString(1, PostgresVectorHelpers.embeddingToString(embedding))
+                    stmt.setString(2, id)
+                    stmt.setString(3, content)
+                    stmt.addBatch()
+                  }
+                  Right(stmt.executeBatch().count(_ != 0))
+                }
+              }
+            }
+          }
+
+        // Keyset pagination by id: every row is visited once, whatever the embedding service answers
+        @scala.annotation.tailrec
+        def loop(after: Option[String], total: Int): Result[Int] =
+          unembedded(after).flatMap { rows =>
+            if (rows.isEmpty) Right(Vector.empty -> 0)
+            else
+              MemoryEmbeddings
+                .embedMissing(
+                  service,
+                  rows.map { case (id, content) => Memory(MemoryId(id), content, MemoryType.Task) },
+                  "postgres-memory-store",
+                  batchSize
+                )
+                .flatMap(embedded => write(rows, embedded.flatMap(_.embedding)))
+                .map(rows -> _)
+          } match {
+            case Left(e)                          => Left(e)
+            case Right((rows, _)) if rows.isEmpty => Right(total)
+            case Right((rows, n))                 => loop(Some(rows.last._1), total + n)
+          }
+
+        loop(None, 0)
     }
 
   override def clear(): Result[MemoryStore] =
@@ -662,18 +789,21 @@ final class PostgresMemoryStore private[memory] (
   private def withConnection[A](f: Connection => A): A =
     Using.resource(dataSource.getConnection)(f)
 
-  private def rowToMemory(rs: ResultSet): Result[Memory] = {
-    val embeddingStr = rs.getString("embedding")
-
+  /** The memory in the current row of `rs`; without `withEmbedding`, the row was read without its embedding column. */
+  private def rowToMemory(rs: ResultSet, withEmbedding: Boolean = true): Result[Memory] = {
     val embeddingResult =
-      if (embeddingStr == null) Right(None)
-      else PostgresVectorHelpers.stringToEmbedding(embeddingStr).map(Some(_))
+      if (!withEmbedding) Right(None)
+      else {
+        val embeddingStr = rs.getString("embedding")
+        if (embeddingStr == null) Right(None)
+        else PostgresVectorHelpers.stringToEmbedding(embeddingStr).map(Some(_))
+      }
 
     embeddingResult.map { embedding =>
       Memory(
         id = MemoryId(rs.getString("id")),
         content = rs.getString("content"),
-        memoryType = MemoryType.fromString(rs.getString("memory_type")),
+        memoryType = MemoryTypeCodec.decode(rs.getString("memory_type")),
         metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata")),
         timestamp = rs.getTimestamp("created_at").toInstant,
         importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
@@ -682,7 +812,7 @@ final class PostgresMemoryStore private[memory] (
     }
   }
 
-  private def setParameter(stmt: PreparedStatement, index: Int, value: SqlParam): Unit = value match {
+  private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
     case SqlParam.PString(s)    => stmt.setString(index, s)
     case SqlParam.PInt(i)       => stmt.setInt(index, i)
     case SqlParam.PLong(l)      => stmt.setLong(index, l)
@@ -691,6 +821,7 @@ final class PostgresMemoryStore private[memory] (
     case SqlParam.PTimestamp(t) => stmt.setTimestamp(index, t)
     case SqlParam.PNullDouble   => stmt.setNull(index, java.sql.Types.DOUBLE)
     case SqlParam.PNullVector   => stmt.setNull(index, java.sql.Types.OTHER, "vector")
+    case other                  => stmt.setObject(index, other)
   }
 }
 
@@ -732,20 +863,7 @@ object PostgresMemoryStore {
    * At most 55 characters, so every name the store derives from it - `<table>_applied`, `<table>_fences` and the
    * `idx_<table>_...` indexes - stays distinct within PostgreSQL's 63-byte identifier limit, which truncates silently.
    */
-  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,54}$".r
-  private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
-
-  /** Helper for binary filter composition (And/Or) */
-  private def composeBinary(
-    left: MemoryFilter,
-    right: MemoryFilter,
-    operator: String
-  ): Result[(String, Seq[SqlParam])] =
-    filterToSql(left).flatMap { case (leftSql, leftParams) =>
-      filterToSql(right).map { case (rightSql, rightParams) =>
-        (s"($leftSql $operator $rightSql)", leftParams ++ rightParams)
-      }
-    }
+  private val ValidIdentifierPattern = "^[a-zA-Z_][a-zA-Z0-9_]{0,54}$".r
 
   final case class Config(
     host: String = "localhost",
@@ -833,63 +951,161 @@ object PostgresMemoryStore {
     else
       initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false))
 
-  private[memory] def filterToSql(filter: MemoryFilter): Result[(String, Seq[SqlParam])] = filter match {
-    case MemoryFilter.All =>
-      Right("TRUE" -> Seq.empty)
+  /** How many rows a streamed read fetches per round trip, so reading a large table to decide a filter never holds it. */
+  private[memory] val FetchSize: Int = 500
 
-    case MemoryFilter.None =>
-      Right("FALSE" -> Seq.empty)
+  /** Every column `rowToMemory` reads but the embedding. */
+  private val ColumnsWithoutEmbedding = "id, content, memory_type, metadata, created_at, importance"
 
-    case MemoryFilter.ByEntity(entityId) =>
-      Right("metadata->>'entity_id' = ?" -> Seq(PString(entityId.value)))
+  /**
+   * The narrowing of `filter`: SQL narrows, `matches` decides, as in every SQL-backed store (`FilterSupport`). The
+   * condition is a superset of what `filter` accepts; when it is not also exact, the store runs `matches` on the rows
+   * it reads before any limit, count or delete.
+   */
+  private[memory] def narrowing(filter: MemoryFilter): FilterSupport.Narrowing =
+    FilterSupport.narrow(filter)(leafSql)
 
-    case MemoryFilter.ByConversation(convId) =>
-      Right("metadata->>'conversation_id' = ?" -> Seq(PString(convId)))
-
-    case MemoryFilter.ByType(memType) =>
-      Right("memory_type = ?" -> Seq(PString(memType.name)))
+  /**
+   * The SQL of one filter, when it means exactly what `matches` means: a row satisfies it if and only if `matches`
+   * accepts the memory read from the row, and it is never NULL - a NULL under `NOT` would drop a row `Not` accepts,
+   * hence the `IS NOT NULL` or `COALESCE` beside every test of a nullable value. A metadata key is a bound parameter,
+   * so any key works. A case-insensitive `ContentContains` has none: PostgreSQL's `lower()` depends on the database's
+   * collation and is not `String.toLowerCase`, so `matches` decides it.
+   */
+  private[memory] def leafSql(filter: MemoryFilter): Option[FilterSupport.Sql] = filter match {
+    case MemoryFilter.ByType(memoryType) =>
+      Some(typeIn(MemoryTypeCodec.spellings(memoryType)))
 
     case MemoryFilter.ByTypes(memoryTypes) =>
-      if (memoryTypes.isEmpty) Right("FALSE" -> Seq.empty)
-      else {
-        val sortedTypes  = memoryTypes.toSeq.sortBy(_.name)
-        val placeholders = sortedTypes.map(_ => "?").mkString(",")
-        Right(s"memory_type IN ($placeholders)" -> sortedTypes.map(t => PString(t.name)))
-      }
+      val names = memoryTypes.toSeq.flatMap(MemoryTypeCodec.spellings).distinct.sorted
+      if (names.isEmpty) Some(FilterSupport.Sql("1 = 0", Seq.empty)) else Some(typeIn(names))
 
-    case MemoryFilter.MinImportance(threshold) =>
-      Right("importance >= ?" -> Seq(PDouble(threshold)))
+    case MemoryFilter.ByEntity(entityId) =>
+      Some(metadataPair(PString("entity_id"), entityId.value))
 
-    case MemoryFilter.ByTimeRange(after, before) =>
-      val (clause, params) = (after, before) match {
-        case (Some(a), Some(b)) =>
-          ("created_at >= ? AND created_at <= ?", Seq(PTimestamp(Timestamp.from(a)), PTimestamp(Timestamp.from(b))))
-        case (Some(a), None) =>
-          ("created_at >= ?", Seq(PTimestamp(Timestamp.from(a))))
-        case (None, Some(b)) =>
-          ("created_at <= ?", Seq(PTimestamp(Timestamp.from(b))))
-        case (None, None) =>
-          ("TRUE", Seq.empty)
-      }
-      Right(clause -> params)
+    case MemoryFilter.ByConversation(conversationId) =>
+      // The literal key keeps the conversation index usable
+      Some(
+        FilterSupport.Sql(
+          "(metadata->>'conversation_id' = ? AND metadata->>'conversation_id' IS NOT NULL)",
+          Seq(PString(conversationId))
+        )
+      )
 
     case MemoryFilter.ByMetadata(key, value) =>
-      if (!ValidMetadataKeyPattern.matches(key)) {
-        Left(ProcessingError("postgres-memory-store", s"Invalid metadata key: '$key'"))
-      } else {
-        Right(s"metadata->>'$key' = ?" -> Seq(PString(value)))
+      Some(metadataPair(PString(key), value))
+
+    case MemoryFilter.HasMetadata(key) =>
+      // `->` gives JSON null, not SQL NULL, for a key whose value is null: the key is there
+      Some(FilterSupport.Sql("(metadata -> CAST(? AS text)) IS NOT NULL", Seq(PString(key))))
+
+    case MemoryFilter.MetadataContains(key, substring) =>
+      // strpos is a literal, case-sensitive substring test; LIKE would read % and _ as wildcards
+      Some(
+        FilterSupport.Sql(
+          "COALESCE(strpos(metadata ->> CAST(? AS text), ?) > 0, FALSE)",
+          Seq(PString(key), PString(substring))
+        )
+      )
+
+    case MemoryFilter.ContentContains(substring, true) =>
+      Some(FilterSupport.Sql("strpos(content, ?) > 0", Seq(PString(substring))))
+
+    case MemoryFilter.MinImportance(threshold) =>
+      // PostgreSQL orders NaN above every number, where `>=` in Scala is false for it
+      Some(
+        FilterSupport.Sql(
+          "(importance >= ? AND importance IS NOT NULL AND importance <> 'NaN'::double precision)",
+          Seq(PDouble(threshold))
+        )
+      )
+
+    case MemoryFilter.ByTimeRange(after, before) =>
+      // The column keeps microseconds: a stored time is at or after `a` exactly when it is at or after `a` rounded up
+      // to the microsecond, and at or before `b` when at or before `b` rounded down
+      val bounds =
+        after.map(a => "created_at >= ?" -> PTimestamp(Timestamp.from(ceilMicros(a)))).toSeq ++
+          before.map(b => "created_at <= ?" -> PTimestamp(Timestamp.from(floorMicros(b)))).toSeq
+      if (bounds.isEmpty) Some(FilterSupport.unrestricted)
+      else Some(FilterSupport.Sql(bounds.map(_._1).mkString(" AND "), bounds.map(_._2)))
+
+    case _ => None // ContentContains ignoring case; And, Or, Not, All, None and Custom are narrowed by FilterSupport
+  }
+
+  private def typeIn(names: Seq[String]): FilterSupport.Sql =
+    names match {
+      case Seq(only) => FilterSupport.Sql("memory_type = ?", Seq(PString(only)))
+      case _ => FilterSupport.Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names.map(PString(_)))
+    }
+
+  /** The metadata holds `key` with the string `value`: a containment test the metadata's GIN index can answer. */
+  private def metadataPair(key: PString, value: String): FilterSupport.Sql =
+    FilterSupport.Sql(
+      "(metadata IS NOT NULL AND metadata @> jsonb_build_object(CAST(? AS text), CAST(? AS text)))",
+      Seq(key, PString(value))
+    )
+
+  private def floorMicros(t: Instant): Instant = t.truncatedTo(ChronoUnit.MICROS)
+
+  private def ceilMicros(t: Instant): Instant = {
+    val floor = floorMicros(t)
+    if (floor == t) t else floor.plusNanos(1000)
+  }
+
+  /** The first `n` values of `rows`, or the first error among them. */
+  private[memory] def firstN[A](rows: Iterator[Result[A]], n: Int): Result[Vector[A]] = {
+    val out                     = Vector.newBuilder[A]
+    var taken                   = 0
+    var error: Option[LLMError] = None
+    while (error.isEmpty && taken < n && rows.hasNext)
+      rows.next() match {
+        case Right(a) =>
+          out += a
+          taken += 1
+        case Left(e) => error = Some(e)
       }
+    error.toLeft(out.result())
+  }
 
-    case MemoryFilter.And(l, r) => composeBinary(l, r, "AND")
-    case MemoryFilter.Or(l, r)  => composeBinary(l, r, "OR")
-
-    case MemoryFilter.Not(inner) =>
-      filterToSql(inner).map { case (innerSql, innerParams) =>
-        (s"NOT ($innerSql)", innerParams)
+  /** How many of `memories` `filter` accepts, or the first error among them. */
+  private def countMatching(memories: Iterator[Result[Memory]], filter: MemoryFilter): Result[Long] = {
+    var n                       = 0L
+    var error: Option[LLMError] = None
+    while (error.isEmpty && memories.hasNext)
+      memories.next() match {
+        case Right(m) => if (filter.matches(m)) n += 1
+        case Left(e)  => error = Some(e)
       }
+    error.toLeft(n)
+  }
 
-    case unsupported =>
-      Left(ProcessingError("postgres-memory-store", s"Unsupported filter: ${unsupported.getClass.getSimpleName}"))
+  /**
+   * The `topK` best keyword matches among `memories` (newest first), best first, ties to the newer; a memory that
+   * matches no phrase is left out. Only `topK` candidates are held at a time.
+   */
+  private[memory] def topScored(
+    memories: Iterator[Result[Memory]],
+    phrases: Seq[Vector[String]],
+    topK: Int
+  ): Result[Seq[ScoredMemory]] = {
+    // The head is the worst kept candidate: the lowest score, then the oldest (read last)
+    val worstFirst = Ordering.by[(Double, Int, Memory), (Double, Int)] { case (score, order, _) => (-score, order) }
+    val kept       = mutable.PriorityQueue.empty[(Double, Int, Memory)](worstFirst)
+    var order      = 0
+    var error: Option[LLMError] = None
+    while (error.isEmpty && memories.hasNext) {
+      memories.next() match {
+        case Right(memory) =>
+          val score = KeywordTokens.score(phrases, memory.content)
+          if (score > 0) {
+            kept.enqueue((score, order, memory))
+            if (kept.size > topK) kept.dequeue(): Unit
+          }
+        case Left(e) => error = Some(e)
+      }
+      order += 1
+    }
+    error.toLeft(kept.toSeq.sortBy { case (score, o, _) => (-score, o) }.map { case (s, _, m) => ScoredMemory(m, s) })
   }
 
   private[memory] def metadataToJson(metadata: Map[String, String]): String =
