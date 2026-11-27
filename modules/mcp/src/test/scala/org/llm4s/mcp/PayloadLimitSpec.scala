@@ -28,6 +28,7 @@ class PayloadLimitSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       connection.setDoOutput(true)
       // Use Expect: 100-continue to allow server to reject based on Content-Length before we send data
       connection.setRequestProperty("Expect", "100-continue")
+      connection.setRequestProperty("Content-Type", "application/json")
 
       val largeBodySize = 10 * 1024 * 1024 + 1024
       connection.setChunkedStreamingMode(4096)

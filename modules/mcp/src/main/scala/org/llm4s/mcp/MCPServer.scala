@@ -38,6 +38,14 @@ import scala.util.{ Failure, Success, Try, Using }
  * @param host    Network interface to bind to (default "127.0.0.1").
  *                Change to "0.0.0.0" (or a specific IP) only when `apiKey` is set;
  *                `start()` refuses to bind a non-loopback host without an `apiKey`.
+ * @param allowedHosts   Host names, besides the loopback ones, that a request's `Host` header may name (matched
+ *                       without its port, ignoring case), for a server reached through a known name. Empty (the
+ *                       default): a server bound to a loopback `host` serves only `localhost`, `127.0.0.1` and
+ *                       `[::1]`, which is what stops DNS rebinding; a server bound to another interface serves
+ *                       any `Host`.
+ * @param allowedOrigins Origins (`scheme://host[:port]`, ignoring case) besides the loopback ones whose browser
+ *                       requests are served. A request without `Origin` (not from a browser) is unaffected; one
+ *                       with any other `Origin`, including `null`, is refused with 403.
  */
 case class MCPServerOptions(
   port: Int,
@@ -45,7 +53,9 @@ case class MCPServerOptions(
   name: String,
   version: String,
   apiKey: Option[Secret] = None,
-  host: String = "127.0.0.1"
+  host: String = "127.0.0.1",
+  allowedHosts: Set[String] = Set.empty,
+  allowedOrigins: Set[String] = Set.empty
 )
 
 /**
@@ -63,6 +73,12 @@ case class MCPServerOptions(
  * requests receive HTTP 401.  Without an API key the server logs a development-only
  * security warning, and `start()` refuses to bind to a non-loopback `host` (returning
  * a `Left`) so an unauthenticated server is never exposed to the network.
+ *
+ * === DNS rebinding ===
+ * Before the key is checked, a request whose `Host` is not a loopback name (or one of
+ * `MCPServerOptions.allowedHosts`) is refused with 403 when the server is bound to a loopback host, and so
+ * is any request whose `Origin` is present and neither loopback nor one of `allowedOrigins`. A POST must
+ * declare `Content-Type: application/json` (415 otherwise).
  *
  * === Concurrency ===
  * Connections are served by an elastic, bounded thread pool capped at
@@ -89,6 +105,10 @@ class MCPServer(
   private var executorService: ExecutorService = _
 
   private val toolMap: Map[String, ToolFunction[_]] = tools.map(t => t.name -> t).toMap
+
+  private val loopbackBound: Boolean           = isLoopbackHost(options.host)
+  private val allowedHostNames: Set[String]    = options.allowedHosts.map(_.trim.toLowerCase(java.util.Locale.ROOT))
+  private val allowedOriginValues: Set[String] = options.allowedOrigins.map(MCPServer.normalizeOrigin)
 
   // SSE connection management – one entry per open SSE connection
   private case class SSEConnection(
@@ -356,6 +376,17 @@ class MCPServer(
   // HTTP handler – entry point for all incoming requests
   private class MCPHandler extends HttpHandler {
     override def handle(exchange: HttpExchange): Unit = {
+      // DNS-rebinding gate (#3069), before the key: a rebound page is same-origin to the browser, so only the
+      // name it used (Host) and the page's origin (Origin) give it away.
+      if (!MCPServer.hostAllowed(exchange.getRequestHeaders.getFirst("Host"), loopbackBound, allowedHostNames)) {
+        sendErrorResponse(exchange, 403, "Forbidden: Host not allowed")
+        return
+      }
+      if (!MCPServer.originAllowed(exchange.getRequestHeaders.getFirst("Origin"), allowedOriginValues)) {
+        sendErrorResponse(exchange, 403, "Forbidden: Origin not allowed")
+        return
+      }
+
       // Authentication gate – checked before any routing
       if (!isAuthorized(exchange)) {
         exchange.getResponseHeaders.set("WWW-Authenticate", "Bearer")
@@ -369,6 +400,10 @@ class MCPServer(
 
       Try {
         (method, path) match {
+          case ("POST", _) if !MCPServer.isJson(exchange.getRequestHeaders.getFirst("Content-Type")) =>
+            // A JSON-RPC body is application/json. Requiring it also keeps a cross-site form or text/plain POST,
+            // which a browser sends without a preflight, from reaching a tool (#3069).
+            sendErrorResponse(exchange, 415, "Unsupported Media Type: Content-Type must be application/json")
           case ("GET", p) if p.endsWith("/sse")       => handleSSEGet(exchange)
           case ("POST", p) if p.endsWith("/messages") => handleSSEPost(exchange)
           case ("POST", _)                            => handlePOST(exchange)
@@ -700,4 +735,55 @@ object MCPServer {
    * are rejected until capacity frees up. Long-lived SSE streams each occupy one thread.
    */
   val MaxServerThreads: Int = 256
+
+  // ── DNS-rebinding checks (#3069) ───────────────────────────────────────────
+
+  private val LoopbackIPv4 = """127\.\d{1,3}\.\d{1,3}\.\d{1,3}""".r
+
+  /** A loopback host name as it appears in a `Host` header or an origin: no DNS lookup, so nothing to rebind. */
+  private def isLoopbackName(name: String): Boolean =
+    name == "localhost" || name == "[::1]" || LoopbackIPv4.matches(name)
+
+  /** The host name a `Host` header names, without its port, in lower case: `[::1]:8080` is `[::1]`. */
+  private[mcp] def hostName(header: String): String = {
+    val value = header.trim.toLowerCase(java.util.Locale.ROOT)
+    if (value.startsWith("[")) value.indexOf(']') match {
+      case -1  => value
+      case end => value.substring(0, end + 1)
+    }
+    else
+      value.indexOf(':') match {
+        case -1    => value
+        case colon => value.substring(0, colon)
+      }
+  }
+
+  /**
+   * Whether a request naming `header` as its `Host` is served. A loopback name always is. A server bound to a
+   * loopback interface, or given `allowedHosts`, serves no other name except those: a DNS-rebound page names its
+   * own. A server bound to another interface without `allowedHosts` cannot know its names, and serves any.
+   */
+  private[mcp] def hostAllowed(header: String, loopbackBound: Boolean, allowed: Set[String]): Boolean =
+    Option(header).map(hostName) match {
+      case Some(name) if isLoopbackName(name) || allowed.contains(name) => true
+      case _                                                            => !loopbackBound && allowed.isEmpty
+    }
+
+  private[mcp] def normalizeOrigin(origin: String): String =
+    origin.trim.toLowerCase(java.util.Locale.ROOT).stripSuffix("/")
+
+  /** Whether a request with this `Origin` is served: none (not a browser), a loopback origin, or an allowed one. */
+  private[mcp] def originAllowed(header: String, allowed: Set[String]): Boolean =
+    Option(header).map(normalizeOrigin) match {
+      case None => true
+      case Some(origin) =>
+        allowed.contains(origin) ||
+        Try(java.net.URI.create(origin)).toOption.exists { uri =>
+          Set("http", "https").contains(uri.getScheme) && Option(uri.getHost).exists(isLoopbackName)
+        }
+    }
+
+  /** Whether a `Content-Type` header declares JSON: `application/json`, with any parameters. */
+  private[mcp] def isJson(contentType: String): Boolean =
+    Option(contentType).exists(_.split(';')(0).trim.equalsIgnoreCase("application/json"))
 }
