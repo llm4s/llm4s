@@ -400,8 +400,20 @@ import org.llm4s.agent.graph.{ RunConfig, TenantId, ThreadId }
 import org.llm4s.agent.harness.memory.{ MemoryRecall, SemanticMemoryMiddleware }
 import org.llm4s.agent.memory.{ MemoryBounds, SQLiteMemoryStore, SimpleMemoryManager }
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
+// A tenant id is any string, so it never goes into a path as it is: its SHA-256, in lower-case hex, is one
+// file per tenant on every file system, case-insensitive ones included. No hash is "none", so runs without a
+// tenant get a file no tenant can share.
+def memoryFile(tenant: Option[TenantId]): String =
+  tenant.fold("memory-none.db") { t =>
+    val hash = MessageDigest.getInstance("SHA-256").digest(t.value.getBytes(StandardCharsets.UTF_8))
+    s"memory-${hash.map(b => f"$b%02x").mkString}.db"
+  }
+
 val memory = new SemanticMemoryMiddleware(
-  stores = tenant => SQLiteMemoryStore(s"memory-${tenant.fold("default")(_.value)}.db"),
+  stores = tenant => SQLiteMemoryStore(memoryFile(tenant)),
   manager = (store, _) => SimpleMemoryManager.withStore(store),
   client = client,                               // the client an LLMMemoryManager would call
   recall = Some(MemoryRecall(maxRecallTokens = 512)),
@@ -416,8 +428,15 @@ for {
 
 - **Per tenant.** `stores` is asked once for each tenant (`RunConfig.tenantId`; `None` for runs
   without one) and must return a store of that tenant's alone: every thread of a tenant recalls what
-  the tenant's earlier threads recorded, and no tenant reads another's. A resolver that returns one
-  store instance for two tenants is refused.
+  the tenant's earlier threads recorded, and no tenant reads another's. A resolver that gives two
+  tenants the same storage is refused: one store instance, or two stores with one
+  `storageIdentity` - a SQLite file, however its path is spelled, or a Postgres table and tenant.
+  Never build a path from a tenant id as it is: `../` in one reaches outside the directory, and
+  `Alice` and `alice` are one file on macOS and Windows. Hash it, as above, or check it against a
+  strict pattern, and give runs without a tenant a name no tenant id can produce.
+- **Postgres** keeps every tenant in one table: give each tenant's store its tenant (see
+  [below](#tenants-in-one-postgres-table)), and each sees, counts and evicts only its own rows.
+
 - **Recall** runs `getRelevantContext` on each turn's input and shows the result to every model
   call of the turn as a system-prompt section, cut to `maxRecallTokens` (four characters a token).
 - **Recording** stores each turn's question and answer through the manager, each memory cut to
@@ -427,8 +446,13 @@ for {
 - **Consolidation** (`consolidate = Some(MemoryConsolidation(olderThan = 1.day, minCount = 10))`)
   replaces groups of old memories with a summary after each turn. It needs a
   `TransactionalMemoryStore`: `InMemoryStore`, `SQLiteMemoryStore` or `PostgresMemoryStore`.
-- **Bounded.** Each write evicts the memories of lowest importance, oldest first, beyond
-  `bounds` (default 1000 memories, 4 MiB), whether or not consolidation is on.
+- **Bounded, by what it wrote.** Every memory the middleware writes carries the metadata
+  `llm4s.writer` (`SemanticMemoryMiddleware.WriterKey`) set to its id, and `bounds` (default 1000
+  memories, 4 MiB) counts only those: each write evicts the middleware's own memories of lowest
+  importance, oldest first, beyond it, whether or not consolidation is on. Memories it did not write -
+  knowledge you loaded with `recordKnowledge`, facts your application stored - are never counted
+  or evicted, so attaching the middleware to a store that already holds data deletes none of it.
+  A `MemoryBounds` used on its own, without `withOwner`, counts the whole store.
 - **Safe across a crash.** Each recording and each consolidated group is one replayable effect of
   the agent runtime: after a crash, `agent.recover` neither records a turn twice nor brings back a
   memory a later consolidation removed. A store that is not transactional records too, but a
@@ -445,6 +469,21 @@ for {
   cleared at the end of each turn, under an agent that removed it again. A thread in flight
   (suspended, or after a crash) is refused with `RestoreRejected` by the changed agent: resume or
   recover it first.
+
+#### Tenants in one Postgres table
+
+A `PostgresMemoryStore` belongs to the tenant it is built with: every statement reads and writes only
+that tenant's rows, so one table serves them all. `tenant = None` is the rows of no tenant, among them
+every row written before the store had tenants.
+
+```scala
+import org.llm4s.agent.graph.TenantId
+import org.llm4s.agent.memory.{ MemoryStore, PostgresMemoryStore }
+import org.llm4s.types.Result
+
+def postgresStores(ds: javax.sql.DataSource): Option[TenantId] => Result[MemoryStore] =
+  tenant => PostgresMemoryStore.fromDataSource(ds, tenant = tenant.map(_.value))
+```
 
 ### Injecting Context
 

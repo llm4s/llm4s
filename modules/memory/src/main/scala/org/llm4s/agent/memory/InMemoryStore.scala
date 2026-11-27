@@ -52,10 +52,11 @@ final case class InMemoryStore private (
           val outcome = TransactionalMemoryStore.Superseded
           (store.copy(applied = store.applied + (key.value -> outcome)), outcome)
         case None =>
-          val adds     = TransactionalMemoryStore.distinctById(add)
-          val removed  = remove.distinct.filter(id => store.memories.contains(id) && !adds.exists(_.id == id)).toVector
-          val written  = store.memories -- removed ++ adds.map(m => m.id -> m)
-          val evicted  = bounds.overflow(written.values.map(MemoryBounds.Entry.of).toSeq)
+          val adds    = TransactionalMemoryStore.distinctById(add)
+          val removed = remove.distinct.filter(id => store.memories.contains(id) && !adds.exists(_.id == id)).toVector
+          val written = store.memories -- removed ++ adds.map(m => m.id -> m)
+          val evicted =
+            bounds.overflow(written.values.filter(m => bounds.counts(m.metadata)).map(MemoryBounds.Entry.of).toSeq)
           val outcome  = AppliedWrite(adds.map(_.id), removed, evicted.size)
           val recorded = store.copy(memories = written -- evicted, applied = store.applied + (key.value -> outcome))
           (recorded, outcome)

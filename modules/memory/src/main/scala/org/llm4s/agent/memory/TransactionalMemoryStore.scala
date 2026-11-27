@@ -58,15 +58,30 @@ object AppliedWrite {
 /**
  * How much one store may hold: at most `maxMemories` memories and `maxBytes` bytes, measured by [[MemoryBounds.sizeOf]].
  * A [[TransactionalMemoryStore]] enforces both in the transaction that adds, by evicting.
+ *
+ * The bounds count, and eviction ranks, every memory in the store, whoever stored it - unless an [[MemoryBounds.Owner]]
+ * is set ([[withOwner]]): then only the memories whose metadata carries the owner's key and value count, and only
+ * they are ever evicted. A writer that shares a store with data it did not write (knowledge loaded with
+ * `recordKnowledge`, facts an application stores) sets one, as `SemanticMemoryMiddleware` does (#3034).
  */
 @Experimental
-final case class MemoryBounds private (maxMemories: Int, maxBytes: Long) {
-  def withMaxMemories(n: Int): MemoryBounds = MemoryBounds(n, maxBytes)
-  def withMaxBytes(n: Long): MemoryBounds   = MemoryBounds(maxMemories, n)
+final case class MemoryBounds private (maxMemories: Int, maxBytes: Long, owner: Option[MemoryBounds.Owner]) {
+  def withMaxMemories(n: Int): MemoryBounds = MemoryBounds(n, maxBytes).withOwner(owner)
+  def withMaxBytes(n: Long): MemoryBounds   = MemoryBounds(maxMemories, n).withOwner(owner)
+
+  /** These bounds counting only the memories whose metadata has `key` set to `value`. */
+  def withOwner(key: String, value: String): MemoryBounds = withOwner(Some(MemoryBounds.Owner(key, value)))
+
+  /** These bounds counting only `owner`'s memories, or every memory for `None`. */
+  def withOwner(owner: Option[MemoryBounds.Owner]): MemoryBounds = new MemoryBounds(maxMemories, maxBytes, owner)
+
+  /** Whether a memory with `metadata` counts toward these bounds, and so may be evicted. */
+  def counts(metadata: Map[String, String]): Boolean = owner.forall(o => metadata.get(o.key).contains(o.value))
 
   /**
    * The memories to evict from `entries` - (id, importance, timestamp, size) - so that the rest are within both
-   * bounds: lowest importance first (a memory with none counts as 0.5), then oldest, then by id.
+   * bounds: lowest importance first (a memory with none counts as 0.5), then oldest, then by id. `entries` are the
+   * memories that [[counts]]: a store passes only those.
    */
   def overflow(entries: Seq[MemoryBounds.Entry]): Vector[MemoryId] = {
     val ordered = entries.sortBy(e => (e.importance.getOrElse(0.5), e.timestamp, e.id.value)).toVector
@@ -82,12 +97,15 @@ final case class MemoryBounds private (maxMemories: Int, maxBytes: Long) {
 @Experimental
 object MemoryBounds {
 
-  /** The default bounds: 1000 memories, 4 MiB. */
+  /** The default bounds: 1000 memories, 4 MiB, counting every memory in the store. */
   def apply(maxMemories: Int = 1000, maxBytes: Long = 4L * 1024 * 1024): MemoryBounds = {
     require(maxMemories >= 1, s"MemoryBounds: maxMemories must be at least 1, was $maxMemories")
     require(maxBytes >= 1, s"MemoryBounds: maxBytes must be at least 1, was $maxBytes")
-    new MemoryBounds(maxMemories, maxBytes)
+    new MemoryBounds(maxMemories, maxBytes, None)
   }
+
+  /** The writer whose memories bounds count: those whose metadata has `key` set to `value`. */
+  final case class Owner(key: String, value: String)
 
   /** One stored memory, as [[MemoryBounds.overflow]] ranks it. */
   final case class Entry(id: MemoryId, importance: Option[Double], timestamp: Instant, size: Long)
@@ -126,7 +144,8 @@ trait TransactionalMemoryStore extends MemoryStore {
   /**
    * In one transaction: for a `key` already applied, its recorded outcome, writing nothing - even if the memories it
    * stored have since been deleted. Otherwise stores `add`, deletes `remove`, then evicts beyond `bounds`
-   * ([[MemoryBounds.overflow]], over the whole store), and records `(key, outcome)`.
+   * ([[MemoryBounds.overflow]], over the memories `bounds` counts: the whole store
+   * unless it has an owner), and records `(key, outcome)`.
    *
    * `remove` names what `add` replaces, as a consolidation's summary replaces its sources: if any memory of `remove`
    * is no longer there, another writer replaced it first, so nothing is written and the outcome records that nothing

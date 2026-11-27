@@ -111,8 +111,8 @@ version to the current release, so you run one rule, once, and no rule runs twic
 |---|---|---|
 | 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
 | 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" or "Since 0.7.0" below, and `PositionalPatternsGainFields` |
-| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped`, and `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9) |
-| 1.0.x | `Llm4sMigrateFrom_1_0` | `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields) and `ModelMetadata` (8 to 9) |
+| 0.7.x | `Llm4sMigrateFrom_0_7` | the rules marked "Since 0.7.0" below: `ErrorProviderIdTyped`, and `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields), `ModelMetadata` (8 to 9), `MemoryBounds` (2 to 3) and `PostgresMemoryStore.Config` (7 to 8) |
+| 1.0.x | `Llm4sMigrateFrom_1_0` | `PositionalPatternsGainFields` for `OpenAIConfig` (11 to 14 fields), `ModelMetadata` (8 to 9), `MemoryBounds` (2 to 3) and `PostgresMemoryStore.Config` (7 to 8) |
 
 A rule for a later break is added to every umbrella whose starting version is older than the break. `Llm4sMigrateFrom_1_0`
 is published from the release after 1.0.0. A 1.x class built with `apply` and `with*` setters gains fields in a minor release, which
@@ -184,7 +184,7 @@ the 0.7.0 artifacts and its expected output under `output/.../fix/v07`: `ErrorPr
 so far, and `Llm4sMigrateFrom_0_7Test`, which pins that the umbrella runs it and leaves alone what the older umbrellas
 would rewrite. `scalafixTests10` is the same for `Llm4sMigrateFrom_1_0`, with `modules/scalafix-rules/input-1.0`
 compiled against the 1.0.0 artifacts and its expected output under `output/.../fix/v10`: `PositionalPatternsGainFieldsTest`
-for its one rule, the `OpenAIConfig` and `ModelMetadata` patterns, and `Llm4sMigrateFrom_1_0ChangesNothingTest`, which
+for its one rule, the `OpenAIConfig`, `ModelMetadata`, `MemoryBounds` and `PostgresMemoryStore.Config` patterns, and `Llm4sMigrateFrom_1_0ChangesNothingTest`, which
 pins that it leaves the rest of 1.0.0 code alone, including what `Llm4sMigrateFrom_0_7` would rewrite. A rule for a
 later break adds its fixtures there.
 

@@ -83,7 +83,25 @@ class PostgresMemoryStoreDataSourceSpec extends AnyFlatSpec with Matchers with E
     PostgresMemoryStore.fromDataSource(ds, "bad name").left.value.message should include("Invalid table name")
     PostgresMemoryStore.fromDataSource(ds, null).isLeft shouldBe true
     PostgresMemoryStore.fromDataSource(ds, "t" * 56).isLeft shouldBe true
+    PostgresMemoryStore.fromDataSource(ds, tenant = Some("")).left.value.message should include("tenant")
+    an[IllegalArgumentException] should be thrownBy PostgresMemoryStore.Config(tenant = Some(""))
     ds.connectionsOpened shouldBe 0
+  }
+
+  // #3032: a table created before tenants gains the column and a primary key per tenant when a store opens it
+  it should "migrate every table to a primary key per tenant, and keep the tenant it was given" in {
+    val ds    = new StubDataSource()
+    val store = PostgresMemoryStore.fromDataSource(ds, "mem", tenant = Some("alice")).value
+    store.tenant shouldBe Some("alice")
+    Seq("mem", "mem_applied", "mem_fences").foreach { table =>
+      // one statement per table, the column added only inside the locked branch (Codex on #3166)
+      ds.statements.exists(s => s.startsWith("DO $$") && s.contains(s"LOCK TABLE $table ")) shouldBe true
+      ds.statements.exists(s => s.startsWith(s"ALTER TABLE $table")) shouldBe false
+    }
+    val migration = PostgresMemoryStore.tenantKeyMigration("mem", "id")
+    migration should include("ARRAY['tenant', 'id']")
+    migration.indexOf("ADD COLUMN IF NOT EXISTS tenant") should be > migration.indexOf("LOCK TABLE mem ")
+    migration should include("ADD PRIMARY KEY (tenant, id)")
   }
 
   it should "report an unreachable DataSource as a Left and leave it open" in {

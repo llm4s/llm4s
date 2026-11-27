@@ -217,9 +217,11 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
   }
 
   it should "execute clear() logic and handle DB failure" in {
+    // clear() deletes the store's tenant's rows, never the whole shared table (#3032)
     (() => mockDataSource.getConnection()).expects().returning(mockConn)
-    (() => mockConn.createStatement()).expects().returning(mockStmt)
-    (mockStmt.execute(_: String)).expects(*).throws(new SQLException("Mock DB Error"))
+    (mockConn.prepareStatement(_: String)).expects("DELETE FROM test_table WHERE tenant = ?").returning(mockStmt)
+    (mockStmt.setString(_: Int, _: String)).expects(1, "")
+    (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 

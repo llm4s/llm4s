@@ -3365,7 +3365,20 @@ lazy val scalafixInput = (project in file("modules/scalafix-rules/input"))
   )
 
 lazy val scalafixOutput = (project in file("modules/scalafix-rules/output"))
-  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, openai, anthropic, ollama, gemini, agent)
+  .dependsOn(
+    core,
+    rag,
+    agentTools,
+    observabilityPrometheus,
+    openaiCompatible,
+    openai,
+    anthropic,
+    ollama,
+    gemini,
+    agent,
+    memory,
+    memoryPostgres
+  )
   .settings(scalafixTestLayout)
 
 lazy val scalafixInput05 = (project in file("modules/scalafix-rules/input-0.5"))
@@ -3399,9 +3412,17 @@ lazy val scalafixInput10 = (project in file("modules/scalafix-rules/input-1.0"))
   .settings(
     scalafixTestLayout,
     semanticdbEnabled := true,
-    libraryDependencies ++= Seq("core", "openai-compatible", "openai", "anthropic", "gemini", "rag", "agent").map(m =>
-      "org.llm4s" %% s"llm4s-$m" % scalafix10Llm4s
-    )
+    libraryDependencies ++= Seq(
+      "core",
+      "openai-compatible",
+      "openai",
+      "anthropic",
+      "gemini",
+      "rag",
+      "agent",
+      "memory",
+      "memory-postgres"
+    ).map(m => "org.llm4s" %% s"llm4s-$m" % scalafix10Llm4s)
   )
 
 lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))

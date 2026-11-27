@@ -147,6 +147,26 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     held(m, Some(t1)).count().value shouldBe 5L
   }
 
+  // #3034: the bound is the middleware's own; knowledge loaded beforehand is never counted or evicted
+  it should "never evict a memory it did not write, on a transactional store or not" in {
+    val knowledge = (1 to 6).map(i => Memory.fromKnowledge(s"chunk $i", "manual"))
+    val stores = Seq[MemoryStore](
+      InMemoryStore.empty.storeAll(knowledge).value,
+      new PlainStore(InMemoryStore.empty.storeAll(knowledge).value.asInstanceOf[InMemoryStore])
+    )
+    stores.foreach { loaded =>
+      val m     = new SemanticMemoryMiddleware(_ => Right(loaded), simple, answering(), bounds = MemoryBounds(3))
+      val agent = agentWith(answering("answer 1", "answer 2", "answer 3"), m)
+      (1 to 3).foreach(i => agent.run(ThreadId(s"own-$i"), s"question $i").value)
+      val all = held(m, None).recall(MemoryFilter.All, Int.MaxValue).value
+      all.filter(_.memoryType == MemoryType.Knowledge).map(_.content).sorted shouldBe knowledge.map(_.content).sorted
+      val own = all.filter(_.metadata.get(SemanticMemoryMiddleware.WriterKey).contains("semantic-memory"))
+      own.size shouldBe 3
+      (own.map(_.content) should contain).allOf("question 3", "answer 3")
+      all.size shouldBe 9
+    }
+  }
+
   it should "never read the store while another thread of the tenant writes it" in {
     // a store that is not thread-safe, as SQLiteMemoryStore is not: it fails any call that overlaps another
     val inside  = new java.util.concurrent.atomic.AtomicInteger()
@@ -373,6 +393,62 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val agent  = agentWith(answering("one", "two"), m)
     agent.run(ThreadId("x"), "hi", tenant(t1)).value
     agent.run(ThreadId("y"), "hi", tenant(t2)).left.value.message should include("another tenant")
+  }
+
+  // #3032: instance identity is not enough - two instances over one file are one store
+  it should "be refused when it gives two tenants two instances over one SQLite file" in {
+    val dir    = java.nio.file.Files.createTempDirectory("llm4s-3032")
+    val opened = new CopyOnWriteArrayList[SQLiteMemoryStore]()
+    val m = new SemanticMemoryMiddleware(
+      // the old guide's mapping: no tenant and TenantId("default") both open memory-default.db
+      tenant =>
+        SQLiteMemoryStore(dir.resolve(s"memory-${tenant.fold("default")(_.value)}.db").toString).map { s =>
+          opened.add(s)
+          s
+        },
+      simple,
+      answering()
+    )
+    val agent = agentWith(answering("one", "two", "three"), m)
+    agent.run(ThreadId("x"), "hi").value
+    val error = agent.run(ThreadId("y"), "hi", tenant(TenantId("default"))).left.value
+    error.message should include("same storage as tenant (none)")
+    agent.run(ThreadId("z"), "hi", tenant(t1)).value
+    opened.asScala.foreach(_.close())
+  }
+
+  it should "be refused when it gives two tenants one shared-cache in-memory SQLite database" in {
+    val opened = new CopyOnWriteArrayList[SQLiteMemoryStore]()
+    val m = new SemanticMemoryMiddleware(
+      _ =>
+        SQLiteMemoryStore("file:llm4s-3032-shared?mode=memory&cache=shared").map { s =>
+          opened.add(s)
+          s
+        },
+      simple,
+      answering()
+    )
+    val agent = agentWith(answering("one", "two"), m)
+    agent.run(ThreadId("s1"), "hi", tenant(t1)).value
+    agent.run(ThreadId("s2"), "hi", tenant(t2)).left.value.message should include("same storage as tenant 't1'")
+    opened.asScala.foreach(_.close())
+  }
+
+  it should "be refused when its store's identity cannot be read, and asked again" in {
+    val attempts = new java.util.concurrent.atomic.AtomicInteger()
+    val m = new SemanticMemoryMiddleware(
+      _ =>
+        Right(new PlainStore(InMemoryStore.empty) {
+          override def storageIdentity: Result[Option[String]] =
+            if attempts.incrementAndGet() == 1 then Left(org.llm4s.error.ProcessingError("identity", "down"))
+            else Right(Some("one"))
+        }),
+      simple,
+      answering()
+    )
+    val agent = agentWith(answering("ok"), m)
+    agent.run(ThreadId("i1"), "hi").isLeft shouldBe true
+    agent.run(ThreadId("i2"), "hi").value.answer shouldBe Some("ok")
   }
 
   it should "be asked again after it fails" in {
@@ -642,8 +718,23 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val dir    = java.nio.file.Files.createTempDirectory("llm4s-f7-guide")
     val client = answering("Noted.", "Teal.")
     // as in docs/guide/agents/memory.md, "Semantic Memory Middleware"; the files go in a temporary directory
+    def memoryFile(tenant: Option[TenantId]): String =
+      tenant.fold("memory-none.db") { t =>
+        val hash = java.security.MessageDigest
+          .getInstance("SHA-256")
+          .digest(t.value.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        s"memory-${hash.map(b => f"$b%02x").mkString}.db"
+      }
+    // no tenant id reaches outside the directory, collides by case, or shares the file of runs without a tenant
+    Seq("../escape", "Alice", "alice", "default", "none")
+      .map(t => memoryFile(Some(TenantId(t))))
+      .distinct
+      .size shouldBe 5
+    Seq("../escape", "Alice", "default").map(t => memoryFile(Some(TenantId(t)))).foreach { f =>
+      f should fullyMatch.regex("memory-[0-9a-f]{64}\\.db")
+    }
     val memory = new SemanticMemoryMiddleware(
-      stores = tenant => SQLiteMemoryStore(dir.resolve(s"memory-${tenant.fold("default")(_.value)}.db").toString),
+      stores = tenant => SQLiteMemoryStore(dir.resolve(memoryFile(tenant)).toString),
       manager = (store, _) => SimpleMemoryManager.withStore(store),
       client = client,
       recall = Some(MemoryRecall(maxRecallTokens = 512)),
@@ -657,7 +748,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     ask("My favourite colour is teal").value shouldBe Some("Noted.")
     ask("What did I say my favourite colour was?").value shouldBe Some("Teal.")
     systemPrompt(client.sent(1)) should include("My favourite colour is teal")
-    java.nio.file.Files.exists(dir.resolve("memory-alice.db")) shouldBe true
+    java.nio.file.Files.exists(dir.resolve(memoryFile(Some(TenantId("alice"))))) shouldBe true
   }
 
   // memory is text: a turn's media - a tool's image, imported history's documents - is never recorded or recalled,

@@ -92,6 +92,7 @@ val storeResult = PostgresMemoryStore(config)
 | `password`    | `""`               | Database password             |
 | `tableName`   | `"agent_memories"` | Table used for memory storage |
 | `maxPoolSize` | `10`               | Maximum HikariCP pool size    |
+| `tenant`      | `None`             | The tenant whose rows the store reads and writes ([Tenants](#tenants)) |
 
 ### Sharing your application's connection pool
 
@@ -115,6 +116,19 @@ Store calls are blocking JDBC; from effectful code run them on the blocking pool
 `ZIO.attemptBlocking`). The vector-store guide's
 [Sharing your application's connection pool](../guide/vector-store.html#sharing-your-applications-connection-pool)
 section has a complete doobie example inside a cats-effect `Resource`.
+
+### Tenants
+
+Many tenants share one table: a store belongs to the `tenant` it is built with (`Config.tenant`, or
+`fromDataSource(..., tenant = Some("alice"))`), and every statement it runs - `recall`, `search`, `count`, `delete`,
+`deleteMatching`, `clear()`, bounds eviction and applied writes - touches only that tenant's rows. `None` is the rows
+of no tenant, among them every row written before the store had tenants; a tenant is never the empty string.
+Two stores over one table and tenant report the same `storageIdentity`, so `SemanticMemoryMiddleware` refuses a
+resolver that gives two tenants the same rows. The identity names the cluster by its `system_identifier`
+(`pg_control_system()`), not by the address a connection used, then the database, the schema-qualified table and the
+tenant. PostgreSQL grants `pg_control_system()` to PUBLIC by default. Where it has been revoked, `storageIdentity` is a
+`Left` naming the missing privilege and the middleware refuses the turn, rather than guess an identity without the
+cluster; grant it to the store's role with `GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>`.
 
 ## Security & Validation
 
@@ -152,13 +166,16 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Create memory table
 CREATE TABLE IF NOT EXISTS agent_memories (
-    id TEXT PRIMARY KEY,
+    tenant TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     content TEXT NOT NULL,
     memory_type TEXT NOT NULL,
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL,
     importance DOUBLE PRECISION,
-    embedding vector
+    embedding vector,
+    version BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant, id)
 );
 
 -- Indexes
@@ -175,7 +192,21 @@ CREATE INDEX IF NOT EXISTS idx_agent_memories_metadata
 CREATE INDEX IF NOT EXISTS idx_agent_memories_conversation
   ON agent_memories ((metadata->>'conversation_id'));
 
+-- Applied writes and fencing tokens of TransactionalMemoryStore, per tenant
+CREATE TABLE IF NOT EXISTS agent_memories_applied (
+    tenant TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, scope TEXT NOT NULL, outcome TEXT NOT NULL,
+    PRIMARY KEY (tenant, key)
+);
+CREATE TABLE IF NOT EXISTS agent_memories_fences (
+    tenant TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL, token BIGINT NOT NULL,
+    PRIMARY KEY (tenant, scope)
+);
 ```
+
+A table created before tenants is migrated when a store opens it: each of the three gains the `tenant` column (`''`
+for its rows) and a primary key that starts with it, under a table lock so two processes migrate it once. An
+up-to-date table is only checked in the catalog, so opening a store never locks it or waits for its readers.
+
 ## Querying and Filters
 
 `recall`, `count`, `deleteMatching` and `search` accept every `MemoryFilter` and answer exactly what

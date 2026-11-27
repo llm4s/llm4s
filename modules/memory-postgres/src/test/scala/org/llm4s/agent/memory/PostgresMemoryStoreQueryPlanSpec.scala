@@ -215,23 +215,45 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     ds.sent.last.sql should startWith("SELECT id, content, memory_type, (SELECT jsonb_object_agg(")
   }
 
+  // Codex on #3166: the identity names the cluster by its system identifier, never the address it was reached on
+  it should "name its cluster, database, schema-qualified table and tenant, and refuse without the cluster" in {
+    def answering(control: Boolean): String => Seq[Map[String, Any]] = sql =>
+      if (sql.contains("pg_control_system"))
+        if (control) Seq(Map("system_identifier" -> "7712809643900526635"))
+        else throw new SQLException("permission denied for function pg_control_system")
+      else if (sql.contains("current_database()")) Seq(Map("db" -> "app", "nspname" -> "public", "relname" -> "t"))
+      else Seq.empty
+    val allowed = new RecordingDataSource()(Some(answering(control = true)))
+    new PostgresMemoryStore(allowed, "t", None, ownsDataSource = false, Some("alice")).storageIdentity shouldBe
+      Right(Some("postgresql://7712809643900526635/app/public.t?tenant=alice"))
+    allowed.sent.exists(_.sql.contains("inet_server_addr")) shouldBe false
+    val refused = new RecordingDataSource()(Some(answering(control = false)))
+    // fail closed: without the cluster two roles would see one table as two (Codex on #3166)
+    val error = store(refused).storageIdentity.left.toOption.get.message
+    error should include("GRANT EXECUTE ON FUNCTION pg_control_system()")
+    error should include("permission denied")
+    refused.sent.exists(_.sql.contains("current_database()")) shouldBe false
+    store(new RecordingDataSource()()).storageIdentity.isLeft shouldBe true
+  }
+
   it should "count with COUNT(*) when the filter is exact" in {
     val ds = new RecordingDataSource(Seq(Map("count" -> 7L)))()
     store(ds).count(MemoryFilter.Not(MemoryFilter.MinImportance(0.5))) shouldBe Right(7L)
-    ds.sent.head.sql should startWith("SELECT COUNT(*) FROM t WHERE NOT (")
+    ds.sent.head.sql should startWith("SELECT COUNT(*) FROM t WHERE (NOT (")
+    ds.sent.head.sql should endWith(") AND tenant = ?")
   }
 
   it should "delete by id the rows matches accepts, and with one DELETE when the filter is exact" in {
     val ds = new RecordingDataSource(Seq(row("a", "keep"), row("b", "drop me")))()
     store(ds).deleteMatching(MemoryFilter.Custom(_.content.startsWith("drop"))).isRight shouldBe true
-    ds.sent.map(_.sql).last shouldBe "DELETE FROM t WHERE id = ANY(?)"
+    ds.sent.map(_.sql).last shouldBe "DELETE FROM t WHERE id = ANY(?) AND tenant = ?"
     // The candidates are locked as they are read, so a concurrent update cannot slip in before the delete
     ds.sent.head.sql should endWith("FOR UPDATE")
     ds.sent.last.params(1) shouldBe Seq("b")
 
     val exact = new RecordingDataSource()()
     store(exact).deleteMatching(MemoryFilter.HasMetadata("user-id")).isRight shouldBe true
-    exact.sent.map(_.sql) shouldBe Seq("DELETE FROM t WHERE (metadata -> CAST(? AS text)) IS NOT NULL")
+    exact.sent.map(_.sql) shouldBe Seq("DELETE FROM t WHERE ((metadata -> CAST(? AS text)) IS NOT NULL) AND tenant = ?")
   }
 
   it should "search by keyword without an embedding service" in {
