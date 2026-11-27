@@ -39,18 +39,25 @@ object SqliteFiles:
   def opened(path: Path, clock: Clock): SqliteCheckpointer =
     SqliteCheckpointer.open(path, clock).fold(e => throw new IllegalStateException(e.message), identity)
 
-  /** Installs, through a connection of its own, a trigger refusing to delete any of `threadId`'s checkpoints. */
-  def failPrunes(path: Path, threadId: ThreadId): Boolean =
-    Using.resource(DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))) { c =>
-      val id = threadId.value.replace("'", "''")
-      Using.resource(c.createStatement())(
-        _.execute(
-          s"""CREATE TRIGGER "refuse_prune_${UUID.randomUUID()}" BEFORE DELETE ON llm4s_checkpoint_history
-             |WHEN OLD.thread_id = '$id' BEGIN SELECT RAISE(ABORT, 'pruning this thread is refused'); END""".stripMargin
-        )
-      ): Unit
-      true
-    }
+  /**
+   * Installs, through a connection of its own, a trigger refusing to delete any of `threadId`'s checkpoints - or,
+   * with `eventsFrom`, its events from that seq on - and hands back what drops it again.
+   */
+  def refuseDeletes(path: Path, threadId: ThreadId, eventsFrom: Option[Long]): Option[() => Unit] = {
+    val id      = threadId.value.replace("'", "''")
+    val trigger = s"refuse_prune_${UUID.randomUUID().toString.replace("-", "")}"
+    val (table, condition) =
+      eventsFrom.fold(("llm4s_checkpoint_history", ""))(seq => ("llm4s_checkpoint_events", s" AND OLD.seq >= $seq"))
+    def run(sql: String): Unit =
+      Using.resource(DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))) { c =>
+        Using.resource(c.createStatement())(_.execute(sql)): Unit
+      }
+    run(
+      s"""CREATE TRIGGER $trigger BEFORE DELETE ON $table WHEN OLD.thread_id = '$id'$condition
+         |BEGIN SELECT RAISE(ABORT, 'pruning this thread is refused'); END""".stripMargin
+    )
+    Some(() => run(s"DROP TRIGGER $trigger"))
+  }
 
 /**
  * The SQLite store passes the contract every store must pass, each case on a file of its own, and with `reopen`
@@ -60,10 +67,22 @@ class SqliteCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContra
 
   protected def newCheckpointer(clock: Clock): Checkpointer = SqliteFiles.opened(SqliteFiles.fresh(), clock)
 
-  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean =
+  override protected def refuseDeletes(
+    store: Checkpointer,
+    threadId: ThreadId,
+    eventsFrom: Option[Long]
+  ): Option[() => Unit] =
     store match {
-      case sqlite: SqliteCheckpointer => SqliteFiles.failPrunes(sqlite.path, threadId)
+      case sqlite: SqliteCheckpointer => SqliteFiles.refuseDeletes(sqlite.path, threadId, eventsFrom)
       case other                      => fail(s"not a SqliteCheckpointer: $other")
+    }
+
+  override protected def shortenSweepBudget(store: Checkpointer): Boolean =
+    store match {
+      case sqlite: SqliteCheckpointer =>
+        sqlite.sweepBudget = Duration.Zero
+        true
+      case other => fail(s"not a SqliteCheckpointer: $other")
     }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer =
@@ -120,10 +139,22 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     Alternating(path, clock, Vector(SqliteFiles.opened(path, clock), SqliteFiles.opened(path, clock)))
   }
 
-  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean =
+  override protected def refuseDeletes(
+    store: Checkpointer,
+    threadId: ThreadId,
+    eventsFrom: Option[Long]
+  ): Option[() => Unit] =
     store match {
-      case alternating: Alternating => SqliteFiles.failPrunes(alternating.path, threadId)
+      case alternating: Alternating => SqliteFiles.refuseDeletes(alternating.path, threadId, eventsFrom)
       case other                    => fail(s"not an alternating store: $other")
+    }
+
+  override protected def shortenSweepBudget(store: Checkpointer): Boolean =
+    store match {
+      case alternating: Alternating =>
+        alternating.stores.foreach(_.sweepBudget = Duration.Zero)
+        true
+      case other => fail(s"not an alternating store: $other")
     }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer =

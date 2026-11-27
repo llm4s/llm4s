@@ -84,9 +84,12 @@ final class SqliteCheckpointer private (
 
   import SqliteCheckpointer.*
 
-  private val lock                                 = new ReentrantLock()
-  @volatile private var shut                       = false
-  private[sqlite] given errorContext: ErrorContext = ErrorContext(path)
+  private val lock = new ReentrantLock()
+
+  /** How long one sweep call prunes before it hands back its cursor; a spec shortens it to cut a sweep short. */
+  @volatile private[sqlite] var sweepBudget: FiniteDuration = busyTimeout
+  @volatile private var shut                                = false
+  private[sqlite] given errorContext: ErrorContext          = ErrorContext(path)
 
   // ---- claims ----
 
@@ -507,9 +510,15 @@ final class SqliteCheckpointer private (
         }
       }.map { events =>
         // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+        val firstKept = events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
+        // and when nothing is left to drop, an event below that naming a checkpoint the thread no longer holds is
+        // left over from a prune cut short after its checkpoints went (#3086): the floor is recovered from the file
         val byCheckpoint =
-          if kept.size == history.size then None
-          else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
+          if kept.size != history.size then firstKept
+          else
+            firstKept.filter(f =>
+              events.exists((seq, e, _) => seq >= current.earliestSeq && seq < f && e.checkpointId.isDefined)
+            )
         val byAge = cutoff.map { cut =>
           events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
         }
@@ -523,8 +532,10 @@ final class SqliteCheckpointer private (
    * the store's lock and the file's write gate are never held for more than one bounded step and the live runs'
    * commits and renewals go between them: a thread's old tombstone reclaimed, or its history pruned at most
    * `RetentionSweep.ChunkRows` checkpoints and then events at a time. A thread whose step fails is logged and
-   * skipped, and the page still hands back its cursor; once the busy timeout has passed, the page stops after the
-   * step in flight and hands back the thread it stopped in, which the next pass finishes. A tombstone is reclaimed
+   * skipped, and the page still hands back its cursor; once the busy timeout has passed - after the page's first
+   * thread, which is always finished - the page stops after the step in flight and hands back the last thread it
+   * finished, so the next call starts with the one it stopped in; the events' floor is worked out again from the rows
+   * that remain. A tombstone is reclaimed
    * only if, inside its transaction, its row still holds nothing but where its numbering ended - no checkpoint,
    * event, effect, metadata or claim newer than the cutoff - so a thread created again over it meanwhile is kept.
    */
@@ -544,7 +555,7 @@ final class SqliteCheckpointer private (
       guard.retained(visited).flatMap { protectedRuns =>
         val cutoff = policy.tombstoneAge.map(age => epochNanos(clock.instant().minusNanos(age.toNanos)))
         RetentionSweep
-          .visit(visited, busyTimeout, s"SqliteCheckpointer($path)", shut) { (threadId, floor) =>
+          .visit(visited, sweepBudget, s"SqliteCheckpointer($path)", shut) { (threadId, floor) =>
             writing("sweep") { c =>
               val reclaim = cutoff.filter(_ => floor.isEmpty && !protectedRuns.contains(threadId)).flatMap { cut =>
                 query(

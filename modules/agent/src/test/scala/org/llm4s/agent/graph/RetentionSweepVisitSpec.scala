@@ -40,21 +40,33 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
     floors.toVector shouldBe Vector("a" -> None, "a" -> None, "a" -> Some(7L), "b" -> None)
   }
 
-  it should "stop once its budget has passed, handing back the thread it stopped in as the cursor" in {
+  it should "always finish the first thread, then stop between threads once its budget has passed" in {
     val steps = mutable.Buffer.empty[String]
-    // the budget is gone from the start: one step is still made, and the page stops inside that thread
-    val inside = RetentionSweep.visit(page, Duration.Zero, "spec", closed = false) { (t, _) =>
+    // the budget is gone from the start: the first thread is still finished, in all its steps
+    val visited = RetentionSweep.visit(page, Duration.Zero, "spec", closed = false) { (t, floor) =>
       steps += t.value
-      Right(Step.More(Some(1L)))
+      if floor.contains(2L) then Right(Step.Done) else Right(Step.More(Some(floor.fold(1L)(_ + 1))))
     }
-    inside.value shouldBe Visited(1, 0, cutShort = true)
-    inside.value.cursor(page, 10) shouldBe Some(ThreadId("a"))
-    steps.toVector shouldBe Vector("a")
+    visited.value shouldBe Visited(1, 0, cutShort = true)
+    steps.toVector shouldBe Vector("a", "a", "a")
+    // the next call, paging after the cursor, starts with b: nothing is skipped
+    visited.value.cursor(page, 10) shouldBe Some(ThreadId("a"))
+  }
 
-    // between threads: the next thread is not begun
-    val between = RetentionSweep.visit(page, Duration.Zero, "spec", closed = false)((_, _) => Right(Step.Done))
-    between.value shouldBe Visited(1, 0, cutShort = true)
-    between.value.cursor(page, 10) shouldBe Some(ThreadId("a"))
+  it should "stop inside a later thread once its budget has passed, its cursor the last thread it finished" in {
+    // #3086: the thread it stopped in must come back first in the next call, not be paged past
+    val steps = mutable.Buffer.empty[String]
+    val visited = RetentionSweep.visit(page, 200.millis, "spec", closed = false) { (t, _) =>
+      steps += t.value
+      if t.value == "a" then Right(Step.Done)
+      else
+        Thread.sleep(150)
+        Right(Step.More(Some(1L)))
+    }
+    visited.value shouldBe Visited(1, 0, cutShort = true)
+    visited.value.cursor(page, 10) shouldBe Some(ThreadId("a"))
+    steps.head shouldBe "a"
+    steps.tail.toSet shouldBe Set("b")
   }
 
   it should "end the call on a cancel, or on any failure once the store is closed" in {

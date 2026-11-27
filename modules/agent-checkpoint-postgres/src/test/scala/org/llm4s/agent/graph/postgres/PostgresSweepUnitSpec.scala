@@ -45,15 +45,20 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
   private def rowOf(id: Any): Vector[Any] = if id == "a" then threadRow(7L, 7L) else threadRow(10L, 1L)
 
   "A sweep" should "reclaim the page's old tombstones under the reclamation lock, raise the mark, and prune the rest" in {
-    val script = Script {
-      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
-        Vector(Vector("a"), Vector("b"), Vector("c"))
-      case (sql, Vector(id)) if sql == Sql.lockedRow(t) || sql == Sql.lockedRowIfFree(t) => Vector(rowOf(id))
-      case (sql, Vector("a", _, _)) if sql == Sql.reclaim(t)                             => Vector(Vector(7L))
-      case (sql, _) if sql == Sql.reclaim(t)                                             => Vector.empty
-      case (sql, _) if sql == Sql.historyAges(t) =>
-        Vector(Vector(1L, "b1", now, "r"), Vector(2L, "b2", now, "s"))
-    }
+    // a scripted store that binds arrays: the prune asks for the first event of the checkpoints it keeps
+    val script = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+          Vector(Vector("a"), Vector("b"), Vector("c"))
+        case (sql, Vector(id)) if sql == Sql.lockedRow(t) || sql == Sql.lockedRowIfFree(t) => Vector(rowOf(id))
+        case (sql, Vector("a", _, _)) if sql == Sql.reclaim(t)                             => Vector(Vector(7L))
+        case (sql, _) if sql == Sql.reclaim(t)                                             => Vector.empty
+        case (sql, _) if sql == Sql.historyAges(t) =>
+          Vector(Vector(1L, "b1", now, "r"), Vector(2L, "b2", now, "s"))
+        case (sql, _) if sql == Sql.firstEventOf(t) => Vector(Vector(null))
+      }
+    )
     val store  = script.store()
     val asked  = new CopyOnWriteArrayList[Vector[ThreadId]]()
     val policy = SweepPolicy(RetentionPolicy(maxEvents = Some(1)), tombstoneAge = Some(1.day), batchSize = 2)

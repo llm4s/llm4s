@@ -92,7 +92,10 @@ final class PostgresCheckpointer private (
   @volatile private var shut                         = false
   private[postgres] given errorContext: ErrorContext = ErrorContext(config.schema)
   private val callTimeout                            = config.callTimeout
-  private val transactionSetting                     = settings(callTimeout)
+
+  /** How long one sweep call prunes before it hands back its cursor; a spec shortens it to cut a sweep short. */
+  @volatile private[postgres] var sweepBudget: FiniteDuration = config.callTimeout
+  private val transactionSetting                              = settings(callTimeout)
   private val notifier = new ChangeNotifier(
     ChangeNotifier.channelFor(config.schema),
     listenerConnection(dataSource, config),
@@ -448,12 +451,20 @@ final class PostgresCheckpointer private (
     if dropped.size > limit then None
     else
       // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-      val byCheckpoint =
-        if kept.size == history.size then None
+      val firstKept =
+        if kept.isEmpty then None
         else
           query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
             Option(rows.getObject(1)).map(_ => rows.getLong(1))
           ).head
+      // and when nothing is left to drop, an event below that naming a checkpoint the thread no longer holds is left
+      // over from a prune cut short after its checkpoints went (#3086): the floor is recovered from what is stored
+      val byCheckpoint =
+        if kept.size != history.size then firstKept
+        else
+          firstKept.filter(f =>
+            query(c, Sql.namedEventBelow(t), threadId.value, current.earliestSeq, f)(_ => ()).nonEmpty
+          )
       val byAge = cutoff.map { cut =>
         query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
           Option(rows.getObject(1)).map(_ => rows.getLong(1))
@@ -473,8 +484,10 @@ final class PostgresCheckpointer private (
    * order, each thread in transactions of its own (#3086), each removing at most `RetentionSweep.ChunkRows`
    * checkpoints or events, so every transaction stays well within the call timeout however large a thread's backlog
    * is and the page always makes progress. A thread whose prune fails is logged and skipped, and the page still hands
-   * back its cursor; once the call timeout has passed, the page stops after the step in flight and hands back the
-   * thread it stopped in, which the next pass finishes. Time is the database's.
+   * back its cursor; once the call timeout has passed - after the page's first thread, which is always finished - the
+   * page stops after the step in flight and hands back the last thread it finished, so the next call starts with the
+   * one it stopped in. A step's work is never carried between calls: the events' floor is worked out again from the
+   * rows that remain. Time is the database's.
    */
   def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
     reading("sweep") { c =>
@@ -510,7 +523,7 @@ final class PostgresCheckpointer private (
           val pruned =
             if policy.retention == RetentionPolicy.keepAll then Right(RetentionSweep.Visited(visited.size, 0, false))
             else
-              RetentionSweep.visit(visited, callTimeout, s"PostgresCheckpointer(${config.schema})", shut) {
+              RetentionSweep.visit(visited, sweepBudget, s"PostgresCheckpointer(${config.schema})", shut) {
                 (threadId, floor) =>
                   if gone(threadId) then Right(RetentionSweep.Step.Done)
                   else

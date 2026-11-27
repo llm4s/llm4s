@@ -343,9 +343,10 @@ trait Checkpointer:
    *
    * Like [[prune]], it needs no claim and changes nothing a run reads or writes; it reads no tenant, for it is the
    * operator's, store-wide. Each call returns within the store's bound, whatever the store holds, and always makes
-   * progress (#3086): a store may prune a thread in several bounded steps, and a call that reaches its bound stops
-   * early, its `next` the thread it stopped in, which the next call finishes; a thread whose prune fails is logged
-   * and skipped, and the page still returns its `next`. Only a `CancelledError`, a closed store, or a failure of the
+   * progress (#3086): a store may prune a thread in several bounded steps, each leaving the thread in a state a later
+   * sweep or [[prune]] finishes from; a call that reaches its bound after its first thread stops early, its `next`
+   * the last thread it finished, so the next call starts with the one it stopped in; a thread whose prune fails is
+   * logged and skipped, and the page still returns its `next`. Only a `CancelledError`, a closed store, or a failure of the
    * page as a whole - reading it, the guard, reclaiming its tombstones - is a `Left`. Run one sweep at a time per
    * store (a worker's schedule does: Stage 5, W2); two at once are safe, only wasteful.
    */

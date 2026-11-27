@@ -75,19 +75,34 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
     wrapped(open(clock, PostgresCheckpointerConfig(schema = isolated)))
   }
 
-  // a trigger refusing to delete any of the thread's checkpoints, so every prune of it fails (#3086)
-  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean = {
-    val in = configOf(store).schema
-    val id = threadId.value.replace("'", "''")
+  // a trigger refusing to delete any of the thread's checkpoints, or its events from a seq on, so its prune fails (#3086)
+  override protected def refuseDeletes(
+    store: Checkpointer,
+    threadId: ThreadId,
+    eventsFrom: Option[Long]
+  ): Option[() => Unit] = {
+    val in      = configOf(store).schema
+    val id      = threadId.value.replace("'", "''")
+    val trigger = s"refuse_prune_${java.util.UUID.randomUUID().toString.replace("-", "")}"
+    val (table, condition) =
+      eventsFrom.fold(("checkpoint_history", ""))(seq => ("checkpoint_events", s" AND OLD.seq >= $seq"))
     PgCheckpointerDb.execute(
       s"""CREATE OR REPLACE FUNCTION "$in".refuse_prune() RETURNS trigger LANGUAGE plpgsql AS
          |$$$$ BEGIN RAISE EXCEPTION 'pruning this thread is refused'; END $$$$""".stripMargin
     )
     PgCheckpointerDb.execute(
-      s"""CREATE TRIGGER "refuse_prune_${java.util.UUID.randomUUID()}" BEFORE DELETE ON "$in".checkpoint_history
-         |FOR EACH ROW WHEN (OLD.thread_id = '$id') EXECUTE FUNCTION "$in".refuse_prune()""".stripMargin
+      s"""CREATE TRIGGER $trigger BEFORE DELETE ON "$in".$table
+         |FOR EACH ROW WHEN (OLD.thread_id = '$id'$condition) EXECUTE FUNCTION "$in".refuse_prune()""".stripMargin
     )
-    true
+    Some(() => PgCheckpointerDb.execute(s"""DROP TRIGGER $trigger ON "$in".$table"""))
+  }
+
+  override protected def shortenSweepBudget(store: Checkpointer): Boolean = store match {
+    case postgres: PostgresCheckpointer =>
+      postgres.sweepBudget = Duration.Zero
+      true
+    case encrypting: EncryptingCheckpointer => shortenSweepBudget(encrypting.inner)
+    case _                                  => false
   }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {

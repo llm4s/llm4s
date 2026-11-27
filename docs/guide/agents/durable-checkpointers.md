@@ -821,8 +821,8 @@ def sweepAll(after: Option[ThreadId]): Result[Unit] =
 - Each call visits at most `batchSize` threads (1 to 1000), tombstones included, and returns the cursor of the next
   page. The SQLite and PostgreSQL stores prune each thread in transactions of their own, each removing at most 1,000
   checkpoints or events, so live runs' commits go between them and a large backlog never times out. A page that
-  reaches the store's bound (`callTimeout`, SQLite's `busyTimeout`) stops early and returns the thread it stopped in as
-  its cursor. The next page finishes that thread.
+  reaches the store's bound (`callTimeout`, SQLite's `busyTimeout`) stops early, after its first thread, and returns
+  the last thread it finished as its cursor. The next page starts with the thread it stopped in.
 - Each thread ends up pruned exactly as `prune(threadId, policy.retention)` would prune it, by the store's commit times.
   A thread whose prune fails is logged at WARN and skipped, and the page still returns its cursor. The next pass tries
   it again.

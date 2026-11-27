@@ -135,20 +135,27 @@ private[graph] object RetentionSweep:
     /** More to remove; `floor` is the events' floor the thread is being pruned to, once its history is done. */
     case More(floor: Option[Long])
 
-  /** The threads of a page a sweep visited (`examined`), the tombstones it reclaimed, and whether it was cut short. */
+  /**
+   * The threads of a page a sweep finished (`examined`), the tombstones it reclaimed, and whether it was cut short by
+   * its budget before the rest of the page.
+   */
   final case class Visited(examined: Int, reclaimed: Int, cutShort: Boolean):
 
-    /** The page's cursor: the last thread visited when the call was cut short, else as [[next]] has it. */
+    /**
+     * The page's cursor: the last thread finished when the call was cut short - so the next call, paging after it,
+     * starts with the thread the budget stopped, or stopped before - else as [[next]] has it.
+     */
     def cursor(page: Vector[ThreadId], batchSize: Int): Option[ThreadId] =
       if cutShort then Some(page(examined - 1)) else next(page, batchSize)
 
   /**
    * Visits `threads` in order, each by `step` - one bounded transaction of the store's, called again with the floor
    * it returned while it returns [[Step.More]] - so a page always makes progress (#3086): a thread whose step fails
-   * is logged and skipped, and the next pass tries it again; once `budget` has passed, the page stops after the
-   * step in flight, at least one step in, and its cursor is the thread it stopped in - what is left of that thread
-   * is removed by the next pass. Only a `CancelledError`, or any failure once `closed` says the store is closed,
-   * ends the call with a `Left`.
+   * is logged and skipped, and the next pass tries it again. The first thread is always finished; once `budget` has
+   * passed, the page stops - between threads, or after the step in flight inside a later thread - and its cursor is
+   * the last thread it finished, so the next call starts with the one it stopped in. A store's steps leave a thread
+   * in a state any later step, sweep or prune finishes from, so nothing carried between calls is lost. Only a
+   * `CancelledError`, or any failure once `closed` says the store is closed, ends the call with a `Left`.
    */
   def visit(threads: Vector[ThreadId], budget: FiniteDuration, store: String, closed: => Boolean)(
     step: (ThreadId, Option[Long]) => Result[Step]
@@ -157,23 +164,24 @@ private[graph] object RetentionSweep:
     def late: Boolean      = System.nanoTime() - deadline > 0
     def fatal(e: LLMError) = e.isInstanceOf[CancelledError] || closed
     // Some(reclaimed) once the thread is done or skipped; None if the budget ran out inside it
-    @tailrec def steps(threadId: ThreadId, floor: Option[Long]): Result[Option[Boolean]] =
+    @tailrec def steps(threadId: ThreadId, floor: Option[Long], first: Boolean): Result[Option[Boolean]] =
       step(threadId, floor) match
         case Left(e) if fatal(e) => Left(e)
         case Left(e) =>
           logger.warn(s"$store: the retention sweep skipped thread ${threadId.value}, whose prune failed: ${e.message}")
           Right(Some(false))
-        case Right(Step.Reclaimed)       => Right(Some(true))
-        case Right(Step.Done)            => Right(Some(false))
-        case Right(Step.More(_)) if late => Right(None)
-        case Right(Step.More(f))         => steps(threadId, f)
+        case Right(Step.Reclaimed)                 => Right(Some(true))
+        case Right(Step.Done)                      => Right(Some(false))
+        case Right(Step.More(_)) if !first && late => Right(None)
+        case Right(Step.More(f))                   => steps(threadId, f, first)
     @tailrec def from(i: Int, reclaimed: Int): Result[Visited] =
       if i == threads.size then Right(Visited(i, reclaimed, cutShort = false))
       else if i > 0 && late then Right(Visited(i, reclaimed, cutShort = true))
       else
-        steps(threads(i), None) match
-          case Left(e)            => Left(e)
-          case Right(None)        => Right(Visited(i + 1, reclaimed, cutShort = true))
+        steps(threads(i), None, first = i == 0) match
+          case Left(e) => Left(e)
+          // the thread it stopped in is not finished: the cursor is the one before it, and the next call resumes it
+          case Right(None)        => Right(Visited(i, reclaimed, cutShort = true))
           case Right(Some(true))  => from(i + 1, reclaimed + 1)
           case Right(Some(false)) => from(i + 1, reclaimed)
     from(0, 0)
