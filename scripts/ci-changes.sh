@@ -74,6 +74,7 @@ BUILD=(
   '^\.scalafmt\.conf$'
   '^\.scalafix\.conf$'
   '^scripts/ci-changes\.sh$'
+  '^scripts/merge-group-labels\.sh$'
   '^scripts/retry-on-transient-network\.sh$'
 )
 # Not code: no compile or test reads them. Everything else is code, so a new kind of file runs the tests until it is

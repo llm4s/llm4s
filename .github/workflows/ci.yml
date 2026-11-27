@@ -109,22 +109,17 @@ jobs:
           FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: printf 'draft=%s\nfull_label=%s\n' "$DRAFT" "$FULL_LABEL" >> "$GITHUB_OUTPUT"
 
-      # The queue's branch is gh-readonly-queue/<base>/pr-<number>-<sha>; a group of several entries is named after its
-      # last. A failed lookup selects everything (`unknown`).
-      - name: Read the queued pull request's labels
+      # Every pull request in the group (one squash commit each, `(#N)`; the queue branch names only the last), so a
+      # group stacked on an entry with `ci:full` runs everything. A failed lookup selects everything (`unknown`).
+      - name: Read the queued pull requests' labels
         id: group
         if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
           HEAD_REF: ${{ github.event.merge_group.head_ref }}
-        run: |
-          n="$(sed -nE 's#^(refs/heads/)?gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$#\2#p' <<< "$HEAD_REF")"
-          label=unknown
-          if [ -n "$n" ] && names="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq '.labels[].name')"; then
-            if grep -qx 'ci:full' <<< "$names"; then label=true; else label=false; fi
-          fi
-          echo "pull request ${n:-?} of $HEAD_REF: ci:full=$label"
-          echo "full_label=$label" >> "$GITHUB_OUTPUT"
+        run: scripts/merge-group-labels.sh "$GROUP_BASE" "$GROUP_HEAD" "$HEAD_REF" >> "$GITHUB_OUTPUT"
 
       - name: Decide what the change needs
         id: diff

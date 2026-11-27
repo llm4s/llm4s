@@ -532,6 +532,40 @@ atp 'a failed Changes job fails'                               fail pull_request
 atp 'a skipped Changes job fails, on a push too'               fail push refs/heads/main "changes=skipped" ""
 atp 'a workspace change without the tier fails'                fail pull_request x "$SKIPS" "${PART/workspace=false/workspace=true} legs=$LEGS1"
 
+# scripts/merge-group-labels.sh: every pull request of a merge group is looked up for ci:full (#3185)
+LABELS="$(cd "$(dirname "$SCRIPT")" && pwd)/merge-group-labels.sh"
+mg="$WORK/mg"; rm -rf "$mg"; mkdir -p "$mg/bin"
+git init -q "$mg/repo"
+mgc() { (cd "$mg/repo" && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q --allow-empty -m "$1"); }
+mgc "base"; MG_BASE="$(git -C "$mg/repo" rev-parse HEAD)"
+mgc "fix: first queued change (#3087) (#101)"
+mgc "feat: second queued change (#102)"
+MG_HEAD="$(git -C "$mg/repo" rev-parse HEAD)"
+# a stub gh: `gh api repos/<r>/pulls/<n> --jq ...` prints the labels in $mg/labels-<n>, fails when the file is missing
+cat > "$mg/bin/gh" <<'GH'
+#!/usr/bin/env bash
+n="${2##*/}"; f="$MG_LABELS/labels-$n"; [ -f "$f" ] && cat "$f" || exit 1
+GH
+chmod +x "$mg/bin/gh"
+labels_case() { # labels_case <label> <want> [<head_ref>]
+  local got
+  got="$(cd "$mg/repo" && PATH="$mg/bin:$PATH" MG_LABELS="$mg" GITHUB_REPOSITORY=o/r \
+    "$LABELS" "$MG_BASE" "$MG_HEAD" "${3:-gh-readonly-queue/main/pr-102-$MG_HEAD}" 2>/dev/null)"
+  if [ "$got" = "full_label=$2" ]; then ok "$1"; else bad "$1" "got '$got', want full_label=$2"; fi
+}
+printf 'bug\n' > "$mg/labels-101"; printf '\n' > "$mg/labels-102"
+labels_case 'merge-group labels: no pull request in the group has ci:full' false
+printf 'bug\nci:full\n' > "$mg/labels-101"
+labels_case 'merge-group labels: ci:full on an earlier pull request of a stacked group runs everything' true
+printf 'bug\n' > "$mg/labels-101"; printf 'ci:full\n' > "$mg/labels-102"
+labels_case 'merge-group labels: ci:full on the last pull request runs everything' true
+printf '\n' > "$mg/labels-102"; rm -f "$mg/labels-101"
+labels_case 'merge-group labels: a pull request whose labels cannot be read is unknown' unknown
+printf '\n' > "$mg/labels-101"
+mgc "a commit with no pull request number"; MG_HEAD="$(git -C "$mg/repo" rev-parse HEAD)"
+labels_case 'merge-group labels: a commit naming no pull request is unknown' unknown
+MG_BASE=0000000000000000000000000000000000000000 labels_case 'merge-group labels: an unreachable base is unknown' unknown
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
