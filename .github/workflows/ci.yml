@@ -600,8 +600,8 @@ jobs:
                       doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, llm4sSttp, traceOpentelemetry,
                       gradleDemo, secretsVault, secretsAws]
           - leg: rag
-            modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
-                      observability, observabilityPrometheus]
+            modules: [rag, ragTestkit, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image,
+                      speech, observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
                       perplexity, jlama, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter,
@@ -880,6 +880,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: rag
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload rag-testkit coverage to Codecov
+        if: contains(matrix.modules, 'ragTestkit')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/rag-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: rag-testkit
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

@@ -5,8 +5,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /**
- * The SQL the Postgres stores send for each [[MetadataFilter]] (#2996). The `@Docker` `PgMetadataFilterParitySpec`
- * in `modules/it` runs it against Postgres and compares the records selected with `SQLiteVectorStore`'s.
+ * The SQL the Postgres stores send for each [[MetadataFilter]] (#2996). The `@Docker` contract suites and
+ * `PgMetadataFilterParitySpec` in `modules/it` run it against Postgres, against the answers of `MetadataFilterMatrix`.
  */
 class PgMetadataFilterSqlSpec extends AnyWordSpec with Matchers {
 

@@ -40,6 +40,10 @@ flags:
     paths:
       - modules/rag/src/main/scala
     carryforward: true
+  rag-testkit:
+    paths:
+      - modules/rag-testkit/src/main/scala
+    carryforward: true
   vectorstore-elasticsearch:
     paths:
       - modules/vectorstore-elasticsearch/src/main/scala

@@ -112,17 +112,15 @@ class PgSearchIndexRagConsistencySpec extends AnyFlatSpec with Matchers with Bef
     }
 
   override def afterAll(): Unit = {
-    openIndexes.headOption.foreach(index => createdPaths.foreach(path => Try(index.collections.delete(path))))
-    openIndexes.foreach(i => Try(i.close()))
     pgUrl.foreach { url =>
-      Try {
-        Using.resource(connect(url)) { conn =>
-          Using.resource(conn.createStatement()) { stmt =>
-            createdTables.foreach(t => stmt.execute(s"DROP TABLE IF EXISTS $t"))
-          }
-        }
+      // Each base name is a vectors table, or the base of the keyword table its index creates as <base>_keyword.
+      val tables = createdTables.toSeq.flatMap(t => Seq(t, s"${t}_keyword"))
+      openIndexes.headOption.foreach { index =>
+        createdPaths.foreach(path => PgSuiteCleanup.removeOwn(index, path, url, pgUser, pgPassword, Seq.empty))
       }
+      PgSuiteCleanup.dropOwnTables(url, pgUser, pgPassword, tables)
     }
+    openIndexes.foreach(i => Try(i.close()))
     super.afterAll()
   }
 

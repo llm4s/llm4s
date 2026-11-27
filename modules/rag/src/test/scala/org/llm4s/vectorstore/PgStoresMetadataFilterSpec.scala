@@ -8,7 +8,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /**
  * Every Postgres store sends the [[PgMetadataFilterSql]] condition for a filter and binds its parameters (#2996),
- * checked over a scripted JDBC connection; `PgMetadataFilterParitySpec` in `modules/it` runs it against Postgres.
+ * checked over a scripted JDBC connection; the `@Docker` contract suites and `PgMetadataFilterParitySpec` in
+ * `modules/it` run it against Postgres.
  */
 class PgStoresMetadataFilterSpec extends AnyWordSpec with Matchers {
 

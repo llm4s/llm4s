@@ -1477,6 +1477,39 @@ store.search(
 
 ---
 
+## Testing a store with the contract suites
+
+`llm4s-rag-testkit` (Experimental) holds the behaviour the `VectorStore` and `KeywordIndex` traits promise, as
+ScalaTest suites: `VectorStoreContract` and `KeywordIndexContract`. Every store in this repository runs them, the SQLite
+stores in the testkit's own tests and Postgres, Qdrant, Elasticsearch, OpenSearch, Redis and Valkey in `modules/it`.
+A store of your own proves itself the same way:
+
+```scala
+// libraryDependencies += "org.llm4s" %% "llm4s-rag-testkit" % llm4sVersion % Test
+import org.llm4s.vectorstore.{ SQLiteVectorStore, VectorStore }
+import org.llm4s.vectorstore.testkit.VectorStoreContract
+import org.scalatest.funsuite.AnyFunSuite
+
+class MyVectorStoreContractSpec extends AnyFunSuite with VectorStoreContract {
+  protected def newStore(): VectorStore                = SQLiteVectorStore.inMemory().fold(e => fail(e.formatted), identity)
+  protected def releaseStore(store: VectorStore): Unit = store.close()
+}
+```
+
+`newStore()` returns a fresh, empty store for each case and `releaseStore` disposes of it. Keep any state the two
+share in an `object`, not a field of the spec: the cases are registered while the suite is constructed.
+
+The cases cover reads and writes on empty, populated and cleared stores; the filter matrix
+(`MetadataFilterMatrix`: `Equals`, `Contains`, `HasKey`, `In`, `And`, `Or`, `Not`, nested) in `list`, `count`,
+`search` and `deleteByFilter`; metadata holding quotes, escapes, control characters and unicode; search order,
+`topK`, the filter applied before the cut, and scores of `(1 + cos) / 2`; zero vectors and a wrong dimension; `list`
+order and paging; and batches past a statement's parameter limit or a server's request limit. `KeywordIndexContract`
+adds re-indexing and queries with quotes, operators, hyphens, stopwords and non-Latin text.
+
+A store that fails a case because of a known defect names it in `knownFailures`, with its issue: the case still runs,
+is reported pending while it fails, and fails once it passes, so the fix removes the entry. A store that cannot run a
+case at all names it in `unsupported`, with the reason, and it is cancelled.
+
 ## Performance Considerations
 
 ### SQLite Backend

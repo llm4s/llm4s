@@ -33,8 +33,8 @@ included, one row per library:
 | `source` | Where the licence comes from: `POM: <what the POM declares>`, or `reviewed: <justification>` for an entry of the exceptions file |
 | `via` | One shortest path from the module to the library, for example `llm4s-rag -> software.amazon.awssdk:s3 -> software.amazon.awssdk:netty-nio-client -> io.netty:netty-buffer` |
 
-Test frameworks are not runtime dependencies and are not listed, except in `llm4s-provider-testkit` and
-`llm4s-agent-testkit`, whose published APIs are built on ScalaTest. Other llm4s modules a module depends on are MIT
+Test frameworks are not runtime dependencies and are not listed, except in `llm4s-provider-testkit`,
+`llm4s-agent-testkit` and `llm4s-rag-testkit`, whose published APIs are built on ScalaTest. Other llm4s modules a module depends on are MIT
 and are left out of its report; each has a report of its own. `llm4s-kotlin-api` is built by Gradle and has no report
 yet: its dependencies are `llm4s-java-api_3` (reported), `kotlinx-coroutines-core` and the Kotlin standard library,
 all Apache-2.0.

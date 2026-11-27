@@ -29,8 +29,8 @@ dependencies are scanned for known vulnerabilities.
 Each BOM lists the **runtime dependency tree** of one module as resolved by the build: group, name, version, hashes
 and a `pkg:maven` package URL for every library, plus the dependency graph between them. They describe the module's
 compile and runtime classpath, so test frameworks such as ScalaTest are not listed (the exceptions are
-`llm4s-provider-testkit` and `llm4s-agent-testkit`, whose published APIs are built on ScalaTest, so ScalaTest is a real
-dependency of them).
+`llm4s-provider-testkit`, `llm4s-agent-testkit` and `llm4s-rag-testkit`, whose published APIs are built on ScalaTest, so
+ScalaTest is a real dependency of them).
 
 A project that a module depends on only for its tests (`dependsOn(other % Test)`, for example the provider test kit)
 is not listed either. The `sbt-sbom` plugin lists such a project as a required component, although the module's POM

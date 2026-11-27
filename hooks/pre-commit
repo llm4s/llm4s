@@ -107,6 +107,7 @@ map_file_to_project() {
     modules/java-rag/*)                   echo "javaRag" ;;
     modules/vectorstore-elasticsearch/*)  echo "vectorstoreElasticsearch" ;;
     modules/vectorstore-redis/*)          echo "vectorstoreRedis" ;;
+    modules/rag-testkit/*)                echo "ragTestkit" ;;
     modules/reactor/*)                    echo "reactor" ;;
     modules/spring-ai/*)                  echo "springAi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
@@ -237,6 +238,9 @@ propagate_downstream() {
     vectorstoreRedis)
       set_add DOWNSTREAM_COMPILE it
       ;;
+    ragTestkit)
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     javaRag)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -284,6 +288,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       set_add DOWNSTREAM_COMPILE vectorstoreRedis
+      set_add DOWNSTREAM_COMPILE ragTestkit
       ;;
     core)
       set_add DOWNSTREAM_COMPILE knowledgegraph
@@ -349,6 +354,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       set_add DOWNSTREAM_COMPILE vectorstoreRedis
+      set_add DOWNSTREAM_COMPILE ragTestkit
       ;;
     knowledgegraph)
       set_add DOWNSTREAM_COMPILE rag
@@ -360,6 +366,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       set_add DOWNSTREAM_COMPILE vectorstoreRedis
+      set_add DOWNSTREAM_COMPILE ragTestkit
       ;;
     rag)
       set_add DOWNSTREAM_COMPILE samples
@@ -369,6 +376,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       set_add DOWNSTREAM_COMPILE vectorstoreRedis
+      set_add DOWNSTREAM_COMPILE ragTestkit
       ;;
     memory)
       set_add DOWNSTREAM_COMPILE memoryPostgres
@@ -545,6 +553,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       set_add DOWNSTREAM_COMPILE vectorstoreRedis
+      set_add DOWNSTREAM_COMPILE ragTestkit
       ;;
     observabilityPrometheus)
       set_add DOWNSTREAM_COMPILE deployService

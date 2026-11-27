@@ -70,7 +70,7 @@ INTEGRATION=(
   '^modules/it/'
   '^deploy/'
   '^config/'
-  '^modules/(media|core|rag|vectorstore-elasticsearch|vectorstore-redis|knowledgegraph|knowledgegraph-neo4j)/'
+  '^modules/(media|core|rag|rag-testkit|vectorstore-elasticsearch|vectorstore-redis|knowledgegraph|knowledgegraph-neo4j)/'
   '^modules/(memory|memory-postgres|observability|openai|openai-compatible|testkit|provider-testkit)/'
   '^modules/(agent|agent-testkit|agent-checkpoint-sqlite|agent-checkpoint-postgres|deploy-service)/'
   '^modules/(secrets-vault|secrets-aws)/'
