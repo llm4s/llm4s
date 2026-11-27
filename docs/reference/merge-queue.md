@@ -39,10 +39,10 @@ linked: merge `main` into your branch (`git merge --signoff origin/main`), fix t
 
 ## For maintainers: enabling it
 
-**Where it stands (2026-11-27, #3183):** `protect-main` is active with the three required checks below and
+**Where it stands (2026-11-27, [#3183](https://github.com/llm4s/llm4s/issues/3183)):** `protect-main` is active with the three required checks below and
 **Require branches to be up to date** off, so no pull request merges with a red or missing `All Tests Pass`, a DCO
 failure or a secret-scan failure. The merge queue (step 3) is not enabled yet: it waits for selective pull request
-runs (#3185, #3186), after which the queue is where everything runs before a merge.
+runs ([#3185](https://github.com/llm4s/llm4s/issues/3185), [#3186](https://github.com/llm4s/llm4s/issues/3186)), after which the queue is where everything runs before a merge.
 
 This is a repository setting, so it needs an admin; the workflows are ready for it. Two options, which can be used in
 sequence.
