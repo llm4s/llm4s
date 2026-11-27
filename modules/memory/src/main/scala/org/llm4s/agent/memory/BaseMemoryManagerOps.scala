@@ -4,6 +4,8 @@ import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
+import BaseMemoryManagerOps.oneLine
+
 /**
  * Shared implementation of [[MemoryManager]] record/retrieve operations.
  *
@@ -153,7 +155,7 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       } else {
         val lines = memories.map { memory =>
           val role = memory.getMetadata("role").fold("unknown")(identity)
-          s"[$role]: ${memory.content}"
+          s"[${oneLine(role)}]: ${oneLine(memory.content)}"
         }
         s"Previous conversation:\n${lines.mkString("\n")}"
       }
@@ -168,8 +170,8 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
           .flatMap(_.getMetadata("entity_name"))
           .fold(entityId.value)(identity)
 
-        val facts = memories.map(m => s"- ${m.content}")
-        s"Known facts about $entityName:\n${facts.mkString("\n")}"
+        val facts = memories.map(m => s"- ${oneLine(m.content)}")
+        s"Known facts about ${oneLine(entityName)}:\n${facts.mkString("\n")}"
       }
     }
 
@@ -185,7 +187,7 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       if (memories.isEmpty) {
         ""
       } else {
-        val facts = memories.map(m => s"- ${m.content}")
+        val facts = memories.map(m => s"- ${oneLine(m.content)}")
         s"Known facts about the user:\n${facts.mkString("\n")}"
       }
     }
@@ -242,6 +244,10 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
    * heading is written only together with at least one entry under it, so a section whose first
    * entry does not fit is left out entirely, and the result is empty when no entry fits.
    *
+   * Each entry is one line: line breaks inside a memory become spaces, so a memory can neither
+   * start a heading of its own nor end its section (#3033). It is still recorded text, not the
+   * application's instructions: fence it as untrusted data before it reaches a prompt.
+   *
    * @param memories the memories to format
    * @param maxChars approximate character budget for the output
    * @return formatted context string, or empty string if no memories or none fits
@@ -258,15 +264,15 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
 
     def addSection(title: String, mems: Seq[Memory]): Unit =
       mems.headOption.foreach { first =>
-        val header    = s"\n## $title\n"
-        val firstLine = s"- ${first.content}\n"
+        val header    = s"\n## ${oneLine(title)}\n"
+        val firstLine = s"- ${oneLine(first.content)}\n"
         if (currentLength + header.length + firstLine.length <= maxChars) {
           formatted.append(header).append(firstLine)
           currentLength += header.length + firstLine.length
 
           mems.iterator
             .drop(1)
-            .map(memory => s"- ${memory.content}\n")
+            .map(memory => s"- ${oneLine(memory.content)}\n")
             .takeWhile(line => currentLength + line.length <= maxChars)
             .foreach { line =>
               formatted.append(line)
@@ -293,5 +299,37 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
 }
 
 private[memory] object BaseMemoryManagerOps {
+
+  private def isBreak(c: Char): Boolean =
+    c == '\r' || c == '\n' || c == '\u000B' || c == '\u000C' || c == '\u0085' || c == ' ' || c == ' '
+
+  private def isBlank(c: Char): Boolean = c == ' ' || c == '\t'
+
+  /**
+   * `s` on one line: each run of blanks and line breaks that holds a line break becomes one space;
+   * a run of blanks alone is kept. A memory rendered as a `- ` entry then cannot start a line, so it
+   * forges no heading and ends no section. One pass, linear in `s` (no regex backtracking).
+   */
+  def oneLine(s: String): String = {
+    val out = new java.lang.StringBuilder(s.length)
+    var i   = 0
+    while (i < s.length) {
+      val c = s.charAt(i)
+      if (isBlank(c) || isBreak(c)) {
+        val start = i
+        var broke = false
+        while (i < s.length && (isBlank(s.charAt(i)) || isBreak(s.charAt(i)))) {
+          if (isBreak(s.charAt(i))) broke = true
+          i += 1
+        }
+        if (broke) out.append(' ') else out.append(s, start, i)
+      } else {
+        out.append(c)
+        i += 1
+      }
+    }
+    out.toString
+  }
+
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BaseMemoryManagerOps])
 }
