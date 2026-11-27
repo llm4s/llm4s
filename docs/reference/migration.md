@@ -376,6 +376,30 @@ gets a `Left`: have an administrator create `llm4s_id_unique` and `llm4s_label_i
 `Neo4jGraphStore`'s Scaladoc); the factories then find them and succeed. Code that relied on traversal order within a
 level should sort by its own key.
 
+## `EntityLinker` merges transitively and keeps provenance; schema extraction enforces the schema (#2967, #2962, #2971)
+
+`llm4s-knowledgegraph` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| After a model-confirmed merge, the kept node listed only its own documents and the rewritten edge had no sources | Every merge moves the removed node's sources to the node it merged into; an edge's sources are the union of every edge rewritten onto it |
+| Two edges rewritten onto one key kept only one edge's sources (#2962) | Their sources are unioned |
+| With three names for one entity, chained merges could bring a removed node back and split its edges | Confirmed pairs are grouped transitively and each group merges once |
+| Nodes with a blank `name` merged into one, and a blank name was a disambiguation candidate for every node | A blank name is no name: the node is keyed by its id and is never a candidate |
+| Every self-loop was deleted | Only a self-loop the merge created is dropped |
+| Edges differing only in properties stayed duplicated | One edge per (source, target, relationship), properties merged with the first edge's winning |
+| The canonical id was the smallest, so an incremental build could rename an existing node | `linkTracked(tracked, preferredIds)` keeps a preferred id; `MultiDocumentGraphBuilder` passes the existing graph's ids |
+| One malformed element in the model's `merges` discarded every merge | It is skipped with a warning; the others apply |
+| Strict mode (`allowOutOfSchema = false`) kept an edge whose endpoints broke its `sourceTypes`/`targetTypes` | It is dropped, and reported as before |
+| `PropertyDefinition.required` was only a prompt hint | A missing (or `null`) required property is a `missing_required_property` violation; strict mode drops the node and its edges |
+| `person` and `Person` stayed two labels | Labels and relationships are respelled as the schema spells them |
+| An edge to a dropped node vanished unreported | It is an `endpoint_missing` violation |
+| Empty `entityTypes` in strict mode dropped every node | Empty `entityTypes` or `relationshipTypes` admits anything, as empty `sourceTypes` does |
+| The builder only logged violations | `extractDocumentsWithValidation` returns a `GraphExtraction` with each document's `ValidationResult` |
+
+A disambiguation candidate now needs a non-blank `name` on both nodes. `ExtractionSchema.simple` matches its
+`properties` keys to type names ignoring case.
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

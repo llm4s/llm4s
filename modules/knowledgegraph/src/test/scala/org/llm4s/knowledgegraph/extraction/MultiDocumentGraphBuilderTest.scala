@@ -428,9 +428,8 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
     )
   }
 
-  test("MultiDocumentGraphBuilder should keep an in-schema edge whose endpoints break its type constraint") {
-    // SchemaValidator reports the wrong source and target types as violations but leaves the edge in the
-    // valid graph, and the builder only logs the violations.
+  test("MultiDocumentGraphBuilder should drop an in-schema edge whose endpoints break its type constraint (#2971)") {
+    // A strict schema keeps only what conforms; the violations reach the caller through extractDocumentsWithValidation
     val typed = ExtractionSchema(
       entityTypes = Seq(EntityTypeDefinition("Person"), EntityTypeDefinition("Organization")),
       relationshipTypes = Seq(
@@ -451,7 +450,32 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
     val tracked = extractWithSchema(typed, backwards)
 
     tracked.graph.nodes.keySet shouldBe Set("alice", "acme")
-    tracked.graph.edges shouldBe List(Edge("acme", "alice", "WORKS_FOR"))
+    tracked.graph.edges shouldBe empty
+
+    val llmClient = mock[LLMClient]
+    (llmClient.complete _).expects(*, *).returning(Right(makeCompletion(backwards)))
+    val config = ExtractionConfig(schema = Some(typed), enableCoreference = false, enableEntityLinking = false)
+    val extraction = new MultiDocumentGraphBuilder(llmClient, config)
+      .extractDocumentsWithValidation(Seq(("text", DocumentSource("doc-1"))))
+      .fold(e => fail(e.message), identity)
+    extraction.graph.graph.edges shouldBe empty
+    extraction.violations.map { case (doc, v) => (doc, v.violationType) } shouldBe Seq(
+      "doc-1" -> "invalid_source_type",
+      "doc-1" -> "invalid_target_type"
+    )
+  }
+
+  test("extractDocumentsWithValidation has no validations when no schema is configured (#2971)") {
+    val llmClient = mock[LLMClient]
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("""{"nodes": [{"id": "a", "label": "X", "properties": {}}], "edges": []}""")))
+    val config = ExtractionConfig(enableCoreference = false, enableEntityLinking = false)
+    val extraction = new MultiDocumentGraphBuilder(llmClient, config)
+      .extractDocumentsWithValidation(Seq(("text", DocumentSource("doc-1"))))
+      .fold(e => fail(e.message), identity)
+    extraction.validations shouldBe empty
+    extraction.graph.graph.nodes.keySet shouldBe Set("doc-1__a")
   }
 
   // One Organization named "Acme" per document, under a different id in each

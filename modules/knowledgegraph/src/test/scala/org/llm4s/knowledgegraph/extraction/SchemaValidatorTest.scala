@@ -198,4 +198,87 @@ class SchemaValidatorTest extends AnyFunSuite with Matchers {
     result.validGraph.edges should have size 1 // Only WORKS_FOR
     result.validGraph.edges.head.relationship shouldBe "WORKS_FOR"
   }
+
+  // ─── #2971 ────────────────────────────────────────────────────────────────────────────────
+
+  private val typedRel =
+    RelationshipTypeDefinition("WORKS_FOR", sourceTypes = Seq("Person"), targetTypes = Seq("Organization"))
+
+  private def typedSchema(allowOutOfSchema: Boolean, personProps: Seq[PropertyDefinition] = Nil) = ExtractionSchema(
+    Seq(EntityTypeDefinition("Person", properties = personProps), EntityTypeDefinition("Organization")),
+    Seq(typedRel),
+    allowOutOfSchema
+  )
+
+  test("strict mode drops an edge whose endpoints break its types; lenient mode keeps and reports it (#2971)") {
+    val graph = Graph(
+      Map("alice" -> Node("alice", "Person"), "acme" -> Node("acme", "Organization")),
+      List(Edge("acme", "alice", "WORKS_FOR"), Edge("alice", "acme", "WORKS_FOR"))
+    )
+    val strict = new SchemaValidator(typedSchema(allowOutOfSchema = false)).validate(graph)
+    strict.validGraph.edges shouldBe List(Edge("alice", "acme", "WORKS_FOR"))
+    strict.violations.map(_.violationType) shouldBe List("invalid_source_type", "invalid_target_type")
+    val lenient = new SchemaValidator(typedSchema(allowOutOfSchema = true)).validate(graph)
+    lenient.validGraph.edges should have size 2
+    lenient.violations should have size 2
+  }
+
+  test("a missing required property is a violation, and strict mode drops the node and its edges (#2971)") {
+    val schema = (strict: Boolean) => typedSchema(!strict, Seq(PropertyDefinition("role", required = true)))
+    val graph = Graph(
+      Map(
+        "alice" -> Node("alice", "Person", Map("Role" -> ujson.Str("CEO"))),
+        "bob"   -> Node("bob", "Person", Map("role" -> ujson.Null)),
+        "acme"  -> Node("acme", "Organization")
+      ),
+      List(Edge("alice", "acme", "WORKS_FOR"), Edge("bob", "acme", "WORKS_FOR"))
+    )
+    val strict = new SchemaValidator(schema(true)).validate(graph)
+    strict.validGraph.nodes.keySet shouldBe Set("alice", "acme")
+    strict.validGraph.edges shouldBe List(Edge("alice", "acme", "WORKS_FOR"))
+    strict.violations.map(v => (v.violationType, v.entityId)) shouldBe List(
+      ("missing_required_property", Some("bob")),
+      ("endpoint_missing", Some("bob"))
+    )
+    val lenient = new SchemaValidator(schema(false)).validate(graph)
+    lenient.validGraph.nodes.keySet shouldBe Set("alice", "bob", "acme")
+    lenient.violations.map(_.violationType) shouldBe List("missing_required_property")
+  }
+
+  test("labels and relationships are respelled as the schema spells them (#2971)") {
+    val graph = Graph(
+      Map("a" -> Node("a", "person"), "b" -> Node("b", "PERSON"), "c" -> Node("c", "organization")),
+      List(Edge("a", "c", "works_for"))
+    )
+    val result = new SchemaValidator(typedSchema(allowOutOfSchema = false)).validate(graph)
+    result.validGraph.nodes.values.map(_.label).toSet shouldBe Set("Person", "Organization")
+    result.validGraph.findNodesByLabel("Person").map(_.id).toSet shouldBe Set("a", "b")
+    result.validGraph.edges shouldBe List(Edge("a", "c", "WORKS_FOR"))
+    result.isFullyValid shouldBe true
+  }
+
+  test("an edge to a dropped node is reported as endpoint_missing (#2971)") {
+    val graph = Graph(
+      Map("alice" -> Node("alice", "Person"), "paris" -> Node("paris", "Location")),
+      List(Edge("alice", "paris", "WORKS_FOR"))
+    )
+    val result = new SchemaValidator(
+      ExtractionSchema(Seq(EntityTypeDefinition("Person")), Seq(RelationshipTypeDefinition("WORKS_FOR")), false)
+    ).validate(graph)
+    result.validGraph.edges shouldBe empty
+    result.outOfSchemaNodes.map(_.id) shouldBe List("paris")
+    result.violations.map(v => (v.violationType, v.entityId)) shouldBe List(("endpoint_missing", Some("paris")))
+  }
+
+  test("empty entityTypes and relationshipTypes admit anything, as empty sourceTypes does (#2971)") {
+    val graph  = Graph(Map("a" -> Node("a", "Thing"), "b" -> Node("b", "Other")), List(Edge("a", "b", "REL")))
+    val result = new SchemaValidator(ExtractionSchema(Nil, Nil, allowOutOfSchema = false)).validate(graph)
+    result.validGraph shouldBe graph
+    result.isFullyValid shouldBe true
+  }
+
+  test("ExtractionSchema.simple looks up properties by type name ignoring case (#2971)") {
+    val schema = ExtractionSchema.simple(Seq("Person"), Nil, properties = Map("person" -> Seq("role")))
+    schema.findEntityType("Person").map(_.properties.map(_.name)) shouldBe Some(Seq("role"))
+  }
 }
