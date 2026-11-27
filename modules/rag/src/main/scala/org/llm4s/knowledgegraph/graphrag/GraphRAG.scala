@@ -2,7 +2,7 @@ package org.llm4s.knowledgegraph.graphrag
 
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.knowledgegraph.storage.GraphStore
-import org.llm4s.knowledgegraph.{ Graph, Node }
+import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
@@ -79,7 +79,8 @@ final case class GraphHybridSearchResult(
   query: String,
   answer: String,
   seedNodeIds: Seq[String],
-  hits: Seq[GraphHybridHit]
+  hits: Seq[GraphHybridHit],
+  communities: Seq[GraphCommunity] = Seq.empty
 )
 
 final case class GraphRAGAnswer(
@@ -188,21 +189,23 @@ final class GraphRAG(
       _ <-
         if (seeds.nonEmpty) Right(())
         else Left(ProcessingError("local_search_no_seeds", "No seed entities were found for local search"))
-      traversal = GraphRAG.traverseFromSeeds(graph, seeds, maxDepth)
+      depths  = GraphRAG.traverseWithDepth(graph, seeds.toSet, maxDepth)
+      ordered = GraphRAG.orderByDepth(depths, seeds)
       _ <-
-        if (traversal.nonEmpty) Right(())
+        if (ordered.nonEmpty) Right(())
         else
           Left(ProcessingError("local_search_no_traversal", "No traversable neighborhood found for local search seeds"))
+      traversal = ordered.toSet
       supportingCommunities = hierarchy.allCommunities
-        .filter(c => traversal.nonEmpty && c.nodeIds.exists(traversal.contains))
+        .filter(c => c.nodeIds.exists(traversal.contains))
         .sortBy(c => -c.nodeIds.count(traversal.contains))
         .take(config.globalTopCommunities)
-      answer <- GraphRAG.answerLocal(query, graph, seeds, traversal.toSeq, supportingCommunities, llmClient)
+      answer <- GraphRAG.answerLocal(query, graph, seeds, ordered, depths, supportingCommunities, llmClient)
     } yield GraphLocalSearchResult(
       query = query,
       answer = answer,
       seedNodeIds = seeds,
-      visitedNodeIds = traversal.toSeq.sorted,
+      visitedNodeIds = ordered,
       supportingCommunities = supportingCommunities
     )
 
@@ -217,13 +220,20 @@ final class GraphRAG(
       seedIds  = GraphRAG.resolveSeedsFromVector(vectorResults, graph)
       expanded = GraphRAG.traverseWithDepth(graph, seedIds, maxDepth)
       hits     = GraphRAG.rankHybridHits(graph, expanded, vectorResults, config)
+      hitIds   = hits.map(_.node.id).toSet
       communities = hierarchy.allCommunities
-        .filter(c => hits.exists(h => c.nodeIds.contains(h.node.id)))
-        .sortBy(c => -hits.count(h => c.nodeIds.contains(h.node.id)))
+        .filter(c => c.nodeIds.exists(hitIds.contains))
+        .sortBy(c => -c.nodeIds.count(hitIds.contains))
         .take(config.globalTopCommunities)
-      answer <- GraphRAG.answerHybrid(query, hits, communities, llmClient)
-    } yield GraphHybridSearchResult(query, answer, seedIds.toSeq.sorted, hits)
+      answer <- GraphRAG.answerHybrid(query, graph, hits, vectorResults, communities, llmClient)
+    } yield GraphHybridSearchResult(query, answer, seedIds.toSeq.sorted, hits, communities)
 
+  /**
+   * Chooses Global or Local for a query from the graph alone: Global for a broad question ("overall", "themes",
+   * "summarize", ...) or one that names no entity of the graph, Local when a whole word of the query matches a node.
+   * It never returns Hybrid, which needs vector results: [[answer]] runs Hybrid when it is given them, and
+   * `RAG.queryWithGraphRAGMode(question, GraphRAGMode.Hybrid)` runs it explicitly.
+   */
   def route(query: String): Result[GraphRAGMode] =
     loadBaseGraph().map { graph =>
       val broadIndicators =
@@ -246,7 +256,7 @@ final class GraphRAG(
           query = query,
           mode = GraphRAGMode.Hybrid,
           answer = hybrid.answer,
-          communityIds = Seq.empty,
+          communityIds = hybrid.communities.map(_.id),
           nodeIds = hybrid.hits.map(_.node.id)
         )
       }
@@ -303,6 +313,39 @@ private[graphrag] object GraphRAG {
   private val AnswerModelTemp        = CompletionOptions(temperature = Some(0.0), maxTokens = Some(1024))
   private val NamePropertyKeys       = Seq("name", "title", "entity", "id")
   private val ProvenancePropertyKeys = Seq("source", "docId", "documentId", "path")
+  private val EntityMetadataKeys     = Seq("entityId", "entity", "entity_id", "nodeId")
+  private val UnclusteredKey         = "__small_merged__"
+
+  /** Nodes and relationships sent in a Local or Hybrid prompt. */
+  private val MaxPromptNodes = 30
+  private val MaxPromptEdges = 40
+
+  /** Hybrid prompt bounds: the hits and passages shown, and the characters of each. */
+  private val MaxHybridHits      = 10
+  private val MaxHybridPassages  = 10
+  private val MaxPassageChars    = 1200
+  private val MaxPropertyChars   = 300
+  private val MaxNodeLineChars   = 1000
+  private val MaxUnclusteredList = 25
+
+  /** Query and node tokens shorter than this never match. */
+  private val MinTokenLength = 2
+
+  /** Seed weights: a token of the node's name counts above one of its id, which counts above any other property. */
+  private val NameTokenWeight     = 3
+  private val IdTokenWeight       = 2
+  private val PropertyTokenWeight = 1
+
+  private val Stopwords: Set[String] = (
+    "a about above after again against all also am an and any are as at be because been before being " +
+      "below between both but by can could did do does doing done down during each else even ever every few " +
+      "for from further get give go had has have having he her here hers herself him himself his how i if " +
+      "in into is it its itself just know let like many may me might more most much must my myself no nor " +
+      "not now of off on once one only or other our ours ourselves out over own please same say shall she " +
+      "should show so some such tell than that the their theirs them themselves then there these they thing " +
+      "things this those through to too under until up us very was we were what when where which while who " +
+      "whom whose why will with would you your yours yourself yourselves"
+  ).split(' ').toSet
 
   def buildHierarchy(graph: Graph, config: GraphRAGConfig): GraphCommunityHierarchy = {
     if (graph.nodes.isEmpty) {
@@ -384,7 +427,10 @@ private[graphrag] object GraphRAG {
             (levelAcc, community) =>
               for {
                 running <- levelAcc
-                summary <- summarizeCommunity(graph, community, llmClient)
+                summary <- community.summary.filter(_.trim.nonEmpty) match {
+                  case Some(listed) => Right(listed)
+                  case None         => summarizeCommunity(graph, community, llmClient)
+                }
               } yield running :+ community.copy(summary = Some(summary))
           }
         } yield built :+ summarizedLevel
@@ -447,16 +493,15 @@ private[graphrag] object GraphRAG {
     query: String,
     graph: Graph,
     seedIds: Seq[String],
-    visitedNodeIds: Seq[String],
+    orderedNodeIds: Seq[String],
+    depths: Map[String, Int],
     communities: Seq[GraphCommunity],
     llmClient: LLMClient
   ): Result[String] = {
-    val nodeLines = visitedNodeIds.flatMap(graph.nodes.get).take(30).map(renderNode).mkString("\n")
-    val edgeLines = graph.edges
-      .filter(e => visitedNodeIds.contains(e.source) && visitedNodeIds.contains(e.target))
-      .take(40)
-      .map(e => s"${e.source} -[${e.relationship}]-> ${e.target}")
-      .mkString("\n")
+    // orderedNodeIds is seeds first, then by depth, so the cut keeps the nearest nodes
+    val shown          = orderedNodeIds.flatMap(graph.nodes.get).take(MaxPromptNodes)
+    val nodeLines      = shown.map(renderNode).mkString("\n")
+    val edgeLines      = edgesAmong(graph, shown.map(_.id).toSet, depths).map(renderEdge).mkString("\n")
     val communityLines = communities.flatMap(_.summary).take(8).mkString("\n\n")
 
     val convo = Conversation(
@@ -485,16 +530,27 @@ private[graphrag] object GraphRAG {
 
   def answerHybrid(
     query: String,
+    graph: Graph,
     hits: Seq[GraphHybridHit],
+    vectorResults: Seq[HybridSearchResult],
     communities: Seq[GraphCommunity],
     llmClient: LLMClient
   ): Result[String] = {
-    val topHits = hits
-      .take(10)
+    val passages = vectorResults
+      .sortBy(r => -r.score)
+      .take(MaxHybridPassages)
+      .zipWithIndex
+      .map { case (r, i) =>
+        f"[${i + 1}] (${r.id}, score=${r.score}%.4f)\n${truncate(r.content.trim, MaxPassageChars)}"
+      }
+      .mkString("\n\n")
+    val topHits = hits.take(MaxHybridHits)
+    val nodeLines = topHits
       .map { hit =>
-        f"${hit.node.id}%-20s score=${hit.score}%.4f vector=${hit.vectorScore}%.4f graph=${hit.graphScore}%.4f"
+        f"${truncate(renderNodeDetailed(hit.node), MaxNodeLineChars)} (score=${hit.score}%.4f vector=${hit.vectorScore}%.4f graph=${hit.graphScore}%.4f)"
       }
       .mkString("\n")
+    val edgeLines = edgesAmong(graph, topHits.map(_.node.id).toSet, Map.empty).map(renderEdge).mkString("\n")
     val summaries = communities.flatMap(_.summary).take(8).mkString("\n\n")
 
     val convo = Conversation(
@@ -503,8 +559,14 @@ private[graphrag] object GraphRAG {
         UserMessage(
           s"""Question: $query
              |
-             |Top hybrid hits:
-             |$topHits
+             |Retrieved passages:
+             |$passages
+             |
+             |Graph nodes:
+             |$nodeLines
+             |
+             |Relationships:
+             |$edgeLines
              |
              |Community summaries:
              |$summaries
@@ -521,25 +583,33 @@ private[graphrag] object GraphRAG {
     if (tokens.isEmpty) return Seq.empty
 
     val scored = graph.nodes.values.toSeq.flatMap { node =>
-      val idScore = if (tokens.exists(t => node.id.toLowerCase.contains(t))) 2 else 0
-      val nameScore = NamePropertyKeys
-        .flatMap(node.properties.get)
+      val nameTokens =
+        NamePropertyKeys.flatMap(node.properties.get).collect { case ujson.Str(s) => tokenize(s) }.flatten.toSet
+      val idTokens = tokenize(node.id)
+      val propTokens = node.properties
         .collect {
-          case ujson.Str(s) if tokens.exists(t => s.toLowerCase.contains(t)) => 3
+          case (k, ujson.Str(s)) if !NamePropertyKeys.contains(k) => tokenize(s)
         }
-        .sum
-      val propScore = node.properties.values.collect {
-        case ujson.Str(s) if tokens.exists(t => s.toLowerCase.contains(t)) => 1
-      }.sum
-      val score = idScore + nameScore + propScore
+        .flatten
+        .toSet
+      // Each query word counts once per field kind, so a node repeating a word in many properties cannot outrank its name
+      val score =
+        NameTokenWeight * tokens.count(nameTokens.contains) +
+          IdTokenWeight * tokens.count(idTokens.contains) +
+          PropertyTokenWeight * tokens.count(propTokens.contains)
       if (score > 0) Some(node -> score) else None
     }
 
     scored.sortBy { case (node, score) => (-score, node.id) }.map(_._1)
   }
 
-  def traverseFromSeeds(graph: Graph, seedIds: Seq[String], maxDepth: Int): Set[String] =
-    traverseWithDepth(graph, seedIds.toSet, maxDepth).keySet
+  /** Node ids seeds first, in the given seed order, then by depth and id. */
+  def orderByDepth(depths: Map[String, Int], seedIds: Seq[String]): Seq[String] = {
+    val seedRank = seedIds.zipWithIndex.toMap
+    depths.toSeq
+      .sortBy { case (id, depth) => (depth, seedRank.getOrElse(id, Int.MaxValue), id) }
+      .map(_._1)
+  }
 
   def traverseWithDepth(graph: Graph, seedIds: Set[String], maxDepth: Int): Map[String, Int] = {
     val adjacency = buildAdjacency(graph)
@@ -572,7 +642,7 @@ private[graphrag] object GraphRAG {
     val directIds = vectorResults
       .flatMap { res =>
         val metadata = res.metadata
-        Seq("entityId", "entity", "entity_id", "nodeId").flatMap(metadata.get)
+        EntityMetadataKeys.flatMap(metadata.get)
       }
       .filter(graph.nodes.contains)
       .toSet
@@ -602,20 +672,55 @@ private[graphrag] object GraphRAG {
     vectorResults: Seq[HybridSearchResult],
     config: GraphRAGConfig
   ): Seq[GraphHybridHit] = {
-    val vectorSignal = vectorResults.map(_.score).sum / math.max(vectorResults.size, 1)
     val maxDepthSeen = math.max(nodeDepths.values.foldLeft(0)(math.max), 1)
     val totalWeight  = config.hybridVectorWeight + config.hybridGraphWeight
+    val evidence     = vectorResults.map(r => VectorEvidence(r))
 
     nodeDepths.toSeq
       .flatMap { case (nodeId, depth) =>
         graph.nodes.get(nodeId).map { node =>
+          val vectorScore = nodeVectorScore(node, evidence)
           val graphScore  = 1.0 - (depth.toDouble / (maxDepthSeen + 1).toDouble)
-          val combinedRaw = config.hybridVectorWeight * vectorSignal + config.hybridGraphWeight * graphScore
+          val combinedRaw = config.hybridVectorWeight * vectorScore + config.hybridGraphWeight * graphScore
           val combined    = combinedRaw / totalWeight
-          GraphHybridHit(node = node, score = combined, vectorScore = vectorSignal, graphScore = graphScore)
+          GraphHybridHit(node = node, score = combined, vectorScore = vectorScore, graphScore = graphScore)
         }
       }
       .sortBy(hit => (-hit.score, hit.node.id))
+  }
+
+  /** A vector result's metadata and content, tokenised once for matching against every node. */
+  final private case class VectorEvidence(
+    score: Double,
+    entityIds: Set[String],
+    provenance: Set[String],
+    contentTokens: Set[String]
+  )
+
+  private object VectorEvidence {
+    def apply(r: HybridSearchResult): VectorEvidence =
+      VectorEvidence(
+        score = r.score,
+        entityIds = EntityMetadataKeys.flatMap(r.metadata.get).toSet,
+        provenance = ProvenancePropertyKeys.flatMap(r.metadata.get).map(_.toLowerCase).toSet,
+        contentTokens = tokenize(r.content)
+      )
+  }
+
+  /**
+   * The best score of the vector results that name the node in their metadata, share its provenance, or mention its
+   * name as whole words; 0 when none does.
+   */
+  private def nodeVectorScore(node: Node, evidence: Seq[VectorEvidence]): Double = {
+    val provenance =
+      ProvenancePropertyKeys.flatMap(node.properties.get).collect { case ujson.Str(s) => s.toLowerCase }.toSet
+    val nameTokens = tokenize(displayName(node))
+    val linked = evidence.filter { e =>
+      e.entityIds.contains(node.id) ||
+      e.provenance.exists(provenance.contains) ||
+      (nameTokens.nonEmpty && nameTokens.forall(e.contentTokens.contains))
+    }
+    linked.map(_.score).foldLeft(0.0)(math.max)
   }
 
   def lexicalScore(query: String, text: String): Double = {
@@ -628,11 +733,11 @@ private[graphrag] object GraphRAG {
     }
   }
 
+  /** Whole words of at least [[MinTokenLength]] characters, lower-cased, without stopwords. */
   private def tokenize(input: String): Set[String] =
     input.toLowerCase
-      .split("[^a-z0-9]+")
-      .map(_.trim)
-      .filter(_.nonEmpty)
+      .split("[^\\p{L}\\p{N}]+")
+      .filter(t => t.length >= MinTokenLength && !Stopwords.contains(t))
       .toSet
 
   private def buildAdjacency(graph: Graph): Map[String, Set[String]] = {
@@ -729,23 +834,33 @@ private[graphrag] object GraphRAG {
 
     val (large, small)     = grouped.partition { case (_, nodes) => nodes.size >= minCommunitySize }
     val mergedSmallNodeIds = small.values.flatten.toSet
-    val merged = if (mergedSmallNodeIds.nonEmpty) {
-      large + ("__small_merged__" -> (large.getOrElse("__small_merged__", Set.empty[String]) ++ mergedSmallNodeIds))
-    } else large
+    val merged =
+      if (mergedSmallNodeIds.nonEmpty) large + (UnclusteredKey -> mergedSmallNodeIds)
+      else large
 
     merged.toSeq
       .sortBy(_._1)
       .zipWithIndex
-      .map { case ((_, nodeIds), idx) =>
+      .map { case ((key, nodeIds), idx) =>
         val edgeCount = graph.edges.count(e => nodeIds.contains(e.source) && nodeIds.contains(e.target))
         GraphCommunity(
           id = s"L$level-C$idx",
           level = level,
           nodeIds = nodeIds,
-          edgeCount = edgeCount
+          edgeCount = edgeCount,
+          // The lump is no community, so it is listed rather than summarised by the model as if it were coherent
+          summary = if (key == UnclusteredKey) Some(unclusteredSummary(graph, nodeIds, minCommunitySize)) else None
         )
       }
       .toVector
+  }
+
+  private def unclusteredSummary(graph: Graph, nodeIds: Set[String], minCommunitySize: Int): String = {
+    val listed = nodeIds.toSeq.sorted.flatMap(graph.nodes.get).take(MaxUnclusteredList).map(renderNode)
+    val more   = nodeIds.size - listed.size
+    val tail   = if (more > 0) s"; and $more more" else ""
+    s"Unclustered nodes, not summarised: these ${nodeIds.size} nodes are in no community of at least " +
+      s"$minCommunitySize nodes. ${listed.mkString("; ")}$tail"
   }
 
   private def summarizeCommunity(graph: Graph, community: GraphCommunity, llmClient: LLMClient): Result[String] = {
@@ -782,12 +897,41 @@ private[graphrag] object GraphRAG {
     }
   }
 
-  private def renderNode(node: Node): String = {
-    val displayName =
-      NamePropertyKeys
-        .flatMap(node.properties.get)
-        .collectFirst { case ujson.Str(s) if s.trim.nonEmpty => s.trim }
-        .getOrElse(node.id)
-    s"${node.id} [${node.label}] $displayName"
+  private def displayName(node: Node): String =
+    NamePropertyKeys
+      .flatMap(node.properties.get)
+      .collectFirst { case ujson.Str(s) if s.trim.nonEmpty => s.trim }
+      .getOrElse(node.id)
+
+  private def renderNode(node: Node): String =
+    s"${node.id} [${node.label}] ${displayName(node)}"
+
+  /** [[renderNode]] plus every other property as `key=value`, each value cut to [[MaxPropertyChars]]. */
+  private def renderNodeDetailed(node: Node): String = {
+    val name = displayName(node)
+    val props = node.properties.toSeq
+      .sortBy(_._1)
+      .flatMap {
+        case (k, ujson.Str(s)) => Option.when(s.trim != name)(s"$k=${truncate(s.trim, MaxPropertyChars)}")
+        case (k, v)            => Some(s"$k=${truncate(v.render(), MaxPropertyChars)}")
+      }
+    if (props.isEmpty) renderNode(node) else s"${renderNode(node)}: ${props.mkString("; ")}"
   }
+
+  private def renderEdge(e: Edge): String =
+    s"${e.source} -[${e.relationship}]-> ${e.target}"
+
+  /** Edges with both ends in `nodeIds`, nearest first when depths are known, at most [[MaxPromptEdges]]. */
+  private def edgesAmong(
+    graph: Graph,
+    nodeIds: Set[String],
+    depths: Map[String, Int]
+  ): Seq[Edge] =
+    graph.edges
+      .filter(e => nodeIds.contains(e.source) && nodeIds.contains(e.target))
+      .sortBy(e => math.max(depths.getOrElse(e.source, 0), depths.getOrElse(e.target, 0)))
+      .take(MaxPromptEdges)
+
+  private def truncate(s: String, max: Int): String =
+    if (s.length <= max) s else s.take(max) + "..."
 }

@@ -963,6 +963,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     result.toOption.get.mode shouldBe GraphRAGMode.Hybrid
     result.toOption.get.answer shouldBe "hybrid graph answer"
     mockEmbeddingProvider.embedCalls should be > 0
+    result.toOption.get.communityIds should not be empty
   }
 
   // ==========================================================================
