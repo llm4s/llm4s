@@ -2,6 +2,7 @@ package org.llm4s.agent.memory
 
 import org.llm4s.error.{ ConfigurationError, NotFoundError, ProcessingError }
 import org.llm4s.types.Result
+import org.llm4s.util.PrivateSqliteFile
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet, SQLException }
 import java.time.Instant
@@ -586,6 +587,7 @@ object SQLiteMemoryStore {
   ): Result[SQLiteMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
+      PrivateSqliteFile.prepare(dbPath)
       val connection = connect(dbPath)
       // If setting up the schema fails (e.g. the file is not a database) the connection must not leak: an open
       // handle keeps the file locked, which blocks deleting it on Windows.

@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
+import org.llm4s.util.PrivateSqliteFile
 import org.llm4s.error.ProcessingError
 
 import org.sqlite.Function
@@ -572,6 +573,7 @@ object SQLiteVectorStore {
   def apply(dbPath: String): Result[SQLiteVectorStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
+      PrivateSqliteFile.prepare(dbPath)
       val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
       openOn(dbPath, connection)
     }.toEither.left.map(e => ProcessingError("sqlite-vector-store", s"Failed to create store: ${e.getMessage}"))

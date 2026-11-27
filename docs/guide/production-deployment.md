@@ -850,6 +850,8 @@ Before deploying to production, verify:
 - [ ] Secrets not logged (check log output for key patterns)
 - [ ] Input validation in place for user-provided prompts
 - [ ] Rate limiting at application level (not just provider)
+- [ ] SQLite stores (checkpointer, memory, RAG) in a directory only the service account can read; no WARN that a database
+  file is readable by group or others ([File permissions](agents/durable-checkpointers#file-permissions))
 
 ### Cost & Performance
 

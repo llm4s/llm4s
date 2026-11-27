@@ -7,6 +7,7 @@ nav_order: 6
 parent: Agents
 grand_parent: User Guide
 cites_closed_issues: [1739, 1919]
+cites_issues: [3087]
 ---
 
 # Durable Checkpointers
@@ -514,6 +515,18 @@ newest first by an index, so a long history costs a page, not a scan, and `prune
 in one transaction each, safely beside other stores writing the file. `prune` reads the thread's whole history and
 event log inside its transaction, so on a very long log it holds the file for a while and other stores' writes wait,
 up to `busyTimeout`; prune regularly, or off-peak, rather than once after months.
+
+### File permissions
+
+The file holds what users said and what tools returned in plain text, so only its owner should read it. On Linux
+and macOS `open` creates a new file with mode `0600` before SQLite opens it, and SQLite gives the `-wal`, `-shm`
+and `-journal` files beside it the same mode. An existing file keeps its mode: when it, or one of those files, is
+readable or writable by its group or others, `open` logs a WARN naming it and opens it anyway; `chmod 600` the
+files while no store has them open. The store creates no directory: give the one it is in mode `0700` too, as
+`Files.createTempDirectory` does. Windows has no POSIX permissions and the store sets none: a new file inherits its
+directory's ACL, so keep it in a directory only the service account can read (one under its user profile is, by
+default). The memory (`SQLiteMemoryStore`, `VectorMemoryStore`) and RAG SQLite stores create their files the same
+way ([#3087](https://github.com/llm4s/llm4s/issues/3087)).
 
 ## The PostgreSQL store
 

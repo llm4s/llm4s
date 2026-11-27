@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.{ Files, Path }
+import java.nio.file.attribute.PosixFilePermissions
 import java.sql.{ Connection, DriverManager }
 import java.time.{ Clock, Instant }
 import java.util.concurrent.{ CountDownLatch, CyclicBarrier, LinkedBlockingQueue, TimeUnit }
@@ -228,6 +229,33 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
   it should "refuse a path whose directory does not exist" in {
     SqliteCheckpointer.open(SqliteFiles.directory.resolve("missing").resolve("x.db")).left.value shouldBe
       a[ProcessingError]
+  }
+
+  it should "create a new file, and the WAL and shared-memory files beside it, readable only by its owner" in {
+    // SQLite alone would create them with the process umask: 0644 with the usual 022 (#3087)
+    assume(
+      org.llm4s.util.PrivateSqliteFile.supportsPosix(SqliteFiles.directory),
+      "the file system has no POSIX permissions (Windows)"
+    )
+    val db    = SqliteFiles.fresh()
+    val store = SqliteCheckpointer.open(db).value
+    val files = Vector(db, Path.of(s"$db-wal"), Path.of(s"$db-shm"))
+    val modes = files.map(f => f -> PosixFilePermissions.toString(Files.getPosixFilePermissions(f)))
+    store.close()
+    modes.foreach { case (file, mode) => withClue(file)(mode shouldBe "rw-------") }
+  }
+
+  it should "open an existing file with a wider mode and leave that mode alone" in {
+    assume(
+      org.llm4s.util.PrivateSqliteFile.supportsPosix(SqliteFiles.directory),
+      "the file system has no POSIX permissions (Windows)"
+    )
+    val db = SqliteFiles.fresh()
+    SqliteCheckpointer.open(db).value.close()
+    Files.setPosixFilePermissions(db, PosixFilePermissions.fromString("rw-r--r--"))
+    val reopened = SqliteCheckpointer.open(db)
+    reopened.value.close()
+    PosixFilePermissions.toString(Files.getPosixFilePermissions(db)) shouldBe "rw-r--r--"
   }
 
   it should "open the file at exactly its path when the path holds a '?', spaces or other URI characters" in {
