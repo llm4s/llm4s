@@ -41,15 +41,27 @@ object MCPServerConfig {
    * @param command Command line to launch the server process
    * @param timeout Maximum response timeout
    * @param trustAnnotations Whether this server's tool annotations are trusted; see [[MCPServerConfig]]
+   * @param env Variables the server needs, set over the allowlisted ones it inherits; it inherits no others
+   *            (#3070, see [[StdioTransport]])
+   * @param workingDirectory The directory to start the server in; `None` is the JVM's
+   * @param inheritEnvironment `true` passes the JVM's whole environment as well, secrets included
    * @return MCPServerConfig configured for stdio transport
    */
   def stdio(
     name: String,
     command: Seq[String],
     timeout: FiniteDuration = 30.seconds,
-    trustAnnotations: Boolean = false
+    trustAnnotations: Boolean = false,
+    env: Map[String, String] = Map.empty,
+    workingDirectory: Option[java.nio.file.Path] = None,
+    inheritEnvironment: Boolean = false
   ): MCPServerConfig =
-    MCPServerConfig(name, StdioTransport(command, name), timeout, trustAnnotations)
+    MCPServerConfig(
+      name,
+      StdioTransport(command, name, env, workingDirectory, inheritEnvironment),
+      timeout,
+      trustAnnotations
+    )
 
   /**
    * Creates configuration for Streamable HTTP-based MCP server (2025-03-26 spec).

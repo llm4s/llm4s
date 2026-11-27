@@ -111,10 +111,11 @@ class MCPToolRegistry(
   }
 
   /**
-   * The hints the MCP server declares for the tool `name` through its tool annotations, as of the last
-   * discovery of that server's tools (`tools`, `getAllTools` or `execute` trigger it); `None` for a tool no
-   * MCP server advertises, for one a local tool shadows, and for any tool of a server whose last discovery
-   * failed.
+   * The hints declared, through its tool annotations, by the MCP server whose tool `name` is: the first
+   * configured server that advertises the name, the same one [[execute]] runs (#3068). Its tools are discovered
+   * first if they are not cached or are stale, as for `execute`. `None` for a tool no MCP server advertises, for
+   * one a local tool shadows, and for any tool of a server whose last discovery failed. A later server's hints
+   * for the same name never apply: they describe a different tool.
    *
    * '''Only a trusted server has hints.''' The MCP specification requires annotations from an untrusted
    * server to be treated as untrusted, and `ApprovalMiddleware.unlessReadOnly` skips approval for a tool
@@ -127,9 +128,9 @@ class MCPToolRegistry(
   def toolHints(name: String): Option[ToolHints] =
     if (localTools.exists(_.name == name)) None
     else
-      mcpServers.view
+      mcpServers
+        .find(server => getToolsFromServer(server).exists(_.name == name))
         .flatMap(server => Option(mcpClients.get(server.name)).flatMap(_.getToolHints().get(name)))
-        .headOption
 
   /**
    * All tools, local first, then each server's in configuration order. A name is listed once: a local tool
@@ -137,7 +138,9 @@ class MCPToolRegistry(
    * tool [[execute]] runs.
    */
   def getAllTools: Seq[ToolFunction[_]] = {
-    val mcpTools = getAllMCPTools
+    val perServer = mcpServers.map(server => server.name -> getToolsFromServer(server))
+    warnOnSharedNames(perServer)
+    val mcpTools = perServer.flatMap(_._2)
     val all      = (localTools ++ mcpTools).distinctBy(_.name)
     logger.debug(
       s"Total tools available: ${localTools.size} local + ${mcpTools.size} MCP = ${all.size} distinct names"
@@ -153,9 +156,22 @@ class MCPToolRegistry(
       .headOption
   }
 
-  // Get all MCP tools from all servers
-  private def getAllMCPTools: Seq[ToolFunction[_]] =
-    mcpServers.flatMap(getToolsFromServer)
+  private val warnedSharedNames = ConcurrentHashMap.newKeySet[String]()
+
+  // A name two sources advertise is one tool to the model: the first source's (#3068). WARN once per name and set
+  // of sources, naming them, since the shadowed tool can never be called and its hints never apply.
+  private def warnOnSharedNames(perServer: Seq[(String, Seq[ToolFunction[_]])]): Unit = {
+    val sources = localTools.map(_.name -> "a local tool") ++
+      perServer.flatMap { case (server, tools) => tools.map(_.name -> s"MCP server '$server'") }
+    sources.groupBy(_._1).foreach { case (name, entries) =>
+      val owners = entries.map(_._2).distinct
+      if (owners.size > 1 && warnedSharedNames.add((name +: owners).mkString("\u0000"))) {
+        logger.warn(
+          s"Tool '$name' is advertised by ${owners.mkString(", ")}: ${owners.head}'s is the one called, and only its hints apply"
+        )
+      }
+    }
+  }
 
   // Get tools from a specific server (with caching)
   private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_]] =
@@ -350,15 +366,27 @@ class MCPToolRegistry(
 }
 
 object MCPToolRegistry {
-  // Create MCP server configuration for Playwright
-  // Using stdio transport to launch and communicate with Playwright MCP server
-  val mcpServerConfig = MCPServerConfig.stdio(
+
+  /**
+   * A stdio config for the Playwright MCP server, fetched by `npx` at run time and unpinned. It starts with the
+   * allowlisted environment only (#3070), like every stdio server.
+   */
+  @deprecated(
+    "a registry's servers are the application's choice: build an MCPServerConfig.stdio with a pinned package (see the PlaywrightExample sample)",
+    since = "1.1.0"
+  )
+  val mcpServerConfig: MCPServerConfig = MCPServerConfig.stdio(
     name = "playwright-mcp-server",
     command = Seq("npx", "@playwright/mcp@latest"),
     timeout = 60.seconds
   )
 
-  def apply() =
+  /** A registry of the unpinned Playwright MCP server alone; see [[mcpServerConfig]]. */
+  @deprecated(
+    "use new MCPToolRegistry(Seq(MCPServerConfig.stdio(...))) with a pinned package (see the PlaywrightExample sample)",
+    since = "1.1.0"
+  )
+  def apply(): MCPToolRegistry =
     new MCPToolRegistry(
       mcpServers = Seq(mcpServerConfig),
       localTools = Seq.empty, // No local tools, using only Playwright MCP tools

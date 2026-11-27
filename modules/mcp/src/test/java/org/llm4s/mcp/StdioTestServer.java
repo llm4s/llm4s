@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
  * <p>Arguments (none contains a quote, so no platform's argument parsing can mangle them):
  * <ul>
  *   <li>{@code method:BASE64URL} - answer each request whose method is {@code method} (or any, for {@code any}) with
- *       the decoded reply, in which {@code $id} is the request's id. A request of another method, or without an
+ *       the decoded reply, in which {@code $id} is the request's id, {@code $env{NAME}} this process's variable
+ *       NAME as a JSON string (or {@code null}) and {@code $cwd} its working directory as a JSON string. A request of another method, or without an
  *       id (a notification), is not answered.</li>
  *   <li>{@code --ready} - write a line to stderr before reading anything.</li>
  *   <li>{@code --delay=N} - sleep a random 0 to N-1 ms before each reply.</li>
@@ -154,9 +155,30 @@ public final class StdioTestServer {
       String reply = replies.containsKey(m) ? replies.get(m) : replies.get("any");
       if (reply == null) continue;
       if (delay > 0) Thread.sleep(ThreadLocalRandom.current().nextInt(delay));
-      out.print(reply.replace("$id", id.group(1)) + "\n");
+      out.print(environment(reply.replace("$id", id.group(1))) + "\n");
       out.flush();
     }
+  }
+
+  private static final Pattern ENV = Pattern.compile("\\$env\\{([A-Za-z0-9_]+)\\}");
+
+  /**
+   * Replaces {@code $env{NAME}} with this process's variable NAME as a JSON string, or {@code null} when it is unset,
+   * and {@code $cwd} with its working directory as a JSON string.
+   */
+  private static String environment(String reply) {
+    Matcher m = ENV.matcher(reply);
+    StringBuilder sb = new StringBuilder();
+    while (m.find()) {
+      String value = System.getenv(m.group(1));
+      m.appendReplacement(sb, Matcher.quoteReplacement(value == null ? "null" : jsonString(value)));
+    }
+    m.appendTail(sb);
+    return sb.toString().replace("$cwd", jsonString(Paths.get("").toAbsolutePath().toString()));
+  }
+
+  private static String jsonString(String s) {
+    return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
   }
 
   private static void writeFile(String path, String content) throws IOException {

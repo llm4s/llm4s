@@ -140,7 +140,7 @@ class MCPServerConfigSpec extends AnyFlatSpec with Matchers {
 
   "MCPTransport" should "support exhaustive pattern matching" in {
     def describeTransport(transport: MCPTransport): String = transport match {
-      case StdioTransport(cmd, name)          => s"stdio:$name:${cmd.mkString(",")}"
+      case StdioTransport(cmd, name, _, _, _) => s"stdio:$name:${cmd.mkString(",")}"
       case SSETransport(url, name)            => s"sse:$name:$url"
       case StreamableHTTPTransport(url, name) => s"http:$name:$url"
     }

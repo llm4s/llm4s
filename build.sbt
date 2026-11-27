@@ -1243,9 +1243,11 @@ lazy val mcp = (project in file("modules/mcp"))
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
     coverageFloor(75),
-    Test / fork                     := true,
-    Compile / mainClass             := None,
-    Compile / discoveredMainClasses := Seq.empty,
+    Test / fork := true,
+    // StdioEnvironmentSpec: a variable a stdio MCP server must not inherit from the JVM (#3070).
+    Test / envVars += "LLM4S_MCP_TEST_SECRET" -> "inherited-secret",
+    Compile / mainClass                       := None,
+    Compile / discoveredMainClasses           := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.ujson,
       Deps.scalatest % Test,

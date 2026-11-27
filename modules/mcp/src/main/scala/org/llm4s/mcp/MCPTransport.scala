@@ -39,10 +39,70 @@ sealed trait MCPTransport {
  * Launches the MCP server as a subprocess and communicates via stdin/stdout.
  * Suitable for local MCP servers and development environments.
  *
- * @param command Command line to launch the server process (e.g., `Seq("npx", "@playwright/mcp@latest")`)
+ * The server does not inherit the JVM's environment (#3070): it starts with a small allowlist
+ * ([[StdioEnvironment.Allowlist]]: `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR` and their Windows counterparts) plus
+ * `env`, so an `OPENAI_API_KEY` or cloud credential of the application never reaches a third-party server unless
+ * declared.
+ *
+ * @param command Command line to launch the server process (e.g., `Seq("npx", "@playwright/mcp@1.2.3")`)
  * @param name Unique identifier for this transport instance
+ * @param env Variables to set for the server, over the allowlisted ones it inherits: the keys it needs, say
+ * @param workingDirectory The directory to start the server in; `None` is the JVM's
+ * @param inheritEnvironment `true` passes the JVM's whole environment, plus `env`, as before 1.1. Only for a server
+ *                           you trust with every secret the application holds
  */
-case class StdioTransport(command: Seq[String], name: String) extends MCPTransport
+case class StdioTransport(
+  command: Seq[String],
+  name: String,
+  env: Map[String, String] = Map.empty,
+  workingDirectory: Option[java.nio.file.Path] = None,
+  inheritEnvironment: Boolean = false
+) extends MCPTransport
+
+/**
+ * The environment a stdio MCP server starts with (#3070), as the official MCP SDKs do it: the JVM's variables on
+ * [[Allowlist]] (matched ignoring case, since Windows names are, as in `Path`), then the declared ones.
+ */
+private[mcp] object StdioEnvironment {
+
+  /** What a server process needs to find programs, a home, a temp directory and a locale, on POSIX and Windows. */
+  val Allowlist: Set[String] = Set(
+    // POSIX
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TERM",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "TZ",
+    // Windows
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERPROFILE",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROGRAMFILES",
+    "TEMP",
+    "TMP"
+  )
+
+  /** Narrows `child` (a `ProcessBuilder`'s environment, the JVM's to begin with) to the allowlist, then adds `declared`. */
+  def prepare(child: java.util.Map[String, String], declared: Map[String, String], inherit: Boolean): Unit = {
+    if (!inherit) child.keySet.removeIf(name => !Allowlist.contains(name.toUpperCase(java.util.Locale.ROOT))): Unit
+    declared.foreach { case (name, value) => child.put(name, value) }
+  }
+}
 
 /**
  * Server-Sent Events transport configuration using HTTP (MCP 2024-11-05 spec).
@@ -722,6 +782,16 @@ class SSETransportImpl(
 
 private[mcp] object StdioTransportImpl {
 
+  /** The transport a [[StdioTransport]] config describes, its environment and working directory included. */
+  def of(config: StdioTransport): StdioTransportImpl =
+    new StdioTransportImpl(
+      config.command,
+      config.name,
+      env = config.env,
+      workingDirectory = config.workingDirectory,
+      inheritEnvironment = config.inheritEnvironment
+    )
+
   /**
    * Turns a server's stderr, arriving in chunks cut anywhere, into lines that are safe to log and to put in an error.
    * A line is redacted as a whole before it is shortened: a secret and the key that names it are never separated by a
@@ -790,7 +860,10 @@ private[mcp] object StdioTransportImpl {
 class StdioTransportImpl(
   command: Seq[String],
   override val name: String,
-  startupTimeout: FiniteDuration = 10.seconds
+  startupTimeout: FiniteDuration = 10.seconds,
+  env: Map[String, String] = Map.empty,
+  workingDirectory: Option[java.nio.file.Path] = None,
+  inheritEnvironment: Boolean = false
 ) extends MCPTransportImpl {
 
   /** Binary-compatible auxiliary constructor matching the pre-timeout 2-param signature. */
@@ -871,6 +944,8 @@ class StdioTransportImpl(
     Try {
       val processBuilder = new ProcessBuilder(command: _*)
       processBuilder.redirectErrorStream(false) // Keep stderr separate for monitoring
+      StdioEnvironment.prepare(processBuilder.environment(), env, inheritEnvironment)
+      workingDirectory.foreach(dir => processBuilder.directory(dir.toFile))
       val newProcess = processBuilder.start()
 
       // Set up I/O streams
@@ -1371,7 +1446,7 @@ object MCPTransport {
   // Creates appropriate transport implementation based on configuration
   def create(config: MCPServerConfig): MCPTransportImpl =
     config.transport match {
-      case StdioTransport(command, name)      => new StdioTransportImpl(command, name)
+      case stdio: StdioTransport              => StdioTransportImpl.of(stdio)
       case SSETransport(url, name)            => new SSETransportImpl(url, name, config.timeout)
       case StreamableHTTPTransport(url, name) => new StreamableHTTPTransportImpl(url, name, config.timeout)
     }
