@@ -110,9 +110,13 @@ object StabilityTiers {
     t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")
   }
 
+  // Compiled once: `String.replaceAll` compiled both for every line read, which was most of the check's time (#3175).
+  private val StringLiteral = java.util.regex.Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\"")
+  private val LineComment   = java.util.regex.Pattern.compile("//.*$")
+
   /** The line without string literals and a trailing `//` comment, so neither can look like code. */
   private def code(line: String): String =
-    line.replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "\"\"").replaceAll("//.*$", "")
+    LineComment.matcher(StringLiteral.matcher(line).replaceAll("\"\"")).replaceAll("")
 
   /**
    * The signature of the member starting at `start`, line by line: for a `def`, `val`, `var` or `given`, its text
@@ -247,8 +251,9 @@ object StabilityTiers {
   private[this] def leaks(lines: Vector[String], experimental: Map[String, Set[String]]): Seq[(Int, String)] = {
     import java.util.regex.Pattern.quote
     // a name visible unqualified matches alone; otherwise only written out with its package
+    val visibleIn = visibility(lines)
     val alternatives = experimental.toSeq.sortBy(_._1).flatMap { case (n, pkgs) =>
-      if (pkgs.exists(p => visibleIn(lines, p, n))) Seq(quote(n))
+      if (pkgs.exists(p => visibleIn(p, n))) Seq(quote(n))
       else pkgs.toSeq.sorted.map(p => quote(s"$p.$n"))
     }
     if (alternatives.isEmpty) Nil
@@ -266,12 +271,17 @@ object StabilityTiers {
 
   private val ImportClause = "(?s)\\bimport\\s+([\\w.]+)\\.(\\{[^}]*\\}|[\\w*]+)".r
 
-  /** Whether `name`, a top-level type of package `pkg`, can be referred to by its simple name in this file. */
-  private def visibleIn(lines: Vector[String], pkg: String, name: String): Boolean = {
+  /**
+   * Whether `name`, a top-level type of package `pkg`, can be referred to by its simple name in this file, as a
+   * function of `(pkg, name)`. The file's packages and imports are read once: `leaks` asks once per @Experimental
+   * type, and re-reading the file for each was quadratic (#3175).
+   */
+  private def visibility(lines: Vector[String]): (String, String) => Boolean = {
     val clauses = lines.map(l => code(l).trim.stripSuffix(";").trim).collect { case PackageLine(p) => p }
     val visible = clauses.scanLeft("")((acc, p) => if (acc.isEmpty) p else s"$acc.$p").drop(1).toSet
     val text    = lines.filterNot(isComment).map(code).mkString("\n")
-    def selects(sel: String): Boolean =
+    val imports = ImportClause.findAllMatchIn(text).map(m => m.group(1) -> m.group(2)).toVector
+    def selects(sel: String, name: String): Boolean =
       if (sel.startsWith("{"))
         sel
           .stripPrefix("{")
@@ -280,8 +290,7 @@ object StabilityTiers {
           .map(_.trim.split("\\s+")(0))
           .exists(s => s == name || s == "_" || s == "*")
       else sel == name || sel == "_" || sel == "*"
-    val imported = ImportClause.findAllMatchIn(text).exists(m => m.group(1) == pkg && selects(m.group(2)))
-    visible(pkg) || imported
+    (pkg, name) => visible(pkg) || imports.exists { case (p, sel) => p == pkg && selects(sel, name) }
   }
 
   // ---- third-party types in @Stable signatures (RFC 0004, #2357) ----
