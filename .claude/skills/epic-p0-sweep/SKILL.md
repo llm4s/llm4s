@@ -48,7 +48,7 @@ The merge rule: Codex clean (or 3 rounds done and the final diff reviewed yourse
 
 ## Close-out per merged PR
 1. Check each issue the PR fixes is CLOSED. Close any that auto-close missed, with a comment naming the PR.
-2. Tick them on the epic. Run `gh issue view E --json body -q .body > epic.md`, then `sed -i '' -E 's/^- \[ \] #(a|b) /- [x] #\1 /'`, then `gh issue edit E --body-file epic.md`. **Tick only after MERGED**, never on enqueue.
+2. Tick them on the epic. Run `gh issue view E --json body -q .body > epic.md`, then `sed -i '' -E 's/^- \[ \] #(a|b) /- [x] #\1 /' epic.md` (GNU sed: `sed -i -E ...`), then `gh issue edit E --body-file epic.md`. **Tick only after MERGED**, never on enqueue.
 3. Post a summary comment on the epic: a table of issue and fix, the release label, behaviour changes with migration notes, and what was not done, with links to follow-ups.
 4. Tell the user.
 

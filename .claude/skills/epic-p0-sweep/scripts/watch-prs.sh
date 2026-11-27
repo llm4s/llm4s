@@ -6,7 +6,7 @@
 repo=llm4s/llm4s
 while true; do
   for p in "$@"; do
-    s=$(gh pr view "$p" --json state,headRefOid,mergeStateStatus,statusCheckRollup 2>/dev/null --jq '"\(.headRefOid[0:8]) \(.state) head=\(.headRefOid[0:8]) merge=\(.mergeStateStatus) fail=" + ([.statusCheckRollup[]|select(.conclusion=="FAILURE" and .name!="Cited issues are in their stated state")|.name]|join("|")) + " pending=" + ([.statusCheckRollup[]|select(.status!="COMPLETED")]|length|tostring)') || continue
+    s=$(gh pr view "$p" --json state,headRefOid,mergeStateStatus,statusCheckRollup 2>/dev/null --jq '"\(.headRefOid[0:8]) \(.state) head=\(.headRefOid[0:8]) merge=\(.mergeStateStatus) fail=" + ([.statusCheckRollup[]|select((.conclusion // .state) as $c | ["FAILURE","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE","ERROR"] | index($c)) | select(.name!="Cited issues are in their stated state")|.name]|join("|")) + " pending=" + ([.statusCheckRollup[]|select((.status // "COMPLETED") != "COMPLETED")]|length|tostring)') || continue
     head=${s%% *}; s=${s#* }
     # Every page of comments: the latest Codex review can be past the first page on a long PR.
     c=$(gh api --paginate --slurp "repos/$repo/issues/$p/comments" 2>/dev/null | jq -r --arg head "$head" '
