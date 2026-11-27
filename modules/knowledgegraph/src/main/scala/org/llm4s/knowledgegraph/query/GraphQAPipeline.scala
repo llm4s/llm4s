@@ -134,8 +134,9 @@ class GraphQAPipeline(
     def covered(q: GraphQuery): Map[String, Int] = q match {
       case GraphQuery.FindNeighbors(id, Direction.Both, None, d) =>
         Map(id -> math.max(1, math.min(d, config.maxQueryDepth)))
-      case GraphQuery.CompositeQuery(steps) =>
-        steps.map(covered).foldLeft(Map.empty[String, Int]) { (acc, m) =>
+      case c: GraphQuery.CompositeQuery =>
+        // Only the steps the executor runs explore anything
+        queryExecutor.stepsRun(c).map(covered).foldLeft(Map.empty[String, Int]) { (acc, m) =>
           m.foldLeft(acc) { case (a, (id, d)) => a.updated(id, math.max(d, a.getOrElse(id, 0))) }
         }
       case _ => Map.empty

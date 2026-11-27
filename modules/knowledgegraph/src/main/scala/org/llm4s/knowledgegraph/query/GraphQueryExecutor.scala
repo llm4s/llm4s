@@ -241,7 +241,7 @@ class GraphQueryExecutor(
    * reference to a step that has not run yet is a `Left` (#2973).
    */
   private def executeComposite(query: GraphQuery.CompositeQuery): Result[GraphQueryResult] = {
-    val run     = query.steps.take(math.max(0, maxCompositeSteps))
+    val run     = stepsRun(query)
     val skipped = query.steps.size - run.size
     run.zipWithIndex
       .foldLeft[Result[Vector[GraphQueryResult]]](Right(Vector.empty)) { case (acc, (step, index)) =>
@@ -266,6 +266,10 @@ class GraphQueryExecutor(
         else merged
       }
   }
+
+  /** The steps of a composite query that run: the first `maxCompositeSteps`. */
+  private[query] def stepsRun(query: GraphQuery.CompositeQuery): Seq[GraphQuery] =
+    query.steps.take(math.max(0, maxCompositeSteps))
 
   /**
    * The step with each `$N` reference replaced by the ids step `N` found: `Right(Right(queries))`, or

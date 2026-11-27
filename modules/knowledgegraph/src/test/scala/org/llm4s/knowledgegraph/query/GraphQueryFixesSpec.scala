@@ -337,4 +337,19 @@ class GraphQueryFixesSpec extends AnyFunSuite with Matchers {
     shown.size should ((be >= 1).and(be < 30))
     r.toOption.get.citations.map(_.nodeId).toSet shouldBe shown
   }
+
+  test("a composite step beyond maxCompositeSteps does not count as exploring its entity (#2975, Codex)") {
+    // alice - bob - carol - dave - erin; the run step describes erin, the skipped one would explore alice
+    val names = Seq("alice", "bob", "carol", "dave", "erin")
+    val s = store(
+      names.map(n => person(n, n.capitalize)),
+      names.zip(names.tail).map { case (x, y) => Edge(x, y, "KNOWS") }
+    )
+    val llm = new ScriptedLLM("""[{"mention": "Alice"}]""", "answer")
+    val query =
+      GraphQuery.CompositeQuery(Seq(GraphQuery.DescribeNode("erin"), GraphQuery.FindNeighbors("alice", maxDepth = 3)))
+    val r = new GraphQAPipeline(llm, s, GraphQAConfig(maxHops = 3, maxCompositeSteps = 1)).askWithQuery("?", query)
+    r.toOption.get.queryResult.nodes.map(_.id).toSet shouldBe names.toSet
+    llm.prompts.last should include("] alice:")
+  }
 }
