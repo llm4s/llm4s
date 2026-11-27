@@ -159,19 +159,19 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           if skip.isEmpty then "" else s"AND e.entry_id NOT IN (${skip.map(_ => "?").mkString(", ")})"
         val head = query(
           c,
-          s"""SELECT e.entry_id, e.lease_token FROM llm4s_checkpoint_queue_entries e
-             |WHERE e.state = 'open' AND e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed
+          // each thread with an open entry of the agents, its head found once (#3085: not once per candidate)
+          s"""SELECT e.entry_id, e.lease_token
+             |FROM (SELECT DISTINCT thread_id FROM llm4s_checkpoint_queue_entries
+             |      WHERE state = 'open' AND agent_id IN (${agents.map(_ => "?").mkString(", ")})) t
+             |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = (${headOf("t.thread_id")})
+             |WHERE e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed
              |  AND (e.lease_token IS NULL OR e.lease_expires_nanos <= ?)
-             |  AND e.entry_id = (
-             |    SELECT h.entry_id FROM llm4s_checkpoint_queue_entries h
-             |    WHERE h.thread_id = e.thread_id AND h.state = 'open'
-             |    ORDER BY ${runOrder("h")} LIMIT 1)
              |  AND NOT EXISTS (
              |    SELECT 1 FROM llm4s_checkpoint_queue_entries o
              |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
              |      AND o.lease_token IS NOT NULL AND o.lease_expires_nanos > ?)
              |ORDER BY e.entry_id LIMIT 1""".stripMargin,
-          (agents ++ skip ++ Vector(now, now))*
+          (agents ++ agents ++ skip ++ Vector(now, now))*
           // a takeable head still holding a lease token holds an expired lease, never released
         )(r => r.getLong(1) -> (r.getObject(2) != null)).headOption
         head match
@@ -411,8 +411,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   private def openOf(c: Connection, threadId: ThreadId): Vector[Raw] =
     query(
       c,
-      s"""SELECT $Columns FROM llm4s_checkpoint_queue_entries q WHERE q.thread_id = ? AND q.state = 'open'
-         |ORDER BY ${runOrder("q")}""".stripMargin,
+      s"SELECT $Columns FROM (${ranked("thread_id = ?")}) q ORDER BY ${runOrder("q")}",
       threadId.value
     )(raw)
 
@@ -476,15 +475,23 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
 private[sqlite] object SqliteRunQueue:
 
   /**
-   * A thread's open entries, the rows aliased `a`, in the order they run (rule 5): attempted first; then each tenant's
+   * A thread's open entries, the rows aliased `a` and [[ranked]], in the order they run (rule 5): attempted first; then each tenant's
    * entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its
    * own tenant's entries only (#3085); within a tenant `Interrupt` entries first, then by id.
    */
-  def runOrder(a: String): String =
-    s"""($a.attempt_count = 0),
-       |  (SELECT MIN(f.entry_id) FROM llm4s_checkpoint_queue_entries f
-       |   WHERE f.thread_id = $a.thread_id AND f.state = 'open' AND f.tenant_id IS $a.tenant_id),
-       |  $a.is_interrupt DESC, $a.entry_id""".stripMargin
+  def runOrder(a: String): String = s"($a.attempt_count = 0), $a.tenant_first, $a.is_interrupt DESC, $a.entry_id"
+
+  /**
+   * The open entries `where` selects, each with `tenant_first`, its tenant's oldest open entry among them: computed
+   * once per row set by a window, never by a subquery per row (#3085).
+   */
+  def ranked(where: String): String =
+    s"""SELECT *, MIN(entry_id) OVER (PARTITION BY tenant_id) AS tenant_first
+       |FROM llm4s_checkpoint_queue_entries WHERE $where AND state = 'open'""".stripMargin
+
+  /** The head of thread `thread` (a column or `?`) in [[runOrder]], as a subquery. */
+  def headOf(thread: String): String =
+    s"SELECT h.entry_id FROM (${ranked(s"thread_id = $thread")}) h ORDER BY ${runOrder("h")} LIMIT 1"
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,

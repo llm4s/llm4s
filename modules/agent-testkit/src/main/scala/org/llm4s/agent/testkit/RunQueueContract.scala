@@ -380,6 +380,18 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.take().value.entry.id shouldBe foreign.entryId
   }
 
+  it should "take in bounded time from a thread with many tenants' entries and a leased head (#3085)" in {
+    val c       = Case()
+    val tenants = 600
+    (1 to tenants).foreach(i => c.submit(tenant = Some(TenantId(s"t$i-${unique()}"))).value)
+    c.take().value
+    // every other entry waits behind the leased head: finding that out reads the thread's order once, not per entry
+    val started = System.nanoTime()
+    (1 to 3).foreach(_ => c.take("worker-2") shouldBe None)
+    val elapsed = (System.nanoTime() - started).nanos
+    withClue(s"three takes took $elapsed: ")(elapsed should be < contractWait)
+  }
+
   it should "close a cancelled entry that has not started at once, so it is never taken, also one that is leased" in {
     val c         = Case()
     val reason    = CancelReason.Requested(Some("never mind"))

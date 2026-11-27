@@ -275,8 +275,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "scan past a full batch of heads whose threads are locked, and lease the first free one" in {
     val first = (1L to PostgresRunQueue.Candidates.toLong).map(i => Vector[Any](i, s"busy-$i")).toVector
     val s = script {
-      case (sql, Vector(_, _, 0L, _)) if sql == Sql.queueCandidates(t) => first
-      case (sql, Vector(_, _, after, _))
+      case (sql, Vector(_, _, _, 0L, _)) if sql == Sql.queueCandidates(t) => first
+      case (sql, Vector(_, _, _, after, _))
           if sql == Sql.queueCandidates(t) && after == PostgresRunQueue.Candidates.toLong =>
         Vector(Vector(100L, "free"))
       case (sql, Vector(name: String)) if sql == tryLock            => Vector(Vector(name.endsWith("thread:free")))
@@ -288,10 +288,10 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     val taken = s.store().runQueue.take(TakeRequest("w", Set(agent), 30.seconds)).value.value
     taken.lease shouldBe Lease(EntryId.unsafe(100), LeaseToken(42), "w", later.toInstant)
     taken.entry.threadId shouldBe ThreadId("free")
-    // two batches: the first from the start, the second past its last id; the agents and the time bound each time
+    // two batches: the first from the start, the second past its last id; the agents (twice) and the time bound each time
     s.madeWith(Sql.queueCandidates(t)) shouldBe Vector(
-      Vector(Vector("a"), now, 0L, now),
-      Vector(Vector("a"), now, PostgresRunQueue.Candidates.toLong, now)
+      Vector(Vector("a"), Vector("a"), now, 0L, now),
+      Vector(Vector("a"), Vector("a"), now, PostgresRunQueue.Candidates.toLong, now)
     )
     // every busy head's thread lock was tried, never waited for, and none of them was checked or leased
     s.madeWith(tryLock).size shouldBe PostgresRunQueue.Candidates + 1

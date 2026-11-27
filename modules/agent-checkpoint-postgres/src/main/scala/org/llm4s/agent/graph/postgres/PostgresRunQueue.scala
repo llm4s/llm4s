@@ -186,6 +186,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             c,
             Sql.queueCandidates(t),
             agents,
+            agents,
             now,
             after,
             now
