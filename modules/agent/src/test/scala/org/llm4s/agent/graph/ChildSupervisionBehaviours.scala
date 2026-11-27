@@ -167,6 +167,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
           catch { case t: Throwable => Left(t) }
         )
       )
+      runner.setDaemon(true) // a child stuck past a failed case cannot keep the test JVM alive
       runner.start()
       var relayed = false
       while (runner.isAlive)
@@ -971,6 +972,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         ended.set(ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, true))
       )
       firstRunner.compareAndSet(null, runner)
+      runner.setDaemon(true) // a child stuck past a failed case cannot keep the test JVM alive
       runner.start()
       var relayed = false
       while (runner.isAlive)
