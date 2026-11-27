@@ -84,9 +84,10 @@ final class PgSearchIndex private (
     additionalFilter: Option[MetadataFilter]
   ): Result[Seq[ScoredRecord]] =
     for {
-      // Step 1: Get accessible collection IDs
+      // Step 1: Get accessible collection IDs. Not only leaves: a collection made a non-leaf while it held documents
+      // (before #2991, creating a child did that) still has them, and they stay searchable.
       accessibleCollections <- _collections.findAccessible(auth, collectionPattern)
-      collectionIds = accessibleCollections.filter(_.isLeaf).map(_.id)
+      collectionIds = accessibleCollections.map(_.id)
 
       // Step 2: Perform vector search with permission filter
       results <-
@@ -204,7 +205,7 @@ final class PgSearchIndex private (
   ): Result[Seq[KeywordSearchResult]] =
     for {
       accessibleCollections <- _collections.findAccessible(auth, collectionPattern)
-      collectionIds = accessibleCollections.filter(_.isLeaf).map(_.id)
+      collectionIds = accessibleCollections.map(_.id)
       results <-
         if (collectionIds.isEmpty || queryText.trim.isEmpty) Right(Seq.empty[KeywordSearchResult])
         else keywordSearchWithPermissions(auth, collectionIds, queryText, topK, additionalFilter)
@@ -292,6 +293,11 @@ final class PgSearchIndex private (
       }) { _ =>
         val attempt =
           Try {
+            // Re-checked under a share lock: PgCollectionStore.create locks the row to make a leaf a parent, so a
+            // child created meanwhile either waits for this ingest or has already made the collection a non-leaf.
+            if (!isLeafLocked(conn, collectionId))
+              throw new IllegalStateException(s"Cannot ingest into non-leaf collection (id $collectionId)")
+
             val sql = s"""
               INSERT INTO $vectorTableName
               (id, embedding, embedding_dim, content, metadata, collection_id, readable_by)
@@ -336,6 +342,12 @@ final class PgSearchIndex private (
       }
     }
   }.toEither.left.map(e => ProcessingError("pg-search-index-insert", Redaction.scrubKnown(e.getMessage)))
+
+  private def isLeafLocked(conn: Connection, collectionId: Int): Boolean =
+    Using.resource(conn.prepareStatement("SELECT is_leaf FROM llm4s_collections WHERE id = ? FOR SHARE")) { stmt =>
+      stmt.setInt(1, collectionId)
+      Using.resource(stmt.executeQuery())(rs => rs.next() && rs.getBoolean("is_leaf"))
+    }
 
   override def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] =
     for {

@@ -137,7 +137,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         Right(collectionMap.values.filter(c => pattern.matches(c.path)).toSeq)
 
       def findAccessible(auth: UserAuthorization, pattern: CollectionPattern): Result[Seq[Collection]] =
-        Right(collectionMap.values.filter(c => pattern.matches(c.path) && c.canQuery(auth)).toSeq)
+        Right(collectionMap.values.filter(c => pattern.matches(c.path) && permits(c, auth)).toSeq)
 
       def updatePermissions(path: CollectionPath, queryableBy: Set[PrincipalId]): Result[Collection] =
         collectionMap.get(path) match {
@@ -165,7 +165,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         Right(collectionMap.get(path).map(_.queryableBy).getOrElse(Set.empty))
 
       def canQuery(path: CollectionPath, auth: UserAuthorization): Result[Boolean] =
-        Right(collectionMap.get(path).exists(_.canQuery(auth)))
+        Right(collectionMap.get(path).exists(permits(_, auth)))
 
       def listChildren(parentPath: CollectionPath): Result[Seq[Collection]] =
         Right(collectionMap.values.filter(_.parentPath.contains(parentPath)).toSeq)
@@ -186,9 +186,21 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         }
     }
 
+    /** The collection's effective access over the ancestors this fake holds. */
+    private def permits(c: Collection, auth: UserAuthorization): Boolean = {
+      val chain = Iterator
+        .iterate(Option(c.path))(_.flatMap(_.parent))
+        .takeWhile(_.isDefined)
+        .flatten
+        .flatMap(collectionMap.get)
+        .toList
+        .reverse
+      EffectiveAccess.of(chain).permits(auth)
+    }
+
     private def accessibleChunks(auth: UserAuthorization, collectionPattern: CollectionPattern) = {
       val accessibleCollIds = collectionMap.values
-        .filter(c => collectionPattern.matches(c.path) && c.canQuery(auth))
+        .filter(c => collectionPattern.matches(c.path) && permits(c, auth))
         .map(_.id)
         .toSet
 

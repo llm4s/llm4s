@@ -3,6 +3,8 @@ package org.llm4s.rag.permissions
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+// Collection.canQuery is deprecated (#2990): these cases pin what it still does.
+@scala.annotation.nowarn("cat=deprecation")
 class PermissionTypesSpec extends AnyFlatSpec with Matchers {
 
   // PrincipalId tests

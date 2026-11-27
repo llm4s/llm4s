@@ -17,7 +17,11 @@ import scala.collection.mutable
 class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
 
   /** A connection whose one collection is the leaf `docs`, id 7, and which records every batched INSERT row. */
-  final private class ScriptedDb(isLeaf: Boolean = true, failInsert: Boolean = false) {
+  final private class ScriptedDb(
+    isLeaf: Boolean = true,
+    failInsert: Boolean = false,
+    lockedIsLeaf: Option[Boolean] = None
+  ) {
     val rows: mutable.ListBuffer[Map[Int, Any]] = mutable.ListBuffer.empty
     var commits: Int                            = 0
     var rollbacks: Int                          = 0
@@ -40,7 +44,7 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
         )
         .asInstanceOf[T]
 
-    private def collectionRow(): ResultSet = {
+    private def collectionRow(leaf: Boolean): ResultSet = {
       var served = false
       proxy(classOf[ResultSet]) {
         case ("next", _) =>
@@ -48,7 +52,7 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
         case ("getInt", Array("id"))          => 7
         case ("getString", Array("path"))     => "docs"
         case ("getString", Array("metadata")) => "{}"
-        case ("getBoolean", Array("is_leaf")) => isLeaf
+        case ("getBoolean", Array("is_leaf")) => leaf
         case _                                => null
       }
     }
@@ -60,7 +64,8 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
         case ("addBatch", _)                                             => rows += current.toMap; current.clear()
         case ("executeBatch", _) =>
           if (failInsert) throw new java.sql.SQLException("insert failed") else Array.fill(rows.size)(1)
-        case ("executeQuery", _) if sql.contains("llm4s_collections") => collectionRow()
+        case ("executeQuery", _) if sql.contains("FOR SHARE")         => collectionRow(lockedIsLeaf.getOrElse(isLeaf))
+        case ("executeQuery", _) if sql.contains("llm4s_collections") => collectionRow(isLeaf)
         case _                                                        => null
       }
     }
@@ -125,6 +130,18 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
       "non-leaf"
     )
     db.rows shouldBe empty
+  }
+
+  it should "refuse, writing nothing, a collection made a non-leaf after it was read (#2991)" in {
+    val db    = new ScriptedDb(lockedIsLeaf = Some(false))
+    val index = PgSearchIndex.fromDataSource(db.dataSource).toOption.get
+
+    index.ingest(docs, "doc-1", Seq(chunk(0, "a")), Map.empty, Set.empty).left.toOption.get.message should include(
+      "non-leaf"
+    )
+    db.rows shouldBe empty
+    db.rollbacks shouldBe 1
+    db.commits shouldBe 0
   }
 
   it should "roll back and report a failed insert" in {

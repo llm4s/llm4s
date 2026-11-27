@@ -41,7 +41,7 @@ It enables you to:
 
 **Key Features:**
 - Two-level permission model (collection + document)
-- Permission inheritance (children can only restrict, never loosen)
+- Permission inheritance (a child adds restrictions to its parent's, never removes them)
 - Pattern-based collection queries
 - PostgreSQL backend with pgvector for efficient vector search
 - Seamless integration with the existing RAG API
@@ -321,8 +321,10 @@ SearchIndex
 **Rules:**
 - Parent collections cannot contain documents (only sub-collections)
 - Leaf collections can contain documents
-- When you create a child, the parent automatically becomes a non-leaf
-- Permissions are inherited: children can only restrict, never loosen
+- When you create a child of an empty leaf, the leaf becomes a parent. A leaf that holds documents cannot be given
+  children: `create` and `ensureExists` return a `ValidationError`, and the leaf and its documents are unchanged
+- Permissions are inherited: a user must pass every restricted collection on the path, so a child can only narrow who
+  reaches it
 
 ```scala
 // Create parent first
@@ -356,16 +358,17 @@ collections.create(CollectionConfig(
   isLeaf = false
 ))
 
-// Child further restricted to managers only
+// Child further restricted to managers: it need not list the parent's principals
 collections.create(CollectionConfig(
   path = CollectionPath.unsafe("company/executive"),
   queryableBy = Set(managers),
   isLeaf = true
 ))
 
-// Get effective permissions (considers inheritance)
-collections.getEffectivePermissions(CollectionPath.unsafe("company/executive"))
-// Returns intersection: only managers who are also employees
+// Effective access (considers inheritance): a user needs a principal at every level,
+// so only managers who are also employees may query company/executive
+collections.effectiveAccess(CollectionPath.unsafe("company/executive"))
+// Right(EffectiveAccess.Restricted(levels)): company needs employees, company/executive needs managers
 
 // Cannot loosen permissions
 collections.create(CollectionConfig(
@@ -398,7 +401,8 @@ collections.findAccessible(userAuth, CollectionPattern.All)
 collections.listChildren(CollectionPath.unsafe("confluence"))
 // Seq(confluence/EN, confluence/DE, ...)
 
-// Check if user can query a collection
+// Check if user can query a collection: the same answer findAccessible and a search give,
+// so a public child of a restricted parent is not queryable by everyone
 collections.canQuery(CollectionPath.unsafe("internal"), userAuth)
 // Right(true) or Right(false)
 
@@ -930,8 +934,12 @@ class RAG {
 - Use `ensureExists` to create parent hierarchy automatically
 
 **"Cannot make collection public when parent is restricted"**
-- Child collections cannot have looser permissions than parents
-- Either make the parent public or restrict the child to a subset of parent's principals
+- A child of a restricted collection must be restricted too
+- Give the child its own `queryableBy` (any principals: a user still needs the parent's as well), or make the parent public
+
+**"... is a leaf holding documents"**
+- A collection with children holds no documents, so a leaf that holds some cannot be given a child
+- Clear the leaf first (`clearCollection`), or create the new collection elsewhere
 
 **"SearchIndex required" error**
 - Call `.withSearchIndex(index)` when building RAG
@@ -950,10 +958,12 @@ collections.findAccessible(userAuth, CollectionPattern.All).foreach { accessible
   println(s"User can access: ${accessible.map(_.path.value)}")
 }
 
-// Check effective permissions
-collections.getEffectivePermissions(path).foreach { perms =>
-  if (perms.isEmpty) println("Collection is public")
-  else println(s"Required principals: ${perms.map(_.value)}")
+// Check effective access
+collections.effectiveAccess(path).foreach {
+  case EffectiveAccess.Public             => println("Collection is public")
+  case EffectiveAccess.Restricted(levels) =>
+    levels.foreach(l => println(s"${l.path.value} needs one of: ${l.anyOf.map(_.value)}"))
+  case EffectiveAccess.Nobody             => println("Only an admin may query it")
 }
 
 // Verify collection exists and is a leaf

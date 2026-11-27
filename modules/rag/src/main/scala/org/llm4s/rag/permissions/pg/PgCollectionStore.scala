@@ -8,7 +8,7 @@ import org.llm4s.vectorstore.{ PgMetadataJson, SqlLikePattern }
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
-import scala.util.{ Try, Using }
+import scala.util.{ Failure, Try, Using }
 
 /**
  * PostgreSQL implementation of CollectionStore.
@@ -23,63 +23,95 @@ final class PgCollectionStore(
   vectorTableName: String = "vectors"
 ) extends CollectionStore {
 
-  override def create(config: CollectionConfig): Result[Collection] =
-    for {
-      // Validate parent exists and permissions are valid
-      _ <- config.parentPath match {
-        case Some(parent) =>
-          for {
-            parentOpt <- get(parent)
-            _ <- parentOpt.toRight(ValidationError("collection", s"Parent collection not found: ${parent.value}"))
-            parentColl = parentOpt.get
-            _ <- validatePermissionsNotLoosened(parentColl.queryableBy, config.queryableBy)
-            // Mark parent as non-leaf if it was a leaf
-            _ <- if (parentColl.isLeaf) markAsNonLeaf(parent) else Right(())
-          } yield ()
-        case None => Right(())
-      }
-      collection <- doCreate(config)
-    } yield collection
-
-  private def doCreate(config: CollectionConfig): Result[Collection] = Try {
-    withConnection { conn =>
-      val queryableByArray = createIntArray(conn, config.queryableBy.map(_.value).toSeq)
-      val metadataJson     = PgMetadataJson.write(config.metadata)
-
-      Using.resource(conn.prepareStatement("""
-        INSERT INTO llm4s_collections (path, parent_path, queryable_by, is_leaf, metadata)
-        VALUES (?, ?, ?, ?, ?::jsonb)
-        RETURNING id, path, parent_path, queryable_by, is_leaf, metadata
-      """)) { stmt =>
-        stmt.setString(1, config.path.value)
-        stmt.setString(2, config.parentPath.map(_.value).orNull)
-        stmt.setArray(3, queryableByArray)
-        stmt.setBoolean(4, config.isLeaf)
-        stmt.setString(5, metadataJson)
-
-        Using.resource(stmt.executeQuery()) { rs =>
-          if (rs.next()) Right(rowToCollection(rs))
-          else Left(ProcessingError("pg-collection-create", "Failed to create collection: no row returned"))
+  /**
+   * Creates the collection, making its parent a non-leaf if it was a leaf, in one transaction (#2991).
+   *
+   * The parent's row is locked first (`FOR UPDATE`), so an ingest into it, which takes a share lock on the same row,
+   * either finishes before the check for its documents or sees the parent as a non-leaf and is refused. A leaf
+   * holding documents is never demoted: queries used to skip non-leaf collections, and its documents vanished.
+   */
+  override def create(config: CollectionConfig): Result[Collection] = Try {
+    withTransaction { conn =>
+      for {
+        _ <- config.parentPath match {
+          case Some(parent) => prepareParent(conn, parent, config)
+          case None         => Right(())
         }
-      }
+        collection <- insert(conn, config)
+      } yield collection
     }
   }.toEither.left
     .map(e => ProcessingError("pg-collection-create", Redaction.scrubKnown(e.getMessage)))
     .flatMap(identity)
 
-  private def markAsNonLeaf(path: CollectionPath): Result[Unit] = Try {
-    withConnection { conn =>
-      Using.resource(
-        conn.prepareStatement(
-          "UPDATE llm4s_collections SET is_leaf = FALSE, updated_at = NOW() WHERE path = ?"
-        )
-      ) { stmt =>
-        stmt.setString(1, path.value)
-        stmt.executeUpdate()
-        ()
+  /** Locks `parent`, checks `config` may go under it, and makes it a non-leaf if it is an empty leaf. */
+  private def prepareParent(conn: Connection, parent: CollectionPath, config: CollectionConfig): Result[Unit] =
+    for {
+      parentColl <- lockForUpdate(conn, parent).toRight(
+        ValidationError("collection", s"Parent collection not found: ${parent.value}")
+      )
+      _ <- validateNotPublicUnderRestricted(parentColl.queryableBy, config.queryableBy)
+      _ <-
+        if (!parentColl.isLeaf) Right(())
+        else if (holdsChunks(conn, parentColl.id))
+          Left(
+            ValidationError(
+              "collection",
+              s"Cannot create ${config.path.value}: its parent ${parent.value} is a leaf holding documents, and a " +
+                "collection with children holds none. Clear the parent first, or create the collection elsewhere."
+            )
+          )
+        else Right(markAsNonLeaf(conn, parentColl.id))
+    } yield ()
+
+  private def lockForUpdate(conn: Connection, path: CollectionPath): Option[Collection] =
+    Using.resource(
+      conn.prepareStatement(
+        "SELECT id, path, parent_path, queryable_by, is_leaf, metadata FROM llm4s_collections WHERE path = ? FOR UPDATE"
+      )
+    ) { stmt =>
+      stmt.setString(1, path.value)
+      Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rowToCollection(rs)) else None)
+    }
+
+  private def holdsChunks(conn: Connection, collectionId: Int): Boolean =
+    Using.resource(
+      conn.prepareStatement(s"SELECT EXISTS (SELECT 1 FROM $vectorTableName WHERE collection_id = ?)")
+    ) { stmt =>
+      stmt.setInt(1, collectionId)
+      Using.resource(stmt.executeQuery())(rs => rs.next() && rs.getBoolean(1))
+    }
+
+  private def markAsNonLeaf(conn: Connection, collectionId: Int): Unit =
+    Using.resource(
+      conn.prepareStatement("UPDATE llm4s_collections SET is_leaf = FALSE, updated_at = NOW() WHERE id = ?")
+    ) { stmt =>
+      stmt.setInt(1, collectionId)
+      stmt.executeUpdate()
+      ()
+    }
+
+  private def insert(conn: Connection, config: CollectionConfig): Result[Collection] = {
+    val queryableByArray = createIntArray(conn, config.queryableBy.map(_.value).toSeq)
+    val metadataJson     = PgMetadataJson.write(config.metadata)
+
+    Using.resource(conn.prepareStatement("""
+      INSERT INTO llm4s_collections (path, parent_path, queryable_by, is_leaf, metadata)
+      VALUES (?, ?, ?, ?, ?::jsonb)
+      RETURNING id, path, parent_path, queryable_by, is_leaf, metadata
+    """)) { stmt =>
+      stmt.setString(1, config.path.value)
+      stmt.setString(2, config.parentPath.map(_.value).orNull)
+      stmt.setArray(3, queryableByArray)
+      stmt.setBoolean(4, config.isLeaf)
+      stmt.setString(5, metadataJson)
+
+      Using.resource(stmt.executeQuery()) { rs =>
+        if (rs.next()) Right(rowToCollection(rs))
+        else Left(ProcessingError("pg-collection-create", "Failed to create collection: no row returned"))
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update", Redaction.scrubKnown(e.getMessage)))
+  }
 
   override def get(path: CollectionPath): Result[Option[Collection]] = Try {
     withConnection { conn =>
@@ -212,7 +244,7 @@ final class PgCollectionStore(
             parentColl <- parentOpt.toRight(
               ProcessingError("pg-collection-update", s"Parent not found: ${parent.value}")
             )
-            _ <- validatePermissionsNotLoosened(parentColl.queryableBy, queryableBy)
+            _ <- validateNotPublicUnderRestricted(parentColl.queryableBy, queryableBy)
           } yield ()
         case None => Right(())
       }
@@ -297,48 +329,54 @@ final class PgCollectionStore(
     }
   }.toEither.left.map(e => ProcessingError("pg-collection-delete", Redaction.scrubKnown(e.getMessage)))
 
-  override def getEffectivePermissions(path: CollectionPath): Result[Set[PrincipalId]] =
-    for {
-      collOpt <- get(path)
-      coll    <- collOpt.toRight(ProcessingError("pg-collection-effective", s"Collection not found: ${path.value}"))
-      result  <- computeEffectivePermissions(coll)
-    } yield result
-
-  private def computeEffectivePermissions(coll: Collection): Result[Set[PrincipalId]] =
-    if (coll.queryableBy.isEmpty) {
-      // This collection is public
-      Right(Set.empty)
-    } else {
-      coll.parentPath match {
-        case None =>
-          // Root collection - just return its own permissions
-          Right(coll.queryableBy)
-        case Some(parentPath) =>
-          // Get parent and intersect permissions
-          for {
-            parentOpt <- get(parentPath)
-            parentColl <- parentOpt.toRight(
-              ProcessingError("pg-collection-effective", s"Parent not found: ${parentPath.value}")
-            )
-            parentEffective <- computeEffectivePermissions(parentColl)
-          } yield
-            if (parentEffective.isEmpty) {
-              // Parent is public, use this collection's permissions
-              coll.queryableBy
-            } else {
-              // Intersect with parent (child can only restrict, never expand)
-              coll.queryableBy.intersect(parentEffective)
-            }
+  /** The collection and its ancestors in one query, root first. */
+  override def effectiveAccess(path: CollectionPath): Result[EffectiveAccess] = {
+    val chain = Iterator.iterate(Option(path))(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten.toList.reverse
+    Try {
+      withConnection { conn =>
+        Using.resource(
+          conn.prepareStatement(
+            "SELECT id, path, parent_path, queryable_by, is_leaf, metadata FROM llm4s_collections WHERE path = ANY(?)"
+          )
+        ) { stmt =>
+          stmt.setArray(1, conn.createArrayOf("text", chain.map(_.value).toArray[AnyRef]))
+          Using.resource(stmt.executeQuery()) { rs =>
+            val found = ArrayBuffer[Collection]()
+            while (rs.next())
+              found += rowToCollection(rs)
+            found.map(c => c.path -> c).toMap
+          }
+        }
       }
-    }
+    }.toEither.left
+      .map(e => ProcessingError("pg-collection-effective", Redaction.scrubKnown(e.getMessage)))
+      .flatMap { byPath =>
+        chain
+          .foldLeft[Result[List[Collection]]](Right(Nil)) { (acc, p) =>
+            acc.flatMap(found =>
+              byPath
+                .get(p)
+                .toRight(ProcessingError("pg-collection-effective", s"Collection not found: ${p.value}"))
+                .map(found :+ _)
+            )
+          }
+          .map(EffectiveAccess.of)
+      }
+  }
 
+  @deprecated("an empty set reads as public; use effectiveAccess", since = "1.1.0")
+  override def getEffectivePermissions(path: CollectionPath): Result[Set[PrincipalId]] =
+    effectiveAccess(path).flatMap(EffectiveAccess.legacyPrincipals(path, _))
+
+  /**
+   * The answer [[findAccessible]] gives for exactly `path` (#2990): the same recursive query, so a public child of a
+   * restricted parent, or a child whose principals the parent does not list, is decided as a search decides it.
+   */
   override def canQuery(path: CollectionPath, auth: UserAuthorization): Result[Boolean] =
-    if (auth.isAdmin) {
-      Right(true)
-    } else {
-      for {
-        effective <- getEffectivePermissions(path)
-      } yield effective.isEmpty || auth.principalIds.exists(effective.contains)
+    get(path).flatMap {
+      case None => Left(ProcessingError("pg-collection-can-query", s"Collection not found: ${path.value}"))
+      case Some(_) if auth.isAdmin => Right(true)
+      case Some(_)                 => findAccessible(auth, CollectionPattern.Exact(path)).map(_.nonEmpty)
     }
 
   override def listChildren(parentPath: CollectionPath): Result[Seq[Collection]] = Try {
@@ -420,32 +458,17 @@ final class PgCollectionStore(
 
   // Helper methods
 
-  private def validatePermissionsNotLoosened(
+  /**
+   * A child of a restricted collection may not be public. It may name any principals, including ones its parent does
+   * not: a query needs a principal at every restricted level, so a child can only narrow who reaches it (#2990).
+   */
+  private def validateNotPublicUnderRestricted(
     parent: Set[PrincipalId],
     child: Set[PrincipalId]
   ): Result[Unit] =
-    if (parent.isEmpty) {
-      // Parent is public, child can have any permissions (including restricting)
-      Right(())
-    } else if (child.isEmpty) {
-      // Child is public but parent is restricted - NOT allowed
+    if (parent.nonEmpty && child.isEmpty)
       Left(ValidationError("permissions", "Cannot make collection public when parent is restricted"))
-    } else {
-      // Child permissions must be a subset of parent permissions.
-      // This prevents accidentally loosening permissions through disjoint sets
-      // (where intersection would be empty, treated as public).
-      val invalidPrincipals = child -- parent
-      if (invalidPrincipals.nonEmpty) {
-        Left(
-          ValidationError(
-            "permissions",
-            s"Child collection cannot grant access to principals not in parent: ${invalidPrincipals.map(_.value).mkString(", ")}"
-          )
-        )
-      } else {
-        Right(())
-      }
-    }
+    else Right(())
 
   private def rowToCollection(rs: ResultSet): Collection = {
     val queryableByArray = Option(rs.getArray("queryable_by"))
@@ -472,6 +495,24 @@ final class PgCollectionStore(
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(getConnection())(f)
+
+  /** Runs `f` in one transaction: committed if it returns a `Right`, rolled back if it returns a `Left` or throws. */
+  private def withTransaction[A](f: Connection => Result[A]): Result[A] =
+    withConnection { conn =>
+      Using.resource(new AutoCloseable {
+        private val original = conn.getAutoCommit
+        conn.setAutoCommit(false)
+        override def close(): Unit = conn.setAutoCommit(original)
+      }) { _ =>
+        Try(f(conn))
+          .flatMap {
+            case done @ Right(_)   => Try(conn.commit()).map(_ => done)
+            case refused @ Left(_) => Try(conn.rollback()).map(_ => refused)
+          }
+          .recoverWith { case e: Exception => Try(conn.rollback()).flatMap(_ => Failure(e)) }
+          .get
+      }
+    }
 }
 
 private[pg] object PgCollectionStore {
