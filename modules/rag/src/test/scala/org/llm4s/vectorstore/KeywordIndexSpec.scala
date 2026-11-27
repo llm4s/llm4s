@@ -201,20 +201,20 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       orResults.toOption.get.size shouldBe 2
     }
 
-    "reject unsafe metadata keys in filters" in {
+    "bind a metadata key holding SQL as a value, never run it" in {
       val docs = Seq(
         KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
       )
       index.indexBatch(docs) shouldBe Right(())
 
+      // The key is a bound parameter (#2995): SQL in it is a key no document has, never SQL
       val unsafeKey = "lang') OR 1=1 --"
       val result    = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals(unsafeKey, "en")))
 
-      result.isLeft shouldBe true
-      result.left.toOption.get.formatted should include("Invalid metadata key")
+      result shouldBe Right(Seq.empty)
     }
 
-    "propagate invalid metadata keys through composite filters" in {
+    "bind such a key inside a composite filter too" in {
       val docs = Seq(
         KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
       )
@@ -229,12 +229,12 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
         )
       )
 
+      // HasKey(unsafeKey) matches nothing, so the Or rests on Not(Contains("lang", "fr")), which doc-1 meets
       val result = index.search("Scala", topK = 10, filter = Some(composite))
-      result.isLeft shouldBe true
-      result.left.toOption.get.formatted should include("Invalid metadata key")
+      result.map(_.map(_.id)) shouldBe Right(Seq("doc-1"))
     }
 
-    "reject empty metadata keys in filters" in {
+    "match a blank metadata key as written" in {
       val docs = Seq(
         KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
       )
@@ -242,8 +242,7 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
 
       val result = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals("   ", "en")))
 
-      result.isLeft shouldBe true
-      result.left.toOption.get.formatted should include("Invalid metadata key")
+      result shouldBe Right(Seq.empty) // a key is matched as written, as SQLiteVectorStore matches it
     }
 
     "allow metadata keys that begin with digits" in {

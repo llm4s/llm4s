@@ -341,6 +341,27 @@ A database `dropSchema` was run on before this release may still hold rows `inge
 them (`vectorsSkipped`), and a plain `PgVectorStore` on the table still reads them. Check them and delete them, for
 example with `DELETE FROM vectors WHERE collection_id IS NULL AND id ~ '^coll-[0-9]+-'`.
 
+`dropSchema` and the migration resolve each table name through `search_path`, as the index's own SQL does, and work
+on the schema-qualified tables. On a connection with auto-commit off they run in a savepoint and leave the commit to
+the caller.
+
+## Keyword search replaces on re-index, reads free text, and survives a failing leg (#2994, #2995)
+
+`llm4s-rag` is Beta. `LegFailurePolicy` is new; `HybridSearcher`, `AsyncHybridSearcher` and `RAGConfig` gain
+`legFailurePolicy` and `withLegFailurePolicy`. `RAGConfig` has a new last field, so a positional pattern on it needs
+one more `_`.
+
+| Before (1.0.0) | After |
+|---|---|
+| Re-indexing an id in `SQLiteKeywordIndex` (`index`, `indexBatch`, `update`, and so every re-ingest of a changed document) kept the old full-text row: its old words still found the document | The full-text row is replaced. An index holding stale rows from before is rebuilt from its documents when opened, once |
+| A query was FTS5 syntax as soon as it held a `"`: `he said "hi` failed, and a blank query failed | A query is free text. A balanced `"..."` is a phrase and a trailing `*` a prefix; open quotes, `NOT`, `:`, `^` and parentheses are searched as text. A blank query finds nothing |
+| Every word was required, so most questions had no keyword hits; `OR` was searched as the word "or" | Every word is optional and BM25 ranks chunks holding more of them first. A bare `AND` or `OR` is dropped |
+| A filter key was a JSON path: `a.b` matched nothing and keys with a space, `:` or `/` were refused with an error | A key is matched as written, as in `SQLiteVectorStore`, with bound parameters |
+| One failing leg of an RRF or weighted search failed the whole search, including `RAG.query` and a permission query | The search answers from the other leg and logs a WARN. `withLegFailurePolicy(LegFailurePolicy.Fail)` restores the error. A `SearchIndex` without keyword search still fails a fused permission query as a configuration error |
+
+A query that relied on every word being required, or on FTS5 operators, now finds more chunks: put the words that
+must appear together in a phrase. Nothing is needed for stale full-text rows; opening the index repairs them.
+
 ## `SemanticMemoryMiddleware` bounds only what it wrote, and tenants never share storage (#3032, #3034)
 
 `llm4s-agent-memory` is Experimental, `llm4s-memory` and `llm4s-memory-postgres` Beta. `MemoryStore` gains

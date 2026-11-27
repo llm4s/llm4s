@@ -135,12 +135,12 @@ class SQLiteKeywordIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     )
     index.indexBatch(docs).value
 
-    // Act: Search for two terms (FTS5 default is AND - both terms must be present)
+    // Act: Search for two terms. Every term is optional (#2995): a document with either matches
     val results = index.search("scala functional", topK = 10).value
 
-    // Assert: Only documents with BOTH terms should match (FTS5 AND behavior)
-    results should have size 2
-    results.map(_.id).toSet shouldBe Set("both", "both-repeated")
+    // Assert: every document holding a term matches, those holding both ranked first
+    results.map(_.id).toSet shouldBe Set("both", "both-repeated", "scala-only", "functional-only")
+    results.take(2).map(_.id).toSet shouldBe Set("both", "both-repeated")
 
     // Document with more occurrences should rank higher
     results.head.id shouldBe "both-repeated"
@@ -259,5 +259,46 @@ class SQLiteKeywordIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     // Assert: Results should be identical
     results1.map(r => (r.id, r.score)) shouldBe results2.map(r => (r.id, r.score))
     results2.map(r => (r.id, r.score)) shouldBe results3.map(r => (r.id, r.score))
+  }
+
+  "SQLiteKeywordIndex.matchExpression" should "quote every term and join them with OR (#2995)" in {
+    import SQLiteKeywordIndex.matchExpression
+    matchExpression("what is the capital") shouldBe Some("\"what\" OR \"is\" OR \"the\" OR \"capital\"")
+    matchExpression("scala AND java OR rust") shouldBe Some("\"scala\" OR \"java\" OR \"rust\"")
+    matchExpression("NOT scala") shouldBe Some("\"NOT\" OR \"scala\"")
+  }
+
+  it should "keep a balanced phrase, read an unpaired quote as text, and honour a trailing *" in {
+    import SQLiteKeywordIndex.matchExpression
+    matchExpression("\"hello world\" again") shouldBe Some("\"hello world\" OR \"again\"")
+    matchExpression("he said \"hi") shouldBe Some("\"he\" OR \"said\" OR \"hi\"")
+    matchExpression("scala*") shouldBe Some("\"scala\"*")
+  }
+
+  it should "find nothing to search in a blank query or one of only punctuation" in {
+    import SQLiteKeywordIndex.matchExpression
+    Seq("", "   ", "\"", "\"\"", "* ^ ( )").foreach(q => withClue(q)(matchExpression(q) shouldBe None))
+    matchExpression(null) shouldBe None
+  }
+
+  "SQLiteKeywordIndex" should "rebuild, when opened, an index an earlier version left with stale FTS rows (#2994)" in {
+    val dir  = java.nio.file.Files.createTempDirectory("llm4s-kw-stale")
+    val path = dir.resolve("kw.db").toString
+    SQLiteKeywordIndex(path).value.close()
+    // The state INSERT OR REPLACE left: d1's document is the new text, and the FTS table also holds the old row
+    scala.util.Using.resource(java.sql.DriverManager.getConnection(s"jdbc:sqlite:$path")) { conn =>
+      scala.util.Using.resource(conn.createStatement()) { stmt =>
+        stmt.executeUpdate("INSERT INTO documents (id, content, metadata) VALUES ('d1', 'delta epsilon', '{}')")
+        stmt.executeUpdate("INSERT INTO documents_fts (id, content) VALUES ('d1', 'alpha beta')")
+      }
+    }
+
+    val reopened = SQLiteKeywordIndex(path).value
+    reopened.search("alpha", 5).value shouldBe empty
+    reopened.search("delta", 5).value.map(_.id) shouldBe Seq("d1")
+    reopened.close()
+    val again = SQLiteKeywordIndex(path).value // idempotent
+    again.search("delta", 5).value.map(_.id) shouldBe Seq("d1")
+    again.close()
   }
 }

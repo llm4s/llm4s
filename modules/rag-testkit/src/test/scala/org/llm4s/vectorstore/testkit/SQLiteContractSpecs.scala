@@ -15,19 +15,6 @@ private object SQLiteKnownFailures {
   )
 
   val keywordIndex: Map[String, String] = Map(
-    "re-indexing an id through index leaves none of its old terms searchable" ->
-      "llm4s/llm4s#2994: INSERT OR REPLACE leaves the old FTS row",
-    "re-indexing ids through indexBatch or update leaves none of their old terms searchable" ->
-      "llm4s/llm4s#2994: INSERT OR REPLACE leaves the old FTS row",
-    "a query with quotes is searched as text, not failed as syntax" ->
-      "llm4s/llm4s#2995: a quote is passed through as FTS5 syntax",
-    "operator words and symbols are searched, not failed as syntax" ->
-      "llm4s/llm4s#2995: OR is quoted as a literal",
-    "a blank query is answered with nothing" -> "llm4s/llm4s#2995: a blank query is an FTS5 syntax error",
-    "a natural-language question finds a document that lacks some of its words" ->
-      "llm4s/llm4s#2995: every word is required",
-    "filters select by keys holding a dot, a space or a colon" ->
-      "llm4s/llm4s#2995: a key with '.' is read as a JSON path; spaces and ':' are refused",
     "unsegmented text is found by a word inside it" ->
       "llm4s/llm4s#3026: unicode61 makes a run of CJK one token"
   )

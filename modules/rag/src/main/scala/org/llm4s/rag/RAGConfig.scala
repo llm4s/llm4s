@@ -9,7 +9,7 @@ import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, DocumentRegistry,
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
 import org.llm4s.types.ProviderModelTypes.ProviderId
-import org.llm4s.vectorstore.FusionStrategy
+import org.llm4s.vectorstore.{ FusionStrategy, LegFailurePolicy }
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.security.Secret
 
@@ -95,8 +95,17 @@ final case class RAGConfig(
   // Where sync records what it indexed; None = in memory
   documentRegistry: Option[DocumentRegistry] = None,
   // Builds the standalone question a chat follow-up is searched with
-  questionCondenser: Option[QuestionCondenser] = None
+  questionCondenser: Option[QuestionCondenser] = None,
+  // What a fused search does when its vector or keyword leg fails
+  legFailurePolicy: LegFailurePolicy = LegFailurePolicy.Degrade
 ) {
+
+  /**
+   * What a fused (RRF or weighted) search does when one leg fails: by default it answers from the other, with a
+   * WARN; `LegFailurePolicy.Fail` fails the query (#2995).
+   */
+  def withLegFailurePolicy(policy: LegFailurePolicy): RAGConfig =
+    copy(legFailurePolicy = policy)
 
   // ========== Embedding Configuration ==========
 

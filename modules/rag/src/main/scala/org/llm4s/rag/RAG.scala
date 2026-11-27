@@ -1276,10 +1276,17 @@ final class RAG private (
       case FusionStrategy.KeywordOnly =>
         keyword(topK).map(HybridFusion.fuse(FusionStrategy.KeywordOnly, Seq.empty, _, topK))
       case fused =>
-        for {
-          keywordResults <- keyword(topK * 2) // first: an index without keyword search fails before embedding
-          vectorResults  <- vector(topK * 2)
-        } yield HybridFusion.fuse(fused, vectorResults, keywordResults, topK)
+        // The keyword leg first: an index without keyword search fails, as a configuration error, before embedding.
+        // Any other failure of one leg is handled by the configured LegFailurePolicy (#2995).
+        keyword(topK * 2) match {
+          case Left(e: ConfigurationError) => Left(e)
+          case keywordResults =>
+            HybridLegs
+              .combine(vector(topK * 2), keywordResults, config.legFailurePolicy)
+              .map { case (vectorResults, keywordResults) =>
+                HybridFusion.fuse(fused, vectorResults, keywordResults, topK)
+              }
+        }
     }
   }
 
@@ -2258,6 +2265,7 @@ object RAG {
                 case None       => KeywordIndex.inMemory()
               }
             } yield HybridSearcher(vectorStore, keywordIndex, config.fusionStrategy)
+              .withLegFailurePolicy(config.legFailurePolicy)
         }
       case None =>
         (config.vectorStorePath, config.keywordIndexPath) match {

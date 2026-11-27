@@ -17,8 +17,13 @@ import scala.concurrent.{ ExecutionContext, Future }
 final class AsyncHybridSearcher private (
   val vectorStore: AsyncVectorStore,
   val keywordIndex: AsyncKeywordIndex,
-  val defaultStrategy: FusionStrategy
+  val defaultStrategy: FusionStrategy,
+  val legFailurePolicy: LegFailurePolicy = LegFailurePolicy.Degrade
 ) {
+
+  /** This searcher with `policy` for a fused search one of whose legs fails, as `HybridSearcher.withLegFailurePolicy`. */
+  def withLegFailurePolicy(policy: LegFailurePolicy): AsyncHybridSearcher =
+    new AsyncHybridSearcher(vectorStore, keywordIndex, defaultStrategy, policy)
 
   def search(
     queryEmbedding: Array[Float],
@@ -134,10 +139,7 @@ final class AsyncHybridSearcher private (
     for {
       vEither <- vectorFuture
       kEither <- keywordFuture
-    } yield for {
-      vectorResults  <- vEither
-      keywordResults <- kEither
-    } yield {
+    } yield HybridLegs.combine(vEither, kEither, legFailurePolicy).map { case (vectorResults, keywordResults) =>
       val vectorMap  = vectorResults.zipWithIndex.map { case (sr, idx) => sr.record.id -> (idx + 1, sr) }.toMap
       val keywordMap = keywordResults.zipWithIndex.map { case (ksr, idx) => ksr.id -> (idx + 1, ksr) }.toMap
 
@@ -182,10 +184,7 @@ final class AsyncHybridSearcher private (
     for {
       vEither <- vectorFuture
       kEither <- keywordFuture
-    } yield for {
-      vectorResults  <- vEither
-      keywordResults <- kEither
-    } yield {
+    } yield HybridLegs.combine(vEither, kEither, legFailurePolicy).map { case (vectorResults, keywordResults) =>
       val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
       val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
 
@@ -235,6 +234,7 @@ object AsyncHybridSearcher {
     new AsyncHybridSearcher(
       AsyncVectorStore(syncSearcher.vectorStore),
       AsyncKeywordIndex(syncSearcher.keywordIndex),
-      syncSearcher.defaultStrategy
+      syncSearcher.defaultStrategy,
+      syncSearcher.legFailurePolicy
     )
 }

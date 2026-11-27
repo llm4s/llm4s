@@ -17,16 +17,18 @@ import upickle.default._
  * Features:
  * - BM25 relevance scoring
  * - Snippet highlighting
- * - Boolean query operators (AND, OR, NOT)
- * - Phrase matching with quotes
- * - Prefix matching with *
+ * - Phrase matching with balanced double quotes
+ * - Prefix matching with a trailing *
  *
- * Query syntax examples:
- * - "hello world" - documents containing both terms
- * - "hello OR world" - documents containing either term
- * - "hello NOT world" - documents with hello but not world
+ * A query is free text, never FTS5 syntax: every word is an optional term, so a document need not hold all of them
+ * and BM25 ranks those holding more first. Operator words and symbols (`NOT`, `NEAR`, `:`, `^`, `-`, parentheses) are
+ * searched as text, and a blank query answers with nothing.
+ * - "hello world" - documents containing either term, those with both first
  * - "\"hello world\"" - exact phrase match
  * - "hello*" - prefix match
+ *
+ * Re-indexing an id replaces its document in the full-text index too, and an index written before that was so is
+ * rebuilt when it is opened.
  */
 final class SQLiteKeywordIndex private (
   private val connection: Connection,
@@ -79,6 +81,16 @@ final class SQLiteKeywordIndex private (
       END
     """)
 
+    // An index written before #2994 may hold an FTS row per earlier version of a re-indexed document: rebuild the FTS
+    // table from the documents when the two disagree. Idempotent, and a no-op on a consistent index.
+    val counts = stmt.executeQuery(s"SELECT (SELECT COUNT(*) FROM $ftsTableName), (SELECT COUNT(*) FROM $tableName)")
+    val stale  = counts.next() && counts.getLong(1) != counts.getLong(2)
+    counts.close()
+    if (stale) {
+      stmt.executeUpdate(s"DELETE FROM $ftsTableName")
+      stmt.executeUpdate(s"INSERT INTO $ftsTableName(id, content) SELECT id, content FROM $tableName")
+    }
+
     stmt.close()
   }
 
@@ -89,7 +101,12 @@ final class SQLiteKeywordIndex private (
     if (docs.isEmpty) Right(())
     else
       withTransaction {
-        val sql  = s"INSERT OR REPLACE INTO $tableName (id, content, metadata) VALUES (?, ?, ?)"
+        // An upsert, not INSERT OR REPLACE: REPLACE deletes the old row without firing the delete trigger (unless
+        // recursive_triggers is on), which left the old text in the FTS table, still searchable (#2994). DO UPDATE
+        // fires the update trigger, which replaces the FTS row.
+        val sql =
+          s"""INSERT INTO $tableName (id, content, metadata) VALUES (?, ?, ?)
+             |ON CONFLICT(id) DO UPDATE SET content = excluded.content, metadata = excluded.metadata""".stripMargin
         val stmt = connection.prepareStatement(sql)
 
         docs.foreach { doc =>
@@ -108,32 +125,44 @@ final class SQLiteKeywordIndex private (
     topK: Int,
     filter: Option[MetadataFilter]
   ): Result[Seq[KeywordSearchResult]] =
-    buildOptionalFilterClause(filter).flatMap { filterClause =>
-      Try {
-        val escapedQuery = escapeQuery(query)
+    // bm25() returns negative values (more negative = more relevant), so it is negated
+    runSearch(query, topK, filter, s"-bm25($ftsTableName) as score", includeHighlights = false, "Search failed")
 
-        // FTS5 match with BM25 scoring
-        // bm25() returns negative values (more negative = more relevant), so we negate it
-        val sql =
-          s"""
-        SELECT d.id, d.content, d.metadata, -bm25($ftsTableName) as score
-        FROM $ftsTableName f
-        JOIN $tableName d ON f.id = d.id
-        WHERE f.content MATCH ?
-        $filterClause
-        ORDER BY score DESC
-        LIMIT ?
-      """
-
-        val stmt = connection.prepareStatement(sql)
-        stmt.setString(1, escapedQuery)
-        stmt.setInt(2, topK)
-
-        val rs      = stmt.executeQuery()
-        val results = collectResults(rs, includeHighlights = false)
-        stmt.close()
-        results
-      }.toEither.left.map(e => ProcessingError("keyword-index", s"Search failed: ${e.getMessage}"))
+  /**
+   * Runs one FTS5 match: `query` made a safe match expression ([[SQLiteKeywordIndex.matchExpression]]), the filter
+   * bound as parameters. A query with no searchable term answers with nothing, as `PgKeywordIndex` does.
+   */
+  private def runSearch(
+    query: String,
+    topK: Int,
+    filter: Option[MetadataFilter],
+    columns: String,
+    includeHighlights: Boolean,
+    failure: String
+  ): Result[Seq[KeywordSearchResult]] =
+    SQLiteKeywordIndex.matchExpression(query) match {
+      case None => Right(Seq.empty)
+      case Some(expression) =>
+        Try {
+          val (filterSql, filterParams) = filter.fold(("1=1", Seq.empty[String]))(filterToSql)
+          val sql =
+            s"""
+            SELECT d.id, d.content, d.metadata, $columns
+            FROM $ftsTableName f
+            JOIN $tableName d ON f.id = d.id
+            WHERE f.content MATCH ? AND $filterSql
+            ORDER BY score DESC
+            LIMIT ?
+          """
+          val stmt = connection.prepareStatement(sql)
+          stmt.setString(1, expression)
+          filterParams.zipWithIndex.foreach { case (p, i) => stmt.setString(i + 2, p) }
+          stmt.setInt(filterParams.size + 2, topK)
+          val rs      = stmt.executeQuery()
+          val results = collectResults(rs, includeHighlights)
+          stmt.close()
+          results
+        }.toEither.left.map(e => ProcessingError("keyword-index", s"$failure: ${e.getMessage}"))
     }
 
   override def searchWithHighlights(
@@ -142,33 +171,14 @@ final class SQLiteKeywordIndex private (
     snippetLength: Int,
     filter: Option[MetadataFilter]
   ): Result[Seq[KeywordSearchResult]] =
-    buildOptionalFilterClause(filter).flatMap { filterClause =>
-      Try {
-        val escapedQuery = escapeQuery(query)
-
-        // FTS5 snippet function for highlighting
-        val sql =
-          s"""
-        SELECT d.id, d.content, d.metadata, -bm25($ftsTableName) as score,
-               snippet($ftsTableName, 1, '<b>', '</b>', '...', $snippetLength) as highlight
-        FROM $ftsTableName f
-        JOIN $tableName d ON f.id = d.id
-        WHERE f.content MATCH ?
-        $filterClause
-        ORDER BY score DESC
-        LIMIT ?
-      """
-
-        val stmt = connection.prepareStatement(sql)
-        stmt.setString(1, escapedQuery)
-        stmt.setInt(2, topK)
-
-        val rs      = stmt.executeQuery()
-        val results = collectResults(rs, includeHighlights = true)
-        stmt.close()
-        results
-      }.toEither.left.map(e => ProcessingError("keyword-index", s"Search with highlights failed: ${e.getMessage}"))
-    }
+    runSearch(
+      query,
+      topK,
+      filter,
+      s"-bm25($ftsTableName) as score, snippet($ftsTableName, 1, '<b>', '</b>', '...', $snippetLength) as highlight",
+      includeHighlights = true,
+      "Search with highlights failed"
+    )
 
   override def get(id: String): Result[Option[KeywordDocument]] =
     Try {
@@ -272,8 +282,6 @@ final class SQLiteKeywordIndex private (
 
   // Helper methods
 
-  private val ValidMetadataKeyPattern: String = "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$"
-
   private def withTransaction[T](f: => T): Result[Unit] =
     Try {
       val autoCommit = connection.getAutoCommit
@@ -304,93 +312,36 @@ final class SQLiteKeywordIndex private (
     builder.result()
   }
 
-  private def escapeQuery(query: String): String = {
-    // FTS5 query escaping
-    // Preserve quoted phrases for phrase matching while escaping individual terms
-    val normalized = query
-      .replaceAll("\\s+", " ") // Normalize whitespace
-      .trim
+  /**
+   * Whether the metadata has an entry with the bound key that meets `condition`: `SQLiteVectorStore`'s form, so a
+   * filter selects the same documents in both legs of a hybrid search. The key is a bound value, not a JSON path, so
+   * a key holding `.`, a space, `:` or `/` names itself (#2995).
+   */
+  private def metadataEntry(condition: String): String =
+    "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(d.metadata) THEN d.metadata ELSE '{}' END) " +
+      s"WHERE key = ? AND type = 'text' AND $condition)"
 
-    // Check if query already contains FTS5 phrase quotes
-    if (normalized.contains("\"")) {
-      // Query has explicit phrase markers - pass through with minimal escaping
-      // Just ensure single quotes become double quotes for FTS5
-      normalized.replace("'", "\"")
-    } else {
-      // No phrase markers - wrap each word in quotes to treat as literals
-      // This prevents FTS5 from interpreting special characters as operators
-      normalized
-        .split("\\s+")
-        .filter(_.nonEmpty)
-        .map(word => s""""$word"""")
-        .mkString(" ")
-    }
-  }
-
-  private def buildOptionalFilterClause(filter: Option[MetadataFilter]): Result[String] =
-    filter match {
-      case Some(f) => buildFilterClause(f).map(c => s"AND $c")
-      case None    => Right("")
-    }
-
-  private def buildFilterClause(filter: MetadataFilter): Result[String] = filter match {
-    case MetadataFilter.All =>
-      Right("1=1")
-    // Each comparison is wrapped in COALESCE(..., 0): json_extract is NULL for a missing key, and a NULL condition
-    // would make Not(...) drop the record too, unlike SQLiteVectorStore (#2996).
-    case MetadataFilter.Equals(key, value) =>
-      jsonPathForKey(key).map(path => s"COALESCE(json_extract(d.metadata, '$path') = '${escapeString(value)}', 0)")
-    case MetadataFilter.Contains(key, substring) =>
-      // instr is a literal, case-sensitive substring test: LIKE would read % and _ as wildcards and fold ASCII case
-      jsonPathForKey(key).map(path =>
-        s"COALESCE(instr(json_extract(d.metadata, '$path'), '${escapeString(substring)}') > 0, 0)"
-      )
-    case MetadataFilter.In(key, values) if values.isEmpty =>
-      jsonPathForKey(key).map(_ => "0")
+  private def filterToSql(filter: MetadataFilter): (String, Seq[String]) = filter match {
+    case MetadataFilter.All                => ("1=1", Seq.empty)
+    case MetadataFilter.Equals(key, value) => (metadataEntry("value = ?"), Seq(key, value))
+    // instr is a literal, case-sensitive substring test: LIKE would read % and _ as wildcards and fold ASCII case
+    case MetadataFilter.Contains(key, substring)        => (metadataEntry("instr(value, ?) > 0"), Seq(key, substring))
+    case MetadataFilter.HasKey(key)                     => (metadataEntry("1=1"), Seq(key))
+    case MetadataFilter.In(_, values) if values.isEmpty => ("1=0", Seq.empty)
     case MetadataFilter.In(key, values) =>
-      jsonPathForKey(key).map { path =>
-        val escaped = values.map(v => s"'${escapeString(v)}'").mkString(",")
-        s"COALESCE(json_extract(d.metadata, '$path') IN ($escaped), 0)"
-      }
-    case MetadataFilter.HasKey(key) =>
-      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') IS NOT NULL")
+      (metadataEntry(s"value IN (${Seq.fill(values.size)("?").mkString(",")})"), Seq(key) ++ values.toSeq)
     case MetadataFilter.And(left, right) =>
-      for {
-        l <- buildFilterClause(left)
-        r <- buildFilterClause(right)
-      } yield s"($l AND $r)"
+      val (l, lp) = filterToSql(left)
+      val (r, rp) = filterToSql(right)
+      (s"($l AND $r)", lp ++ rp)
     case MetadataFilter.Or(left, right) =>
-      for {
-        l <- buildFilterClause(left)
-        r <- buildFilterClause(right)
-      } yield s"($l OR $r)"
+      val (l, lp) = filterToSql(left)
+      val (r, rp) = filterToSql(right)
+      (s"($l OR $r)", lp ++ rp)
     case MetadataFilter.Not(inner) =>
-      buildFilterClause(inner).map(s => s"NOT ($s)")
+      val (i, ip) = filterToSql(inner)
+      (s"NOT ($i)", ip)
   }
-
-  private def validateMetadataKey(key: String): Result[String] = {
-    val trimmed = Option(key).map(_.trim).getOrElse("")
-    if (trimmed.isEmpty)
-      Left(ProcessingError("keyword-index", "Invalid metadata key: key must not be empty"))
-    else if (!trimmed.matches(ValidMetadataKeyPattern) || trimmed.endsWith(".") || trimmed.contains(".."))
-      Left(ProcessingError("keyword-index", s"Invalid metadata key: '$key'"))
-    else
-      Right(trimmed)
-  }
-
-  // Validation guarantees segments contain only [a-zA-Z0-9_-]; the segment
-  // escaping is defence-in-depth for the SQLite JSON path quoting.
-  private def jsonPathForKey(key: String): Result[String] =
-    validateMetadataKey(key).map { trimmed =>
-      val segments = trimmed.split("\\.").toSeq
-      "$" + segments.map(seg => s"""."${escapeJsonPathSegment(seg)}"""").mkString
-    }
-
-  private def escapeJsonPathSegment(seg: String): String =
-    seg.replace("\\", "\\\\").replace("\"", "\\\"")
-
-  private def escapeString(s: String): String =
-    s.replace("'", "''")
 
   private def serializeMetadata(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
@@ -403,6 +354,45 @@ final class SQLiteKeywordIndex private (
 }
 
 object SQLiteKeywordIndex {
+
+  /**
+   * The FTS5 match expression for a free-text query, or `None` when it holds no searchable term (#2995).
+   *
+   *  - A balanced `"..."` is a phrase; an unpaired `"` is text.
+   *  - Every other word is a term; a word ending in `*` is a prefix term.
+   *  - Each term is quoted, with `"` doubled, so nothing in it is read as FTS5 syntax: `AND`, `NOT`, `NEAR`, `:`,
+   *    `^`, `+`, `-` and parentheses are searched as text. A bare upper-case `AND` or `OR` is a connector and dropped.
+   *  - Terms are joined with `OR`: a document need not hold every word, and BM25 ranks those holding more first.
+   */
+  private[vectorstore] def matchExpression(query: String): Option[String] = {
+    def searchable(s: String): Boolean = s.exists(Character.isLetterOrDigit)
+    def quote(s: String): String       = "\"" + s.replace("\"", "\"\"") + "\""
+
+    val text     = Option(query).getOrElse("")
+    val segments = text.split("\"", -1).toVector
+    // n quotes make n + 1 segments; with an odd n the last quote is unpaired, so its two sides are one text segment
+    val paired =
+      if (segments.size % 2 == 0) segments.dropRight(2) :+ (segments(segments.size - 2) + " " + segments.last)
+      else segments
+
+    val terms = paired.zipWithIndex.flatMap {
+      case (phrase, i) if i % 2 == 1 =>
+        val trimmed = phrase.trim.replaceAll("\\s+", " ")
+        if (searchable(trimmed)) Seq(quote(trimmed)) else Seq.empty
+      case (words, _) =>
+        words
+          .split("\\s+")
+          .toSeq
+          .filterNot(w => w == "AND" || w == "OR")
+          .flatMap { word =>
+            val base = word.stripSuffix("*")
+            if (!searchable(base)) Seq.empty
+            else if (word.endsWith("*") && base.nonEmpty && !base.endsWith("*")) Seq(quote(base) + "*")
+            else Seq(quote(word))
+          }
+    }
+    if (terms.isEmpty) None else Some(terms.distinct.mkString(" OR "))
+  }
 
   private val ValidSqliteTableNamePattern: String = "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
