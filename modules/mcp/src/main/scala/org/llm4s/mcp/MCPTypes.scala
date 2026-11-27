@@ -307,7 +307,19 @@ object JsonRpcNotification {
 }
 
 object JsonRpcResponse {
-  implicit val rw: ReadWriter[JsonRpcResponse] = macroRW
+  private val derived: ReadWriter[JsonRpcResponse] = macroRW
+
+  /**
+   * Writes `jsonrpc` always (#3071): JSON-RPC 2.0 requires it on every response, and the derived writer leaves
+   * out a field equal to its default. A response read without it still reads, as `"2.0"`.
+   */
+  implicit val rw: ReadWriter[JsonRpcResponse] = readwriter[ujson.Value].bimap[JsonRpcResponse](
+    response => {
+      val fields = writeJs(response)(using derived).obj.view.filterKeys(_ != "jsonrpc").toSeq
+      ujson.Obj.from(("jsonrpc" -> ujson.Str(response.jsonrpc)) +: fields)
+    },
+    json => read[JsonRpcResponse](json)(using derived)
+  )
 }
 
 object JsonRpcError {

@@ -59,7 +59,7 @@ class NotificationSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       // But checking we got a valid JSON-RPC response is enough
     }
 
-    it("should handle notifications (without id) and return 200 OK with no body") {
+    it("should handle notifications (without id) and return 202 Accepted with no body") {
       val notificationBody = ujson
         .Obj(
           "jsonrpc" -> "2.0",
@@ -76,10 +76,10 @@ class NotificationSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
       val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
-      // We expect 200 OK
-      response.statusCode() shouldBe 200
+      // Streamable HTTP: an accepted notification is 202 Accepted
+      response.statusCode() shouldBe 202
 
-      // HttpExchange.sendResponseHeaders(200, -1) means "no content length" / "no content"?
+      // HttpExchange.sendResponseHeaders(202, -1) means "no content length" / "no content"?
       // Actually -1 means no content body will be sent.
       // So body should be empty.
       response.body() shouldBe ""
@@ -101,7 +101,7 @@ class NotificationSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         .build()
 
       val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-      response.statusCode() shouldBe 200
+      response.statusCode() shouldBe 202
       response.body() shouldBe ""
     }
   }

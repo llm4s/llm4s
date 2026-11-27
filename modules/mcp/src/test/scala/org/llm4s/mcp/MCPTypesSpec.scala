@@ -73,6 +73,16 @@ class MCPTypesSpec extends AnyFlatSpec with Matchers {
     parsed("result")("tools").arr shouldBe empty
   }
 
+  it should "always write the jsonrpc member, which JSON-RPC 2.0 requires on every response (#3071)" in {
+    val parsed = ujson.read(write(JsonRpcResponse(id = "r", result = Some(ujson.Obj()))))
+    parsed.obj.get("jsonrpc") shouldBe Some(ujson.Str("2.0"))
+    parsed.obj.contains("error") shouldBe false
+  }
+
+  it should "still read a response without jsonrpc" in {
+    read[JsonRpcResponse]("""{"id":"r","result":{}}""").jsonrpc shouldBe "2.0"
+  }
+
   it should "serialize error response" in {
     val error    = JsonRpcError(-32600, "Invalid Request", None)
     val response = JsonRpcResponse("2.0", "req-2", None, Some(error))

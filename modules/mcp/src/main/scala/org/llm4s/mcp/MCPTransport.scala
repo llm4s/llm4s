@@ -1000,9 +1000,15 @@ class StdioTransportImpl(
   private def routeResponse(line: String): Unit = {
     logger.debugPayload(s"StdioTransport($name) routing response: ", line)
     Try {
-      // Parse the response to extract the ID
-      val json       = ujson.read(line)
-      val responseId = json.obj.get("id").map(_.toString.stripPrefix("\"").stripSuffix("\"")).getOrElse("")
+      // A response to one of this client's requests: no `method`, and the id as this client sent it, a string. A
+      // server's own request (it has a `method`) or a numeric id, which `toString` would have turned into the text of
+      // a pending string id, is not one (#3071).
+      val json = ujson.read(line)
+      val responseId = json.objOpt
+        .filterNot(_.contains("method"))
+        .flatMap(_.get("id"))
+        .flatMap(_.strOpt)
+        .getOrElse("")
 
       if (responseId.nonEmpty) {
         val future = pendingRequests.remove(responseId)

@@ -5,8 +5,7 @@ import org.llm4s.security.Secret
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.util.DurationRounding
 import org.slf4j.LoggerFactory
-import ujson.Obj
-import upickle.default.{ read => upickleRead, write => upickleWrite }
+import upickle.default.read as upickleRead
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
@@ -209,6 +208,74 @@ class MCPServer(
     }
   }
 
+  // ── JSON-RPC 2.0 envelope, shared by both transports (#3071) ──────────────
+
+  // What a POSTed message is. A request keeps its id as it arrived, a string or a number, so the reply carries the
+  // same value back; JsonRpcRequest.id holds its text only for logging and as a tool call's fallback id.
+  private enum Incoming:
+    case Request(request: JsonRpcRequest, id: ujson.Value)
+    case Notification(notification: JsonRpcNotification)
+    case ClientResponse
+    case Invalid(id: ujson.Value, message: String)
+
+  private def classify(json: ujson.Value): Incoming = json match {
+    case _: ujson.Arr => Incoming.Invalid(ujson.Null, "Batch requests are not supported")
+    case obj: ujson.Obj =>
+      val fields = obj.value
+      val id     = fields.get("id")
+      val validId = id.collect {
+        case s: ujson.Str => s
+        case n: ujson.Num => n
+      }
+      val replyId = validId.getOrElse(ujson.Null)
+      val params  = fields.get("params")
+      fields.get("method") match {
+        case Some(ujson.Str(_)) if !fields.get("jsonrpc").contains(ujson.Str("2.0")) =>
+          Incoming.Invalid(replyId, "jsonrpc must be \"2.0\"")
+        case Some(_) if params.exists(p => p.objOpt.isEmpty && p.arrOpt.isEmpty) =>
+          Incoming.Invalid(replyId, "params must be an object or an array")
+        case Some(ujson.Str(method)) =>
+          (id, validId) match {
+            case (None, _) => Incoming.Notification(JsonRpcNotification("2.0", method, params))
+            case (Some(_), Some(value)) =>
+              Incoming.Request(JsonRpcRequest("2.0", idText(value), method, params), value)
+            case (Some(_), None) => Incoming.Invalid(ujson.Null, "id must be a string or a number")
+          }
+        case Some(_) => Incoming.Invalid(replyId, "method must be a string")
+        case None if validId.isDefined && (fields.contains("result") || fields.contains("error")) =>
+          Incoming.ClientResponse
+        case None => Incoming.Invalid(replyId, "Invalid Request")
+      }
+    case _ => Incoming.Invalid(ujson.Null, "Invalid Request")
+  }
+
+  private def idText(id: ujson.Value): String = id match {
+    case ujson.Str(s) => s
+    case other        => other.render()
+  }
+
+  // The reply's text: `jsonrpc`, the request's own id (null when it could not be read), then a result or an error.
+  private def renderReply(id: ujson.Value, response: JsonRpcResponse): String = {
+    val reply = ujson.Obj("jsonrpc" -> "2.0", "id" -> id)
+    response.error match {
+      case Some(error) => reply("error") = upickle.default.writeJs(error)
+      case None        => reply("result") = response.result.getOrElse(ujson.Obj())
+    }
+    ujson.write(reply)
+  }
+
+  private def errorReply(id: ujson.Value, code: Int, message: String): String =
+    renderReply(id, JsonRpcResponse(id = idText(id), error = Some(JsonRpcError(code, message, None))))
+
+  // The capabilities this server implements: tools, with no list-changed notifications. Written out, not through
+  // MCPCapabilities, whose defaults are a client's (roots, sampling) and whose writer leaves out `tools` (#3071).
+  private def initializeResult(protocolVersion: String): ujson.Value =
+    ujson.Obj(
+      "protocolVersion" -> protocolVersion,
+      "capabilities"    -> ujson.Obj("tools" -> ujson.Obj("listChanged" -> false)),
+      "serverInfo"      -> upickle.default.writeJs(ServerInfo(options.name, options.version))
+    )
+
   // Shared tool execution – used by both Streamable HTTP and SSE transports
 
   private def handleToolsList(request: JsonRpcRequest): JsonRpcResponse = {
@@ -223,8 +290,9 @@ class MCPServer(
   }
 
   private def handleToolsCall(request: JsonRpcRequest): JsonRpcResponse = {
-    val toolName  = request.params.flatMap(_.obj.get("name")).map(_.str).getOrElse("")
-    val arguments = request.params.flatMap(_.obj.get("arguments")).getOrElse(ujson.Obj())
+    val paramFields = request.params.flatMap(_.objOpt)
+    val toolName    = paramFields.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse("")
+    val arguments   = paramFields.flatMap(_.get("arguments")).getOrElse(ujson.Obj())
     logger.info(s"Executing tool: $toolName")
     toolMap.get(toolName) match {
       case Some(tool) =>
@@ -275,18 +343,7 @@ class MCPServer(
           .flatMap(p => Try(upickleRead[InitializeRequest](p.toString)).toOption)
           .getOrElse(InitializeRequest("2024-11-05", MCPCapabilities(), ClientInfo("unknown", "1.0")))
         logger.info(s"SSE initialize: client=${initReq.clientInfo.name}, protocol=${initReq.protocolVersion}")
-        JsonRpcResponse(
-          id = request.id,
-          result = Some(
-            upickle.default.writeJs(
-              InitializeResponse(
-                protocolVersion = "2024-11-05",
-                capabilities = MCPCapabilities(tools = Some(Obj())),
-                serverInfo = ServerInfo(options.name, options.version)
-              )
-            )
-          )
-        )
+        JsonRpcResponse(id = request.id, result = Some(initializeResult("2024-11-05")))
       case "tools/list" => handleToolsList(request)
       case "tools/call" => handleToolsCall(request)
       case other =>
@@ -418,25 +475,27 @@ class MCPServer(
                 case Failure(e) =>
                   logger.error(s"SSE($sid) bad request: ${e.getMessage}")
                   sendErrorResponse(exchange, 400, "Bad request")
-                case Success((bodyStr, json)) =>
-                  if (json.obj.contains("id")) {
-                    Try(upickleRead[JsonRpcRequest](bodyStr)) match {
-                      case Failure(e) =>
-                        sendErrorResponse(exchange, 400, s"Invalid JSON-RPC: ${e.getMessage}")
-                      case Success(request) =>
-                        logger.debug(s"SSE($sid) request: ${request.method} (id=${request.id})")
-                        val response = processSSERequest(request)
-                        val sseEvent = s"event: message\ndata: ${upickleWrite(response)}\n\n"
-                        conn.queue.put(Some(sseEvent))
-                        // POST returns 202 Accepted; the actual response is delivered via SSE stream
-                        exchange.sendResponseHeaders(202, -1)
-                        exchange.close()
-                    }
-                  } else {
-                    // JSON-RPC notification – acknowledge only, no response
-                    Try(upickleRead[JsonRpcNotification](bodyStr)).foreach(handleNotification)
-                    exchange.sendResponseHeaders(202, -1)
-                    exchange.close()
+                case Success((_, json)) =>
+                  classify(json) match {
+                    case Incoming.Request(request, id) =>
+                      logger.debug(s"SSE($sid) request: ${request.method} (id=${request.id})")
+                      val sseEvent = s"event: message\ndata: ${renderReply(id, processSSERequest(request))}\n\n"
+                      conn.queue.put(Some(sseEvent))
+                      // POST returns 202 Accepted; the actual response is delivered via SSE stream
+                      sendAccepted(exchange)
+                    case Incoming.Notification(notification) =>
+                      handleNotification(notification)
+                      sendAccepted(exchange)
+                    case Incoming.ClientResponse =>
+                      // A response to a server request: this server sends none, so there is nothing to match it to.
+                      sendAccepted(exchange)
+                    case Incoming.Invalid(id, message) =>
+                      sendResponse(
+                        exchange,
+                        400,
+                        "application/json",
+                        errorReply(id, MCPErrorCodes.INVALID_REQUEST, message)
+                      )
                   }
               }
           }
@@ -464,28 +523,22 @@ class MCPServer(
       } yield (bodyStr, json)
 
       result match {
-        case Success((bodyStr, json)) =>
-          if (json.obj.contains("id")) {
-            Try(upickleRead[JsonRpcRequest](bodyStr)) match {
-              case Success(request) =>
-                logger.debug(s"Request: ${request.method} (id: ${request.id})")
-                handleRequest(exchange, request)
-              case Failure(e) =>
-                logger.error(s"Failed to parse request: ${e.getMessage}")
-                sendJsonRpcError(exchange, "unknown", MCPErrorCodes.PARSE_ERROR, "Parse error")
-            }
-          } else {
-            Try(upickleRead[JsonRpcNotification](bodyStr)) match {
-              case Success(notification) =>
-                logger.debug(s"Notification: ${notification.method}")
-                handleNotification(notification)
-                exchange.sendResponseHeaders(200, -1)
-                exchange.close()
-              case Failure(e) =>
-                logger.warn(s"Failed to parse notification: ${e.getMessage}")
-                exchange.sendResponseHeaders(200, -1)
-                exchange.close()
-            }
+        case Success((_, json)) =>
+          classify(json) match {
+            case Incoming.Request(request, id) =>
+              logger.debug(s"Request: ${request.method} (id: ${request.id})")
+              handleRequest(exchange, request, id)
+            case Incoming.Notification(notification) =>
+              logger.debug(s"Notification: ${notification.method}")
+              handleNotification(notification)
+              // Streamable HTTP: an accepted notification or response is 202 with no body.
+              sendAccepted(exchange)
+            case Incoming.ClientResponse =>
+              // A response to a server request: this server sends none, so there is nothing to match it to.
+              sendAccepted(exchange)
+            case Incoming.Invalid(id, message) =>
+              logger.warn(s"Invalid JSON-RPC message: $message")
+              sendResponse(exchange, 400, "application/json", errorReply(id, MCPErrorCodes.INVALID_REQUEST, message))
           }
 
         case Failure(e) if Option(e.getMessage).contains("Payload too large") =>
@@ -494,11 +547,16 @@ class MCPServer(
 
         case Failure(e) =>
           logger.error(s"Failed to parse JSON: ${e.getMessage}")
-          sendJsonRpcError(exchange, "unknown", MCPErrorCodes.PARSE_ERROR, "Parse error")
+          sendResponse(
+            exchange,
+            400,
+            "application/json",
+            errorReply(ujson.Null, MCPErrorCodes.PARSE_ERROR, "Parse error")
+          )
       }
     }
 
-    private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
+    private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest, id: ujson.Value): Unit = {
       val protocolValid = if (request.method != "initialize") {
         Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).exists { version =>
           SupportedVersions.contains(version)
@@ -509,17 +567,17 @@ class MCPServer(
         val version = exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")
         sendJsonRpcError(
           exchange,
-          request.id,
+          id,
           MCPErrorCodes.INVALID_PROTOCOL_VERSION,
           s"Unsupported protocol version: $version. Supported: ${SupportedVersions.mkString(", ")}"
         )
       } else {
         val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
         request.method match {
-          case "initialize" => handleInitialize(exchange, request)
-          case "tools/list" => handleWithSession(exchange, request, sessionId, handleToolsList)
-          case "tools/call" => handleWithSession(exchange, request, sessionId, handleToolsCall)
-          case _ => sendJsonRpcError(exchange, request.id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
+          case "initialize" => handleInitialize(exchange, request, id)
+          case "tools/list" => handleWithSession(exchange, request, id, sessionId, handleToolsList)
+          case "tools/call" => handleWithSession(exchange, request, id, sessionId, handleToolsCall)
+          case _            => sendJsonRpcError(exchange, id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
         }
       }
     }
@@ -530,7 +588,7 @@ class MCPServer(
         case _                           => logger.debug(s"Received notification: ${notification.method}")
       }
 
-    private def handleInitialize(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
+    private def handleInitialize(exchange: HttpExchange, request: JsonRpcRequest, id: ujson.Value): Unit = {
       val initRequest = request.params
         .flatMap(params => Try(upickleRead[InitializeRequest](params.toString)).toOption)
         .getOrElse(InitializeRequest("2025-06-18", MCPCapabilities(), ClientInfo("unknown", "1.0")))
@@ -543,34 +601,23 @@ class MCPServer(
         Some(SessionStore.createSession(protocolVersion))
       } else None
 
-      val response = JsonRpcResponse(
-        id = request.id,
-        result = Some(
-          upickle.default.writeJs(
-            InitializeResponse(
-              protocolVersion = protocolVersion,
-              capabilities = MCPCapabilities(tools = Some(Obj())),
-              serverInfo = ServerInfo(options.name, options.version)
-            )
-          )
-        )
-      )
-      sendJsonRpcResponse(exchange, response, sessionOpt.map(_.id))
+      val response = JsonRpcResponse(id = request.id, result = Some(initializeResult(protocolVersion)))
+      sendJsonRpcResponse(exchange, id, response, sessionOpt.map(_.id))
     }
 
     private def handleWithSession(
       exchange: HttpExchange,
       request: JsonRpcRequest,
+      id: ujson.Value,
       sessionId: Option[String],
       handler: JsonRpcRequest => JsonRpcResponse
     ): Unit =
       sessionId match {
-        case Some(id) if SessionStore.getSession(id).isEmpty =>
-          logger.warn(s"Unknown session: $id")
-          sendJsonRpcError(exchange, request.id, MCPErrorCodes.INVALID_REQUEST, s"Invalid session: $id")
+        case Some(session) if SessionStore.getSession(session).isEmpty =>
+          logger.warn(s"Unknown session: $session")
+          sendJsonRpcError(exchange, id, MCPErrorCodes.INVALID_REQUEST, s"Invalid session: $session")
         case _ =>
-          val response = handler(request)
-          sendJsonRpcResponse(exchange, response, sessionId)
+          sendJsonRpcResponse(exchange, id, handler(request), sessionId)
       }
 
     private def handleDELETE(exchange: HttpExchange): Unit = {
@@ -589,19 +636,22 @@ class MCPServer(
 
     // ── HTTP helpers ─────────────────────────────────────────────────────────
 
-    private def sendJsonRpcError(exchange: HttpExchange, id: String, code: Int, message: String): Unit = {
-      val error = JsonRpcResponse(id = id, error = Some(JsonRpcError(code, message, None)))
-      sendJsonRpcResponse(exchange, error)
-    }
+    private def sendJsonRpcError(exchange: HttpExchange, id: ujson.Value, code: Int, message: String): Unit =
+      sendResponse(exchange, 200, "application/json", errorReply(id, code, message))
 
     private def sendJsonRpcResponse(
       exchange: HttpExchange,
+      id: ujson.Value,
       response: JsonRpcResponse,
-      sessionId: Option[String] = None
+      sessionId: Option[String]
     ): Unit = {
-      val json = upickleWrite(response)
-      sessionId.foreach(id => exchange.getResponseHeaders.set("mcp-session-id", id))
-      sendResponse(exchange, 200, "application/json", json)
+      sessionId.foreach(session => exchange.getResponseHeaders.set("mcp-session-id", session))
+      sendResponse(exchange, 200, "application/json", renderReply(id, response))
+    }
+
+    private def sendAccepted(exchange: HttpExchange): Unit = {
+      exchange.sendResponseHeaders(202, -1)
+      exchange.close()
     }
 
     private def sendResponse(exchange: HttpExchange, statusCode: Int, contentType: String, body: String): Unit = {
