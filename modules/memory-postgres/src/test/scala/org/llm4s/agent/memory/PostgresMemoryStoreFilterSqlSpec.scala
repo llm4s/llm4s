@@ -54,9 +54,57 @@ class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
     Seq("session_id", "user-id", "a.b", "x[0]", "say \"hi\"", "it's; DROP TABLE x; --").foreach { key =>
       val (sql, params, exact) = narrowed(MemoryFilter.ByMetadata(key, "v"))
       (sql should not).include(key)
-      params shouldBe Seq(PString(key), PString(key), PString("v"))
+      params shouldBe Seq(PString(key), PString("v"), PString(key), PString(key), PString("v"))
       exact shouldBe true
     }
+  }
+
+  it should "narrow ByMetadata by a containment the GIN index serves, for every JSON value its text could be (#3164)" in {
+    val Contains         = "metadata @> jsonb_build_object(CAST(? AS text), CAST(? AS %s))"
+    def exact(v: String) = Seq(PString("k"), PString("k"), PString(v))
+    // a JSON string only
+    narrowed(MemoryFilter.ByMetadata("k", "blue")) shouldBe
+      ((
+        s"(${Contains.format("text")}) AND COALESCE($KeyText = ?, FALSE)",
+        Seq(PString("k"), PString("blue")) ++ exact("blue"),
+        true
+      ))
+    // a string, or the number, boolean or null it is the text of
+    Seq("3", "-1.50", "0", "true", "false", "null").foreach { v =>
+      narrowed(MemoryFilter.ByMetadata("k", v)) shouldBe
+        ((
+          s"(${Contains.format("text")} OR ${Contains.format("jsonb")}) AND COALESCE($KeyText = ?, FALSE)",
+          Seq(PString("k"), PString(v), PString("k"), PString(v)) ++ exact(v),
+          true
+        ))
+    }
+    // the text of a nested value: no containment, the text test alone
+    Seq("""{"a":1}""", "[1, 2]").foreach { v =>
+      narrowed(MemoryFilter.ByMetadata("k", v)) shouldBe ((s"COALESCE($KeyText = ?, FALSE)", exact(v), true))
+    }
+  }
+
+  it should "cast to jsonb only the text PostgreSQL writes for a number, a boolean or null" in {
+    Seq("0", "-0", "12", "-3.25", "1.50", "true", "false", "null", "9" * 131072).foreach(v =>
+      withClue(v.take(20))(PostgresMemoryStore.isJsonScalarText(v) shouldBe true)
+    )
+    Seq(
+      "",
+      "01",
+      "1.",
+      ".5",
+      "+1",
+      "1e3",
+      "1E-2",
+      "NaN",
+      "Infinity",
+      "True",
+      " 1",
+      "1 ",
+      "0x1",
+      "9" * 131073,
+      "1." + "0" * 16384
+    ).foreach(v => withClue(v.take(20))(PostgresMemoryStore.isJsonScalarText(v) shouldBe false))
   }
 
   it should "translate HasMetadata, MetadataContains and a case-sensitive ContentContains" in {
@@ -87,9 +135,10 @@ class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
 
     narrowed(MemoryFilter.Not(MemoryFilter.ByEntity(EntityId("e1")))) shouldBe
       ((
-        "NOT (COALESCE(COALESCE(metadata ->> 'entity_id', CASE WHEN jsonb_typeof(metadata -> 'entity_id') = 'null' " +
+        "NOT ((metadata @> jsonb_build_object(CAST('entity_id' AS text), CAST(? AS text))) AND " +
+          "COALESCE(COALESCE(metadata ->> 'entity_id', CASE WHEN jsonb_typeof(metadata -> 'entity_id') = 'null' " +
           "THEN 'null' END) = ?, FALSE))",
-        Seq(PString("e1")),
+        Seq(PString("e1"), PString("e1")),
         true
       ))
     narrowed(MemoryFilter.Not(MemoryFilter.ByConversation("c1"))) shouldBe

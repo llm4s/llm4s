@@ -1238,11 +1238,55 @@ object PostgresMemoryStore {
    * The metadata value at `key` reads as `value`. Compared as text, as `matches` compares what [[MetadataText]] read:
    * a number or a boolean matches its text, not only a JSON string.
    */
-  private def metadataEquals(key: String, keyParams: Seq[PString], value: String): FilterSupport.Sql =
-    FilterSupport.Sql(
+  private def metadataEquals(key: String, keyParams: Seq[PString], value: String): FilterSupport.Sql = {
+    val exact = FilterSupport.Sql(
       s"COALESCE(${metadataText(key)} = ?, FALSE)",
       metadataTextParams(keyParams) :+ PString(value)
     )
+    metadataContainment(key, keyParams, value).fold(exact) { index =>
+      FilterSupport.Sql(s"(${index.clause}) AND ${exact.clause}", index.params ++ exact.params)
+    }
+  }
+
+  /**
+   * A containment test the `GIN(metadata)` index serves (#3164), true of every row whose value at `key` reads as
+   * `value`, and never NULL: [[metadataEquals]] ANDs it before the exact text test, so the index narrows the rows and
+   * the text decides. `value` is what `->>` gives for a JSON string equal to it, and, when it is also the text of a
+   * number as PostgreSQL writes one (no exponent, within `numeric`'s range), `true`, `false` or `null`, for that JSON
+   * value too: a containment of a number compares numerically, so it may admit `1.0` for `1`, which the text test then
+   * refuses. The text of a nested value (`{...}` or `[...]`) has no containment test: none, and the text test alone.
+   */
+  private def metadataContainment(key: String, keyParams: Seq[PString], value: String): Option[FilterSupport.Sql] = {
+    // a literal key is cast, so jsonb_build_object never sees an argument of unknown type
+    val named                        = if (keyParams.isEmpty) s"CAST($key AS text)" else key
+    def contains(as: String): String = s"metadata @> jsonb_build_object($named, CAST(? AS $as))"
+    if (value.startsWith("{") || value.startsWith("[")) None
+    else {
+      val asString = FilterSupport.Sql(contains("text"), keyParams :+ PString(value))
+      if (!isJsonScalarText(value)) Some(asString)
+      else
+        Some(
+          FilterSupport.Sql(
+            s"${asString.clause} OR ${contains("jsonb")}",
+            asString.params ++ keyParams :+ PString(value)
+          )
+        )
+    }
+  }
+
+  /** `numeric`'s limits: digits before and after the point. */
+  private val MaxIntegerDigits  = 131072
+  private val MaxFractionDigits = 16383
+  private val NumericText       = "-?(0|[1-9][0-9]*)(?:\\.([0-9]+))?".r
+
+  /** `s` is how `->>` writes a JSON number, boolean or null, so `CAST(s AS jsonb)` parses it. */
+  private[memory] def isJsonScalarText(s: String): Boolean =
+    s match {
+      case "true" | "false" | "null" => true
+      case NumericText(integer, fraction) =>
+        integer.length <= MaxIntegerDigits && Option(fraction).forall(_.length <= MaxFractionDigits)
+      case _ => false
+    }
 
   private def floorMicros(t: Instant): Instant = t.truncatedTo(ChronoUnit.MICROS)
 
