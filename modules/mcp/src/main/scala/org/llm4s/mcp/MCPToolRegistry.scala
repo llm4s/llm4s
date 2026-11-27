@@ -366,15 +366,27 @@ class MCPToolRegistry(
 }
 
 object MCPToolRegistry {
-  // Create MCP server configuration for Playwright
-  // Using stdio transport to launch and communicate with Playwright MCP server
-  val mcpServerConfig = MCPServerConfig.stdio(
+
+  /**
+   * A stdio config for the Playwright MCP server, fetched by `npx` at run time and unpinned. It starts with the
+   * allowlisted environment only (#3070), like every stdio server.
+   */
+  @deprecated(
+    "a registry's servers are the application's choice: build an MCPServerConfig.stdio with a pinned package (see the PlaywrightExample sample)",
+    since = "1.1.0"
+  )
+  val mcpServerConfig: MCPServerConfig = MCPServerConfig.stdio(
     name = "playwright-mcp-server",
     command = Seq("npx", "@playwright/mcp@latest"),
     timeout = 60.seconds
   )
 
-  def apply() =
+  /** A registry of the unpinned Playwright MCP server alone; see [[mcpServerConfig]]. */
+  @deprecated(
+    "use new MCPToolRegistry(Seq(MCPServerConfig.stdio(...))) with a pinned package (see the PlaywrightExample sample)",
+    since = "1.1.0"
+  )
+  def apply(): MCPToolRegistry =
     new MCPToolRegistry(
       mcpServers = Seq(mcpServerConfig),
       localTools = Seq.empty, // No local tools, using only Playwright MCP tools

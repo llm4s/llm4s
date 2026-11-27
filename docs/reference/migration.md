@@ -438,6 +438,26 @@ MCPServerOptions(8080, "/mcp", "tools", "1.0", apiKey = Some(key), host = "0.0.0
   allowedHosts = Set("mcp.example.com"), allowedOrigins = Set("https://app.example.com"))
 ```
 
+## A stdio MCP server inherits only an allowlisted environment (#3070)
+
+`llm4s-mcp` is Beta. A server started by `MCPServerConfig.stdio` used to receive every variable of the JVM,
+`OPENAI_API_KEY` and cloud credentials included. Now it gets the variables on an allowlist (`PATH`, `HOME`, `USER`,
+`LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `TZ`, and on Windows `APPDATA`, `LOCALAPPDATA`,
+`HOMEDRIVE`, `HOMEPATH`, `USERNAME`, `USERPROFILE`, `SYSTEMDRIVE`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`,
+`PROCESSOR_ARCHITECTURE`, `PROGRAMFILES`, `TEMP`, `TMP`) plus those you declare. A server that needs a key has to be
+given it:
+
+```scala
+MCPServerConfig.stdio("github", Seq("github-mcp-server", "stdio"),
+  env = Map("GITHUB_PERSONAL_ACCESS_TOKEN" -> token), workingDirectory = Some(Paths.get("/srv/mcp")))
+// the old behaviour, for a server you trust with every secret: inheritEnvironment = true
+```
+
+`StdioTransport` gains `env`, `workingDirectory` and `inheritEnvironment`, all with defaults, so a pattern
+`case StdioTransport(command, name)` becomes `case StdioTransport(command, name, _, _, _)` (or `case t: StdioTransport`).
+`MCPToolRegistry()` and `MCPToolRegistry.mcpServerConfig`, which ran the unpinned `@playwright/mcp@latest`, are
+deprecated: build the config yourself with a pinned version, as the `PlaywrightExample` sample does.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

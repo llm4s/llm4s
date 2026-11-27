@@ -264,6 +264,9 @@ def classify(client: LLMClient, review: String): Result[Option[String]] =
   service create it once at startup and close it on shutdown, rather than per request as this short example does.
 - **Name the interpreter.** Use the virtual environment's `python` as the command, not whatever `python3` is on the
   `PATH`, so the server runs with the packages you installed.
+- **The server gets only the environment you give it.** It inherits `PATH`, `HOME`, the locale and the temp
+  directory, not your API keys; pass any variable it needs as `env = Map(...)`, and `workingDirectory` to start it
+  elsewhere.
 - **A server that fails to start contributes no tools.** The failure is logged and the registry offers the model only
   the tools it can call. Check at startup that the tools you expect are there, as the sample does.
 - **`timeout`** bounds one call, reply included; a slow model inside the Python function needs a longer one.

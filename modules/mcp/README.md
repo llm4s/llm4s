@@ -25,6 +25,10 @@ version and how to add it.
 
 The client tries the Streamable HTTP transport first and falls back to SSE when the server does not support it.
 
+A stdio server does not inherit the JVM's environment: it starts with an allowlist (`PATH`, `HOME`, `USER`, `LANG`,
+`TMPDIR` and their Windows counterparts) plus the `env` you pass to `MCPServerConfig.stdio`, which also takes
+`workingDirectory`. `inheritEnvironment = true` passes everything, secrets included.
+
 ## Connecting and listing tools
 
 ```scala

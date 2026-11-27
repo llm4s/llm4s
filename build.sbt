@@ -1244,6 +1244,8 @@ lazy val mcp = (project in file("modules/mcp"))
     // Never lower it.
     coverageFloor(75),
     Test / fork                     := true,
+    // StdioEnvironmentSpec: a variable a stdio MCP server must not inherit from the JVM (#3070).
+    Test / envVars += "LLM4S_MCP_TEST_SECRET" -> "inherited-secret",
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(

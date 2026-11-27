@@ -9,6 +9,7 @@ import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -30,6 +31,15 @@ import scala.util.Try
 
 object PlaywrightExample {
   private val logger = LoggerFactory.getLogger(getClass)
+
+  // A pinned package, so what npx runs is the version you reviewed. The server starts with the allowlisted
+  // environment only (PATH, HOME, ...): none of this application's API keys reach it (#3070). Pass `env` for a
+  // variable it needs.
+  private val playwrightServer = MCPServerConfig.stdio(
+    name = "playwright-mcp-server",
+    command = Seq("npx", "@playwright/mcp@0.0.86"),
+    timeout = 60.seconds
+  )
 
   private def logNoToolsError(): Unit =
     logger.error("""
@@ -69,7 +79,7 @@ object PlaywrightExample {
 
     val result = for {
       client <- validatePrerequisites()
-      mcpRegistry = MCPToolRegistry()
+      mcpRegistry = new MCPToolRegistry(Seq(playwrightServer))
       _ <- checkForTools(mcpRegistry)
       _ <- runQueries(client, mcpRegistry)
       _ <- closeMCPClient(mcpRegistry)
