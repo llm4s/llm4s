@@ -205,6 +205,17 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 99
   }
 
+  it should "refuse an open store's writes once a newer build has migrated the file, reads still answered (#3090)" in {
+    val db    = SqliteFiles.fresh()
+    val store = SqliteCheckpointer.open(db).value
+    store.claim(ThreadId("t1"), ClaimRequest(RunId("r1"), None, 30.seconds)).isRight shouldBe true
+    exec(db, "UPDATE llm4s_checkpoint_schema SET version = 99")
+    store.claim(ThreadId("t2"), ClaimRequest(RunId("r2"), None, 30.seconds)).left.value shouldBe
+      GraphError.UnsupportedStoreSchema(s"SQLite file $db", 99, SqliteSchema.Current)
+    store.latest(ThreadId("t1")).isRight shouldBe true
+    store.close()
+  }
+
   it should "refuse a file that is not a database, and close the connection it opened" in {
     val db = SqliteFiles.fresh()
     Files.writeString(db, "this is not a SQLite database, not even close" * 100)

@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.AgentId
+import org.llm4s.agent.service.{ QueuedInput, Submission }
 import org.llm4s.error.ProcessingError
 import org.llm4s.it.tags.Docker
 import org.llm4s.security.Secret
@@ -139,6 +141,23 @@ class PostgresCheckpointerSpec
     PgCheckpointerDb.scalar(s"""SELECT version FROM "${config.schema}".checkpoint_schema""")(_.getInt(1)) shouldBe 99
     // an owned pool is closed with a refused store
     pool.isClosed shouldBe true
+  }
+
+  it should "refuse a running store's writes once a newer build has migrated the schema, reads still answered (#3090)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val thread = ThreadId(s"newer-${java.util.UUID.randomUUID()}")
+    store.claim(thread, ClaimRequest(RunId("r1"), None, 30.seconds)).isRight shouldBe true
+    PgCheckpointerDb.execute(s"""UPDATE "${config.schema}".checkpoint_schema SET version = 99""")
+    store
+      .claim(ThreadId(s"other-${java.util.UUID.randomUUID()}"), ClaimRequest(RunId("r2"), None, 30.seconds))
+      .left
+      .value shouldBe
+      GraphError.UnsupportedStoreSchema(s"""PostgreSQL schema "${config.schema}"""", 99, PostgresSchema.Current)
+    store.runQueue.submit(Submission(thread, AgentId.unsafe("a"), QueuedInput.query("q"))).left.value shouldBe
+      a[GraphError.UnsupportedStoreSchema]
+    store.latest(thread).isRight shouldBe true
+    store.close()
   }
 
   it should "open at the current version for a role that may only read and write its tables" in {

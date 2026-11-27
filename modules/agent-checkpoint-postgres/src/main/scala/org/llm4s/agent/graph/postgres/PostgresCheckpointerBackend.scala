@@ -17,7 +17,8 @@ import org.llm4s.types.Result
  *  - `url` (`LLM4S_CHECKPOINTER_POSTGRES_URL`), `jdbc:postgresql://host:port/database`, and `user`
  *    (`LLM4S_CHECKPOINTER_POSTGRES_USER`): required;
  *  - `password` (`LLM4S_CHECKPOINTER_POSTGRES_PASSWORD`): unset for none; never logged or put in an error;
- *  - `schema`, `callTimeout`, `connectionTimeout`, `maxPoolSize`: [[PostgresCheckpointerConfig]]'s, with its defaults.
+ *  - `schema`, `callTimeout`, `connectionTimeout`, `maxPoolSize`, `migrationTimeout`: [[PostgresCheckpointerConfig]]'s,
+ *    with its defaults.
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader` instantiates it through a public no-arg
  * constructor.
@@ -76,8 +77,15 @@ object PostgresCheckpointerBackend:
       callTimeout       <- settings.duration("callTimeout", d.callTimeout)
       connectionTimeout <- settings.duration("connectionTimeout", d.connectionTimeout)
       maxPoolSize       <- settings.int("maxPoolSize", d.maxPoolSize)
+      migrationTimeout  <- settings.duration("migrationTimeout", d.migrationTimeout)
       config <- PostgresCheckpointerConfig
-        .of(settings.optionalString("schema").getOrElse(d.schema), callTimeout, connectionTimeout, maxPoolSize)
+        .of(
+          settings.optionalString("schema").getOrElse(d.schema),
+          callTimeout,
+          connectionTimeout,
+          maxPoolSize,
+          migrationTimeout
+        )
         .left
         .map { e =>
           val block = s"${CheckpointerSettings.Path}.$Kind"

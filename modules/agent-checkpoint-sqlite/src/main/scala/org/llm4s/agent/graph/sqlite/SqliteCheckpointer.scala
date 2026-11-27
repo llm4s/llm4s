@@ -842,7 +842,13 @@ final class SqliteCheckpointer private (
       val written = CancelledError.catchInterrupt {
         gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
           transaction(c, "BEGIN IMMEDIATE") { guard =>
-            val result = body(c)
+            // a file a newer build migrated since this store opened is written no more (#3090)
+            val found =
+              query(c, "SELECT MAX(version) FROM llm4s_checkpoint_schema")(_.getInt(1)).headOption.getOrElse(0)
+            val result =
+              if found > SqliteSchema.Current then
+                Left(GraphError.UnsupportedStoreSchema(s"SQLite file $path", found, SqliteSchema.Current))
+              else body(c)
             if result.isRight then
               execute(c, "COMMIT")
               guard.committed = true
