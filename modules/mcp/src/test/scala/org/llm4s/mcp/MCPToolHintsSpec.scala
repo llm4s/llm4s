@@ -242,7 +242,7 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
       (_: SafeParameterExtractor) => Right("local")
     )
 
-  "MCPToolRegistry" should "answer with the hints a server declares, once it has discovered its tools" in
+  "MCPToolRegistry" should "answer with the hints a server declares, discovering its tools when they are not cached" in
     LocalProviderTestServer.withServer("/")(mcpServer) { url =>
       val registry =
         new MCPToolRegistry(
@@ -250,7 +250,7 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
           initializeOnStartup = false
         )
       try {
-        registry.toolHints("reader") shouldBe None // not discovered yet
+        registry.toolHints("reader") shouldBe Some(expected("reader")) // discovers the tools, as execute does
 
         registry.getAllTools.map(_.name).toSet shouldBe Set("reader", "writer", "plain")
 
@@ -304,6 +304,42 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
         } finally registry.close()
       }
     }
+
+  // #3068: an untrusted server listed first must not borrow a trusted server's hints for a tool of the same name,
+  // because its tool is the one execute runs.
+  private def sameNameRegistry(untrustedFirst: Boolean)(body: MCPToolRegistry => Unit): Unit =
+    LocalProviderTestServer.withServer("/")(mcpServer) { trustedUrl =>
+      LocalProviderTestServer.withServer("/")(
+        mcpServerListing(() => ujson.Arr(toolJson("reader", Some(ujson.Obj("readOnlyHint" -> true)))))
+      ) { untrustedUrl =>
+        val trusted   = MCPServerConfig.streamableHTTP("mine", trustedUrl, 10.seconds, trustAnnotations = true)
+        val untrusted = MCPServerConfig.streamableHTTP("theirs", untrustedUrl, 10.seconds)
+        val registry = new MCPToolRegistry(
+          if (untrustedFirst) Seq(untrusted, trusted) else Seq(trusted, untrusted),
+          initializeOnStartup = false
+        )
+        try body(registry)
+        finally registry.close()
+      }
+    }
+
+  it should "give a tool the hints of the server whose tool runs: none when that server is untrusted (#3068)" in
+    sameNameRegistry(untrustedFirst = true) { registry =>
+      registry.getAllTools: Unit
+      registry.toolHints("reader") shouldBe None
+    }
+
+  it should "give a tool the hints of the server whose tool runs: its own when that server is trusted (#3068)" in
+    sameNameRegistry(untrustedFirst = false) { registry =>
+      registry.getAllTools: Unit
+      registry.toolHints("reader") shouldBe Some(expected("reader"))
+    }
+
+  it should "resolve the winning server even before any discovery (#3068)" in
+    sameNameRegistry(untrustedFirst = true)(registry => registry.toolHints("reader") shouldBe None)
+  sameNameRegistry(untrustedFirst = false) { registry =>
+    registry.toolHints("reader") shouldBe Some(expected("reader"))
+  }
 
   it should "stop reporting a tool's hints once its server's listing can no longer be read" in {
     val broken  = new java.util.concurrent.atomic.AtomicBoolean(false)
