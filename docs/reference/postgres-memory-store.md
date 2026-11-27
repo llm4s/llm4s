@@ -125,9 +125,10 @@ Many tenants share one table: a store belongs to the `tenant` it is built with (
 of no tenant, among them every row written before the store had tenants; a tenant is never the empty string.
 Two stores over one table and tenant report the same `storageIdentity`, so `SemanticMemoryMiddleware` refuses a
 resolver that gives two tenants the same rows. The identity names the cluster by its `system_identifier`
-(`pg_control_system()`, granted to every role by default), not by the address a connection used, then the database,
-the schema-qualified table and the tenant. A server that refuses `pg_control_system()` gets an identity without a
-cluster, so two clusters with a table of the same database, schema, name and tenant are taken for one and refused.
+(`pg_control_system()`), not by the address a connection used, then the database, the schema-qualified table and the
+tenant. PostgreSQL grants `pg_control_system()` to PUBLIC by default. Where it has been revoked, `storageIdentity` is a
+`Left` naming the missing privilege and the middleware refuses the turn, rather than guess an identity without the
+cluster; grant it to the store's role with `GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>`.
 
 ## Security & Validation
 

@@ -216,7 +216,7 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
   }
 
   // Codex on #3166: the identity names the cluster by its system identifier, never the address it was reached on
-  it should "name its cluster, database, schema-qualified table and tenant, and no cluster when refused one" in {
+  it should "name its cluster, database, schema-qualified table and tenant, and refuse without the cluster" in {
     def answering(control: Boolean): String => Seq[Map[String, Any]] = sql =>
       if (sql.contains("pg_control_system"))
         if (control) Seq(Map("system_identifier" -> "7712809643900526635"))
@@ -228,7 +228,11 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
       Right(Some("postgresql://7712809643900526635/app/public.t?tenant=alice"))
     allowed.sent.exists(_.sql.contains("inet_server_addr")) shouldBe false
     val refused = new RecordingDataSource()(Some(answering(control = false)))
-    store(refused).storageIdentity shouldBe Right(Some("postgresql://unknown/app/public.t?tenant="))
+    // fail closed: without the cluster two roles would see one table as two (Codex on #3166)
+    val error = store(refused).storageIdentity.left.toOption.get.message
+    error should include("GRANT EXECUTE ON FUNCTION pg_control_system()")
+    error should include("permission denied")
+    refused.sent.exists(_.sql.contains("current_database()")) shouldBe false
     store(new RecordingDataSource()()).storageIdentity.isLeft shouldBe true
   }
 

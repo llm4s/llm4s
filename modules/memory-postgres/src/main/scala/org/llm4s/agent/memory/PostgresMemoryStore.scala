@@ -58,11 +58,11 @@ final class PostgresMemoryStore private[memory] (
    * same rows is caught.
    *
    * The cluster is its `system_identifier` (`pg_control_system()`), which does not depend on the address a connection
-   * came in on (`127.0.0.1`, `::1`, a host name, a pooler). PostgreSQL grants that function to every role (checked on
-   * 14, 16 and 17); where a server refuses it, the identity names no cluster - `postgresql://unknown/...` - which is
-   * conservative: two stores over tables of the same database, schema, name and tenant on different clusters are then
-   * taken for one and refused, never two tenants on one table accepted. The table is its schema-qualified name, as
-   * `search_path` resolves it.
+   * came in on (`127.0.0.1`, `::1`, a host name, a pooler). PostgreSQL grants that function to PUBLIC by default
+   * (checked on 14, 16 and 17). Where the store's role may not execute it, the identity is a `Left` naming the missing
+   * privilege - fail closed, since an identity without the cluster would let two roles see one table as two - and
+   * `SemanticMemoryMiddleware` refuses the turn: `GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>`. The table is
+   * its schema-qualified name, as `search_path` resolves it.
    */
   override def storageIdentity: Result[Option[String]] =
     attempt("Failed to read the store's identity") {
@@ -71,26 +71,38 @@ final class PostgresMemoryStore private[memory] (
           runQuery(conn, "SELECT system_identifier::text FROM pg_control_system()", Seq.empty, stream = false)(rows =>
             if (rows.hasNext) Option(rows.next().getString(1)) else None
           )
-        ).toOption.flatten
-        runQuery(
-          conn,
-          "SELECT current_database(), n.nspname, c.relname FROM pg_class c " +
-            "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)",
-          Seq(SqlParam.PString(tableName)),
-          stream = false
-        ) { rows =>
-          if (!rows.hasNext)
-            Left(ProcessingError("postgres-memory-store", s"Failed to read the store's identity: no table $tableName"))
-          else {
-            val rs = rows.next()
-            Right(
-              Some(
-                s"postgresql://${cluster.getOrElse("unknown")}/${rs.getString(1)}/${rs.getString(2)}.${rs.getString(3)}" +
-                  s"?tenant=$tenantKey"
-              )
+        ).toEither.left.map(e => Redaction.scrubKnown(e.getMessage)).flatMap(_.toRight("no system identifier"))
+        cluster.left
+          .map(reason =>
+            ProcessingError(
+              "postgres-memory-store",
+              "Failed to read the store's identity: the cluster's system identifier needs EXECUTE on " +
+                s"pg_control_system() (GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>): $reason"
             )
-          }
-        }
+          )
+          .flatMap(cluster =>
+            runQuery(
+              conn,
+              "SELECT current_database(), n.nspname, c.relname FROM pg_class c " +
+                "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)",
+              Seq(SqlParam.PString(tableName)),
+              stream = false
+            ) { rows =>
+              if (!rows.hasNext)
+                Left(
+                  ProcessingError("postgres-memory-store", s"Failed to read the store's identity: no table $tableName")
+                )
+              else {
+                val rs = rows.next()
+                Right(
+                  Some(
+                    s"postgresql://$cluster/${rs.getString(1)}/${rs.getString(2)}.${rs.getString(3)}" +
+                      s"?tenant=$tenantKey"
+                  )
+                )
+              }
+            }
+          )
       }
     }
 
