@@ -77,7 +77,8 @@ object PlatformTests {
       "org.llm4s.mcp.MCPErrorPathsSpec",
       "org.llm4s.mcp.PayloadLogSpec",
       "org.llm4s.mcp.StdioStderrDrainSpec",
-      "org.llm4s.mcp.MCPClientImplSpec"
+      "org.llm4s.mcp.MCPClientImplSpec",
+      "org.llm4s.mcp.MCPSessionRecoverySpec"
     ),
     "anthropic" -> Seq(
       "org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec",

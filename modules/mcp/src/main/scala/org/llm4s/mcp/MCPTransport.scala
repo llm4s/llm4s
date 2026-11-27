@@ -82,6 +82,19 @@ trait MCPTransportImpl {
   def close(): Unit
 }
 
+/**
+ * A request the server provably did not run, because the session it belonged to is gone (#3072): an HTTP server
+ * refused it with 404 for its session id, or a stdio server's process had died and the request was never written to
+ * its replacement. `MCPClientImpl` answers it by running the handshake again and retrying the request once.
+ */
+final private[mcp] case class MCPSessionLost(message: String) extends LLMError
+
+private[mcp] object MCPSessionLost {
+  val Expired: MCPSessionLost = MCPSessionLost("Transport error: MCP session expired, client should reinitialize")
+  val Restarted: MCPSessionLost =
+    MCPSessionLost("Transport error: MCP server process restarted, client should reinitialize")
+}
+
 // Session management for Streamable HTTP
 case class MCPSession(
   sessionId: String,
@@ -179,7 +192,7 @@ class StreamableHTTPTransportImpl(
     if (response.statusCode == 404 && mcpSessionId.isDefined) {
       logger.warn(s"StreamableHTTPTransport($name) session expired (404), clearing session")
       mcpSessionId = None
-      Left(SimpleError("Transport error: MCP session expired, client should reinitialize"))
+      Left(MCPSessionLost.Expired)
     } else if (response.statusCode == 405) {
       // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
       Left(
@@ -531,7 +544,7 @@ class SSETransportImpl(
         if (response.statusCode == 404 && mcpSessionId.isDefined) {
           logger.warn(s"SSETransport($name) session expired (404), clearing session")
           mcpSessionId = None
-          Left(SimpleError("Transport error: MCP session expired, client should reinitialize"))
+          Left(MCPSessionLost.Expired)
         } else if (response.statusCode >= 400) {
           // Handle other HTTP errors
           Left(
@@ -819,6 +832,11 @@ class StdioTransportImpl(
 
   logger.info(s"StdioTransport($name) initialized with command: ${command.mkString(" ")}")
 
+  // Whether a process of this transport has run since it was created or last closed: a process started after that
+  // is a restart, and a restarted server has not been through the handshake (#3072).
+  @volatile private var hasRun          = false
+  @volatile private var handshakeNeeded = false
+
   // Gets existing process or starts new one if needed
   private def getOrStartProcess(): Result[Process] =
     process match {
@@ -826,8 +844,25 @@ class StdioTransportImpl(
         logger.debug(s"StdioTransport($name) reusing existing process")
         Right(p)
       case _ =>
-        startNewProcess()
+        val restart = hasRun
+        startNewProcess().map { started =>
+          hasRun = true
+          if (restart) {
+            logger.warn(
+              s"StdioTransport($name) server process had exited; started a new one, which needs the handshake"
+            )
+            handshakeNeeded = true
+          }
+          started
+        }
     }
+
+  // A restarted server gets `initialize` first: any other request is refused unsent, so the client can run the
+  // handshake and retry it without the server having run it twice.
+  private def handshakeGate(request: JsonRpcRequest): Result[Unit] =
+    if (request.method == "initialize") { handshakeNeeded = false; Right(()) }
+    else if (handshakeNeeded) Left(MCPSessionLost.Restarted)
+    else Right(())
 
   // Starts a new MCP server process with proper initialization
   private def startNewProcess(): Result[Process] = {
@@ -1081,7 +1116,7 @@ class StdioTransportImpl(
     CancelledError.attempt("mcp.stdio.request") {
       logger.debug(s"StdioTransport($name) sending request: method=${request.method}, id=${request.id}")
 
-      getOrStartProcess().flatMap { _ =>
+      getOrStartProcess().flatMap(_ => handshakeGate(request)).flatMap { _ =>
         stdinWriter match {
           case Some(writer) =>
             // Create a future for this request's response
@@ -1318,6 +1353,8 @@ class StdioTransportImpl(
   override def close(): Unit = {
     logger.info(s"StdioTransport($name) closing process and streams")
     cleanupProcess()
+    hasRun = false
+    handshakeNeeded = false
   }
 
   // Generates unique request IDs
