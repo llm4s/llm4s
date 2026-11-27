@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.sqlite
 import org.llm4s.agent.graph.*
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, PrivateSqliteFile }
 
 import java.nio.file.Path
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
@@ -914,6 +914,7 @@ object SqliteCheckpointer:
     given ErrorContext = ErrorContext(path)
     Try {
       Class.forName("org.sqlite.JDBC")
+      PrivateSqliteFile.prepare(path)
       connect(jdbcUrl(path))
     }.toEither.left.map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))).flatMap {
       connection =>

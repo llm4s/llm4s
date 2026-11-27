@@ -53,7 +53,8 @@ object PlatformTests {
       "org.llm4s.config.ApiKeyFileConfigSpec",
       "org.llm4s.config.SharedApiKeyFileSpec",
       "org.llm4s.model.ModelRegistryServiceSpec",
-      "org.llm4s.http.Llm4sHttpClientSpec"
+      "org.llm4s.http.Llm4sHttpClientSpec",
+      "org.llm4s.util.PrivateSqliteFileSpec"
     ),
     "agent" -> Seq("org.llm4s.assistant.*", "org.llm4s.agent.harness.HostFileBackendSpec"),
     "agentTestkit" -> Seq(

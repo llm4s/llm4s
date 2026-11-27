@@ -3,6 +3,7 @@ package org.llm4s.rag.loader
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
+import org.llm4s.util.PrivateSqliteFile
 
 import java.sql.{ Connection, DriverManager, ResultSet, Types }
 import java.util.concurrent.atomic.AtomicBoolean
@@ -122,6 +123,7 @@ object SQLiteDocumentRegistry {
   private def open(dbPath: String, url: String): Result[SQLiteDocumentRegistry] =
     Try {
       Class.forName("org.sqlite.JDBC")
+      PrivateSqliteFile.prepare(dbPath, org.llm4s.vectorstore.SQLiteVectorStore.JdbcPragmas)
       val connection = DriverManager.getConnection(url)
       val created = Try {
         Using.resource(connection.createStatement()) { stmt =>

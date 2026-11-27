@@ -1,6 +1,6 @@
 package org.llm4s.agent.memory
 
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ PrivateSqliteFile, Redaction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.llmconnect.EmbeddingClient
@@ -634,6 +634,7 @@ object VectorMemoryStore {
   ): Result[VectorMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
+      PrivateSqliteFile.prepare(dbPath, SQLiteMemoryStore.JdbcPragmas)
       val connection = connect(dbPath)
       // If schema setup fails (e.g. the file is not a database) the connection must not leak:
       // an open handle keeps the file locked, which blocks deletion on Windows.
