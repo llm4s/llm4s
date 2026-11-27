@@ -3,6 +3,7 @@ rule = Llm4sMigrateFrom_1_0
 */
 package fix.v10
 
+import org.llm4s.agent.memory.{ MemoryBounds, PostgresMemoryStore }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelMetadata
 import org.llm4s.security.Secret
@@ -17,6 +18,15 @@ object PositionalPatternsGainFieldsTest {
 
   def mode(metadata: ModelMetadata): String = metadata match {
     case ModelMetadata(id, _, mode, _, _, _, _, _) => s"$id $mode"
+  }
+
+  // MemoryBounds gained `owner`, PostgresMemoryStore.Config `tenant` (#3032, #3034)
+  def maxOf(bounds: MemoryBounds): Int = bounds match {
+    case MemoryBounds(max, _) => max
+  }
+
+  def tableOf(config: PostgresMemoryStore.Config): String = config match {
+    case PostgresMemoryStore.Config(_, _, _, _, _, table, _) => table
   }
 
   // Not positional patterns: left as they are.

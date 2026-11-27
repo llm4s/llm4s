@@ -612,4 +612,27 @@ class SQLiteMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     result.isRight shouldBe true
     result.toOption.get.close()
   }
+
+  // #3032: two instances over one file must be recognised as one store, however the path is spelled
+  "SQLiteMemoryStore.storageIdentity" should "be one identity for every spelling of one file, and none in memory" in {
+    val dir = java.nio.file.Files.createTempDirectory("llm4s-identity")
+    val sub = java.nio.file.Files.createDirectory(dir.resolve("sub"))
+    def identity(path: String): Option[String] = {
+      val opened = SQLiteMemoryStore(path).toOption.get
+      val found  = opened.storageIdentity
+      opened.close()
+      found.toOption.get
+    }
+    val plain = identity(dir.resolve("alice.db").toString)
+    plain shouldBe defined
+    identity(sub.resolve("../alice.db").toString) shouldBe plain
+    if (java.io.File.separatorChar == '/') identity(s"file:${dir.resolve("alice.db")}") shouldBe plain
+    identity(dir.resolve("bob.db").toString) should not be plain
+    // on a case-insensitive file system (macOS, Windows) `ALICE.db` opens the same file
+    if (java.nio.file.Files.exists(dir.resolve("ALICE.db"))) identity(dir.resolve("ALICE.db").toString) shouldBe plain
+    store.storageIdentity shouldBe Right(None)
+    SQLiteMemoryStore.fileIdentity("file::memory:?cache=shared") shouldBe Right(None)
+    SQLiteMemoryStore.fileIdentity("file:x?mode=memory") shouldBe Right(None)
+    InMemoryStore.empty.storageIdentity shouldBe Right(None)
+  }
 }

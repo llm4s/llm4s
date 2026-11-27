@@ -14,7 +14,8 @@ import scala.util.Using
  * serialised (design §4.31, "Tenant scope"). It is the `Transactional` target's `AppliedKeys` for C4's guard: its
  * `forget` is the store's `forgetApplied`, under the same lock and fenced by the same token.
  */
-final private[memory] class TenantMemory(val initial: MemoryStore) extends AppliedKeys:
+final private[memory] class TenantMemory(val initial: MemoryStore, val identity: Option[String] = None)
+    extends AppliedKeys:
   private val lock                        = new ReentrantLock()
   @volatile private var held: MemoryStore = initial
 
@@ -41,8 +42,8 @@ final private[memory] class TenantMemory(val initial: MemoryStore) extends Appli
     }
 
   /**
-   * For a store that is not transactional: stores `add`, deletes `remove`, then deletes the overflow beyond `bounds`,
-   * under the lock. Serialised in this process, but not one transaction.
+   * For a store that is not transactional: stores `add`, deletes `remove`, then deletes the overflow beyond `bounds`
+   * among the memories it counts, under the lock. Serialised in this process, but not one transaction.
    */
   def writePlain(add: Seq[Memory], remove: Seq[MemoryId], bounds: MemoryBounds): Result[AppliedWrite] =
     locked {
@@ -51,7 +52,7 @@ final private[memory] class TenantMemory(val initial: MemoryStore) extends Appli
         ids = present.map(_.id).toSet
         replaced <- held.replace(add, remove)
         all      <- replaced.recall(MemoryFilter.All, Int.MaxValue)
-        evicted = bounds.overflow(all.map(MemoryBounds.Entry.of))
+        evicted = bounds.overflow(all.filter(m => bounds.counts(m.metadata)).map(MemoryBounds.Entry.of))
         trimmed <- evicted.foldLeft[Result[MemoryStore]](Right(replaced))((acc, id) => acc.flatMap(_.delete(id)))
       yield
         held = trimmed

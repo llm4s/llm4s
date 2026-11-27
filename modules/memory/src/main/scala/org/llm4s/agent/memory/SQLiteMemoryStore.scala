@@ -32,6 +32,15 @@ final class SQLiteMemoryStore private (
   import SQLiteMemoryStore._
   import FilterSupport.Sql
 
+  /**
+   * The database file's real path - links resolved, and on a case-insensitive file system its stored spelling - so
+   * two stores opened on one file by different spellings (`Alice.db`, `alice.db`, `./x/../alice.db`) have one
+   * identity. `None` for an in-memory database, which only this connection sees.
+   */
+  override def storageIdentity: Result[Option[String]] = fileIdentity
+
+  private lazy val fileIdentity: Result[Option[String]] = SQLiteMemoryStore.fileIdentity(dbPath)
+
   /** Stores `add`, then deletes `remove`, in one transaction. */
   override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
     Try {
@@ -59,7 +68,7 @@ final class SQLiteMemoryStore private (
             val removed = remove.distinct.filterNot(addIds.contains).toVector
             deleteIds(removed.map(_.value))
             writeAll(adds)
-            val evicted = bounds.overflow(entries())
+            val evicted = bounds.overflow(entries(bounds))
             deleteIds(evicted.map(_.value))
             AppliedWrite(adds.map(_.id), removed, evicted.size)
           }
@@ -140,8 +149,8 @@ final class SQLiteMemoryStore private (
       Using.resource(stmt.executeQuery())(_.next())
     }
 
-  /** Every stored memory as [[MemoryBounds.overflow]] ranks it, without its embedding. */
-  private def entries(): Vector[MemoryBounds.Entry] =
+  /** Every stored memory `bounds` counts, as [[MemoryBounds.overflow]] ranks it, without its embedding. */
+  private def entries(bounds: MemoryBounds): Vector[MemoryBounds.Entry] =
     Using.resource(connection.createStatement()) { stmt =>
       Using.resource(stmt.executeQuery("SELECT id, importance, timestamp, content, metadata_json FROM memories")) {
         rs =>
@@ -149,12 +158,14 @@ final class SQLiteMemoryStore private (
           while (rs.next()) {
             val importance = rs.getDouble(2)
             val known      = !rs.wasNull()
-            out += MemoryBounds.Entry(
-              MemoryId(rs.getString(1)),
-              if (known) Some(importance) else None,
-              Instant.ofEpochMilli(rs.getLong(3)),
-              MemoryBounds.sizeOf(rs.getString(4), jsonToMetadata(rs.getString(5)))
-            )
+            val metadata   = jsonToMetadata(rs.getString(5))
+            if (bounds.counts(metadata))
+              out += MemoryBounds.Entry(
+                MemoryId(rs.getString(1)),
+                if (known) Some(importance) else None,
+                Instant.ofEpochMilli(rs.getLong(3)),
+                MemoryBounds.sizeOf(rs.getString(4), metadata)
+              )
           }
           out.result()
       }
@@ -601,6 +612,25 @@ object SQLiteMemoryStore {
    */
   def inMemory(config: MemoryStoreConfig = MemoryStoreConfig.testing): Result[SQLiteMemoryStore] =
     apply(":memory:", config)
+
+  /** The identity of the database `dbPath` opens: `sqlite:` and the file's real path, or `None` in memory. */
+  private[memory] def fileIdentity(dbPath: String): Result[Option[String]] = {
+    val uri  = dbPath.startsWith("file:")
+    val path = if (uri) dbPath.stripPrefix("file:").takeWhile(_ != '?').replaceFirst("^//(?=/)", "") else dbPath
+    val inMemory =
+      dbPath.isEmpty || dbPath == ":memory:" || (uri && (path.isEmpty || path == ":memory:" || dbPath.contains(
+        "mode=memory"
+      )))
+    if (inMemory) Right(None)
+    else
+      Try {
+        val file = java.nio.file.Paths.get(path)
+        val real = Try(file.toRealPath()).getOrElse(file.toAbsolutePath.normalize())
+        Some(s"sqlite:$real")
+      }.toEither.left.map(e =>
+        ProcessingError("sqlite-identity", s"Cannot resolve the path of $dbPath: ${e.getMessage}")
+      )
+  }
 
   /**
    * Schema version for migrations.

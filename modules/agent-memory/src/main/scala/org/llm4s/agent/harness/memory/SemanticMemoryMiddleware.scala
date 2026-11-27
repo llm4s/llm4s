@@ -43,7 +43,11 @@ import scala.util.{ Try, Using }
  *
  *   - **Tenant scope.** `stores` is asked once per tenant (`RunContext.config.tenantId`) for that tenant's store; the
  *     store is held in one cell per tenant, whose writes are serialised. Every thread of a tenant shares it; no two
- *     tenants may share a store instance (refused). A failed resolution is asked again on the next turn.
+ *     tenants may share a store (refused): not one instance, nor two instances with one
+ *     [[org.llm4s.agent.memory.MemoryStore.storageIdentity storageIdentity]] - one SQLite file, however its path is
+ *     spelled, or one Postgres table and tenant (#3032). A store that names no identity is told apart by instance only,
+ *     so a resolver that opens one shared backend twice must scope it to the tenant itself. A failed resolution is
+ *     asked again on the next turn.
  *   - **The manager** is built for each hook call by `manager(view, context.accounted(client))`, over a view of the
  *     tenant's store whose writes are the middleware's effects, so every model call it makes is counted in the
  *     thread's usage.
@@ -58,8 +62,11 @@ import scala.util.{ Try, Using }
  *   - **Consolidation** (`afterAgent`, after recording) runs the manager's `consolidateMemories` on memories older than
  *     `olderThan`; each group it replaces is one effect (`memory.consolidate`, keyed by the group's ids). It needs a
  *     transactional store: on any other, the input is refused.
- *   - **Bounds.** Every write evicts, in its own transaction, the memories of lowest importance, oldest first, beyond
- *     `bounds`, so a tenant's store stays bounded whether or not consolidation is on.
+ *   - **Bounds.** Every memory the middleware writes carries [[SemanticMemoryMiddleware.WriterKey]] set to its `id`,
+ *     and `bounds` counts only those: every write evicts, in its own transaction, the middleware's own memories of
+ *     lowest importance, oldest first, beyond `bounds`, so what it records stays bounded whether or not consolidation
+ *     is on. A memory it did not write - knowledge an application loaded, facts it stored - is never counted or
+ *     evicted (#3034).
  *   - **Failures after the answer** are skipped and announced by [[MemoryEvents.Skipped]]: the answer is never
  *     retracted because memory could not be written. A crash is replayed by `recover` from C4's records.
  *
@@ -79,7 +86,8 @@ import scala.util.{ Try, Using }
  * @param recall what to recall before a turn; `None` recalls nothing
  * @param record how to record a turn; `None` records nothing
  * @param consolidate when to consolidate old memories after a turn; `None` never
- * @param bounds the most each tenant's store keeps
+ * @param bounds the most of the middleware's own memories each tenant's store keeps; any owner it has is replaced by
+ *               the middleware's ([[SemanticMemoryMiddleware.WriterKey]], `id`)
  * @param clock where consolidation reads "now" from
  * @param id this middleware's id
  */
@@ -99,6 +107,12 @@ final class SemanticMemoryMiddleware(
 
   private val cells     = new ConcurrentHashMap[Option[TenantId], TenantMemory]()
   private val resolving = new ReentrantLock()
+
+  /** `bounds`, counting only what this middleware wrote. */
+  private val owned: MemoryBounds = bounds.withOwner(WriterKey, id.value)
+
+  /** `memory` marked as this middleware's, so its bounds count it. */
+  private def stamped(memory: Memory): Memory = memory.copy(metadata = memory.metadata + (WriterKey -> id.value))
 
   override def writes: Set[StateKey[?, ?]] = Set(RecalledKey)
 
@@ -170,14 +184,14 @@ final class SemanticMemoryMiddleware(
         case Some((turn, query)) =>
           val key = context.run.effectKey("memory.record", turn)
           MemoryEffects
-            .write(context.run, tenant, key, bounds) {
+            .write(context.run, tenant, key, owned) {
               val view   = MemoryView.recording(tenant)
               val thread = context.run.position.threadId.value
               guarded(
                 manager(view, context.accounted(client))
                   .recordConversation(Seq(UserMessage(query), AssistantMessage(answer)), thread)
               ).flatMap(recorded => buffered(recorded.store))
-                .map(add => add.map(cut(_, settings.maxRecordChars)) -> Nil)
+                .map(add => add.map(m => stamped(cut(m, settings.maxRecordChars))) -> Nil)
             }
             .map(out =>
               if out.added.nonEmpty || out.evicted > 0 then
@@ -192,7 +206,7 @@ final class SemanticMemoryMiddleware(
     val view = MemoryView.consolidating(tenant) { (add, remove) =>
       val key = context.run.effectKey("memory.consolidate", remove.map(_.value).distinct.sorted*)
       MemoryEffects
-        .write(context.run, tenant, key, bounds)(Right(add.map(cut(_, maxChars)) -> remove))
+        .write(context.run, tenant, key, owned)(Right(add.map(m => stamped(cut(m, maxChars))) -> remove))
         .map(out => if out.added.nonEmpty || out.removed.nonEmpty || out.evicted > 0 then outcomes.add(out): Unit)
     }
     val cutoff = clock.instant().minusNanos(settings.olderThan.toNanos)
@@ -232,7 +246,8 @@ final class SemanticMemoryMiddleware(
       case Some(found) => Right(found)
       case None =>
         for
-          store <- guarded(stores(tenant))
+          store    <- guarded(stores(tenant))
+          identity <- guarded(store.storageIdentity)
           _ <- Either.cond(
             !cells.values.asScala.exists(_.initial.eq(store)),
             (),
@@ -241,6 +256,18 @@ final class SemanticMemoryMiddleware(
               s"the store for tenant ${name(tenant)} is the same instance as another tenant's: give each tenant its own"
             )
           )
+          _ <- identity.flatMap(same =>
+            cells.asScala.collectFirst { case (other, c) if c.identity.contains(same) => other }
+          ) match
+            case Some(other) =>
+              Left(
+                ValidationError(
+                  "stores",
+                  s"the store for tenant ${name(tenant)} reads and writes the same storage as tenant ${name(other)}'s " +
+                    "(one file or one table and tenant): give each tenant its own"
+                )
+              )
+            case None => Right(())
           _ <- Either.cond(
             consolidate.isEmpty || store.isInstanceOf[TransactionalMemoryStore],
             (),
@@ -251,7 +278,7 @@ final class SemanticMemoryMiddleware(
             )
           )
         yield
-          val created = new TenantMemory(store)
+          val created = new TenantMemory(store, identity)
           cells.put(tenant, created)
           created
 
@@ -260,6 +287,12 @@ object SemanticMemoryMiddleware:
 
   /** The default middleware id. */
   val DefaultId: MiddlewareId = MiddlewareId("semantic-memory")
+
+  /**
+   * The metadata key marking a memory the middleware wrote - a recorded turn or a consolidation's summary - with the
+   * middleware's id as its value. Its bounds count only memories so marked, so it never evicts another writer's.
+   */
+  val WriterKey: String = "llm4s.writer"
 
   /**
    * What the turn's recall found, cut to `maxRecallTokens * 4` characters: written by `beforeAgent` (removed when it

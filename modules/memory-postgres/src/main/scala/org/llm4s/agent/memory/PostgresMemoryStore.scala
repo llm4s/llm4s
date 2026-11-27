@@ -22,12 +22,18 @@ import scala.util.{ Try, Using }
  *
  * Built either by [[PostgresMemoryStore.apply]], which creates a connection pool and closes it on [[close]], or by
  * [[PostgresMemoryStore.fromDataSource]], over a `javax.sql.DataSource` the caller owns and keeps open.
+ *
+ * A store belongs to one `tenant`, set when it is built (#3032): every statement reads and writes only that tenant's
+ * rows of the table - recall, search, count, delete, `clear()`, bounds eviction and the applied writes - so many
+ * tenants share one table without seeing each other. `None` is the rows of no tenant, among them every row written
+ * before the column existed; opening the store adds the column to an older table.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: DataSource,
   val tableName: String,
   private val embeddingService: Option[EmbeddingService],
-  private[memory] val ownsDataSource: Boolean = true
+  private[memory] val ownsDataSource: Boolean = true,
+  val tenant: Option[String] = None
 ) extends TransactionalMemoryStore
     with AutoCloseable {
 
@@ -35,6 +41,38 @@ final class PostgresMemoryStore private[memory] (
 
   private val appliedTable = s"${tableName}_applied"
   private val fencesTable  = s"${tableName}_fences"
+
+  /** The `tenant` column's value for this store's rows: the tenant, or `''` for a store without one. */
+  private val tenantKey: String = tenant.getOrElse("")
+
+  /** `filter`'s narrowing, restricted to this store's tenant: every query of the memory table goes through it. */
+  private def scoped(filter: MemoryFilter): FilterSupport.Narrowing = {
+    val plan   = PostgresMemoryStore.narrowing(filter)
+    val clause = plan.sql.fold("tenant = ?")(s => s"(${s.clause}) AND tenant = ?")
+    FilterSupport.Narrowing(Some(FilterSupport.Sql(clause, plan.params :+ SqlParam.PString(tenantKey))), plan.exact)
+  }
+
+  /**
+   * The server, database, table and tenant this store reads and writes: two stores over one table and one tenant have
+   * one identity, whichever data source or instance reaches them, so a resolver that hands two tenants the same rows is
+   * caught. The server is its address and port, or, over a Unix socket, the JDBC URL.
+   */
+  override def storageIdentity: Result[Option[String]] =
+    attempt("Failed to read the store's identity") {
+      withConnection { conn =>
+        val url = Option(conn.getMetaData.getURL).getOrElse("").takeWhile(_ != '?')
+        runQuery(
+          conn,
+          "SELECT host(inet_server_addr()) || ':' || inet_server_port(), current_database(), to_regclass(?)::oid::text",
+          Seq(SqlParam.PString(tableName)),
+          stream = false
+        ) { rows =>
+          val rs     = rows.next()
+          val server = Option(rs.getString(1)).getOrElse(url)
+          Right(Some(s"postgresql://$server/${rs.getString(2)}?table=${rs.getString(3)}&tenant=$tenantKey"))
+        }
+      }
+    }
 
   private[memory] def initializeSchema(): Unit =
     withConnection { conn =>
@@ -45,14 +83,16 @@ final class PostgresMemoryStore private[memory] (
         // 2. Create table with proper VECTOR type
         stmt.execute(s"""
           CREATE TABLE IF NOT EXISTS $tableName (
-            id TEXT PRIMARY KEY,
+            tenant TEXT NOT NULL DEFAULT '',
+            id TEXT NOT NULL,
             content TEXT NOT NULL,
             memory_type TEXT NOT NULL,
             metadata JSONB DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             importance DOUBLE PRECISION,
             embedding vector,
-            version BIGINT NOT NULL DEFAULT 0
+            version BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (tenant, id)
           )
         """)
 
@@ -66,9 +106,19 @@ final class PostgresMemoryStore private[memory] (
 
         // 4. The applied writes of `TransactionalMemoryStore`, and the newest fencing token per scope
         stmt.execute(
-          s"CREATE TABLE IF NOT EXISTS $appliedTable (key TEXT PRIMARY KEY, scope TEXT NOT NULL, outcome TEXT NOT NULL)"
+          s"CREATE TABLE IF NOT EXISTS $appliedTable (tenant TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, " +
+            "scope TEXT NOT NULL, outcome TEXT NOT NULL, PRIMARY KEY (tenant, key))"
         )
-        stmt.execute(s"CREATE TABLE IF NOT EXISTS $fencesTable (scope TEXT PRIMARY KEY, token BIGINT NOT NULL)")
+        stmt.execute(
+          s"CREATE TABLE IF NOT EXISTS $fencesTable (tenant TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL, " +
+            "token BIGINT NOT NULL, PRIMARY KEY (tenant, scope))"
+        )
+
+        // 5. A table created before tenants (#3032) gains the column, its rows the tenant '', and a key per tenant
+        Seq(tableName -> "id", appliedTable -> "key", fencesTable -> "scope").foreach { case (table, key) =>
+          stmt.execute(s"ALTER TABLE $table ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT ''")
+          stmt.execute(PostgresMemoryStore.tenantKeyMigration(table, key))
+        }
       }
       ()
     }
@@ -112,9 +162,12 @@ final class PostgresMemoryStore private[memory] (
   private def alreadyApplied(key: AppliedWriteKey): Result[Boolean] =
     attempt("Failed to read applied write") {
       withConnection { conn =>
-        runQuery(conn, s"SELECT 1 FROM $appliedTable WHERE key = ?", Seq(SqlParam.PString(key.value)), stream = false)(
-          rows => Right(rows.hasNext)
-        )
+        runQuery(
+          conn,
+          s"SELECT 1 FROM $appliedTable WHERE key = ? AND tenant = ?",
+          Seq(SqlParam.PString(key.value), SqlParam.PString(tenantKey)),
+          stream = false
+        )(rows => Right(rows.hasNext))
       }
     }
 
@@ -134,16 +187,18 @@ final class PostgresMemoryStore private[memory] (
             val addIds  = adds.map(_.id).toSet
             val removed = deleteIds(conn, remove.distinct.filterNot(addIds.contains))
             writeAll(conn, adds)
-            val evicted = bounds.overflow(entries(conn))
+            val evicted = bounds.overflow(entries(conn, bounds))
             deleteIds(conn, evicted): Unit
             AppliedWrite(adds.map(_.id), removed, evicted.size)
           }
-        Using.resource(conn.prepareStatement(s"INSERT INTO $appliedTable (key, scope, outcome) VALUES (?, ?, ?)")) {
-          stmt =>
-            stmt.setString(1, key.value)
-            stmt.setString(2, key.scope)
-            stmt.setString(3, write(AppliedWrite.toJson(outcome)))
-            stmt.executeUpdate(): Unit
+        Using.resource(
+          conn.prepareStatement(s"INSERT INTO $appliedTable (key, scope, outcome, tenant) VALUES (?, ?, ?, ?)")
+        ) { stmt =>
+          stmt.setString(1, key.value)
+          stmt.setString(2, key.scope)
+          stmt.setString(3, write(AppliedWrite.toJson(outcome)))
+          stmt.setString(4, tenantKey)
+          stmt.executeUpdate(): Unit
         }
         outcome
       }
@@ -157,8 +212,9 @@ final class PostgresMemoryStore private[memory] (
 
   override def forgetApplied(key: AppliedWriteKey, token: Long): Result[TransactionalMemoryStore] =
     fencedTransaction(key, token) { conn =>
-      Using.resource(conn.prepareStatement(s"DELETE FROM $appliedTable WHERE key = ?")) { stmt =>
+      Using.resource(conn.prepareStatement(s"DELETE FROM $appliedTable WHERE key = ? AND tenant = ?")) { stmt =>
         stmt.setString(1, key.value)
+        stmt.setString(2, tenantKey)
         stmt.executeUpdate(): Unit
       }
     }.map(_ => this)
@@ -166,10 +222,9 @@ final class PostgresMemoryStore private[memory] (
   override def appliedWriteCount: Result[Int] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.createStatement()) { stmt =>
-          Using.resource(stmt.executeQuery(s"SELECT COUNT(*) FROM $appliedTable"))(rs =>
-            if (rs.next()) rs.getInt(1) else 0
-          )
+        Using.resource(conn.prepareStatement(s"SELECT COUNT(*) FROM $appliedTable WHERE tenant = ?")) { stmt =>
+          stmt.setString(1, tenantKey)
+          Using.resource(stmt.executeQuery())(rs => if (rs.next()) rs.getInt(1) else 0)
         }
       }
     }.toEither.left.map(e =>
@@ -195,22 +250,25 @@ final class PostgresMemoryStore private[memory] (
             stmt.setString(1, tableName.toLowerCase(java.util.Locale.ROOT))
             Using.resource(stmt.executeQuery())(_.next()): Unit
           }
-          val newest = Using.resource(conn.prepareStatement(s"SELECT token FROM $fencesTable WHERE scope = ?")) {
-            stmt =>
-              stmt.setString(1, key.scope)
-              Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getLong(1)) else None)
-          }
+          val newest =
+            Using.resource(conn.prepareStatement(s"SELECT token FROM $fencesTable WHERE scope = ? AND tenant = ?")) {
+              stmt =>
+                stmt.setString(1, key.scope)
+                stmt.setString(2, tenantKey)
+                Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getLong(1)) else None)
+            }
           newest match {
             case Some(n) if token < n => Left(TransactionalMemoryStore.stale(key.scope, token, n))
             case _ =>
               Using.resource(
                 conn.prepareStatement(
-                  s"INSERT INTO $fencesTable (scope, token) VALUES (?, ?) " +
-                    "ON CONFLICT (scope) DO UPDATE SET token = EXCLUDED.token"
+                  s"INSERT INTO $fencesTable (scope, token, tenant) VALUES (?, ?, ?) " +
+                    "ON CONFLICT (tenant, scope) DO UPDATE SET token = EXCLUDED.token"
                 )
               ) { stmt =>
                 stmt.setString(1, key.scope)
                 stmt.setLong(2, token)
+                stmt.setString(3, tenantKey)
                 stmt.executeUpdate(): Unit
               }
               Right(body(conn))
@@ -228,8 +286,9 @@ final class PostgresMemoryStore private[memory] (
       .flatten
 
   private def readApplied(conn: Connection, key: String): Option[AppliedWrite] =
-    Using.resource(conn.prepareStatement(s"SELECT outcome FROM $appliedTable WHERE key = ?")) { stmt =>
+    Using.resource(conn.prepareStatement(s"SELECT outcome FROM $appliedTable WHERE key = ? AND tenant = ?")) { stmt =>
       stmt.setString(1, key)
+      stmt.setString(2, tenantKey)
       Using.resource(stmt.executeQuery()) { rs =>
         if (rs.next())
           Some(
@@ -240,37 +299,45 @@ final class PostgresMemoryStore private[memory] (
     }
 
   private def present(conn: Connection, id: MemoryId): Boolean =
-    Using.resource(conn.prepareStatement(s"SELECT 1 FROM $tableName WHERE id = ?")) { stmt =>
+    Using.resource(conn.prepareStatement(s"SELECT 1 FROM $tableName WHERE id = ? AND tenant = ?")) { stmt =>
       stmt.setString(1, id.value)
+      stmt.setString(2, tenantKey)
       Using.resource(stmt.executeQuery())(_.next())
     }
 
   /** Deletes `ids`, returning those that were there. */
   private def deleteIds(conn: Connection, ids: Seq[MemoryId]): Vector[MemoryId] =
-    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ?")) { stmt =>
+    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ? AND tenant = ?")) { stmt =>
       ids.filter { id =>
         stmt.setString(1, id.value)
+        stmt.setString(2, tenantKey)
         stmt.executeUpdate() > 0
       }.toVector
     }
 
-  /** Every stored memory as [[MemoryBounds.overflow]] ranks it, without its embedding. */
-  private def entries(conn: Connection): Vector[MemoryBounds.Entry] =
-    Using.resource(conn.createStatement()) { stmt =>
-      Using.resource(stmt.executeQuery(s"SELECT id, importance, created_at, content, metadata::text FROM $tableName")) {
-        rs =>
-          val out = Vector.newBuilder[MemoryBounds.Entry]
-          while (rs.next()) {
-            val importance = rs.getDouble(2)
-            val known      = !rs.wasNull()
+  /** Every memory of this tenant that `bounds` counts, as [[MemoryBounds.overflow]] ranks it, without its embedding. */
+  private def entries(conn: Connection, bounds: MemoryBounds): Vector[MemoryBounds.Entry] =
+    Using.resource(
+      conn.prepareStatement(
+        s"SELECT id, importance, created_at, content, metadata::text FROM $tableName WHERE tenant = ?"
+      )
+    ) { stmt =>
+      stmt.setString(1, tenantKey)
+      Using.resource(stmt.executeQuery()) { rs =>
+        val out = Vector.newBuilder[MemoryBounds.Entry]
+        while (rs.next()) {
+          val importance = rs.getDouble(2)
+          val known      = !rs.wasNull()
+          val metadata   = PostgresMemoryStore.jsonToMetadata(rs.getString(5))
+          if (bounds.counts(metadata))
             out += MemoryBounds.Entry(
               MemoryId(rs.getString(1)),
               if (known) Some(importance) else None,
               rs.getTimestamp(3).toInstant,
-              MemoryBounds.sizeOf(rs.getString(4), PostgresMemoryStore.jsonToMetadata(rs.getString(5)))
+              MemoryBounds.sizeOf(rs.getString(4), metadata)
             )
-          }
-          out.result()
+        }
+        out.result()
       }
     }
 
@@ -329,9 +396,9 @@ final class PostgresMemoryStore private[memory] (
   private def writeAll(conn: Connection, memories: Seq[Memory]): Unit = {
     val sql = s"""
       INSERT INTO $tableName
-        (id, content, memory_type, metadata, created_at, importance, embedding)
-      VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector)
-      ON CONFLICT (id) DO UPDATE SET
+        (id, content, memory_type, metadata, created_at, importance, embedding, tenant)
+      VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector, ?)
+      ON CONFLICT (tenant, id) DO UPDATE SET
         content = EXCLUDED.content,
         memory_type = EXCLUDED.memory_type,
         metadata = EXCLUDED.metadata,
@@ -365,6 +432,7 @@ final class PostgresMemoryStore private[memory] (
       case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
       case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
     }
+    stmt.setString(8, tenantKey)
 
     stmt.addBatch()
   }
@@ -387,9 +455,10 @@ final class PostgresMemoryStore private[memory] (
     Try {
       withConnection { conn =>
         Using.resource(
-          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ?")
+          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ? AND tenant = ?")
         ) { stmt =>
           stmt.setString(1, id.value)
+          stmt.setString(2, tenantKey)
           Using.resource(stmt.executeQuery()) { rs =>
             if (rs.next()) {
               rowToMemory(rs).map(Some(_))
@@ -446,7 +515,7 @@ final class PostgresMemoryStore private[memory] (
    */
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     attempt("Failed to recall memories") {
-      val plan = PostgresMemoryStore.narrowing(filter)
+      val plan = scoped(filter)
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
@@ -493,7 +562,7 @@ final class PostgresMemoryStore private[memory] (
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
     attempt("Vector search failed") {
-      val plan       = PostgresMemoryStore.narrowing(filter)
+      val plan       = scoped(filter)
       val conditions = (plan.sql.map(s => s"(${s.clause})").toSeq :+ "embedding IS NOT NULL").mkString(" AND ")
       val vectorStr  = PostgresVectorHelpers.embeddingToString(queryVector)
       val sql =
@@ -536,7 +605,7 @@ final class PostgresMemoryStore private[memory] (
     if (phrases.isEmpty || topK <= 0) Right(Seq.empty)
     else
       attempt("Keyword search failed") {
-        val plan = PostgresMemoryStore.narrowing(filter)
+        val plan = scoped(filter)
         withConnection { conn =>
           inTransaction(conn) {
             val sql = s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC"
@@ -556,8 +625,9 @@ final class PostgresMemoryStore private[memory] (
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ?")) { stmt =>
+        Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ? AND tenant = ?")) { stmt =>
           stmt.setString(1, id.value)
+          stmt.setString(2, tenantKey)
           stmt.executeUpdate()
         }
       }
@@ -576,7 +646,7 @@ final class PostgresMemoryStore private[memory] (
    */
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     attempt("Failed to delete matching memories") {
-      val plan = PostgresMemoryStore.narrowing(filter)
+      val plan = scoped(filter)
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
@@ -598,9 +668,10 @@ final class PostgresMemoryStore private[memory] (
 
   /** Delete `ids`, [[PostgresMemoryStore.WriteBatchSize]] at a time. The caller supplies the transaction. */
   private def deleteAll(conn: Connection, ids: Seq[MemoryId]): Unit =
-    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ANY(?)")) { stmt =>
+    Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id = ANY(?) AND tenant = ?")) { stmt =>
       ids.grouped(PostgresMemoryStore.WriteBatchSize).foreach { chunk =>
         stmt.setArray(1, conn.createArrayOf("text", chunk.map(_.value).toArray[AnyRef]))
+        stmt.setString(2, tenantKey)
         stmt.executeUpdate(): Unit
       }
     }
@@ -624,7 +695,7 @@ final class PostgresMemoryStore private[memory] (
                 importance = ?,
                 embedding = ?::vector,
                 version = ?
-              WHERE id = ? AND version = ?
+              WHERE id = ? AND version = ? AND tenant = ?
             """
               Using.resource(conn.prepareStatement(sql)) { stmt =>
                 stmt.setString(1, updated.content)
@@ -645,6 +716,7 @@ final class PostgresMemoryStore private[memory] (
                 stmt.setLong(7, version + 1)
                 stmt.setString(8, id.value)
                 stmt.setLong(9, version)
+                stmt.setString(10, tenantKey)
                 stmt.executeUpdate()
               }
             }
@@ -675,7 +747,7 @@ final class PostgresMemoryStore private[memory] (
   /** How many memories `filter` accepts: `COUNT(*)` when the SQL is exact, otherwise the narrowed rows `matches` accepts. */
   override def count(filter: MemoryFilter): Result[Long] =
     attempt("Failed to count memories") {
-      val plan = PostgresMemoryStore.narrowing(filter)
+      val plan = scoped(filter)
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
@@ -706,11 +778,13 @@ final class PostgresMemoryStore private[memory] (
       case Some(service) =>
         def unembedded(after: Option[String]): Result[Vector[(String, String)]] =
           attempt("Failed to read memories to embed") {
-            val sql = s"SELECT id, content FROM $tableName WHERE embedding IS NULL" +
+            val sql = s"SELECT id, content FROM $tableName WHERE tenant = ? AND embedding IS NULL" +
               after.fold("")(_ => " AND id > ?") + " ORDER BY id LIMIT ?"
+            val params =
+              (SqlParam.PString(tenantKey) +: after.map(SqlParam.PString(_)).toSeq) :+ SqlParam.PInt(batchSize)
             withConnection { conn =>
-              runQuery(conn, sql, after.map(SqlParam.PString(_)).toSeq :+ SqlParam.PInt(batchSize), stream = false) {
-                rows => Right(rows.map(rs => rs.getString(1) -> rs.getString(2)).toVector)
+              runQuery(conn, sql, params, stream = false) { rows =>
+                Right(rows.map(rs => rs.getString(1) -> rs.getString(2)).toVector)
               }
             }
           }
@@ -720,12 +794,14 @@ final class PostgresMemoryStore private[memory] (
             withConnection { conn =>
               inTransaction(conn) {
                 val sql =
-                  s"UPDATE $tableName SET embedding = ?::vector WHERE id = ? AND content = ? AND embedding IS NULL"
+                  s"UPDATE $tableName SET embedding = ?::vector " +
+                    "WHERE id = ? AND content = ? AND embedding IS NULL AND tenant = ?"
                 Using.resource(conn.prepareStatement(sql)) { stmt =>
                   rows.zip(embeddings).foreach { case ((id, content), embedding) =>
                     stmt.setString(1, PostgresVectorHelpers.embeddingToString(embedding))
                     stmt.setString(2, id)
                     stmt.setString(3, content)
+                    stmt.setString(4, tenantKey)
                     stmt.addBatch()
                   }
                   Right(stmt.executeBatch().count(_ != 0))
@@ -761,7 +837,10 @@ final class PostgresMemoryStore private[memory] (
   override def clear(): Result[MemoryStore] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.createStatement())(stmt => stmt.execute(s"TRUNCATE TABLE $tableName"))
+        Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE tenant = ?")) { stmt =>
+          stmt.setString(1, tenantKey)
+          stmt.executeUpdate()
+        }
       }
       this
     }.toEither.left.map(e =>
@@ -790,9 +869,10 @@ final class PostgresMemoryStore private[memory] (
     Try {
       withConnection { conn =>
         Using.resource(
-          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ?")
+          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ? AND tenant = ?")
         ) { stmt =>
           stmt.setString(1, id.value)
+          stmt.setString(2, tenantKey)
           Using.resource(stmt.executeQuery()) { rs =>
             if (rs.next()) rowToMemory(rs).map(mem => Some(VersionedMemory(mem, rs.getLong("version"))))
             else Right(None)
@@ -895,12 +975,14 @@ object PostgresMemoryStore {
     user: String = "postgres",
     password: Secret = Secret(""),
     tableName: String = "agent_memories",
-    maxPoolSize: Int = 10
+    maxPoolSize: Int = 10,
+    tenant: Option[String] = None
   ) {
     require(
       ValidIdentifierPattern.matches(tableName),
       s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,54}"
     )
+    require(!tenant.exists(_.isEmpty), TenantMessage)
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
@@ -930,7 +1012,8 @@ object PostgresMemoryStore {
     }.toEither.left
       .map(initFailure)
       .flatMap { dataSource =>
-        val store = new PostgresMemoryStore(dataSource, config.tableName, embeddingService, ownsDataSource = true)
+        val store =
+          new PostgresMemoryStore(dataSource, config.tableName, embeddingService, ownsDataSource = true, config.tenant)
         initialized(store).left.map { e =>
           store.close()
           e
@@ -956,14 +1039,20 @@ object PostgresMemoryStore {
    * @param dataSource a `javax.sql.DataSource` the caller owns and closes
    * @param tableName the memory table; at most 55 characters matching `[a-zA-Z_][a-zA-Z0-9_]*`
    * @param embeddingService the service embedding memories, if any
+   * @param tenant the tenant whose memories this store reads and writes: many tenants share one table, each seeing,
+   *               counting, evicting and clearing only its own rows. `None` is the rows of no tenant, which is every
+   *               row a store wrote before tenants existed; a tenant is never empty.
    */
   def fromDataSource(
     dataSource: DataSource,
     tableName: String = "agent_memories",
-    embeddingService: Option[EmbeddingService] = None
+    embeddingService: Option[EmbeddingService] = None,
+    tenant: Option[String] = None
   ): Result[PostgresMemoryStore] =
     if (dataSource == null)
       Left(ProcessingError("postgres-memory-store", "dataSource must not be null"))
+    else if (tenant.exists(t => t == null || t.isEmpty))
+      Left(ProcessingError("postgres-memory-store", TenantMessage))
     else if (tableName == null || !ValidIdentifierPattern.matches(tableName))
       Left(
         ProcessingError(
@@ -972,7 +1061,32 @@ object PostgresMemoryStore {
         )
       )
     else
-      initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false))
+      initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false, tenant))
+
+  /**
+   * One statement making `(tenant, key)` the primary key of `table` if it is not yet: it locks the table and checks
+   * again before it changes the key, so two processes opening an older table at once migrate it once. An up-to-date
+   * table is checked without the lock. `table` is a validated identifier.
+   */
+  private[memory] def tenantKeyMigration(table: String, key: String): String = {
+    val keyed =
+      s"""EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+         |WHERE c.conrelid = '$table'::regclass AND c.contype = 'p' AND a.attname = 'tenant')""".stripMargin
+    s"""DO $$$$
+       |DECLARE pk name;
+       |BEGIN
+       |  IF NOT $keyed THEN
+       |    LOCK TABLE $table IN ACCESS EXCLUSIVE MODE;
+       |    IF NOT $keyed THEN
+       |      SELECT conname INTO pk FROM pg_constraint WHERE conrelid = '$table'::regclass AND contype = 'p';
+       |      IF pk IS NOT NULL THEN EXECUTE format('ALTER TABLE $table DROP CONSTRAINT %I', pk); END IF;
+       |      ALTER TABLE $table ADD PRIMARY KEY (tenant, $key);
+       |    END IF;
+       |  END IF;
+       |END $$$$""".stripMargin
+  }
+
+  private val TenantMessage = "a tenant must not be empty: the rows of no tenant are tenant = None"
 
   /** How many rows a streamed read fetches per round trip, so reading a large table to decide a filter never holds it. */
   private[memory] val FetchSize: Int = 500

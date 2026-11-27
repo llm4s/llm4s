@@ -164,6 +164,23 @@ trait TransactionalMemoryStoreContract extends AnyFlatSpecLike with Matchers wit
     contents(s2) shouldBe Vector("ABCDEFGHIJ", "abcdefghij")
   }
 
+  // #3034: a writer bounds what it wrote, never what someone else stored in the same store
+  it should "with an owner, count and evict only the owner's memories" in withStore { s0 =>
+    val bounds = MemoryBounds(maxMemories = 2).withOwner("writer", "me")
+    val mine   = (m: Memory) => m.withMetadata(Map("writer" -> "me"))
+    val loaded = (1 to 5).map(i => memory(s"loaded $i", None, at = i.toLong))
+    val s1     = s0.storeAll(loaded).value.asInstanceOf[TransactionalMemoryStore]
+    val (s2, a) =
+      applied(s1, key("a"), 1, Seq(mine(memory("mine 1", at = 10)), mine(memory("mine 2", at = 11))), Nil, bounds)
+    a.evicted shouldBe 0
+    val (s3, b) = applied(s2, key("b"), 1, Seq(mine(memory("mine 3", at = 12))), Nil, bounds)
+    b.evicted shouldBe 1
+    contents(s3) shouldBe (loaded.map(_.content) ++ Vector("mine 2", "mine 3")).sorted
+    bounds.counts(Map("writer" -> "me")) shouldBe true
+    bounds.counts(Map("writer" -> "you")) shouldBe false
+    MemoryBounds().counts(Map.empty) shouldBe true
+  }
+
   it should "keep applied keys when the store is cleared" in withStore { s0 =>
     val (s1, out) = applied(s0, key("k"), 1, Seq(memory("one")))
     val s2        = s1.clear().value.asInstanceOf[TransactionalMemoryStore]
@@ -228,6 +245,8 @@ class AppliedWriteSpec extends org.scalatest.flatspec.AnyFlatSpec with Matchers 
     an[IllegalArgumentException] should be thrownBy MemoryBounds(maxMemories = 0)
     an[IllegalArgumentException] should be thrownBy MemoryBounds(maxBytes = 0)
     MemoryBounds().withMaxMemories(3).withMaxBytes(9) shouldBe MemoryBounds(3, 9)
+    MemoryBounds().withOwner("w", "me").withMaxMemories(3).withMaxBytes(9).owner shouldBe
+      Some(MemoryBounds.Owner("w", "me"))
     MemoryBounds.sizeOf(Memory.userFact("é").withMetadata(Map("k" -> "vv"))) shouldBe
       2 + MemoryBounds.sizeOf("", Memory.userFact("é").withMetadata(Map("k" -> "vv")).metadata)
   }

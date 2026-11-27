@@ -24,7 +24,8 @@ import scalafix.v1._
  * alone.
  *
  * [[Llm4sMigrateFrom_1_0]] runs it with [[PositionalPatternsGainFields.arity10]]: since 1.0.0, `OpenAIConfig` gained
- * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900).
+ * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900), `MemoryBounds`
+ * `owner` and `PostgresMemoryStore.Config` `tenant` (#3032, #3034).
  */
 class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
     extends SemanticRule("PositionalPatternsGainFields") {
@@ -59,8 +60,10 @@ object PositionalPatternsGainFields {
    * them since removed, so a pattern on it is not widened by a `_`.
    */
   private val current: Map[String, Int] = Map(
-    "org/llm4s/llmconnect/config/OpenAIConfig" -> 14,
-    "org/llm4s/model/ModelMetadata"            -> 9
+    "org/llm4s/llmconnect/config/OpenAIConfig"          -> 14,
+    "org/llm4s/model/ModelMetadata"                     -> 9,
+    "org/llm4s/agent/memory/MemoryBounds"               -> 3,
+    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 8
   )
 
   /** `old` (a type's arity in some release) as `(old, current)` pairs. */
@@ -130,13 +133,16 @@ object PositionalPatternsGainFields {
 
   /**
    * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
-   * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900).
-   * 0.7.0 had the same arities, so [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
+   * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900),
+   * `MemoryBounds` `owner` and `PostgresMemoryStore.Config` `tenant` (#3032, #3034). 0.7.0 had the same arities, so
+   * [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
    */
   val arity10: Map[String, (Int, Int)] = toCurrent(
     Map(
-      "org/llm4s/llmconnect/config/OpenAIConfig" -> 11,
-      "org/llm4s/model/ModelMetadata"            -> 8
+      "org/llm4s/llmconnect/config/OpenAIConfig"          -> 11,
+      "org/llm4s/model/ModelMetadata"                     -> 8,
+      "org/llm4s/agent/memory/MemoryBounds"               -> 2,
+      "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 7
     )
   )
 

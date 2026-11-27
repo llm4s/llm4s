@@ -285,6 +285,40 @@ lower-cased copy of the value under its own key when you index, such as `"title_
 with `Contains("title_lc", query.toLowerCase)`. Neither form of `Contains` takes a pattern, so a wildcard search
 needs its own key, such as a prefix stored separately, or filtering in your code after the search.
 
+## `SemanticMemoryMiddleware` bounds only what it wrote, and tenants never share storage (#3032, #3034)
+
+`llm4s-agent-memory` is Experimental, `llm4s-memory` and `llm4s-memory-postgres` Beta. `MemoryStore` gains
+`storageIdentity` (with a default), `MemoryBounds` gains an `owner` (`withOwner`, `counts`), and
+`PostgresMemoryStore.fromDataSource` and `PostgresMemoryStore.Config` gain a `tenant`. A positional pattern on
+`MemoryBounds` or `PostgresMemoryStore.Config` gains a `_` with `Llm4sMigrateFrom_1_0`.
+
+| Before (1.0.0) | After |
+|---|---|
+| Every write of `SemanticMemoryMiddleware` evicted beyond `bounds` across the whole store, so attaching it to a store holding knowledge or facts deleted them | It marks what it writes with `llm4s.writer` = its id (`SemanticMemoryMiddleware.WriterKey`), and `bounds` counts and evicts only those. A `MemoryBounds` without `withOwner` still counts the whole store |
+| A resolver giving two tenants two instances over one SQLite file, or one Postgres table, was accepted, and the tenants read each other's memories | It is refused on the second tenant's first turn, naming both tenants: a store with the same `storageIdentity` as another tenant's (a SQLite file's real path; a Postgres table and tenant) is the same storage |
+| `PostgresMemoryStore` had no tenant: every store over a table read, counted, evicted and `clear()`ed every row, and `clear()` truncated the table | A store belongs to its `tenant` (`None` by default) and touches only that tenant's rows; `clear()` deletes them. Opening an older table adds a `tenant` column (`''`, the rows of `tenant = None`) and makes `(tenant, id)` its primary key, and `(tenant, key)` and `(tenant, scope)` those of its `_applied` and `_fences` tables |
+
+Memories the middleware recorded before this change carry no `llm4s.writer`, so its bounds no longer count or evict
+them. To keep them bounded, mark them once:
+
+```scala
+store.recall(MemoryFilter.All, Int.MaxValue).map(_.filter(_.memoryType == MemoryType.Conversation)).flatMap { recorded =>
+  recorded.foldLeft[Result[MemoryStore]](Right(store))((s, m) =>
+    s.flatMap(_.update(m.id, _.withMetadata(SemanticMemoryMiddleware.WriterKey, "semantic-memory")))
+  )
+}
+```
+
+(use the middleware's own id if it is not the default), or delete what you no longer need with `deleteMatching`.
+
+A resolver that built a file name from the tenant id must not let two tenants reach one file: `memory-default.db` for
+both `None` and `TenantId("default")`, or `Alice` and `alice` on a case-insensitive file system, is now refused, and a
+tenant id with `../` could name any path. Hash the id, as the
+[guide's example](../guide/agents/memory#semantic-memory-middleware) does; renaming the existing files to the new
+names keeps their memories. Postgres tenants that shared one table through stores of their own can now share it
+safely: pass `tenant = tenantId.map(_.value)`, and move each tenant's existing rows to it
+(`UPDATE agent_memories SET tenant = ... WHERE ...`) if you can tell them apart.
+
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;

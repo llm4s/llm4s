@@ -218,20 +218,21 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
   it should "count with COUNT(*) when the filter is exact" in {
     val ds = new RecordingDataSource(Seq(Map("count" -> 7L)))()
     store(ds).count(MemoryFilter.Not(MemoryFilter.MinImportance(0.5))) shouldBe Right(7L)
-    ds.sent.head.sql should startWith("SELECT COUNT(*) FROM t WHERE NOT (")
+    ds.sent.head.sql should startWith("SELECT COUNT(*) FROM t WHERE (NOT (")
+    ds.sent.head.sql should endWith(") AND tenant = ?")
   }
 
   it should "delete by id the rows matches accepts, and with one DELETE when the filter is exact" in {
     val ds = new RecordingDataSource(Seq(row("a", "keep"), row("b", "drop me")))()
     store(ds).deleteMatching(MemoryFilter.Custom(_.content.startsWith("drop"))).isRight shouldBe true
-    ds.sent.map(_.sql).last shouldBe "DELETE FROM t WHERE id = ANY(?)"
+    ds.sent.map(_.sql).last shouldBe "DELETE FROM t WHERE id = ANY(?) AND tenant = ?"
     // The candidates are locked as they are read, so a concurrent update cannot slip in before the delete
     ds.sent.head.sql should endWith("FOR UPDATE")
     ds.sent.last.params(1) shouldBe Seq("b")
 
     val exact = new RecordingDataSource()()
     store(exact).deleteMatching(MemoryFilter.HasMetadata("user-id")).isRight shouldBe true
-    exact.sent.map(_.sql) shouldBe Seq("DELETE FROM t WHERE (metadata -> CAST(? AS text)) IS NOT NULL")
+    exact.sent.map(_.sql) shouldBe Seq("DELETE FROM t WHERE ((metadata -> CAST(? AS text)) IS NOT NULL) AND tenant = ?")
   }
 
   it should "search by keyword without an embedding service" in {

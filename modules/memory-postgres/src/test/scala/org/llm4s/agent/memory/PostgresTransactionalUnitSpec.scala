@@ -69,14 +69,14 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
       statements += sql
       val s = state
       if (sql.startsWith("SELECT pg_advisory_xact_lock")) { locks += params(1).toString; rows(Seq(Seq(true))) }
-      else if (sql == s"SELECT token FROM ${table}_fences WHERE scope = ?")
+      else if (sql == s"SELECT token FROM ${table}_fences WHERE scope = ? AND tenant = ?")
         rows(s.fences.get(params(1).toString).map(Seq(_)).toSeq)
-      else if (sql == s"SELECT outcome FROM ${table}_applied WHERE key = ?")
+      else if (sql == s"SELECT outcome FROM ${table}_applied WHERE key = ? AND tenant = ?")
         rows(s.applied.get(params(1).toString).map(Seq(_)).toSeq)
-      else if (sql == s"SELECT 1 FROM ${table}_applied WHERE key = ?")
+      else if (sql == s"SELECT 1 FROM ${table}_applied WHERE key = ? AND tenant = ?")
         rows(s.applied.get(params(1).toString).map(_ => Seq(1)).toSeq)
-      else if (sql == s"SELECT COUNT(*) FROM ${table}_applied") rows(Seq(Seq(s.applied.size)))
-      else if (sql == s"SELECT 1 FROM $table WHERE id = ?")
+      else if (sql == s"SELECT COUNT(*) FROM ${table}_applied WHERE tenant = ?") rows(Seq(Seq(s.applied.size)))
+      else if (sql == s"SELECT 1 FROM $table WHERE id = ? AND tenant = ?")
         rows(s.memories.get(params(1).toString).map(_ => Seq(1)).toSeq)
       else if (sql.startsWith("SELECT id, importance, created_at, content, metadata::text"))
         rows(s.memories.values.toSeq.map(r => Seq(r.id, r.importance.orNull, r.at, r.content, r.metadata)))
@@ -90,9 +90,9 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
         state = s.copy(fences = s.fences + (params(1).toString -> params(2).asInstanceOf[Long])); 1
       } else if (sql.startsWith(s"INSERT INTO ${table}_applied")) {
         state = s.copy(applied = s.applied + (params(1).toString -> params(3).toString)); 1
-      } else if (sql == s"DELETE FROM ${table}_applied WHERE key = ?") {
+      } else if (sql == s"DELETE FROM ${table}_applied WHERE key = ? AND tenant = ?") {
         state = s.copy(applied = s.applied - params(1).toString); 1
-      } else if (sql == s"DELETE FROM $table WHERE id = ?") {
+      } else if (sql == s"DELETE FROM $table WHERE id = ? AND tenant = ?") {
         val id = params(1).toString
         state = s.copy(memories = s.memories - id)
         if (s.memories.contains(id)) 1 else 0
@@ -180,7 +180,7 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     db.state.memories.keySet shouldBe Set("a")
     // A peek at the applied record (to skip embedding a replay), then the locked transaction
     db.statements.take(2) shouldBe Seq(
-      "SELECT 1 FROM mem_applied WHERE key = ?",
+      "SELECT 1 FROM mem_applied WHERE key = ? AND tenant = ?",
       "SELECT pg_advisory_xact_lock(hashtext(?))"
     )
   }
