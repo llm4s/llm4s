@@ -2,7 +2,7 @@ package org.llm4s.speech.util
 
 import org.llm4s.error.CancelledError
 
-import scala.sys.process.{ BasicIO, ProcessBuilder }
+import scala.sys.process.{ BasicIO, ProcessBuilder, ProcessLogger }
 import scala.util.Try
 
 /**
@@ -25,6 +25,32 @@ private[speech] object CommandRuns {
       case 0    => Right(buffer.toString)
       case code => Left(new RuntimeException(s"Nonzero exit value: $code"))
     }
+  }
+
+  /** How a program ended: its exit code and the last `maxStderrChars` characters it wrote to stderr. */
+  final case class Completed(exitCode: Int, stderrTail: String)
+
+  /**
+   * Runs the program to completion, discarding its stdout and keeping the tail of its stderr, so an
+   * engine can say why a run failed. A non-zero exit is a `Right` here: the caller reads `exitCode`.
+   */
+  def withStderrTail(command: ProcessBuilder, maxStderrChars: Int = 2000): Either[Throwable, Completed] = {
+    val tail = new StderrTail(maxStderrChars)
+    start(command.run(ProcessLogger(_ => (), tail.add))).map(code => Completed(code, tail.text))
+  }
+
+  /** The last `max` characters of the lines given to `add`. */
+  final private class StderrTail(max: Int) {
+    private val lines = scala.collection.mutable.ArrayDeque.empty[String]
+    private var size  = 0
+
+    def add(line: String): Unit = synchronized {
+      lines.append(line)
+      size += line.length + 1
+      while (lines.size > 1 && size - lines.head.length - 1 >= max) size -= lines.removeHead().length + 1
+    }
+
+    def text: String = synchronized(lines.mkString("\n").takeRight(max))
   }
 
   /** The exit code, with the program's output going where `!` sends it. */

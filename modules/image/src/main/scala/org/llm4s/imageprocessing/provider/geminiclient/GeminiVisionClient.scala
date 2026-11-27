@@ -2,14 +2,13 @@ package org.llm4s.imageprocessing.provider.geminiclient
 
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
-import org.llm4s.imageprocessing.provider.LocalImageProcessor
+import org.llm4s.imageprocessing.provider.{ BoundedImageIO, LocalImageProcessor }
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import ujson.read
 
-import java.nio.file.{ Files, Paths }
 import java.time.Instant
 import java.util.Base64
 import scala.concurrent.duration._
@@ -99,10 +98,9 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
    * @return [[scala.util.Try]] wrapping the Base64 string on success.
    */
   def encodeImageToBase64(imagePath: String): Try[String] =
-    Try {
-      val imageBytes = Files.readAllBytes(Paths.get(imagePath))
-      Base64.getEncoder.encodeToString(imageBytes)
-    }
+    BoundedImageIO
+      .readBytes(imagePath, BoundedImageIO.MaxUploadBytes)
+      .map(imageBytes => Base64.getEncoder.encodeToString(imageBytes))
 
   /**
    * Detects the MIME media type of the image from its file extension.

@@ -153,7 +153,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       prompt = "test prompt"
     )
 
-    image.asBytes shouldBe testData
+    image.bytes.map(_.toSeq) shouldBe Right(testData.toSeq)
     image.prompt shouldBe "test prompt"
   }
 
@@ -171,7 +171,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val tempFile = Files.createTempFile("test_image", ".png")
 
     try
-      image.saveToFile(tempFile) match {
+      image.saveToFile(tempFile, overwrite = true) match {
         case Right(savedImage) =>
           savedImage.filePath shouldBe Some(tempFile)
           Files.readAllBytes(tempFile) shouldBe testData

@@ -123,7 +123,13 @@ val german = new VoskSpeechToText(modelPath = Some("/opt/vosk/vosk-model-small-d
 
 ### Whisper
 - **Installation**: `pip install openai-whisper`
-- **Usage**: The module integrates with Whisper CLI for transcription
+- **Usage**: `WhisperSpeechToText` runs the openai-whisper CLI (whisper.cpp's flags differ and are not supported)
+  with `--output_dir` set to a fresh temporary directory and `--verbose False`, reads the transcript from there and
+  deletes it: nothing is written to the working directory or beside the input
+- **Output format**: `txt` (the default) or `json` (always, when word timestamps are requested); `srt`, `vtt`,
+  `tsv` and `all` are refused with `STTError.InvalidInput`
+- **Language**: a BCP 47 tag is passed as its primary language (`en-US` as `en`), which is what the CLI accepts
+- **Errors**: a failed run reports the exit code and the end of the program's stderr
 - **Models**: Supports various model sizes (tiny, base, small, medium, large)
 
 ### Tacotron2

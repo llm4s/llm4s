@@ -37,7 +37,7 @@ class StableDiffusionSmokeSpec extends AnyFlatSpec with Matchers with EitherValu
       result.isRight shouldBe true
     }
 
-    val bytes   = result.value.asBytes.toSeq
+    val bytes   = result.value.bytes.value.toSeq
     val isPng   = bytes.startsWith(PngMagicBytes)
     val isJpeg  = bytes.startsWith(JpegMagicBytes)
     val leading = bytes.take(4).map(b => f"0x$b%02x").mkString(", ")

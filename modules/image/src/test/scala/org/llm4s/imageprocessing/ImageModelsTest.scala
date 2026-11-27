@@ -63,7 +63,7 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
       val metadata       = ImageMetadata()
       val processedImage = ProcessedImage(data, MediaType.Jpeg, 100, 100, metadata)
 
-      val result = processedImage.saveToFile(tempFile)
+      val result = processedImage.saveToFile(tempFile, overwrite = true)
       result shouldBe Right(())
       Files.exists(tempFile) shouldBe true
       Files.readAllBytes(tempFile) shouldBe data

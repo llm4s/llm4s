@@ -51,7 +51,9 @@ object ImageGenerationExample {
 
         // Save to file
         val outputPath = Paths.get("sunset.png")
-        image.saveToFile(outputPath).foreach(savedImage => logger.info(s"Saved to: ${savedImage.filePath.get}"))
+        image
+          .saveToFile(outputPath, overwrite = true)
+          .foreach(savedImage => logger.info(s"Saved to: ${savedImage.filePath.get}"))
 
       case Left(error) =>
         logger.error(s"Generation failed: ${error.message}")
@@ -80,7 +82,7 @@ object ImageGenerationExample {
         logger.info(s"Generated cyberpunk image with seed: ${image.seed.get}")
 
         val filename = s"cyberpunk_${image.seed.get}.png"
-        image.saveToFile(Paths.get(filename)).foreach(_ => logger.info(s"Saved: $filename"))
+        image.saveToFile(Paths.get(filename), overwrite = true).foreach(_ => logger.info(s"Saved: $filename"))
 
       case Left(error) =>
         logger.error(s"Advanced generation failed: ${error.message}")
@@ -99,7 +101,7 @@ object ImageGenerationExample {
 
         images.zipWithIndex.foreach { case (image, index) =>
           val filename = s"robot_${index + 1}.png"
-          image.saveToFile(Paths.get(filename)).foreach(_ => logger.info(s"Saved: $filename"))
+          image.saveToFile(Paths.get(filename), overwrite = true).foreach(_ => logger.info(s"Saved: $filename"))
         }
 
       case Left(error) =>
@@ -158,7 +160,9 @@ object ImageGenerationExample {
     ) match {
       case Right(editedImages) if editedImages.nonEmpty =>
         val output = Paths.get("edited_output.png")
-        editedImages.head.saveToFile(output).foreach(_ => logger.info(s"Edited image saved to: $output"))
+        editedImages.head
+          .saveToFile(output, overwrite = true)
+          .foreach(_ => logger.info(s"Edited image saved to: $output"))
       case Right(_) =>
         logger.info("Image editing returned no images")
       case Left(error) =>

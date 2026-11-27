@@ -448,9 +448,18 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         )
       }.toSeq
 
-      logger.info(s"Successfully generated ${images.length} image(s)")
       images
-    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
+    }.toEither.left
+      .map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
+      .flatMap { images =>
+        // An entry with neither `b64_json` nor `url` is no image at all, not an empty one (#3140).
+        if (images.exists(i => i.data.isEmpty && i.url.isEmpty))
+          Left(ImageValidationError("The response holds an image entry with neither b64_json nor url"))
+        else {
+          logger.info(s"Successfully generated ${images.length} image(s)")
+          Right(images)
+        }
+      }
 
   private def resolveImageFormat(
     maybeBase64Data: Option[String],

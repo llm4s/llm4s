@@ -10,7 +10,6 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import ujson.read
 
-import java.nio.file.{ Files, Paths }
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
@@ -163,10 +162,9 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
    * @return Try containing the Base64-encoded string, or failure if encoding fails
    */
   def encodeImageToBase64(imagePath: String): Try[String] =
-    Try {
-      val imageBytes = Files.readAllBytes(Paths.get(imagePath))
-      Base64.getEncoder.encodeToString(imageBytes)
-    }
+    BoundedImageIO
+      .readBytes(imagePath, BoundedImageIO.MaxUploadBytes)
+      .map(imageBytes => Base64.getEncoder.encodeToString(imageBytes))
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Result[String] =
     // A blank key would be sent as `Authorization: Bearer `: refused before any request.
