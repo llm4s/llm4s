@@ -13,7 +13,8 @@
 # Seen at main 64f8235e6 with `sbt doc docs/doc`: 21 warnings, 6 entries.
 
 # llm4s-provider-testkit's ProviderModuleChecks extends org.scalatest.Assertions, and llm4s-agent-testkit's
-# contracts (CheckpointerContract, ReplayContract, FileBackendContract, ...) extend AnyFlatSpecLike, so that a
+# contracts (CheckpointerContract, ReplayContract, FileBackendContract, ...) extend AnyFlatSpecLike, and
+# llm4s-rag-testkit's (VectorStoreContract, KeywordIndexContract) AnyFunSuiteLike, so that a
 # provider or backend's own spec mixes them in. They inherit ScalaTest's assert/assume/fail/intercept/pending, whose
 # comments link to ScalaTest's exception types by short name.
 org/scalatest/Assertions.scala | TestFailedException | assert/fail/intercept/assertResult docs, inherited by the testkits
@@ -22,6 +23,8 @@ org/scalatest/Assertions.scala | TestCanceledException | assume docs, inherited 
 org/scalatest/Assertions.scala | TestPendingException | pending docs, inherited by the testkits
 org/scalatest/Suite.scala | NullArgumentException | Suite.run docs, inherited by the agent-testkit contracts via AnyFlatSpecLike
 org/scalatest/flatspec/AnyFlatSpecLike.scala | NullArgumentException | registerTest/registerIgnoredTest/run docs, inherited by the agent-testkit contracts
+org/scalatest/funsuite/AnyFunSuiteLike.scala | NullArgumentException | test/ignore/registerTest/run docs, inherited by the rag-testkit contracts (VectorStoreContract, KeywordIndexContract)
+org/scalatest/funsuite/AnyFunSuiteLike.scala | DuplicateTestNameException | test/ignore/registerTest docs, inherited by the rag-testkit contracts
 
 # The cats-effect samples (CatsEffectAgentExample, AgentStreamIOExample) extend IOApp.Simple, whose
 # `final def run(args: List[String])` inherits IOApp.run's comment and its member link; a final member cannot be

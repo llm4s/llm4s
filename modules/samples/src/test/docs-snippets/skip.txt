@@ -196,6 +196,7 @@ getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not 
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
 getting-started/installation.md | c99f578025 | skip | sbt build definition, not Scala source
+getting-started/installation.md | ab9262ecdb | skip | sbt build definition, not Scala source
 getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
 tutorials/support-assistant/part-1-first-call.md | c0673f0690 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
 tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
