@@ -585,8 +585,12 @@ Each has the factories `strict`, `balanced`, `lenient` and `monitoring` (`Ground
 - `SourceAttributionGuardrail` passes without a judge call when the context has no chunks or `requireAttributions` is
   `false`. Give it a context with `sources`, or the judge has no source names to look for.
 - `GuardrailAction.Warn` logs and passes. None of them can repair an answer, so `GuardrailAction.Fix` does not fix:
-  `GroundingGuardrail` and `TopicBoundaryGuardrail` block as `Block` does, and the other two log and pass as `Warn`
-  does.
+  `GroundingGuardrail` and `TopicBoundaryGuardrail` block as `Block` does (`GroundingGuardrail` also on a context
+  with no chunks), and the other two log and pass as `Warn` does.
+- The judge's reply is read line by line (`SCORE:`, `OVERALL_SCORE:` and `CHUNK_SCORES:`, `ATTRIBUTION_SCORE:`,
+  `RELEVANCE_SCORE:`), each score with the grammar an `LLMGuardrail` reads: one plain number from 0 to 1, never
+  clamped. A score on another scale (`2/10`, `30%`, `85`), a missing score line or a reply without the structure asked
+  for is a `Left`, never a pass.
 - `TopicBoundaryGuardrail` is an ordinary `InputGuardrail` on the query: pass it in `input`, with no wrapping.
 
 ---

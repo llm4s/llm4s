@@ -250,14 +250,15 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     result.swap.toOption.get shouldBe a[NetworkError]
   }
 
-  it should "fall back to score-only parsing" in {
+  // #3234: a reply without the SCORE and GROUNDED lines is unreadable, never a bare score read out of it
+  it should "refuse a score-only reply" in {
     val mockClient = new MockGroundingLLMClient("0.85")
     val guardrail  = GroundingGuardrail(mockClient, threshold = 0.8)
 
     val context = RAGContext("Test", Seq("Context"))
     val result  = guardrail.validateWithContext("Response", context)
 
-    result shouldBe Right("Response")
+    result.isLeft shouldBe true
   }
 
   it should "fail when LLM response is unparseable" in {

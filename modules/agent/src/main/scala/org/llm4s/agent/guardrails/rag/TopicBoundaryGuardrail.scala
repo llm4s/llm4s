@@ -11,8 +11,6 @@ import org.slf4j.LoggerFactory
 
 import java.util.Locale
 
-import scala.util.Try
-
 /**
  * Result of topic boundary evaluation.
  *
@@ -209,19 +207,15 @@ class TopicBoundaryGuardrail(
    * Parse the structured topic result from LLM response.
    */
   private def parseTopicResult(response: String): Result[TopicBoundaryResult] = {
-    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
+    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty).toSeq
 
     val isOnTopic = lines.find(_.startsWith("IS_ON_TOPIC:")).exists { line =>
       line.stripPrefix("IS_ON_TOPIC:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
-    val relevanceScore = lines
-      .find(_.startsWith("RELEVANCE_SCORE:"))
-      .flatMap { line =>
-        val value = line.stripPrefix("RELEVANCE_SCORE:").trim.replaceAll("[^0-9.]", "")
-        Try(value.toDouble).toOption.map(s => Math.max(0.0, Math.min(1.0, s)))
-      }
-      .getOrElse(if (isOnTopic) 0.7 else 0.3)
+    // Read as LLMGuardrail reads a score (#3234): a number from 0 to 1, never clamped; a missing or unreadable
+    // RELEVANCE_SCORE is a Left, never a default score.
+    val relevanceScoreRead = JudgeScores.required(lines, "RELEVANCE_SCORE:", "topic_boundary_parse", response)
 
     val matchedTopics = lines
       .find(_.startsWith("MATCHED_TOPICS:"))
@@ -242,18 +236,16 @@ class TopicBoundaryGuardrail(
       .map(_.stripPrefix("EXPLANATION:").trim)
       .getOrElse("No explanation provided")
 
-    // Apply threshold to determine final on-topic status
-    val finalIsOnTopic = isOnTopic && relevanceScore >= threshold
-
-    Right(
+    relevanceScoreRead.map { relevanceScore =>
       TopicBoundaryResult(
-        isOnTopic = finalIsOnTopic,
+        // Apply threshold to determine final on-topic status
+        isOnTopic = isOnTopic && JudgeScores.reaches(relevanceScore, threshold),
         relevanceScore = relevanceScore,
         matchedTopics = matchedTopics,
         detectedTopic = detectedTopic,
         explanation = explanation
       )
-    )
+    }
   }
 }
 
