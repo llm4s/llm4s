@@ -7,10 +7,16 @@ import scala.collection.mutable
 
 /**
  * A connection whose queries return `rows(sql)` and which records the parameters of every statement it runs
- * (one entry per `executeUpdate`, `executeQuery` or batch row).
+ * (one entry per `executeUpdate`, `executeQuery` or batch row). A statement whose SQL `fails` throws when run, after
+ * it is recorded. Commits and rollbacks are counted.
  */
-final class ScriptedDb(rows: String => Seq[Map[String, Any]]) {
+final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => Boolean = _ => false) {
   val writes: mutable.ListBuffer[(String, Map[Int, Any])] = mutable.ListBuffer.empty
+  var commits: Int                                        = 0
+  var rollbacks: Int                                      = 0
+
+  /** The SQL of every statement run, in order. */
+  def statements: Seq[String] = writes.toSeq.map(_._1)
 
   private def proxy[T](cls: Class[T])(handler: (String, Array[AnyRef]) => Any): T =
     Proxy
@@ -43,8 +49,11 @@ final class ScriptedDb(rows: String => Seq[Map[String, Any]]) {
   }
 
   private def statement(sql: String): PreparedStatement = {
-    val params         = mutable.Map.empty[Int, Any]
-    def record(): Unit = { writes += ((sql, params.toMap)); params.clear() }
+    val params = mutable.Map.empty[Int, Any]
+    def record(): Unit = {
+      writes += ((sql, params.toMap)); params.clear()
+      if (fails(sql)) throw new java.sql.SQLException(s"scripted failure: $sql")
+    }
     proxy(classOf[PreparedStatement]) {
       case (name, Array(i: Integer, v)) if name.startsWith("set") => params(i.intValue) = v
       case ("addBatch", _)                                        => record()
@@ -60,6 +69,8 @@ final class ScriptedDb(rows: String => Seq[Map[String, Any]]) {
       case ("getAutoCommit", _)                     => true
       case ("prepareStatement", Array(sql: String)) => statement(sql)
       case ("createStatement", _)                   => proxy(classOf[Statement])((_, _) => null)
+      case ("commit", _)                            => commits += 1
+      case ("rollback", _)                          => rollbacks += 1
       case _                                        => null
     }
     proxy(classOf[DataSource]) {

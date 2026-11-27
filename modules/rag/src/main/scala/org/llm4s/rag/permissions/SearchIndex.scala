@@ -119,15 +119,15 @@ trait SearchIndex {
    * Delete a document from every collection that holds it.
    *
    * `RAG.deleteDocument` calls it, so that deleting a document by id removes what [[ingest]] wrote for it in any
-   * collection, not only what the plain ingest API wrote. The default deletes it from each leaf collection in turn and
-   * stops at the first failure; an index that can do it in one statement should override it.
+   * collection, not only what the plain ingest API wrote. The default deletes it from each collection in turn, leaves
+   * and parents alike (a parent made one while it held documents still holds them), and stops at the first failure; an index that can do it in one statement should override it.
    *
    * @param documentId The document identifier
    * @return Number of chunks deleted
    */
   def deleteDocumentFromAllCollections(documentId: String): Result[Long] =
     collections.list(CollectionPattern.All).flatMap { all =>
-      all.filter(_.isLeaf).foldLeft[Result[Long]](Right(0L)) { (acc, collection) =>
+      all.foldLeft[Result[Long]](Right(0L)) { (acc, collection) =>
         acc.flatMap(total => deleteDocument(collection.path, documentId).map(total + _))
       }
     }

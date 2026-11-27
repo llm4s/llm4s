@@ -285,6 +285,34 @@ lower-cased copy of the value under its own key when you index, such as `"title_
 with `Contains("title_lc", query.toLowerCase)`. Neither form of `Contains` takes a pattern, so a wildcard search
 needs its own key, such as a prefix stored separately, or filtering in your code after the search.
 
+## Collection permissions fail closed, and a leaf holding documents keeps them (#2990, #2991)
+
+`llm4s-rag` is Beta. `CollectionStore` gains `effectiveAccess` (with a default) and `EffectiveAccess`;
+`getEffectivePermissions` and `Collection.canQuery` are deprecated.
+
+| Before (1.0.0) | After |
+|---|---|
+| `canQuery` on a public child of a restricted parent was `true` for everyone, and so was it when the parent's and child's sets were disjoint; a search denied both | `canQuery` gives the answer `findAccessible` and a search give: a non-admin needs a principal at every restricted level |
+| A child could only name principals listed by its parent: `company` (`employees`) with `company/executive` (`managers`) was a `ValidationError` | Any principals are accepted. A public child of a restricted parent is still refused |
+| `getEffectivePermissions` returned the intersection of the levels, empty meaning public, so disjoint levels read as public | It returns an error where the intersection is empty. Use `effectiveAccess`: `Public`, `Restricted(levels)` or `Nobody` |
+| `create` or `ensureExists` of a child under a leaf made it a non-leaf, and its documents dropped out of every search; a failed child insert still demoted the parent | A leaf holding documents is refused a child (`ValidationError`), and the demotion and insert are one transaction. Search covers non-leaf collections, so documents an earlier version hid are found again |
+
+`Collection.canQuery` checks only that collection's own `queryableBy`: call `CollectionStore.canQuery`, or
+`effectiveAccess(path).map(_.permits(auth))`. Code that read an empty `getEffectivePermissions` as public should
+match on `effectiveAccess` instead:
+
+```scala
+collections.effectiveAccess(path).map {
+  case EffectiveAccess.Public             => "public"
+  case EffectiveAccess.Restricted(levels) => levels.map(l => s"${l.path.value}: ${l.anyOf.size}").mkString(", ")
+  case EffectiveAccess.Nobody             => "admins only"
+}
+```
+
+To give children to a leaf that holds documents, clear it (`clearCollection`) and ingest those documents into a
+child. A collection an earlier version made a non-leaf keeps its documents, which are searchable again, but it still
+takes no new ones.
+
 ## `SemanticMemoryMiddleware` bounds only what it wrote, and tenants never share storage (#3032, #3034)
 
 `llm4s-agent-memory` is Experimental, `llm4s-memory` and `llm4s-memory-postgres` Beta. `MemoryStore` gains

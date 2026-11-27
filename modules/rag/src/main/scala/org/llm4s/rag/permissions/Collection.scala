@@ -6,7 +6,7 @@ package org.llm4s.rag.permissions
  * Collections organize documents and define access permissions.
  * They form a tree structure where:
  * - Parent collections can have their own queryable_by permissions
- * - Sub-collections inherit parent permissions and can add further restrictions
+ * - Sub-collections inherit every restriction above them and can add further ones ([[EffectiveAccess]])
  * - Documents can only be added to leaf collections
  *
  * @param id Database primary key
@@ -38,13 +38,19 @@ final case class Collection(
   def depth: Int = path.depth
 
   /**
-   * Check if a user with the given authorization can query this collection.
+   * Check if a user with the given authorization passes this collection's own `queryableBy`.
    *
-   * A user can query if:
+   * A user passes if:
    * - The collection is public (empty queryableBy), OR
    * - The user is an admin, OR
    * - The user's principal IDs overlap with the collection's queryableBy set
+   *
+   * It does not see the collection's ancestors, so a public child of a restricted parent passes everyone.
    */
+  @deprecated(
+    "checks only this collection, not its ancestors; use CollectionStore.canQuery or CollectionStore.effectiveAccess",
+    since = "1.1.0"
+  )
   def canQuery(auth: UserAuthorization): Boolean =
     isPublic || auth.isAdmin || auth.principalIds.exists(queryableBy.contains)
 }

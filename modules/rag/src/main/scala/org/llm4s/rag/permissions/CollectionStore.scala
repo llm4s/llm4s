@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions
 
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 /**
@@ -7,9 +8,11 @@ import org.llm4s.types.Result
  *
  * Manages the hierarchical collection structure and enforces
  * permission inheritance rules:
- * - SubCollections inherit parent permissions
- * - SubCollections can only add restrictions (never loosen)
- * - Documents can only be added to leaf collections
+ * - A sub-collection inherits every restriction above it: a non-admin user needs a principal at each restricted
+ *   level ([[EffectiveAccess]])
+ * - A sub-collection of a restricted collection may not be public, but may name any principals; it need not repeat
+ *   its parent's
+ * - Documents can only be added to leaf collections, and a leaf holding documents cannot be given children
  */
 trait CollectionStore {
 
@@ -18,8 +21,11 @@ trait CollectionStore {
    *
    * Validates that:
    * - The parent exists (if not a root collection)
-   * - Permissions don't loosen parent restrictions
+   * - The collection is not public under a restricted parent
+   * - The parent, if it is a leaf, holds no documents: it becomes a non-leaf, and a non-leaf holds none
    * - The path is valid and not already taken
+   *
+   * Making the parent a non-leaf and creating the collection succeed or fail together.
    *
    * @param config The collection configuration
    * @return The created collection, or error
@@ -76,7 +82,7 @@ trait CollectionStore {
   /**
    * Update collection permissions.
    *
-   * Validates that new permissions don't loosen parent restrictions.
+   * Validates that the collection is not made public under a restricted parent.
    *
    * @param path The collection path
    * @param queryableBy The new set of queryable principals
@@ -110,28 +116,50 @@ trait CollectionStore {
   def delete(path: CollectionPath): Result[Unit]
 
   /**
-   * Get effective permissions for a collection considering inheritance.
+   * Who may query a collection, considering every collection above it.
    *
-   * Effective permissions are the intersection of:
-   * - The collection's own queryableBy, AND
-   * - All ancestor collections' queryableBy sets
-   *
-   * If any ancestor is public (empty queryableBy), that level is skipped.
-   * If the collection itself is public, returns empty (meaning public).
+   * The default reads the collection and each ancestor with [[get]]; a store that can read them in one query should
+   * override it.
    *
    * @param path The collection path
-   * @return The effective permissions set
+   * @return The collection's effective access, or an error if it or an ancestor does not exist
    */
+  def effectiveAccess(path: CollectionPath): Result[EffectiveAccess] = {
+    val chain = Iterator.iterate(Option(path))(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten.toList.reverse
+    chain
+      .foldLeft[Result[List[Collection]]](Right(Nil)) { (acc, p) =>
+        acc.flatMap(found =>
+          get(p).flatMap(
+            _.toRight(ValidationError("collection", s"Collection not found: ${p.value}"))
+              .map(found :+ _)
+          )
+        )
+      }
+      .map(EffectiveAccess.of)
+  }
+
+  /**
+   * Get effective permissions for a collection considering inheritance.
+   *
+   * An empty set means public. A collection whose levels no single principal satisfies (`company` queryable by
+   * `employees`, `company/executive` by `managers`) has no answer of this shape, and returns an error rather than
+   * an empty set.
+   *
+   * @param path The collection path
+   * @return The principals any one of which may query the collection, or empty for public
+   */
+  @deprecated("an empty set reads as public; use effectiveAccess", since = "1.1.0")
   def getEffectivePermissions(path: CollectionPath): Result[Set[PrincipalId]]
 
   /**
    * Check if a user can query a collection.
    *
-   * This considers the effective permissions (with inheritance).
+   * Applies the rule [[findAccessible]] does, the collection and every ancestor ([[EffectiveAccess]]): a public
+   * child of a restricted parent is not public.
    *
    * @param path The collection path
    * @param auth The user's authorization context
-   * @return True if the user can query this collection
+   * @return True if the user can query this collection, or an error if it does not exist
    */
   def canQuery(path: CollectionPath, auth: UserAuthorization): Result[Boolean]
 
