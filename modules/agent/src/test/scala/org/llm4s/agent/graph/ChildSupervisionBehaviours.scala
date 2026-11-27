@@ -50,7 +50,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val childTools: Seq[AgentTool[?]] = Nil,
     val delegateTimeout: Option[FiniteDuration] = None,
     val parentMiddleware: Seq[AgentMiddleware] = Nil,
-    val childConfig: RunConfig = RunConfig()
+    val childConfig: RunConfig = RunConfig(),
+    val timeoutLandsIn: Option[CountDownLatch] = None
   ) {
     val crashAfterChild                   = new AtomicBoolean(false)
     val ends                              = new CopyOnWriteArrayList[Result[ChildEnd]]()
@@ -81,8 +82,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val delegate = AgentTool(spec) { (args, ctx) =>
       val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
       setup.lastOrigin.set(origin)
-      val ended =
+      val ended = interruptedOnceIn(setup.timeoutLandsIn)(
         ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), setup.childConfig, ctx, setup.settle)
+      )
       setup.ends.add(ended)
       if (setup.crashAfterChild.getAndSet(false)) ToolOutcome.Fatal(ProcessingError("crash", "after the child"))
       else outcome(setup, ended)
@@ -136,11 +138,49 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
 
   /** Waits for `latch`, ignoring interrupts, as a tool that will not be stopped does. */
-  private def awaitIgnoringInterrupts(latch: CountDownLatch): Unit = {
-    var waiting = true
-    while (waiting)
-      try waiting = !latch.await(30, TimeUnit.SECONDS)
+  private def awaitIgnoringInterrupts(latch: CountDownLatch, what: String, limit: FiniteDuration = 60.seconds): Unit = {
+    // Bounded: a latch that never opens (the child stalled before its tool, a release never sent) fails the case
+    // with `what` instead of hanging the job until CI's timeout.
+    val deadline = System.nanoTime() + limit.toNanos
+    var open     = latch.getCount == 0
+    while (!open && System.nanoTime() < deadline)
+      try open = latch.await(math.max(1L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
       catch { case _: InterruptedException => () }
+    if (!open) throw new AssertionError(s"$what within $limit")
+  }
+
+  /**
+   * Runs `body` - a delegating call's child run - on a thread of its own, and passes an interrupt of the calling thread
+   * on to it only once `inTool` is open, then restores the caller's flag. A call's timeout is wall-clock time
+   * (`ToolLoop` races the call against Ox's `timeoutOption`), and a slow runner may not admit the child and reach its
+   * tool within a short one (#2385, #3157): the call then times out before the child exists, no child is registered,
+   * and a case about the timed-out child's settlement finds none. Relayed this way the timeout always lands with the
+   * child in its tool, however slow the runner. Without `inTool`, `body` runs on the calling thread.
+   */
+  private def interruptedOnceIn[A](inTool: Option[CountDownLatch])(body: => A): A = inTool match {
+    case None => body
+    case Some(latch) =>
+      val result = new AtomicReference[Either[Throwable, A]]()
+      val runner = new Thread(() =>
+        result.set(
+          try Right(body)
+          catch { case t: Throwable => Left(t) }
+        )
+      )
+      runner.setDaemon(true) // a child stuck past a failed case cannot keep the test JVM alive
+      runner.start()
+      var relayed = false
+      while (runner.isAlive)
+        try runner.join()
+        catch {
+          case _: InterruptedException if !relayed =>
+            relayed = true
+            try awaitIgnoringInterrupts(latch, "the child did not reach its tool")
+            finally runner.interrupt()
+          case _: InterruptedException => ()
+        }
+      if (relayed) Thread.currentThread().interrupt()
+      result.get.fold(throw _, identity)
   }
 
   private def eventually(what: String)(condition: => Boolean): Unit = {
@@ -518,17 +558,22 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       childTools = Seq(gate)
     )
     val thread = ThreadId("held-elsewhere")
-    // a lease long enough that the holder's renewals land on a slow runner (a 300 ms lease lapsed on Windows CI, so
-    // the waiter took the child over instead of waiting): the holder renews every 100 ms with 900 ms to spare
+    // The waiter waits twice its own claim's life, so `here` keeps a short one; but nothing in this case may lose a
+    // claim to a renewal that lands late, as one did on Windows CI even with a 1 second lease (#3157): the waiting
+    // parent run lost its own claim on the thread, and the holder's could lapse the same way. So each
+    // runtime judges its lease by a frozen clock (`ticker`), and never finds it passed, and the holder's lease in the
+    // store outlasts the case, so no renewal has to land in time.
     val claims = ClaimPolicy(ttl = 1.second, renewEvery = 100.millis)
     val here   = new GraphRuntime(open(), claims = claims)
+    here.ticker = () => 0L
     family(here, setup)._1.run(thread, "go").isLeft shouldBe true
     val childId = onlyChild(here, thread).threadId
 
     // another runtime recovers the child and holds it
     mode.set(1)
-    val elsewhere = new GraphRuntime(open(), claims = claims)
-    val held      = elsewhere.recoverChild(childId, family(elsewhere, setup)._2.loop.graph, RunConfig()).ok
+    val elsewhere = new GraphRuntime(open(), claims = ClaimPolicy(ttl = 1.hour, renewEvery = 1.minute))
+    elsewhere.ticker = () => 0L
+    val held = elsewhere.recoverChild(childId, family(elsewhere, setup)._2.loop.graph, RunConfig()).ok
     entered.await(10, TimeUnit.SECONDS) shouldBe true
 
     val began = System.nanoTime()
@@ -599,7 +644,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
       ScriptedLLMClient.of(calling(call("k1", "hang"))),
       childTools = Seq(hanging(new AtomicBoolean(true), entered)),
-      delegateTimeout = Some(300.millis)
+      delegateTimeout = Some(300.millis),
+      timeoutLandsIn = Some(entered)
     )
     val runtime = new GraphRuntime(open())
     val thread  = ThreadId("timed-out-call")
@@ -643,6 +689,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
       childTools = Seq(hanging(blocking, entered)),
       delegateTimeout = Some(RetriedCallTimeout),
+      timeoutLandsIn = Some(entered),
       parentMiddleware = Seq(retrying)
     )
     val runtime = new GraphRuntime(open())
@@ -677,10 +724,12 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     it should s"settle or reattach the child of a timed-out call a wrapper suspended, when approved it $how (#2098)" in {
       val open     = storage()
       val blocking = new AtomicBoolean(true)
+      val inTool   = new CountDownLatch(1)
       val setup = new Setup(
         ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
         ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
-        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        childTools = Seq(hanging(blocking, inTool)),
+        timeoutLandsIn = Some(inTool),
         // only a call run again needs the longer timeout: one that gives up never runs it a second time
         delegateTimeout = Some(if (rerun) RetriedCallTimeout else 300.millis),
         parentMiddleware = Seq(approvingRetry(rerun, blocking))
@@ -737,10 +786,12 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         }
         else ToolOutcome.NeedsApproval("still unsure")
     }
+    val inTool = new CountDownLatch(1)
     val setup = new Setup(
       ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
       ScriptedLLMClient.of(calling(call("k1", "hang"))),
-      childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+      childTools = Seq(hanging(blocking, inTool)),
+      timeoutLandsIn = Some(inTool),
       delegateTimeout = Some(300.millis),
       parentMiddleware = Seq(again)
     )
@@ -765,10 +816,12 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     it should s"settle the child of a suspended timed-out call $how, and clear its record (#2105)" in {
       val open     = storage()
       val blocking = new AtomicBoolean(true)
+      val inTool   = new CountDownLatch(1)
       val setup = new Setup(
         ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
         ScriptedLLMClient.of(calling(call("k1", "hang"))),
-        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        childTools = Seq(hanging(blocking, inTool)),
+        timeoutLandsIn = Some(inTool),
         delegateTimeout = Some(300.millis),
         parentMiddleware = Seq(approvingRetry(rerun = true, blocking))
       )
@@ -807,11 +860,12 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val open        = storage()
     val runtime     = new GraphRuntime(open())
     val blocking    = new AtomicBoolean(true)
+    val inTool      = new CountDownLatch(1)
     val childClient = ScriptedLLMClient.of(calling(call("k1", "hang")))
     val child = Agent
       .builder("worker", childClient)
       .withRuntime(runtime)
-      .withToolSet(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
+      .withToolSet(SpecTools.set(hanging(blocking, inTool)))
       .build()
       .ok
     // asks first; its resume delegates, and times out
@@ -821,7 +875,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       def execute(args: SpecTools.Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: SpecTools.Text, question: Confirm, answer: Boolean, ctx: ToolContext): ToolOutcome = {
         val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
-        ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx) match {
+        interruptedOnceIn(Some(inTool))(
+          ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx)
+        ) match {
           case Right(_)    => ToolOutcome.success(ToolContent.Json(ujson.Str("report")))
           case Left(error) => ToolOutcome.Fatal(error)
         }
@@ -869,10 +925,12 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
           case other => other
         }
     }
+    val inTool = new CountDownLatch(1)
     val setup = new Setup(
       ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
       ScriptedLLMClient.of(calling(call("k1", "hang"))),
-      childTools = Seq(hanging(new AtomicBoolean(true), new CountDownLatch(1))),
+      childTools = Seq(hanging(new AtomicBoolean(true), inTool)),
+      timeoutLandsIn = Some(inTool),
       delegateTimeout = Some(300.millis),
       parentMiddleware = Seq(swallow)
     )
@@ -893,7 +951,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val stubborn = SpecTools.tool("stubborn") { (_, _) =>
       if (calls.getAndIncrement() == 0) {
         entered.countDown()
-        awaitIgnoringInterrupts(release)
+        awaitIgnoringInterrupts(release, "stubborn was not released")
       }
       ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
     }
@@ -914,6 +972,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         ended.set(ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, true))
       )
       firstRunner.compareAndSet(null, runner)
+      runner.setDaemon(true) // a child stuck past a failed case cannot keep the test JVM alive
       runner.start()
       var relayed = false
       while (runner.isAlive)
@@ -921,8 +980,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         catch {
           case _: InterruptedException if !relayed =>
             relayed = true
-            awaitIgnoringInterrupts(entered)
-            runner.interrupt()
+            try awaitIgnoringInterrupts(entered, "the child did not reach stubborn")
+            finally runner.interrupt()
           case _: InterruptedException => ()
         }
       if (relayed) Thread.currentThread().interrupt()
