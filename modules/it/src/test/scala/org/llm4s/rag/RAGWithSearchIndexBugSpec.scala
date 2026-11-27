@@ -2,7 +2,7 @@ package org.llm4s.rag
 
 import org.llm4s.security.Secret
 import org.llm4s.rag.permissions._
-import org.llm4s.rag.permissions.pg.PgSearchIndex
+import org.llm4s.rag.permissions.pg.{ PgSearchIndex, PgSuiteCleanup }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -26,12 +26,15 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
   private val testTableName                      = "test_rag_searchindex_bug"
   private var searchIndex: Option[PgSearchIndex] = None
 
+  // A collection of this run's own, never dropSchema(): llm4s_collections and llm4s_principals are shared.
+  private val root = PgSuiteCleanup.runRoot("rag-bug-test")
+
   override def beforeAll(): Unit = {
     super.beforeAll()
     pgUrl.foreach { url =>
       PgSearchIndex.fromJdbcUrl(url, pgUser, pgPassword, testTableName) match {
         case Right(index) =>
-          index.dropSchema()
+          PgSuiteCleanup.dropOwnTables(url, pgUser, pgPassword, Seq(testTableName))
           index.initializeSchema() match {
             case Right(_) => searchIndex = Some(index)
             case Left(e)  => println(s"Failed to initialize schema: ${e.message}")
@@ -44,7 +47,7 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
   override def afterAll(): Unit = {
     searchIndex.foreach { idx =>
-      idx.dropSchema()
+      pgUrl.foreach(url => PgSuiteCleanup.removeOwn(idx, root, url, pgUser, pgPassword, Seq(testTableName)))
       idx.close()
     }
     super.afterAll()
@@ -78,16 +81,16 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
     val result = for {
       _ <- index.collections.ensureExists(
-        CollectionConfig.publicLeaf(CollectionPath.unsafe("rag-bug-test"))
+        CollectionConfig.publicLeaf(root)
       )
       count <- index.ingest(
-        collectionPath = CollectionPath.unsafe("rag-bug-test"),
+        collectionPath = root,
         documentId = "test-doc",
         chunks = Seq(ChunkWithEmbedding("Test content", Array(0.1f, 0.2f, 0.3f), 0))
       )
       results <- index.query(
         auth = UserAuthorization.Admin,
-        collectionPattern = CollectionPattern.Exact(CollectionPath.unsafe("rag-bug-test")),
+        collectionPattern = CollectionPattern.Exact(root),
         queryVector = Array(0.1f, 0.2f, 0.3f),
         topK = 10
       )

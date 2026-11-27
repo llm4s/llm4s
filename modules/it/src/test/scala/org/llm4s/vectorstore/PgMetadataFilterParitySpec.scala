@@ -2,9 +2,9 @@ package org.llm4s.vectorstore
 
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
-import org.llm4s.rag.permissions.{ ChunkWithEmbedding, CollectionConfig, CollectionPath, CollectionPattern }
+import org.llm4s.rag.permissions.{ ChunkWithEmbedding, CollectionConfig, CollectionPattern }
 import org.llm4s.rag.permissions.UserAuthorization
-import org.llm4s.rag.permissions.pg.PgSearchIndex
+import org.llm4s.rag.permissions.pg.{ PgSearchIndex, PgSuiteCleanup }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.MetadataFilter._
@@ -87,8 +87,8 @@ class PgMetadataFilterParitySpec extends AnyWordSpec with Matchers {
           }
         }
       } finally {
-        store.clear()
         store.close()
+        PgSuiteCleanup.dropOwnTables(testUrl.get, user, password, Seq(s"filter_parity_v_$suffix"))
       }
     }
   }
@@ -102,8 +102,8 @@ class PgMetadataFilterParitySpec extends AnyWordSpec with Matchers {
         checkAll(f => index.search("common", 10, Some(f)).map(_.map(_.id).toSet))
         checkAll(f => index.searchWithHighlights("common", 10, filter = Some(f)).map(_.map(_.id).toSet))
       } finally {
-        index.clear()
         index.close()
+        PgSuiteCleanup.dropOwnTables(testUrl.get, user, password, Seq(s"filter_parity_k_${suffix}_keyword"))
       }
     }
   }
@@ -111,11 +111,14 @@ class PgMetadataFilterParitySpec extends AnyWordSpec with Matchers {
   "PgSearchIndex" should {
     "select the same records as SQLiteVectorStore in query and keywordQuery" in {
       requirePg()
-      val index = PgSearchIndex.fromJdbcUrl(testUrl.get, user, password, s"filter_parity_s_$suffix").toOption.get
+      val table = s"filter_parity_s_$suffix"
+      val index = PgSearchIndex.fromJdbcUrl(testUrl.get, user, password, table).toOption.get
+      // A root of its own, never dropSchema(): the collection and principal tables are shared with other suites.
+      val root = PgSuiteCleanup.runRoot("filter-parity")
       try {
-        index.dropSchema()
         index.initializeSchema() shouldBe Right(())
-        val path = CollectionPath.unsafe("parity")
+        val path = root.child("leaf").toOption.get
+        index.collections.create(CollectionConfig.publicParent(root)).isRight shouldBe true
         index.collections.create(CollectionConfig.publicLeaf(path)).isRight shouldBe true
         records.foreach { case (id, m) =>
           index.ingest(path, id, Seq(ChunkWithEmbedding("common words", Array(1.0f, 0.0f), 0)), m, Set.empty) shouldBe
@@ -139,7 +142,7 @@ class PgMetadataFilterParitySpec extends AnyWordSpec with Matchers {
             .map(r => docIds(r.map(_.metadata)))
         )
       } finally {
-        index.dropSchema()
+        PgSuiteCleanup.removeOwn(index, root, testUrl.get, user, password, Seq(table))
         index.close()
       }
     }
