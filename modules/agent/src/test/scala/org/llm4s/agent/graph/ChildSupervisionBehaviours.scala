@@ -138,11 +138,15 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
 
   /** Waits for `latch`, ignoring interrupts, as a tool that will not be stopped does. */
-  private def awaitIgnoringInterrupts(latch: CountDownLatch): Unit = {
-    var waiting = true
-    while (waiting)
-      try waiting = !latch.await(30, TimeUnit.SECONDS)
+  private def awaitIgnoringInterrupts(latch: CountDownLatch, what: String, limit: FiniteDuration = 60.seconds): Unit = {
+    // Bounded: a latch that never opens (the child stalled before its tool, a release never sent) fails the case
+    // with `what` instead of hanging the job until CI's timeout.
+    val deadline = System.nanoTime() + limit.toNanos
+    var open     = latch.getCount == 0
+    while (!open && System.nanoTime() < deadline)
+      try open = latch.await(math.max(1L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
       catch { case _: InterruptedException => () }
+    if (!open) throw new AssertionError(s"$what within $limit")
   }
 
   /**
@@ -170,8 +174,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         catch {
           case _: InterruptedException if !relayed =>
             relayed = true
-            awaitIgnoringInterrupts(latch)
-            runner.interrupt()
+            try awaitIgnoringInterrupts(latch, "the child did not reach its tool")
+            finally runner.interrupt()
           case _: InterruptedException => ()
         }
       if (relayed) Thread.currentThread().interrupt()
@@ -946,7 +950,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val stubborn = SpecTools.tool("stubborn") { (_, _) =>
       if (calls.getAndIncrement() == 0) {
         entered.countDown()
-        awaitIgnoringInterrupts(release)
+        awaitIgnoringInterrupts(release, "stubborn was not released")
       }
       ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
     }
@@ -974,8 +978,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         catch {
           case _: InterruptedException if !relayed =>
             relayed = true
-            awaitIgnoringInterrupts(entered)
-            runner.interrupt()
+            try awaitIgnoringInterrupts(entered, "the child did not reach stubborn")
+            finally runner.interrupt()
           case _: InterruptedException => ()
         }
       if (relayed) Thread.currentThread().interrupt()
