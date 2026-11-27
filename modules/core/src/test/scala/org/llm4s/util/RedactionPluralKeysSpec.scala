@@ -262,16 +262,12 @@ class RedactionPluralKeysSpec extends AnyFlatSpec with Matchers {
   }
 
   // The scaling test above is PerformanceTest, run by `sbt testPerformance`; this one stays in `sbt test` and fails on
-  // a catastrophic regression of its worst shapes in one run, under a generous hang guard.
-  it should "redact a megabyte of plural keys and credential parameters well inside the hang guard (#1646)" in {
-    val inputs = Seq(
-      "{\"api_keys\": [\"a\", " * 60000,
-      ";jsessionid=a" * 90000,
-      "a" * 1000000 + "secrets"
-    )
-    inputs.foreach { input =>
-      input.length should be > 1000000
-      LinearTime.timed("a megabyte of plural keys", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
-    }
+  // a catastrophic regression of its worst shape in one run, under a generous hang guard. Of the three shapes the
+  // scaling test times, matrix parameters cost the most a megabyte (about 2.2 s, against 1.4 s for plural arrays and
+  // 0.8 s for one long word, #3215), so it is the one guard.
+  it should "redact a megabyte of credential parameters well inside the hang guard (#1646)" in {
+    val input = ";jsessionid=a" * 90000
+    input.length should be > 1000000
+    LinearTime.timed("a megabyte of matrix parameters", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 }

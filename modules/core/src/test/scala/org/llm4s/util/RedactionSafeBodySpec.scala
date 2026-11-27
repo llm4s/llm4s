@@ -45,6 +45,16 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     sb.toString
   }
 
+  /**
+   * `head` followed by log lines to just past [[WholeLimit]]: the shortest body that `safeBody` redacts only in a
+   * prefix. A longer one would be read the same way, only slower (#3215).
+   */
+  private def pastWholeLimit(head: String): String = {
+    val b = head + logLines(WholeLimit + 1024 - head.length)
+    b.length should be > WholeLimit
+    b
+  }
+
   private def isSeparator(c: Char): Boolean = Character.isWhitespace(c) || "\"',;<>{}[]()".indexOf(c.toInt) >= 0
 
   private def suffix(b: String, cut: Int): String =
@@ -63,7 +73,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
 
   it should "redact a longer body only in a prefix, cut after a letter or digit and before a separator (#1680)" in {
     (1 to 2).foreach { i =>
-      val b = body(i.toLong, 140 * 1024 + i * 200 * 1024)
+      val b = body(i.toLong, 140 * 1024 + i * 60 * 1024)
       Seq(1, 2048).foreach { max =>
         Redaction.safeBodyCut(b, max) match {
           case Some(cut) =>
@@ -77,12 +87,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
         }
       }
     }
-    val big = body(1680, 1024 * 1024)
-    val cut = Redaction.safeBodyCut(big, 2048)
-    cut should not be empty
-    val out = Redaction.safeBody(big, 2048)
-    out should endWith(suffix(big, cut.get))
-    Seq("secret", "bearer", "query", "py").foreach(word => (out should not).include(word))
+    // A body of a megabyte is the hang guard's, below.
   }
 
   it should "never cut a key in two, the issue's counterexample (#1680)" in {
@@ -168,7 +173,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
     Seq(4 -> "'", 2 -> "\"", 3 -> "\"", 7 -> "\"", 6 -> "'", 4 -> "u0027").foreach { case (run, quote) =>
       deepQuotedHeads(secret, run, quote).take(2).foreach { head =>
         withClue(s"run $run, quote $quote, head ${head.take(40)}: ") {
-          (Redaction.safeBody(head + logLines(100000), 2048) should not).include(secret)
+          (Redaction.safeBody(pastWholeLimit(head), 2048) should not).include(secret)
         }
       }
     }
@@ -181,7 +186,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
       quote <- Seq("'", "\"", "u0027", "u0022") if run > 0 || !quote.startsWith("u")
       head  <- deepQuotedHeads(secret, run, quote)
     } {
-      val b = head + logLines(150000)
+      val b = pastWholeLimit(head)
       withClue(s"run $run, quote $quote, head ${head.take(40)}: ") {
         if (!Redaction.redact(b).contains(secret)) (Redaction.safeBody(b, 2048) should not).include(secret)
       }
@@ -216,7 +221,7 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
 
   it should "keep a null body and a negative or oversized limit working (#1680)" in {
     Redaction.safeBody(null) shouldBe "null"
-    val b = body(7, 200 * 1024)
+    val b = body(7, WholeLimit + 8 * 1024)
     Redaction.safeBodyCut(b, -1) shouldBe None
     Redaction.safeBody(b, -1) shouldBe Redaction.truncateForLog(Redaction.redact(b), -1)
     // A limit no prefix can serve: the caller asked for the body redacted whole.
@@ -257,9 +262,10 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
       val kind = rnd.nextInt(10)
       val len  = Seq(20, 3000, 30000, 60000, 200000)(rnd.nextInt(5))
       val h    = head(kind, text(len, rnd), deep(rnd))
-      val b    = h + logLines(math.max(0, 200000 + rnd.nextInt(200000) - h.length))
-      val max  = Seq(1, 300, 2048)(rnd.nextInt(3))
-      val out  = Redaction.safeBody(b, max)
+      // past WholeLimit, so it is read only in a prefix; a longer body would only cost more (#3215)
+      val b   = h + logLines(math.max(0, WholeLimit + 1024 + rnd.nextInt(64 * 1024) - h.length))
+      val max = Seq(1, 300, 2048)(rnd.nextInt(3))
+      val out = Redaction.safeBody(b, max)
       Redaction.safeBodyCut(b, max) match {
         case Some(cut) => out shouldBe Redaction.redact(b.substring(0, cut)).take(max) + suffix(b, cut)
         case None      => out shouldBe Redaction.safeBodyOmitted(b)
@@ -280,12 +286,17 @@ class RedactionSafeBodySpec extends AnyFlatSpec with Matchers {
   it should "redact a body of a megabyte without hanging (#1680)" in {
     // An ordinary hang guard on a body well over the 128 KiB a body is redacted whole up to; how the cost compares
     // with redacting the body whole is the PerformanceTest below.
-    val b   = body(16, 1024 * 1024)
+    // It also keeps what was checked of a megabyte body in the test of a longer body above: it is cut, and shows none
+    // of its credentials.
+    val b   = body(1680, 1024 * 1024)
     var out = ""
     LinearTime.timed("safeBody of a 1 MiB body", LinearTime.MegabyteHangGuard) {
       out = Redaction.safeBody(b, 2048)
     }
-    out should endWith(s"redacted from its first ${Redaction.safeBodyCut(b, 2048).get} chars)")
+    val cut = Redaction.safeBodyCut(b, 2048)
+    cut should not be empty
+    out should endWith(suffix(b, cut.get))
+    Seq("secret", "bearer", "query", "py").foreach(word => (out should not).include(word))
   }
 
   it should "cost about what a 128 KiB body costs, whatever the body's size (#1680)" taggedAs PerformanceTest in {
