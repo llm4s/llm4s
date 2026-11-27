@@ -70,7 +70,8 @@ Property keys starting with `llm4s_` are reserved: `upsertNode` and `upsertEdge`
 property can never replace a node's id or label. Properties read back as they were written. Strings, booleans and
 numbers are stored natively (a whole number as an integer, so `GraphFilter(propertyKey = "age", propertyValue = "42")`
 matches as it does in memory), an array of one primitive type as a Neo4j list, and anything else (`null`, an object,
-a nested or mixed array) as JSON in the reserved `llm4s_json` property, which a property filter does not search.
+a nested or mixed array) as JSON in the reserved `llm4s_json` property. A property filter compares an array or a
+JSON-stored value by its compact JSON text, as the in-memory store does (`propertyValue = "{\"x\":1}"`).
 
 ## Testing
 

@@ -14,6 +14,10 @@ import scala.util.Try
  * a float, and an array whose elements are all strings, all booleans or all numbers as a Neo4j list. Everything Neo4j
  * cannot hold as a property (`null`, an object, a nested or mixed array) goes into one JSON object under
  * [[JsonKey]]. Keys starting with [[ReservedPrefix]] belong to the store.
+ *
+ * An array, and a value stored as JSON, also gets a [[TextPrefix]] key holding the value's compact JSON (its
+ * `toString`), which a property filter compares as the in-memory store does: `toString` on a list fails in Cypher, and
+ * a value inside [[JsonKey]] has no property of its own.
  */
 private[neo4j] object Neo4jProperties {
 
@@ -21,6 +25,10 @@ private[neo4j] object Neo4jProperties {
   val IdKey          = "llm4s_id"
   val LabelKey       = "llm4s_label"
   val JsonKey        = "llm4s_json"
+  val TextPrefix     = "llm4s_text_"
+
+  /** The key holding the filterable text of the user's property `key`, when it has one. */
+  def textKey(key: String): String = TextPrefix + key
 
   /** The largest whole double that converts to a `Long` without clamping. */
   private val LongBound = 9.2e18
@@ -42,6 +50,10 @@ private[neo4j] object Neo4jProperties {
           case Some(n) => m.put(k, n)
           case None    => json.put(k, v)
         }
+        v match {
+          case ujson.Str(_) | ujson.Bool(_) | ujson.Num(_) => ()
+          case other                                       => m.put(textKey(k), other.toString)
+        }
       }
       if (json.nonEmpty) m.put(JsonKey, ujson.write(ujson.Obj.from(json)))
       Right(m)
@@ -56,7 +68,7 @@ private[neo4j] object Neo4jProperties {
         Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o.value.toMap }.getOrElse(Map.empty)
       case _ => Map.empty[String, ujson.Value]
     }
-    all.view.filterKeys(k => k != IdKey && k != LabelKey && k != JsonKey).mapValues(fromDriverValue).toMap ++ fromJson
+    all.view.filterKeys(k => !k.startsWith(ReservedPrefix)).mapValues(fromDriverValue).toMap ++ fromJson
   }
 
   def toNode(n: org.neo4j.driver.types.Node): Node =

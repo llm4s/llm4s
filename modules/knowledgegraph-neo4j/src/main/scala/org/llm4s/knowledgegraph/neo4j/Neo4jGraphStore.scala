@@ -459,7 +459,11 @@ final class Neo4jGraphStore private (
     val propResult = filter.propertyKey.zip(filter.propertyValue).foldLeft[Result[Unit]](Right(())) {
       case (Right(_), (key, value)) =>
         sanitizePropertyKey(key).map { safeKey =>
-          clauses += s"toString(n.`$safeKey`) = $$filterPropValue"
+          // As the in-memory store compares: the value's text when it is an array or stored as JSON, else
+          // toString of the native value. CASE is evaluated lazily, so toString never sees a list.
+          val textKey = Neo4jProperties.textKey(safeKey)
+          clauses += s"(CASE WHEN n.`$textKey` IS NOT NULL THEN n.`$textKey` = $$filterPropValue " +
+            s"ELSE toString(n.`$safeKey`) = $$filterPropValue END)"
           params.put("filterPropValue", value)
         }
       case (Left(err), _) => Left(err)

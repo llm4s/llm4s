@@ -283,6 +283,7 @@ dependency (such as `llm4s-rag`) brought `sts` in.
 | On EKS with IRSA (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`) the default chain skipped web identity and could use the node's instance role | The pod's service-account role is used. Grant it `bedrock:InvokeModel` (and `InvokeModelWithResponseStream`) if the node role had it instead |
 | A `profile` with `role_arn` or SSO settings failed at the first call | It authenticates as that role or SSO user |
 | `close()` left the profile or default credentials provider open | `close()` closes it |
+
 ## GraphRAG is refused in every mode on a `RAG` with a `SearchIndex` (#2964)
 
 `llm4s-rag` is Beta, and no signature changed. On a `RAG` built with `.withSearchIndex(...)`, `queryWithGraphRAG`

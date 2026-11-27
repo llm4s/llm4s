@@ -116,6 +116,11 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
     stored.get("strs") shouldBe java.util.List.of("a", "b")
     stored.get("ints") shouldBe java.util.List.of(java.lang.Long.valueOf(1L), java.lang.Long.valueOf(2L))
     Seq("null", "mixed", "nested", "obj").foreach(k => stored.containsKey(k) shouldBe false)
+    // What a property filter compares, as the in-memory store does: the value's toString
+    Seq("null", "mixed", "nested", "obj", "strs", "empty").foreach { k =>
+      stored.get(Neo4jProperties.textKey(k)) shouldBe everyKind(k).toString
+    }
+    Seq("str", "bool", "int", "real").foreach(k => stored.containsKey(Neo4jProperties.textKey(k)) shouldBe false)
     ujson.read(stored.get(Neo4jProperties.JsonKey).asInstanceOf[String]).obj.keySet shouldBe
       Set("null", "mixed", "nested", "obj")
   }
@@ -135,6 +140,7 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
     stored.put("llm4s_id", "a")
     stored.put("llm4s_label", "Person")
     stored.put("llm4s_json", "not json")
+    stored.put("llm4s_text_tags", "[\"a\"]")
     stored.put("name", "Alice")
     Neo4jProperties.decode(stored) shouldBe Map("name" -> ujson.Str("Alice"))
   }

@@ -396,4 +396,27 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     store.getNode("b").toOption.flatten shouldBe Some(Node("b", "Person"))
     store.loadAll().toOption.get.edges shouldBe empty
   }
+
+  test("query: a property filter on an array, object or null value matches as in the in-memory store (#2969)") {
+    requireNeo4j()
+    val memory = new org.llm4s.knowledgegraph.storage.InMemoryGraphStore()
+    val nodes = Seq(
+      Node("1", "Doc", Map("meta" -> ujson.Obj("x" -> 1))),
+      Node("2", "Doc", Map("meta" -> ujson.Arr("a", 1))),
+      Node("3", "Doc", Map("meta" -> ujson.Arr("a", "b"))),
+      Node("4", "Doc", Map("meta" -> ujson.Null)),
+      Node("5", "Doc", Map("meta" -> ujson.Str("plain"))),
+      Node("6", "Doc", Map("meta" -> ujson.Num(3)))
+    )
+    nodes.foreach { n =>
+      store.upsertNode(n) shouldBe Right(())
+      memory.upsertNode(n) shouldBe Right(())
+    }
+    def ids(s: org.llm4s.knowledgegraph.storage.GraphStore, value: String): Set[String] =
+      s.query(GraphFilter(propertyKey = Some("meta"), propertyValue = Some(value))).toOption.get.nodes.keySet
+    val values = Seq("""{"x":1}""", """["a",1]""", """["a","b"]""", "null", "plain", "3", "nothing")
+    values.foreach(v => withClue(v)(ids(store, v) shouldBe ids(memory, v)))
+    ids(store, """{"x":1}""") shouldBe Set("1")
+    ids(store, """["a","b"]""") shouldBe Set("3")
+  }
 }
