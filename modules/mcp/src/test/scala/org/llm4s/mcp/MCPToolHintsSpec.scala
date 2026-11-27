@@ -335,6 +335,19 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
       registry.toolHints("reader") shouldBe Some(expected("reader"))
     }
 
+  it should "resolve hints through the registry's reconnect, from the server whose tool runs (#3068, #3072)" in {
+    sameNameRegistry(untrustedFirst = false) { registry =>
+      registry.getAllTools: Unit
+      registry.closeMCPClients()
+      registry.toolHints("reader") shouldBe Some(expected("reader"))
+    }
+    sameNameRegistry(untrustedFirst = true) { registry =>
+      registry.getAllTools: Unit
+      registry.closeMCPClients()
+      registry.toolHints("reader") shouldBe None
+    }
+  }
+
   it should "resolve the winning server even before any discovery (#3068)" in
     sameNameRegistry(untrustedFirst = true)(registry => registry.toolHints("reader") shouldBe None)
   sameNameRegistry(untrustedFirst = false) { registry =>
