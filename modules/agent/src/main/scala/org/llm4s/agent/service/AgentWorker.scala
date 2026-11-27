@@ -4,7 +4,14 @@ import org.llm4s.agent.{ AgentId, AgentRun }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ CancelledError, CircuitOpenError, LLMError, OptimisticLockFailure, ValidationError }
+import org.llm4s.error.{
+  CancelledError,
+  CircuitOpenError,
+  LLMError,
+  OptimisticLockFailure,
+  ProcessingError,
+  ValidationError
+}
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -66,7 +73,9 @@ final case class SweepReport(examined: Int, tombstones: Int, entries: Int, skipp
  *     rolling upgrade - for a worker that can, passing over it for a while, and closes it `Failed(Unrunnable)` once it
  *     has waited `settings.unrunnableAfter` by the store's clock;
  *  1. records the attempt with a new `RunId.random()` before touching the thread (rule 4), then acts on
- *     [[AttemptPlan]]: starts the input, recovers the thread, or closes the entry from the thread's state;
+ *     [[AttemptPlan]]: starts the input, recovers the thread, or closes the entry from the thread's state; a start or
+ *     recover the store failed to admit is left to come back when its lease expires, as a failed run is, and only one
+ *     the runtime refused closes the entry `Failed(RunFailed)`;
  *  1. closes the entry from the thread's state once its run has ended at rest, or - for a run that failed - leaves it
  *     to come back when its lease expires, for an attempt that recovers it, until its attempts run out;
  *  1. on `AttemptStart.Exhausted`, settles the thread first if its input was admitted - each tool call left without a
@@ -566,11 +575,7 @@ final class AgentWorker private (
             passOver(entry.id, settings.pollInterval)
             Next.Release
           case Right(Left(_: CancelledError)) => Next.Release
-          // worth another attempt later: a transient failure, or one that only needs time (an open circuit) or a
-          // fresh read (a concurrent write)
-          case Right(Left(error))
-              if error.isRetryable || error.isInstanceOf[CircuitOpenError] || error
-                .isInstanceOf[OptimisticLockFailure] =>
+          case Right(Left(error)) if AgentWorker.admissionTransient(error) =>
             logger.warn(s"Worker $holder: entry ${entry.id.value} could not be admitted: ${error.message}")
             Next.Expire
           case Right(Left(error)) => Next.Close(EntryOutcome.Failed(FailureReason.RunFailed(error.message)))
@@ -753,6 +758,21 @@ object AgentWorker:
 
   /** The kind of the `RunOutcome.Failed` an interrupted entry's thread is settled with (W3). */
   val InterruptedKind: String = "Interrupted"
+
+  /**
+   * Whether an attempt whose run could not be admitted is worth another attempt (#3084), its lease left to lapse: a
+   * retryable failure, one that only needs time (an open circuit) or a fresh read (a concurrent write), or the store
+   * failing as the run is admitted - a `ProcessingError` from the checkpointer (a call timeout, a pool's connection
+   * timeout, a busy file), a claim's commit the store refused ([[GraphError.CheckpointWriteFailed]]) or gave up on
+   * ([[GraphError.ClaimLost]]), or a throwable from it ([[GraphError.RunCrashed]]). None is the run's own refusal of the
+   * input, so the entry is not closed on it: its attempts, bounded by `maxAttempts`, decide. Any other refusal - the
+   * thread suspended, at rest, another tenant's, an input that does not validate - closes the entry
+   * `Failed(RunFailed)`.
+   */
+  private[service] def admissionTransient(error: LLMError): Boolean = error match
+    case _: ProcessingError | _: CircuitOpenError | _: OptimisticLockFailure                      => true
+    case _: GraphError.CheckpointWriteFailed | _: GraphError.ClaimLost | _: GraphError.RunCrashed => true
+    case other                                                                                    => other.isRetryable
 
   /** The synthetic tool result and the outcome a run stopped by `request` is settled with. */
   private def settlementOf(request: StopRequest): (String, RunOutcome.Failed) = request match
