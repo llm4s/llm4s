@@ -100,8 +100,23 @@ final class PostgresMemoryStore private[memory] (
     remove: Seq[MemoryId],
     bounds: MemoryBounds
   ): Result[(TransactionalMemoryStore, AppliedWrite)] =
-    // Embedded before the transaction, so no embedding request runs while the table's advisory lock is held
-    embedMissing(add).flatMap(embedded => applyEmbedded(key, token, embedded, remove, bounds))
+    // A key already applied replays its recorded outcome without asking the embedding service (which may be down):
+    // the transaction reads the record again, under the lock. Otherwise the memories are embedded before the
+    // transaction, so no embedding request runs while the table's advisory lock is held.
+    alreadyApplied(key).flatMap { applied =>
+      if (applied) applyEmbedded(key, token, add, remove, bounds)
+      else embedMissing(add).flatMap(embedded => applyEmbedded(key, token, embedded, remove, bounds))
+    }
+
+  /** True if `key` has a recorded outcome; read without the lock, so only to skip work the transaction then skips. */
+  private def alreadyApplied(key: AppliedWriteKey): Result[Boolean] =
+    attempt("Failed to read applied write") {
+      withConnection { conn =>
+        runQuery(conn, s"SELECT 1 FROM $appliedTable WHERE key = ?", Seq(SqlParam.PString(key.value)), stream = false)(
+          rows => Right(rows.hasNext)
+        )
+      }
+    }
 
   private def applyEmbedded(
     key: AppliedWriteKey,
@@ -561,7 +576,9 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
-            val sql = s"SELECT ${columnsFor(filter)} FROM $tableName ${plan.where}"
+            // FOR UPDATE: a row updated concurrently is locked as its new version and judged by `matches` as that
+            // version, and no update lands between the read and the delete
+            val sql = s"SELECT ${columnsFor(filter)} FROM $tableName ${plan.where} FOR UPDATE"
             runQuery(conn, sql, plan.params, stream = true) { rows =>
               val memories = rows.map(rowToMemory(_, withEmbedding = FilterSupport.readsEmbedding(filter)))
               PostgresMemoryStore.firstN(memories.filter(_.forall(filter.matches)).map(_.map(_.id)), Int.MaxValue)

@@ -73,6 +73,8 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
         rows(s.fences.get(params(1).toString).map(Seq(_)).toSeq)
       else if (sql == s"SELECT outcome FROM ${table}_applied WHERE key = ?")
         rows(s.applied.get(params(1).toString).map(Seq(_)).toSeq)
+      else if (sql == s"SELECT 1 FROM ${table}_applied WHERE key = ?")
+        rows(s.applied.get(params(1).toString).map(_ => Seq(1)).toSeq)
       else if (sql == s"SELECT COUNT(*) FROM ${table}_applied") rows(Seq(Seq(s.applied.size)))
       else if (sql == s"SELECT 1 FROM $table WHERE id = ?")
         rows(s.memories.get(params(1).toString).map(_ => Seq(1)).toSeq)
@@ -176,7 +178,11 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     val (_, again) = store.applyAtomically(k, 1, Seq(m("b")), Nil, big).value
     again shouldBe first
     db.state.memories.keySet shouldBe Set("a")
-    db.statements.head shouldBe "SELECT pg_advisory_xact_lock(hashtext(?))"
+    // A peek at the applied record (to skip embedding a replay), then the locked transaction
+    db.statements.take(2) shouldBe Seq(
+      "SELECT 1 FROM mem_applied WHERE key = ?",
+      "SELECT pg_advisory_xact_lock(hashtext(?))"
+    )
   }
 
   it should "delete what is there, evict beyond the bounds, and not resurrect a deleted memory on replay" in {

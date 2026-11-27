@@ -217,12 +217,54 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
       store.count(MemoryFilter.ByType(MemoryType.Task)) shouldBe Right(0L)
     }
 
-  private def execute(sql: String): Unit = {
+  it should "replay an applied key's outcome while the embedding service is down" in skipIfDisabled {
+    val key     = AppliedWriteKey("scope", "replayed")
+    val memory  = Memory(MemoryId("replayed"), "replayed note", MemoryType.Knowledge)
+    val applied = store.applyAtomically(key, 1L, Seq(memory), Seq.empty, MemoryBounds()).map(_._2)
+    applied.isRight shouldBe true
+
+    val down = new EmbeddingService {
+      def dimensions                                = embeddingService.dimensions
+      def embed(text: String): Result[Array[Float]] = Left(ProcessingError("embed-error", "down"))
+      def embedBatch(texts: Seq[String])            = Left(ProcessingError("embed-error", "down"))
+    }
+    val retrying = PostgresMemoryStore(dbConfig, Some(down)).fold(e => fail(e.message), identity)
+    retrying.applyAtomically(key, 1L, Seq(memory), Seq.empty, MemoryBounds()).map(_._2) shouldBe applied
+    retrying
+      .applyAtomically(AppliedWriteKey("scope", "new"), 2L, Seq(memory), Seq.empty, MemoryBounds())
+      .isLeft shouldBe
+      true
+    retrying.close()
+  }
+
+  it should "not delete a row that a concurrent update makes stop matching" in skipIfDisabled {
+    store.store(Memory(MemoryId("racy"), "drop me", MemoryType.Task)).isRight shouldBe true
+    val filter = MemoryFilter.Custom(_.content.startsWith("drop"))
+
+    scala.util.Using.resource(connection()) { other =>
+      other.setAutoCommit(false)
+      scala.util.Using.resource(other.createStatement())(
+        _.executeUpdate(s"UPDATE $tableName SET content = 'keep me' WHERE id = 'racy'")
+      )
+      // The delete reads the row while the update holds it; it must wait for it and judge the new content
+      val deleting = scala.concurrent.Future(store.deleteMatching(filter))(scala.concurrent.ExecutionContext.global)
+      Thread.sleep(500)
+      other.commit()
+      scala.concurrent.Await.result(deleting, scala.concurrent.duration.Duration(30, "s")).isRight shouldBe true
+    }
+    store.get(MemoryId("racy")).map(_.map(_.content)) shouldBe Right(Some("keep me"))
+  }
+
+  private def connection(): java.sql.Connection = {
     val ds = new org.postgresql.ds.PGSimpleDataSource()
     ds.setURL(dbConfig.jdbcUrl)
     ds.setUser(dbConfig.user)
     ds.setPassword(dbConfig.password.reveal)
-    scala.util.Using.resource(ds.getConnection)(c => scala.util.Using.resource(c.createStatement())(_.execute(sql)))
+    ds.getConnection
+  }
+
+  private def execute(sql: String): Unit = {
+    scala.util.Using.resource(connection())(c => scala.util.Using.resource(c.createStatement())(_.execute(sql)))
     ()
   }
 

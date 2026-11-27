@@ -168,6 +168,25 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     embedder.asked.toSeq shouldBe Seq(Seq("remember this"), Seq("remember this"), Seq("remember this"))
   }
 
+  it should "replay an applied key's recorded outcome without asking the embedding service" in {
+    val recorded = AppliedWrite(Vector(MemoryId("m")), Vector.empty, 0)
+    val ds = new RecordingDataSource()(Some { sql =>
+      if (sql.startsWith("SELECT 1 FROM t_applied")) Seq(Map("one" -> "1"))
+      else if (sql.startsWith("SELECT outcome FROM t_applied"))
+        Seq(Map("outcome" -> ujson.write(AppliedWrite.toJson(recorded))))
+      else Seq.empty
+    })
+    val result = store(ds, Some(failing)).applyAtomically(
+      AppliedWriteKey("scope", "k"),
+      1L,
+      Seq(memory),
+      Seq.empty,
+      MemoryBounds()
+    )
+    result.map(_._2) shouldBe Right(recorded)
+    ds.sent.exists(_.sql.contains("INSERT INTO t ")) shouldBe false
+  }
+
   it should "write nothing when embedding fails" in {
     val ds = new RecordingDataSource()()
     val s  = store(ds, Some(failing))
@@ -175,7 +194,7 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     s.storeAll(Seq(memory)).isLeft shouldBe true
     s.replace(Seq(memory), Seq.empty).isLeft shouldBe true
     s.applyAtomically(AppliedWriteKey("scope", "k"), 1L, Seq(memory), Seq.empty, MemoryBounds()).isLeft shouldBe true
-    ds.sent shouldBe empty
+    ds.sent.map(_.sql).filterNot(_.startsWith("SELECT 1 FROM t_applied")) shouldBe empty
   }
 
   it should "let the database apply the limit when the filter is exact" in {
@@ -206,6 +225,8 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     val ds = new RecordingDataSource(Seq(row("a", "keep"), row("b", "drop me")))()
     store(ds).deleteMatching(MemoryFilter.Custom(_.content.startsWith("drop"))).isRight shouldBe true
     ds.sent.map(_.sql).last shouldBe "DELETE FROM t WHERE id = ANY(?)"
+    // The candidates are locked as they are read, so a concurrent update cannot slip in before the delete
+    ds.sent.head.sql should endWith("FOR UPDATE")
     ds.sent.last.params(1) shouldBe Seq("b")
 
     val exact = new RecordingDataSource()()
