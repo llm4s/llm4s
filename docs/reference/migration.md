@@ -1281,7 +1281,7 @@ The `clock` and `sleep` parameters were test seams and are no longer public.
 | `new ReliableClient(client, "openai", ReliabilityConfig.default)` | `ReliableClient(client, "openai")`, or as before without `new` |
 | `new ReliableClient(client, "openai", config, Some(metrics))` | `ReliableClient(client, "openai", config).withMetrics(metrics)` |
 | `new ReliableClient(client, "openai", config, None)` | `ReliableClient(client, "openai", config)` |
-| `new ReliableClient(client, "p", config, sleep = _ => ())`, in a test that must not wait | give the config a short delay: `config.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))` |
+| `new ReliableClient(client, "p", config, sleep = _ => ())`, in a test that must not wait | give the config a short delay: `config.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))`; a scripted `RateLimitError` also needs a short `retryAfter` (`RateLimitError(provider, retryAfter = 1.millis)`), since without one the policy waits `RetryPolicy.DefaultRateLimitDelay` (30 s) |
 | `new ReliableClient(client, "p", config, clock = fake)`, in a test of the deadline or of circuit recovery | no public replacement: use a short `deadline` or `recoveryTimeout` and wait for real |
 
 `withMetrics` returns a new client with a circuit breaker and rate limit of its own, so call it where the client is

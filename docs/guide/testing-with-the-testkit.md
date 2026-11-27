@@ -130,7 +130,7 @@ def providerError(error: LLMError): LLMError = error match {
 }
 ```
 
-To test retries, put the scripted client under a `ReliableClient`, with a retry policy whose delay is short enough that the test does not wait:
+To test retries, put the scripted client under a `ReliableClient`, with a retry policy whose delay is short enough that the test does not wait. A rate limit is the exception: the policy waits the delay the provider asked for (`retryAfter`), else `RetryPolicy.DefaultRateLimitDelay` (30 seconds), whatever its own delay. So script a `RateLimitError` with a short `retryAfter`, as below; a `RateLimitError` without one makes the test wait 30 seconds:
 
 ```scala
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
@@ -138,8 +138,9 @@ import scala.concurrent.duration._
 ```
 
 ```scala
-val flaky = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))), Reply.text("recovered"))
-val quick = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+val limited  = RateLimitError(ProviderId("openai"), retryAfter = 1.millis)
+val flaky    = ScriptedLLMClient.sequence(Reply.failure(limited), Reply.text("recovered"))
+val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
 val reliable = ReliableClient(flaky, "openai", quick)
 
 reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")

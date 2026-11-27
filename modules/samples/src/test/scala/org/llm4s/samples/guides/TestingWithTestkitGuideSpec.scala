@@ -71,8 +71,9 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "retry through ReliableClient and then succeed" in {
-    val flaky = ScriptedLLMClient.sequence(Reply.failure(RateLimitError(ProviderId("openai"))), Reply.text("recovered"))
-    val quick = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+    val limited  = RateLimitError(ProviderId("openai"), retryAfter = 1.millis)
+    val flaky    = ScriptedLLMClient.sequence(Reply.failure(limited), Reply.text("recovered"))
+    val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
     val reliable = ReliableClient(flaky, "openai", quick)
 
     reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")
