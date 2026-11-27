@@ -95,9 +95,7 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   }
 
   it should "return AuthenticationError for invalid credentials" in {
-    // GOOGLE_ACCESS_TOKEN takes precedence over any credential file, so the bad one would never be read.
-    if (accessToken.isDefined) cancel("GOOGLE_ACCESS_TOKEN is set and would replace the invalid credentials")
-
+    // a configured credential file is used even when GOOGLE_ACCESS_TOKEN is set (#3126)
     // An authorized-user file whose refresh token Google's token endpoint rejects.
     val file = Files.createTempFile("llm4s-vertex-invalid", ".json")
     Files.write(

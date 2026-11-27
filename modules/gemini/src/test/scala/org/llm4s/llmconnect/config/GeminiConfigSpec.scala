@@ -146,6 +146,11 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     vertexai.endpointUrl shouldBe Some("https://us-central1-aiplatform.googleapis.com/v1")
   }
 
+  test("the global location uses the global host, which has no location prefix (#3126)") {
+    vertexai.withLocation("global").computedBaseUrl shouldBe "https://aiplatform.googleapis.com/v1"
+    vertexai.withLocation("europe-west4").computedBaseUrl shouldBe "https://europe-west4-aiplatform.googleapis.com/v1"
+  }
+
   test("withModel changes only the model, preserving type, provider and provider-specific fields") {
     Seq[ProviderConfig](gemini, vertexai).foreach { config =>
       val renamed = config.withModel(ModelName("some-other-model"))

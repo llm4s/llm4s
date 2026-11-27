@@ -635,4 +635,67 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     ujson.read(capturedBody)("generationConfig")("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> -1)
     result.toOption.get.adjustments shouldBe Nil
   }
+
+  // ---- #3126: a refused token is retried once, and user credentials name their quota project ----
+
+  /**
+   * A client on an `authorized_user` file with a quota project, whose token endpoint hands out `tok-1`, `tok-2`, ...
+   * and whose model endpoint refuses `tok-1` with a 401. Returns the client and the Authorization and
+   * x-goog-user-project headers of each model call.
+   */
+  private def refusingFirstTokenClient()
+    : (VertexAIClient, java.util.concurrent.ConcurrentLinkedQueue[(String, String)]) = {
+    val file = java.nio.file.Files.createTempFile("vertex-user", ".json")
+    file.toFile.deleteOnExit()
+    java.nio.file.Files.writeString(
+      file,
+      """{"type":"authorized_user","client_id":"id","client_secret":"s","refresh_token":"r","quota_project_id":"bill-me"}"""
+    )
+    val issued = new java.util.concurrent.atomic.AtomicInteger(0)
+    val calls  = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+    def answer(headers: Map[String, String]): Int = {
+      val auth = headers.getOrElse("Authorization", "")
+      calls.add(auth -> headers.getOrElse("x-goog-user-project", ""))
+      if (auth == "Bearer tok-1") 401 else 200
+    }
+    val sse      = "data: " + successBody.replace("\n", "") + "\n\n"
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
+      (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right {
+          if (url.contains("oauth2.googleapis.com"))
+            HttpResponse(200, s"""{"access_token":"tok-${issued.incrementAndGet()}","expires_in":3600}""", Map.empty)
+          else if (answer(headers) == 401)
+            HttpResponse(401, """{"error":{"code":401,"message":"revoked"}}""", Map.empty)
+          else HttpResponse(200, successBody, Map.empty)
+        }
+    }
+    (mockHttp.onPostStream _).when(*, *, *, *).onCall {
+      (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        val status = answer(headers)
+        val body   = if (status == 401) """{"error":{"code":401,"message":"revoked"}}""" else sse
+        Right(StreamingHttpResponse(status, new java.io.ByteArrayInputStream(body.getBytes("UTF-8"))))
+    }
+    val config = testConfig.withCredentialFilePath(Some(file.toString))
+    (
+      new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp),
+      calls
+    )
+  }
+
+  import scala.jdk.CollectionConverters.*
+
+  "VertexAIClient" should "drop a token refused with a 401 and retry once with a fresh one, on complete (#3126)" in {
+    val (client, calls) = refusingFirstTokenClient()
+    client.complete(Conversation(Seq(UserMessage("hi")))).isRight shouldBe true
+    calls.asScala.toSeq shouldBe Seq("Bearer tok-1" -> "bill-me", "Bearer tok-2" -> "bill-me")
+    client.close()
+  }
+
+  it should "drop a token refused with a 401 and retry once with a fresh one, on a stream (#3126)" in {
+    val (client, calls) = refusingFirstTokenClient()
+    client.streamComplete(Conversation(Seq(UserMessage("hi"))))(_ => ()).isRight shouldBe true
+    calls.asScala.toSeq.map(_._1) shouldBe Seq("Bearer tok-1", "Bearer tok-2")
+    client.close()
+  }
 }

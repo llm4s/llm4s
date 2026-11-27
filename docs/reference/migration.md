@@ -135,7 +135,8 @@ After 1.0.0, [an `openai` section on api.openai.com uses the Responses API](#an-
 and, in the Experimental `llm4s-schema-derivation`,
 [an annotation that is not a constant string is a compile error](#an-annotation-that-is-not-a-constant-string-is-a-compile-error-2951);
 in the Beta `llm4s-bedrock`, [web-identity, assume-role and SSO credentials load](#bedrock-loads-web-identity-assume-role-and-sso-credentials-3127);
-and [Anthropic sends every system message, and no default one](#anthropic-sends-every-system-message-and-no-default-one-3125).
+[Anthropic sends every system message, and no default one](#anthropic-sends-every-system-message-and-no-default-one-3125);
+and [Vertex AI prefers the configured credential file, and retries a refused token](#vertex-ai-prefers-the-configured-credential-file-and-retries-a-refused-token-3126).
 
 ## An `openai` section on api.openai.com uses the Responses API (#2900)
 
@@ -247,6 +248,18 @@ was silently ignored, so the field was described by its name. An argument that i
 `val` that is not `final`, a `final val` with a declared type, an `f"..."` interpolation) now fails to compile where
 the `SchemaOf`, `PartialOf` or tool is derived, with a message naming the field. Make the value a constant
 (`final val Limit = 750`, without `: Int`), or write the text out.
+
+## Vertex AI prefers the configured credential file, and retries a refused token (#3126)
+
+`llm4s-gemini` is frozen, and no signature changed. How a `vertexai` client authenticates changes:
+
+| Before (1.0.0) | After |
+|---|---|
+| `GOOGLE_ACCESS_TOKEN` in the environment was used even when the section set `apiKey` (a credential file), and cached for the life of the process | A configured file always wins. The variable is used only when the section sets no file, before `GOOGLE_APPLICATION_CREDENTIALS`, and read again every five minutes. A deployment that relied on the variable overriding the file now authenticates as the file's principal: remove `apiKey` from the section to keep using the token |
+| A credential file missing `refresh_token`, `private_key` or another field threw `NoSuchElementException` out of `complete` and `validate()` | An `AuthenticationError` naming the field |
+| A token Vertex AI refused with a 401 kept failing until it expired | The token is dropped and the call retried once with a fresh one |
+| An `authorized_user` file's `quota_project_id` was ignored | It is sent as `x-goog-user-project` |
+| `location = "global"` called `global-aiplatform.googleapis.com`, which does not exist | It calls `aiplatform.googleapis.com` |
 
 ## Anthropic sends every system message, and no default one (#3125)
 

@@ -72,8 +72,13 @@ final case class VertexAIConfig private (
   /** Whether every request carries Vertex AI's `googleSearch` grounding tool; see `GeminiConfig.googleSearch`. */
   def withGoogleSearch(enabled: Boolean): VertexAIConfig = copy(googleSearch = enabled)
 
-  /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
-  def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"
+  /**
+   * Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`; the `global`
+   * location has no regional host and is `"https://aiplatform.googleapis.com/v1"` (#3126).
+   */
+  def computedBaseUrl: String =
+    if (location.trim.equalsIgnoreCase("global")) "https://aiplatform.googleapis.com/v1"
+    else s"https://$location-aiplatform.googleapis.com/v1"
 
   override def endpointUrl: Option[BaseUrl] = Some(BaseUrl(computedBaseUrl))
 

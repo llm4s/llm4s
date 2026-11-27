@@ -598,10 +598,14 @@ above registers both.
 
 1. **Pick a GCP project** with the Vertex AI API enabled, and a region that serves your model.
 2. **Authenticate** with Application Default Credentials (`gcloud auth application-default login`),
-   or point `apiKey` at a service-account JSON file. Without `apiKey`, credentials come from
+   or point `apiKey` at a service-account or `authorized_user` JSON file. A configured `apiKey` file is
+   always used, whatever the environment holds. Without one, credentials come from an access token in
+   `GOOGLE_ACCESS_TOKEN` (read again every five minutes; for CI and tests), then
    `GOOGLE_APPLICATION_CREDENTIALS`, then gcloud's `application_default_credentials.json`, then the
    GCE metadata server. The file is located as Google's client libraries do: in `$CLOUDSDK_CONFIG`
-   when that is set (any OS), else `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`.
+   when that is set (any OS), else `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`. An
+   `authorized_user` file's `quota_project_id` is sent as `x-goog-user-project`. A token Vertex AI refuses
+   with a 401 is dropped and the call retried once with a fresh one.
 
 ### Configuration
 
@@ -623,7 +627,7 @@ llm4s {
 | Key | Required | Meaning |
 |-----|----------|---------|
 | `project` | yes | The GCP project ID that owns your Vertex AI resources |
-| `location` | no | The GCP region; requests go to `https://<location>-aiplatform.googleapis.com/v1`. Default `us-central1` |
+| `location` | no | The GCP region; requests go to `https://<location>-aiplatform.googleapis.com/v1`, or `https://aiplatform.googleapis.com/v1` for `global`. Default `us-central1` |
 | `apiKey` | no | A path to a service-account credential file - not an API key |
 
 Because Vertex AI has no API key, it has no shared `llm4s.credentials` key: nothing is bound for
@@ -2343,8 +2347,8 @@ or EKS service account (IRSA) the application runs as. See the
 
 ### Vertex AI with Application Default Credentials
 
-A `vertexai` section with no `apiKey` uses Application Default Credentials:
-`GOOGLE_APPLICATION_CREDENTIALS`, then gcloud's `application_default_credentials.json`, then the
+A `vertexai` section with no `apiKey` uses `GOOGLE_ACCESS_TOKEN` when it is set, else Application Default
+Credentials: `GOOGLE_APPLICATION_CREDENTIALS`, then gcloud's `application_default_credentials.json`, then the
 metadata server of the GCE, GKE or Cloud Run workload. See [Google Vertex AI](#google-vertex-ai).
 
 ---

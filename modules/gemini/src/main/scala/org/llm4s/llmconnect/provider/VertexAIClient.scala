@@ -101,6 +101,36 @@ final class VertexAIClient private[provider] (
   // the model's registry capabilities, looked up once: the registry is a static snapshot
   private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
 
+  /** The `Authorization` header for `token`, and `x-goog-user-project` when user credentials name a quota project. */
+  private def authHeaders(token: String): Map[String, String] =
+    Map("Authorization" -> s"Bearer $token") ++ authProvider.quotaProject.map("x-goog-user-project" -> _)
+
+  /**
+   * Sends a request with the current token. A token refused with a 401 is dropped and the request sent once more
+   * with a fresh one (#3126), so a token revoked before its expiry fails one attempt, not every call until then.
+   * The outer `Left` is a token that could not be had, the inner one the request's own failure.
+   *
+   * @param status  the response's HTTP status
+   * @param discard releases a refused response before the retry
+   */
+  private def sendWithToken[R](send: Map[String, String] => Result[R])(
+    status: R => Int,
+    discard: R => Unit
+  ): Result[Result[R]] =
+    authProvider.getAccessToken().map { token =>
+      send(authHeaders(token)).flatMap {
+        case refused if status(refused) == 401 =>
+          authProvider.invalidate(token)
+          authProvider.getAccessToken() match {
+            case Right(fresh) =>
+              discard(refused)
+              send(authHeaders(fresh))
+            case Left(_) => Right(refused) // no fresh token: the 401 stands
+          }
+        case response => Right(response)
+      }
+    }
+
   private def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
     s"$base/projects/${config.projectId}/locations/${config.location}/publishers/google/models/${config.model}:$suffix"
@@ -143,9 +173,11 @@ final class VertexAIClient private[provider] (
           logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
 
         for {
-          token <- authProvider.getAccessToken()
-          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token") ++ tierHeaders
-          attempt <- http.post(url, headers, requestText, timeout = requestTimeout) match {
+          sent <- sendWithToken(auth =>
+            http
+              .post(url, Map("Content-Type" -> "application/json") ++ auth ++ tierHeaders, requestText, requestTimeout)
+          )(_.statusCode, _ => ())
+          attempt <- sent match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -199,9 +231,15 @@ final class VertexAIClient private[provider] (
         logger.debug(s"[VertexAI] Starting stream to $url")
 
         for {
-          token <- authProvider.getAccessToken()
-          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token") ++ tierHeaders
-          result <- http.postStream(url, headers, requestText, timeout = streamTimeout) match {
+          sent <- sendWithToken(auth =>
+            http.postStream(
+              url,
+              Map("Content-Type" -> "application/json") ++ auth ++ tierHeaders,
+              requestText,
+              streamTimeout
+            )
+          )(_.statusCode, response => Try(response.body.close()): Unit)
+          result <- sent match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -341,13 +379,14 @@ final class VertexAIClient private[provider] (
    * none, so a project the credentials may not call is found only by a completion.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    authProvider.getAccessToken().flatMap { token =>
-      http
-        .get(
-          s"${config.computedBaseUrl}/publishers/google/models/${config.model}",
-          Map("Authorization" -> s"Bearer $token"),
-          timeout = requestTimeout.min(VertexAIClient.ValidationTimeout)
-        )
+    sendWithToken(auth =>
+      http.get(
+        s"${config.computedBaseUrl}/publishers/google/models/${config.model}",
+        auth,
+        timeout = requestTimeout.min(VertexAIClient.ValidationTimeout)
+      )
+    )(_.statusCode, _ => ()).flatMap { sent =>
+      sent
         .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300) Right(())
           else handleErrorResponse(response.statusCode, response.body, response.headers)

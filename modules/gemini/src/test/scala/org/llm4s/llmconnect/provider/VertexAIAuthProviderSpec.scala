@@ -10,6 +10,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import VertexAIAuthProvider._
+import scala.concurrent.duration.*
 
 /**
  * Unit tests for [[VertexAIAuthProvider]].
@@ -384,5 +385,82 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     val token = CachedToken("tok", Long.MaxValue)
 
     token.isExpired shouldBe false
+  }
+
+  // ---- #3126 ----
+
+  private def userFile =
+    """{"type":"authorized_user","client_id":"id","client_secret":"secret","refresh_token":"refresh",
+      |"quota_project_id":"billing-project"}""".stripMargin
+
+  "A configured credential file" should "win over GOOGLE_ACCESS_TOKEN in the environment (#3126)" in {
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = Some("/fake/creds.json"),
+      httpClient = mockHttp,
+      envReader = {
+        case "GOOGLE_ACCESS_TOKEN" => Some("someone-elses-token")
+        case _                     => None
+      },
+      fileReader = _ => Right(userFile)
+    )
+    provider.getAccessToken() shouldBe Right("ya29.test-token")
+    provider.quotaProject shouldBe Some("billing-project")
+  }
+
+  "GOOGLE_ACCESS_TOKEN" should "win over Application Default Credentials, for a finite time" in {
+    val mockHttp = stub[StubbedHttpCalls]
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = None,
+      httpClient = mockHttp,
+      envReader = {
+        case "GOOGLE_ACCESS_TOKEN"            => Some("env-token")
+        case "GOOGLE_APPLICATION_CREDENTIALS" => Some("/adc.json")
+        case _                                => None
+      },
+      fileReader = _ => fail("ADC must not be read while GOOGLE_ACCESS_TOKEN is set")
+    )
+    provider.getAccessToken() shouldBe Right("env-token")
+    provider.quotaProject shouldBe None
+    EnvTokenLife should be < 1.hour
+  }
+
+  "A malformed credential file" should "be an AuthenticationError naming the missing field, not an exception" in {
+    val cases = Seq(
+      """{"type":"authorized_user","client_id":"id","client_secret":"s"}"""                    -> "refresh_token",
+      """{"type":"authorized_user","client_id":"id","refresh_token":42,"client_secret":"s"}""" -> "refresh_token",
+      """{"type":"service_account","client_email":"sa@example.iam.gserviceaccount.com"}"""     -> "private_key",
+      """{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----"}"""             -> "client_email"
+    )
+    cases.foreach { (content, field) =>
+      val provider = new VertexAIAuthProvider(
+        credentialFilePath = Some("/fake/creds.json"),
+        httpClient = stub[StubbedHttpCalls],
+        envReader = _ => None,
+        fileReader = _ => Right(content)
+      )
+      withClue(content) {
+        provider.getAccessToken() match {
+          case Left(e: AuthenticationError) => e.message should include(s"'$field'")
+          case other                        => fail(s"expected an AuthenticationError, got $other")
+        }
+      }
+    }
+  }
+
+  "invalidate" should "drop the cached token it names, and only that one" in {
+    val mockHttp = stub[StubbedHttpCalls]
+    val fetches  = new java.util.concurrent.atomic.AtomicInteger(0)
+    (mockHttp.onGet _).when(*, *, *, *).onCall { (_, _, _, _) =>
+      val token = if (fetches.getAndIncrement() == 0) "first" else "second"
+      Right(HttpResponse(200, s"""{"access_token":"$token","expires_in":3600}""", Map.empty))
+    }
+    val provider = new VertexAIAuthProvider(credentialFilePath = None, httpClient = mockHttp, envReader = _ => None)
+    provider.getAccessToken() shouldBe Right("first")
+    provider.invalidate("not-the-cached-one")
+    provider.getAccessToken() shouldBe Right("first")
+    provider.invalidate("first")
+    provider.getAccessToken() shouldBe Right("second")
   }
 }
