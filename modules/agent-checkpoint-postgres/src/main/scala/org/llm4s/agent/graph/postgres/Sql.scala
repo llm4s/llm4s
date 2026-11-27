@@ -379,6 +379,24 @@ private[postgres] object Sql:
        |      AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?)
        |ORDER BY e.entry_id LIMIT ?""".stripMargin
 
+  /**
+   * Whether entry `?` is still untaken, read under its thread's lock (#3093): open, with no attempt, its thread's head,
+   * and no entry of the thread holding a live lease at the time bound second - a take that leased it since the sweep
+   * chose it has committed, since a take leases only under the thread's lock.
+   */
+  def queueStillUntaken(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueEntries} e
+       |WHERE e.entry_id = ? AND e.state = 'open' AND e.attempt_count = 0
+       |  AND e.entry_id = (${queueHeadOf(t)})
+       |  AND NOT EXISTS (
+       |    SELECT 1 FROM ${t.queueEntries} o WHERE o.thread_id = e.thread_id AND o.state = 'open'
+       |      AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?)
+       |FOR UPDATE OF e""".stripMargin
+
+  /** [[closeQueueEntry]], only while the entry is open with no attempt and no live lease at the time bound last. */
+  def closeUntakenQueueEntry(t: Tables): String =
+    s"${closeUnstartedQueueEntry(t)} AND (lease_token IS NULL OR lease_expires_at <= ?)"
+
   /** A tenant column matching the tenant bound twice, null for none. */
   private val TenantIs = "(tenant_id = CAST(? AS text) OR (tenant_id IS NULL AND CAST(? AS text) IS NULL))"
 

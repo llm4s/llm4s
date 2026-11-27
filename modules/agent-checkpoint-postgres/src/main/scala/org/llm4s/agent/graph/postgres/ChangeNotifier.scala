@@ -128,6 +128,8 @@ final private[postgres] class ChangeNotifier(
             receive(listen)
           current = None
           abort(listen.connection)
+          // a waiter that saw the listener up waits on notifications alone: woken now, it sees it down and polls
+          wakeAll()
           if !closed then logger.warn(s"lost the connection listening on channel $channel; polling until it is back")
 
   /** A connection `LISTEN`ing on the channel, or `None` if one cannot be had now. */

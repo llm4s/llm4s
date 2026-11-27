@@ -399,18 +399,17 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     id: Long,
     outcome: EntryOutcome,
     at: Instant,
-    unstarted: Boolean = false
+    unstarted: Boolean = false,
+    untaken: Option[Instant] = None
   ): Boolean =
     // an Interrupt entry that never started withdraws the stop it asked of its thread's other entries (#3094)
     val withdrawing = query(c, Sql.unstartedInterruptThread(t), id)(_.getString(1)).headOption
-    val closed = updated(
-      c,
-      if unstarted then Sql.closeUnstartedQueueEntry(t) else Sql.closeQueueEntry(t),
-      outcome.state,
-      ujson.write(EntryOutcome.toJson(outcome)),
-      micros(at),
-      id
-    ) > 0
+    val sql =
+      if untaken.isDefined then Sql.closeUntakenQueueEntry(t)
+      else if unstarted then Sql.closeUnstartedQueueEntry(t)
+      else Sql.closeQueueEntry(t)
+    val params = Vector(outcome.state, ujson.write(EntryOutcome.toJson(outcome)), micros(at), id) ++ untaken.toVector
+    val closed = updated(c, sql, params*) > 0
     if closed then
       withdrawing.foreach { thread =>
         query(c, Sql.siblingStops(t), thread, id)(r => r.getLong(1) -> Option(r.getString(2)))
@@ -448,13 +447,15 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           (r.getLong(1), r.getString(2), Option(r.getString(3)), r.getString(4))
         )
         // each under its thread's lock, tried, as a take's is: a submission or a take deciding the thread is left be
+        // each decided again under its thread's lock, tried, as a take's is: the candidates are an earlier snapshot, and
+        // a take may have leased one since (it leases only under that lock, so its lease has committed by now)
         val untaken = candidates.filter { (id, thread, tenant, _) =>
           lockIfFree(c, s"thread:$thread") &&
-          query(c, Sql.lockedQueueEntry(t), id)(raw).headOption.exists(r => r.outcome.isEmpty && r.attempts == 0) &&
+          query(c, Sql.queueStillUntaken(t), id, now)(_ => ()).nonEmpty &&
           query(c, Sql.queueThreadClaimed(t), thread, tenant, tenant, now)(_ => ()).isEmpty
         }
         val closed = untaken.filter((id, _, _, agent) =>
-          closeRow(c, id, RunQueue.untakenOutcome(AgentId.unsafe(agent), age), now, unstarted = true)
+          closeRow(c, id, RunQueue.untakenOutcome(AgentId.unsafe(agent), age), now, untaken = Some(now))
         )
         sequence(closed.map((id, _, _, _) => view(c, rowOf(c, id).get)))
       }

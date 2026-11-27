@@ -240,6 +240,22 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     s.madeWith(ChangeNotifier.NotifySql).map(_.last) should contain(ChangeNotifier.payload(EntryId.unsafe(6)))
   }
 
+  "PostgresRunQueue.closeUntaken" should "decide each candidate again under its thread's lock, and close only an untaken one (#3093)" in {
+    val s = script {
+      case (sql, _) if sql == Sql.queueUntaken(t) =>
+        Vector(Vector(5L, "t1", null, "a"), Vector(6L, "t2", null, "a"))
+      case (sql, _) if sql == tryLock => Vector(Vector(true))
+      // a take leased entry 5 after the candidates were read: it is no longer untaken
+      case (sql, Vector(6L, _)) if sql == Sql.queueStillUntaken(t) => Vector(Vector(1))
+      case (sql, Vector(6L)) if sql == Sql.queueEntry(t)           => Vector(entry(6, threadId = "t2"))
+    }
+    s.store().runQueue.closeUntaken(1.hour, 10).value.map(_.id) shouldBe Vector(EntryId.unsafe(6))
+    s.madeWith(Sql.queueStillUntaken(t)).map(_.head) shouldBe Vector(5L, 6L)
+    // the close itself is guarded too: open, no attempt, no live lease
+    s.madeWith(Sql.closeUntakenQueueEntry(t)).map(p => (p(3), p(4))) shouldBe Vector((6L, now))
+    Sql.closeUntakenQueueEntry(t) should endWith("AND (lease_token IS NULL OR lease_expires_at <= ?)")
+  }
+
   "PostgresRunQueue.renew" should "answer the stop asked of the entry with the renewed lease (W3)" in {
     val interrupt = ujson.write(StopRequest.toJson(StopRequest.Interrupt(EntryId.unsafe(8))))
     val s = script {
