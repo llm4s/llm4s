@@ -84,4 +84,72 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
       (error.message should not).include("neo4j-password-0001")
     }
   }
+
+  // ─── Property encoding (#2969) ────────────────────────────────────────────
+
+  private val everyKind: Map[String, ujson.Value] = Map(
+    "str"     -> ujson.Str("hello"),
+    "jsonish" -> ujson.Str("""{"a":1}"""),
+    "bool"    -> ujson.Bool(false),
+    "int"     -> ujson.Num(42),
+    "big"     -> ujson.Num(9007199254740993.0),
+    "real"    -> ujson.Num(42.5),
+    "null"    -> ujson.Null,
+    "strs"    -> ujson.Arr("a", "b"),
+    "nums"    -> ujson.Arr(1, 2.5),
+    "ints"    -> ujson.Arr(1, 2),
+    "bools"   -> ujson.Arr(true, false),
+    "empty"   -> ujson.Arr(),
+    "mixed"   -> ujson.Arr("a", 1, ujson.Null),
+    "nested"  -> ujson.Arr(ujson.Arr(1), ujson.Arr(2)),
+    "obj"     -> ujson.Obj("k" -> ujson.Arr(1, ujson.Obj("x" -> ujson.Null)))
+  )
+
+  test("properties of every JSON kind read back as they were written") {
+    Neo4jProperties.encode(everyKind, "Node(1)").map(Neo4jProperties.decode) shouldBe Right(everyKind)
+  }
+
+  test("primitives and primitive arrays are stored natively, whole numbers as integers, the rest as JSON") {
+    val stored = Neo4jProperties.encode(everyKind, "Node(1)").toOption.get
+    stored.get("int") shouldBe java.lang.Long.valueOf(42L)
+    stored.get("real") shouldBe java.lang.Double.valueOf(42.5)
+    stored.get("strs") shouldBe java.util.List.of("a", "b")
+    stored.get("ints") shouldBe java.util.List.of(java.lang.Long.valueOf(1L), java.lang.Long.valueOf(2L))
+    Seq("null", "mixed", "nested", "obj").foreach(k => stored.containsKey(k) shouldBe false)
+    // What a property filter compares, as the in-memory store does: the value's toString
+    Seq("null", "mixed", "nested", "obj", "strs", "empty").foreach { k =>
+      stored.get(Neo4jProperties.textKey(k)) shouldBe everyKind(k).toString
+    }
+    Seq("str", "bool", "int", "real").foreach(k => stored.containsKey(Neo4jProperties.textKey(k)) shouldBe false)
+    ujson.read(stored.get(Neo4jProperties.JsonKey).asInstanceOf[String]).obj.keySet shouldBe
+      Set("null", "mixed", "nested", "obj")
+  }
+
+  test("a property key the store reserves is refused, so it can never replace a node's identity") {
+    Seq("llm4s_id", "llm4s_label", "llm4s_json", "llm4s_other").foreach { key =>
+      val result = Neo4jProperties.encode(Map(key -> ujson.Str("b")), "Node(a)")
+      result match {
+        case Left(e)  => e.message should include(key)
+        case Right(_) => fail(s"$key was accepted")
+      }
+    }
+  }
+
+  test("decode leaves out the store's own keys and tolerates a corrupt JSON property") {
+    val stored = new java.util.HashMap[String, AnyRef]()
+    stored.put("llm4s_id", "a")
+    stored.put("llm4s_label", "Person")
+    stored.put("llm4s_json", "not json")
+    stored.put("llm4s_text_tags", "[\"a\"]")
+    stored.put("name", "Alice")
+    Neo4jProperties.decode(stored) shouldBe Map("name" -> ujson.Str("Alice"))
+  }
+
+  test("driver values convert to ujson: null, numbers, lists and maps") {
+    Neo4jProperties.fromDriverValue(null) shouldBe ujson.Null
+    Neo4jProperties.fromDriverValue(java.lang.Long.valueOf(5L)) shouldBe ujson.Num(5)
+    Neo4jProperties.fromDriverValue(java.util.List.of("a")) shouldBe ujson.Arr("a")
+    Neo4jProperties.fromDriverValue(java.util.Map.of("k", java.lang.Boolean.TRUE)) shouldBe ujson.Obj("k" -> true)
+    Neo4jProperties.fromDriverValue(java.time.LocalDate.of(2026, 1, 2)) shouldBe ujson.Str("2026-01-02")
+  }
 }

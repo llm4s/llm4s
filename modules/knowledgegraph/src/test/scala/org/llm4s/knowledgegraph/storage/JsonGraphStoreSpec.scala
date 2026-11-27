@@ -2,8 +2,9 @@ package org.llm4s.knowledgegraph.storage
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.knowledgegraph.{ Edge, Node }
+import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import java.nio.file.{ Files, Path }
+import scala.jdk.CollectionConverters._
 
 /**
  * Comprehensive test suite for JsonGraphStore.
@@ -607,5 +608,130 @@ class JsonGraphStoreSpec extends AnyFunSuite with Matchers {
 
     // Cleanup
     Files.deleteIfExists(path)
+  }
+
+  // ─── save, load and atomic writes (#2968) ─────────────────────────────────
+
+  private def filesIn(dir: Path): Set[String] = {
+    val stream = Files.list(dir)
+    try stream.iterator().asScala.map(_.getFileName.toString).toSet
+    finally stream.close()
+  }
+
+  test("save after the cache is populated replaces the graph later writes build on") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    val big   = Graph(Map("x" -> Node("x", "X"), "y" -> Node("y", "Y")), List(Edge("x", "y", "R")))
+
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    store.save(big) shouldBe Right(())
+    store.loadAll().map(_.nodes.keySet) shouldBe Right(Set("x", "y"))
+    store.upsertNode(Node("b", "B")) shouldBe Right(())
+
+    val expected = Set("x", "y", "b")
+    store.loadAll().map(_.nodes.keySet) shouldBe Right(expected)
+    new JsonGraphStore(path).loadAll().map(g => (g.nodes.keySet, g.edges.size)) shouldBe Right((expected, 1))
+  }
+
+  test("save refuses a graph that load would refuse, and leaves the file and cache as they were") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    val before = Files.readAllBytes(path)
+
+    store.save(Graph(Map.empty, List(Edge("x", "y", "R")))).isLeft shouldBe true
+    Files.readAllBytes(path) shouldBe before
+    store.loadAll().map(_.nodes.keySet) shouldBe Right(Set("a"))
+    new JsonGraphStore(path).loadAll().map(_.nodes.keySet) shouldBe Right(Set("a"))
+  }
+
+  test("load re-reads the file and refreshes what the store serves") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+
+    new JsonGraphStore(path).upsertNode(Node("b", "B")) shouldBe Right(())
+    store.load().map(_.nodes.keySet) shouldBe Right(Set("a", "b"))
+    store.getNode("b").map(_.isDefined) shouldBe Right(true)
+  }
+
+  test("a read of a missing file is an empty graph and creates no file") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.loadAll() shouldBe Right(Graph.empty)
+    store.getNode("a") shouldBe Right(None)
+    Files.exists(path) shouldBe false
+  }
+
+  test("a truncated file is a Left, and the store never replaces it with an empty graph") {
+    val path = createTempJsonPath()
+    new JsonGraphStore(path).upsertNode(Node("a", "A", Map("name" -> ujson.Str("Alice")))) shouldBe Right(())
+    val full = Files.readAllBytes(path)
+    Files.write(path, full.take(full.length / 2))
+    val truncated = Files.readAllBytes(path)
+
+    val store = new JsonGraphStore(path)
+    store.loadAll().isLeft shouldBe true
+    store.upsertNode(Node("b", "B")).isLeft shouldBe true
+    Files.readAllBytes(path) shouldBe truncated
+  }
+
+  test("every write replaces the file whole and leaves no temporary file beside it") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    store.upsertNode(Node("b", "B")) shouldBe Right(())
+    store.upsertEdge(Edge("a", "b", "R")) shouldBe Right(())
+    store.deleteEdge("a", "b", "R") shouldBe Right(())
+    store.deleteNode("b") shouldBe Right(())
+    store.save(Graph(Map("c" -> Node("c", "C")), Nil)) shouldBe Right(())
+
+    filesIn(path.getParent) shouldBe Set(path.getFileName.toString)
+    new JsonGraphStore(path).loadAll().map(_.nodes.keySet) shouldBe Right(Set("c"))
+  }
+
+  test("a write that cannot complete leaves the previous file whole") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    val before = Files.readAllBytes(path)
+    val dir    = path.getParent
+    assume(
+      Files.getFileStore(dir).supportsFileAttributeView("posix"),
+      "needs POSIX permissions to make the directory unwritable"
+    )
+    val perms = Files.getPosixFilePermissions(dir)
+    Files.setPosixFilePermissions(dir, java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"))
+    try {
+      assume(!Files.isWritable(dir), "the directory is still writable (running as root?)")
+      store.upsertNode(Node("b", "B")).isLeft shouldBe true
+    } finally Files.setPosixFilePermissions(dir, perms)
+
+    Files.readAllBytes(path) shouldBe before
+    filesIn(dir) shouldBe Set(path.getFileName.toString)
+    store.loadAll().map(_.nodes.keySet) shouldBe Right(Set("a"))
+  }
+
+  test("a write keeps an existing file's POSIX permissions") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    assume(Files.getFileStore(path).supportsFileAttributeView("posix"), "needs POSIX permissions")
+    val groupReadable = java.nio.file.attribute.PosixFilePermissions.fromString("rw-r-----")
+    Files.setPosixFilePermissions(path, groupReadable)
+
+    store.upsertNode(Node("b", "B")) shouldBe Right(())
+    store.save(Graph(Map("c" -> Node("c", "C")), Nil)) shouldBe Right(())
+    Files.getPosixFilePermissions(path) shouldBe groupReadable
+  }
+
+  test("a new file gets the default permissions a plain write gives, not owner-only ones") {
+    val dir = createTempJsonPath().getParent
+    assume(Files.getFileStore(dir).supportsFileAttributeView("posix"), "needs POSIX permissions")
+    val plain = Files.write(dir.resolve("plain.json"), Array[Byte]('x'))
+    val path  = dir.resolve("graph.json")
+
+    new JsonGraphStore(path).upsertNode(Node("a", "A")) shouldBe Right(())
+    Files.getPosixFilePermissions(path) shouldBe Files.getPosixFilePermissions(plain)
   }
 }

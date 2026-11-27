@@ -59,12 +59,19 @@ All operations return `Result[A]` (`Either[LLMError, A]`).
 | `deleteEdge(src, tgt, rel)` | Remove a specific edge |
 | `loadAll()` | Full graph snapshot |
 | `stats()` | Node count, edge count, average degree, densest node |
-| `executeRead(cypher)` | Native read Cypher pass-through |
+| `executeRead(cypher)` | Native read Cypher pass-through; each row maps a column to a `ujson.Value` |
 | `executeWrite(cypher)` | Native write Cypher pass-through |
 
 ## Namespace Isolation
 
 All nodes are stored with the `:LLM4S` label and two reserved properties (`llm4s_id`, `llm4s_label`). This lets llm4s coexist with your own data in the same Neo4j database.
+
+Property keys starting with `llm4s_` are reserved: `upsertNode` and `upsertEdge` return a `Left` for one, so a
+property can never replace a node's id or label. Properties read back as they were written. Strings, booleans and
+numbers are stored natively (a whole number as an integer, so `GraphFilter(propertyKey = "age", propertyValue = "42")`
+matches as it does in memory), an array of one primitive type as a Neo4j list, and anything else (`null`, an object,
+a nested or mixed array) as JSON in the reserved `llm4s_json` property. A property filter compares an array or a
+JSON-stored value by its compact JSON text, as the in-memory store does (`propertyValue = "{\"x\":1}"`).
 
 ## Testing
 

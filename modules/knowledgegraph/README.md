@@ -24,7 +24,7 @@ question-answering classes take an `LLMClient` you build the usual way (see the
 |---|---|---|
 | Model | `Node(id, label, properties)`, `Edge(source, target, relationship, properties)`, `Graph` | properties are `ujson.Value`s; `Graph` is immutable and has `merge`, `validate`, `getNeighbors`, `findNodesByLabel` and similar |
 | Storage | `GraphStore`, `InMemoryGraphStore`, `JsonGraphStore` | every `GraphStore` method returns a `Result`; `traverse(startId, TraversalConfig)` does a breadth-first walk with `maxDepth` and `Direction` |
-| Extraction | `KnowledgeGraphGenerator`, `SchemaGuidedExtractor`, `MultiDocumentGraphBuilder`, `EntityLinker`, `CoreferenceResolver` | LLM-driven; `KnowledgeGraphGenerator` writes into its `GraphStore`; the others return a `Graph`, a `SourceTrackedGraph` or text to the caller |
+| Extraction | `FreeFormExtractor`, `KnowledgeGraphGenerator`, `SchemaGuidedExtractor`, `MultiDocumentGraphBuilder`, `EntityLinker`, `CoreferenceResolver` | LLM-driven; `KnowledgeGraphGenerator.extract(text, source)` writes into its `GraphStore`, with node ids namespaced by the source's id; the others return a `Graph`, a `SourceTrackedGraph` or text to the caller |
 | Query | `GraphQuery`, `GraphQueryExecutor`, `GraphQueryTranslator`, `GraphRanking` | |
 | Question answering | `GraphQAPipeline` | identifies entities, traverses for context, ranks them and asks the LLM; the answer carries the nodes and edges that supported it |
 | Tool | `GraphQueryTool` | exposes the pipeline to an agent as a tool |
@@ -59,11 +59,12 @@ val outcome = for {
 
 - **Experimental tier.** Types here are not annotated `@Stable`; expect changes before they are
   frozen.
-- **Extraction needs an LLM.** `KnowledgeGraphGenerator` and `SchemaGuidedExtractor` call the
+- **Extraction needs an LLM.** `FreeFormExtractor`, `KnowledgeGraphGenerator` and `SchemaGuidedExtractor` call the
   client you give them and parse its JSON reply; a failure, including a reply that does not parse,
   is a `Left(ProcessingError)`, so check the `Result`.
 - **`InMemoryGraphStore` is not persistent**, and `JsonGraphStore` rewrites its file on each
-  change: neither is meant for large graphs.
+  change (to a temporary file moved over it, so the file is always whole): neither is meant for large graphs.
+  `JsonGraphStore` assumes it is its file's only writer; `load()` re-reads the file.
 
 ## Tests
 

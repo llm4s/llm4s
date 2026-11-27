@@ -5,7 +5,8 @@ import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import org.llm4s.syntax.toResult
 
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ AtomicMoveNotSupportedException, Files, Path, StandardCopyOption }
+import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
@@ -14,6 +15,12 @@ import scala.util.Try
  *
  * Thread-safety note: This implementation is NOT thread-safe.
  * For concurrent access, wrap with synchronization or use a thread-safe alternative.
+ *
+ * The store reads the file once and serves later reads from memory, so it assumes it is the file's only writer:
+ * two stores on one path each write their own view. [[load]] re-reads the file and replaces what the store serves.
+ * Every write, [[save]] included, is validated and replaces the file whole: the graph is written to a temporary file
+ * beside it and moved over it, so a crash or a full disk leaves the previous file, never a truncated one (#2968). A
+ * missing file reads as an empty graph; the first write creates it.
  *
  * @example
  * {{{
@@ -36,11 +43,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
   private def ensureLoaded(): Result[Graph] =
     cachedGraph match {
       case Some(g) => Right(g)
-      case None =>
-        load().map { g =>
-          cachedGraph = Some(g)
-          g
-        }
+      case None    => load()
     }
 
   override def upsertNode(node: Node): Result[Unit] =
@@ -203,7 +206,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
       GraphStats(nodeCount, edgeCount, avgDegree, densestNodeId)
     }
 
-  /** Persist graph to file */
+  /** Persist graph to file: written beside it, then moved over it, so the file is always whole */
   private def persistGraph(graph: Graph): Result[Unit] = Try {
     val nodesJson = graph.nodes.values.map { node =>
       ujson.Obj(
@@ -227,15 +230,53 @@ class JsonGraphStore(path: Path) extends GraphStore {
       "edges" -> ujson.Arr.from(edgesJson)
     )
 
-    Files.write(path, json.render(indent = 2).getBytes(StandardCharsets.UTF_8))
-    ()
+    writeAtomically(json.render(indent = 2).getBytes(StandardCharsets.UTF_8))
   }.toResult
 
+  private def writeAtomically(bytes: Array[Byte]): Unit = {
+    val target = path.toAbsolutePath
+    // createFile, not createTempFile: a new graph file gets the umask's permissions, as Files.write gave it, rather
+    // than createTempFile's owner-only ones
+    val tmp = Files.createFile(target.resolveSibling(s".${target.getFileName}.${java.util.UUID.randomUUID()}.tmp"))
+    val moved = Try {
+      keepPermissions(target, tmp)
+      Files.write(tmp, bytes)
+      Try(Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)).recover {
+        case _: AtomicMoveNotSupportedException => Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING)
+      }.get
+    }
+    if (moved.isFailure) Files.deleteIfExists(tmp)
+    moved.map(_ => ()).get
+  }
+
+  /** Gives `tmp` the POSIX permissions of an existing `target`, so replacing the file does not change who can read it. */
+  private def keepPermissions(target: Path, tmp: Path): Unit =
+    if (Files.exists(target)) {
+      Option(Files.getFileAttributeView(target, classOf[PosixFileAttributeView])).foreach { view =>
+        Files.setPosixFilePermissions(tmp, view.readAttributes().permissions())
+      }
+    }
+
+  /** Writes `graph` if it is valid, and makes it what the store serves. */
+  private def replaceWith(graph: Graph): Result[Unit] =
+    for {
+      _ <- graph.validate()
+      _ <- persistGraph(graph)
+    } yield cachedGraph = Some(graph)
+
+  /**
+   * Reads the file, validates it, and makes it what the store serves. A missing file is an empty graph, and is not
+   * created.
+   */
   def load(): Result[Graph] =
+    readFile().map { g =>
+      cachedGraph = Some(g)
+      g
+    }
+
+  private def readFile(): Result[Graph] =
     if (!Files.exists(path)) {
-      // Initialize with empty graph if file doesn't exist
-      val emptyGraph = Graph(Map.empty, List.empty)
-      persistGraph(emptyGraph).map(_ => emptyGraph)
+      Right(Graph.empty)
     } else {
       Try {
         val content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8)
@@ -274,6 +315,9 @@ class JsonGraphStore(path: Path) extends GraphStore {
       }.toResult.flatten
     }
 
-  /** Legacy method for backward compatibility */
-  def save(graph: Graph): Result[Unit] = persistGraph(graph)
+  /**
+   * Replaces the stored graph with `graph`, which later reads and writes then build on. A graph that [[load]] would
+   * refuse, such as one with an edge to a missing node, is a `Left`, and nothing is written.
+   */
+  def save(graph: Graph): Result[Unit] = replaceWith(graph)
 }

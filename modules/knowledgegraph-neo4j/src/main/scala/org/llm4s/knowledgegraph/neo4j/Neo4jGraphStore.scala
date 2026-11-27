@@ -19,6 +19,12 @@ import scala.util.{ Try, Using }
  * All nodes carry the `:LLM4S` label for namespace isolation alongside any
  * user-defined label stored as the `llm4s_label` property.
  *
+ * Properties round-trip as the in-memory store keeps them: strings, booleans and numbers are stored natively (a whole
+ * number as an integer, so a property filter on `42` matches as it does in memory), an array of one primitive type
+ * as a Neo4j list, and any other value (`null`, an object, a nested or mixed array) as JSON in the reserved
+ * `llm4s_json` property. Property keys starting with `llm4s_` are reserved for the store: an `upsertNode` or
+ * `upsertEdge` that uses one is a `Left` (#2969).
+ *
  * Connection management: each GraphStore call acquires a single session, executes
  * the query, then closes the session — mirroring the PgVectorStore pattern.
  * The driver (and its internal connection pool) is managed externally; pass
@@ -46,30 +52,36 @@ final class Neo4jGraphStore private (
   // ─────────────────────────────────────────────────────────────────────────
 
   override def upsertNode(node: Node): Result[Unit] =
-    withSession { session =>
-      val params = new java.util.HashMap[String, AnyRef]()
-      params.put("id", node.id)
-      params.put("label", node.label)
-      params.put("props", toNeo4jMap(node.properties))
-      session.executeWriteWithoutResult { tx =>
-        tx.run(
-          """MERGE (n:LLM4S {llm4s_id: $id})
-            |SET n = { llm4s_id: $id, llm4s_label: $label }
-            |SET n += $props""".stripMargin,
-          params
-        )
-        ()
+    Neo4jProperties.encode(node.properties, s"Node(${node.id})").flatMap { props =>
+      withSession { session =>
+        val params = new java.util.HashMap[String, AnyRef]()
+        params.put("id", node.id)
+        params.put("label", node.label)
+        params.put("props", props)
+        session.executeWriteWithoutResult { tx =>
+          // The identity is set after the properties, so nothing in them can replace it
+          tx.run(
+            """MERGE (n:LLM4S {llm4s_id: $id})
+              |SET n = $props
+              |SET n.llm4s_id = $id, n.llm4s_label = $label""".stripMargin,
+            params
+          )
+          ()
+        }
+        Right(())
       }
-      Right(())
     }
 
   override def upsertEdge(edge: Edge): Result[Unit] =
-    validateRelType(edge.relationship).flatMap { relType =>
+    (for {
+      relType <- validateRelType(edge.relationship)
+      props   <- Neo4jProperties.encode(edge.properties, s"Edge(${edge.source}->${edge.target})")
+    } yield (relType, props)).flatMap { case (relType, props) =>
       withSession { session =>
         val params = new java.util.HashMap[String, AnyRef]()
         params.put("src", edge.source)
         params.put("tgt", edge.target)
-        params.put("props", toNeo4jMap(edge.properties))
+        params.put("props", props)
         Try {
           session.executeWrite { tx =>
             val srcExists =
@@ -355,17 +367,21 @@ final class Neo4jGraphStore private (
 
   /**
    * Executes an arbitrary read-only Cypher query and returns results as a list
-   * of maps (column name → value as String).
+   * of maps (column name → value).
+   *
+   * Strings, numbers, booleans, `null`, lists and maps convert to the matching `ujson.Value`. A node is an object with
+   * its `id`, `label` and `properties` (for an `:LLM4S` node, as `getNode` reads them), and a relationship one with
+   * its `type` and `properties`; any other driver value is its string form.
    */
-  def executeRead(cypher: String, params: Map[String, AnyRef] = Map.empty): Result[List[Map[String, String]]] =
+  def executeRead(cypher: String, params: Map[String, AnyRef] = Map.empty): Result[List[Map[String, ujson.Value]]] =
     withSession { session =>
       val jParams = new java.util.HashMap[String, AnyRef](params.asJava)
       Right(session.executeRead { tx =>
         val rs  = tx.run(cypher, jParams)
-        val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, String]]
+        val buf = scala.collection.mutable.ArrayBuffer.empty[Map[String, ujson.Value]]
         while (rs.hasNext) {
           val rec = rs.next()
-          buf += rec.keys().asScala.map(k => k -> rec.get(k).toString).toMap
+          buf += rec.keys().asScala.map(k => k -> Neo4jProperties.fromDriverValue(rec.get(k).asObject())).toMap
         }
         buf.toList
       })
@@ -418,44 +434,10 @@ final class Neo4jGraphStore private (
       .map(e => ProcessingError("neo4j-store", s"Session error: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
-  private def recordToNode(n: org.neo4j.driver.types.Node): Node = {
-    val id    = n.get("llm4s_id").asString()
-    val label = n.get("llm4s_label").asString()
-    val props = n
-      .asMap()
-      .asScala
-      .toMap
-      .removed("llm4s_id")
-      .removed("llm4s_label")
-      .map { case (k, v) => k -> fromNeo4jValue(v) }
-    Node(id, label, props)
-  }
+  private def recordToNode(n: org.neo4j.driver.types.Node): Node = Neo4jProperties.toNode(n)
 
   private def fromNeo4jRelProps(rel: org.neo4j.driver.types.Relationship): Map[String, ujson.Value] =
-    rel.asMap().asScala.toMap.map { case (k, v) => k -> fromNeo4jValue(v) }
-
-  private def fromNeo4jValue(v: AnyRef): ujson.Value = v match {
-    case s: String            => ujson.Str(s)
-    case b: java.lang.Boolean => ujson.Bool(b.booleanValue())
-    case n: java.lang.Long    => ujson.Num(n.doubleValue())
-    case n: java.lang.Integer => ujson.Num(n.doubleValue())
-    case n: java.lang.Double  => ujson.Num(n.doubleValue())
-    case n: java.lang.Float   => ujson.Num(n.doubleValue())
-    case null                 => ujson.Null
-    case other                => ujson.Str(other.toString)
-  }
-
-  private def toNeo4jMap(props: Map[String, ujson.Value]): java.util.Map[String, AnyRef] = {
-    val m = new java.util.HashMap[String, AnyRef]()
-    props.foreach {
-      case (k, ujson.Str(s))  => m.put(k, s)
-      case (k, ujson.Bool(b)) => m.put(k, java.lang.Boolean.valueOf(b))
-      case (k, ujson.Num(n))  => m.put(k, java.lang.Double.valueOf(n))
-      case (_, ujson.Null)    => ()
-      case (k, other)         => m.put(k, other.toString)
-    }
-    m
-  }
+    Neo4jProperties.decode(rel.asMap())
 
   private def validateRelType(relType: String): Result[String] =
     if (relType.matches("^[A-Za-z0-9_]+$")) Right(relType)
@@ -477,7 +459,11 @@ final class Neo4jGraphStore private (
     val propResult = filter.propertyKey.zip(filter.propertyValue).foldLeft[Result[Unit]](Right(())) {
       case (Right(_), (key, value)) =>
         sanitizePropertyKey(key).map { safeKey =>
-          clauses += s"toString(n.`$safeKey`) = $$filterPropValue"
+          // As the in-memory store compares: the value's text when it is an array or stored as JSON, else
+          // toString of the native value. CASE is evaluated lazily, so toString never sees a list.
+          val textKey = Neo4jProperties.textKey(safeKey)
+          clauses += s"(CASE WHEN n.`$textKey` IS NOT NULL THEN n.`$textKey` = $$filterPropValue " +
+            s"ELSE toString(n.`$safeKey`) = $$filterPropValue END)"
           params.put("filterPropValue", value)
         }
       case (Left(err), _) => Left(err)

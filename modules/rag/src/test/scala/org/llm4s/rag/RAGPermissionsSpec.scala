@@ -946,24 +946,48 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     } finally rag.close()
   }
 
-  it should "be refused by GraphRAG's Hybrid mode, whose vector half is a plain search" in {
-    val index = new MockSearchIndex()
+  /** A restricted RAG with a graph store holding one node, and a model that counts its calls. */
+  private def restrictedGraphRag(): (RAG, java.util.concurrent.atomic.AtomicInteger) = {
+    val calls = new java.util.concurrent.atomic.AtomicInteger()
+    val llm = new MockLLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        calls.incrementAndGet()
+        super.complete(conversation, options)
+      }
+    }
+    val graph = new org.llm4s.knowledgegraph.storage.InMemoryGraphStore()
+    graph.upsertNode(org.llm4s.knowledgegraph.Node("secret", "Project", Map("name" -> ujson.Str("Merger"))))
     val rag = RAG
       .buildWithClient(
-        RAGConfig.default
-          .withSearchIndex(index)
-          .withLLM(new MockLLMClient())
-          .withGraphStore(new org.llm4s.knowledgegraph.storage.InMemoryGraphStore()),
+        RAGConfig.default.withSearchIndex(new MockSearchIndex()).withLLM(llm).withGraphStore(graph),
         EmbeddingClient(new MockEmbeddingProvider())
       )
       .toOption
       .get
-    try
-      isPlainQueryRefusal(
-        rag.queryWithGraphRAGMode("merger", org.llm4s.knowledgegraph.graphrag.GraphRAGMode.Hybrid),
-        "queryWithPermissionsAndAnswer"
-      ) shouldBe true
-    finally rag.close()
+    (rag, calls)
+  }
+
+  for (
+    mode <- Seq(
+      org.llm4s.knowledgegraph.graphrag.GraphRAGMode.Global,
+      org.llm4s.knowledgegraph.graphrag.GraphRAGMode.Local,
+      org.llm4s.knowledgegraph.graphrag.GraphRAGMode.Hybrid
+    )
+  )
+    it should s"be refused by GraphRAG's $mode mode before the model is called: the graph has no permission filter" in {
+      val (rag, calls) = restrictedGraphRag()
+      try {
+        isPlainQueryRefusal(rag.queryWithGraphRAGMode("merger", mode), "queryWithPermissionsAndAnswer") shouldBe true
+        calls.get shouldBe 0
+      } finally rag.close()
+    }
+
+  it should "be refused by the routed queryWithGraphRAG before the router calls the model" in {
+    val (rag, calls) = restrictedGraphRag()
+    try {
+      isPlainQueryRefusal(rag.queryWithGraphRAG("merger"), "queryWithPermissionsAndAnswer") shouldBe true
+      calls.get shouldBe 0
+    } finally rag.close()
   }
 
   it should "leave the permission API working: the answer comes from the permitted document only" in {

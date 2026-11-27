@@ -1109,6 +1109,8 @@ final class RAG private (
         )
       case Some(engine) =>
         for {
+          // Checked before routing, so a refused query never reaches the model
+          _      <- graphRAGAllowed
           routed <- engine.route(question)
           answer <- queryWithGraphRAGMode(question, routed, topK)
         } yield answer
@@ -1126,43 +1128,56 @@ final class RAG private (
           )
         )
       case Some(engine) =>
-        mode match {
-          case GraphRAGMode.Global =>
-            engine.globalSearch(question, config.graphRAGConfig.globalTopCommunities).map { res =>
-              GraphRAGAnswer(
-                query = question,
-                mode = GraphRAGMode.Global,
-                answer = res.answer,
-                communityIds = res.rankedCommunities.map(_._1.id),
-                nodeIds = Seq.empty
-              )
-            }
-          case GraphRAGMode.Local =>
-            engine.localSearch(question, config.graphRAGConfig.localTraversalDepth).map { res =>
-              GraphRAGAnswer(
-                query = question,
-                mode = GraphRAGMode.Local,
-                answer = res.answer,
-                communityIds = res.supportingCommunities.map(_.id),
-                nodeIds = res.visitedNodeIds
-              )
-            }
-          case GraphRAGMode.Hybrid =>
-            val k = topK.getOrElse(config.topK)
-            for {
-              // Its vector half is a plain search, with no permission filter
-              _              <- plainQueryAllowed("GraphRAG's Hybrid mode", "queryWithPermissionsAndAnswer")
-              queryEmbedding <- embedQuery(question, new QueryMeter)
-              vectorResults  <- searchWithStrategy(queryEmbedding, question, k, new QueryMeter)
-              hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
-            } yield GraphRAGAnswer(
-              query = question,
-              mode = GraphRAGMode.Hybrid,
-              answer = hybrid.answer,
-              communityIds = Seq.empty,
-              nodeIds = hybrid.hits.map(_.node.id)
-            )
+        graphRAGAllowed.flatMap(_ => graphRAGSearch(engine, question, mode, topK))
+    }
+
+  /**
+   * Every GraphRAG mode reads the whole graph and every community summary, with no principal or collection, and
+   * Hybrid's vector half is a plain search; so a RAG with a `SearchIndex` refuses all three (#2964).
+   */
+  private def graphRAGAllowed: Result[Unit] =
+    plainQueryAllowed("GraphRAG", "queryWithPermissionsAndAnswer")
+
+  private def graphRAGSearch(
+    engine: GraphRAG,
+    question: String,
+    mode: GraphRAGMode,
+    topK: Option[Int]
+  ): Result[GraphRAGAnswer] =
+    mode match {
+      case GraphRAGMode.Global =>
+        engine.globalSearch(question, config.graphRAGConfig.globalTopCommunities).map { res =>
+          GraphRAGAnswer(
+            query = question,
+            mode = GraphRAGMode.Global,
+            answer = res.answer,
+            communityIds = res.rankedCommunities.map(_._1.id),
+            nodeIds = Seq.empty
+          )
         }
+      case GraphRAGMode.Local =>
+        engine.localSearch(question, config.graphRAGConfig.localTraversalDepth).map { res =>
+          GraphRAGAnswer(
+            query = question,
+            mode = GraphRAGMode.Local,
+            answer = res.answer,
+            communityIds = res.supportingCommunities.map(_.id),
+            nodeIds = res.visitedNodeIds
+          )
+        }
+      case GraphRAGMode.Hybrid =>
+        val k = topK.getOrElse(config.topK)
+        for {
+          queryEmbedding <- embedQuery(question, new QueryMeter)
+          vectorResults  <- searchWithStrategy(queryEmbedding, question, k, new QueryMeter)
+          hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
+        } yield GraphRAGAnswer(
+          query = question,
+          mode = GraphRAGMode.Hybrid,
+          answer = hybrid.answer,
+          communityIds = Seq.empty,
+          nodeIds = hybrid.hits.map(_.node.id)
+        )
     }
 
   /** Check if GraphRAG is available for this pipeline. */

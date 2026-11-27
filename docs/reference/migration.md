@@ -284,6 +284,77 @@ dependency (such as `llm4s-rag`) brought `sts` in.
 | A `profile` with `role_arn` or SSO settings failed at the first call | It authenticates as that role or SSO user |
 | `close()` left the profile or default credentials provider open | `close()` closes it |
 
+## GraphRAG is refused in every mode on a `RAG` with a `SearchIndex` (#2964)
+
+`llm4s-rag` is Beta, and no signature changed. On a `RAG` built with `.withSearchIndex(...)`, `queryWithGraphRAG`
+and `queryWithGraphRAGMode` in Global and Local mode now return a `ConfigurationError`, as Hybrid mode and plain
+`query` already did, before the router or the model is called. They answered from the whole graph and every
+community summary, with no principal or collection, so any caller could read what the permission API would hide.
+GraphRAG has no permission-filtered form yet: on a permission-aware `RAG`, answer with
+`queryWithPermissionsAndAnswer`, or run a separate `GraphRAG` over a graph store that holds only what every caller
+of it may read.
+
+## GraphRAG no longer writes community nodes into your graph store (#2965)
+
+`llm4s-rag` is Beta, and no signature changed. `GraphRAG` only reads its `GraphStore` now. It used to write a
+`community:<id>` node labelled `Community` per community, with a `CONTAINS` edge to each member, during the first
+query, after deleting every node whose id started with `community:` or whose label was `Community`, so a query
+could delete your own `Community` nodes and their edges. Every other reader of the store (`GraphQAPipeline`,
+`GraphQueryExecutor`, `GraphQueryTool`) saw the synthetic nodes and edges. Communities and their summaries are now
+held by the `GraphRAG` instance, built once even when several first queries arrive together, and every node in the
+store is treated as your data, whatever its label or id.
+
+A store that an earlier version queried still holds those artefacts, and GraphRAG now reads them as ordinary nodes.
+Delete them once: the nodes whose id starts with `community:`, whose label is `Community` and which carry the
+`communityId`, `level`, `summary` and `edgeCount` properties GraphRAG wrote (`deleteNode` removes their edges).
+Summaries are recomputed per `GraphRAG` instance; storing them outside the graph is tracked in
+[#2981](https://github.com/llm4s/llm4s/issues/2981).
+
+## `KnowledgeGraphGenerator.extract` takes a `DocumentSource` and namespaces node ids (#2966, #2963)
+
+`llm4s-knowledgegraph` is Experimental. The model's node ids are arbitrary (usually `1`, `2`, ...), and
+`KnowledgeGraphGenerator.extract` wrote them to the store unchanged, so a second document on the same store replaced
+the first one's nodes while keeping its edges: "Alice WORKS_FOR Acme" from one document and "Bob" and "Paris" from the
+next became "Bob WORKS_FOR Paris".
+
+| Before (1.0.0) | After |
+|---|---|
+| `generator.extract(text)` | `generator.extract(text, DocumentSource("doc-1"))`; the stored and returned ids are `doc-1__1`, `doc-1__2`, ..., as `MultiDocumentGraphBuilder` already namespaces them |
+| `extract(text, entityTypes, relationTypes)` | `extract(text, source, entityTypes, relationTypes)` |
+| `new KnowledgeGraphGenerator(llmClient)`, which wrote into a private in-memory store | `new FreeFormExtractor(llmClient).extract(text)`, which returns the `Graph` and stores nothing |
+| A failed node write still let every edge write run | No edge is written once a node write has failed |
+| `MultiDocumentGraphBuilder.extractDocuments` accepted blank or repeated source ids, cross-wiring those documents' entities | It returns a `ValidationError` before any extraction when a source id is blank, repeated, or already a source of `existingGraph`; `extractDocument` refuses a blank id |
+
+To re-extract a document into a graph built earlier, build from a `SourceTrackedGraph` without that document, or give
+the new version its own source id.
+
+## `Neo4jGraphStore` reserves `llm4s_` keys, round-trips properties, and `executeRead` returns `ujson` values (#2969)
+
+`llm4s-knowledgegraph-neo4j` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| A property named `llm4s_id` or `llm4s_label` replaced the node's id or label | A property key starting with `llm4s_` is a `Left` from `upsertNode` and `upsertEdge` |
+| Every number was stored as a float, so a property filter matched `"42.0"` but not `"42"` | Whole numbers are stored as integers: `"42"` matches, as in the in-memory and JSON stores, and `"42.0"` does not |
+| `ujson.Null` was dropped, and arrays and objects were stored and read back as their `toString` | They read back as written: primitive arrays as Neo4j lists, the rest as JSON in `llm4s_json` |
+| `executeRead` returned `List[Map[String, String]]` of driver `toString` output (`"\"Alice\""`, `node<5>`) | It returns `List[Map[String, ujson.Value]]`: `ujson.Str("Alice")`, and a node as an object with `id`, `label` and `properties` |
+
+Read a string column with `row("name").str` instead of stripping quotes. Values written before this release keep
+their stored form: numbers stored as floats still match only `"42.0"` until rewritten, and an array or object stored
+as text reads back as a `ujson.Str`. Re-upsert those nodes to store them in the new form.
+
+## `JsonGraphStore.save` validates and updates the store; writes are atomic (#2968)
+
+`llm4s-knowledgegraph` is Experimental, and no signature changed.
+
+| Before (1.0.0) | After |
+|---|---|
+| `save(graph)` wrote the file but not the store's cache, so the next write rewrote the file from the old graph and `graph` was lost | `save` replaces what the store serves, and later writes build on it |
+| `save` wrote a graph with an edge to a missing node, which every later `load` refused | `save` returns that `Left` and writes nothing |
+| Each write truncated the file in place, so a crash or a full disk could leave it empty or cut off | Each write goes to a temporary file beside it, moved over it; the directory must be writable |
+| `load()` re-read the file but the store kept serving its cache | `load()` refreshes what the store serves |
+| A read of a missing file created it | It reads as an empty graph, and the first write creates the file |
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

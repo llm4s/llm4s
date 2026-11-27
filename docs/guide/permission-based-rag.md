@@ -478,8 +478,9 @@ On a `RAG` with a `SearchIndex`, the `ingest*WithPermissions` methods are the on
 query could return it.
 
 Likewise, it searches only through the permission API. Plain `query`, `queryWithAnswer`, `queryWithAnswerStreaming`
-and GraphRAG's Hybrid mode return a `ConfigurationError`, since they would search every document with no permission
-filter; use `queryWithPermissions`, `queryWithPermissionsAndAnswer` and `queryWithPermissionsAndAnswerStreaming`.
+and every GraphRAG mode (`queryWithGraphRAG`, and `queryWithGraphRAGMode` in Global, Local or Hybrid) return a
+`ConfigurationError`, since they would search every document, or the whole graph, with no permission filter; use
+`queryWithPermissions`, `queryWithPermissionsAndAnswer` and `queryWithPermissionsAndAnswerStreaming`.
 `clear()` is refused as well: use `searchIndex.clearCollection(path)`, or `dropSchema()` and `initializeSchema()`
 to reset everything. `dropSchema()` deletes every document in a collection along with the permission tables, so none
 survives without its permissions; rows a plain `PgVectorStore` wrote to the same table, in no collection, are kept.

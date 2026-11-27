@@ -62,7 +62,7 @@ class MultiDocumentGraphBuilder(
 
   private val coreferenceResolver = new CoreferenceResolver(llmClient)
   private val schemaExtractor     = new SchemaGuidedExtractor(llmClient)
-  private val freeFormExtractor   = new KnowledgeGraphGenerator(llmClient)
+  private val freeFormExtractor   = new FreeFormExtractor(llmClient)
   private val entityLinkerInstance = if (config.llmDisambiguation) {
     new EntityLinker(Some(llmClient))
   } else {
@@ -75,11 +75,12 @@ class MultiDocumentGraphBuilder(
    * Runs the full per-document pipeline: coreference → extraction → validation.
    *
    * @param text The document text to extract from
-   * @param source The document source metadata
+   * @param source The document source metadata; a blank id is a `Left`
    * @return A SourceTrackedGraph containing entities from this document
    */
   def extractDocument(text: String, source: DocumentSource): Result[SourceTrackedGraph] =
     for {
+      _            <- DocumentSource.validateIds(Seq(source))
       resolvedText <- resolveCoref(text)
       rawGraph     <- extractGraph(resolvedText)
       validGraph = validateGraph(rawGraph)
@@ -94,6 +95,10 @@ class MultiDocumentGraphBuilder(
    * Fails fast: if any document's extraction fails, the method returns immediately with
    * that error and subsequent documents are not processed.
    *
+   * Each source id namespaces its document's node ids, so before any extraction the call returns a `Left` when an id
+   * is blank, two documents share one, or a document's id is already a source of `existingGraph`; re-extracting a
+   * document into a graph that already holds it would mix its old and new entities.
+   *
    * @param documents Sequence of (text, source) pairs to extract from
    * @param existingGraph Optional existing graph to build upon incrementally
    * @return A SourceTrackedGraph combining all documents, or the first extraction error
@@ -105,7 +110,8 @@ class MultiDocumentGraphBuilder(
     val base = existingGraph.getOrElse(SourceTrackedGraph.empty)
 
     // Extract each document and fold into the accumulator
-    val merged = documents.foldLeft[Result[SourceTrackedGraph]](Right(base)) { case (accResult, (text, source)) =>
+    val validated = DocumentSource.validateIds(base.sources ++ documents.map(_._2)).map(_ => base)
+    val merged = documents.foldLeft[Result[SourceTrackedGraph]](validated) { case (accResult, (text, source)) =>
       accResult.flatMap { acc =>
         extractDocument(text, source).map(docTracked => acc.addDocument(docTracked.graph, source))
       }

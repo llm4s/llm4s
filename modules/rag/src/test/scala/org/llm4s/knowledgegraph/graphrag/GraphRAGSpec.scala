@@ -92,16 +92,66 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
     )
   }
 
-  test("summarizeCommunities generates summaries and persists community nodes") {
-    val store = seededStore()
-    val rag   = new GraphRAG(store, new DeterministicLLM())
+  test("summarizeCommunities generates summaries and writes nothing to the graph store") {
+    val store  = seededStore()
+    val before = store.loadAll().toOption.get
+    val rag    = new GraphRAG(store, new DeterministicLLM())
 
     val hierarchy = rag.summarizeCommunities().toOption.get
     hierarchy.allCommunities.forall(_.summary.exists(_.nonEmpty)) shouldBe true
 
-    val graph = store.loadAll().toOption.get
-    graph.nodes.values.exists(_.label == "Community") shouldBe true
-    graph.edges.exists(_.relationship == "CONTAINS") shouldBe true
+    store.loadAll().toOption.get shouldBe before
+  }
+
+  test("no query mode changes the graph store, so other readers of it see the same graph") {
+    val store         = seededStore()
+    val before        = store.loadAll().toOption.get
+    val rag           = new GraphRAG(store, new DeterministicLLM())
+    val vectorResults = Seq(HybridSearchResult("alice", "Alice works at FinTech Labs", 0.9, Some(0.9), None))
+
+    rag.globalSearch("What are the themes?").isRight shouldBe true
+    rag.localSearch("What does Alice do?").isRight shouldBe true
+    rag.hybridSearch("Who is connected to Alice?", vectorResults).isRight shouldBe true
+    rag.summarizeCommunities(forceRefresh = true).isRight shouldBe true
+
+    store.loadAll().toOption.get shouldBe before
+  }
+
+  test("a user node labelled Community, or with a community: id, survives a query and is part of the graph") {
+    val store = seededStore()
+    store.upsertNode(Node("community:scala", "Community", Map("name" -> ujson.Str("Scala Community")))).isRight shouldBe
+      true
+    store.upsertEdge(Edge("alice", "community:scala", "MEMBER_OF")).isRight shouldBe true
+    val before = store.loadAll().toOption.get
+    val rag    = new GraphRAG(store, new DeterministicLLM())
+
+    rag.globalSearch("What are the themes?").isRight shouldBe true
+    store.loadAll().toOption.get shouldBe before
+
+    val local = rag.localSearch("Tell me about the Scala Community").toOption.get
+    local.seedNodeIds should contain("community:scala")
+    local.visitedNodeIds should contain("alice")
+    rag.detectCommunities().toOption.get.allCommunities.flatMap(_.nodeIds) should contain("community:scala")
+  }
+
+  test("concurrent first queries summarise the communities once") {
+    val llm = new CountingLLM {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        synchronized(super.complete(conversation, options))
+    }
+    val single = new CountingLLM()
+    new GraphRAG(seededStore(), single).summarizeCommunities().isRight shouldBe true
+
+    val rag   = new GraphRAG(seededStore(), llm)
+    val start = new java.util.concurrent.CountDownLatch(1)
+    val threads = (1 to 8).map { _ =>
+      val t = new Thread(() => { start.await(); rag.summarizeCommunities(): Unit })
+      t.start()
+      t
+    }
+    start.countDown()
+    threads.foreach(_.join())
+    llm.completeCalls shouldBe single.completeCalls
   }
 
   test("globalSearch uses community summaries map-reduce") {
@@ -165,18 +215,6 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
     llm.completeCalls shouldBe firstCount
   }
 
-  test("summarizeCommunities removes stale persisted community artifacts before writing new ones") {
-    val store = seededStore()
-    val rag   = new GraphRAG(store, new DeterministicLLM())
-    rag.summarizeCommunities().isRight shouldBe true
-
-    store.upsertNode(Node("community:stale", "Community", Map("summary" -> ujson.Str("stale")))).isRight shouldBe true
-    store.upsertEdge(Edge("community:stale", "alice", "CONTAINS")).isRight shouldBe true
-
-    rag.summarizeCommunities(forceRefresh = true).isRight shouldBe true
-    store.getNode("community:stale").toOption.flatten shouldBe None
-  }
-
   test("detectCommunities uses cache unless forceRefresh is true") {
     val store = seededStore()
     val rag   = new GraphRAG(store, new DeterministicLLM())
@@ -224,25 +262,6 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
     rag.answer("What does Alice do?").toOption.get.mode shouldBe GraphRAGMode.Local
     rag.answer("Give an overall summary of themes").toOption.get.mode shouldBe GraphRAGMode.Global
     rag.answer("Who is connected to Alice?", vectorResults).toOption.get.mode shouldBe GraphRAGMode.Hybrid
-  }
-
-  test("filterCommunityArtifacts removes synthetic community nodes and dangling edges") {
-    val graph = Graph(
-      nodes = Map(
-        "alice"         -> Node("alice", "Person"),
-        "community:L0"  -> Node("community:L0", "Community"),
-        "regular-node2" -> Node("regular-node2", "Org")
-      ),
-      edges = List(
-        Edge("alice", "regular-node2", "KNOWS"),
-        Edge("community:L0", "alice", "CONTAINS"),
-        Edge("alice", "community:L0", "CONTAINS")
-      )
-    )
-
-    val filtered = GraphRAG.filterCommunityArtifacts(graph)
-    filtered.nodes.keySet shouldBe Set("alice", "regular-node2")
-    filtered.edges.map(e => (e.source, e.target)) shouldBe List(("alice", "regular-node2"))
   }
 
   test("resolveSeedsFromVector uses provenance and lexical fallbacks when direct entity ids are missing") {
