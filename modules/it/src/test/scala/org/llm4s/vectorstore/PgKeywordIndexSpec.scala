@@ -78,6 +78,21 @@ class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
       retrieved.toOption.flatten.map(_.metadata) shouldBe Some(Map("source" -> "test", "type" -> "tutorial"))
     }
 
+    "store and read back metadata a hand-written JSON writer broke on (#2993)" in skipIfNoPg {
+      val metadata = Map(
+        "quote"     -> "say \"hi\"",
+        "backslash" -> """C:\docs\""",
+        "newline"   -> "line one\nline two",
+        "tab"       -> "a\tb",
+        "unicode"   -> "héllo 世界 🚀",
+        "title"     -> """x","tenant":"other""",
+        "tenant"    -> "acme"
+      )
+      index.indexBatch(Seq(KeywordDocument("tricky", "postgres metadata escaping", metadata))) shouldBe Right(())
+      index.get("tricky").map(_.map(_.metadata)) shouldBe Right(Some(metadata))
+      index.search("postgres", 5).map(_.map(_.metadata)) shouldBe Right(Seq(metadata))
+    }
+
     "return None for non-existent document" in skipIfNoPg {
       val result = index.get("non-existent")
       result shouldBe Right(None)

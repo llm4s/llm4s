@@ -16,6 +16,7 @@ import org.llm4s.vectorstore.{
 import org.llm4s.util.RateLimitedLogger
 import org.llm4s.security.Secret
 import org.llm4s.vectorstore.JdbcUrlCredentials
+import org.llm4s.vectorstore.PgMetadataJson
 
 import org.slf4j.LoggerFactory
 
@@ -246,7 +247,7 @@ final class PgSearchIndex private (
               id = rs.getString("id"),
               content = Option(rs.getString("content")).getOrElse(""),
               score = rs.getDouble("score"),
-              metadata = jsonToMap(rs.getString("metadata"))
+              metadata = PgMetadataJson.read(rs.getString("metadata"))
             )
           buffer.toSeq
         }
@@ -325,7 +326,7 @@ final class PgSearchIndex private (
                 stmt.setString(2, embeddingToString(chunk.embedding))
                 stmt.setInt(3, chunk.dimensions)
                 stmt.setString(4, chunk.content)
-                stmt.setString(5, mapToJson(chunkMetadata))
+                stmt.setString(5, PgMetadataJson.write(chunkMetadata))
                 stmt.setInt(6, collectionId)
                 stmt.setArray(7, readableByArray)
                 stmt.addBatch()
@@ -461,7 +462,7 @@ final class PgSearchIndex private (
 
     parseEmbedding(embeddingStr) match {
       case Some(embedding) =>
-        val metadata = jsonToMap(rs.getString("metadata"))
+        val metadata = PgMetadataJson.read(rs.getString("metadata"))
 
         Some(
           VectorRecord(
@@ -491,32 +492,6 @@ final class PgSearchIndex private (
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
     conn.createArrayOf("integer", values.map(Int.box).toArray)
-
-  private def mapToJson(map: Map[String, String]): String =
-    if (map.isEmpty) "{}"
-    else {
-      val entries = map.map { case (k, v) =>
-        val escapedKey   = k.replace("\\", "\\\\").replace("\"", "\\\"")
-        val escapedValue = v.replace("\\", "\\\\").replace("\"", "\\\"")
-        s""""$escapedKey":"$escapedValue""""
-      }
-      s"{${entries.mkString(",")}}"
-    }
-
-  private def jsonToMap(json: String): Map[String, String] =
-    if (json == null || json.isEmpty || json == "{}") Map.empty
-    else {
-      // Simple JSON parsing for flat string maps
-      val pattern = """"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"""".r
-      pattern
-        .findAllMatchIn(json)
-        .map { m =>
-          val key   = m.group(1).replace("\\\"", "\"").replace("\\\\", "\\")
-          val value = m.group(2).replace("\\\"", "\"").replace("\\\\", "\\")
-          key -> value
-        }
-        .toMap
-    }
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(dataSource.getConnection)(f)

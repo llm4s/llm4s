@@ -91,4 +91,31 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
     store.findAccessible(UserAuthorization.Admin, pattern).map(_.map(_.path.value)) shouldBe Right(expected)
     store.findAccessible(UserAuthorization.Anonymous, pattern).map(_.map(_.path.value)) shouldBe Right(expected)
   }
+
+  "PgSearchIndex" should "store and read back chunk and collection metadata a hand-written JSON writer broke on (#2993)" in {
+    requirePg()
+    val index = searchIndex.get
+    val metadata = Map(
+      "quote"     -> "say \"hi\"",
+      "backslash" -> """C:\docs\""",
+      "escape"    -> """a\nb""",
+      "newline"   -> "line one\nline two",
+      "tab"       -> "a\tb",
+      "unicode"   -> "héllo 世界 🚀",
+      "title"     -> """x","tenant":"other""",
+      "tenant"    -> "acme"
+    )
+    val path = CollectionPath.unsafe("meta2993")
+
+    index.collections.create(CollectionConfig(path, metadata = metadata)).map(_.metadata) shouldBe Right(metadata)
+    index.collections.get(path).map(_.map(_.metadata)) shouldBe Right(Some(metadata))
+    index.collections.updateMetadata(path, metadata + ("extra" -> "\u0001")).map(_.metadata) shouldBe
+      Right(metadata + ("extra" -> "\u0001"))
+
+    val chunk = ChunkWithEmbedding("metadata escaping", Array(0.1f, 0.2f, 0.3f), 0)
+    index.ingest(path, "doc-2993", Seq(chunk), metadata, Set.empty).map(_.size) shouldBe Right(1)
+
+    val hits = index.query(UserAuthorization.Admin, CollectionPattern.Exact(path), Array(0.1f, 0.2f, 0.3f), 5)
+    hits.map(_.map(_.record.metadata -- Set("docId", "chunkIndex"))) shouldBe Right(Seq(metadata))
+  }
 }

@@ -4,7 +4,7 @@ import org.llm4s.util.Redaction
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
-import org.llm4s.vectorstore.SqlLikePattern
+import org.llm4s.vectorstore.{ PgMetadataJson, SqlLikePattern }
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -44,7 +44,7 @@ final class PgCollectionStore(
   private def doCreate(config: CollectionConfig): Result[Collection] = Try {
     withConnection { conn =>
       val queryableByArray = createIntArray(conn, config.queryableBy.map(_.value).toSeq)
-      val metadataJson     = mapToJson(config.metadata)
+      val metadataJson     = PgMetadataJson.write(config.metadata)
 
       Using.resource(conn.prepareStatement("""
         INSERT INTO llm4s_collections (path, parent_path, queryable_by, is_leaf, metadata)
@@ -248,7 +248,7 @@ final class PgCollectionStore(
     metadata: Map[String, String]
   ): Result[Collection] = Try {
     withConnection { conn =>
-      val metadataJson = mapToJson(metadata)
+      val metadataJson = PgMetadataJson.write(metadata)
 
       Using.resource(conn.prepareStatement("""
         UPDATE llm4s_collections
@@ -455,7 +455,7 @@ final class PgCollectionStore(
 
     val parentPath = Option(rs.getString("parent_path")).flatMap(p => CollectionPath.create(p).toOption)
     val path       = CollectionPath.unsafe(rs.getString("path"))
-    val metadata   = jsonToMap(rs.getString("metadata"))
+    val metadata   = PgMetadataJson.read(rs.getString("metadata"))
 
     Collection(
       id = rs.getInt("id"),
@@ -469,25 +469,6 @@ final class PgCollectionStore(
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
     conn.createArrayOf("integer", values.map(Int.box).toArray)
-
-  private def mapToJson(map: Map[String, String]): String =
-    if (map.isEmpty) "{}"
-    else {
-      val entries = map.map { case (k, v) =>
-        val escapedKey   = k.replace("\"", "\\\"")
-        val escapedValue = v.replace("\"", "\\\"")
-        s""""$escapedKey":"$escapedValue""""
-      }
-      s"{${entries.mkString(",")}}"
-    }
-
-  private def jsonToMap(json: String): Map[String, String] =
-    if (json == null || json.isEmpty || json == "{}") Map.empty
-    else {
-      // Simple JSON parsing for flat string maps
-      val pattern = """"([^"]+)"\s*:\s*"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(getConnection())(f)
