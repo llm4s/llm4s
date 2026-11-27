@@ -296,7 +296,7 @@ class PgVectorStoreSpec extends AnyWordSpec with Matchers {
 
 Tiers are tags rather than name patterns in a `testOnly` argument because a name pattern
 fails silently: a suite matching no pattern is run by nothing and reports nothing. `sbt
-it/itTierCheck` - part of Quick Checks in CI - fails the build when a suite declares no tier
+it/itTierCheck` - run in CI before `modules/it`'s tests, in `Test (other modules)` and every tier - fails the build when a suite declares no tier
 or more than one.
 
 ### Skipping is a local convenience, not a CI outcome

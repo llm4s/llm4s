@@ -123,24 +123,31 @@ flags:
   bedrock:
     paths:
       - modules/providers/bedrock/src/main/scala
+    carryforward: true
   azure-identity:
     paths:
       - modules/providers/azure-identity/src/main/scala
+    carryforward: true
   jina:
     paths:
       - modules/providers/jina/src/main/scala
+    carryforward: true
   jev:
     paths:
       - modules/providers/jev/src/main/scala
+    carryforward: true
   secrets-vault:
     paths:
       - modules/secrets-vault/src/main/scala
+    carryforward: true
   secrets-aws:
     paths:
       - modules/secrets-aws/src/main/scala
+    carryforward: true
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala
+    carryforward: true
   watsonx:
     paths:
       - modules/providers/watsonx/src/main/scala

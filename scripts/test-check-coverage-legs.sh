@@ -201,6 +201,12 @@ expect_fail "a flag whose path is not the module's fails" "has paths .* expected
 
 fresh
 mutate <<'RB'
+codecov['flags'][uploads.first['with']['flags']].delete('carryforward')
+RB
+expect_fail "a flag without carryforward fails" "does not set carryforward: true"
+
+fresh
+mutate <<'RB'
 job['strategy']['matrix'].delete('include')
 RB
 expect_fail "a coverage job without legs fails" "has no strategy.matrix.include legs"
