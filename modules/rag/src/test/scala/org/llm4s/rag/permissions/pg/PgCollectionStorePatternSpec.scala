@@ -1,11 +1,14 @@
 package org.llm4s.rag.permissions.pg
 
-import org.llm4s.rag.permissions.{ CollectionPath, CollectionPattern }
+import org.llm4s.rag.permissions.{ CollectionPath, CollectionPattern, PrincipalId, UserAuthorization }
 import org.llm4s.vectorstore.SqlLikePattern
+import org.scalatest.LoneElement
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.sql.DriverManager
+import java.lang.reflect.{ InvocationHandler, Method, Proxy }
+import java.sql.{ Array => SqlArray, Connection, DriverManager, PreparedStatement, ResultSet }
+import scala.collection.mutable
 import scala.util.Using
 
 /**
@@ -14,7 +17,7 @@ import scala.util.Using
  * The `LIKE` parameter is checked by evaluating it with SQLite's `LIKE ... ESCAPE '\'`, whose `_`, `%` and
  * escape handling is the same as Postgres's, so no database server is needed.
  */
-class PgCollectionStorePatternSpec extends AnyWordSpec with Matchers {
+class PgCollectionStorePatternSpec extends AnyWordSpec with Matchers with LoneElement {
 
   private def path(p: String): CollectionPath = CollectionPath.unsafe(p)
 
@@ -74,6 +77,75 @@ class PgCollectionStorePatternSpec extends AnyWordSpec with Matchers {
       PgCollectionStore.patternToSql(CollectionPattern.Exact(path("a_b"))) shouldBe ("path = ?", Seq("a_b"))
       PgCollectionStore.patternToSql(CollectionPattern.ImmediateChildren(path("a_b"))) shouldBe
         ("parent_path = ?", Seq("a_b"))
+    }
+  }
+
+  /** A connection that records each prepared statement's SQL and string parameters and returns no rows. */
+  final private class RecordingDb {
+    val statements: mutable.ListBuffer[(String, mutable.Map[Int, String])] = mutable.ListBuffer.empty
+
+    private def proxy[T](cls: Class[T])(handler: (String, Array[AnyRef]) => Any): T =
+      Proxy
+        .newProxyInstance(
+          getClass.getClassLoader,
+          Array[Class[?]](cls),
+          new InvocationHandler {
+            def invoke(p: Any, m: Method, args: Array[AnyRef]): AnyRef = {
+              val result = handler(m.getName, Option(args).getOrElse(Array.empty))
+              (result, m.getReturnType) match {
+                case (null, t) if t == java.lang.Boolean.TYPE => java.lang.Boolean.FALSE
+                case (null, t) if t == java.lang.Integer.TYPE => Int.box(0)
+                case (r, _)                                   => r.asInstanceOf[AnyRef]
+              }
+            }
+          }
+        )
+        .asInstanceOf[T]
+
+    private val emptyResult = proxy(classOf[ResultSet])((_, _) => null)
+
+    val connection: Connection = proxy(classOf[Connection]) {
+      case ("prepareStatement", args) =>
+        val params = mutable.Map.empty[Int, String]
+        statements += ((args(0).asInstanceOf[String], params))
+        proxy(classOf[PreparedStatement]) {
+          case ("setString", a)    => params(a(0).asInstanceOf[Integer].intValue) = a(1).asInstanceOf[String]
+          case ("executeQuery", _) => emptyResult
+          case _                   => null
+        }
+      case ("createArrayOf", _) => proxy(classOf[SqlArray])((_, _) => null)
+      case _                    => null
+    }
+
+    def store: PgCollectionStore = new PgCollectionStore(() => connection)
+  }
+
+  "PgCollectionStore" should {
+    val pattern = CollectionPattern.AllDescendants(path("tenant_1"))
+    val escaped = Map("exact" -> "tenant_1", "like" -> "tenant\\_1/%")
+
+    "bind the escaped prefix in list" in {
+      val db = new RecordingDb
+      db.store.list(pattern) shouldBe Right(Seq.empty)
+      val (sql, params) = db.statements.loneElement
+      sql should include(s"path LIKE ? ${SqlLikePattern.EscapeClause}")
+      params.toMap shouldBe Map(1 -> escaped("exact"), 2 -> escaped("like"))
+    }
+
+    "bind the escaped prefix in findAccessible for an admin" in {
+      val db = new RecordingDb
+      db.store.findAccessible(UserAuthorization.Admin, pattern) shouldBe Right(Seq.empty)
+      val (sql, params) = db.statements.loneElement
+      sql should include(s"path LIKE ? ${SqlLikePattern.EscapeClause}")
+      params.toMap shouldBe Map(1 -> escaped("exact"), 2 -> escaped("like"))
+    }
+
+    "bind the escaped prefix in findAccessible for a principal, after the principal arrays" in {
+      val db = new RecordingDb
+      db.store.findAccessible(UserAuthorization.forUser(PrincipalId(3)), pattern) shouldBe Right(Seq.empty)
+      val (sql, params) = db.statements.loneElement
+      sql should include(s"path LIKE ? ${SqlLikePattern.EscapeClause}")
+      params.toMap shouldBe Map(3 -> escaped("exact"), 4 -> escaped("like"))
     }
   }
 }
