@@ -3,11 +3,12 @@ package org.llm4s.rag.loader
 import org.llm4s.error.ProcessingError
 
 import java.io.File
-import java.nio.file.{ Files, Path }
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{ Files, NoSuchFileException, Path }
 import java.util.Locale
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
-import scala.util.{ Try, Using }
+import scala.util.{ Failure, Success, Try, Using }
 
 /**
  * Load all documents from a directory.
@@ -22,6 +23,11 @@ import scala.util.{ Try, Using }
  * following its link again, so a link retargeted afterwards is not followed; a file whose checked path no longer
  * resolves to itself is a failure. Java cannot open a file relative to a held directory, so a directory inside the
  * root replaced by a link in the instant between that recheck and the open is the one race left.
+ *
+ * A directory that cannot be listed (permissions, an I/O error), or an entry whose real path or attributes cannot be
+ * read, ends the load with a [[LoadResult.ListingFailure]], after the documents that were listed: what that part of
+ * the tree holds is unknown, so `RAG.sync` returns the error and deletes nothing, rather than treat its documents as
+ * gone. An entry that no longer exists when it is resolved, such as a link to nothing, is skipped.
  *
  * @param path Path to the directory
  * @param extensions File extensions to include (without leading dot)
@@ -60,27 +66,57 @@ final case class DirectoryLoader(
       )
     }
 
-    listFiles().iterator.flatMap { case (file, real) =>
+    val listing = listFiles()
+    val documents = listing.files.iterator.flatMap { case (file, real) =>
       val fileMetadata = metadata + ("directory" -> dir.getName)
       // Read from the real path checked when listing, never by following `file` again (#2724)
       FileLoader(file, fileMetadata).loadFrom(real)
     }
+    // After the documents that were listed: a part of the tree that could not be listed is not an empty part, so
+    // RAG.sync must delete nothing for this source (#2998)
+    documents ++ listing.failure.iterator
   }
 
-  /** Every matching regular file under the root, depth first, entries in name order, with its checked real path. */
-  private def listFiles(): Seq[(Path, Path)] =
-    Try(path.toRealPath()).toOption match {
-      case None => Seq.empty
-      case Some(rootReal) =>
+  /**
+   * Every matching regular file under the root, depth first, entries in name order, with its checked real path; and,
+   * when a directory could not be listed or an entry's real path or attributes could not be read, the
+   * [[LoadResult.ListingFailure]] naming them. An entry that is gone by the time it is resolved (deleted since the
+   * listing, or a link to nothing) is skipped, as a file that no longer exists.
+   */
+  private def listFiles(): DirectoryLoader.Listing =
+    Try(path.toRealPath()) match {
+      case Failure(error) =>
+        DirectoryLoader.Listing(Seq.empty, DirectoryLoader.failure(path, Seq(path -> error)))
+      case Success(rootReal) =>
         def inside(real: Path): Boolean = !confineToRoot || real.startsWith(rootReal)
 
-        // Each entry of `dir` that is inside the root, with the real path it would be read from (links followed)
-        def entries(dir: Path): Vector[(Path, Path)] =
-          Using(Files.list(dir))(_.iterator().asScala.toVector.sortBy(_.getFileName.toString))
-            .getOrElse(Vector.empty)
-            .flatMap(e => Try(e.toRealPath()).toOption.filter(inside).map(e -> _))
+        // Deduplicated: a directory is listed twice, once when its depth is found and once when it is walked
+        val errors = scala.collection.mutable.LinkedHashMap[Path, Throwable]()
 
-        def subdirs(dir: Path): Vector[(Path, Path)] = entries(dir).filter { case (_, real) => Files.isDirectory(real) }
+        // Each entry of `dir` that is inside the root, with the real path it would be read from (links followed)
+        // and that path's attributes
+        def entries(dir: Path): Vector[(Path, Path, BasicFileAttributes)] =
+          Using(Files.list(dir))(_.iterator().asScala.toVector.sortBy(_.getFileName.toString)) match {
+            case Failure(error) =>
+              errors.getOrElseUpdate(dir, error)
+              Vector.empty
+            case Success(listed) =>
+              listed.flatMap { e =>
+                Try {
+                  val real = e.toRealPath()
+                  (e, real, Files.readAttributes(real, classOf[BasicFileAttributes]))
+                } match {
+                  case Success(resolved @ (_, real, _)) => Option.when(inside(real))(resolved)
+                  case Failure(_: NoSuchFileException)  => None // gone since the listing, or a link to nothing
+                  case Failure(error) =>
+                    errors.getOrElseUpdate(e, error)
+                    None
+                }
+              }
+          }
+
+        def subdirs(dir: Path): Vector[(Path, Path)] =
+          entries(dir).collect { case (entry, real, attrs) if attrs.isDirectory => entry -> real }
 
         // The shallowest depth each real directory is reachable at, breadth first, so a directory reached through a
         // deep link is still walked as deep as its shallowest path allows; each real directory is listed once here
@@ -102,17 +138,18 @@ final case class DirectoryLoader(
         def walk(dir: Path, depth: Int): Seq[(Path, Path)] = {
           val resolved = entries(dir)
           val files = resolved.collect {
-            case (entry, real) if Files.isRegularFile(real) && matchesExtension(entry) => entry -> real
+            case (entry, real, attrs) if attrs.isRegularFile && matchesExtension(entry) => entry -> real
           }
           val subdirFiles = resolved.collect {
-            case (entry, real)
-                if Files.isDirectory(real) && shallowest.get(real).contains(depth + 1) && walked.add(real) =>
+            case (entry, real, attrs)
+                if attrs.isDirectory && shallowest.get(real).contains(depth + 1) && walked.add(real) =>
               walk(entry, depth + 1)
           }.flatten
           files ++ subdirFiles
         }
 
-        walk(path, 0)
+        val files = walk(path, 0)
+        DirectoryLoader.Listing(files, DirectoryLoader.failure(path, errors.toSeq))
     }
 
   private def matchesExtension(file: Path): Boolean = {
@@ -123,7 +160,9 @@ final case class DirectoryLoader(
   override def estimatedCount: Option[Int] = {
     val dir = path.toFile
     if (dir.exists() && dir.isDirectory) {
-      Some(listFiles().size)
+      val listing = listFiles()
+      // Unknown, not the part that could be listed
+      Option.when(listing.failure.isEmpty)(listing.files.size)
     } else {
       None
     }
@@ -157,6 +196,26 @@ final case class DirectoryLoader(
 }
 
 object DirectoryLoader {
+
+  /** The files a listing found, and the failure to report when part of the tree could not be listed. */
+  final private case class Listing(files: Seq[(Path, Path)], failure: Option[LoadResult])
+
+  /** Shown in a listing failure's message; the rest are counted. */
+  private val shownErrors = 5
+
+  /** One [[LoadResult.ListingFailure]] for the root, naming each path that could not be listed or resolved. */
+  private def failure(root: Path, errors: Seq[(Path, Throwable)]): Option[LoadResult] =
+    Option.when(errors.nonEmpty) {
+      val shown = errors.take(shownErrors).map { case (p, e) =>
+        val detail = Option(e.getMessage).filterNot(_ == p.toString).fold("")(m => s": $m")
+        s"$p (${e.getClass.getSimpleName}$detail)"
+      }
+      val more = if (errors.size > shownErrors) s", and ${errors.size - shownErrors} more" else ""
+      LoadResult.listingFailure(
+        root.toString,
+        ProcessingError("list", s"Could not list ${errors.size} path(s) under $root: ${shown.mkString(", ")}$more")
+      )
+    }
 
   /** Default supported file extensions */
   val defaultExtensions: Set[String] = Set(

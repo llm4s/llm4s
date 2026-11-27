@@ -3,7 +3,6 @@ package org.llm4s.rag.loader.internal
 import org.llm4s.security.RegexSafetyManager
 
 import java.util.regex.Pattern
-import scala.collection.mutable
 
 /**
  * Utility for matching URLs against glob-style patterns.
@@ -21,8 +20,11 @@ import scala.collection.mutable
  */
 object GlobPatternMatcher {
 
-  // Cache compiled patterns for performance
-  private val patternCache = mutable.Map[String, Pattern]()
+  /** The most compiled patterns kept; the least recently used is dropped first. */
+  private[loader] val MaxCachedPatterns: Int = 1024
+
+  // Compiled patterns, shared by every crawl in the process, so bounded and thread-safe
+  private val patternCache = new BoundedCache[String, Pattern](MaxCachedPatterns)
 
   /**
    * Check if a URL matches any of the given patterns.
@@ -107,4 +109,7 @@ object GlobPatternMatcher {
    * Clear the pattern cache (for testing or memory management).
    */
   def clearCache(): Unit = patternCache.clear()
+
+  /** How many compiled patterns are cached. */
+  private[loader] def cacheSize: Int = patternCache.size
 }

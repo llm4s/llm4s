@@ -21,6 +21,8 @@ import scala.concurrent.duration.*
  * @param acceptContentTypes Content types to process (others are skipped)
  * @param urlPolicy Which URLs may be requested - each seed, crawled link, redirect hop and robots.txt - and the
  *                  addresses the crawler connects to (default: [[UrlPolicy.default]], public addresses only)
+ * @param maxCrawlDelay The longest robots.txt `Crawl-delay` honoured (default 60 seconds); a longer one is capped, so a
+ *                      site cannot stall the crawl. `delay` is never capped
  */
 final case class CrawlerConfig(
   maxDepth: Int = 3,
@@ -35,7 +37,8 @@ final case class CrawlerConfig(
   includeQueryParams: Boolean = false,
   sameDomainOnly: Boolean = true,
   acceptContentTypes: Set[String] = Set("text/html", "application/xhtml+xml"),
-  urlPolicy: UrlPolicy = UrlPolicy.default
+  urlPolicy: UrlPolicy = UrlPolicy.default,
+  maxCrawlDelay: FiniteDuration = CrawlerConfig.DefaultMaxCrawlDelay
 ) {
 
   /** Set max crawl depth */
@@ -86,12 +89,19 @@ final case class CrawlerConfig(
   def withUrlPolicy(policy: UrlPolicy): CrawlerConfig =
     copy(urlPolicy = policy)
 
+  /** Set the longest robots.txt `Crawl-delay` honoured */
+  def withMaxCrawlDelay(max: FiniteDuration): CrawlerConfig =
+    copy(maxCrawlDelay = max)
+
   /** Set acceptable content types */
   def withContentTypes(types: Set[String]): CrawlerConfig =
     copy(acceptContentTypes = types)
 }
 
 object CrawlerConfig {
+
+  /** The longest robots.txt `Crawl-delay` honoured by default. */
+  val DefaultMaxCrawlDelay: FiniteDuration = 60.seconds
 
   /** Default configuration with sensible defaults */
   val default: CrawlerConfig = CrawlerConfig()
