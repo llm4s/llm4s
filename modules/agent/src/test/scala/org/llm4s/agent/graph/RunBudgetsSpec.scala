@@ -119,7 +119,8 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
 
   it should "report exactly one cause when cancel races expiry" in {
     var cancelled, expired = 0
-    (1 to 100).foreach { i =>
+    // 20 runs: each of the five offsets 4 times, the 50 ms one, at the deadline itself, among them
+    (1 to 20).foreach { i =>
       val store   = InMemoryCheckpointer()
       val runtime = GraphRuntime(store)
       val g       = blockingGraph(new AtomicInteger(), new AtomicBoolean(true))

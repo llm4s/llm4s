@@ -46,7 +46,7 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
   // ---- backpressure -------------------------------------------------------------------------
 
   "streamComplete" should "block the producer when the bounded queue is full and resume when the consumer drains" in {
-    val counting = new Counting(100000)
+    val counting = new Counting(10000)
     val gate     = Deferred.unsafe[IO, Unit]
     val result = stream(counting.client)
       .evalTap(c => if (c.id == "c0") gate.get else IO.unit)
@@ -60,11 +60,11 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
     }
     // Capacity is 64 and the producer is typically stopped at 66; fs2/cats-effect scheduling lets it
     // run ahead occasionally (up to ~1500 observed in 1 of 200 runs), so the bound is generous.
-    // An unbounded buffer lets all 100000 through.
-    counting.entered.get() should be <= 10000
+    // An unbounded buffer lets all 10000 through.
+    counting.entered.get() should be <= 5000
 
     run(gate.complete(()))
-    Await.result(result, Safety).map(_.id) shouldBe ids(100000)
+    Await.result(result, Safety).map(_.id) shouldBe ids(10000)
     counting.finished.get() shouldBe true
   }
 
@@ -94,7 +94,7 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
   }
 
   it should "terminate and interrupt a producer that is blocked on a full queue when the consumer stops early" in {
-    val counting = new Counting(100000)
+    val counting = new Counting(10000)
     val gate     = Deferred.unsafe[IO, Unit]
     val result = stream(counting.client)
       .evalTap(_ => gate.get)
@@ -155,7 +155,7 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
   }
 
   it should "interrupt a producer blocked on a full queue when the consuming fiber is cancelled" in {
-    val counting = new Counting(100000)
+    val counting = new Counting(10000)
     val gate     = Deferred.unsafe[IO, Unit]
     val fiber    = stream(counting.client).evalTap(_ => gate.get).compile.drain.start.unsafeRunSync()
     awaitBlocked(counting)

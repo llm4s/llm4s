@@ -467,9 +467,11 @@ class AgentWorkerSpec
   it should "record no attempt while the probe claim cannot be given back" in {
     val store   = InMemoryCheckpointer()
     val failing = new AtomicBoolean(true)
+    val refused = new Semaphore(0)
     val sticky = new ForwardingCheckpointer(store) {
       override def release(threadId: ThreadId, token: FencingToken): Result[Unit] =
-        if (failing.get) Left(ValidationError("store", "release failed")) else super.release(threadId, token)
+        if (failing.get) { refused.release(); Left(ValidationError("store", "release failed")) }
+        else super.release(threadId, token)
     }
     val worker = AgentWorker(
       store.runQueue,
@@ -477,11 +479,13 @@ class AgentWorkerSpec
       Seq(QueuedAgent(agentOver(store, answering("x")))),
       fast,
       RunQueueSettings(lease = LeasePolicy(ttl = 300.millis, renewEvery = 100.millis))
-    ).value
+    ).value.withProbeTtl(200.millis) // a probe claim that is not given back holds the thread this long, not 5 s
     started.add(worker)
     val id = submit(store, thread())
     worker.start()
-    Thread.sleep(500)
+    // the worker has probed, and failed to give the claim back, twice - the second once the first claim had lapsed:
+    // it has had its chances to record an attempt
+    refused.tryAcquire(2, 10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
     store.runQueue.entry(None, id).value.attempts shouldBe empty
     failing.set(false)
     closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
