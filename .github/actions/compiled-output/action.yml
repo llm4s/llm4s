@@ -1,0 +1,47 @@
+name: Compiled output cache
+description: >-
+  Restores (mode `restore`) or saves (mode `save`) the sbt target directories of one job kind, so a pull request
+  compiles only what changed since the nightly run on main saved them (zinc keys sources by content, not timestamp).
+  Only the nightly run and a manual run save; a pull request, a push and a release only restore.
+
+# Keyed by job kind, because the classes differ between kinds: instrumented (a coverage leg, Integration Tests) must
+# never meet uninstrumented ones, and Windows' entries are Windows'. Test reports, coverage measurements and reports,
+# SBOMs and Docker staging are left out of an entry. compiled-cache.yml keeps the newest entry per kind (#3179; the
+# pilot, in the agent leg and `Test (other modules)`, compiled 144 files where an uncached leg compiled 1,290).
+# Not for a job that checks what the compiler or Scaladoc prints: an up-to-date task prints nothing, so a log check
+# would pass on nothing (ScalaDoc reads `sbt docs/doc`'s warnings, so it has no entry).
+inputs:
+  kind:
+    description: The job kind, e.g. `quick-checks`, `coverage-core`, `windows`; part of the key `compiled-v1-<kind>-`
+    required: true
+  mode:
+    description: '`restore` (after setup-sbt) or `save` (the last step; it saves only on a nightly or manual run)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.mode == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          **/target
+          !**/target/**/test-reports
+          !**/target/**/scoverage-report
+          !**/target/**/scoverage-data/scoverage.measurements.*
+          !**/target/sboms
+          !**/target/docker
+        key: compiled-v1-${{ inputs.kind }}-${{ github.run_id }}
+        restore-keys: compiled-v1-${{ inputs.kind }}-
+
+    - if: inputs.mode == 'save' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          **/target
+          !**/target/**/test-reports
+          !**/target/**/scoverage-report
+          !**/target/**/scoverage-data/scoverage.measurements.*
+          !**/target/sboms
+          !**/target/docker
+        key: compiled-v1-${{ inputs.kind }}-${{ github.run_id }}-${{ github.run_attempt }}

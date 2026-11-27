@@ -9,7 +9,7 @@ redirect_from:
   - /reference/merge-queue
   - /reference/merge-queue.html
 cites_closed_issues: [1638]
-cites_open_issues: [3183, 3185, 3186]
+cites_open_issues: [3183, 3185, 3186, 3190]
 ---
 
 # Protecting `main` from merge skew
@@ -39,10 +39,16 @@ linked: merge `main` into your branch (`git merge --signoff origin/main`), fix t
 
 ## For maintainers: enabling it
 
-**Where it stands (2026-11-27, [#3183](https://github.com/llm4s/llm4s/issues/3183)):** `protect-main` is active with the three required checks below and
-**Require branches to be up to date** off, so no pull request merges with a red or missing `All Tests Pass`, a DCO
-failure or a secret-scan failure. The merge queue (step 3) is not enabled yet: it waits for selective pull request
-runs ([#3185](https://github.com/llm4s/llm4s/issues/3185), [#3186](https://github.com/llm4s/llm4s/issues/3186)), after which the queue is where everything runs before a merge.
+**Where it stands (2026-11-27, [#3183](https://github.com/llm4s/llm4s/issues/3183)):** `protect-main` is active
+with the three required checks below, **Require branches to be up to date** off, and the merge queue on with the
+settings in step 3. A pull request merges through the queue: the **Merge when ready** button, or
+`gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position}}}' -f id=<node id>`
+(auto-merge is off for the repository, so `gh pr merge` refuses), and it lands when its `merge_group` run passes.
+`main` then sits on exactly the commit that run tested. Next: pull request runs and merge-group runs test only what
+their change reaches ([#3185](https://github.com/llm4s/llm4s/issues/3185),
+[#3186](https://github.com/llm4s/llm4s/issues/3186); a merge group by its diff against `main`), the nightly run tests
+everything, and the push-to-main run drops what the queue already ran on the same commit
+([#3190](https://github.com/llm4s/llm4s/issues/3190)).
 
 This is a repository setting, so it needs an admin; the workflows are ready for it. Two options, which can be used in
 sequence.
@@ -69,10 +75,11 @@ To enable it:
    Do not add `OSV-Scanner` (it is path-filtered, so most pull requests never report it), Codecov's statuses (they are
    informational here and are not guaranteed to report on a merge group) or the `DCO` GitHub App's check (it is not known to report on merge groups; the
    workflow's `Check DCO sign-off` covers the same rule).
-3. Add **Require merge queue**. Suggested settings:
+3. **Require merge queue** (done), with these settings:
    - Merge method: **Squash**, as pull requests are merged today. The squash commit message keeps each commit's
      `Signed-off-by`.
-   - Build concurrency: 5. Minimum group size 1, maximum 5, wait time 5 minutes.
+   - Build concurrency: 1 (5 dispatched five full runs at once against the 20-job limit, so each took 38-44 minutes and
+     a failure discarded the runs stacked on it; #3183). Minimum group size 1, maximum 5, wait time 5 minutes.
    - **Only merge non-failing pull requests**: on, so a failing group is split and the culprit removed rather than
      everything behind it.
    - Status check timeout: 60 minutes (a full `ci.yml` run takes about 20).
