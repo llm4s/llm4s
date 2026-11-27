@@ -342,6 +342,18 @@ Read a string column with `row("name").str` instead of stripping quotes. Values 
 their stored form: numbers stored as floats still match only `"42.0"` until rewritten, and an array or object stored
 as text reads back as a `ujson.Str`. Re-upsert those nodes to store them in the new form.
 
+## `JsonGraphStore.save` validates and updates the store; writes are atomic (#2968)
+
+`llm4s-knowledgegraph` is Experimental, and no signature changed.
+
+| Before (1.0.0) | After |
+|---|---|
+| `save(graph)` wrote the file but not the store's cache, so the next write rewrote the file from the old graph and `graph` was lost | `save` replaces what the store serves, and later writes build on it |
+| `save` wrote a graph with an edge to a missing node, which every later `load` refused | `save` returns that `Left` and writes nothing |
+| Each write truncated the file in place, so a crash or a full disk could leave it empty or cut off | Each write goes to a temporary file beside it, moved over it; the directory must be writable |
+| `load()` re-read the file but the store kept serving its cache | `load()` refreshes what the store serves |
+| A read of a missing file created it | It reads as an empty graph, and the first write creates the file |
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

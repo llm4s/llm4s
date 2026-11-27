@@ -63,7 +63,8 @@ val outcome = for {
   client you give them and parse its JSON reply; a failure, including a reply that does not parse,
   is a `Left(ProcessingError)`, so check the `Result`.
 - **`InMemoryGraphStore` is not persistent**, and `JsonGraphStore` rewrites its file on each
-  change: neither is meant for large graphs.
+  change (to a temporary file moved over it, so the file is always whole): neither is meant for large graphs.
+  `JsonGraphStore` assumes it is its file's only writer; `load()` re-reads the file.
 
 ## Tests
 
