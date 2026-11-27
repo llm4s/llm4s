@@ -7,7 +7,7 @@ import scala.collection.mutable
 
 /**
  * A connection whose queries return `rows(sql)` and which records the parameters of every statement it runs
- * (one entry per `executeUpdate`, `executeQuery` or batch row). A statement whose SQL `fails` throws when run, after
+ * (one entry per `executeUpdate`, `executeQuery`, `execute` or batch row). A statement whose SQL `fails` throws when run, after
  * it is recorded. Commits and rollbacks are counted.
  */
 final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => Boolean = _ => false) {
@@ -59,6 +59,7 @@ final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => B
       case ("addBatch", _)                                        => record()
       case ("executeBatch", _)                                    => Array(1)
       case ("executeUpdate", _)                                   => record(); 1
+      case ("execute", _)                                         => record(); false
       case ("executeQuery", _)                                    => record(); resultSet(rows(sql))
       case _                                                      => null
     }

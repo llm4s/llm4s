@@ -438,6 +438,20 @@ rag.ingestWithPermissions(
 )
 ```
 
+Ingesting a document id again into the same collection replaces the document there: `PgSearchIndex` deletes its old
+chunks and inserts the new ones in one transaction, so a section the new version dropped, or the old version's
+`readableBy`, never stays searchable. Ingesting it into another collection adds a second copy and leaves the first
+where it was. To move a document, say to a more restricted collection, use `moveWithPermissions` (the same
+arguments), which also deletes it from every other collection, in the same transaction:
+
+```scala
+rag.moveWithPermissions(
+  collectionPath = CollectionPath.unsafe("hr-docs"),
+  documentId = "confidential-doc",
+  content = "This is confidential information."
+)
+```
+
 ### Pre-chunked documents and raw bytes
 
 To know exactly which chunks were indexed (for a chunk browser or citations), chunk once and hand the chunks in.
@@ -467,7 +481,10 @@ Likewise, it searches only through the permission API. Plain `query`, `queryWith
 and GraphRAG's Hybrid mode return a `ConfigurationError`, since they would search every document with no permission
 filter; use `queryWithPermissions`, `queryWithPermissionsAndAnswer` and `queryWithPermissionsAndAnswerStreaming`.
 `clear()` is refused as well: use `searchIndex.clearCollection(path)`, or `dropSchema()` and `initializeSchema()`
-to reset everything.
+to reset everything. `dropSchema()` deletes every document in a collection along with the permission tables, so none
+survives without its permissions; rows a plain `PgVectorStore` wrote to the same table, in no collection, are kept.
+The collection and principal tables are shared by every `PgSearchIndex` in the database, so `dropSchema()` refuses,
+changing nothing, while another index's table still holds documents in a collection: clear those collections first.
 
 ### Two-Level Permission Model
 
@@ -662,19 +679,21 @@ This creates:
 
 ### Migration from Non-Permission RAG
 
-If you have existing vectors without permissions:
+If you have existing vectors without permissions, decide who may read them, create a leaf collection with those
+readers, and migrate the vectors into it:
 
 ```scala
+import org.llm4s.rag.permissions.CollectionPath
 import org.llm4s.rag.permissions.pg.PgSchemaManager
 import java.sql.DriverManager
 
 val conn = DriverManager.getConnection(jdbcUrl, user, password)
 
-// Run full migration
-PgSchemaManager.runFullMigration(conn, "vectors").foreach { stats =>
-  println(s"Created ${stats.tablesCreated} tables")
-  println(s"Created ${stats.indexesCreated} indexes")
-  println(s"Migrated ${stats.vectorsMigrated} vectors to default collection")
+// After searchIndex.initializeSchema() and
+// searchIndex.collections.create(CollectionConfig.restrictedLeaf(CollectionPath.unsafe("legacy"), readers))
+PgSchemaManager.runFullMigration(conn, "vectors", into = CollectionPath.unsafe("legacy")).foreach { stats =>
+  println(s"Migrated ${stats.vectorsMigrated} vectors into collection ${stats.collectionId}")
+  println(s"Skipped ${stats.vectorsSkipped} rows ingested with permissions that had lost their collection")
 }
 
 conn.close()
@@ -683,8 +702,13 @@ conn.close()
 This:
 1. Creates permission tables
 2. Adds `collection_id` and `readable_by` columns to your vectors table
-3. Creates a "default" public collection
-4. Migrates existing vectors to the default collection
+3. Moves every vector in no collection into `legacy`, which must already exist and be a leaf
+
+It never picks a collection for you. `PgSchemaManager.createDefaultCollection(conn)` creates a public `default`
+collection, for vectors anyone may read. A row `PgSearchIndex.ingest` wrote that lost its collection (`dropSchema` in llm4s
+1.0 kept such rows and dropped their permissions) is never migrated: nothing records who could read it,
+so it stays in no collection, where no permission query returns it, and is counted in `vectorsSkipped`. Delete those
+rows yourself once you have checked them. Running the migration again is safe.
 
 ---
 
@@ -861,11 +885,20 @@ trait SearchIndex {
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Seq[String]]  // the stored ids, one per chunk
 
+  def moveDocument(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[ChunkWithEmbedding],
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Seq[String]]  // ingest, deleting the document from every other collection
+
   def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long]
   def deleteDocumentFromAllCollections(documentId: String): Result[Long]
   def clearCollection(collectionPath: CollectionPath): Result[Long]
   def stats(collectionPath: CollectionPath): Result[CollectionStats]
   def initializeSchema(): Result[Unit]
+  def dropSchema(): Result[Unit]  // a reset: deletes every document in a collection
   def close(): Unit
 }
 ```
@@ -892,6 +925,14 @@ class RAG {
   ): Result[RAGAnswerResult]
 
   def ingestWithPermissions(
+    collectionPath: CollectionPath,
+    documentId: String,
+    content: String,
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Int]
+
+  def moveWithPermissions(
     collectionPath: CollectionPath,
     documentId: String,
     content: String,

@@ -1406,6 +1406,9 @@ final class RAG private (
    *
    * Requires a SearchIndex to be configured via .withSearchIndex().
    *
+   * Ingesting a document again replaces it in that collection: its old chunks are deleted, whatever their number or
+   * permissions. A copy in another collection is kept; [[moveWithPermissions]] deletes it.
+   *
    * @param collectionPath Target collection (must be a leaf collection)
    * @param documentId Unique document identifier
    * @param content Document text content
@@ -1421,7 +1424,28 @@ final class RAG private (
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Int] =
     permissionIndex.flatMap { index =>
-      indexWithPermissions(index, collectionPath, documentId, chunk(content), metadata, readableBy).map(_.size)
+      indexWithPermissions(index, collectionPath, documentId, chunk(content), metadata, readableBy, move = false)
+        .map(_.size)
+    }
+
+  /**
+   * [[ingestWithPermissions]], deleting the document from every other collection: a move, for a document whose
+   * collection changed (`SearchIndex.moveDocument`). Re-ingesting into the same collection replaces the document
+   * there either way; `ingestWithPermissions` into another collection keeps the old copy, so a document moved to a
+   * more restricted collection stays readable where it was.
+   *
+   * @return Number of chunks indexed
+   */
+  def moveWithPermissions(
+    collectionPath: CollectionPath,
+    documentId: String,
+    content: String,
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Int] =
+    permissionIndex.flatMap { index =>
+      indexWithPermissions(index, collectionPath, documentId, chunk(content), metadata, readableBy, move = true)
+        .map(_.size)
     }
 
   /**
@@ -1447,7 +1471,7 @@ final class RAG private (
     for {
       index   <- permissionIndex
       _       <- RAG.sequentialIndices(chunks)
-      indexed <- indexWithPermissions(index, collectionPath, documentId, chunks, metadata, readableBy)
+      indexed <- indexWithPermissions(index, collectionPath, documentId, chunks, metadata, readableBy, move = false)
     } yield indexed
 
   private def permissionIndex: Result[SearchIndex] =
@@ -1463,7 +1487,8 @@ final class RAG private (
     documentId: String,
     chunks: Seq[DocumentChunk],
     metadata: Map[String, String],
-    readableBy: Set[PrincipalId]
+    readableBy: Set[PrincipalId],
+    move: Boolean
   ): Result[Seq[IndexedChunk]] =
     for {
       embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
@@ -1475,13 +1500,9 @@ final class RAG private (
           metadata = ChunkMetadata.toRecordMetadata(chunk.metadata)
         )
       }
-      ids <- index.ingest(
-        collectionPath = collectionPath,
-        documentId = documentId,
-        chunks = chunksWithEmbeddings,
-        metadata = metadata,
-        readableBy = readableBy
-      )
+      ids <-
+        if (move) index.moveDocument(collectionPath, documentId, chunksWithEmbeddings, metadata, readableBy)
+        else index.ingest(collectionPath, documentId, chunksWithEmbeddings, metadata, readableBy)
       _ <-
         if (ids.size == chunks.size) Right(())
         else

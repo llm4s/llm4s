@@ -88,6 +88,10 @@ trait SearchIndex {
    * - Exist (call ensureExists first if needed)
    * - Be a leaf collection (can contain documents)
    *
+   * Ingesting a document again replaces it in that collection: the chunks it had there before are deleted, so none
+   * stays searchable under its old content or `readableBy`. A copy of the document in another collection is a
+   * separate copy and is kept; [[moveDocument]] replaces the document everywhere.
+   *
    * @param collectionPath Target collection path
    * @param documentId Unique document identifier
    * @param chunks Pre-chunked content with embeddings
@@ -103,6 +107,30 @@ trait SearchIndex {
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Seq[String]]
+
+  /**
+   * Ingest a document into `collectionPath` and delete it from every other collection: a move, for a document whose
+   * collection (and so whose readers) changed. [[ingest]] alone keeps the copy in the old collection.
+   *
+   * `PgSearchIndex` does both in one transaction. This default ingests first and then deletes the document from each
+   * other collection, stopping at the first failure; an index that can do it atomically should override it.
+   *
+   * @return the ids the chunks are stored under, as [[ingest]] returns them
+   */
+  def moveDocument(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[ChunkWithEmbedding],
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Seq[String]] =
+    for {
+      ids    <- ingest(collectionPath, documentId, chunks, metadata, readableBy)
+      others <- collections.list(CollectionPattern.All).map(_.filterNot(_.path == collectionPath))
+      _ <- others.foldLeft[Result[Long]](Right(0L)) { (acc, collection) =>
+        acc.flatMap(total => deleteDocument(collection.path, documentId).map(total + _))
+      }
+    } yield ids
 
   /**
    * Delete a document from a collection.
@@ -162,10 +190,12 @@ trait SearchIndex {
   def initializeSchema(): Result[Unit]
 
   /**
-   * Drop the permission schema.
+   * Drop the permission schema: a complete reset of the index.
    *
-   * WARNING: This is destructive and will delete all permission data.
-   * Only use for testing or complete reset.
+   * WARNING: This is destructive. It deletes every document ingested into a collection, with all permission data,
+   * so that none of it survives without its permissions; `initializeSchema()` then starts an empty index.
+   * `PgSearchIndex` refuses, changing nothing, while another vectors table in the database still holds documents in
+   * the collections it would drop.
    *
    * @return Success or error
    */

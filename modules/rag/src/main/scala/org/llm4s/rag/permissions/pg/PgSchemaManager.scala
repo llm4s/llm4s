@@ -1,6 +1,7 @@
 package org.llm4s.rag.permissions.pg
 
 import org.llm4s.error.ProcessingError
+import org.llm4s.rag.permissions.CollectionPath
 import org.llm4s.types.Result
 import org.llm4s.util.{ SqlIdentifier, Redaction }
 import org.llm4s.vectorstore.PgVectorTableSchema
@@ -167,10 +168,10 @@ object PgSchemaManager {
   )
 
   /**
-   * Create a default public collection for migrating existing data.
+   * Create a public collection named `default`, for [[runFullMigration]] to migrate existing data into.
    *
    * This creates a "default" collection that is:
-   * - Public (empty queryable_by)
+   * - Public (empty queryable_by): everything migrated into it is readable by everyone, anonymous users included
    * - A leaf collection (can contain documents)
    *
    * @param conn Database connection
@@ -193,47 +194,101 @@ object PgSchemaManager {
   )
 
   /**
-   * Migrate existing vectors to the default collection.
-   *
-   * Updates all vectors that don't have a collection_id to use the default collection.
-   *
-   * @param conn Database connection
-   * @param tableName The name of the vectors table
-   * @param defaultCollectionId The ID of the default collection
-   * @return Number of migrated vectors, or error
+   * Rows `PgSearchIndex.ingest` wrote (a `coll-<id>-` id and a `docId`) that no longer belong to a collection: what an
+   * earlier `dropSchema`, before #2992, kept after dropping their permissions. Nothing says who could read them, so
+   * the migration never moves them into a collection.
    */
-  def migrateExistingVectors(conn: Connection, tableName: String, defaultCollectionId: Int): Result[Long] = Try {
-    Using.resource(conn.prepareStatement(s"""
-      UPDATE $tableName
-      SET collection_id = ?, readable_by = '{}'
-      WHERE collection_id IS NULL
-    """)) { stmt =>
-      stmt.setInt(1, defaultCollectionId)
-      stmt.executeUpdate().toLong
-    }
-  }.toEither.left.map(e =>
-    ProcessingError("pg-schema-migrate", s"Failed to migrate existing vectors: ${Redaction.scrubKnown(e.getMessage)}")
-  )
+  private[pg] val OrphanedPermissionRow =
+    "(metadata->>'docId') IS NOT NULL AND id ~ '^coll-[0-9]+-.*-chunk-[0-9]+$'"
 
   /**
-   * Run the full migration: initialize schema, extend vectors, create default collection, migrate data.
+   * Migrate existing vectors into the collection `collectionId`, which the caller names and must be a leaf.
+   *
+   * Moves every row with no collection into it, keeping its `readable_by`. A row `PgSearchIndex.ingest` wrote that
+   * lost its collection (an earlier `dropSchema` kept it, without its permissions) is skipped: it stays in no
+   * collection, so no permission query returns it. [[runFullMigration]] reports how many were skipped.
    *
    * @param conn Database connection
    * @param tableName The name of the vectors table
+   * @param collectionId The ID of the collection to migrate into: its readers can read every migrated row
+   * @return Number of migrated vectors, or error
+   */
+  def migrateExistingVectors(conn: Connection, tableName: String, collectionId: Int): Result[Long] =
+    SqlIdentifier.validate(tableName, "pg-schema-migrate").flatMap { _ =>
+      inTransaction(conn, "pg-schema-migrate") {
+        val leaf = Using.resource(
+          conn.prepareStatement("SELECT is_leaf FROM llm4s_collections WHERE id = ? FOR SHARE")
+        ) { stmt =>
+          stmt.setInt(1, collectionId)
+          Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getBoolean("is_leaf")) else None)
+        }
+        leaf match {
+          case None => Left(ProcessingError("pg-schema-migrate", s"Collection not found (id $collectionId)"))
+          case Some(false) =>
+            Left(ProcessingError("pg-schema-migrate", s"Cannot migrate into a non-leaf collection (id $collectionId)"))
+          case Some(true) =>
+            Using.resource(conn.prepareStatement(s"""
+              UPDATE $tableName
+              SET collection_id = ?, readable_by = COALESCE(readable_by, '{}')
+              WHERE collection_id IS NULL AND NOT ($OrphanedPermissionRow)
+            """)) { stmt =>
+              stmt.setInt(1, collectionId)
+              Right(stmt.executeUpdate().toLong)
+            }
+        }
+      }
+    }
+
+  /**
+   * Run the full migration into the collection `into`: initialize the schema, extend the vectors table, and move every
+   * row with no collection into `into` ([[migrateExistingVectors]]).
+   *
+   * `into` must exist and be a leaf, so the caller decides who can read the migrated rows: create it first, after
+   * [[initializeSchema]] (`PgSearchIndex.collections.create`, or [[createDefaultCollection]] for a public `default`).
+   *
+   * @param conn Database connection
+   * @param tableName The name of the vectors table
+   * @param into The collection to migrate the existing rows into
    * @return Migration stats or error
    */
-  def runFullMigration(conn: Connection, tableName: String): Result[MigrationStats] =
+  def runFullMigration(conn: Connection, tableName: String, into: CollectionPath): Result[MigrationStats] =
     for {
-      _             <- initializeSchema(conn)
-      _             <- extendVectorsTable(conn, tableName)
-      defaultId     <- createDefaultCollection(conn)
-      migratedCount <- migrateExistingVectors(conn, tableName, defaultId)
+      _            <- initializeSchema(conn)
+      _            <- extendVectorsTable(conn, tableName)
+      collectionId <- collectionId(conn, into)
+      migrated     <- migrateExistingVectors(conn, tableName, collectionId)
+      skipped      <- countOrphanedRows(conn, tableName)
     } yield MigrationStats(
       tablesCreated = 2,
       indexesCreated = 5,
-      defaultCollectionId = defaultId,
-      vectorsMigrated = migratedCount
+      collectionId = collectionId,
+      vectorsMigrated = migrated,
+      vectorsSkipped = skipped
     )
+
+  private def collectionId(conn: Connection, path: CollectionPath): Result[Int] =
+    Try {
+      Using.resource(conn.prepareStatement("SELECT id FROM llm4s_collections WHERE path = ?")) { stmt =>
+        stmt.setString(1, path.value)
+        Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rs.getInt("id")) else None)
+      }
+    }.toEither.left
+      .map(e => ProcessingError("pg-schema-migrate", Redaction.scrubKnown(e.getMessage)))
+      .flatMap(
+        _.toRight(
+          ProcessingError(
+            "pg-schema-migrate",
+            s"Collection not found: ${path.value}. Create it, with the readers the migrated rows should have, " +
+              "before migrating into it."
+          )
+        )
+      )
+
+  private def countOrphanedRows(conn: Connection, tableName: String): Result[Long] = Try {
+    Using.resource(
+      conn.prepareStatement(s"SELECT COUNT(*) FROM $tableName WHERE collection_id IS NULL AND $OrphanedPermissionRow")
+    )(stmt => Using.resource(stmt.executeQuery())(rs => if (rs.next()) rs.getLong(1) else 0L))
+  }.toEither.left.map(e => ProcessingError("pg-schema-migrate", Redaction.scrubKnown(e.getMessage)))
 
   /**
    * Check if the permission schema is already initialized.
@@ -261,47 +316,110 @@ object PgSchemaManager {
   )
 
   /**
-   * Drop all permission-related tables and sequences.
+   * Reset the permission schema: delete every row of `tableName` that belongs to a collection, then drop the
+   * permission columns, the collection and principal tables and the group sequence, in one transaction.
    *
-   * WARNING: This is destructive and will delete all permission data.
-   * Only use for testing or complete reset.
+   * The rows go with the tables because nothing else records who may read them (#2992): kept, a later
+   * [[runFullMigration]] would hand them to whichever collection it is given. Rows with no collection, written by a
+   * plain `PgVectorStore` on the same table, are kept. The collection table and the vectors table are locked first,
+   * so an ingest running meanwhile either finishes before the reset or fails after it.
+   *
+   * The collection and principal tables are shared by every `PgSearchIndex` in the database schema. If another
+   * vectors table still holds rows in a collection, the reset is refused and nothing changes: those rows would lose
+   * their collection. Clear that index's collections first (`PgSearchIndex.clearCollection`).
    *
    * @param conn Database connection
-   * @param tableName The name of the vectors table (to remove permission columns)
+   * @param tableName The name of the vectors table whose permission rows and columns are removed
    * @return Success or error
    */
-  def dropSchema(conn: Connection, tableName: String): Result[Unit] = Try {
-    Using.resource(conn.createStatement()) { stmt =>
-      // Remove columns from vectors table
-      stmt.execute(s"""
-        DO $$$$
-        BEGIN
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = '$tableName' AND column_name = 'collection_id'
-          ) THEN
-            ALTER TABLE $tableName DROP COLUMN collection_id;
-          END IF;
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = '$tableName' AND column_name = 'readable_by'
-          ) THEN
-            ALTER TABLE $tableName DROP COLUMN readable_by;
-          END IF;
-        END $$$$
-      """)
-      stmt.execute(s"DROP INDEX IF EXISTS idx_${tableName}_content_fts")
+  def dropSchema(conn: Connection, tableName: String): Result[Unit] =
+    SqlIdentifier.validate(tableName, "pg-schema-drop").flatMap { _ =>
+      inTransaction(conn, "pg-schema-drop") {
+        if (exists(conn, "SELECT to_regclass('llm4s_collections') IS NOT NULL"))
+          execute(conn, "LOCK TABLE llm4s_collections IN ACCESS EXCLUSIVE MODE")
+        val columns = permissionColumns(conn).getOrElse(tableName.toLowerCase, Set.empty)
+        if (columns.nonEmpty) execute(conn, s"LOCK TABLE $tableName IN ACCESS EXCLUSIVE MODE")
 
-      // Drop tables
-      stmt.execute("DROP TABLE IF EXISTS llm4s_collections CASCADE")
-      stmt.execute("DROP TABLE IF EXISTS llm4s_principals CASCADE")
-      stmt.execute("DROP SEQUENCE IF EXISTS llm4s_group_id_seq")
+        val others = permissionColumns(conn)
+          .collect {
+            case (table, cols) if table != tableName.toLowerCase && cols.contains("collection_id") => table
+          }
+          .toSeq
+          .sorted
+        val holding = others
+          .filter(t => exists(conn, s"SELECT EXISTS (SELECT 1 FROM ${quoted(t)} WHERE collection_id IS NOT NULL)"))
 
-      ()
+        if (holding.nonEmpty)
+          Left(
+            ProcessingError(
+              "pg-schema-drop",
+              s"Refusing to drop the permission schema: ${holding.mkString(", ")} still hold rows in its collections, " +
+                "which would be left with no collection and no permissions. Clear those indexes' collections first."
+            )
+          )
+        else {
+          val owned =
+            if (columns == Set("collection_id", "readable_by"))
+              Some("collection_id IS NOT NULL OR cardinality(readable_by) > 0")
+            else if (columns.contains("collection_id")) Some("collection_id IS NOT NULL")
+            else if (columns.contains("readable_by")) Some("cardinality(readable_by) > 0")
+            else None
+          owned.foreach(where => execute(conn, s"DELETE FROM $tableName WHERE $where"))
+          if (columns.nonEmpty)
+            execute(
+              conn,
+              s"ALTER TABLE $tableName DROP COLUMN IF EXISTS collection_id, DROP COLUMN IF EXISTS readable_by"
+            )
+          execute(conn, s"DROP INDEX IF EXISTS idx_${tableName}_content_fts")
+          execute(conn, "DROP TABLE IF EXISTS llm4s_collections CASCADE")
+          execute(conn, "DROP TABLE IF EXISTS llm4s_principals CASCADE")
+          execute(conn, "DROP SEQUENCE IF EXISTS llm4s_group_id_seq")
+          Right(())
+        }
+      }
     }
-  }.toEither.left.map(e =>
-    ProcessingError("pg-schema-drop", s"Failed to drop schema: ${Redaction.scrubKnown(e.getMessage)}")
-  )
+
+  /** The tables of the current schema with a `collection_id` or `readable_by` column, and which of the two. */
+  private def permissionColumns(conn: Connection): Map[String, Set[String]] =
+    Using.resource(conn.prepareStatement("""
+      SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = current_schema() AND column_name IN ('collection_id', 'readable_by')
+    """)) { stmt =>
+      Using.resource(stmt.executeQuery()) { rs =>
+        val found = scala.collection.mutable.ListBuffer.empty[(String, String)]
+        while (rs.next()) found += ((rs.getString("table_name"), rs.getString("column_name")))
+        found.toList.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
+      }
+    }
+
+  private def quoted(identifier: String): String = "\"" + identifier.replace("\"", "\"\"") + "\""
+
+  private def exists(conn: Connection, sql: String): Boolean =
+    Using.resource(conn.prepareStatement(sql))(stmt =>
+      Using.resource(stmt.executeQuery())(rs => rs.next() && rs.getBoolean(1))
+    )
+
+  private def execute(conn: Connection, sql: String): Unit =
+    Using.resource(conn.prepareStatement(sql))(stmt => stmt.execute(): Unit)
+
+  /**
+   * Runs `body` in a transaction on `conn`: committed if it returns `Right`, rolled back if it returns `Left` or
+   * throws. The connection's auto-commit mode is restored afterwards.
+   */
+  private def inTransaction[A](conn: Connection, operation: String)(body: => Result[A]): Result[A] =
+    Try {
+      val original = conn.getAutoCommit
+      conn.setAutoCommit(false)
+      val outcome = Try(body).flatMap {
+        case right @ Right(_) => Try(conn.commit()).map(_ => right)
+        case left @ Left(_)   => Try(conn.rollback()).map(_ => left)
+      }
+      outcome.failed.foreach(_ => Try(conn.rollback()))
+      Try(conn.setAutoCommit(original))
+      outcome.get
+    }.toEither.left
+      .map(e => ProcessingError(operation, Redaction.scrubKnown(e.getMessage)))
+      .flatMap(identity)
 }
 
 /**
@@ -309,12 +427,14 @@ object PgSchemaManager {
  *
  * @param tablesCreated Number of tables created
  * @param indexesCreated Number of indexes created
- * @param defaultCollectionId ID of the default collection
- * @param vectorsMigrated Number of vectors migrated to the default collection
+ * @param collectionId ID of the collection the vectors were migrated into
+ * @param vectorsMigrated Number of vectors migrated into it
+ * @param vectorsSkipped Number of rows `PgSearchIndex.ingest` wrote that had lost their collection, left out of it
  */
 final case class MigrationStats(
   tablesCreated: Int,
   indexesCreated: Int,
-  defaultCollectionId: Int,
-  vectorsMigrated: Long
+  collectionId: Int,
+  vectorsMigrated: Long,
+  vectorsSkipped: Long
 )

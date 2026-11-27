@@ -713,6 +713,40 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     index.query(UserAuthorization.Admin, CollectionPattern.All, Array(0.1f)).map(_.size) shouldBe Right(1)
   }
 
+  "SearchIndex.moveDocument" should "by default ingest into the collection and delete the document everywhere else (#2988)" in {
+    val index = new MockSearchIndex()
+    val a     = CollectionPath.unsafe("a")
+    val b     = CollectionPath.unsafe("b")
+    index.collections.create(CollectionConfig.publicLeaf(a))
+    index.collections.create(CollectionConfig.restrictedLeaf(b, Set(PrincipalId.user(1))))
+    val chunk = ChunkWithEmbedding("x", Array(0.1f), 0)
+    index.ingest(a, "doc-1", Seq(chunk))
+    index.ingest(a, "doc-2", Seq(chunk))
+
+    index.moveDocument(b, "doc-1", Seq(chunk)).map(_.size) shouldBe Right(1)
+
+    index.query(UserAuthorization.Admin, CollectionPattern.Exact(a), Array(0.1f)).map(_.size) shouldBe Right(1)
+    index.query(UserAuthorization.Admin, CollectionPattern.Exact(b), Array(0.1f)).map(_.size) shouldBe Right(1)
+  }
+
+  "RAG.moveWithPermissions" should "move the document, where ingestWithPermissions keeps the old copy" in {
+    val index = new MockSearchIndex()
+    val a     = CollectionPath.unsafe("a")
+    val b     = CollectionPath.unsafe("b")
+    index.collections.create(CollectionConfig.publicLeaf(a))
+    index.collections.create(CollectionConfig.publicLeaf(b))
+    val rag = permissionRag(index)
+
+    rag.ingestWithPermissions(a, "doc-1", "Some text.") shouldBe Right(1)
+    rag.ingestWithPermissions(b, "doc-1", "Some text.") shouldBe Right(1)
+    index.query(UserAuthorization.Admin, CollectionPattern.Exact(a), Array(0.1f, 0.2f, 0.3f)).map(_.size) shouldBe
+      Right(1)
+
+    rag.moveWithPermissions(b, "doc-1", "Some text.") shouldBe Right(1)
+    index.query(UserAuthorization.Admin, CollectionPattern.Exact(a), Array(0.1f, 0.2f, 0.3f)).map(_.size) shouldBe
+      Right(0)
+  }
+
   // ==========================================================================
   // Fusion, keyword search and reranking in permission queries (#2716)
   // ==========================================================================
