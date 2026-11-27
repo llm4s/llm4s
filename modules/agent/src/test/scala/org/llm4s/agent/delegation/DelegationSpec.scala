@@ -3,7 +3,15 @@ package org.llm4s.agent.delegation
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Agent, AgentBuilder, CompletionFixture }
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InMemoryCheckpointer, InterruptId, RunConfig, ThreadId }
+import org.llm4s.agent.graph.{
+  GraphError,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  InterruptId,
+  RunConfig,
+  ThreadId,
+  WaitClock
+}
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
 import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Operation, ToolContent, ToolOutcome, ToolSet }
@@ -19,6 +27,7 @@ import upickle.default.ReadWriter
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** `TypedAgent`, the `task` tools and parallel bounded children (#2048, design 4.44), through a parent agent's runs. */
@@ -1227,6 +1236,24 @@ class DelegationSpec
     agent.run(ThreadId("t1"), "one").value
     agent.run(ThreadId("t1"), "two").value
     agent.children(ThreadId("t1")).value should have size 1
+  }
+
+  // the wall-clock smoke of the busy-child wait that ChildSupervisionBehaviours passes on a test clock (#3214)
+  "ChildRunner.pause" should "back off on the wall clock, and be ThreadBusy once its bound has passed" in {
+    val busy  = GraphError.ThreadBusy("child", None)
+    val clock = WaitClock.system
+    val until = clock.now() + 150.millis.toNanos
+    val began = System.nanoTime()
+    @scala.annotation.tailrec
+    def waiting(waits: Int): (Result[Unit], Int) = ChildRunner.pause(until, waits, busy, clock) match {
+      case Right(_) => waiting(waits + 1)
+      case done     => (done, waits)
+    }
+    val (ended, pauses) = waiting(0)
+    ended shouldBe Left(busy)
+    (System.nanoTime() - began).nanos should be >= 150.millis
+    // 10, 20, 40, 80 ms and what is left: backing off, not spinning
+    pauses should ((be >= 2).and(be <= 6))
   }
 }
 

@@ -263,12 +263,32 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     store: Checkpointer,
     time: ManualTime,
     claims: ClaimPolicy = live,
-    watch: WatchPolicy = WatchPolicy.default
+    watch: WatchPolicy = WatchPolicy.default,
+    passing: Set[WaitClock.Bound] = Set.empty
   ): GraphRuntime = {
     val runtime = GraphRuntime(store, claims = claims, watch = watch)
     runtime.ticker = () => time.nanos()
+    if passing.nonEmpty then PassingWaitClock.on(runtime, passing.toSeq*): Unit
     runtime
   }
+
+  // A case whose run is stuck once its claim is found lost passes the bound its own path waits out as soon as it waits
+  // on it ([[PassingWaitClock]], #3214), rather than after the bound's wall-clock time: each names only the waits that
+  // reach their bound on the wall clock and decide its outcome, so a path that wins there still wins. The lease is
+  // still judged by [[ManualTime]]. On the wall clock, as smokes: "A lost run whose renewal hangs in a store that
+  // serialises its calls" (a lost claim's release), "A lost Async run's late write that lands while the run frees its
+  // thread" (a lost writer's drain and release), "A change whose heartbeat cannot be joined" and "A renewal in flight
+  // when the run ends" (a heartbeat's stop), and the Async case of "A run whose closing commit sticks" (a stalled
+  // closing wait). The busy-child wait's is in DelegationSpec.
+
+  /** A run, change or admission that cannot end by itself: its end is given up at the loss bound. */
+  private val lossBound: Set[WaitClock.Bound] = Set(WaitClock.Bound.Loss)
+
+  /** A lost claim whose release hangs in the store: waited for until the loss bound. */
+  private val stuckRelease: Set[WaitClock.Bound] = Set(WaitClock.Bound.Release)
+
+  /** A lost Async run whose writer hangs in the store, waited for `ttl`, and whose release hangs too. */
+  private val stuckWriter: Set[WaitClock.Bound] = Set(WaitClock.Bound.Drain, WaitClock.Bound.Release)
 
   private def run(id: String) = RunConfig().withRunId(RunId(id))
 
@@ -717,7 +737,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         releaseGate.await(10, TimeUnit.SECONDS): Unit
         None
       }
-      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = stuckWriter)
       val handle = rt.start(thread, graph, "x", run("first"), Durability.Async).value
       entered.await(5, TimeUnit.SECONDS) shouldBe true
       writing.await(5, TimeUnit.SECONDS) shouldBe true
@@ -750,9 +770,15 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
    * waits for `heldGate`, or for the interrupt a lost claim sends - unless `ignoresInterrupts`, when it
    * waits for `heldGate` whatever interrupts it, so the run thread never ends while the test runs. With
    * `hangs` false the write does not hang. `landed` opens once the write has landed;
-   * `writeInterrupted` records whether its thread was interrupted while in the store.
+   * `writeInterrupted` records whether its thread was interrupted while in the store. Its bounds - the writer's drain
+   * and the release, and the run's end when it ignores interrupts - pass as soon as the run waits on them, unless
+   * `onWallClock` ([[PassingWaitClock]]).
    */
-  final private class LateWrite(ignoresInterrupts: Boolean = false, hangs: Boolean = true) {
+  final private class LateWrite(
+    ignoresInterrupts: Boolean = false,
+    hangs: Boolean = true,
+    onWallClock: Boolean = false
+  ) {
     val time             = ManualTime()
     val store            = Hooked(InMemoryCheckpointer(time))
     val writing          = new CountDownLatch(1)
@@ -798,7 +824,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       releaseGate.await(10, TimeUnit.SECONDS): Unit
       None
     }
-    val rt: GraphRuntime = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+    val rt: GraphRuntime = runtime(
+      store,
+      time,
+      ClaimPolicy(300.millis, 10.millis),
+      passing = if onWallClock then Set.empty else if ignoresInterrupts then lossBound ++ stuckWriter else stuckWriter
+    )
     // this run's own Async writer, never another test's on a thread of the same name
     val writers = new ConcurrentLinkedQueue[Thread]()
     rt.writerCreated = (_, created) => writers.add(created): Unit
@@ -884,7 +915,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
 
   "A lost Async run's late write that lands while the run frees its thread" should
     "leave the hub no hand-over mark, whichever of the two finishes last" in {
-      val late   = LateWrite()
+      val late   = LateWrite(onWallClock = true)
       val hooked = new CountDownLatch(1)
       // between the run forgetting the mark and freeing its slot: the late write lands and recreates the
       // mark, then either finishes its own cleanup (a race) or waits for the release to complete
@@ -1009,7 +1040,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val stuck  = new CountDownLatch(1)
       val hang   = new CountDownLatch(1)
       val inside = new AtomicInteger()
-      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       rt.committing = (_, commit) => if isWorker(commit) then begun.countDown()
       // the first worker commit to reach the store returns once both have begun; the second stays there
       store.onCommit = commit => {
@@ -1124,7 +1155,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
             }
             None
           }
-          val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
           val handle = rt.start(thread, two.graph, "x", run("first"), durability).value
           val token  = tokenOf(store)
           two.gate.countDown()
@@ -1173,7 +1204,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         }
         None
       }
-      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt     = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       val handle = rt.start(thread, two.graph, "x", run("first")).value
       val own    = handle.asInstanceOf[DefaultRunHandle[Vector[String]]]
       val runs   = RunRecorder()
@@ -1316,7 +1347,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
               returned.countDown()
               Some(landing)
             } else None
-          val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
           val admitting = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
           Thread
             .ofVirtual()
@@ -1385,7 +1416,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         landed.await(5, TimeUnit.SECONDS): Unit
         None
       }
-      val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt        = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       val admitting = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
       Thread.ofVirtual().start(() => admitting.offer(rt.start(thread, two.graph, "x", run("first"))): Unit)
       entering.await(5, TimeUnit.SECONDS) shouldBe true
@@ -1594,7 +1625,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val releasing = new CountDownLatch(1)
       val hang      = new CountDownLatch(1)
       store.onRelease = () => { releasing.countDown(); stuckUntil(hang); None }
-      val rt     = runtime(store, time, second)
+      val rt     = runtime(store, time, second, passing = stuckRelease)
       val handle = rt.start(thread, two.graph, "x", run("first"), Durability.OnExit).value
       val token  = tokenOf(store)
       two.gate.countDown()
@@ -1635,7 +1666,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
           val releasing = new CountDownLatch(1)
           val hang      = new CountDownLatch(1)
           store.onRelease = () => { releasing.countDown(); stuckUntil(hang); None }
-          val rt = runtime(store, time, second)
+          val rt = runtime(store, time, second, passing = stuckRelease)
 
           within(changing(how, rt, two, latest.checkpoint.id, "change")).value.left.value shouldBe
             GraphError.ThreadBusy(held.value, if how == "fork" then None else Some(latest.checkpoint.id))
@@ -1664,7 +1695,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
           // change's next read - every change reads its thread again under the claim - queues behind it
           store.serialiseAfterClaim()
           store.hangRenewals()
-          val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+          val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound ++ stuckRelease)
           val releases = store.released.size
           val returned = new CountDownLatch(1)
           rt.changeReturned = id => if id == held then returned.countDown()
@@ -1724,7 +1755,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         landed.await(5, TimeUnit.SECONDS): Unit
         None
       }
-      val rt             = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt             = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       val releasedBefore = store.released.get
       val outcome        = new java.util.concurrent.LinkedBlockingQueue[Result[Checkpoint]]()
       Thread
@@ -2150,7 +2181,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       withClue(s"an older release $label late: ") {
         val time  = ManualTime()
         val store = Hooked(InMemoryCheckpointer(time))
-        val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+        val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = stuckRelease)
         val older = TwoStep()
         val first = rt.start(thread, older.graph, "x", run("first")).value
         older.awaitEntered()
@@ -2455,7 +2486,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         override def contextWindow: Int     = 4096
         override def reserveCompletion: Int = 1024
       }
-      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound ++ stuckRelease)
       val agent = org.llm4s.agent.Agent.builder("assistant", client).withRuntime(rt).build().value
       val turn  = RunConfig().withRunId(RunId("turn"))
       val lost  = agent.start(thread, "hello", turn).value
@@ -2507,7 +2538,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     "never deliver that node's progress to its observer or its handle's subscription (#1918)" in {
       val time     = ManualTime()
       val store    = Hooked(InMemoryCheckpointer(time))
-      val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt       = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       val log      = StateKey.appending[String]("log")
       val calls    = new AtomicInteger(0)
       val entered  = new CountDownLatch(1) // the lost run's node is running
@@ -2598,7 +2629,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         override def contextWindow: Int     = 4096
         override def reserveCompletion: Int = 1024
       }
-      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis))
+      val rt    = runtime(store, time, ClaimPolicy(300.millis, 10.millis), passing = lossBound)
       val agent = org.llm4s.agent.Agent.builder("assistant", client).withRuntime(rt).withStreaming().build().value
       val turn  = RunConfig().withRunId(RunId("turn"))
       val lost  = agent.start(thread, "hello", turn).value
@@ -2657,9 +2688,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
    * A store whose renewals always land, so the run never loses its claim, and whose commit of a completed checkpoint -
    * an `Async` run's drain, or an `OnExit` run's exit commit - sticks in the store, ignoring interrupts, until
    * `hang` opens; its release sticks until `releaseGate` opens. Records which thread released, and whether its
-   * interrupt flag was set then.
+   * interrupt flag was set then. With `passing`, the closing wait's bound passes as soon as the run waits on it once
+   * the test has armed [[waits]] ([[PassingWaitClock]]); without, it is waited out on the wall clock.
    */
-  final private class StuckClose {
+  final private class StuckClose(passing: Set[WaitClock.Bound] = Set(WaitClock.Bound.Close)) {
     val time         = ManualTime()
     val store        = Hooked(InMemoryCheckpointer(time))
     val hang         = new CountDownLatch(1)
@@ -2684,7 +2716,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       None
     }
     val rt: GraphRuntime = runtime(store, time, second)
-    val two              = TwoStep()
+    // armed once the stuck commit has begun, so that no healthy commit before it is given up on
+    val waits = new PassingWaitClock(passing, armedAtStart = false)
+    rt.waitClock = waits
+    val two = TwoStep()
     two.gate.countDown()
     def start(durability: Durability): RunHandle[Vector[String]] =
       rt.start(thread, two.graph, "x", run("first"), durability).value
@@ -2692,13 +2727,16 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
 
   "A run whose closing commit sticks in a store that keeps its claim" should
     "end CommitTimedOut within twice its ttl, its thread freed and its claim released on a detached thread, for Async and OnExit" in {
-      for durability <- Seq(Durability.Async, Durability.OnExit) do
+      // Async waits its bound out on the wall clock, as a smoke; OnExit's passes once the run waits on it (#3214)
+      for (durability, passing) <- Seq(Durability.Async -> Set.empty, Durability.OnExit -> Set(WaitClock.Bound.Close))
+      do
         withClue(s"$durability: ") {
-          val stuck  = StuckClose()
+          val stuck  = StuckClose(passing)
           val handle = stuck.start(durability).asInstanceOf[DefaultRunHandle[Vector[String]]]
           val own    = RunRecorder()
           handle.subscribe()(own).value
           stuck.entered.await(5, TimeUnit.SECONDS) shouldBe true
+          stuck.waits.arm()
 
           // the bound is 2 seconds, inside the 5 a test waits; the release, stuck too, is not waited for
           val ended = within(handle.await()).value.value
@@ -2736,6 +2774,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
         stuck.releaseGate.countDown()
         val handle = stuck.start(durability).asInstanceOf[DefaultRunHandle[Vector[String]]]
         stuck.entered.await(5, TimeUnit.SECONDS) shouldBe true
+        stuck.waits.arm()
         within(handle.await()).value.value.failed._2 shouldBe GraphError.CommitTimedOut("t", 2.seconds)
         eventually(stuck.store.released.get == 1)
 

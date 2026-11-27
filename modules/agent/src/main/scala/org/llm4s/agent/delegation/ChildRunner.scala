@@ -170,11 +170,17 @@ private[agent] object ChildRunner:
 
   /**
    * Waits before the next read of a busy thread, the `waits`th wait backing off from [[InitialBackoff]] to
-   * [[MaxBackoff]]: `busy` once `until` (a `System.nanoTime` value) has passed, a `CancelledError` with the interrupt
-   * flag kept when interrupted. `BoundAgent.run` on a caller-chosen thread waits the same way.
+   * [[MaxBackoff]]: `busy` once `until` (a `clock` value: the runtime's [[GraphRuntime.waitClock]]) has passed, a
+   * `CancelledError` with the interrupt flag kept when interrupted. `BoundAgent.run` on a caller-chosen thread waits the
+   * same way.
    */
-  private[delegation] def pause(until: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =
-    val left = until - System.nanoTime()
+  private[delegation] def pause(
+    until: Long,
+    waits: Int,
+    busy: GraphError.ThreadBusy,
+    clock: WaitClock
+  ): Result[Unit] =
+    val left = clock.remaining(until, WaitClock.Bound.Busy)
     if left <= 0 then Left(busy)
     else
       val backoff = (InitialBackoff.toNanos << waits.min(16)).min(MaxBackoff.toNanos)
@@ -331,7 +337,7 @@ private[agent] object ChildRunner:
     private def grantExpired(grant: ChildGrant): Boolean = grant.deadline.exists(d => !runtime.now().isBefore(d))
 
     /**
-     * When waiting on a busy child gives up, as a `System.nanoTime` value: twice the claim's life from now, or the
+     * When waiting on a busy child gives up, as a [[GraphRuntime.waitClock]] value: twice the claim's life from now, or the
      * parent's deadline or the child's stored one ([[childDeadline]]) if sooner (#2086), so a recovered parent with a
      * fresh, long deadline never waits past the child's own. Fixed at the first `ThreadBusy`. A holder still there then
      * is `ThreadBusy` for the call (settling needs the child's claim); the next admission that holds the claim settles
@@ -342,7 +348,7 @@ private[agent] object ChildRunner:
       val window = (ctx.run.deadline ++ childDeadline).foldLeft(runtime.claimTtl * 2) { (bound, d) =>
         bound.min(JDuration.between(now, d).toNanos.max(0L).nanos)
       }
-      System.nanoTime() + window.toNanos
+      runtime.waitClock.now() + window.toNanos
 
     def drive(): Result[ChildEnd] =
       @tailrec def loop(cutoff: Option[Long], waits: Int): Result[ChildEnd] =
@@ -353,7 +359,7 @@ private[agent] object ChildRunner:
             case Step.Again        => loop(cutoff, waits)
             case Step.Busy(error) =>
               val until = cutoff.getOrElse(busyCutoff())
-              pause(until, waits, error) match
+              pause(until, waits, error, runtime.waitClock) match
                 case Left(stop) => Left(stop)
                 case Right(_)   => loop(Some(until), waits + 1)
       // the loop settles a child the call's own timeout left `Running` once the call commits (#2098); a run that reaches
