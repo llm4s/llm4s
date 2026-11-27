@@ -1,10 +1,12 @@
 name: Compiled Output Cache
 
-# Keeps the compiled-output cache pilot (ci.yml: `Restore the compiled output` / `Save the compiled output`, in the
-# agent coverage leg and `Test (other modules)`) to one entry per job kind and branch. CI's nightly run saves a new
-# entry for each kind; this deletes the older ones, so the pilot holds about two entries of the repository's 10 GB and
-# cannot crowd out the sbt dependency cache (dependency-cache.yml). Its own workflow because deleting caches needs
-# `actions: write`, which no ci.yml job may ask for: release.yml calls ci.yml with `contents: read` only.
+# Keeps the compiled-output cache (.github/actions/compiled-output: `Restore the compiled output` / `Save the compiled
+# output` in every sbt job of ci.yml but ScalaDoc, #3179) to one entry per job kind and branch. CI's nightly run saves
+# a new entry for each kind; this deletes the older ones, so the cache holds about a dozen entries (the pilot's two
+# were 40-50 MB each) of the repository's 10 GB and cannot crowd out the sbt dependency cache (dependency-cache.yml).
+# Its own workflow because deleting caches needs `actions: write`, which no ci.yml job may ask for: release.yml calls
+# ci.yml with `contents: read` only.
+
 on:
   schedule:
     - cron: "37 4 * * *"  # 04:37 UTC every day, after CI's nightly run (02:41)
