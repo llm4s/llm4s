@@ -16,7 +16,7 @@ import org.llm4s.vectorstore.{
 import org.llm4s.util.RateLimitedLogger
 import org.llm4s.security.Secret
 import org.llm4s.vectorstore.JdbcUrlCredentials
-import org.llm4s.vectorstore.PgMetadataJson
+import org.llm4s.vectorstore.{ PgMetadataFilterSql, PgMetadataJson }
 
 import org.slf4j.LoggerFactory
 
@@ -110,8 +110,8 @@ final class PgSearchIndex private (
     val collectionPlaceholders = collectionIds.map(_ => "?").mkString(",")
 
     val (additionalWhereClause, additionalParams) = additionalFilter match {
-      case Some(filter) => filterToSql(filter)
-      case None         => ("", Seq.empty[Any])
+      case Some(filter) => PgMetadataFilterSql(filter)
+      case None         => ("", Seq.empty[String])
     }
 
     val whereClause = if (auth.isAdmin) {
@@ -137,14 +137,7 @@ final class PgSearchIndex private (
       }
 
       additionalParams.foreach { param =>
-        param match {
-          case s: String  => stmt.setString(paramIdx, s)
-          case i: Int     => stmt.setInt(paramIdx, i)
-          case l: Long    => stmt.setLong(paramIdx, l)
-          case d: Double  => stmt.setDouble(paramIdx, d)
-          case b: Boolean => stmt.setBoolean(paramIdx, b)
-          case _          => stmt.setObject(paramIdx, param)
-        }
+        stmt.setString(paramIdx, param)
         paramIdx += 1
       }
 
@@ -417,43 +410,6 @@ final class PgSearchIndex private (
     if (ownsDataSource && closed.compareAndSet(false, true)) PgDataSources.closeOwned(dataSource)
 
   // Helper methods
-
-  private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
-    case MetadataFilter.All =>
-      ("", Seq.empty)
-
-    case MetadataFilter.Equals(key, value) =>
-      ("metadata->>? = ?", Seq(key, value))
-
-    case MetadataFilter.Contains(key, substring) =>
-      ("metadata->>? LIKE ?", Seq(key, s"%$substring%"))
-
-    case MetadataFilter.HasKey(key) =>
-      ("metadata ? ?", Seq(key))
-
-    case MetadataFilter.In(key, values) =>
-      val placeholders = values.map(_ => "?").mkString(",")
-      (s"metadata->>? IN ($placeholders)", Seq(key) ++ values.toSeq)
-
-    case MetadataFilter.And(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      if (leftSql.isEmpty && rightSql.isEmpty) ("", Seq.empty)
-      else if (leftSql.isEmpty) (rightSql, rightParams)
-      else if (rightSql.isEmpty) (leftSql, leftParams)
-      else (s"($leftSql AND $rightSql)", leftParams ++ rightParams)
-
-    case MetadataFilter.Or(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      if (leftSql.isEmpty || rightSql.isEmpty) ("", Seq.empty)
-      else (s"($leftSql OR $rightSql)", leftParams ++ rightParams)
-
-    case MetadataFilter.Not(inner) =>
-      val (innerSql, innerParams) = filterToSql(inner)
-      if (innerSql.isEmpty) ("", Seq.empty)
-      else (s"NOT ($innerSql)", innerParams)
-  }
 
   private def rowToRecord(rs: ResultSet): Option[VectorRecord] = {
     val id           = rs.getString("id")
