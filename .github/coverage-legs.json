@@ -1,0 +1,6 @@
+[
+  {"leg":"core","modules":["core","memory","memoryPostgres","schemaDerivation","schemaIron","prompt","testkit","capabilities","doctor","repl","observabilityMicrometer","agentTools","llm4sTapir","llm4sSttp","traceOpentelemetry","gradleDemo","secretsVault","secretsAws"]},
+  {"leg":"rag","modules":["rag","ragTestkit","vectorstoreElasticsearch","vectorstoreRedis","knowledgegraph","mcp","media","image","speech","observability","observabilityPrometheus"]},
+  {"leg":"providers","modules":["ollama","gemini","anthropic","openai","openaiCompatible","voyage","bedrock","jina","jev","cohere","watsonx","perplexity","jlama","azureIdentity","providerTestkit","javaApi","javaRag","reactor","springBootStarter","springAi","deployService","examplesHttp"]},
+  {"leg":"agent","modules":["agent","agentTestkit","agentCheckpointSqlite","agentCheckpointPostgres","agentMemory","llm4sEffect","llm4sZio","llm4sPekko","llm4sOx"]}
+]

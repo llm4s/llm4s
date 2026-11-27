@@ -12,8 +12,8 @@
 #     except a need the job runs without: one whose `skipped` result its steps accept as a pass, in a job that runs
 #     regardless (`if: always()`; the workspace tier, which runs only on PRs that change the workspace: #1982), or any
 #     need of a job whose condition calls a status function (`always()`, `!cancelled()`), which GitHub evaluates even
-#     when a need was skipped - such as CI's `changes` job, which runs only on pull requests. Its outputs are then
-#     empty, and the job's condition must still let it run;
+#     when a need was skipped. A need's outputs are taken as empty (as when it is skipped, or emits no decision, as
+#     CI's `changes` job does off pull requests and merge groups), and the job's condition must still let it run;
 #   - nothing in it reads `github.event.pull_request` unless its step or job runs only on pull_request;
 #   - its concurrency neither cancels a merge group nor shares a group with one (a group's ref is unique);
 #   - the DCO job does run dco-check on pull requests and reports on merge groups (it needs the pull request);

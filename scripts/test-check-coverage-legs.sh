@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/check-coverage-legs.sh: the repository's own workflow passes, and each way a coverage floor can
 # stop being enforced (or a flag be uploaded twice) fails with a message naming it. Each case copies the build model,
-# ci.yml and codecov.yml into a scratch directory, changes one thing with ruby, and runs the check there. The modules
+# ci.yml, codecov.yml and .github/coverage-legs.json into a scratch directory, changes one thing with ruby, and runs the check there. The modules
 # changed are picked from the real files (the first leg's first module, ...), so a new module or a re-balanced leg
 # does not touch this test.
 #
@@ -23,9 +23,10 @@ fresh() {
   cp "$MODEL" "$WORK/case/model.json"
   cp "$REPO_ROOT/.github/workflows/ci.yml" "$WORK/case/ci.yml"
   cp "$REPO_ROOT/codecov.yml" "$WORK/case/codecov.yml"
+  cp "$REPO_ROOT/.github/coverage-legs.json" "$WORK/case/legs.json"
 }
 
-# mutate <<'RB' ... RB : run Ruby with `wf` (ci.yml), `job` (its coverage-leg job), `legs` (its matrix rows),
+# mutate <<'RB' ... RB : run Ruby with `wf` (ci.yml), `job` (its coverage-leg job), `legs` (coverage-legs.json's rows),
 # `uploads` (the leg job's upload steps), `it_job` (the integration-tests job), `it_run` (its step with
 # COVERAGE_MODULES), `it_uploads` (its upload steps), `model` and `codecov` loaded; each is written back afterwards.
 mutate() {
@@ -33,7 +34,7 @@ mutate() {
 dir, code = ARGV
 wf = YAML.load_file("#{dir}/ci.yml")
 job = wf['jobs']['coverage-leg']
-legs = job['strategy']['matrix']['include']
+legs = JSON.parse(File.read("#{dir}/legs.json"))
 model = JSON.parse(File.read("#{dir}/model.json"))
 codecov = YAML.load_file("#{dir}/codecov.yml")
 uploads = job['steps'].select { |s| s['uses'].to_s.start_with?('codecov/') }
@@ -44,11 +45,13 @@ eval(code) # rubocop:disable Security/Eval -- the cases below are this file's ow
 File.write("#{dir}/ci.yml", wf.to_yaml)
 File.write("#{dir}/model.json", JSON.generate(model))
 File.write("#{dir}/codecov.yml", codecov.to_yaml)
+File.write("#{dir}/legs.json", JSON.generate(legs))
 RUBY
 }
 
 run_check() {
-  "$CHECK" --model "$WORK/case/model.json" --workflow "$WORK/case/ci.yml" --codecov "$WORK/case/codecov.yml" > "$WORK/out" 2>&1
+  "$CHECK" --model "$WORK/case/model.json" --workflow "$WORK/case/ci.yml" --codecov "$WORK/case/codecov.yml" \
+    --legs "$WORK/case/legs.json" > "$WORK/out" 2>&1
 }
 
 expect_pass() {
@@ -207,9 +210,33 @@ expect_fail "a flag without carryforward fails" "does not set carryforward: true
 
 fresh
 mutate <<'RB'
-job['strategy']['matrix'].delete('include')
+legs.clear
 RB
-expect_fail "a coverage job without legs fails" "has no strategy.matrix.include legs"
+expect_fail "a legs file without legs fails" "has no legs"
+
+fresh
+mutate <<'RB'
+job['strategy']['matrix']['include'] = legs
+RB
+expect_fail "legs listed in ci.yml's matrix again fail" "strategy.matrix must be exactly"
+
+fresh
+mutate <<'RB'
+job['strategy']['matrix']['java'] = [21]
+RB
+expect_fail "a second matrix axis fails" "strategy.matrix must be exactly"
+
+fresh
+mutate <<'RB'
+legs[0]['java'] = 21
+RB
+expect_fail "a leg with another key fails" "has keys other than leg and modules"
+
+fresh
+mutate <<'RB'
+legs.push(legs.shift)
+RB
+expect_pass "legs in another order pass"
 
 # The integration-tests job (#2349): the second uploader of the flags in its COVERAGE_MODULES, and of no other.
 fresh

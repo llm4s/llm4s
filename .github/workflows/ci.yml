@@ -2,15 +2,19 @@ name: CI
 
 # What runs where (the conditions are on the jobs; All Tests Pass knows which may be skipped, and when):
 #   - a pull request: everything but the main-only tiers, less what its change cannot affect (the `changes` job), and
-#     nothing at all on a draft. The `ready_for_review` type runs it when a draft is marked ready.
+#     nothing at all on a draft. The `ready_for_review` type runs it when a draft is marked ready. Each coverage leg
+#     tests only the modules the change reaches over the project graph (#3185, #3186), and a leg with none is left
+#     out; a build-file change or the `ci:full` label selects every module.
+#   - a merge group: as a pull request, selected by the group's diff against main (base_sha..head_sha): what that
+#     cannot reach already passed on main, which lands on exactly the commit the group tested (#3183).
 #   - a push to main: the checks whose results main itself needs - Quick Checks, the coverage legs (Codecov compares
 #     a PR with main's coverage), the other modules' tests, Integration Tests - and the main-only tiers (Workspace,
-#     Ollama, MCP reference). The Windows, performance, ScalaDoc, consumer and Spring jobs, which every PR has already
-#     run on its own tree, wait for the nightly run.
-#   - the nightly run (`schedule`): every PR job, on main as it stands, so what a push to main leaves out still runs
-#     on main once a day. GitHub mails a scheduled run's failure to whoever last changed its cron line, as it does for
-#     the other nightly workflows.
-#   - a merge group, a manual run, and a release (release.yml calls this workflow on the tag): every PR job.
+#     Ollama, MCP reference), every module. The Windows, performance, ScalaDoc, consumer and Spring jobs, which every
+#     PR has already run on its own tree, wait for the nightly run.
+#   - the nightly run (`schedule`): every PR job, every module, on main as it stands, so what a push to main or a
+#     selective run leaves out still runs on main once a day. GitHub mails a scheduled run's failure to whoever last
+#     changed its cron line, as it does for the other nightly workflows.
+#   - a manual run and a release (release.yml calls this workflow on the tag): every PR job, every module.
 on:
   push:
     branches: [ main, master ]
@@ -60,21 +64,25 @@ permissions:
   contents: read
 
 jobs:
-  # What a pull request's change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`,
-  # `windows`, `integration`, `consumers`, `workspace`, `performance`), and whether it is a draft. A change to a build
-  # file (build.sbt, project/, this workflow, ...) runs every job; a docs-only change runs Quick Checks, ScalaDoc and the
-  # suites that read docs/ (`Docs tests`). The checkout is the PR's merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's
-  # change. Every other job needs this one and reads its outputs; it runs only on a pull request, so on every other
-  # event they are empty, and each job's condition (`!= 'false'`, `!= 'true'`) then runs it. A draft pull request runs
-  # nothing else: every decision is false, and All Tests Pass is skipped rather than reporting a pass for tests that did
-  # not run. Marking it ready for review (`ready_for_review`) starts a full run.
+  # What a change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`, `windows`,
+  # `integration`, `consumers`, `workspace`, `performance`; and the rule behind `modules`, `legs` and `full`), and
+  # whether it is a draft. A change to a build file (build.sbt, project/, this workflow, ...) or the `ci:full` label runs
+  # every job and module; a docs-only change runs Quick Checks, ScalaDoc and the suites that read docs/ (`Docs tests`).
+  # On a pull request the checkout is its merge commit, so its first parent is the base and HEAD^1..HEAD is exactly
+  # the PR's change; a merge group compares its base_sha with its head_sha. Every other job needs this one and reads
+  # its outputs. On a push, the nightly run, a manual run and a release it emits only `modules`, `legs` (every leg in
+  # full) and `full=true`: the decisions stay empty, and each job's condition (`!= 'false'`, `!= 'true'`) then runs
+  # it. A draft pull request runs nothing else: every decision is false, and All Tests Pass is skipped rather than
+  # reporting a pass for tests that did not run. Marking it ready for review (`ready_for_review`) starts a run. The
+  # `ci:full` label is read when the run starts: add it, then push (a re-run reuses the event the run started with).
+  # The log says why each module was selected.
   changes:
     name: Changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name == 'pull_request'
     permissions:
       contents: read
+      pull-requests: read  # a merge group's queued pull request's labels (`ci:full`)
     outputs:
       draft: ${{ steps.diff.outputs.draft }}
       code: ${{ steps.diff.outputs.code }}
@@ -84,24 +92,67 @@ jobs:
       consumers: ${{ steps.diff.outputs.consumers }}
       workspace: ${{ steps.diff.outputs.workspace }}
       performance: ${{ steps.diff.outputs.performance }}
+      modules: ${{ steps.diff.outputs.modules }}
+      legs: ${{ steps.diff.outputs.legs }}
+      full: ${{ steps.diff.outputs.full }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
+      - name: Read the pull request's draft state and labels
+        id: pr
+        if: github.event_name == 'pull_request'
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+          FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: printf 'draft=%s\nfull_label=%s\n' "$DRAFT" "$FULL_LABEL" >> "$GITHUB_OUTPUT"
+
+      # The queue's branch is gh-readonly-queue/<base>/pr-<number>-<sha>; a group of several entries is named after its
+      # last. A failed lookup selects everything (`unknown`).
+      - name: Read the queued pull request's labels
+        id: group
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          n="$(sed -nE 's#^(refs/heads/)?gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]+$#\2#p' <<< "$HEAD_REF")"
+          label=unknown
+          if [ -n "$n" ] && names="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq '.labels[].name')"; then
+            if grep -qx 'ci:full' <<< "$names"; then label=true; else label=false; fi
+          fi
+          echo "pull request ${n:-?} of $HEAD_REF: ci:full=$label"
+          echo "full_label=$label" >> "$GITHUB_OUTPUT"
+
       - name: Decide what the change needs
         id: diff
         env:
-          DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ steps.pr.outputs.draft }}
+          FULL_LABEL: ${{ steps.pr.outputs.full_label || steps.group.outputs.full_label }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
-          if [ "$DRAFT" = true ]; then
+          set -o pipefail  # a failing script fails the step instead of hiding behind tee
+          case "$FULL_LABEL" in
+            true) export CI_FULL="the pull request has the ci:full label" ;;
+            unknown) export CI_FULL="the queued pull request's labels could not be read" ;;
+          esac
+          if [ "$EVENT" = pull_request ] && [ "$DRAFT" = true ]; then
             echo "A draft pull request: no job runs until it is marked ready for review"
             printf '%s\n' draft=true code=false docs=false windows=false integration=false consumers=false \
-              workspace=false performance=false >> "$GITHUB_OUTPUT"
-          else
+              workspace=false performance=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = pull_request ]; then
             echo draft=false >> "$GITHUB_OUTPUT"
             scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = merge_group ]; then
+            echo draft=false >> "$GITHUB_OUTPUT"
+            git cat-file -e "$GROUP_BASE^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$GROUP_BASE"
+            CI_EVENT=merge_group scripts/ci-changes.sh "$GROUP_BASE" "$GROUP_HEAD" | tee -a "$GITHUB_OUTPUT"
+          else
+            scripts/ci-changes.sh --all "a $EVENT run tests every module" | tee -a "$GITHUB_OUTPUT"
           fi
 
   # Checks that need no tests run: formatting, scalafix, compile, the build's policy checks and the scripts' own
@@ -607,11 +658,18 @@ jobs:
   # (the order inside a leg matters: a new module goes after the modules it depends on).
   #
   # The legs are summarised by the `Code Coverage` job below, which `All Tests Pass` needs.
+  #
+  # The legs and their modules are .github/coverage-legs.json (balanced by the per-module times of the single job,
+  # #1935's run: about 5 minutes of sbt each). The `changes` job cuts each leg to the modules the change reaches
+  # (#3186) and drops a leg left with none, so `matrix.modules` lists only the modules this run tests, and each
+  # upload step below runs only for a module its leg tested. On a push, the nightly run, a manual run, a release, a
+  # build-file change and the `ci:full` label, the matrix is the file's four legs in full.
   coverage-leg:
     name: Code Coverage (${{ matrix.leg }})
     needs: [changes]
-    # On a pull request only when it changes code (`changes`; never on a draft).
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    # On a pull request only when it changes code (`changes`; never on a draft), and when some leg has a module the
+    # change reaches: an empty matrix is an error, not a skip.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.changes.outputs.legs != '[]' }}
     runs-on: ubuntu-latest
     # Healthy legs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 30
@@ -621,22 +679,7 @@ jobs:
       # Every leg runs to the end, so one failing floor does not hide another leg's result.
       fail-fast: false
       matrix:
-        # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
-        include:
-          - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
-                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, llm4sSttp, traceOpentelemetry,
-                      gradleDemo, secretsVault, secretsAws]
-          - leg: rag
-            modules: [rag, ragTestkit, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image,
-                      speech, observability, observabilityPrometheus]
-          - leg: providers
-            modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      perplexity, jlama, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter,
-                      springAi, deployService, examplesHttp]
-          - leg: agent
-            modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
-                      llm4sPekko, llm4sOx]
+        include: ${{ fromJSON(needs.changes.outputs.legs) }}
 
     # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
     # others it costs a few seconds of start-up.
@@ -1373,9 +1416,10 @@ jobs:
       # The data and report of each module this leg reported on, for the `Code Coverage` job's aggregate report. On a
       # fresh runner only those modules have a scoverage-report. A dependency's data (compiled and measured here too)
       # is left out: its statement ids differ from one compile to the next, so it must not overwrite the owning leg's.
-      # Not on a pull request, where the aggregate report is not built (see the `coverage` job).
+      # Not on a pull request, nor on a run that tests only some modules (a merge group's), where the aggregate report
+      # is not built (see the `coverage` job).
       - name: Collect this leg's coverage data
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         env:
           MODULES: ${{ join(matrix.modules, ' ') }}
         run: |
@@ -1393,7 +1437,7 @@ jobs:
           [ "$n" -eq "$expected" ]
 
       - name: Upload this leg's coverage data
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-data-${{ matrix.leg }}
@@ -1402,9 +1446,10 @@ jobs:
           if-no-files-found: error
 
   # The coverage gate: green only when every leg is. `All Tests Pass` needs this job, so the required-check story is
-  # what it was with one coverage job, and the check is still called `Code Coverage`. Off pull requests it also writes
-  # the informational aggregate report, from the legs' coverage data (statement files and measurements; no compile).
-  # On a pull request nobody reads that report (Codecov has the legs' own uploads), so the job is the gate alone: one
+  # what it was with one coverage job, and the check is still called `Code Coverage`. Off pull requests, when every
+  # module was tested (`full`), it also writes the informational aggregate report, from the legs' coverage data
+  # (statement files and measurements; no compile). On a pull request nobody reads that report (Codecov has the legs'
+  # own uploads), and a merge group's selective run has only some modules' data, so the job is the gate alone: one
   # step, no checkout and no sbt, a few seconds instead of about two minutes.
   coverage:
     name: Code Coverage
@@ -1417,45 +1462,55 @@ jobs:
       contents: read
 
     steps:
+      # Skipped legs pass only when `changes` left no leg a module (`legs` is `[]`): a change that reaches no measured
+      # module, such as one to samples or modules/it alone. Anything else (a failure, a cancelled leg, or legs skipped
+      # while `legs` names some, which a broken condition would cause) fails the gate.
       - name: Check every coverage leg passed
+        env:
+          RESULT: ${{ needs.coverage-leg.result }}
+          LEGS: ${{ needs.changes.outputs.legs }}
         run: |
-          if [[ "${{ needs.coverage-leg.result }}" != "success" ]]; then
-            echo "A coverage leg failed (result: ${{ needs.coverage-leg.result }}); see the Code Coverage (<leg>) jobs"
+          if [[ "$RESULT" == "skipped" && "$LEGS" == "[]" ]]; then
+            echo "No coverage leg ran: the change reaches no module a leg measures"
+          elif [[ "$RESULT" != "success" ]]; then
+            echo "A coverage leg failed (result: $RESULT); see the Code Coverage (<leg>) jobs"
             exit 1
+          else
+            echo "Every coverage leg passed: $LEGS"
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
 
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         with:
           distribution: 'temurin'
           java-version: 21
           problem-matcher: true
 
       - name: Restore the sbt dependency cache
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
         with:
           disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
 
       - name: Download the legs' coverage data
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-data-*
           merge-multiple: true
 
       - name: Aggregate the coverage report
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         run: scripts/retry-on-transient-network.sh sbt coverageAggregate
 
       - name: Upload coverage report artifact
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.full == 'true' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
@@ -2290,12 +2345,16 @@ jobs:
   # skips the coverage legs and the other test jobs. A few dozen suites read docs/ - a guide's code blocks, links and
   # tables tested against the code - so a docs-only change can still break them: this runs those, tagged DocsSpec
   # (`sbt testDocs`, the modules in `docsTestProjects` in build.sbt). scripts/check-docs-tests.sh (Quick Checks) fails
-  # when a suite reads docs/ without the tag. On a change with code the coverage legs and `Test (other modules)` run
-  # these suites with all the others, so this job is skipped.
+  # when a suite reads docs/ without the tag. A change with docs and code runs it too unless every module was selected
+  # (`full`): the coverage legs test only the modules the code reaches (#3186), and docs/ is in no module, so the
+  # tagged suites of the others would not run. With `full` the legs and `Test (other modules)` run them with all the
+  # others, so this job is skipped.
   docs-tests:
     name: Docs tests
     needs: [changes]
-    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.code == 'false'
+    if: >-
+      needs.changes.outputs.docs == 'true' &&
+      (needs.changes.outputs.code == 'false' || needs.changes.outputs.full == 'false')
     runs-on: ubuntu-latest
     # Healthy runs take about 10 minutes: samples compiles most of the build.
     timeout-minutes: 30
@@ -2356,8 +2415,8 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: ${{ always() && needs.changes.outputs.draft != 'true' }}
-    # changes, workspace-integration and performance-tests run only where they apply (#1982): skipped is a pass for
-    # them, failed is not, so a PR that changes the workspace cannot merge with the live suites red.
+    # workspace-integration and performance-tests run only where they apply (#1982): skipped is a pass for them, failed
+    # is not, so a PR that changes the workspace cannot merge with the live suites red. `changes` runs on every event.
     needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, docs-tests, integration-tests, consumers, spring-compat, workspace-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2374,6 +2433,7 @@ jobs:
           INTEGRATION: ${{ needs.changes.outputs.integration }}
           CONSUMERS: ${{ needs.changes.outputs.consumers }}
           PERFORMANCE: ${{ needs.changes.outputs.performance }}
+          FULL: ${{ needs.changes.outputs.full }}
         run: |
           failed=0
           # require LABEL RESULT [SKIP_OK]: RESULT must be success, or skipped when SKIP_OK is true
@@ -2405,29 +2465,28 @@ jobs:
           require "Kotlin, Java and framework consumers" "${{ needs.consumers.result }}" "$(skip_ok "$CONSUMERS")"
           require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$(skip_ok "$CONSUMERS")"
           require "Performance tests" "${{ needs.performance-tests.result }}" "$(skip_ok "$PERFORMANCE")"
-          # Docs tests runs only on a pull request that changes docs and no code; anywhere else skipped is the pass.
+          # Docs tests runs only on a change with docs and either no code or not every module selected (`full`);
+          # anywhere else skipped is the pass.
           if [[ "${{ needs.docs-tests.result }}" != "success" && "${{ needs.docs-tests.result }}" != "skipped" ]]; then
             echo "::error::Docs tests: ${{ needs.docs-tests.result }}"
             failed=1
           fi
-          if [[ "$DOCS" == "true" && "$CODE" == "false" && "${{ needs.docs-tests.result }}" != "success" ]]; then
-            echo "::error::The change touches docs/ only, but Docs tests did not run and pass"
+          if [[ "$DOCS" == "true" && ( "$CODE" == "false" || "$FULL" == "false" ) && "${{ needs.docs-tests.result }}" != "success" ]]; then
+            echo "::error::The change touches docs/ and the legs do not test every module, but Docs tests did not run and pass"
             failed=1
           fi
-          if [[ "${{ needs.changes.result }}" != "success" && "${{ needs.changes.result }}" != "skipped" ]]; then
-            echo "::error::Deciding what the change needs failed"
+          # The detector runs on every event (the coverage legs' matrix is its `legs` output), so skipped is never a
+          # pass for it: a PR that disables its condition fails here.
+          if [[ "${{ needs.changes.result }}" != "success" ]]; then
+            echo "::error::Deciding what the change needs did not run and pass: ${{ needs.changes.result }}"
             failed=1
           fi
           if [[ "${{ needs.workspace-integration.result }}" != "success" && "${{ needs.workspace-integration.result }}" != "skipped" ]]; then
             echo "::error::Workspace integration tests failed"
             failed=1
           fi
-          # skipped passes only where the tier does not apply: on a pull request the detector must run, and a change that
-          # touches the workspace must run the tier (a PR that disables either job's condition fails here)
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.changes.result }}" != "success" ]]; then
-            echo "::error::Deciding what the pull request needs did not run"
-            failed=1
-          fi
+          # skipped passes only where the tier does not apply: a change that touches the workspace must run the tier (a
+          # PR that disables the job's condition fails here)
           if [[ "${{ needs.changes.outputs.workspace }}" == "true" && "${{ needs.workspace-integration.result }}" != "success" ]]; then
             echo "::error::The change touches the workspace but Workspace Integration did not run and pass"
             failed=1
@@ -2536,7 +2595,7 @@ jobs:
     timeout-minutes: 40
     # On a push to main, on a pull request that changes the workspace (`changes`; All Tests Pass then requires
     # it to pass), and on demand: `gh workflow run ci.yml --ref <branch> -f tier=workspace`. Not on a merge group: the
-    # queued PR already ran it. `!cancelled()` because `changes` is skipped on every event but a pull request.
+    # queued PR already ran it. `changes` sets workspace=false in a merge group, and emits no decisions on the other events.
     needs: [changes]
     if: >-
       !cancelled() && (

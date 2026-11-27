@@ -98,7 +98,7 @@ expect 'another dependency'      false "sed -i.bak 's/2.13.0/2.14.0/' project/De
 expect 'no change'                false ":"
 
 # ci.yml wires the verdict to the tier, and the tier into All Tests Pass
-label='ci.yml runs the tier on the verdict; All Tests Pass needs the detector on a PR, and the tier when the verdict is true'
+label='ci.yml runs the tier on the verdict; All Tests Pass needs the detector, and the tier when the verdict is true'
 # shellcheck disable=SC2016 # the ${{ }} are GitHub expressions, matched literally
 if ruby -ryaml -e '
   jobs = YAML.load_file(ARGV[0])["jobs"]
@@ -113,7 +113,7 @@ if ruby -ryaml -e '
        wi["if"].include?("!cancelled()") &&
        (Array(atp["needs"]) & %w[changes workspace-integration]).size == 2 &&
        atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ needs.changes.outputs.workspace }}" == "true" && "${{ needs.workspace-integration.result }}" != "success"}) } &&
-       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ github.event_name }}" == "pull_request" && "${{ needs.changes.result }}" != "success"}) }
+       atp["steps"].any? { |s| s["run"].to_s.include?(%q{if [[ "${{ needs.changes.result }}" != "success" ]]; then}) }
   exit(ok ? 0 : 1)
 ' "$CI"; then ok "$label"; else bad "$label"; fi
 

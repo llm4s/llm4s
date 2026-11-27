@@ -13,8 +13,11 @@ jobs:
   # Run CI checks first
   ci:
     uses: ./.github/workflows/ci.yml
+    # A called workflow's jobs get no more than this: CI's `changes` job asks for pull-requests: read (it reads a
+    # merge group's labels), and a job asking for more than its caller grants fails the whole run before it starts.
     permissions:
       contents: read
+      pull-requests: read
 
   # A release tag must be the `latest` line of docs/_data/support.yml, the Support Policy's table, before anything is
   # published (#2289): the table is updated by hand in the release pull request (docs/reference/release.md).
