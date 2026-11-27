@@ -2238,7 +2238,11 @@ object RAG {
         ChunkerFactory.create(other)
     }
 
-  private def createHybridSearcher(config: RAGConfig): Result[HybridSearcher] =
+  /** The configured backends' searcher, under the configured `LegFailurePolicy` whichever backends they are. */
+  private[rag] def createHybridSearcher(config: RAGConfig): Result[HybridSearcher] =
+    createBackendSearcher(config).map(_.withLegFailurePolicy(config.legFailurePolicy))
+
+  private def createBackendSearcher(config: RAGConfig): Result[HybridSearcher] =
     config.pgVectorConnectionString match {
       case Some(connStr) =>
         val user        = config.pgVectorUser.getOrElse("postgres")
@@ -2265,7 +2269,6 @@ object RAG {
                 case None       => KeywordIndex.inMemory()
               }
             } yield HybridSearcher(vectorStore, keywordIndex, config.fusionStrategy)
-              .withLegFailurePolicy(config.legFailurePolicy)
         }
       case None =>
         (config.vectorStorePath, config.keywordIndexPath) match {

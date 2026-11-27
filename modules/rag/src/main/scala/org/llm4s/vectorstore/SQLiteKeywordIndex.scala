@@ -82,16 +82,22 @@ final class SQLiteKeywordIndex private (
     """)
 
     // An index written before #2994 may hold an FTS row per earlier version of a re-indexed document: rebuild the FTS
-    // table from the documents when the two disagree. Idempotent, and a no-op on a consistent index.
-    val counts = stmt.executeQuery(s"SELECT (SELECT COUNT(*) FROM $ftsTableName), (SELECT COUNT(*) FROM $tableName)")
-    val stale  = counts.next() && counts.getLong(1) != counts.getLong(2)
-    counts.close()
-    if (stale) {
-      stmt.executeUpdate(s"DELETE FROM $ftsTableName")
-      stmt.executeUpdate(s"INSERT INTO $ftsTableName(id, content) SELECT id, content FROM $tableName")
-    }
-
+    // table from the documents when the two disagree. Idempotent, and a no-op on a consistent index. The check and the
+    // rebuild run in one write transaction, its lock taken before the check (BEGIN IMMEDIATE): a write from another
+    // connection between them would otherwise be indexed twice, once by its trigger and once by the rebuild.
+    stmt.execute("BEGIN IMMEDIATE")
+    val outcome = Try {
+      val counts = stmt.executeQuery(s"SELECT (SELECT COUNT(*) FROM $ftsTableName), (SELECT COUNT(*) FROM $tableName)")
+      val stale  = counts.next() && counts.getLong(1) != counts.getLong(2)
+      counts.close()
+      if (stale) {
+        stmt.executeUpdate(s"DELETE FROM $ftsTableName")
+        stmt.executeUpdate(s"INSERT INTO $ftsTableName(id, content) SELECT id, content FROM $tableName")
+      }
+    }.flatMap(_ => Try(stmt.execute("COMMIT")).map(_ => ()))
+    outcome.failed.foreach(_ => Try(stmt.execute("ROLLBACK")))
     stmt.close()
+    outcome.get
   }
 
   override def index(doc: KeywordDocument): Result[Unit] =

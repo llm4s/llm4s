@@ -301,4 +301,40 @@ class SQLiteKeywordIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     again.search("delta", 5).value.map(_.id) shouldBe Seq("d1")
     again.close()
   }
+
+  it should "take the write lock before its stale check, so a concurrent write is indexed once" in {
+    import scala.concurrent.{ Await, Future }
+    import scala.concurrent.ExecutionContext.Implicits.global
+    import scala.concurrent.duration.*
+
+    val dir  = java.nio.file.Files.createTempDirectory("llm4s-kw-race")
+    val path = dir.resolve("kw.db").toString
+    SQLiteKeywordIndex(path).value.close()
+    def fts(conn: java.sql.Connection): Long =
+      scala.util.Using.resource(conn.createStatement())(s =>
+        scala.util.Using.resource(s.executeQuery("SELECT COUNT(*) FROM documents_fts")) { rs =>
+          rs.next(); rs.getLong(1)
+        }
+      )
+
+    scala.util.Using.resource(java.sql.DriverManager.getConnection(s"jdbc:sqlite:$path")) { writer =>
+      scala.util.Using.resource(writer.createStatement()) { stmt =>
+        // stale: a document whose old version also has an FTS row
+        stmt.executeUpdate("INSERT INTO documents (id, content, metadata) VALUES ('d1', 'delta', '{}')")
+        stmt.executeUpdate("INSERT INTO documents_fts (id, content) VALUES ('d1', 'alpha')")
+        // another writer holds the write lock while the index opens
+        stmt.execute("BEGIN IMMEDIATE")
+        val opening = Future(SQLiteKeywordIndex(path).value)
+        Thread.sleep(300)
+        opening.isCompleted shouldBe false // waiting for the lock, before its check
+        stmt.executeUpdate("INSERT INTO documents (id, content, metadata) VALUES ('d2', 'gamma', '{}')")
+        stmt.execute("COMMIT")
+        val index = Await.result(opening, 10.seconds)
+        fts(writer) shouldBe 2L // d1 and d2, each once
+        index.search("alpha", 5).value shouldBe empty
+        index.search("gamma", 5).value.map(_.id) shouldBe Seq("d2")
+        index.close()
+      }
+    }
+  }
 }
