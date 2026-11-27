@@ -9,7 +9,8 @@ redirect_from:
   - /reference/merge-queue
   - /reference/merge-queue.html
 cites_closed_issues: [1638]
-cites_open_issues: [3183, 3185, 3186, 3190]
+cites_open_issues: [3183, 3190]
+cites_issues: [3185, 3186]
 ---
 
 # Protecting `main` from merge skew
@@ -44,10 +45,10 @@ with the three required checks below, **Require branches to be up to date** off,
 settings in step 3. A pull request merges through the queue: the **Merge when ready** button, or
 `gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position}}}' -f id=<node id>`
 (auto-merge is off for the repository, so `gh pr merge` refuses), and it lands when its `merge_group` run passes.
-`main` then sits on exactly the commit that run tested. Next: pull request runs and merge-group runs test only what
+`main` then sits on exactly the commit that run tested. Pull request runs and merge-group runs test only the modules
 their change reaches ([#3185](https://github.com/llm4s/llm4s/issues/3185),
-[#3186](https://github.com/llm4s/llm4s/issues/3186); a merge group by its diff against `main`), the nightly run tests
-everything, and the push-to-main run drops what the queue already ran on the same commit
+[#3186](https://github.com/llm4s/llm4s/issues/3186); a merge group by its diff against `main`), and the push-to-main
+and nightly runs test everything. Next: the push-to-main run drops what the queue already ran on the same commit
 ([#3190](https://github.com/llm4s/llm4s/issues/3190)).
 
 This is a repository setting, so it needs an admin; the workflows are ready for it. Two options, which can be used in

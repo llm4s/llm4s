@@ -386,8 +386,14 @@ request the `Changes` job (`scripts/ci-changes.sh`, which lists the paths behind
 cannot affect: the coverage legs and `Test (other modules)` need a change to code (anything but docs/, the top-level
 markdown, other workflows and scripts/), `Test (Windows)` a change to what `PlatformTests` runs, `Integration Tests`
 a change to modules/it or a module its `@Docker` suites reach, the consumer and Spring jobs a change to the Java,
-Kotlin, Spring or Quarkus modules or what they build on, and `Performance tests` a change to core, agent or media. A
-change to a build file (build.sbt, project/, ci.yml, ...) runs everything. A docs-only change runs Quick Checks,
+Kotlin, Spring or Quarkus modules or what they build on, and `Performance tests` a change to core, agent or media.
+Each coverage leg then tests only the modules the change reaches over the project graph (`.github/ci-graph.json`,
+`sbt generateCiGraph`): a module whose main code changed and everything that depends on it, a module whose tests
+changed and those whose tests depend on its tests (`test->test`), and a leg with none is left out; the `Changes` log
+says why each module was selected. A merge group selects the same way, by its diff against main. A change to a build
+file (build.sbt, project/, ci.yml, ...), a path in no module, or the `ci:full` label on the pull request (add it, then
+push) runs everything, as do a push to main, the nightly run, a manual run and a release. A change with docs and only
+some modules selected also runs `Docs tests`. A docs-only change runs Quick Checks,
 `ScalaDoc` and `Docs tests`: the suites that read docs/, which carry the class annotation `@org.llm4s.tags.DocsSpec`
 and run with `sbt testDocs`. A suite that reads docs/ must carry it: `scripts/check-docs-tests.sh` (Quick Checks) fails
 otherwise, and a module with tagged suites joins `docsTestProjects` in build.sbt.

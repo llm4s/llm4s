@@ -148,9 +148,12 @@ and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to 
    - Reference related issues: `Fixes #123`
    - Respond to reviewer feedback
    - While you are still pushing, keep the PR a draft (`gh pr create --draft`, or `gh pr ready --undo`) and mark
-     it ready once (`gh pr ready`). CI runs nothing on a draft and a full run when it is marked ready; on a PR that
+     it ready once (`gh pr ready`). CI runs nothing on a draft and a run when it is marked ready; on a PR that
      is ready, each push cancels the run in progress and starts another, and those runs share the project's
      20-job concurrency limit with every other PR. Batch review fixes into one push for the same reason.
+   - A run tests only the modules your change reaches over the project graph (the `Changes` job's log says why each
+     was selected); a build-file change tests everything. If a change reaches a module in a way the graph cannot see,
+     add the `ci:full` label and push again to test everything.
 
 6. **Landing on `main`:**
    - Two pull requests can each be green and still break `main` together (merge skew), because a PR's CI tests the

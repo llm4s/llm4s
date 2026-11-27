@@ -50,15 +50,19 @@ Run it to see the current floors. The numbers are deliberately not copied here, 
 ### What CI runs
 
 Coverage runs in four parallel legs, the `Code Coverage (<leg>)` jobs (`coverage-leg` in
-`.github/workflows/ci.yml`). Each leg lists the modules it owns in the job's matrix and runs
+`.github/workflows/ci.yml`). Each leg owns the modules `.github/coverage-legs.json` lists for it and runs
 `<module>/test <module>/coverageReport` for each, in order; `<module>/coverageReport` is the step that enforces that
-module's floor. A report counts every measurement taken so far in the leg, so a module's floor is judged on its own
+module's floor. A pull request or merge group runs only the modules its change reaches (the `Changes` job, see the
+[Testing Guide](testing-guide)), and a leg with none is left out; a push to main, the nightly run and a build-file
+change run every module. A report counts every measurement taken so far in the leg, so a module's floor is judged on its own
 tests plus those of modules that ran ahead of it in the same leg. The legs keep the order the single coverage job
 used, and mostly keep a module with the modules whose tests exercise its code (`rag` before `knowledgegraph`,
 `media` and `observability`; `image` before `observabilityPrometheus`; the providers before `providerTestkit`).
 Two such pairs are now split: `providerTestkit` no longer counts `rag`'s, `mcp`'s, `speech`'s and `image`'s tests
-(96.66% to 96.46%, floor 90), nor `agent` `observability`'s (93.19% to 93.14%, floor 90). Each leg uploads its modules' Codecov flags, and only
-those, so every flag is uploaded once. The `Code Coverage` job passes only when every leg does, and is what
+(96.66% to 96.46%, floor 90), nor `agent` `observability`'s (93.19% to 93.14%, floor 90). When a run selects a
+module, it also selects the modules ahead of it in its leg whose tests run its code, so its report, and its floor, are
+judged as in a full run. Each leg uploads the Codecov flags of the modules it ran, and only those, so every flag is
+uploaded once; a flag not uploaded keeps its last coverage (`carryforward`). The `Code Coverage` job passes only when every leg does, and is what
 `All Tests Pass` waits for. Off pull requests it also writes the aggregate report from the legs' coverage data, which
 is informational only, because a build-wide average is not a meaningful gate; on a pull request it is the gate alone.
 
@@ -77,7 +81,7 @@ the services, as CI does: `sbt "set rag / coverageEnabled := true" "set rag / co
 "set rag / coverageMinimumStmtTotal := 0" testIntegration rag/coverageReport` (those three settings and one report
 per module).
 
-A new module with a floor has to join a leg, normally the one holding its dependencies, after them, with an upload step for
+A new module with a floor has to join a leg in `.github/coverage-legs.json`, normally the one holding its dependencies, after them, with an upload step for
 its flag, in the same change that adds it. `scripts/check-coverage-legs.sh`, run in Quick Checks against the build sbt
 loaded, fails until it does: it checks that every module with a floor is in exactly one leg (or in the script's
 short, reasoned exemption list) and has exactly one upload step, under the `codecov.yml` flag for its directory.

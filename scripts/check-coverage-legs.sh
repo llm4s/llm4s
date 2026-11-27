@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Fails when a module with a coverage floor would not have that floor enforced by CI.
 #
-# CI's coverage runs in parallel legs (the `coverage-leg` job's matrix in .github/workflows/ci.yml): each leg runs
+# CI's coverage runs in parallel legs (.github/coverage-legs.json, which the `changes` job cuts to the modules a change
+# reaches and the `coverage-leg` job in .github/workflows/ci.yml takes as its matrix): each leg runs
 # `<module>/test <module>/coverageReport` for the modules it lists, and `<module>/coverageReport` is what enforces the
 # module's floor (`coverageFloor(n)` in build.sbt). A module in no leg is never measured, and nothing else says so;
 # that is how a carved-out module used to drop out of coverage when someone forgot to add it to the job. This checks,
 # against the build sbt actually loaded (the build model, project/BuildModel.scala) rather than build.sbt's text:
 #
+#   - the `coverage-leg` job's matrix is the `changes` job's `legs` output (`include: ${{ fromJSON(...) }}`), so the
+#     legs file is the only list of legs;
 #   - every module with a coverage floor is in exactly one leg, or in EXEMPT below with the reason;
 #   - every module in a leg has a coverage floor, and no leg name or module is listed twice;
 #   - every module in a leg has exactly one Codecov upload step in that job, gated on its leg
@@ -26,32 +29,35 @@
 #
 # No network, no sbt when given a model. Needs ruby (on GitHub's runners).
 #
-# Usage: scripts/check-coverage-legs.sh [--model FILE] [--workflow FILE] [--codecov FILE]
+# Usage: scripts/check-coverage-legs.sh [--model FILE] [--workflow FILE] [--codecov FILE] [--legs FILE]
 #   --model     the build model (default target/build-model.json; write it with `sbt "dumpBuildModel FILE"`)
 #   --workflow  the workflow holding the `coverage-leg` job (default .github/workflows/ci.yml)
 #   --codecov   the Codecov configuration (default codecov.yml)
+#   --legs      the coverage legs and their modules, in order (default .github/coverage-legs.json)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL="$REPO_ROOT/target/build-model.json"
 WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
 CODECOV="$REPO_ROOT/codecov.yml"
+LEGS="$REPO_ROOT/.github/coverage-legs.json"
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) MODEL="$2"; shift 2 ;;
     --workflow) WORKFLOW="$2"; shift 2 ;;
     --codecov) CODECOV="$2"; shift 2 ;;
+    --legs) LEGS="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 command -v ruby >/dev/null || { echo "ruby is needed to run this check" >&2; exit 2; }
-for f in "$MODEL" "$WORKFLOW" "$CODECOV"; do
+for f in "$MODEL" "$WORKFLOW" "$CODECOV" "$LEGS"; do
   [ -f "$f" ] || { echo "No such file: $f" >&2; exit 2; }
 done
 
-ruby -ryaml -rjson - "$MODEL" "$WORKFLOW" "$CODECOV" <<'RUBY'
-model_file, workflow_file, codecov_file = ARGV
+ruby -ryaml -rjson - "$MODEL" "$WORKFLOW" "$CODECOV" "$LEGS" <<'RUBY'
+model_file, workflow_file, codecov_file, legs_file = ARGV
 
 # Modules whose floor no leg enforces, each with the reason. Every entry needs one; adding a module here takes the
 # same deliberate decision as `coverageDisabled` in build.sbt. These two were outside the single coverage job too.
@@ -77,8 +83,24 @@ floors = projects.select { |_, p| p['coverageFloor'] }.keys.sort
 wf = YAML.load_file(workflow_file)
 job = (wf['jobs'] || {})[JOB]
 abort "#{workflow_file} has no job '#{JOB}'" unless job
-include_rows = Array(job.dig('strategy', 'matrix', 'include'))
-abort "#{JOB} has no strategy.matrix.include legs" if include_rows.empty?
+MATRIX = '${{ fromJSON(needs.changes.outputs.legs) }}'
+matrix = job.dig('strategy', 'matrix')
+unless matrix.is_a?(Hash) && matrix.keys == ['include'] && matrix['include'] == MATRIX
+  errors << "#{JOB}'s strategy.matrix must be exactly `include: #{MATRIX}` (the legs are #{File.basename(legs_file)}, " \
+            "cut by the changes job), has #{matrix.inspect}"
+end
+include_rows = begin
+  JSON.parse(File.read(legs_file))
+rescue JSON::ParserError => e
+  abort "#{legs_file} is not JSON: #{e.message.lines.first.strip}"
+end
+abort "#{File.basename(legs_file)} has no legs (a JSON array of {\"leg\": ..., \"modules\": [...]})" \
+  unless include_rows.is_a?(Array) && !include_rows.empty? && include_rows.all? { |r| r.is_a?(Hash) }
+include_rows.each do |row|
+  extra = row.keys - %w[leg modules]
+  errors << "leg #{row['leg'].inspect} in #{File.basename(legs_file)} has keys other than leg and modules: #{extra.join(', ')}" \
+    unless extra.empty?
+end
 
 legs = {}
 include_rows.each do |row|
@@ -99,7 +121,7 @@ floors.each do |m|
     errors << "#{m} is exempt (#{EXEMPT[m]}) but also in leg(s) #{legs_of[m].join(', ')}: drop one" unless legs_of[m].empty?
   elsif legs_of[m].empty?
     errors << "#{m} has a coverage floor (#{projects[m]['coverageFloor']}%) but is in no coverage leg: " \
-              "add it to a leg of #{JOB} in #{File.basename(workflow_file)}, with an upload step for its flag"
+              "add it to a leg in #{File.basename(legs_file)}, with an upload step for its flag in #{JOB}"
   elsif legs_of[m].size > 1
     errors << "#{m} is in more than one coverage leg: #{legs_of[m].join(', ')}"
   end
