@@ -135,7 +135,7 @@ and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to 
 
 4. **Test thoroughly:**
    ```bash
-   sbt scalafixAll        # Run scalafix checks (enforced in CI/compile)
+   sbt scalafixAll        # Run scalafix checks (enforced in CI by Quick Checks)
    sbt scalafmtAll        # Format code
    sbt compile            # Compile (Scala 3 only)
    sbt test               # Run all tests

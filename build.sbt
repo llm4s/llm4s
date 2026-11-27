@@ -81,9 +81,10 @@ inThisBuild(
     ThisBuild / (coverageReport / aggregate) := false,
     // --- scalafix ---
     ThisBuild / scalafixDependencies += "ch.epfl.scala" %% "scalafix-rules" % "0.12.1",
-    // Run Scalafix on compile only in CI (not locally to avoid developer friction);
-    // local developers rely on pre-commit hooks and `sbt scalafixAll` for manual checks.
-    ThisBuild / scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean
+    // Never on compile, locally or in CI (#3207): Quick Checks runs `scalafixAll --check` once, and scalafix inside
+    // every CI job's compile only put a scalafix pass on each job's critical path. Locally the pre-commit hook and
+    // `sbt scalafixAll` check it. `semanticdbEnabled` (commonSettings) does not depend on this setting.
+    ThisBuild / scalafixOnCompile := false
   )
 )
 
@@ -166,8 +167,8 @@ addCommandAlias("testDocs", docsTestProjects.map(p => s"$p/testOnly -- -n $DocsS
 //   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
 //   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
 //
-// The aliases *replace* `it / Test / testOptions` because the default value restricts the run
-// to the Local tier; adding a second `-n` would intersect to nothing.
+// The aliases swap the it project's `-n Local` for their own tag in `it / Test / test / testOptions` (a second `-n`
+// would intersect to nothing) and keep every other option: `-oD` and the `PerformanceTest` exclusion (#3206).
 addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
 addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
 addCommandAlias("testMcpReference", ItTiers.alias(ItTiers.McpReference))
@@ -2734,7 +2735,7 @@ lazy val it = (project in file("modules/it"))
     Test / fork := true,
     // The default run - including the aggregated `sbt test` - is the Local tier only.
     // Everything else needs a database, an image build, a model server or a paid API key.
-    // The tier aliases replace this setting rather than adding to it (see ItTiers.alias).
+    // The tier aliases swap this `-n` for their own tag, keeping the other options (see ItTiers.alias).
     //
     // Scoped to `test` rather than to the whole Test configuration on purpose: `testOnly`
     // names a suite explicitly, so `it/testOnly org.llm4s.vectorstore.PgVectorStoreSpec`

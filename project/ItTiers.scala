@@ -25,9 +25,14 @@ object ItTiers {
 
   val all: Seq[String] = Seq(Local, Docker, Workspace, McpReference, Ollama, Cloud)
 
-  /** The `sbt` command that runs one tier: select it by tag, replacing the Local-tier default. */
+  /**
+   * The `sbt` command that runs one tier: select it by tag in place of the Local-tier default.
+   *
+   * Only the it project's `-n Local` is removed; every other option stays, among them `-oD` (per-test durations)
+   * and the `PerformanceTest` exclusion from `commonSettings` (#3206).
+   */
   def alias(tag: String): String =
-    s""";set it / Test / test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-n", "$tag")); it/test"""
+    s""";set it / Test / test / testOptions := (it / Test / test / testOptions).value.filterNot(_ == Tests.Argument(TestFrameworks.ScalaTest, "-n", "$Local")) :+ Tests.Argument(TestFrameworks.ScalaTest, "-n", "$tag"); it/test"""
 
   private def simpleName(tag: String): String = tag.split('.').last
 
