@@ -1678,7 +1678,8 @@ jobs:
     # (`changes`; never on a draft).
     if: ${{ !cancelled() && needs.changes.outputs.integration != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 35: healthy runs took 15-18 minutes; the store contract suites (#3000) took them past the old 20
+    timeout-minutes: 35
     permissions:
       contents: read
 
