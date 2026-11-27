@@ -6,7 +6,7 @@ import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, SpecTools }
 import org.llm4s.agent.delegation.{ TaskRequest, TypedAgent }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{ ToolContent, ToolOutcome }
-import org.llm4s.error.{ CancelledError, ValidationError }
+import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
@@ -193,6 +193,103 @@ class AgentWorkerSpec
     val resumed = closed(store, submit(store, on, QueuedInput.Resume(Map(InterruptId("i") -> ujson.True))))
     resumed.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.RunFailed]
     resumed.attempts should have size 1
+  }
+
+  // ---- a store failure during admission (#3084) ----
+
+  /** `store`, whose next `latest` or `commit` fails once armed, as a store blip would. */
+  final private class BlippingCheckpointer(store: Checkpointer) extends ForwardingCheckpointer(store) {
+    val latestBlip = new AtomicBoolean(false)
+    val commitBlip = new AtomicBoolean(false)
+    override def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] =
+      if (latestBlip.compareAndSet(true, false))
+        Left(ProcessingError("test-checkpointer.latest", "the call did not finish within its call timeout"))
+      else super.latest(threadId)
+    override def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+      if (commitBlip.compareAndSet(true, false)) Left(ProcessingError("test-checkpointer.commit", "the store is busy"))
+      else super.commit(threadId, commit)
+  }
+
+  it should "give a start another attempt when the store fails as its run is admitted" in {
+    val store  = InMemoryCheckpointer()
+    val blips  = new BlippingCheckpointer(store)
+    val client = answering("done")
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(blips, client))))
+    val id     = submit(store, thread())
+    blips.latestBlip.set(true)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe Some(CheckpointStatus.Completed)
+    entry.attempts should have size 2
+    client.calls shouldBe 1
+  }
+
+  it should "give a start another attempt when its admission's commit fails" in {
+    val store  = InMemoryCheckpointer()
+    val blips  = new BlippingCheckpointer(store)
+    val client = answering("done")
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(blips, client))))
+    val id     = submit(store, thread())
+    blips.commitBlip.set(true)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe Some(CheckpointStatus.Completed)
+    entry.attempts should have size 2
+    client.calls shouldBe 1
+  }
+
+  it should "give a queued recover another attempt when the store fails as it is admitted" in {
+    val store   = InMemoryCheckpointer()
+    val blips   = new BlippingCheckpointer(store)
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n == 1) blocked(entered) else Right(CompletionFixture.simple("recovered")))
+    val agent   = agentOver(blips, client)
+    val on      = thread()
+    val running = agent.start(on, "hello").value
+    entered.acquire()
+    running.cancel()
+    running.await().isLeft shouldBe true
+    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    val id     = submit(store, on, QueuedInput.Recover)
+    blips.latestBlip.set(true)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe a[EntryOutcome.Done]
+    entry.attempts should have size 2
+    store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Completed
+  }
+
+  it should "give an admitted entry's recovery another attempt when the store fails as it is admitted" in {
+    val store   = InMemoryCheckpointer()
+    val blips   = new BlippingCheckpointer(store)
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n == 1) blocked(entered) else Right(CompletionFixture.simple("finished")))
+    val agent   = agentOver(blips, client)
+    val on      = thread()
+    val id      = submit(store, on, maxAttempts = 5)
+    val first   = diedMidRun(store, agent, on, entered)
+    blips.latestBlip.set(true)
+    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe Some(CheckpointStatus.Completed)
+    entry.attempts.map(_.runId).head shouldBe first
+    entry.attempts should have size 3
+  }
+
+  it should "close an entry Failed(AttemptsExhausted) when every admission meets a store failure" in {
+    val store = InMemoryCheckpointer()
+    val down = new ForwardingCheckpointer(store) {
+      override def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] =
+        Left(ProcessingError("test-checkpointer.latest", "down"))
+    }
+    val client = answering("never")
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(down, client))))
+    val id     = submit(store, thread(), maxAttempts = 2)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe FailureReason.AttemptsExhausted(2)
+    client.calls shouldBe 0
   }
 
   it should "run a typed agent's queued start, rendering its input" in {
