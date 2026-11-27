@@ -358,15 +358,16 @@ guide/permission-based-rag.md | 0091c8e45c | with | import org.llm4s.rag.RAG; im
 guide/permission-based-rag.md | 32ca3679f6 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val collections: CollectionStore = ???
 guide/permission-based-rag.md | ce191da192 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val searchIndex: SearchIndex = ???; val userId: PrincipalId = ???; val employeesGroup: PrincipalId = ???
 guide/permission-based-rag.md | 659f4b33db | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???
+guide/permission-based-rag.md | c74310c2b2 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???
 guide/permission-based-rag.md | df34dcf535 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???
 guide/permission-based-rag.md | 52c4d702a9 | with | import org.llm4s.rag.IndexedChunk; import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val text: String = ???
 guide/permission-based-rag.md | 44a76f120d | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val searchIndex: SearchIndex = ???
 guide/permission-based-rag.md | 04ef3b37c8 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; import org.llm4s.rag.RAG.RAGConfigOps; given org.llm4s.model.ModelRegistryService = ???; val searchIndex: SearchIndex = ???; val llmClient: org.llm4s.llmconnect.LLMClient = client; val userAuth: UserAuthorization = ???
 guide/permission-based-rag.md | 3b6bfc18f8 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val rag: RAG = ???; val auth: UserAuthorization = ???
 guide/permission-based-rag.md | 5d0effaf80 | with | import org.llm4s.rag.permissions.pg.PgSearchIndex
-guide/permission-based-rag.md | d21703a8a2 | with | val jdbcUrl: String = ???; val user: String = ???; val password: String = ???
-guide/permission-based-rag.md | 52a94d38dc | skip | an outline of the SearchIndex trait's members, for reading; the trait itself is in llm4s-rag
-guide/permission-based-rag.md | 5b063eac4a | skip | an outline of RAG's permission methods, for reading: not a definition
+guide/permission-based-rag.md | ed5fc69006 | with | val jdbcUrl: String = ???; val user: String = ???; val password: String = ???
+guide/permission-based-rag.md | cae018ef12 | skip | an outline of the SearchIndex trait's members, for reading; the trait itself is in llm4s-rag
+guide/permission-based-rag.md | 68aefa03b7 | skip | an outline of RAG's permission methods, for reading: not a definition
 guide/permission-based-rag.md | 2f80e01217 | with | import org.llm4s.rag.RAG; import org.llm4s.rag.permissions._; import org.llm4s.types.Result; val collections: CollectionStore = ???; val userAuth: UserAuthorization = ???; val path: CollectionPath = ???
 guide/agents/durable-checkpointers.md | 5d6b33bae4 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val b: GraphRuntime = ???
 guide/agents/durable-checkpointers.md | a21e1ab1b2 | with | import org.llm4s.agent.graph.*; import scala.concurrent.duration.*; val graph: CompiledGraph[String, String] = ???; val b: GraphRuntime = ???

@@ -1,19 +1,27 @@
 package org.llm4s.vectorstore
 
 import java.lang.reflect.{ InvocationHandler, Method, Proxy }
-import java.sql.{ Connection, PreparedStatement, ResultSet, Statement }
+import java.sql.{ Connection, PreparedStatement, ResultSet, Savepoint, Statement }
 import javax.sql.DataSource
 import scala.collection.mutable
 
 /**
  * A connection whose queries return `rows(sql)` and which records the parameters of every statement it runs
- * (one entry per `executeUpdate`, `executeQuery` or batch row). A statement whose SQL `fails` throws when run, after
- * it is recorded. Commits and rollbacks are counted.
+ * (one entry per `executeUpdate`, `executeQuery`, `execute` or batch row). A statement whose SQL `fails` throws when run, after
+ * it is recorded. Commits and rollbacks are counted, and so are savepoints: `autoCommit = false` scripts a connection
+ * already inside a caller's transaction.
  */
-final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => Boolean = _ => false) {
+final class ScriptedDb(
+  rows: String => Seq[Map[String, Any]],
+  fails: String => Boolean = _ => false,
+  autoCommit: Boolean = true
+) {
   val writes: mutable.ListBuffer[(String, Map[Int, Any])] = mutable.ListBuffer.empty
   var commits: Int                                        = 0
   var rollbacks: Int                                      = 0
+  var savepoints: Int                                     = 0
+  var savepointReleases: Int                              = 0
+  var savepointRollbacks: Int                             = 0
 
   /** The SQL of every statement run, in order. */
   def statements: Seq[String] = writes.toSeq.map(_._1)
@@ -59,6 +67,7 @@ final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => B
       case ("addBatch", _)                                        => record()
       case ("executeBatch", _)                                    => Array(1)
       case ("executeUpdate", _)                                   => record(); 1
+      case ("execute", _)                                         => record(); false
       case ("executeQuery", _)                                    => record(); resultSet(rows(sql))
       case _                                                      => null
     }
@@ -66,10 +75,13 @@ final class ScriptedDb(rows: String => Seq[Map[String, Any]], fails: String => B
 
   val dataSource: DataSource = {
     val connection = proxy(classOf[Connection]) {
-      case ("getAutoCommit", _)                     => true
+      case ("getAutoCommit", _)                     => autoCommit
       case ("prepareStatement", Array(sql: String)) => statement(sql)
       case ("createStatement", _)                   => proxy(classOf[Statement])((_, _) => null)
       case ("commit", _)                            => commits += 1
+      case ("setSavepoint", _)                      => savepoints += 1; proxy(classOf[Savepoint])((_, _) => null)
+      case ("releaseSavepoint", _)                  => savepointReleases += 1
+      case ("rollback", Array(_))                   => savepointRollbacks += 1
       case ("rollback", _)                          => rollbacks += 1
       case _                                        => null
     }

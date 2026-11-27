@@ -646,7 +646,8 @@ val complex = Equals("type", "doc")
 
 The SQLite and PostgreSQL stores and keyword indexes all give the same answers. `Contains` is a literal,
 case-sensitive substring test, so `%` and `_` are ordinary characters. `Not` keeps a record that lacks the key, so
-`!Equals("draft", "true")` matches a record with no `draft` key. An empty `In` matches nothing.
+`!Equals("draft", "true")` matches a record with no `draft` key. An empty `In` matches nothing. A key is matched as
+written, so a key holding `.`, a space, `:` or `/` names itself rather than a JSON path.
 
 ### Using Filters
 
@@ -800,6 +801,15 @@ val keywordOnly = searcher.search(embedding, "query", strategy = KeywordOnly)
 | WeightedScore | When you know relative importance |
 | VectorOnly | Semantic/conceptual queries |
 | KeywordOnly | Exact term matching, names, codes |
+
+A keyword query is free text, not query syntax. On the SQLite index every word is an optional term: a chunk need not
+hold all of them, and BM25 ranks those that hold more of them first, so a question such as "what is the capital of
+France" still finds a chunk about Paris. A balanced `"..."` is a phrase, a trailing `*` makes a word a prefix, and
+anything else (quotes left open, `NOT`, `:`, `^`, parentheses) is searched as text. A blank query finds nothing.
+
+If one leg of an RRF or weighted search fails, the searcher answers from the other and logs a WARN.
+`HybridSearcher.withLegFailurePolicy(LegFailurePolicy.Fail)` (or `RAGConfig.withLegFailurePolicy`) fails the search
+instead.
 
 #### How WeightedScore combines the two channels
 

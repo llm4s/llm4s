@@ -109,7 +109,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
       ingestAll(rag)
 
       val results = rag
-        .query("functional programming language", topK = Some(5))
+        .query("functional programming", topK = Some(5))
         .fold(err => fail(err.message), identity)
 
       // A merged result is one the same chunk reached through both channels.
@@ -190,7 +190,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
     ingestAll(rag)
 
     val results = rag
-      .query("functional programming language", topK = Some(5))
+      .query("functional programming", topK = Some(5))
       .fold(err => fail(err.message), identity)
 
     results should not be empty

@@ -313,6 +313,55 @@ To give children to a leaf that holds documents, clear it (`clearCollection`) an
 child. A collection an earlier version made a non-leaf keeps its documents, which are searchable again, but it still
 takes no new ones.
 
+## A permission re-ingest replaces the document, and `dropSchema` deletes what was in a collection (#2988, #2992)
+
+`llm4s-rag` is Beta. `SearchIndex` gains `moveDocument` (with a default) and `RAG` gains `moveWithPermissions`.
+
+| Before (1.0.0) | After |
+|---|---|
+| `PgSearchIndex.ingest` (and `ingestWithPermissions`) of a document id already in the collection upserted by chunk id: chunks past the new count kept the old text and the old `readableBy` | The document's old chunks in that collection are deleted in the insert's transaction: a re-ingest replaces it |
+| Ingesting the id into another collection left the old copy, with no way to move it | Still a second copy. `moveWithPermissions` / `SearchIndex.moveDocument` delete it from every other collection, in the same transaction for `PgSearchIndex` |
+| `dropSchema` dropped the permission columns and tables and kept every row, which a migration then made public | It deletes every row in a collection first, in one transaction, keeping rows in none (a plain `PgVectorStore`'s). It refuses, changing nothing, while another vectors table holds rows in the shared collections |
+| `runFullMigration(conn, table)` moved every row in no collection into a public `default`, with `readable_by` reset to `'{}'` | `runFullMigration(conn, table, into)` moves them into `into`, which must exist and be a leaf; `readable_by` is kept. A row `ingest` wrote that lost its collection is skipped |
+| `MigrationStats(tablesCreated, indexesCreated, defaultCollectionId, vectorsMigrated)` | `MigrationStats(tablesCreated, indexesCreated, collectionId, vectorsMigrated, vectorsSkipped)` |
+
+To keep migrating into the public `default` collection, create it and name it:
+
+```scala
+for {
+  _     <- PgSchemaManager.initializeSchema(conn)
+  _     <- PgSchemaManager.createDefaultCollection(conn)
+  stats <- PgSchemaManager.runFullMigration(conn, "vectors", CollectionPath.unsafe("default"))
+} yield stats
+```
+
+`migrateExistingVectors(conn, table, collectionId)` now refuses a collection that does not exist or is not a leaf.
+A database `dropSchema` was run on before this release may still hold rows `ingest` wrote, with ids
+`coll-<collectionId>-<docId>-chunk-<n>` and no permissions: no permission query returns them, the migration skips
+them (`vectorsSkipped`), and a plain `PgVectorStore` on the table still reads them. Check them and delete them, for
+example with `DELETE FROM vectors WHERE collection_id IS NULL AND id ~ '^coll-[0-9]+-'`.
+
+`dropSchema` and the migration resolve each table name through `search_path`, as the index's own SQL does, and work
+on the schema-qualified tables. On a connection with auto-commit off they run in a savepoint and leave the commit to
+the caller.
+
+## Keyword search replaces on re-index, reads free text, and survives a failing leg (#2994, #2995)
+
+`llm4s-rag` is Beta. `LegFailurePolicy` is new; `HybridSearcher`, `AsyncHybridSearcher` and `RAGConfig` gain
+`legFailurePolicy` and `withLegFailurePolicy`. `RAGConfig` has a new last field, so a positional pattern on it needs
+one more `_`.
+
+| Before (1.0.0) | After |
+|---|---|
+| Re-indexing an id in `SQLiteKeywordIndex` (`index`, `indexBatch`, `update`, and so every re-ingest of a changed document) kept the old full-text row: its old words still found the document | The full-text row is replaced. An index holding stale rows from before is rebuilt from its documents when opened, once |
+| A query was FTS5 syntax as soon as it held a `"`: `he said "hi` failed, and a blank query failed | A query is free text. A balanced `"..."` is a phrase and a trailing `*` a prefix; open quotes, `NOT`, `:`, `^` and parentheses are searched as text. A blank query finds nothing |
+| Every word was required, so most questions had no keyword hits; `OR` was searched as the word "or" | Every word is optional and BM25 ranks chunks holding more of them first. A bare `AND` or `OR` is dropped |
+| A filter key was a JSON path: `a.b` matched nothing and keys with a space, `:` or `/` were refused with an error | A key is matched as written, as in `SQLiteVectorStore`, with bound parameters |
+| One failing leg of an RRF or weighted search failed the whole search, including `RAG.query` and a permission query | The search answers from the other leg and logs a WARN. `withLegFailurePolicy(LegFailurePolicy.Fail)` restores the error. A `SearchIndex` without keyword search still fails a fused permission query as a configuration error |
+
+A query that relied on every word being required, or on FTS5 operators, now finds more chunks: put the words that
+must appear together in a phrase. Nothing is needed for stale full-text rows; opening the index repairs them.
+
 ## `SemanticMemoryMiddleware` bounds only what it wrote, and tenants never share storage (#3032, #3034)
 
 `llm4s-agent-memory` is Experimental, `llm4s-memory` and `llm4s-memory-postgres` Beta. `MemoryStore` gains

@@ -269,5 +269,23 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
       FusionStrategy.WeightedScore(vectorWeight = 1.0, keywordWeight = 0.0).keywordWeight shouldBe 0.0
       FusionStrategy.WeightedScore(vectorWeight = 0.0, keywordWeight = 1.0).vectorWeight shouldBe 0.0
     }
+
+    "answer from the vector leg when the keyword leg fails, and fail under LegFailurePolicy.Fail (#2995)" in {
+      val vectors = VectorStoreFactory.inMemory().fold(e => fail(e.formatted), identity)
+      val broken  = KeywordIndex.inMemory().fold(e => fail(e.formatted), identity)
+      docs.foreach { case (id, content, embedding) => vectors.upsert(VectorRecord(id, embedding, Some(content))) }
+      broken.close() // every search on it now fails
+      val degrading = HybridSearcher(vectors, broken)
+      val query     = Array(0.85f, 0.15f, 0.0f)
+
+      Seq(FusionStrategy.RRF(), FusionStrategy.WeightedScore()).foreach { strategy =>
+        withClue(strategy) {
+          val results = degrading.search(query, "scala", topK = 3, strategy = strategy)
+          results.map(_.map(_.id).head) shouldBe Right("scala-guide")
+          degrading.withLegFailurePolicy(LegFailurePolicy.Fail).search(query, "scala", 3, strategy).isLeft shouldBe true
+        }
+      }
+      vectors.close()
+    }
   }
 }

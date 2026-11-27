@@ -299,5 +299,28 @@ class AsyncHybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAf
       // With keyword weight 0, results should be purely vector-based
       matches.zip(matches.tail).foreach { case (a, b) => a.score should be >= b.score }
     }
+
+    "answer from the vector leg when the keyword leg fails, and fail under LegFailurePolicy.Fail (#2995)" in {
+      val vectors = VectorStoreFactory.inMemory().fold(e => fail(e.formatted), identity)
+      val broken  = KeywordIndex.inMemory().fold(e => fail(e.formatted), identity)
+      docs.foreach { case (id, content, embedding) => vectors.upsert(VectorRecord(id, embedding, Some(content))) }
+      broken.close() // every search on it now fails
+      val degrading = AsyncHybridSearcher(HybridSearcher(vectors, broken))
+      val query     = Array(0.85f, 0.15f, 0.0f)
+
+      Seq(FusionStrategy.RRF(), FusionStrategy.WeightedScore()).foreach { strategy =>
+        withClue(strategy) {
+          Await.result(degrading.search(query, "scala", 3, strategy), 10.seconds).map(_.map(_.id).head) shouldBe
+            Right("scala-guide")
+          Await
+            .result(
+              degrading.withLegFailurePolicy(LegFailurePolicy.Fail).search(query, "scala", 3, strategy),
+              10.seconds
+            )
+            .isLeft shouldBe true
+        }
+      }
+      vectors.close()
+    }
   }
 }

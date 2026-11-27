@@ -6,6 +6,7 @@ package fix.v10
 import org.llm4s.agent.memory.{ MemoryBounds, PostgresMemoryStore }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelMetadata
+import org.llm4s.rag.RAGConfig
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ModelName
 
@@ -27,6 +28,11 @@ object PositionalPatternsGainFieldsTest {
 
   def tableOf(config: PostgresMemoryStore.Config): String = config match {
     case PostgresMemoryStore.Config(_, _, _, _, _, table, _) => table
+  }
+
+  // RAGConfig gained `legFailurePolicy` (#2995)
+  def topK(config: RAGConfig): Int = config match {
+    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
   }
 
   // Not positional patterns: left as they are.

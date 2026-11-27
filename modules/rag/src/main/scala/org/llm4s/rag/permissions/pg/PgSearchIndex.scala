@@ -249,12 +249,37 @@ final class PgSearchIndex private (
     }
   }.toEither.left.map(e => ProcessingError("pg-search-index-keyword-query", Redaction.scrubKnown(e.getMessage)))
 
+  /**
+   * Replaces the document's chunks in `collectionPath` in one transaction: the chunks it had there before are deleted,
+   * so none of them stays searchable under its old content or permissions (#2988). A copy in another collection is
+   * kept; [[moveDocument]] removes those too.
+   */
   override def ingest(
     collectionPath: CollectionPath,
     documentId: String,
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String],
     readableBy: Set[PrincipalId]
+  ): Result[Seq[String]] =
+    write(collectionPath, documentId, chunks, metadata, readableBy, everywhere = false)
+
+  /** [[ingest]], deleting the document from every other collection in the same transaction. */
+  override def moveDocument(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[ChunkWithEmbedding],
+    metadata: Map[String, String],
+    readableBy: Set[PrincipalId]
+  ): Result[Seq[String]] =
+    write(collectionPath, documentId, chunks, metadata, readableBy, everywhere = true)
+
+  private def write(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[ChunkWithEmbedding],
+    metadata: Map[String, String],
+    readableBy: Set[PrincipalId],
+    everywhere: Boolean
   ): Result[Seq[String]] =
     for {
       // Verify collection exists and is a leaf
@@ -275,15 +300,21 @@ final class PgSearchIndex private (
         }
 
       // Insert chunks
-      count <- insertChunks(collection.id, documentId, chunks, metadata, readableBy)
+      count <- replaceChunks(collection.id, documentId, chunks, metadata, readableBy, everywhere)
     } yield count
 
-  private def insertChunks(
+  /**
+   * Deletes the document's chunks (in `collectionId`, or in every collection if `everywhere`) and inserts `chunks`, in
+   * one transaction. Two writes of one document run one after the other, under a transaction-scoped advisory lock on
+   * its id: otherwise the later one's delete could miss rows the earlier one inserted, and keep them.
+   */
+  private def replaceChunks(
     collectionId: Int,
     documentId: String,
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String],
-    readableBy: Set[PrincipalId]
+    readableBy: Set[PrincipalId],
+    everywhere: Boolean
   ): Result[Seq[String]] = Try {
     withConnection { conn =>
       Using.resource(new AutoCloseable {
@@ -297,6 +328,9 @@ final class PgSearchIndex private (
             // child created meanwhile either waits for this ingest or has already made the collection a non-leaf.
             if (!isLeafLocked(conn, collectionId))
               throw new IllegalStateException(s"Cannot ingest into non-leaf collection (id $collectionId)")
+
+            lockDocument(conn, documentId)
+            deleteChunks(conn, collectionId, documentId, everywhere)
 
             val sql = s"""
               INSERT INTO $vectorTableName
@@ -343,6 +377,28 @@ final class PgSearchIndex private (
     }
   }.toEither.left.map(e => ProcessingError("pg-search-index-insert", Redaction.scrubKnown(e.getMessage)))
 
+  private def lockDocument(conn: Connection, documentId: String): Unit =
+    Using.resource(conn.prepareStatement("SELECT pg_advisory_xact_lock(?, hashtext(?))")) { stmt =>
+      stmt.setInt(1, PgSearchIndex.DocumentLockClass)
+      stmt.setString(2, documentId)
+      Using.resource(stmt.executeQuery())(_ => ())
+    }
+
+  private def deleteChunks(conn: Connection, collectionId: Int, documentId: String, everywhere: Boolean): Unit = {
+    val scope = if (everywhere) "collection_id IS NOT NULL" else "collection_id = ?"
+    Using.resource(
+      conn.prepareStatement(s"DELETE FROM $vectorTableName WHERE $scope AND ${PgSearchIndex.DocIdMatch}")
+    ) { stmt =>
+      if (everywhere) stmt.setString(1, documentId)
+      else {
+        stmt.setInt(1, collectionId)
+        stmt.setString(2, documentId)
+      }
+      stmt.executeUpdate()
+      ()
+    }
+  }
+
   private def isLeafLocked(conn: Connection, collectionId: Int): Boolean =
     Using.resource(conn.prepareStatement("SELECT is_leaf FROM llm4s_collections WHERE id = ? FOR SHARE")) { stmt =>
       stmt.setInt(1, collectionId)
@@ -362,7 +418,7 @@ final class PgSearchIndex private (
     withConnection { conn =>
       Using.resource(conn.prepareStatement(s"""
         DELETE FROM $vectorTableName
-        WHERE collection_id = ? AND metadata->>'docId' = ?
+        WHERE collection_id = ? AND ${PgSearchIndex.DocIdMatch}
       """)) { stmt =>
         stmt.setInt(1, collectionId)
         stmt.setString(2, documentId)
@@ -376,7 +432,7 @@ final class PgSearchIndex private (
     withConnection { conn =>
       Using.resource(conn.prepareStatement(s"""
         DELETE FROM $vectorTableName
-        WHERE collection_id IS NOT NULL AND metadata->>'docId' = ?
+        WHERE collection_id IS NOT NULL AND ${PgSearchIndex.DocIdMatch}
       """)) { stmt =>
         stmt.setString(1, documentId)
         stmt.executeUpdate().toLong
@@ -466,6 +522,16 @@ final class PgSearchIndex private (
 }
 
 object PgSearchIndex {
+
+  /** The first key of the advisory lock a write of one document takes: `pg_advisory_xact_lock(class, hashtext(id))`. */
+  private[pg] val DocumentLockClass: Int = 0x6c347264 // "l4rd"
+
+  /**
+   * Selects a document's chunks by the `docId` each carries, binding the id as one parameter. A containment test, not
+   * `metadata->>'docId' = ?`, so the GIN index on `metadata` serves it: a re-ingest's delete would otherwise scan the
+   * whole collection, and a bulk load would grow quadratically.
+   */
+  private[pg] val DocIdMatch = "metadata @> jsonb_build_object('docId', ?::text)"
 
   /** The text search configuration of [[PgSearchIndex.keywordQuery]]. */
   private[pg] val TextSearchConfig = "english"

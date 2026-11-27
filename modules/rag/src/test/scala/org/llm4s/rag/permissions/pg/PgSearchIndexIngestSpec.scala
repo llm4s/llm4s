@@ -1,6 +1,7 @@
 package org.llm4s.rag.permissions.pg
 
 import org.llm4s.rag.permissions.{ ChunkWithEmbedding, CollectionPath, PrincipalId }
+import org.llm4s.vectorstore.{ ScriptedDb => RecordingDb }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -66,6 +67,7 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
           if (failInsert) throw new java.sql.SQLException("insert failed") else Array.fill(rows.size)(1)
         case ("executeQuery", _) if sql.contains("FOR SHARE")         => collectionRow(lockedIsLeaf.getOrElse(isLeaf))
         case ("executeQuery", _) if sql.contains("llm4s_collections") => collectionRow(isLeaf)
+        case ("executeQuery", _)                                      => proxy(classOf[ResultSet])((_, _) => null)
         case _                                                        => null
       }
     }
@@ -153,6 +155,70 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
     )
     db.rollbacks shouldBe 1
     db.commits shouldBe 0
+  }
+
+  /** A recording connection whose one collection is the leaf `docs`, id 7; `failInsert` fails the chunk INSERT. */
+  private def recording(failInsert: Boolean = false): RecordingDb =
+    new RecordingDb(
+      sql =>
+        if (sql.contains("FOR SHARE")) Seq(Map("is_leaf" -> true))
+        else if (sql.contains("llm4s_collections"))
+          Seq(Map("id" -> 7, "path" -> "docs", "parent_path" -> null, "is_leaf" -> true, "metadata" -> "{}"))
+        else Seq.empty,
+      fails = sql => failInsert && sql.contains("INSERT INTO")
+    )
+
+  "A re-ingest" should "delete the document's chunks in the collection before inserting, in one transaction (#2988)" in {
+    val db    = recording()
+    val index = PgSearchIndex.fromDataSource(db.dataSource).toOption.get
+
+    index.ingest(docs, "doc-1", Seq(chunk(0, "a")), Map.empty, Set(PrincipalId.group(2))) shouldBe Right(
+      Seq("coll-7-doc-1-chunk-0")
+    )
+
+    val sql      = db.statements
+    val leafLock = sql.indexWhere(_.contains("FOR SHARE"))
+    val docLock  = sql.indexWhere(_.contains("pg_advisory_xact_lock"))
+    val delete   = sql.indexWhere(_.contains("DELETE FROM vectors"))
+    val insert   = sql.indexWhere(_.contains("INSERT INTO vectors"))
+    leafLock should be >= 0
+    docLock should be > leafLock
+    delete should be > docLock
+    insert should be > delete
+    sql(delete) should include("collection_id = ?")
+    sql(delete) should include(PgSearchIndex.DocIdMatch)
+    db.writes(delete)._2 shouldBe Map(1 -> 7, 2 -> "doc-1")
+    db.writes(docLock)._2 shouldBe Map(1 -> PgSearchIndex.DocumentLockClass, 2 -> "doc-1")
+    db.commits shouldBe 1
+    db.rollbacks shouldBe 0
+  }
+
+  it should "keep the old chunks when the insert fails: the delete is rolled back with it" in {
+    val db    = recording(failInsert = true)
+    val index = PgSearchIndex.fromDataSource(db.dataSource).toOption.get
+
+    index.ingest(docs, "doc-1", Seq(chunk(0, "a")), Map.empty, Set.empty).isLeft shouldBe true
+
+    db.statements.exists(_.contains("DELETE FROM vectors")) shouldBe true
+    db.rollbacks shouldBe 1
+    db.commits shouldBe 0
+  }
+
+  "PgSearchIndex.moveDocument" should "delete the document from every collection, then insert, in one transaction" in {
+    val db    = recording()
+    val index = PgSearchIndex.fromDataSource(db.dataSource).toOption.get
+
+    index.moveDocument(docs, "doc-1", Seq(chunk(0, "a")), Map.empty, Set.empty) shouldBe Right(
+      Seq("coll-7-doc-1-chunk-0")
+    )
+
+    val sql    = db.statements
+    val delete = sql.indexWhere(_.contains("DELETE FROM vectors"))
+    sql(delete) should include("collection_id IS NOT NULL")
+    sql(delete) should include(PgSearchIndex.DocIdMatch)
+    db.writes(delete)._2 shouldBe Map(1 -> "doc-1")
+    sql.indexWhere(_.contains("INSERT INTO vectors")) should be > delete
+    db.commits shouldBe 1
   }
 
   "PgSearchIndex.chunkId" should "include the collection id, so two collections never share an id" in {

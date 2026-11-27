@@ -92,6 +92,42 @@ object FusionStrategy {
   val default: FusionStrategy = RRF()
 }
 
+/** What a fused (RRF or weighted) search does when one of its two legs fails and the other succeeds (#2995). */
+enum LegFailurePolicy {
+
+  /** Answer from the leg that succeeded, and log the failed leg's error as a WARN. The default. */
+  case Degrade
+
+  /** Fail the whole search with the failed leg's error. */
+  case Fail
+}
+
+/** Combines the two legs of a fused search under a [[LegFailurePolicy]]. */
+private[llm4s] object HybridLegs {
+  private val logger = org.slf4j.LoggerFactory.getLogger("org.llm4s.vectorstore.HybridSearcher")
+
+  /**
+   * Both legs' results; under `Degrade`, an empty list for a failed leg when the other succeeded. When both fail, or
+   * under `Fail`, the first failure: the vector leg's, then the keyword leg's.
+   */
+  def combine[V, K](
+    vector: Result[Seq[V]],
+    keyword: Result[Seq[K]],
+    policy: LegFailurePolicy
+  ): Result[(Seq[V], Seq[K])] =
+    (vector, keyword, policy) match {
+      case (Right(v), Right(k), _) => Right((v, k))
+      case (Left(e), Right(k), LegFailurePolicy.Degrade) =>
+        logger.warn(s"Hybrid search answered from keyword results only: the vector search failed: ${e.message}")
+        Right((Seq.empty, k))
+      case (Right(v), Left(e), LegFailurePolicy.Degrade) =>
+        logger.warn(s"Hybrid search answered from vector results only: the keyword search failed: ${e.message}")
+        Right((v, Seq.empty))
+      case (Left(e), _, _) => Left(e)
+      case (_, Left(e), _) => Left(e)
+    }
+}
+
 /**
  * Hybrid searcher combining vector similarity and keyword matching.
  *
@@ -116,8 +152,16 @@ object FusionStrategy {
 final class HybridSearcher private (
   val vectorStore: VectorStore,
   val keywordIndex: KeywordIndex,
-  val defaultStrategy: FusionStrategy
+  val defaultStrategy: FusionStrategy,
+  val legFailurePolicy: LegFailurePolicy = LegFailurePolicy.Degrade
 ) {
+
+  /**
+   * This searcher with `policy` for a fused search one of whose legs fails: by default it answers from the other
+   * leg, with a WARN; `LegFailurePolicy.Fail` fails the search instead.
+   */
+  def withLegFailurePolicy(policy: LegFailurePolicy): HybridSearcher =
+    new HybridSearcher(vectorStore, keywordIndex, defaultStrategy, policy)
 
   /**
    * Perform hybrid search combining vector and keyword results.
@@ -234,11 +278,14 @@ final class HybridSearcher private (
     k: Int,
     filter: Option[MetadataFilter]
   ): Result[Seq[HybridSearchResult]] =
-    for {
-      // Fetch more results than needed for better fusion
-      vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
-      keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
-    } yield HybridFusion.rrf(vectorResults, keywordResults, topK, k)
+    // Fetch more results than needed for better fusion
+    HybridLegs
+      .combine(
+        vectorStore.search(queryEmbedding, topK * 2, filter),
+        keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter),
+        legFailurePolicy
+      )
+      .map { case (vectorResults, keywordResults) => HybridFusion.rrf(vectorResults, keywordResults, topK, k) }
 
   /**
    * Search with weighted score combination.
@@ -251,10 +298,15 @@ final class HybridSearcher private (
     keywordWeight: Double,
     filter: Option[MetadataFilter]
   ): Result[Seq[HybridSearchResult]] =
-    for {
-      vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
-      keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
-    } yield HybridFusion.weighted(vectorResults, keywordResults, topK, vectorWeight, keywordWeight)
+    HybridLegs
+      .combine(
+        vectorStore.search(queryEmbedding, topK * 2, filter),
+        keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter),
+        legFailurePolicy
+      )
+      .map { case (vectorResults, keywordResults) =>
+        HybridFusion.weighted(vectorResults, keywordResults, topK, vectorWeight, keywordWeight)
+      }
 
   /**
    * Close both the vector store and keyword index.

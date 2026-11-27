@@ -19,13 +19,13 @@ import scalafix.v1._
  * `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
  * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
  * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
- * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). `AgentResult`'s six, the same in
+ * `completionOptions` (#2715), `documentRegistry` (#2714), `questionCondenser` (#2733) and `legFailurePolicy` (#2995). `AgentResult`'s six, the same in
  * 0.5.1 and 0.6.0, gain `runUsage` (#2922). A pattern with any other number of arguments is left
  * alone.
  *
  * [[Llm4sMigrateFrom_1_0]] runs it with [[PositionalPatternsGainFields.arity10]]: since 1.0.0, `OpenAIConfig` gained
  * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900), `MemoryBounds`
- * `owner` and `PostgresMemoryStore.Config` `tenant` (#3032, #3034).
+ * `owner`, `PostgresMemoryStore.Config` `tenant` (#3032, #3034) and `RAGConfig` `legFailurePolicy` (#2995).
  */
 class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
     extends SemanticRule("PositionalPatternsGainFields") {
@@ -63,7 +63,8 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/config/OpenAIConfig"          -> 14,
     "org/llm4s/model/ModelMetadata"                     -> 9,
     "org/llm4s/agent/memory/MemoryBounds"               -> 3,
-    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 8
+    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 8,
+    "org/llm4s/rag/RAGConfig"                           -> 29
   )
 
   /** `old` (a type's arity in some release) as `(old, current)` pairs. */
@@ -109,7 +110,6 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/spi/ProviderFeatures"                     -> (2  -> 3),
     "org/llm4s/model/ModelCapabilities"                             -> (18 -> 24),
     "org/llm4s/model/ModelPricing"                                  -> (15 -> 16),
-    "org/llm4s/rag/RAGConfig"                                       -> (25 -> 28),
     "org/llm4s/model/TransformationResult"                          -> (3  -> 4),
     "org/llm4s/reranker/RerankProviderConfig"                       -> (3  -> 4),
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
@@ -120,7 +120,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),
     "org/llm4s/trace/TraceEvent.TokenUsageRecorded"                 -> (4  -> 5),
     "org/llm4s/vectorstore/VectorStoreFactory.Config"               -> (4  -> 5)
-  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 9))
+  ) ++ toCurrent(Map("org/llm4s/llmconnect/config/OpenAIConfig" -> 9, "org/llm4s/rag/RAGConfig" -> 25))
 
   /**
    * Each type's extractor arity in 0.6.0 and on main, where 0.6.0's differs from 0.5.1's: a pattern written against
@@ -134,7 +134,8 @@ object PositionalPatternsGainFields {
   /**
    * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
    * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900),
-   * `MemoryBounds` `owner` and `PostgresMemoryStore.Config` `tenant` (#3032, #3034). 0.7.0 had the same arities, so
+   * `MemoryBounds` `owner`, `PostgresMemoryStore.Config` `tenant` (#3032, #3034) and `RAGConfig` `legFailurePolicy`
+   * (#2995). 0.7.0 had the same arities, so
    * [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
    */
   val arity10: Map[String, (Int, Int)] = toCurrent(
@@ -142,7 +143,8 @@ object PositionalPatternsGainFields {
       "org/llm4s/llmconnect/config/OpenAIConfig"          -> 11,
       "org/llm4s/model/ModelMetadata"                     -> 8,
       "org/llm4s/agent/memory/MemoryBounds"               -> 2,
-      "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 7
+      "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 7,
+      "org/llm4s/rag/RAGConfig"                           -> 28
     )
   )
 
