@@ -55,9 +55,12 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           view(c, existing).map(e => Ticket(e.id, e.threadId, e.position, existing = true))
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
-        val queued = openOf(c, submission.threadId)
-        // Reject: busy with an open entry, or with a live claim - a direct run (W3) - by the database's clock
-        // another tenant's claim is never reported (rule 9): its submission is queued, and the worker refuses it
+        // only the submitter's tenant's entries are seen (rule 9, #3085): another tenant's are never reported
+        val tenant = submission.tenantId.map(_.value)
+        val queued = openOf(c, submission.threadId, tenant)
+        // Reject: busy with an open entry of the submitter's tenant, or with a live claim - a direct run (W3) - by the
+        // database's clock; another tenant's entry or claim is never reported (rule 9): its submission is queued, and
+        // the worker refuses it
         def claimed = query(
           c,
           Sql.queueThreadClaimed(t),
@@ -72,7 +75,6 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           val now = store.clockNow(c)
           val id  = query(c, Sql.nextQueueEntryId(t))(_.getLong(1)).head
           // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
-          val tenant = submission.tenantId.map(_.value)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it
           // runs - only while it still has no attempt, which a concurrent recordAttempt may have recorded meanwhile
           // the entries closed here - the update changed the row - are answered in the ticket: only this submit has
@@ -81,7 +83,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
             else
               queued
-                .filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0)
+                .filter(r => r.interrupt && r.attempts == 0)
                 .filter(r =>
                   closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now, unstarted = true)
                 )
@@ -89,7 +91,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           if submission.policy == BusyThreadPolicy.Interrupt then
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled;
             // decided under the thread's lock, which recording an attempt takes too
-            queued.filter(r => r.tenantId == tenant && r.attempts > 0 && !cancelling(r)).foreach { r =>
+            queued.filter(r => r.attempts > 0 && !cancelling(r)).foreach { r =>
               setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
             }
           update(
@@ -108,7 +110,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             micros(now),
             submission.traceContext.map(_.traceParent)
           )
-          val position = openOf(c, submission.threadId).indexWhere(_.id == id)
+          val position = openOf(c, submission.threadId, tenant).indexWhere(_.id == id)
           sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
             Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
           }
@@ -155,8 +157,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     store.reading("queue.openEntries") { c =>
-      val open = openOf(c, threadId)
-      sequence(open.zipWithIndex.filter(_._1.tenantId == tenantId.map(_.value)).map((r, i) => entryOf(c, r, Some(i))))
+      sequence(openOf(c, threadId, tenantId.map(_.value)).zipWithIndex.map((r, i) => entryOf(c, r, Some(i))))
     }
 
   // ---- leases ----
@@ -261,7 +262,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       val targeted: Result[Vector[Raw]] = target match
         case CancelTarget.Entry(id) =>
           found(c, tenantId, id).map(_ => query(c, Sql.lockedQueueEntry(t), id.value)(raw))
-        case CancelTarget.Thread(th) => Right(openOf(c, th).filter(_.tenantId == tenantId.map(_.value)))
+        case CancelTarget.Thread(th) => Right(openOf(c, th, tenantId.map(_.value)))
       targeted.flatMap { rows =>
         val now = store.clockNow(c)
         // an entry is closed by this call when its update changed the row: decided in the closing transaction
@@ -418,8 +419,14 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       raw
     )
 
+  /** The thread's open entries of `tenantId`, in the order they run. */
+  private def openOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Raw] =
+    openOf(c, threadId).filter(_.tenantId == tenantId)
+
   private def view(c: Connection, row: Raw): Result[QueueEntry] =
-    val position = Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId)).indexWhere(_.id == row.id))
+    // only the entry's own tenant's entries are counted (rule 9)
+    val position =
+      Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId), row.tenantId).indexWhere(_.id == row.id))
     entryOf(c, row, position)
 
   private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[QueueEntry] =

@@ -101,7 +101,8 @@ object Submission:
 
 /**
  * What [[RunQueue.submit]] answers (design 4.55): the entry `entryId` made for the submission on `threadId`, and its
- * `position` among the thread's open entries when the store answered (`0`: it runs next). `existing` is `true` when a
+ * `position` among its tenant's open entries of the thread when the store answered (`0`: it runs next of them; another
+ * tenant's entries are never counted, rule 9). `existing` is `true` when a
  * submission key named an entry the store already held, so this submit made none; its `position` is then the entry's
  * current one, and `None` once that entry has closed. `interrupted` holds the entries this submit closed - for an
  * `Interrupt` submission, the thread's earlier `Interrupt` entries that had not started, closed `Interrupted(by = this

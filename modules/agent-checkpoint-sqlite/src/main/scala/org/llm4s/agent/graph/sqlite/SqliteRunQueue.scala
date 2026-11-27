@@ -43,9 +43,11 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           view(c, existing).map(e => Ticket(e.id, e.threadId, e.position, existing = true))
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
-        val queued = openOf(c, submission.threadId)
-        // Reject: busy with an open entry, or with a live claim of the submitter's tenant - a direct run (W3) - by the
-        // store's clock; another tenant's claim is never reported (rule 9)
+        // only the submitter's tenant's entries are seen (rule 9, #3085): another tenant's are never reported
+        val tenant = submission.tenantId.map(_.value)
+        val queued = openOf(c, submission.threadId, tenant)
+        // Reject: busy with an open entry of the submitter's tenant, or with a live claim of its tenant - a direct run
+        // (W3) - by the store's clock; another tenant's entry or claim is never reported (rule 9)
         val busy = claimed(c, submission.threadId, submission.tenantId)
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || busy) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
@@ -53,19 +55,18 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           val now = epochNanos(clock.instant())
           val id  = bump(c, "last_entry")
           // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
-          val tenant = submission.tenantId.map(_.value)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it runs
           // the entries closed here are answered in the ticket, in this transaction, so only this submit reports them
           val interrupted =
             if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
             else
-              queued.filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0).map { r =>
+              queued.filter(r => r.interrupt && r.attempts == 0).map { r =>
                 closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now)
                 r.id
               }
           if submission.policy == BusyThreadPolicy.Interrupt then
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled
-            queued.filter(r => r.tenantId == tenant && r.attempts > 0 && !cancelling(r)).foreach { r =>
+            queued.filter(r => r.attempts > 0 && !cancelling(r)).foreach { r =>
               setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
             }
           update(
@@ -87,7 +88,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             now,
             submission.traceContext.map(_.traceParent)
           )
-          val position = openOf(c, submission.threadId).indexWhere(_.id == id)
+          val position = openOf(c, submission.threadId, tenant).indexWhere(_.id == id)
           sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
             Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
           }
@@ -142,8 +143,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
 
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     store.reading("queue.openEntries") { c =>
-      val open = openOf(c, threadId)
-      sequence(open.zipWithIndex.filter(_._1.tenantId == tenantId.map(_.value)).map((r, i) => entryOf(c, r, Some(i))))
+      sequence(openOf(c, threadId, tenantId.map(_.value)).zipWithIndex.map((r, i) => entryOf(c, r, Some(i))))
     }
 
   // ---- leases ----
@@ -165,7 +165,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
              |  AND e.entry_id = (
              |    SELECT h.entry_id FROM llm4s_checkpoint_queue_entries h
              |    WHERE h.thread_id = e.thread_id AND h.state = 'open'
-             |    ORDER BY $RunOrder LIMIT 1)
+             |    ORDER BY ${runOrder("h")} LIMIT 1)
              |  AND NOT EXISTS (
              |    SELECT 1 FROM llm4s_checkpoint_queue_entries o
              |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
@@ -257,7 +257,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     store.writing("queue.cancel") { c =>
       val targeted: Result[Vector[Raw]] = target match
         case CancelTarget.Entry(id) => found(c, tenantId, id).map(_ => rowOf(c, id.value).toVector)
-        case CancelTarget.Thread(t) => Right(openOf(c, t).filter(_.tenantId == tenantId.map(_.value)))
+        case CancelTarget.Thread(t) => Right(openOf(c, t, tenantId.map(_.value)))
       targeted.flatMap { rows =>
         // the rows are read in this write transaction, so the entries closed here are closed by this call only
         val closed = rows.flatMap { row =>
@@ -411,12 +411,19 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   private def openOf(c: Connection, threadId: ThreadId): Vector[Raw] =
     query(
       c,
-      s"SELECT $Columns FROM llm4s_checkpoint_queue_entries WHERE thread_id = ? AND state = 'open' ORDER BY $RunOrder",
+      s"""SELECT $Columns FROM llm4s_checkpoint_queue_entries q WHERE q.thread_id = ? AND q.state = 'open'
+         |ORDER BY ${runOrder("q")}""".stripMargin,
       threadId.value
     )(raw)
 
+  /** The thread's open entries of `tenantId`, in the order they run. */
+  private def openOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Raw] =
+    openOf(c, threadId).filter(_.tenantId == tenantId)
+
   private def view(c: Connection, row: Raw): Result[QueueEntry] =
-    val position = Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId)).indexWhere(_.id == row.id))
+    // only the entry's own tenant's entries are counted (rule 9)
+    val position =
+      Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId), row.tenantId).indexWhere(_.id == row.id))
     entryOf(c, row, position)
 
   private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[QueueEntry] =
@@ -468,8 +475,16 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
 
 private[sqlite] object SqliteRunQueue:
 
-  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
-  val RunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
+  /**
+   * A thread's open entries, the rows aliased `a`, in the order they run (rule 5): attempted first; then each tenant's
+   * entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its
+   * own tenant's entries only (#3085); within a tenant `Interrupt` entries first, then by id.
+   */
+  def runOrder(a: String): String =
+    s"""($a.attempt_count = 0),
+       |  (SELECT MIN(f.entry_id) FROM llm4s_checkpoint_queue_entries f
+       |   WHERE f.thread_id = $a.thread_id AND f.state = 'open' AND f.tenant_id IS $a.tenant_id),
+       |  $a.is_interrupt DESC, $a.entry_id""".stripMargin
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,

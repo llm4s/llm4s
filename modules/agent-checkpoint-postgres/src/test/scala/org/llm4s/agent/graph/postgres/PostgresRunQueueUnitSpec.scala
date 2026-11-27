@@ -255,13 +255,13 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     queue.entry(None, EntryId.unsafe(11)).left.value shouldBe QueueError.TicketNotFound(EntryId.unsafe(11))
   }
 
-  it should "list only the tenant's open entries, each at its place in the thread's order" in {
+  it should "list only the tenant's open entries, each at its place among the tenant's entries (#3085)" in {
     val s = script {
       case (sql, _) if sql == Sql.openQueueEntries(t) =>
         Vector(entry(2, tenant = "acme"), entry(3), entry(5, tenant = "acme"))
     }
     s.store().runQueue.openEntries(Some(TenantId("acme")), thread).value.map(e => e.id.value -> e.position) shouldBe
-      Vector(2L -> Some(0), 5L -> Some(2))
+      Vector(2L -> Some(0), 5L -> Some(1))
   }
 
   // ---- take ----

@@ -29,9 +29,11 @@ import scala.jdk.CollectionConverters.*
  *
  * The cases are the ones the `RunQueue` Scaladoc states: submission - entries read back as submitted (the submitter's
  * trace context included, kept through a reopen and a retried key), ids in
- * submission order, the per-thread run order of rule 5 (an attempted entry first, then `Interrupt` entries, then the
- * rest, each by id; a later `Interrupt` closing an earlier one that has not started), `Reject` refused while the thread
- * has an open entry or a live claim, and submission keys looked up or inserted per tenant; cancel and interrupt (W3) -
+ * submission order, the per-thread run order of rule 5 (an attempted entry first, then each tenant's entries together,
+ * by its oldest, `Interrupt` entries first within a tenant, then the rest, each by id; a later `Interrupt` closing an
+ * earlier one that has not started), `Reject` refused while the thread has an open entry or a live claim of the
+ * submitter's tenant, another tenant's never refusing or counted in a position (#3085), and submission keys looked up
+ * or inserted per tenant; cancel and interrupt (W3) -
  * an entry not started closed at once, a started one asked to stop durably, the request answered with its renewals
  * and takes, a cancel never replaced by an interrupt, per tenant, and each close reported only to the call that made it,
  * of two cancels or two `Interrupt` submissions raced at once (#2368); tenant scoping and the `TicketExpired` /
@@ -324,6 +326,58 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val queued = c.submit(tenant = theirs, policy = BusyThreadPolicy.Reject).value
     queued.position shouldBe Some(0)
     c.entry(queued.entryId, theirs).isOpen shouldBe true
+  }
+
+  it should "refuse a Reject submission for the submitter's own tenant's open entries only (#3085)" in {
+    val c      = Case()
+    val mine   = Some(TenantId(s"m-${unique()}"))
+    val theirs = Some(TenantId(s"o-${unique()}"))
+    val busy   = GraphError.ThreadBusy(c.thread.value, None, GraphError.BusyHolder.Unnamed)
+    // another tenant's open entry on the id neither refuses the thread's tenant nor tells it the entry is there
+    val foreign = c.submit(tenant = theirs, policy = BusyThreadPolicy.Reject).value
+    val first   = c.submit(tenant = mine, policy = BusyThreadPolicy.Reject).value
+    first.position shouldBe Some(0)
+    // each tenant is refused by its own entry
+    c.submit(tenant = mine, policy = BusyThreadPolicy.Reject).refused shouldBe busy
+    c.submit(tenant = theirs, policy = BusyThreadPolicy.Reject).refused shouldBe busy
+    c.submit(policy = BusyThreadPolicy.Reject).value.position shouldBe Some(0)
+    c.ids(tenant = mine) shouldBe Vector(first.entryId)
+    c.ids(tenant = theirs) shouldBe Vector(foreign.entryId)
+  }
+
+  it should "count only the entry's own tenant's entries in its position (#3085)" in {
+    val c      = Case()
+    val mine   = Some(TenantId(s"m-${unique()}"))
+    val theirs = Some(TenantId(s"o-${unique()}"))
+    c.submit(tenant = theirs).value
+    c.submit(tenant = theirs).value
+    val first  = c.submit(tenant = mine).value
+    val second = c.submit(tenant = mine).value
+    (first.position, second.position) shouldBe ((Some(0), Some(1)))
+    c.entry(second.entryId, mine).position shouldBe Some(1)
+    c.queue.openEntries(mine, c.thread).value.map(_.position) shouldBe Vector(Some(0), Some(1))
+    // a retried key answers its position the same way
+    val keyed = c.submit(tenant = mine, key = Some(s"k-${unique()}")).value
+    keyed.position shouldBe Some(2)
+  }
+
+  it should "never run another tenant's later Interrupt entry ahead of a thread's earlier entries (#3085)" in {
+    val c      = Case()
+    val mine   = Some(TenantId(s"m-${unique()}"))
+    val theirs = Some(TenantId(s"o-${unique()}"))
+    val queued = c.submit(tenant = mine).value.entryId
+    // an Interrupt goes ahead of its own tenant's entries only: it cannot take a thread its tenant came to second
+    val foreign = c.submit(tenant = theirs, policy = BusyThreadPolicy.Interrupt).value
+    foreign.position shouldBe Some(0)
+    val own = c.submit(tenant = mine, policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.ids(tenant = mine) shouldBe Vector(own, queued)
+    val leased = c.take().value
+    leased.entry.id shouldBe own
+    c.queue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    val next = c.take().value
+    next.entry.id shouldBe queued
+    c.queue.close(next.lease, EntryOutcome.Done(None, None)).value
+    c.take().value.entry.id shouldBe foreign.entryId
   }
 
   it should "close a cancelled entry that has not started at once, so it is never taken, also one that is leased" in {

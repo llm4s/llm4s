@@ -274,6 +274,21 @@ none of the protections. With `ContainerisedWorkspace`, nothing changes in your 
 
 To run the image by hand, see [Workspace sandbox](workspace-sandbox#example-locked-down-sandbox).
 
+## A run queue sees only the submitter's tenant's entries on a thread (#3085)
+
+The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature
+changed, and the stored schema is the same. Entries on one thread id from different tenants no longer affect each
+other:
+
+| Before (1.0.0) | After |
+|---|---|
+| A `Reject` submission was refused with `ThreadBusy` when any tenant had an open entry on the thread | Only an open entry (or a live claim) of the submitter's own tenant refuses it; another tenant's is never reported |
+| `Ticket.position` and `QueueEntry.position` counted every tenant's entries | They count only the entry's own tenant's entries ahead of it, so `0` means "next of this tenant's" |
+| An `Interrupt` entry went ahead of every unstarted entry of the thread, whoever's | It goes ahead of its own tenant's entries only. Tenants are served in the order of their oldest open entry, and an entry that has started still runs first |
+| `RunSubmitter.submit` queued a submission to any thread id | A thread whose latest checkpoint is another tenant's is refused with `GraphError.TenantMismatch`, naming only the submitter's tenant. A thread with no checkpoint yet is queued, as before |
+
+A custom `RunQueue` must follow the same rules. The new `RunQueueContract` cases in `llm4s-agent-testkit` check them.
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

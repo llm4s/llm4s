@@ -280,13 +280,22 @@ private[postgres] object Sql:
 
   private def queueColumns: String = PostgresRunQueue.Columns
 
-  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
-  val QueueRunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
+  /**
+   * A thread's open entries, the rows aliased `a`, in the order they run (rule 5): attempted first; then each tenant's
+   * entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its
+   * own tenant's entries only (#3085); within a tenant `Interrupt` entries first, then by id.
+   */
+  def queueRunOrder(t: Tables, a: String): String =
+    s"""($a.attempt_count = 0),
+       |  (SELECT MIN(f.entry_id) FROM ${t.queueEntries} f
+       |   WHERE f.thread_id = $a.thread_id AND f.state = 'open'
+       |     AND (f.tenant_id = $a.tenant_id OR (f.tenant_id IS NULL AND $a.tenant_id IS NULL))),
+       |  $a.is_interrupt DESC, $a.entry_id""".stripMargin
 
   /** The head of `e`'s thread, as a correlated subquery. */
   def queueHeadOf(t: Tables): String =
     s"""SELECT h.entry_id FROM ${t.queueEntries} h WHERE h.thread_id = e.thread_id AND h.state = 'open'
-       |ORDER BY $QueueRunOrder LIMIT 1""".stripMargin
+       |ORDER BY ${queueRunOrder(t, "h")} LIMIT 1""".stripMargin
 
   /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
   def queueLiveSibling(t: Tables): String =
@@ -301,7 +310,8 @@ private[postgres] object Sql:
     s"SELECT $queueColumns FROM ${t.queueEntries} WHERE key_scope = ? AND submission_key = ? FOR UPDATE"
 
   def openQueueEntries(t: Tables): String =
-    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' ORDER BY $QueueRunOrder"
+    s"""SELECT $queueColumns FROM ${t.queueEntries} q WHERE q.thread_id = ? AND q.state = 'open'
+       |ORDER BY ${queueRunOrder(t, "q")}""".stripMargin
 
   def nextQueueEntryId(t: Tables): String = s"SELECT nextval('${t.queueEntryIds}')"
   def nextLeaseToken(t: Tables): String   = s"SELECT nextval('${t.queueLeaseTokens}')"

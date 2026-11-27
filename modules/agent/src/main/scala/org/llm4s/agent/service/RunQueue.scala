@@ -23,16 +23,20 @@ import scala.concurrent.duration.*
  *  - '''submit''' an entry atomically: look up its [[SubmissionKey]], if any, among the tenant's entries and insert
  *    only if there is none, so a retried submit gets the first one's ticket ([[Ticket.existing]]) and a different
  *    submission under a held key is refused ([[QueueError.SubmissionKeyReused]]); refuse a `Reject` submission to a
- *    thread with an open entry, or one a live claim of the submitter's tenant holds by the store's clock (a direct
- *    run, W3; another tenant's claim is never reported, rule 9), with
- *    `GraphError.ThreadBusy` naming no holder; when an `Interrupt` entry is submitted, close every queued `Interrupt`
+ *    thread with an open entry of the submitter's tenant, or one a live claim of the submitter's tenant holds by the
+ *    store's clock (a direct run, W3), with `GraphError.ThreadBusy` naming no holder - another tenant's entry or claim
+ *    on the id is never reported (rule 9, #3085), so it neither refuses the submission nor tells it anything is
+ *    there; when an `Interrupt` entry is submitted, close every queued `Interrupt`
  *    entry of the thread that has recorded no attempt `Interrupted(by = the new entry)`, answering them in
  *    [[Ticket.interrupted]], and ask every open entry of the thread that has recorded one to stop for it
  *    ([[StopRequest.Interrupt]]) unless a cancel was asked of it; and
  *    issue entry ids in submission order, never reused;
- *  - '''order''' each thread's open entries (rule 5): an entry that has recorded an attempt first, then `Interrupt`
- *    entries, then the rest, each by id; only a thread's first entry in that order - its head - is ever taken, and only
- *    while no other entry of the thread holds a live lease;
+ *  - '''order''' each thread's open entries (rule 5): an entry that has recorded an attempt first; then each tenant's
+ *    entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its
+ *    own tenant's entries only and never takes a thread another tenant came to first (#3085); within a tenant
+ *    `Interrupt` entries first, then the rest, each by id; only a thread's first entry in that order - its head - is
+ *    ever taken, and only while no other entry of the thread holds a live lease; an entry's position
+ *    ([[QueueEntry.position]], [[Ticket.position]]) counts only its own tenant's entries ahead of it (rule 9);
  *  - '''lease''' like a claim: [[take]] leases a head whose lease is absent or expired, by the store's clock, with a
  *    new [[LeaseToken]] greater than every one issued for the entry, and ends the expired lease of every other entry of
  *    the thread (a head an `Interrupt` entry displaced), so two workers never hold an actionable lease on one thread;
@@ -76,8 +80,8 @@ trait RunQueue:
 
   /**
    * Queues `submission`, or finds the entry its key already names, and answers its [[Ticket]]. Refusals:
-   * `GraphError.ThreadBusy` for a `Reject` submission to a thread with an open entry or a live claim, and
-   * [[QueueError.SubmissionKeyReused]].
+   * `GraphError.ThreadBusy` for a `Reject` submission to a thread with an open entry or a live claim of the
+   * submitter's tenant, and [[QueueError.SubmissionKeyReused]].
    */
   def submit(submission: Submission): Result[Ticket]
 
