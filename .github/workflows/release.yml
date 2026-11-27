@@ -58,6 +58,8 @@ jobs:
       
       - name: Setup sbt
         uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
       
       - name: Import GPG key
         run: |
@@ -221,6 +223,8 @@ jobs:
 
       - name: Setup sbt
         uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Generate and check the SBOMs and licence reports
         run: |
@@ -309,6 +313,8 @@ jobs:
 
       - name: Setup sbt
         uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

@@ -133,6 +133,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
       
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
       # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
@@ -468,10 +470,9 @@ jobs:
           sbt --client licenseCheck
           sbt --client "reload plugins; test; reload return"
 
-      # Fails when an integration suite in modules/it declares no tier, i.e. when no command
-      # and no CI job below would run it. Eleven of eighteen suites were in that state.
-      - name: Check every integration suite declares a test tier
-        run: sbt --client it/itTierCheck
+      # No `it/itTierCheck` step here (#3174): it reads the tags off `modules/it`'s compiled test classes, so it
+      # compiled every test it depends on (2-2.7 minutes), and `it / Test / test` already depends on it (build.sbt),
+      # so `Test (other modules)` (`it` is in TEST_MODULES) and every tier alias run it first.
 
       # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
       # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md; and when a @Stable
@@ -534,6 +535,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Generate ScalaDoc
         # `docs/doc` builds the single aggregate API tree that the docs site publishes (see the `docs` project in
@@ -639,6 +642,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # Compiled-output cache pilot: the target directories the nightly run on main saved for this job kind, so a
       # pull request compiles only what changed since (zinc keys sources by content, not timestamp). Keyed by job kind:
@@ -1428,6 +1433,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
         if: github.event_name != 'pull_request'
 
       - name: Download the legs' coverage data
@@ -1496,6 +1503,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # The MCP Python SDK, pinned, for samples' PythonToolBridgeExampleSpec (#2333): it starts sentiment_tool.py with
       # the `python3` first on the PATH, so the venv goes there. Without it the spec is cancelled, not run.
@@ -1597,6 +1606,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # The step runs in PowerShell, which cannot run the bash retry wrapper; this job is not part of the parallel burst
       # that rate-limited the ubuntu jobs on 2026-11-20.
@@ -1649,6 +1660,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Resolve the dependencies
         run: scripts/retry-on-transient-network.sh sbt resolveAll
@@ -1790,6 +1803,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # LiteLLMGatewaySpec (#2315): the enterprise overlay's gateway, a LiteLLM proxy, routing to a fake upstream that
       # the suite runs on this runner at port 18089 (host.docker.internal from inside the container). Started here
@@ -2008,6 +2023,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Check the Micronaut and Helidon guides' snippets are the samples'
         run: scripts/check-framework-guide-snippets.sh
@@ -2194,6 +2211,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Test the starter against the latest Spring Boot 3.x
         run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
@@ -2235,6 +2254,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Resolve the dependencies
         run: scripts/retry-on-transient-network.sh sbt resolveAll
@@ -2396,6 +2417,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Wait for the Ollama server
         run: |
@@ -2466,6 +2489,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Build the workspace-runner image
         run: scripts/retry-on-transient-network.sh sbt workspaceRunner/Docker/publishLocal
@@ -2514,6 +2539,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # The official MCP reference server (#1006). Started in a step rather than as a service
       # container because a service cannot be given a command, and the server picks its
@@ -2576,6 +2603,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # VertexAISmokeSpec authenticates with Application Default Credentials: a service-account
       # JSON key, held as the VERTEX_CREDENTIALS_JSON secret, written to a file for

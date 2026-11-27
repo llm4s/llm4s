@@ -13,6 +13,8 @@
 #     (`if: contains(matrix.modules, '<module>')`), uploading `<base>/target/scala-<version>/scoverage-report/scoverage.xml`
 #     under the codecov.yml flag whose path is `<base>/src/main/scala`, and no upload step names a module in no leg;
 #     so each flag is uploaded once, from the leg that owns the module;
+#   - every codecov.yml flag sets `carryforward: true`, so a run that does not upload a module keeps its last coverage
+#     instead of dropping it from the project status (#3177);
 #   - every project the root project aggregates has its tests run by exactly one job: a coverage leg, or the `test`
 #     job, which runs the tests of the modules in its TEST_MODULES env (the modules no leg runs; `sbt test` used to run
 #     every module's tests again, uninstrumented). So a module in no leg and not in TEST_MODULES, whose tests would run
@@ -116,6 +118,12 @@ end
 
 codecov = YAML.load_file(codecov_file) || {}
 flag_paths = (codecov['flags'] || {}).to_h { |name, f| [name, Array((f || {})['paths'])] }
+
+flag_paths.each_key do |name|
+  next if (codecov['flags'][name] || {})['carryforward'] == true
+  errors << "flag '#{name}' in #{File.basename(codecov_file)} does not set carryforward: true; a run that does not " \
+            "upload it would drop its coverage"
+end
 
 report_of = ->(p) { "#{p['base']}/target/scala-#{p['scalaVersion']}/scoverage-report/scoverage.xml" }
 # An upload step for module m (project p) must upload m's report under the one flag whose path is m's sources.

@@ -224,6 +224,11 @@ for the most recent one, `git rebase --signoff main` for a branch of them, then
 `git push --force-with-lease`. Signing as you go is cheaper than either. See
 [CONTRIBUTING.md](CONTRIBUTING.md#developer-certificate-of-origin-dco).
 
+**Iterate on a draft PR.** CI runs nothing on a draft and everything when it is marked ready; a push to a
+ready PR cancels its run and starts another, inside a 20-job concurrency limit shared with every other PR
+(19 of 40 runs were cancelled that way, #3178). Open with `gh pr create --draft`, push fixes in one batch, then
+`gh pr ready`.
+
 ## Configuration and Environment Variables
 
 **Nothing in the library reads `LLM_MODEL`** (removed with legacy single-provider loading in #903).

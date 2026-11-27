@@ -70,6 +70,8 @@ jobs:
           problem-matcher: true
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       # This month's cache only (see Size above): an older month's would carry its stale artifacts into the save.
       - id: deps

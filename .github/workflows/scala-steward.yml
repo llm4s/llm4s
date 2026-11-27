@@ -46,6 +46,8 @@ jobs:
           problem-matcher: true
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Launch Scala Steward
         uses: scala-steward-org/scala-steward-action@3e5cae868160200afda12b57c150e56cede989ab # v2.97.0

@@ -66,6 +66,8 @@ jobs:
         uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
+        with:
+          disk-cache: false  # sbt 2.x only; this build is sbt 1, and each run saved ~57 MB (#3176)
 
       - name: Publish the probed modules to the runner's ~/.ivy2/local
         # A fixed version, so the probes need not chase sbt-dynver's. llm4s-java-api's dependencies (the provider
