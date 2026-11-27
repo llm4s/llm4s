@@ -545,21 +545,28 @@ final class ToolLoop private (
     if input.refusedBy.isDefined || owners.isEmpty then Right(ToolLoop.Admitted(input, None))
     else
       val ledger = new AdmissionContext.Collected
-      val passed = owners.foldLeft[Result[String]](Right(input.query)) { (query, owner) =>
-        query.flatMap { text =>
-          stacks(owner).admit(text, AdmissionContext.before(threadId, owner, config.tenantId, config.principal, ledger))
-        }
+      // the query, then every imported user message's text, through each stack in turn (#3235): history a new thread
+      // imports is admitted as the query is, rewritten as the stages rewrite it, and refused as they refuse it
+      val passed = owners.foldLeft[Result[(String, Vector[Message])]](Right(input.query -> input.history)) {
+        (acc, owner) =>
+          acc.flatMap { (text, history) =>
+            val context = AdmissionContext.before(threadId, owner, config.tenantId, config.principal, ledger)
+            val stack   = stacks(owner)
+            stack.admit(text, context).flatMap(query => ToolLoop.admitHistory(stack, history, context).map(query -> _))
+          }
       }
       val prior = input.admission.getOrElse(Admission(Vector.empty))
       def record(refusedBy: Option[String]) =
         Admission(prior.agents ++ owners, prior.usage.merge(ledger.usage), prior.calls ++ ledger.calls, refusedBy)
       passed match
-        case Right(query) if query.trim.isEmpty =>
+        case Right((query, _)) if query.trim.isEmpty =>
           Left(ValidationError("query", "admit returned a blank query"))
-        case Right(query) => Right(ToolLoop.Admitted(input.withQuery(query).withAdmission(record(None)), None))
+        case Right((query, history)) =>
+          Right(ToolLoop.Admitted(input.withQuery(query).withHistory(history).withAdmission(record(None)), None))
         case Left(blocked: GuardrailBlocked) =>
-          // nothing of the query goes on: the turn it starts holds who refused it, and what the stages counted
-          val refused = input.withQuery("").withAdmission(record(Some(blocked.guardrail)))
+          // nothing of the query or the history goes on: the turn it starts holds who refused it, and what the
+          // stages counted
+          val refused = input.withQuery("").withHistory(Vector.empty).withAdmission(record(Some(blocked.guardrail)))
           Right(ToolLoop.Admitted(refused, Some(blocked)))
         case Left(error) => Left(error)
 
@@ -680,6 +687,38 @@ object ToolLoop:
    * reason, which the input does not hold.
    */
   final private[agent] case class Admitted(input: AgentInput, refused: Option[GuardrailBlocked])
+
+  /**
+   * `history` through `stack`'s `admit` stages (#3235): each imported user message's text parts, each on its own, as
+   * a query is; a part the stages rewrite is stored as rewritten. Assistant messages and tool results are kept as
+   * they are - they are the earlier turns' model and tool output, not caller input. A stage's `Left` refuses the
+   * whole import, and a text part the stages return blank is a `ValidationError`.
+   */
+  private[agent] def admitHistory(
+    stack: MiddlewareStack,
+    history: Vector[Message],
+    context: AdmissionContext
+  ): Result[Vector[Message]] =
+    history.foldLeft[Result[Vector[Message]]](Right(Vector.empty)) { (acc, message) =>
+      acc.flatMap { admitted =>
+        message match
+          case user: UserMessage =>
+            user.parts.toVector
+              .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (parts, part) =>
+                parts.flatMap { done =>
+                  part match
+                    case ContentPart.Text(text) if text.trim.nonEmpty =>
+                      stack.admit(text, context).flatMap { next =>
+                        if next.trim.isEmpty then Left(ValidationError("history", "admit returned a blank message"))
+                        else Right(done :+ ContentPart.Text(next))
+                      }
+                    case other => Right(done :+ other)
+                }
+              }
+              .map(parts => admitted :+ user.withParts(parts))
+          case other => Right(admitted :+ other)
+      }
+    }
 
   /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */
   private[agent] def settled(output: TurnOutput): RunOutcome = output.outcome match

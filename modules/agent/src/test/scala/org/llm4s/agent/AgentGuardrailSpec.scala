@@ -391,7 +391,8 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // --- an input block on a new thread ---
 
-  "An input block on a new thread" should "still import the history, so the next turn continues it" in {
+  // #3235: a refused import stores nothing - the history was not admitted - so it can be made again
+  "An input block on a new thread" should "import nothing and create no thread, so the import can be made again" in {
     val client  = answers("next answer")
     val agent   = guarded(client, input = Seq(rejectNo))
     val thread  = org.llm4s.agent.graph.ThreadId("blocked-with-history")
@@ -399,13 +400,33 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     val blocked = agent.run(thread, "no", org.llm4s.agent.graph.RunConfig(), history).value
     blocked.status shouldBe a[AgentStatus.Blocked]
-    blocked.messages shouldBe history.toVector
-    blocked.activeAgent.value shouldBe "assistant"
+    blocked.threadId shouldBe thread
+    blocked.messages shouldBe empty
+    agent.runtime.history(thread) shouldBe Right(Vector.empty)
 
-    val next = agent.run(thread, "yes").value
+    val next = agent.run(thread, "yes", org.llm4s.agent.graph.RunConfig(), history).value
     next.answer shouldBe Some("next answer")
     next.messages shouldBe (history.toVector ++ Vector(UserMessage("yes"), AssistantMessage("next answer")))
     client.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("earlier question", "yes")
+  }
+
+  it should "admit each imported user message, and refuse the import when one is refused (#3235)" in {
+    val client = answers("fine")
+    val agent  = guarded(client, input = Seq(rejectNo))
+    val thread = org.llm4s.agent.graph.ThreadId("blocked-history-message")
+
+    val blocked =
+      agent.run(thread, "yes", org.llm4s.agent.graph.RunConfig(), Seq(UserMessage("no"), AssistantMessage("ok"))).value
+    blocked.status shouldBe a[AgentStatus.Blocked]
+    agent.runtime.history(thread) shouldBe Right(Vector.empty)
+    client.callCount shouldBe 0
+  }
+
+  it should "still refuse an import onto a thread that exists" in {
+    val agent  = guarded(answers("fine", "again"), input = Seq(rejectNo))
+    val thread = org.llm4s.agent.graph.ThreadId("blocked-history-existing")
+    agent.run(thread, "yes").value.answer shouldBe Some("fine")
+    agent.run(thread, "no", org.llm4s.agent.graph.RunConfig(), Seq(UserMessage("earlier"))).isLeft shouldBe true
   }
 
   // --- a blank query (review of #1369) ---

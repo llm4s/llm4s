@@ -109,6 +109,12 @@ final class Agent private[agent] (
    * `PendingInterrupts` - come back unchanged. Either way no thread is created and an existing one
    * is unchanged.
    *
+   * `history` is admitted with the query (#3235): every imported user message's text goes through the agent's input
+   * guardrails and `admit` stages as the query does, and is stored and sent as they rewrite it. Assistant messages
+   * and tool results are imported as they are. When a stage refuses the query or an imported message, the turn ends
+   * `AgentStatus.Blocked(guardrail, reason)` as any refused query does, but nothing of it is stored: no thread is
+   * created, and the import can be made again on the same `threadId`.
+   *
    * Interrupting the calling thread cancels the turn: `run` returns `Left(CancelledError)` with the
    * interrupt flag still set, once the turn has ended, leaving the thread for [[recover]]. It waits up to
    * 5 seconds ([[AgentRun.Drain]]) for the turn to end; with tracing, delivering the ended turn's last
@@ -491,6 +497,10 @@ final class Agent private[agent] (
    * stage has run, a rewritten query is the only one stored, and a refused one starts a turn that holds no query and
    * blocks at once, its reason on the returned run's result only. An input that records its admission - one a
    * queue's submitter admitted - is started as it is.
+   *
+   * An input that imports `history` has every imported user message admitted with the query (#3235); a refusal of
+   * either ends the turn `Blocked` with no thread created ([[refusedImport]]), so the import can be tried again on the
+   * same thread id. A queued input refused at submission imports nothing.
    */
   private def startInput(
     threadId: ThreadId,
@@ -498,25 +508,69 @@ final class Agent private[agent] (
     config: RunConfig,
     listening: Option[Listening]
   ): Result[AgentRun] =
-    val history = input.history
+    // an input a submitter refused holds no query, and imports nothing it did not admit (#3235)
+    val history = if input.refusedBy.isDefined then Vector.empty else input.history
     for
       _        <- if history.isEmpty then Right(()) else importable(history)
-      admitted <- admitting(threadId, input, config)
+      admitted <- admitting(threadId, input.withHistory(history), config)
       watching = listening.map(observed(config, _))
       observer = watching.map(_._1)
-      handle <-
+      run <-
         if history.isEmpty then
-          runtime.start(threadId, loop.graph, admitted.input, configured(config), observer = observer)
+          runtime
+            .start(threadId, loop.graph, admitted.input, configured(config), observer = observer)
+            .map(agentRun(_, watching.map(_._2), listening.exists(_.drain), refused = admitted.refused))
         else
-          runtime.startNew(
-            threadId,
-            loop.graph,
-            admitted.input,
-            configured(config),
-            ValidationError("history", "history is imported only into a new thread"),
-            observer
-          )
-    yield agentRun(handle, watching.map(_._2), listening.exists(_.drain), refused = admitted.refused)
+          admitted.refused match
+            case Some(blocked) => refusedImport(threadId, admitted.input, config, watching, listening, blocked)
+            case None =>
+              runtime
+                .startNew(
+                  threadId,
+                  loop.graph,
+                  admitted.input,
+                  configured(config),
+                  Agent.notNew,
+                  observer
+                )
+                .map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
+    yield run
+
+  /**
+   * A history import refused at admission (#3235): the turn ends `AgentStatus.Blocked`, as any refused query does, but
+   * nothing of it reaches the agent's store, so no thread is created and the caller can import again on `threadId`.
+   * The blocked turn - which holds no query and no history - runs on a runtime of its own, in memory, discarded with
+   * the returned run. A thread that already exists is refused as an import onto it always is.
+   */
+  private def refusedImport(
+    threadId: ThreadId,
+    input: AgentInput,
+    config: RunConfig,
+    watching: Option[(Observer, RunScope)],
+    listening: Option[Listening],
+    blocked: GuardrailBlocked
+  ): Result[AgentRun] =
+    runtime.storedGraphId(threadId, config).flatMap {
+      case Some(_) => Left(Agent.notNew)
+      case None =>
+        val detached = GraphRuntime.inMemory()
+        detached
+          .start(threadId, loop.graph, input, configured(config), observer = watching.map(_._1))
+          .map { handle =>
+            AgentRun(
+              handle,
+              loop,
+              id,
+              detached,
+              tracing,
+              watching.map(_._2),
+              listening.exists(_.drain),
+              None,
+              handle.traceContext,
+              Some(blocked)
+            )
+          }
+    }
 
   /** [[start]] with an input a queue held (W2): admitted now unless its submitter admitted it. */
   private[agent] def startQueued(threadId: ThreadId, input: AgentInput, config: RunConfig): Result[AgentRun] =
@@ -679,6 +733,9 @@ enum AdmittedQuery:
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])
+
+  /** A history import onto a thread that exists. */
+  private def notNew: ValidationError = ValidationError("history", "history is imported only into a new thread")
 
   /**
    * Awaits `run`, which has begun, as [[Agent.blocking]] does: an interrupted wait - also one interrupted before it

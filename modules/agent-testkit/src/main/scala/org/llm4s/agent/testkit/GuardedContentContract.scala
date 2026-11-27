@@ -255,6 +255,58 @@ trait GuardedContentContract extends AnyFlatSpecLike with Matchers with EitherVa
     assertAbsent(QueryMarker, recorded, thread, tracing)
   }
 
+  // ---- imported history (#3235) ----
+
+  "GuardedContentContract: imported history an input guardrail refuses" should "block the turn, be stored nowhere and create no thread" in {
+    val recorded = Recorded(newStores().checkpointer)
+    val tracing  = RecordingTracing()
+    val thread   = ThreadId(s"history-${unique()}")
+    val client   = Scripted(text("fine"))
+    val agent    = builder(client, recorded, tracing).withInputGuardrails(refusingCards("NoCards")).build().value
+    val saved    = Seq(UserMessage(s"my card is $QueryMarker"), AssistantMessage("noted", Seq.empty))
+
+    agent.run(thread, "an ordinary question", RunConfig(), saved).value.status should matchPattern {
+      case AgentStatus.Blocked("NoCards", _) =>
+    }
+    recorded.latest(thread).value shouldBe None
+    assertAbsent(QueryMarker, recorded, thread, tracing)
+
+    // nothing was created, so the import can be made again, without what was refused
+    val clean = Seq(UserMessage("my card is on file"), AssistantMessage("noted", Seq.empty))
+    agent.run(thread, "an ordinary question", RunConfig(), clean).value.answer.value shouldBe "fine"
+    (sentTo(client) should not).include(QueryMarker)
+  }
+
+  it should "create no thread when the query is refused, so the same history can be imported again" in {
+    val recorded = Recorded(newStores().checkpointer)
+    val tracing  = RecordingTracing()
+    val thread   = ThreadId(s"history-query-${unique()}")
+    val agent =
+      builder(Scripted(text("fine")), recorded, tracing).withInputGuardrails(refusingCards("NoCards")).build().value
+    val saved = Seq(UserMessage("an earlier question"), AssistantMessage("an earlier answer", Seq.empty))
+
+    agent.run(thread, s"my card is $QueryMarker", RunConfig(), saved).value.status should matchPattern {
+      case AgentStatus.Blocked("NoCards", Some(_)) =>
+    }
+    recorded.latest(thread).value shouldBe None
+    assertAbsent(QueryMarker, recorded, thread, tracing)
+    agent.run(thread, "an ordinary question", RunConfig(), saved).value.answer.value shouldBe "fine"
+  }
+
+  "GuardedContentContract: imported history an input guardrail rewrites" should "be stored and sent only as rewritten" in {
+    val recorded = Recorded(newStores().checkpointer)
+    val tracing  = RecordingTracing()
+    val thread   = ThreadId(s"history-mask-${unique()}")
+    val client   = Scripted(text("fine"))
+    val agent    = builder(client, recorded, tracing).withInputGuardrails(maskingCards("MaskCards")).build().value
+    val saved    = Seq(UserMessage(s"my card is $QueryMarker"), AssistantMessage("noted", Seq.empty))
+
+    agent.run(thread, "an ordinary question", RunConfig(), saved).value.answer.value shouldBe "fine"
+    (sentTo(client) should not).include(QueryMarker)
+    sentTo(client) should include(Masked)
+    assertAbsent(QueryMarker, recorded, thread, tracing)
+  }
+
   "GuardedContentContract: a query admitted before it is queued" should "be in its queue entry only as admitted" in {
     val stores   = newStores()
     val recorded = Recorded(stores.checkpointer)

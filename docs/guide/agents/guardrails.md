@@ -58,6 +58,14 @@ trace and - when you admit before you queue - no queue entry; a query one of the
 query as it was submitted, before any middleware's `beforeAgent` hook, so text such a hook adds to the query is not
 checked by them.
 
+**Imported history is admitted with the query** (#3235). `agent.run(threadId, query, config, history)` runs every
+imported user message's text through the same input guardrails: a message they rewrite is stored and sent only as
+rewritten, and when they refuse the query or any imported message the turn ends `AgentStatus.Blocked(guardrail,
+reason)`, as any refused query does, with nothing stored: no thread is created, and the import can be tried again on
+the same thread id. Imported assistant messages and tool results are not checked: they are earlier turns' model
+and tool output. A `resume` answer (a tool question's reply, an approval's rejection reason, a reviewer's
+`GuardrailVerdict.Edit`) is not checked by the input guardrails either.
+
 ### `GuardrailMiddleware`: choosing the position
 
 `withInputGuardrails` and `withOutputGuardrails` are `@Stable`. Underneath they install a `GuardrailMiddleware`
