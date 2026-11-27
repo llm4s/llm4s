@@ -283,6 +283,15 @@ dependency (such as `llm4s-rag`) brought `sts` in.
 | On EKS with IRSA (`AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`) the default chain skipped web identity and could use the node's instance role | The pod's service-account role is used. Grant it `bedrock:InvokeModel` (and `InvokeModelWithResponseStream`) if the node role had it instead |
 | A `profile` with `role_arn` or SSO settings failed at the first call | It authenticates as that role or SSO user |
 | `close()` left the profile or default credentials provider open | `close()` closes it |
+## GraphRAG is refused in every mode on a `RAG` with a `SearchIndex` (#2964)
+
+`llm4s-rag` is Beta, and no signature changed. On a `RAG` built with `.withSearchIndex(...)`, `queryWithGraphRAG`
+and `queryWithGraphRAGMode` in Global and Local mode now return a `ConfigurationError`, as Hybrid mode and plain
+`query` already did, before the router or the model is called. They answered from the whole graph and every
+community summary, with no principal or collection, so any caller could read what the permission API would hide.
+GraphRAG has no permission-filtered form yet: on a permission-aware `RAG`, answer with
+`queryWithPermissionsAndAnswer`, or run a separate `GraphRAG` over a graph store that holds only what every caller
+of it may read.
 
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
