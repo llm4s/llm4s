@@ -3,8 +3,8 @@ package org.llm4s.vectorstore.opensearch
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
 import org.llm4s.security.Secret
-import org.llm4s.vectorstore.{ MetadataFilter, VectorRecord }
-import org.scalatest.BeforeAndAfterEach
+import org.llm4s.vectorstore.{ FastRefreshIndexTemplate, MetadataFilter, VectorRecord }
+import org.scalatest.{ BeforeAndAfterAll, BeforeAndAfterEach }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -24,17 +24,27 @@ import scala.collection.mutable
  * For a secured cluster set `OPENSEARCH_TEST_USERNAME` and `OPENSEARCH_TEST_PASSWORD` as well.
  */
 @Docker
-class OpenSearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach {
+class OpenSearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach with BeforeAndAfterAll {
 
   private val testUrl  = sys.env.get("OPENSEARCH_TEST_URL").filter(_.nonEmpty)
   private val username = sys.env.get("OPENSEARCH_TEST_USERNAME").filter(_.nonEmpty)
   private val password = sys.env.get("OPENSEARCH_TEST_PASSWORD").getOrElse("")
+  private val auth     = username.fold[OpenSearchAuth](OpenSearchAuth.NoAuth)(OpenSearchAuth.Basic(_, Secret(password)))
+
+  private val template = "llm4s-it-vector-store-spec"
 
   private val opened = mutable.Buffer.empty[OpenSearchVectorStore]
 
+  // The test indices refresh every 100 ms, not every second, so a write's `refresh=wait_for` returns sooner (#3216)
+  override def beforeAll(): Unit =
+    testUrl.foreach(FastRefreshIndexTemplate.install(_, template, "llm4s-it-*", auth.headers))
+
+  override def afterAll(): Unit =
+    testUrl.foreach(FastRefreshIndexTemplate.remove(_, template, auth.headers))
+
   override def afterEach(): Unit = {
     opened.foreach { s =>
-      s.clear()
+      s.clear() // deletes the store's index
       s.close()
     }
     opened.clear()
@@ -48,7 +58,7 @@ class OpenSearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAnd
     val config = OpenSearchConfig(
       baseUrl = testUrl.getOrElse(fail("OPENSEARCH_TEST_URL not set")),
       index = s"llm4s-it-${engine.wireName}-${System.nanoTime()}",
-      auth = username.fold[OpenSearchAuth](OpenSearchAuth.NoAuth)(OpenSearchAuth.Basic(_, Secret(password))),
+      auth = auth,
       spaceType = spaceType,
       engine = engine
     )

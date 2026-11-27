@@ -4,19 +4,24 @@ import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.BedrockTestSupport.*
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.sendJsonResponse
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import com.sun.net.httpserver.{ HttpExchange, HttpServer }
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ListBuffer
+import scala.util.Using
 
 /**
  * RFC 0009 PR 2 for `BedrockClient`: Converse's `stopReason` is mapped on `complete` and on a stream, where before
  * the client reported it raw as `Other`; a guardrail or filter stop is a `ContentFilteredError` on both paths, with
  * the usage the call was billed.
  */
-class BedrockFinishReasonSpec extends AnyWordSpec with Matchers {
+class BedrockFinishReasonSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
@@ -53,14 +58,37 @@ class BedrockFinishReasonSpec extends AnyWordSpec with Matchers {
     (result, chunks.toList)
   }
 
-  private def withResult[A](respond: com.sun.net.httpserver.HttpExchange => Unit)(call: BedrockClient => A): A = {
-    var result = Option.empty[A]
-    withServer("/")(respond) { url =>
-      val client = new BedrockClient(config(url))
-      result = Some(call(client))
-      client.close()
+  // One server and one client for the suite: the server answers with whatever `respond` holds. A server and a
+  // client per call cost ~1 s each, because closing a client that has streamed shuts its Netty event loop down
+  // gracefully, and that waits out a quiet period (#3216).
+  private val respond                                       = new AtomicReference[HttpExchange => Unit](_ => ())
+  @volatile private var server: Option[HttpServer]          = None
+  @volatile private var sharedClient: Option[BedrockClient] = None
+
+  override def beforeAll(): Unit = {
+    val s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    s.createContext("/", exchange => respond.get()(exchange))
+    s.start()
+    server = Some(s)
+  }
+
+  override def afterAll(): Unit =
+    Using.resource(new AutoCloseable { override def close(): Unit = server.foreach(_.stop(0)) })(_ =>
+      sharedClient.foreach(_.close())
+    )
+
+  private def client: BedrockClient = synchronized {
+    sharedClient.getOrElse {
+      val port = server.getOrElse(fail("server not started")).getAddress.getPort
+      val c    = new BedrockClient(config(s"http://127.0.0.1:$port"))
+      sharedClient = Some(c)
+      c
     }
-    result.getOrElse(fail("the call did not run"))
+  }
+
+  private def withResult[A](answer: HttpExchange => Unit)(call: BedrockClient => A): A = {
+    respond.set(answer)
+    call(client)
   }
 
   private val mapped = Seq(

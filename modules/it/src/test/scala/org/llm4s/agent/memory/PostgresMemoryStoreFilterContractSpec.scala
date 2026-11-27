@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.collection.concurrent.TrieMap
 import scala.util.Using
 
 /**
@@ -19,13 +20,13 @@ import scala.util.Using
  * be any string. The SQL translation itself is `PostgresMemoryStoreFilterSqlSpec` (`modules/memory-postgres`).
  *
  * Tier 2 (`@Docker`), enabled as `PostgresMemoryStoreSpec` is: `POSTGRES_TEST_ENABLED=true`, with the connection from
- * `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. Each test loads its own
- * table and drops it afterwards.
+ * `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. Read-only cases share
+ * one loaded table per subject; a case that deletes loads its own table and drops it afterwards.
  */
 @Docker
 class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
-  import MemoryStoreFilterContractSpec.{ filters, fixtures }
+  import MemoryStoreFilterFixtures.{ filters, fixtures }
 
   private def isEnabled = sys.env.get("POSTGRES_TEST_ENABLED").exists(_.toBoolean)
 
@@ -50,22 +51,43 @@ class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers wi
     pool
   }
 
-  override def afterAll(): Unit = if (pool != null) pool.close()
+  override def afterAll(): Unit =
+    if (pool != null)
+      Using.resource(pool)(ds => shared.values.foreach((table, _) => drop(ds, table)))
 
   private val subjects: Seq[(String, Option[EmbeddingService])] = Seq(
     "PostgresMemoryStore (keyword search)" -> None,
     "PostgresMemoryStore (vector search)"  -> Some(MockEmbeddingService(64))
   )
 
-  /** Run `test` against a fresh table holding the fixtures; always drop the table. */
-  private def withLoaded(service: Option[EmbeddingService])(test: MemoryStore => Any): Unit = {
+  private def load(ds: HikariDataSource, table: String, service: Option[EmbeddingService]): MemoryStore =
+    right(right(PostgresMemoryStore.fromDataSource(ds, table, service)).storeAll(fixtures))
+
+  private def nextTable(): String = s"filter_contract_${suffix}_${tables.incrementAndGet()}"
+
+  // A read-only case (recall, count, search) runs against one loaded table per subject, built on first use and
+  // dropped in `afterAll`; only a case that deletes loads a table of its own (#3216).
+  private val shared = TrieMap.empty[String, (String, MemoryStore)]
+
+  /** Run a read-only `test` against the subject's shared table holding the fixtures. */
+  private def withShared(name: String, service: Option[EmbeddingService])(test: MemoryStore => Any): Unit = {
+    val ds = dataSource()
+    val (_, store) = shared.getOrElseUpdate(
+      name, {
+        val table = nextTable()
+        (table, load(ds, table, service))
+      }
+    )
+    test(store)
+  }
+
+  /** Run a `test` that writes against a fresh table holding the fixtures; always drop the table. */
+  private def withFresh(service: Option[EmbeddingService])(test: MemoryStore => Any): Unit = {
     val ds    = dataSource()
-    val table = s"filter_contract_${suffix}_${tables.incrementAndGet()}"
-    Using.resource(new AutoCloseable { override def close(): Unit = drop(ds, table) }) { _ =>
-      val empty  = right(PostgresMemoryStore.fromDataSource(ds, table, service))
-      val loaded = right(empty.storeAll(fixtures))
-      test(loaded)
-    }
+    val table = nextTable()
+    Using.resource(new AutoCloseable { override def close(): Unit = drop(ds, table) })(_ =>
+      test(load(ds, table, service))
+    )
   }
 
   private def drop(ds: HikariDataSource, table: String): Unit =
@@ -85,21 +107,21 @@ class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers wi
   } {
     val expected = fixtures.filter(filter.matches)
 
-    name should s"recall exactly the memories $filterName matches" in withLoaded(service) { store =>
+    name should s"recall exactly the memories $filterName matches" in withShared(name, service) { store =>
       ids(right(store.recall(filter, 100))) shouldBe ids(expected)
     }
 
-    it should s"count exactly the memories $filterName matches ($name)" in withLoaded(service) { store =>
+    it should s"count exactly the memories $filterName matches ($name)" in withShared(name, service) { store =>
       right(store.count(filter)) shouldBe expected.size.toLong
     }
 
     it should s"keep only the memories $filterName does not match after deleteMatching ($name)" in
-      withLoaded(service) { store =>
+      withFresh(service) { store =>
         val after = right(store.deleteMatching(filter))
         ids(right(after.recall(MemoryFilter.All, 100))) shouldBe ids(fixtures.filterNot(filter.matches))
       }
 
-    it should s"return only memories $filterName matches from search ($name)" in withLoaded(service) { store =>
+    it should s"return only memories $filterName matches from search ($name)" in withShared(name, service) { store =>
       val found = right(store.search("note plan identifiers case", 100, filter)).map(_.memory)
       found.foreach(m => withClue(s"${m.id.value}: ")(filter.matches(m) shouldBe true))
       // Vector search ranks every embedded memory the filter accepts, so with topK above the count it finds them all
@@ -108,14 +130,14 @@ class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers wi
   }
 
   private lazy val leaves: Vector[MemoryFilter] =
-    filters.map(_._2).filter(MemoryStoreFilterContractSpec.isLeaf).toVector
+    filters.map(_._2).filter(MemoryStoreFilterFixtures.isLeaf).toVector
 
   for ((name, service) <- subjects) {
     name should "answer recall, count and deleteMatching like `matches` for 300 random filter trees" in
-      withLoaded(service) { store =>
+      withShared(name, service) { store =>
         val random = new scala.util.Random(20261006L)
         (1 to 300).foreach { n =>
-          val tree     = MemoryStoreFilterContractSpec.randomTree(leaves, random, 3)
+          val tree     = MemoryStoreFilterFixtures.randomTree(leaves, random, 3)
           val expected = ids(fixtures.filter(tree.matches))
           withClue(s"tree #$n $tree: ") {
             ids(right(store.recall(tree, 1000))) shouldBe expected
@@ -127,8 +149,8 @@ class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers wi
     it should s"delete exactly the rows `matches` accepts for random filter trees ($name)" in {
       val random = new scala.util.Random(20261007L)
       (1 to 40).foreach { n =>
-        val tree = MemoryStoreFilterContractSpec.randomTree(leaves, random, 3)
-        withLoaded(service) { store =>
+        val tree = MemoryStoreFilterFixtures.randomTree(leaves, random, 3)
+        withFresh(service) { store =>
           val after = right(store.deleteMatching(tree))
           withClue(s"tree #$n $tree: ")(
             ids(right(after.recall(MemoryFilter.All, 1000))) shouldBe ids(fixtures.filterNot(tree.matches))
@@ -137,7 +159,7 @@ class PostgresMemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers wi
       }
     }
 
-    it should s"apply the limit after the filter, not before it ($name)" in withLoaded(service) { store =>
+    it should s"apply the limit after the filter, not before it ($name)" in withShared(name, service) { store =>
       val filter   = MemoryFilter.Custom(m => m.id.value.startsWith("pct") || m.id.value.startsWith("snake"))
       val expected = fixtures.filter(filter.matches).sortBy(m => -m.timestamp.toEpochMilli).take(2)
       right(store.recall(filter, 2)).map(_.id.value) shouldBe expected.map(_.id.value)

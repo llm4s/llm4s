@@ -2681,7 +2681,8 @@ lazy val it = (project in file("modules/it"))
     // the VectorStoreContract and KeywordIndexContract suites of the Postgres, Qdrant, search-engine and Redis stores (#3000)
     ragTestkit % Test,
     knowledgegraph,
-    memory % "compile->compile;test->test",
+    // memory's two contract files are compiled into this project's tests (`Test / unmanagedSources` below, #3217)
+    memory,
     memoryPostgres,
     mcp,
     image,
@@ -2751,6 +2752,13 @@ lazy val it = (project in file("modules/it"))
     Test / unmanagedSources ++= {
       val dir = (samples / baseDirectory).value / "src" / "main" / "scala" / "org" / "llm4s" / "samples" / "kafka"
       Seq(dir / "Tickets.scala", dir / "TicketPipeline.scala")
+    },
+    // The memory contracts the Postgres suites pass (#3217): two files compiled here instead of depending on memory's
+    // tests, which compiled memory's and core's test sources for them and put core's fixture providers and test
+    // application.conf on this classpath. Both files use only main classes and ScalaTest.
+    Test / unmanagedSources ++= {
+      val dir = (memory / baseDirectory).value / "src" / "test" / "scala" / "org" / "llm4s" / "agent" / "memory"
+      Seq(dir / "MemoryStoreFilterFixtures.scala", dir / "TransactionalMemoryStoreContract.scala")
     },
     itTierCheck := ItTiers.check(
       (Test / definedTests).value.map(_.name),
