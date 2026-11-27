@@ -58,16 +58,19 @@ object GraphQuery {
   ) extends GraphQuery
 
   /**
-   * Find a path between two nodes.
+   * Find the shortest paths between two nodes.
    *
    * @param fromNodeId The starting node ID
    * @param toNodeId The target node ID
    * @param maxHops Maximum number of hops to search
+   * @param direction Which edges a path may follow: `Both` (the default) also walks an edge against its direction, so
+   *                  `alice -WORKS_FOR-> acme <-WORKS_FOR- bob` connects Alice and Bob (#2974)
    */
   case class FindPath(
     fromNodeId: String,
     toNodeId: String,
-    maxHops: Int = 5
+    maxHops: Int = 5,
+    direction: Direction = Direction.Both
   ) extends GraphQuery
 
   /**
@@ -84,11 +87,18 @@ object GraphQuery {
   /**
    * Execute multiple queries in sequence, feeding results forward.
    *
+   * A node id of the form `$N` (see [[GraphQuery.stepReference]]) in a later step stands for each node step `N`
+   * (1-based) found, so `find_nodes{name: Alice}` then `find_neighbors{node_id: "$1"}` runs on Alice's real id (#2973).
+   *
    * @param steps The ordered list of queries to execute
    */
   case class CompositeQuery(
     steps: Seq[GraphQuery]
   ) extends GraphQuery
+
+  /** The step a `$N` node id refers to (1-based), if it is one. */
+  def stepReference(nodeId: String): Option[Int] =
+    if (nodeId.length > 1 && nodeId.head == '$') nodeId.tail.toIntOption.filter(_ > 0) else None
 }
 
 /**
@@ -98,12 +108,15 @@ object GraphQuery {
  * @param edges The edges returned by the query (relationships between result nodes)
  * @param paths Ordered paths found (for path queries)
  * @param summary A human-readable summary of the result
+ * @param missingNodeIds Node ids the query named that are not in the graph: an unknown id, rather than a node with no
+ *                       neighbours (#2973)
  */
 case class GraphQueryResult(
   nodes: Seq[Node],
   edges: Seq[Edge],
   paths: Seq[List[Edge]] = Seq.empty,
-  summary: String = ""
+  summary: String = "",
+  missingNodeIds: Seq[String] = Seq.empty
 ) {
 
   /**
@@ -117,12 +130,13 @@ case class GraphQueryResult(
   def merge(other: GraphQueryResult): GraphQueryResult =
     GraphQueryResult(
       nodes = (nodes ++ other.nodes).distinctBy(_.id),
-      edges = (edges ++ other.edges).distinct,
+      edges = (edges ++ other.edges).distinctBy(e => (e.source, e.target, e.relationship)),
       paths = paths ++ other.paths,
       summary =
         if (summary.isEmpty) other.summary
         else if (other.summary.isEmpty) summary
-        else s"$summary\n${other.summary}"
+        else s"$summary\n${other.summary}",
+      missingNodeIds = (missingNodeIds ++ other.missingNodeIds).distinct
     )
 }
 

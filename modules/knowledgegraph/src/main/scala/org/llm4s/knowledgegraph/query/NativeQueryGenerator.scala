@@ -3,11 +3,7 @@ package org.llm4s.knowledgegraph.query
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
-import org.llm4s.util.BoundedJson
-
-import scala.util.Try
 
 /**
  * Supported native graph query languages.
@@ -113,8 +109,10 @@ class NativeQueryGenerator(llmClient: LLMClient) {
       val relStr = relType.map(r => s"via '$r' relationships").getOrElse("")
       s"Find $dirStr neighbors of node '$nodeId' $relStr within $maxDepth hops".trim
 
-    case GraphQuery.FindPath(from, to, maxHops) =>
-      s"Find paths from node '$from' to node '$to' within $maxHops hops"
+    case GraphQuery.FindPath(from, to, maxHops, direction) =>
+      val dirStr =
+        if (direction == org.llm4s.knowledgegraph.storage.Direction.Both) "following edges either way " else ""
+      s"Find paths from node '$from' to node '$to' ${dirStr}within $maxHops hops"
 
     case GraphQuery.DescribeNode(nodeId, includeNeighbors) =>
       val neighborsStr = if (includeNeighbors) "including neighbors" else ""
@@ -155,22 +153,12 @@ class NativeQueryGenerator(llmClient: LLMClient) {
   }
 
   private def parseResponse(jsonStr: String, language: QueryLanguage): Result[NativeQuery] = {
-    val cleaned = jsonStr.trim
-      .stripPrefix("```json")
-      .stripPrefix("```")
-      .stripSuffix("```")
-      .trim
-
-    // The reply is model output: a document nested more than 512 levels deep is refused before it
-    // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
+    // The JSON object may come fenced or with prose around it; a null or missing explanation is an empty one (#2973)
     val parsed = for {
-      json <- BoundedJson.read(cleaned)
-      query <- Try {
-        val queryString = json("query").str
-        val explanation = json.obj.get("explanation").map(_.str).getOrElse("")
-        NativeQuery(language = language, queryString = queryString, explanation = explanation)
-      }.toResult
-    } yield query
+      json        <- ModelJson.obj(jsonStr, "native query")
+      queryString <- ModelJson.string(json, "query", "native query")
+      explanation <- ModelJson.optString(json, "explanation", "native query")
+    } yield NativeQuery(language = language, queryString = queryString, explanation = explanation.getOrElse(""))
     parsed.left.map(e => ProcessingError("native_query_parse", s"Failed to parse native query response: ${e.message}"))
   }
 }

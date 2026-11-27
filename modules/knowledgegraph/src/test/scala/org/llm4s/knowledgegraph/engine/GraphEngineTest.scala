@@ -163,4 +163,57 @@ class GraphEngineTest extends AnyFunSuite with Matchers {
 
     nodesAtDist999 shouldBe empty
   }
+
+  // ─── #2974 ────────────────────────────────────────────────────────────────────────────────
+
+  test("traverseDFS finds every node within maxDepth, even one first reached the long way (#2974)") {
+    val ids = Seq("a", "b", "c", "d")
+    val g = Graph(
+      ids.map(id => id -> Node(id, "N")).toMap,
+      List(Edge("a", "b", "E"), Edge("a", "c", "E"), Edge("b", "c", "E"), Edge("c", "d", "E"))
+    )
+    val engine = new GraphEngine(g)
+    engine.traverseDFS("a", 2).map(_.id) shouldBe Set("a", "b", "c", "d")
+    engine.traverseDFS("a", 2) shouldBe engine.traverse("a", 2)
+  }
+
+  test("traversal and getNodesAtDistance give nothing for a negative depth (#2974)") {
+    val g      = Graph(Map("a" -> Node("a", "N"), "b" -> Node("b", "N")), List(Edge("a", "b", "E")))
+    val engine = new GraphEngine(g)
+    engine.getNodesAtDistance("a", -1) shouldBe empty
+    engine.traverse("a", -1) shouldBe empty
+    engine.traverseDFS("a", -1) shouldBe empty
+  }
+
+  test("traversal follows the given direction (#2974)") {
+    val g = Graph(
+      Map("a" -> Node("a", "N"), "b" -> Node("b", "N"), "c" -> Node("c", "N")),
+      List(Edge("b", "a", "E"), Edge("a", "c", "E"))
+    )
+    val engine = new GraphEngine(g)
+    engine.traverse("a", 1).map(_.id) shouldBe Set("a", "c")
+    engine.traverse("a", 1, direction = org.llm4s.knowledgegraph.storage.Direction.Incoming).map(_.id) shouldBe Set(
+      "a",
+      "b"
+    )
+    engine.traverse("a", 1, direction = org.llm4s.knowledgegraph.storage.Direction.Both).map(_.id) shouldBe
+      Set("a", "b", "c")
+  }
+
+  test("findShortestPaths returns every shortest path, capped, and none from a node to itself (#2974)") {
+    val g = Graph(
+      Seq("a", "b", "c", "z").map(id => id -> Node(id, "N")).toMap,
+      List(Edge("a", "b", "E"), Edge("a", "c", "E"), Edge("b", "z", "E"), Edge("c", "z", "E"), Edge("a", "z", "LONG"))
+    )
+    val engine = new GraphEngine(g)
+    engine.findShortestPaths("a", "z", 5) shouldBe List(List(Edge("a", "z", "LONG")))
+    val g2 = g.copy(edges = g.edges.filterNot(_.relationship == "LONG"))
+    new GraphEngine(g2).findShortestPaths("a", "z", 5).toSet shouldBe Set(
+      List(Edge("a", "b", "E"), Edge("b", "z", "E")),
+      List(Edge("a", "c", "E"), Edge("c", "z", "E"))
+    )
+    new GraphEngine(g2).findShortestPaths("a", "z", 5, maxPaths = 1) should have size 1
+    engine.findShortestPaths("a", "a", 5) shouldBe empty
+    engine.findAllPaths("a", "a", 5) shouldBe empty
+  }
 }
