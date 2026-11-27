@@ -386,7 +386,9 @@ final class PostgresMemoryStore private[memory] (
   override def get(id: MemoryId): Result[Option[Memory]] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
+        Using.resource(
+          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ?")
+        ) { stmt =>
           stmt.setString(1, id.value)
           Using.resource(stmt.executeQuery()) { rs =>
             if (rs.next()) {
@@ -412,7 +414,8 @@ final class PostgresMemoryStore private[memory] (
    * may look at it, so a filtered count or delete neither reads nor decodes a vector per row.
    */
   private def columnsFor(filter: MemoryFilter): String =
-    if (FilterSupport.readsEmbedding(filter)) "*" else PostgresMemoryStore.ColumnsWithoutEmbedding
+    if (FilterSupport.readsEmbedding(filter)) PostgresMemoryStore.AllColumns
+    else PostgresMemoryStore.ColumnsWithoutEmbedding
 
   /**
    * Run `sql` with `params` on `conn` and hand `read` its rows. With `stream`, the rows are fetched
@@ -447,13 +450,14 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
-            val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            val sql = s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC"
             runQuery(conn, sql, plan.params, stream = true) { rows =>
               PostgresMemoryStore.firstN(rows.map(rowToMemory(_)).filter(_.forall(filter.matches)), limit)
             }
           }
         else {
-          val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC LIMIT ?"
+          val sql =
+            s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC LIMIT ?"
           runQuery(conn, sql, plan.params :+ SqlParam.PInt(limit), stream = false) { rows =>
             PostgresMemoryStore.firstN(rows.map(rowToMemory(_)), Int.MaxValue)
           }
@@ -494,7 +498,7 @@ final class PostgresMemoryStore private[memory] (
       val vectorStr  = PostgresVectorHelpers.embeddingToString(queryVector)
       val sql =
         s"""
-           |SELECT *,
+           |SELECT ${PostgresMemoryStore.AllColumns},
            |       1 - (embedding <=> ?::vector) AS similarity
            |FROM $tableName
            |WHERE $conditions
@@ -535,7 +539,7 @@ final class PostgresMemoryStore private[memory] (
         val plan = PostgresMemoryStore.narrowing(filter)
         withConnection { conn =>
           inTransaction(conn) {
-            val sql = s"SELECT * FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            val sql = s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC"
             runQuery(conn, sql, plan.params, stream = true) { rows =>
               val memories = rows.map(rowToMemory(_))
               PostgresMemoryStore.topScored(
@@ -785,7 +789,9 @@ final class PostgresMemoryStore private[memory] (
   private def getVersioned(id: MemoryId): Result[Option[VersionedMemory]] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
+        Using.resource(
+          conn.prepareStatement(s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName WHERE id = ?")
+        ) { stmt =>
           stmt.setString(1, id.value)
           Using.resource(stmt.executeQuery()) { rs =>
             if (rs.next()) rowToMemory(rs).map(mem => Some(VersionedMemory(mem, rs.getLong("version"))))
@@ -821,7 +827,7 @@ final class PostgresMemoryStore private[memory] (
         id = MemoryId(rs.getString("id")),
         content = rs.getString("content"),
         memoryType = MemoryTypeCodec.decode(rs.getString("memory_type")),
-        metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata")),
+        metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata_text")),
         timestamp = rs.getTimestamp("created_at").toInstant,
         importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
         embedding = embedding
@@ -971,8 +977,19 @@ object PostgresMemoryStore {
   /** How many rows a streamed read fetches per round trip, so reading a large table to decide a filter never holds it. */
   private[memory] val FetchSize: Int = 500
 
+  /**
+   * The metadata as `rowToMemory` reads it: every value as the text `->>` gives for it (a JSON null as `null`), so a
+   * number, a boolean or a nested value an outside writer stored reads back as the very text a metadata filter compares
+   * in SQL - `{"count": 1.0}` is `count -> "1.0"`, which `ByMetadata("count", "1.0")` matches in SQL and in `matches`.
+   */
+  private val MetadataText =
+    "(SELECT jsonb_object_agg(key, COALESCE(value, 'null')) FROM jsonb_each_text(metadata)) AS metadata_text"
+
+  /** Every column `rowToMemory` reads. */
+  private[memory] val AllColumns = s"*, $MetadataText"
+
   /** Every column `rowToMemory` reads but the embedding. */
-  private val ColumnsWithoutEmbedding = "id, content, memory_type, metadata, created_at, importance"
+  private val ColumnsWithoutEmbedding = s"id, content, memory_type, $MetadataText, created_at, importance"
 
   /**
    * The narrowing of `filter`: SQL narrows, `matches` decides, as in every SQL-backed store (`FilterSupport`). The
@@ -998,19 +1015,20 @@ object PostgresMemoryStore {
       if (names.isEmpty) Some(FilterSupport.Sql("1 = 0", Seq.empty)) else Some(typeIn(names))
 
     case MemoryFilter.ByEntity(entityId) =>
-      Some(metadataPair(PString("entity_id"), entityId.value))
+      Some(metadataEquals("'entity_id'", Seq.empty, entityId.value))
 
     case MemoryFilter.ByConversation(conversationId) =>
-      // The literal key keeps the conversation index usable
+      // The first test is the conversation index's expression, so the index stays usable
       Some(
         FilterSupport.Sql(
-          "(metadata->>'conversation_id' = ? AND metadata->>'conversation_id' IS NOT NULL)",
-          Seq(PString(conversationId))
+          "((metadata->>'conversation_id' = ? AND metadata->>'conversation_id' IS NOT NULL) OR " +
+            "COALESCE(? = 'null' AND jsonb_typeof(metadata -> 'conversation_id') = 'null', FALSE))",
+          Seq(PString(conversationId), PString(conversationId))
         )
       )
 
     case MemoryFilter.ByMetadata(key, value) =>
-      Some(metadataPair(PString(key), value))
+      Some(metadataEquals("CAST(? AS text)", Seq(PString(key)), value))
 
     case MemoryFilter.HasMetadata(key) =>
       // `->` gives JSON null, not SQL NULL, for a key whose value is null: the key is there
@@ -1020,8 +1038,8 @@ object PostgresMemoryStore {
       // strpos is a literal, case-sensitive substring test; LIKE would read % and _ as wildcards
       Some(
         FilterSupport.Sql(
-          "COALESCE(strpos(metadata ->> CAST(? AS text), ?) > 0, FALSE)",
-          Seq(PString(key), PString(substring))
+          s"COALESCE(strpos(${metadataText("CAST(? AS text)")}, ?) > 0, FALSE)",
+          metadataTextParams(Seq(PString(key))) :+ PString(substring)
         )
       )
 
@@ -1055,11 +1073,24 @@ object PostgresMemoryStore {
       case _ => FilterSupport.Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names.map(PString(_)))
     }
 
-  /** The metadata holds `key` with the string `value`: a containment test the metadata's GIN index can answer. */
-  private def metadataPair(key: PString, value: String): FilterSupport.Sql =
+  /**
+   * The text of the metadata value at `key` (SQL for the key, a literal or `CAST(? AS text)`) as [[MetadataText]] reads
+   * it: what `->>` gives, and `null` for a JSON null; SQL NULL only when the key is absent. Its parameters, `keyParams`
+   * twice, are [[metadataTextParams]].
+   */
+  private def metadataText(key: String): String =
+    s"COALESCE(metadata ->> $key, CASE WHEN jsonb_typeof(metadata -> $key) = 'null' THEN 'null' END)"
+
+  private def metadataTextParams(keyParams: Seq[PString]): Seq[PString] = keyParams ++ keyParams
+
+  /**
+   * The metadata value at `key` reads as `value`. Compared as text, as `matches` compares what [[MetadataText]] read:
+   * a number or a boolean matches its text, not only a JSON string.
+   */
+  private def metadataEquals(key: String, keyParams: Seq[PString], value: String): FilterSupport.Sql =
     FilterSupport.Sql(
-      "(metadata IS NOT NULL AND metadata @> jsonb_build_object(CAST(? AS text), CAST(? AS text)))",
-      Seq(key, PString(value))
+      s"COALESCE(${metadataText(key)} = ?, FALSE)",
+      metadataTextParams(keyParams) :+ PString(value)
     )
 
   private def floorMicros(t: Instant): Instant = t.truncatedTo(ChronoUnit.MICROS)

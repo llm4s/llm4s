@@ -255,6 +255,52 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     store.get(MemoryId("racy")).map(_.map(_.content)) shouldBe Right(Some("keep me"))
   }
 
+  it should "filter metadata an outside writer stored as numbers, booleans and nulls as matches reads it" in
+    skipIfDisabled {
+      // Not written by the store, which writes strings: JSON numbers, booleans and null, as another writer may
+      def insert(id: String, metadata: String): Unit =
+        execute(
+          s"INSERT INTO $tableName (id, content, memory_type, metadata, created_at) " +
+            s"VALUES ('$id', 'typed $id', 'task', '$metadata'::jsonb, now())"
+        )
+      insert("num", """{"count": 3, "ratio": 1.0, "entity_id": 7, "conversation_id": 9}""")
+      insert("bool", """{"flag": true, "conversation_id": null}""")
+      insert("nul", """{"count": null}""")
+      insert("str", """{"count": "3", "flag": "false"}""")
+      insert("none", """{}""")
+
+      val all = store.recall(MemoryFilter.All, 10).fold(e => fail(e.message), identity)
+      all.find(_.id.value == "num").map(_.metadata) shouldBe
+        Some(Map("count" -> "3", "ratio" -> "1.0", "entity_id" -> "7", "conversation_id" -> "9"))
+
+      val filters = Seq(
+        MemoryFilter.ByMetadata("count", "3"),
+        MemoryFilter.ByMetadata("ratio", "1.0"),
+        MemoryFilter.ByMetadata("flag", "true"),
+        MemoryFilter.ByMetadata("count", "null"),
+        MemoryFilter.ByEntity(EntityId("7")),
+        MemoryFilter.ByConversation("9"),
+        MemoryFilter.ByConversation("null"),
+        MemoryFilter.MetadataContains("ratio", "."),
+        MemoryFilter.MetadataContains("flag", "ru"),
+        MemoryFilter.HasMetadata("count"),
+        MemoryFilter.HasMetadata("conversation_id")
+      )
+      (filters ++ filters.map(MemoryFilter.Not(_))).foreach { filter =>
+        val expected = all.filter(filter.matches).map(_.id.value).toSet
+        withClue(s"$filter: ") {
+          store.recall(filter, 10).map(_.map(_.id.value).toSet) shouldBe Right(expected)
+          store.count(filter) shouldBe Right(expected.size.toLong)
+        }
+      }
+      store.recall(MemoryFilter.ByMetadata("count", "3"), 10).map(_.map(_.id.value).toSet) shouldBe
+        Right(Set("num", "str"))
+
+      // A delete through Not removes exactly what the predicate accepts
+      store.deleteMatching(MemoryFilter.Not(MemoryFilter.ByMetadata("count", "3"))).isRight shouldBe true
+      store.recall(MemoryFilter.All, 10).map(_.map(_.id.value).toSet) shouldBe Right(Set("num", "str"))
+    }
+
   private def connection(): java.sql.Connection = {
     val ds = new org.postgresql.ds.PGSimpleDataSource()
     ds.setURL(dbConfig.jdbcUrl)

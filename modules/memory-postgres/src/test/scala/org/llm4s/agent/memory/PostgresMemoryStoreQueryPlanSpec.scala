@@ -133,14 +133,14 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
 
   private def row(id: String, content: String, memoryType: String = "task"): Map[String, Any] =
     Map(
-      "id"          -> id,
-      "content"     -> content,
-      "memory_type" -> memoryType,
-      "metadata"    -> "{}",
-      "created_at"  -> Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")),
-      "importance"  -> null,
-      "embedding"   -> null,
-      "similarity"  -> 0.5
+      "id"            -> id,
+      "content"       -> content,
+      "memory_type"   -> memoryType,
+      "metadata_text" -> "{}",
+      "created_at"    -> Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")),
+      "importance"    -> null,
+      "embedding"     -> null,
+      "similarity"    -> 0.5
     )
 
   private def store(ds: DataSource, service: Option[EmbeddingService] = None) =
@@ -212,7 +212,7 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     ds.autoCommitOff shouldBe 1
 
     store(ds).count(MemoryFilter.ContentContains("BETA")) shouldBe Right(1L)
-    ds.sent.last.sql should startWith("SELECT id, content, memory_type, metadata, created_at, importance FROM t")
+    ds.sent.last.sql should startWith("SELECT id, content, memory_type, (SELECT jsonb_object_agg(")
   }
 
   it should "count with COUNT(*) when the filter is exact" in {

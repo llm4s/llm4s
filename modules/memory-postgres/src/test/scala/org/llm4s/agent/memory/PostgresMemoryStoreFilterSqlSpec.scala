@@ -16,6 +16,10 @@ import java.time.Instant
  */
 class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
 
+  /** The text of the metadata value at a bound key, as the store compares it. */
+  private val KeyText =
+    "COALESCE(metadata ->> CAST(? AS text), CASE WHEN jsonb_typeof(metadata -> CAST(? AS text)) = 'null' THEN 'null' END)"
+
   private def narrowed(filter: MemoryFilter): (String, Seq[Any], Boolean) = {
     val plan = PostgresMemoryStore.narrowing(filter)
     (plan.sql.fold("")(_.clause), plan.params, plan.exact)
@@ -50,7 +54,7 @@ class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
     Seq("session_id", "user-id", "a.b", "x[0]", "say \"hi\"", "it's; DROP TABLE x; --").foreach { key =>
       val (sql, params, exact) = narrowed(MemoryFilter.ByMetadata(key, "v"))
       (sql should not).include(key)
-      params shouldBe Seq(PString(key), PString("v"))
+      params shouldBe Seq(PString(key), PString(key), PString("v"))
       exact shouldBe true
     }
   }
@@ -59,7 +63,11 @@ class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
     narrowed(MemoryFilter.HasMetadata("a.b")) shouldBe
       (("(metadata -> CAST(? AS text)) IS NOT NULL", Seq(PString("a.b")), true))
     narrowed(MemoryFilter.MetadataContains("tag", "50%")) shouldBe
-      (("COALESCE(strpos(metadata ->> CAST(? AS text), ?) > 0, FALSE)", Seq(PString("tag"), PString("50%")), true))
+      ((
+        s"COALESCE(strpos($KeyText, ?) > 0, FALSE)",
+        Seq(PString("tag"), PString("tag"), PString("50%")),
+        true
+      ))
     narrowed(MemoryFilter.ContentContains("100%", caseSensitive = true)) shouldBe
       (("strpos(content, ?) > 0", Seq(PString("100%")), true))
   }
@@ -79,14 +87,16 @@ class PostgresMemoryStoreFilterSqlSpec extends AnyFlatSpec with Matchers {
 
     narrowed(MemoryFilter.Not(MemoryFilter.ByEntity(EntityId("e1")))) shouldBe
       ((
-        "NOT ((metadata IS NOT NULL AND metadata @> jsonb_build_object(CAST(? AS text), CAST(? AS text))))",
-        Seq(PString("entity_id"), PString("e1")),
+        "NOT (COALESCE(COALESCE(metadata ->> 'entity_id', CASE WHEN jsonb_typeof(metadata -> 'entity_id') = 'null' " +
+          "THEN 'null' END) = ?, FALSE))",
+        Seq(PString("e1")),
         true
       ))
     narrowed(MemoryFilter.Not(MemoryFilter.ByConversation("c1"))) shouldBe
       ((
-        "NOT ((metadata->>'conversation_id' = ? AND metadata->>'conversation_id' IS NOT NULL))",
-        Seq(PString("c1")),
+        "NOT (((metadata->>'conversation_id' = ? AND metadata->>'conversation_id' IS NOT NULL) OR " +
+          "COALESCE(? = 'null' AND jsonb_typeof(metadata -> 'conversation_id') = 'null', FALSE)))",
+        Seq(PString("c1"), PString("c1")),
         true
       ))
   }
