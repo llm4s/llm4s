@@ -293,6 +293,22 @@ GraphRAG has no permission-filtered form yet: on a permission-aware `RAG`, answe
 `queryWithPermissionsAndAnswer`, or run a separate `GraphRAG` over a graph store that holds only what every caller
 of it may read.
 
+## GraphRAG no longer writes community nodes into your graph store (#2965)
+
+`llm4s-rag` is Beta, and no signature changed. `GraphRAG` only reads its `GraphStore` now. It used to write a
+`community:<id>` node labelled `Community` per community, with a `CONTAINS` edge to each member, during the first
+query, after deleting every node whose id started with `community:` or whose label was `Community`, so a query
+could delete your own `Community` nodes and their edges. Every other reader of the store (`GraphQAPipeline`,
+`GraphQueryExecutor`, `GraphQueryTool`) saw the synthetic nodes and edges. Communities and their summaries are now
+held by the `GraphRAG` instance, built once even when several first queries arrive together, and every node in the
+store is treated as your data, whatever its label or id.
+
+A store that an earlier version queried still holds those artefacts, and GraphRAG now reads them as ordinary nodes.
+Delete them once: the nodes whose id starts with `community:`, whose label is `Community` and which carry the
+`communityId`, `level`, `summary` and `edgeCount` properties GraphRAG wrote (`deleteNode` removes their edges).
+Summaries are recomputed per `GraphRAG` instance; storing them outside the graph is tracked in
+[#2981](https://github.com/llm4s/llm4s/issues/2981).
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.
