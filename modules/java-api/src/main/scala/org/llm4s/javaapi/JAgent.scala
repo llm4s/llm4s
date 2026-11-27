@@ -6,6 +6,7 @@ import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 import java.util.Objects
@@ -64,7 +65,11 @@ import java.util.concurrent.{ CompletableFuture, Executor }
 final class JAgent private[javaapi] (
   token: FacadeToken,
   underlying: Result[Agent],
-  asyncExecutor: Executor = FacadeAsync.virtualThreadPerCall
+  asyncExecutor: Executor,
+  // how long a stream's cancel waits for the turn to end: None, as the facade builds every agent, is the agent
+  // runtime's bound (5 seconds); tests of that bound give a short one. One constructor and no defaults, because a
+  // second constructor, or a default's getter, would be Java-visible
+  streamCancelWait: Option[FiniteDuration]
 ) {
 
   FacadeToken.check(token, "JAgent")
@@ -227,7 +232,12 @@ final class JAgent private[javaapi] (
    * @throws NullPointerException when `executor` is `null`
    */
   def withAsyncExecutor(executor: Executor): JAgent =
-    new JAgent(FacadeToken.INSTANCE, underlying, Objects.requireNonNull(executor, "executor must not be null"))
+    new JAgent(
+      FacadeToken.INSTANCE,
+      underlying,
+      Objects.requireNonNull(executor, "executor must not be null"),
+      streamCancelWait
+    )
 
   /** `answers` by interrupt id, the last answer to an id winning; or the first answer that is not one. */
   private def decoded(answers: java.util.List[Answer]): Result[Map[InterruptId, ujson.Value]] =
@@ -257,7 +267,7 @@ final class JAgent private[javaapi] (
       call("JAgent.stream") { agent =>
         val buffer = AgentEventBuffer(JAgent.BufferSize)
         start(agent, () => buffer.end(), buffer.listener)
-          .map(new AgentStream(FacadeToken.INSTANCE, _, buffer, listener))
+          .map(new AgentStream(FacadeToken.INSTANCE, _, buffer, listener, streamCancelWait))
       }
 
   /** [[call]] for a turn: its result as a [[JAgentResult]]. */

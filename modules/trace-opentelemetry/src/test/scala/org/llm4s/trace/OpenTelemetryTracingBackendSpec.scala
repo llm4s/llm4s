@@ -1,5 +1,8 @@
 package org.llm4s.trace
 
+import io.opentelemetry.sdk.common.CompletableResultCode
+import io.opentelemetry.sdk.trace.`export`.SpanExporter
+import io.opentelemetry.sdk.trace.data.SpanData
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
 import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId, UsageSummary, UserMessage }
@@ -12,7 +15,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * Proves this module registers itself for `TracingMode.Named("opentelemetry")` through
  * its services entry - the replacement for the `Class.forName` reflection core
  * used to load it (#1133). No collector is needed: the OTLP exporter connects
- * lazily and nothing here exports a span.
+ * lazily, the backend cases export no span, and the span-mapping cases export to
+ * an exporter that discards them.
  */
 class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with EitherValues:
 
@@ -66,7 +70,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
   "OpenTelemetryTracing" should {
 
     "map an ended agent run to an invoke_agent span" in {
-      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val tracing = inMemory()
       val usage   = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
       val event = TraceEvent.AgentRunEnded(
         "thread-1",
@@ -98,7 +102,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     }
 
     "carry a child run's parent ids on its invoke_agent span" in {
-      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val tracing = inMemory()
       val event = TraceEvent.AgentRunEnded(
         "parent/~task/researcher/abc",
         "child-run",
@@ -118,7 +122,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     }
 
     "map a tool execution to an execute_tool span" in {
-      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val tracing = inMemory()
       val (name, attributes) = tracing.mapEventToAttributes(
         TraceEvent.ToolExecuted(
           "search",
@@ -135,7 +139,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     }
 
     "map an agent's tool_executed event to an execute_tool span" in {
-      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val tracing = inMemory()
       val data = ujson.Obj(
         "threadId" -> "thread-1",
         "runId"    -> "run-1",
@@ -155,3 +159,12 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
   }
 
   private def key(name: String) = io.opentelemetry.api.common.AttributeKey.stringKey(name)
+
+  // The span mapping needs no collector: a tracing exporting over gRPC to a port with nothing listening waited
+  // out the exporter's retry backoff on close, seconds per case (#3216).
+  private def inMemory(): OpenTelemetryTracing = OpenTelemetryTracing.exportingTo("backend-spec", Discarding)
+
+  private object Discarding extends SpanExporter:
+    def `export`(batch: java.util.Collection[SpanData]): CompletableResultCode = CompletableResultCode.ofSuccess()
+    def flush(): CompletableResultCode                                         = CompletableResultCode.ofSuccess()
+    def shutdown(): CompletableResultCode                                      = CompletableResultCode.ofSuccess()

@@ -235,7 +235,8 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "fail every call of an agent that did not build" in {
-    val broken = new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")))
+    val broken =
+      new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")), FacadeAsync.virtualThreadPerCall, None)
     broken.resume("t", java.util.List.of()).getError().getMessage should include("broken")
     broken.recover("t").getError().getMessage should include("broken")
     broken.abandon("t").getError().getMessage should include("broken")

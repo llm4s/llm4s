@@ -240,7 +240,8 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read a long Basic token that holds escapes of '=' in a loop, on a small stack" in {
-    val input  = "Basic " + u("a~3d") * 50000
+    // 16 Ki escapes (114 Ki characters): far past where a recursion per escape overflows a 256 KB stack (#3215)
+    val input  = "Basic " + u("a~3d") * 16384
     var result = ""
     val thread = new Thread(null, () => result = Redaction.redact(input), "small-stack", 256 * 1024)
     thread.start()

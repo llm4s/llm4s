@@ -277,6 +277,13 @@ final class GraphRuntime(
   @volatile private[graph] var ticker: () => Long = () => System.nanoTime()
 
   /**
+   * The clock by which the runtime bounds its waits on a store or thread that may not return - a lost claim's end, a
+   * stalled closing wait, a heartbeat's stop, a busy child - [[WaitClock.system]]. A test replaces it to pass a bound
+   * without waiting it out. Separate from [[ticker]], so that passing a bound never moves a lease.
+   */
+  @volatile private[agent] var waitClock: WaitClock = WaitClock.system
+
+  /**
    * A test hook run by an Async committer that a lost claim abandoned, once it refuses every commit
    * not yet written and before it waits for one in flight; a no-op by default.
    */
@@ -1914,7 +1921,7 @@ final class GraphRuntime(
             }
             .flatMap { (claim, sentAt) =>
               var heartbeat = Option.empty[Heartbeat]
-              // when the claim was found lost, as a System.nanoTime value; set before `lossSignal` completes
+              // when the claim was found lost, as a [[waitClock]] value; set before `lossSignal` completes
               val lost = AtomicReference[Option[Long]](None)
               // the claim that replaced this one, when the loss named one; set before `lost`
               val lostTo     = AtomicReference[Option[FencingToken]](None)
@@ -1934,7 +1941,7 @@ final class GraphRuntime(
                 // that replaced this one if it named one; idempotent, keeping the first replacement named
                 def claimLost(current: Option[FencingToken]): Unit =
                   current.foreach(c => lostTo.compareAndSet(None, Some(c)): Unit)
-                  lost.compareAndSet(None, Some(System.nanoTime())): Unit
+                  lost.compareAndSet(None, Some(waitClock.now())): Unit
                   // fenced before the caller is woken, so no write begins once the loss is acted on
                   if gate.fence(GraphError.StaleClaim(threadId.value, claim.token, lostTo.get)) then
                     GraphRuntime.logger.warn(
@@ -2076,7 +2083,7 @@ final class GraphRuntime(
 
   /**
    * Runs `work` on a virtual thread named `name` and waits for it: for as long as it takes while the claim
-   * holds, but once it is found lost - `lostAt`, a `System.nanoTime` value set before `lossSignal` is
+   * holds, but once it is found lost - `lostAt`, a [[waitClock]] value set before `lossSignal` is
    * completed - only until [[lossBound]] after the loss. Past that `work` is given up, and `givenUp`'s value
    * returned without it, so that a store hung on `work`'s next call cannot hold the caller, or the thread,
    * past the bound. `givenUp` runs on the caller's thread, before it is returned, and must not call the
@@ -2114,7 +2121,7 @@ final class GraphRuntime(
           case None =>
             DefaultRunHandle.guarded(java.util.concurrent.CompletableFuture.anyOf(attempt, lossSignal).get())
           case Some(at) =>
-            val remaining = at + lossBound - System.nanoTime()
+            val remaining = waitClock.remaining(at + lossBound, WaitClock.Bound.Loss)
             if remaining <= 0 then
               attempt.complete(Right(givenUp()) -> false): Unit
               Right(())
@@ -2154,7 +2161,7 @@ final class GraphRuntime(
   /**
    * Stops `heartbeat` and gives back the claim whose token is `token`.
    *
-   * A claim found lost - `lostAt` is when, as a `System.nanoTime` value, read before and again after the
+   * A claim found lost - `lostAt` is when, as a [[waitClock]] value, read before and again after the
    * heartbeat stops - is given back on a detached thread ([[releaseDetached]]) without joining the
    * heartbeat, whose renewal may be stuck in the store: waited for only until [[lossBound]] after the
    * loss, so that a healthy store still frees the thread at once and a hung one never holds the end past
@@ -2174,45 +2181,47 @@ final class GraphRuntime(
     lostAt: => Option[Long],
     detach: Boolean = false
   ): Unit =
-    def untilBound(at: Long): Long = math.max(0L, at + lossBound - System.nanoTime())
     lostAt match
       case Some(at) =>
         heartbeat.foreach(_.halt())
-        releaseDetached(threadId, token, untilBound(at))
+        releaseDetached(threadId, token, Some(at + lossBound))
       // a run whose closing commit is stuck in the store: neither its renewal nor its release is waited for
       case None if detach =>
         heartbeat.foreach(_.halt())
-        releaseDetached(threadId, token, 0L)
+        releaseDetached(threadId, token, None)
       case None =>
         val joined = heartbeat.forall(_.stop())
         lostAt match
-          case Some(at)       => releaseDetached(threadId, token, if joined then untilBound(at) else 0L)
+          case Some(at)       => releaseDetached(threadId, token, Option.when(joined)(at + lossBound))
           case None if joined => releaseClaim(threadId, token)
-          case None           => releaseDetached(threadId, token, 0L)
+          case None           => releaseDetached(threadId, token, None)
 
   /**
    * Gives back the claim whose token is `token` on a detached virtual thread, `llm4s-release-<threadId>`,
-   * waiting for it at most `wait`: for a run whose end must not depend on the store answering - it lost
-   * its claim, or a renewal of it could not be joined. Best effort: a release that never lands leaves
+   * waiting for it until `until` (a [[waitClock]] value), or not at all without one: for a run whose end
+   * must not depend on the store answering - it lost its claim, or a renewal of it could not be joined.
+   * Best effort: a release that never lands leaves
    * the claim to lapse after `claims.ttl`. A release is by token, so one that lands late cannot release
    * a claim another run has taken since. Never throws, and keeps the caller's interrupt flag.
    */
-  private def releaseDetached(threadId: ThreadId, token: FencingToken, wait: Long): Unit =
+  private def releaseDetached(threadId: ThreadId, token: FencingToken, until: Option[Long]): Unit =
     val releaser =
       Thread.ofVirtual().name(s"llm4s-release-${threadId.value}").start(() => releasing(threadId, token))
-    if joinWithin(releaser, System.nanoTime() + wait, Thread.interrupted()) then Thread.currentThread().interrupt()
+    val deadline = until.getOrElse(waitClock.now())
+    if joinWithin(releaser, deadline, WaitClock.Bound.Release, Thread.interrupted()) then
+      Thread.currentThread().interrupt()
 
   /**
-   * Joins `t` until `deadline` (a `System.nanoTime` value), even if interrupted; whether an interrupt
-   * arrived, counting `interrupted`.
+   * Joins `t` until `deadline` (a [[waitClock]] value), even if interrupted; whether an interrupt
+   * arrived, counting `interrupted`. `bound` is what the wait is for.
    */
-  @tailrec private def joinWithin(t: Thread, deadline: Long, interrupted: Boolean): Boolean =
-    val remaining = deadline - System.nanoTime()
+  @tailrec private def joinWithin(t: Thread, deadline: Long, bound: WaitClock.Bound, interrupted: Boolean): Boolean =
+    val remaining = waitClock.remaining(deadline, bound)
     if remaining <= 0 || !t.isAlive then interrupted
     else
       CancelledError.catchInterrupt(t.join(java.time.Duration.ofNanos(remaining))) match
-        case Right(_) => joinWithin(t, deadline, interrupted)
-        case Left(_)  => joinWithin(t, deadline, interrupted = true)
+        case Right(_) => joinWithin(t, deadline, bound, interrupted)
+        case Left(_)  => joinWithin(t, deadline, bound, interrupted = true)
 
   /**
    * Forgets the hub's hand-over mark for `threadId` unless the thread is still in use in this runtime:
@@ -2337,7 +2346,7 @@ final class GraphRuntime(
                 // twice `claims.ttl` after the loss, it is settled without it, as ClaimLost
                 run.stopper = () =>
                   handle.stop(StopCause.ClaimLost)
-                  handle.endWithin(run.lossDeadline, () => run.endedWithoutRunThread(), () => releaseBoth())
+                  handle.endWithin(run.lossDeadline, () => run.endedWithoutRunThread(), () => releaseBoth(), waitClock)
                 // while the claim holds, a closing wait stuck on the store is bounded too (#1919), through the
                 // same settling as the loss watchdog: whichever comes first ends the run
                 run.closing = () =>
@@ -2346,7 +2355,8 @@ final class GraphRuntime(
                     () => run.stalledSince,
                     closeBound,
                     () => run.closedWithoutRunThread(),
-                    () => releaseBoth()
+                    () => releaseBoth(),
+                    waitClock
                   )
                 run.abandonedWrites = Some(abandoned)
                 handle.launch(() => run.execute(), run.crashed, () => releaseBoth(), run.deadline)
@@ -2564,10 +2574,10 @@ final class GraphRuntime(
     private var orphanCounted = 0
 
     /**
-     * When a commit last began or returned, as a `System.nanoTime` value; under `gate`. With one in flight, how long
+     * When a commit last began or returned, as a [[waitClock]] value; under `gate`. With one in flight, how long
      * the committer has made no progress: what bounds a run's closing wait ([[stalledSince]]).
      */
-    private var progressAt = System.nanoTime()
+    private var progressAt = waitClock.now()
 
     /**
      * When the committer last made progress - a commit began or returned - if a commit is in flight now; `None`
@@ -2606,7 +2616,7 @@ final class GraphRuntime(
       val fence = withLock(gate) {
         if fencedBy.isEmpty then
           inFlight += 1
-          progressAt = System.nanoTime()
+          progressAt = waitClock.now()
         fencedBy
       }
       fence match
@@ -2616,7 +2626,7 @@ final class GraphRuntime(
             def close(): Unit =
               val orphaned = withLock(gate) {
                 inFlight -= 1
-                progressAt = System.nanoTime()
+                progressAt = waitClock.now()
                 val counted = orphanCounted > 0
                 if counted then orphanCounted -= 1
                 counted
@@ -2767,14 +2777,15 @@ final class GraphRuntime(
       orphan()
       abandoning(threadId)
       writer.shutdown()
-      val deadline = System.nanoTime() + claims.ttl.toNanos
+      val deadline = waitClock.now() + claims.ttl.toNanos
       @tailrec def await(interrupted: Boolean): Boolean =
-        val remaining = deadline - System.nanoTime()
+        val remaining = waitClock.remaining(deadline, WaitClock.Bound.Drain)
         if remaining <= 0 then interrupted
         else
           CancelledError.catchInterrupt(writer.awaitTermination(remaining, TimeUnit.NANOSECONDS)) match
-            case Right(_) => interrupted
-            case Left(_)  => await(interrupted = true)
+            case Right(true) => interrupted
+            case Right(_)    => await(interrupted)
+            case Left(_)     => await(interrupted = true)
       if await(Thread.interrupted()) then Thread.currentThread().interrupt()
       !writer.isTerminated
 
@@ -2988,11 +2999,11 @@ final class GraphRuntime(
     def stop(): Boolean =
       withLock(lock) { over = true }
       stopped.countDown()
-      val deadline = System.nanoTime() + claims.ttl.toNanos
+      val deadline = waitClock.now() + claims.ttl.toNanos
       // the beat first, so that no renewal starts after the one read below
-      val interrupted = joinWithin(beat, deadline, Thread.interrupted())
+      val interrupted = joinWithin(beat, deadline, WaitClock.Bound.Stop, Thread.interrupted())
       if renewal.get.exists(_.isAlive) then joiningRenewal(threadId)
-      val all = renewal.get.fold(interrupted)(joinWithin(_, deadline, interrupted))
+      val all = renewal.get.fold(interrupted)(joinWithin(_, deadline, WaitClock.Bound.Stop, interrupted))
       if all then Thread.currentThread().interrupt()
       !beat.isAlive && renewal.get.forall(!_.isAlive)
 
@@ -3273,23 +3284,23 @@ final class GraphRuntime(
       RunEvent.RunFailed(RunFailedDetails(message, lostUsage, failedSteps.get))
 
     /**
-     * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
+     * When the claim was found lost, at any stage of the run, as a [[waitClock]] value; set once. The
      * run's end is bounded from it: see [[lossDeadline]].
      */
     private val lostAt = AtomicReference[Option[Long]](None)
 
     /** Records that the claim is lost, now, unless it was recorded already. */
-    private def markLost(): Unit = lostAt.compareAndSet(None, Some(System.nanoTime())): Unit
+    private def markLost(): Unit = lostAt.compareAndSet(None, Some(waitClock.now())): Unit
 
     /** Whether the claim has been found lost. */
     def claimWasLost: Boolean = lostAt.get.isDefined
 
     /**
-     * When a run whose claim was found lost must have ended, as a `System.nanoTime` value: twice
+     * When a run whose claim was found lost must have ended, as a [[waitClock]] value: twice
      * `claims.ttl` after the loss. By then its admission has returned, its result is set, and its local
      * slot is free, whatever the store is doing.
      */
-    def lossDeadline: Long = lostAt.get.getOrElse(System.nanoTime()) + lossBound
+    def lossDeadline: Long = lostAt.get.getOrElse(waitClock.now()) + lossBound
 
     /** Completed once the claim is found lost; an admission waiting on its claim's commit wakes on it. */
     private val lossSignal = new java.util.concurrent.CompletableFuture[Unit]()

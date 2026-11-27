@@ -566,6 +566,10 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val claims = ClaimPolicy(ttl = 1.second, renewEvery = 100.millis)
     val here   = new GraphRuntime(open(), claims = claims)
     here.ticker = () => 0L
+    // and the wait on the busy child passes its bound as soon as it waits on it, rather than after 2 s of wall-clock
+    // time (#3214); the clock records how long the wait had left, so the bound it would have waited is still checked.
+    // DelegationSpec waits a short bound out on the wall clock.
+    val busyWait = PassingWaitClock.on(here, WaitClock.Bound.Busy)
     family(here, setup)._1.run(thread, "go").isLeft shouldBe true
     val childId = onlyChild(here, thread).threadId
 
@@ -576,10 +580,10 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val held = elsewhere.recoverChild(childId, family(elsewhere, setup)._2.loop.graph, RunConfig()).ok
     entered.await(10, TimeUnit.SECONDS) shouldBe true
 
-    val began = System.nanoTime()
     family(here, setup)._1.recover(thread).isLeft shouldBe true
-    // waited twice the claim's life, less a little for the clock's granularity
-    (System.nanoTime() - began).nanos should be >= (claims.ttl * 2 - 100.millis)
+    // its wait was bounded at twice the claim's life, less what the first read of the busy child took
+    busyWait.skipped(WaitClock.Bound.Busy).getOrElse(Duration.Zero) should be >= (claims.ttl * 2 - 100.millis)
+    busyWait.skipped(WaitClock.Bound.Busy).getOrElse(Duration.Zero) should be <= claims.ttl * 2
     setup.allEnds.last.left.toOption.get shouldBe a[GraphError.ThreadBusy]
 
     release.countDown()

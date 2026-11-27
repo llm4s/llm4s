@@ -31,7 +31,7 @@ cites_issues: [2804, 2805, 2809]
 - Rule type: syntactic regex (no SemanticDB required; currently run on the Scala 3.7.1 build).
 
 ## Running Scalafix
-- Compile-time enforcement: enabled in CI only (`scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean`).
+- Enforcement: Quick Checks runs `sbt "scalafixAll --check"`, and the pre-commit hook runs `scalafixAll`. Scalafix does not run on compile (`scalafixOnCompile := false`), locally or in CI.
 - Manual run:
   - `sbt scalafixAll` to lint every module.
   - `sbt core/scalafix` to lint just core main sources.

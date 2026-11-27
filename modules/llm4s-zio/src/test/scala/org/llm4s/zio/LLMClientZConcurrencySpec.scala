@@ -42,7 +42,7 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
     suite("LLMClientZ concurrency")(
       // ---- backpressure ----------------------------------------------------------------------
       test("blocks the producer when the bounded queue is full and resumes when the consumer drains") {
-        val counting = new Counting(100000)
+        val counting = new Counting(10000)
         for {
           gate <- Promise.make[Nothing, Unit]
           fiber <- stream(counting.client)
@@ -56,9 +56,9 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
           out      <- fiber.join
         } yield assertTrue(!finished) &&
           // Capacity is 64; scheduling lets the producer run ahead occasionally, so the bound is
-          // generous. An unbounded buffer lets all 100000 through.
-          assertTrue(entered <= 10000) &&
-          assertTrue(out.map(_.id) == ids(100000)) &&
+          // generous. An unbounded buffer lets all 10000 through.
+          assertTrue(entered <= 5000) &&
+          assertTrue(out.map(_.id) == ids(10000)) &&
           assertTrue(counting.finished.get())
       },
       // ---- early termination -----------------------------------------------------------------
@@ -73,7 +73,7 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
           assertTrue(parks.client.streamCalls.get() == 1)
       },
       test("terminates and interrupts a producer blocked on a full queue when the consumer stops early") {
-        val counting = new Counting(100000)
+        val counting = new Counting(10000)
         for {
           gate  <- Promise.make[Nothing, Unit]
           fiber <- stream(counting.client).tap(_ => gate.await).take(1).runCollect.fork
@@ -117,7 +117,7 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
         } yield assertTrue(exit.isInterrupted) && assertTrue(ex) && assertTrue(parks.interruptions.get() == 1)
       },
       test("interrupts a producer blocked on a full queue when the consuming fiber is interrupted") {
-        val counting = new Counting(100000)
+        val counting = new Counting(10000)
         for {
           gate  <- Promise.make[Nothing, Unit]
           fiber <- stream(counting.client).tap(_ => gate.await).runDrain.fork

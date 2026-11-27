@@ -28,6 +28,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
+import org.llm4s.util.DurationText
 import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
@@ -37,6 +38,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.*
 
 /**
  * The checks every provider module's `Llm4s<Name>ModuleSpec` makes, as assertions.
@@ -363,7 +365,8 @@ trait ProviderModuleChecks extends Assertions:
   /**
    * Any client call that returns a `Result` honours interruption: `call` runs on a virtual thread
    * (as the agent runtime runs calls) against a server that never answers, is interrupted, and
-   * returns `Left(CancelledError)` within 10 seconds with the thread's interrupt flag still set.
+   * returns `Left(CancelledError)` within [[interruptionWait]] (10 seconds) with the thread's interrupt
+   * flag still set.
    *
    * For a call the specific checks do not cover - a reranker, a speech or image client, an MCP
    * client. Point the client at [[LocalProviderTestServer.holdOpen]].
@@ -400,13 +403,20 @@ trait ProviderModuleChecks extends Assertions:
     interrupted("streamComplete") {
       client.streamComplete(Conversation(Seq(UserMessage("Hello"))))(_ => firstChunk.countDown())
     } {
-      if !firstChunk.await(10, TimeUnit.SECONDS) then
+      if !firstChunk.await(interruptionWait.toMillis, TimeUnit.MILLISECONDS) then
         failAt("streamComplete delivered no chunk before the server stalled")
     }
 
   /**
+   * How long the interruption checks wait before they fail: for [[assertCancelsStreamWhenInterrupted]]'s
+   * first chunk, and for an interrupted call to return. 10 seconds, generous for a loaded build machine;
+   * a spec may override it to fail a misbehaving client sooner, as the testkit's own specs do.
+   */
+  protected def interruptionWait: FiniteDuration = 10.seconds
+
+  /**
    * Runs `call` on a virtual thread, waits with `ready`, interrupts it, and checks it returns
-   * `Left(CancelledError)` within 10 seconds with its interrupt flag set.
+   * `Left(CancelledError)` within [[interruptionWait]] with its interrupt flag set.
    */
   private def interrupted(what: String)(call: => Result[?])(ready: => Unit)(using pos: Position): Assertion =
     @volatile var outcome: Option[(Result[?], Boolean)] = None
@@ -417,8 +427,9 @@ trait ProviderModuleChecks extends Assertions:
     ready
     Thread.sleep(100) // let the call block on the socket; any earlier interrupt must also cancel
     worker.interrupt()
-    worker.join(10_000)
-    if worker.isAlive then failAt(s"$what was still running 10 seconds after its thread was interrupted")
+    worker.join(interruptionWait.toMillis)
+    if worker.isAlive then
+      failAt(s"$what was still running ${DurationText(interruptionWait)} after its thread was interrupted")
     outcome match
       case Some((Left(_: CancelledError), true)) => succeed
       case Some((Left(_: CancelledError), false)) =>

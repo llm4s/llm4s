@@ -103,8 +103,8 @@ jobs:
               scripts/retry-on-transient-network.sh sbt "$prop" "${target%/test}/update" < /dev/null
             done
 
-      # scalafmt and scalafix fetch their own tools through Coursier the first time they run (CI sets
-      # scalafixOnCompile, so every compile runs scalafix). Running the checks once fetches them. A formatting or lint
+      # scalafmt and scalafix fetch their own tools through Coursier the first time they run (Quick Checks runs both).
+      # Running the checks once fetches them. A formatting or lint
       # failure here is the code's, not the cache's, and quick checks reports it, so it does not stop the save.
       - name: Fetch scalafmt and scalafix
         continue-on-error: true

@@ -3,8 +3,8 @@ package org.llm4s.vectorstore.elasticsearch
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
 import org.llm4s.security.Secret
-import org.llm4s.vectorstore.{ MetadataFilter, VectorRecord }
-import org.scalatest.BeforeAndAfterEach
+import org.llm4s.vectorstore.{ FastRefreshIndexTemplate, MetadataFilter, VectorRecord }
+import org.scalatest.{ BeforeAndAfterAll, BeforeAndAfterEach }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -22,26 +22,32 @@ import org.scalatest.wordspec.AnyWordSpec
  * For a secured cluster set `ELASTICSEARCH_TEST_API_KEY` (an encoded API key) as well.
  */
 @Docker
-class ElasticsearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach {
+class ElasticsearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach with BeforeAndAfterAll {
 
   private val testUrl = sys.env.get("ELASTICSEARCH_TEST_URL")
   private val apiKey  = sys.env.get("ELASTICSEARCH_TEST_API_KEY").filter(_.nonEmpty)
+  private val auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(k => ElasticsearchAuth.ApiKey(Secret(k)))
+
+  private val template = "llm4s-it-vector-store-spec"
 
   private var store: ElasticsearchVectorStore = scala.compiletime.uninitialized
 
+  // The test indices refresh every 100 ms, not every second, so a write's `refresh=wait_for` returns sooner (#3216)
+  override def beforeAll(): Unit =
+    testUrl.foreach(FastRefreshIndexTemplate.install(_, template, "llm4s-it-*", auth.headers))
+
+  override def afterAll(): Unit =
+    testUrl.foreach(FastRefreshIndexTemplate.remove(_, template, auth.headers))
+
   override def beforeEach(): Unit =
     testUrl.foreach { url =>
-      val config = ElasticsearchConfig(
-        baseUrl = url,
-        index = s"llm4s-it-${System.nanoTime()}",
-        auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(k => ElasticsearchAuth.ApiKey(Secret(k)))
-      )
+      val config = ElasticsearchConfig(baseUrl = url, index = s"llm4s-it-${System.nanoTime()}", auth = auth)
       store = ElasticsearchVectorStore(config).fold(e => fail(s"Failed to create store: ${e.formatted}"), identity)
     }
 
   override def afterEach(): Unit =
     if (store != null) {
-      store.clear()
+      store.clear() // deletes the test's index
       store.close()
       store = null
     }

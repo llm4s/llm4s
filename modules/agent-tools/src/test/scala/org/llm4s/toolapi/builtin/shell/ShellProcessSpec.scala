@@ -145,7 +145,13 @@ class ShellProcessSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     val parentPid = workDir.resolve("timeout-parent.pid")
     val childPid  = workDir.resolve("timeout-child.pid")
 
-    val outcome = ShellProcess.run(child("parent", parentPid.toString, childPid.toString), 8.seconds, 10000)
+    // the command times out as soon as both processes are up, rather than after a fixed wait long enough for two
+    // JVMs to start: the timeout path is the same, and the tree it kills is the whole one
+    val outcome = ShellProcess.runUntil(child("parent", parentPid.toString, childPid.toString), 10000) { _ =>
+      awaitPid(parentPid)
+      awaitPid(childPid)
+      false
+    }
 
     outcome match {
       case f: ShellProcess.Finished =>
