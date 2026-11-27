@@ -515,6 +515,8 @@ lazy val llm4s = (project in file("."))
     // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
     // scripts/check-doc-support.sh. See project/BuildModel.scala.
     commands += BuildModel.dumpCommand,
+    // `generateCiGraph` writes .github/ci-graph.json, the project graph CI selects tests from (#3184).
+    commands += CiGraph.command,
     // `sbt testPlatform`: only the tests that exercise platform-specific behaviour, for CI's Windows job.
     // See project/PlatformTests.scala.
     PlatformTests.settings(PerformanceTestTag),
