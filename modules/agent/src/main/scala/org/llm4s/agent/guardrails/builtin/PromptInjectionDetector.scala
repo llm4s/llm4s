@@ -3,6 +3,7 @@ package org.llm4s.agent.guardrails.builtin
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
+import org.llm4s.security.RegexSafetyManager
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -109,13 +110,19 @@ class PromptInjectionDetector(
   def validate(value: String): Result[String] = {
     val normalizedInput = MatchText.folded(value)
 
-    // Find all matching patterns
+    // Find all matching patterns. Each match is step-bounded (#3233): a pattern whose match exhausts its budget, a
+    // custom pattern that backtracks, counts as a match, so the input is never let through unscanned.
+    val budget = PromptInjectionDetector.stepBudget(normalizedInput.length)
     val matches = patterns.flatMap { pattern =>
-      if (pattern.regex.findFirstIn(normalizedInput).isDefined && pattern.severity >= sensitivity.threshold) {
-        Some(InjectionMatch(pattern.name, pattern.category, pattern.severity))
-      } else {
-        None
-      }
+      if (pattern.severity < sensitivity.threshold) None
+      else
+        RegexSafetyManager.boundedFind(pattern.regex.pattern, normalizedInput, budget) match {
+          case Right(false) => None
+          case Right(true)  => Some(InjectionMatch(pattern.name, pattern.category, pattern.severity))
+          case Left(_) =>
+            logger.warn(s"$name: pattern ${pattern.name} exceeded its matching budget; treating the input as a match")
+            Some(InjectionMatch(pattern.name, pattern.category, pattern.severity))
+        }
     }
 
     if (matches.isEmpty) {
@@ -290,19 +297,19 @@ object InjectionPattern {
   private val instructionOverridePatterns = Seq(
     InjectionPattern(
       "ignore_instructions",
-      """ignore\s+(all\s+)?(previous|prior|above|your)?\s*(instructions?|rules?|guidelines?|prompts?)""".r,
+      """ignore\s++(all\s++)?(previous|prior|above|your)?\s*+(instructions?|rules?|guidelines?|prompts?)""".r,
       InstructionOverride,
       3
     ),
     InjectionPattern(
       "forget_instructions",
-      """forget\s+(all\s+)?(previous|prior|your)?\s*(instructions?|rules?|training)""".r,
+      """forget\s++(all\s++)?(previous|prior|your)?\s*+(instructions?|rules?|training)""".r,
       InstructionOverride,
       3
     ),
     InjectionPattern(
       "disregard",
-      """disregard\s+(all\s+)?(previous|prior|your|the)?\s*(instructions?|rules?)""".r,
+      """disregard\s++(all\s++)?(previous|prior|your|the)?\s*+(instructions?|rules?)""".r,
       InstructionOverride,
       3
     ),
@@ -418,13 +425,15 @@ object InjectionPattern {
     ),
     InjectionPattern(
       "creative_writing",
-      """(write|create)\s+(a\s+)?(story|fiction|essay)\s+(about|where).*(bomb|weapon|drug|hack)""".r,
+      ("""(?m)^(?>.*?(?:write|create)\s++(?:a\s++)?(?:story|fiction|essay)\s++(?:about|where))""" +
+        """.*?(?:bomb|weapon|drug|hack)""").r,
       Jailbreak,
       3
     ),
     InjectionPattern(
       "how_to_dangerous",
-      """(write|create|tell).*(how\s+to|making|creating).*(bomb|weapon|explosive|malware)""".r,
+      ("""(?m)^(?>.*?(?:write|create|tell))(?>.*?(?:how\s++to|making|creating))""" +
+        """.*?(?:bomb|weapon|explosive|malware)""").r,
       Jailbreak,
       3
     ),
@@ -446,7 +455,7 @@ object InjectionPattern {
   private val codeInjectionPatterns = Seq(
     InjectionPattern(
       "sql_injection",
-      """(['"]?\s*;\s*(drop|delete|truncate|update|insert)\s+)|(union\s+select)|(--\s*$)""".r,
+      """;\s*+(?:drop|delete|truncate|update|insert)\s|union\s++select|--\s*+$""".r,
       CodeInjection,
       3
     ),
@@ -458,7 +467,7 @@ object InjectionPattern {
     ),
     InjectionPattern(
       "script_tags",
-      """<script[^>]*>|</script>|javascript:|on\w+\s*=""".r,
+      """\A(?>(?s:.*?)<script)[^>]*+>|</script>|javascript:|\bon\w++\s*+=""".r,
       CodeInjection,
       2
     )
@@ -512,6 +521,13 @@ object InjectionPattern {
 
 @Experimental
 object PromptInjectionDetector {
+
+  /**
+   * The character reads one pattern's match may take on an input of `length` characters (#3233): ten million, plus
+   * 100 per character. The default patterns are linear and read each character a few times; a pattern that backtracks
+   * exhausts the budget on a long input, and the detector then counts it as a match rather than hang admission.
+   */
+  private[builtin] def stepBudget(length: Int): Long = 10000000L + 100L * length
 
   /**
    * Create a detector with default settings (high sensitivity, block mode).

@@ -826,6 +826,7 @@ signature. No signature changed and the stored format is the same; what changed 
 | Before (1.0.0) | After |
 |---|---|
 | `CompositeGuardrail.all` ran every guardrail on the original value and returned it, so a masking guardrail inside it masked nothing (#3232) | Each guardrail sees the value as the one before it rewrote it, and `all` returns the last rewrite. A failing guardrail leaves the value unchanged for the next, and every failure is still reported |
+| `PromptInjectionDetector`'s `how_to_dangerous`, `creative_writing`, `ignore_instructions`, `forget_instructions`, `disregard`, `sql_injection` and `script_tags` patterns could take cubic or quadratic time on crafted input, at admission (#3233) | They match in linear time, and every pattern's match is step-bounded: one that exhausts its budget (ten million reads plus 100 per character) counts as a match, under the detector's `onFail`. `script_tags` matches an event-handler attribute only at the start of a word (`onclick=`, not `money=`) |
 
 ## An error's `provider` is a `ProviderId` (#2936)
 

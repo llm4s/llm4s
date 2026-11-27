@@ -699,6 +699,11 @@ val forStories: Result[PromptInjectionDetector] =
     .map(_.withSensitivity(InjectionSensitivity.Medium))
 ```
 
+The detector runs at admission, on the caller's thread and before any run budget applies, so every default pattern
+matches in time linear in the input, and every match - a custom pattern's too - is bounded: a pattern that needs more
+than ten million character reads plus 100 per input character counts as a match, so an input is never let through
+unscanned (#3233). A custom `InjectionPattern` should avoid unbounded gaps (`a.*b.*c`) for the same reason.
+
 ---
 
 ## Error Handling
