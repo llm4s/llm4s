@@ -402,25 +402,30 @@ final class SqliteCheckpointer private (
    * `protectedRuns` committed. Events go first, then checkpoints, so the floor a prune works towards can always be
    * worked out again from the file - the checkpoints it drops are still there until the events are gone (#3086): a
    * step raises the events' floor towards it by at most `limit` events, and once it is reached removes at most
-   * `limit` of the checkpoints the policy drops, oldest first. `floor`, a target an earlier step of the same call
-   * worked out, saves decoding the event log again while events remain. With `limit` `Int.MaxValue` one step is the
-   * whole prune, as [[prune]] runs it.
+   * `limit` of the checkpoints the policy drops, oldest first. `carried`, the plan an earlier step of the same call
+   * worked out, saves reading the history and decoding the event log again: the thread is planned once per call, and
+   * a later call plans it again from the file. With `limit` `Int.MaxValue` one step is the whole prune, as [[prune]]
+   * runs it.
    */
   private def pruneStep(
     c: Connection,
     threadId: ThreadId,
     policy: RetentionPolicy,
     protectedRuns: Set[RunId],
-    floor: Option[Long],
+    carried: Option[RetentionSweep.PrunePlan],
     limit: Int
-  ): Result[RetentionSweep.Step] =
+  ): Result[RetentionSweep.Step[RetentionSweep.PrunePlan]] =
     readRow(c, threadId) match
       case None => Right(RetentionSweep.Step.Done)
       case Some(current) =>
-        val planned: Result[(Option[Vector[Long]], Long)] = floor match
-          case Some(f) => Right((None, f))
-          case None    => plan(c, threadId, current, policy, protectedRuns).map((d, f) => (Some(d), f))
-        planned.map { (dropped, target) =>
+        val planning: Result[RetentionSweep.PrunePlan] = carried.filter(_.firstSeq == current.firstSeq) match
+          case Some(p) => Right(p)
+          case None =>
+            plan(c, threadId, current, policy, protectedRuns).map((d, f) =>
+              RetentionSweep.PrunePlan(current.firstSeq, f, d)
+            )
+        planning.map { planned =>
+          val target = planned.floor
           val eventsDone =
             current.earliestSeq >= target || {
               val nth =
@@ -439,21 +444,33 @@ final class SqliteCheckpointer private (
               update(c, "UPDATE llm4s_checkpoint_threads SET earliest_seq = ? WHERE thread_id = ?", to, threadId.value)
               to >= target
             }
-          if !eventsDone then RetentionSweep.Step.More(Some(target))
+          if !eventsDone then RetentionSweep.Step.More(Some(planned))
           else
-            dropped match
-              case None => RetentionSweep.Step.More(None)
-              case Some(positions) =>
-                positions.take(limit).foreach { position =>
-                  update(
-                    c,
-                    "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
-                    threadId.value,
-                    position
-                  )
-                }
-                if positions.size > limit then RetentionSweep.Step.More(None) else RetentionSweep.Step.Done
+            // an open queue entry's evidence is read again in this transaction: one opened since the plan keeps its own
+            val queued = if carried.isEmpty then Set.empty[Long] else queueEvidence(c, threadId)
+            planned.dropped.take(limit).filterNot(queued).foreach { position =>
+              update(
+                c,
+                "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
+                threadId.value,
+                position
+              )
+            }
+            val rest = planned.dropped.drop(limit)
+            if rest.nonEmpty then RetentionSweep.Step.More(Some(planned.copy(dropped = rest)))
+            else RetentionSweep.Step.Done
         }
+
+  /** The newest checkpoint each run an open queue entry of the thread recorded committed (rule 4, design 4.55). */
+  private def queueEvidence(c: Connection, threadId: ThreadId): Set[Long] =
+    query(
+      c,
+      """SELECT MAX(h.position) FROM llm4s_checkpoint_history h
+        |JOIN llm4s_checkpoint_queue_attempts a ON a.thread_id = h.thread_id AND a.run_id = h.run_id
+        |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = a.entry_id AND e.state = 'open'
+        |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin,
+      threadId.value
+    )(_.getLong(1)).toSet
 
   /**
    * What `policy` prunes of the thread: the positions of the checkpoints it drops, oldest first, and the events' floor
@@ -487,14 +504,7 @@ final class SqliteCheckpointer private (
     val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
     // and an open queue entry's admission evidence (rule 4, design 4.55): the newest checkpoint each of its runs
     // committed, read in this transaction
-    val queued = query(
-      c,
-      """SELECT MAX(h.position) FROM llm4s_checkpoint_history h
-            |JOIN llm4s_checkpoint_queue_attempts a ON a.thread_id = h.thread_id AND a.run_id = h.run_id
-            |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = a.entry_id AND e.state = 'open'
-            |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin,
-      threadId.value
-    )(_.getLong(1)).toSet
+    val queued        = queueEvidence(c, threadId)
     val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
     val dropped       = history.filterNot(h => keptPositions(h._1)).map(_._1)
     val keptIds       = kept.map(_._2).toSet
@@ -555,37 +565,38 @@ final class SqliteCheckpointer private (
       guard.retained(visited).flatMap { protectedRuns =>
         val cutoff = policy.tombstoneAge.map(age => epochNanos(clock.instant().minusNanos(age.toNanos)))
         RetentionSweep
-          .visit(visited, sweepBudget, s"SqliteCheckpointer($path)", shut) { (threadId, floor) =>
-            writing("sweep") { c =>
-              val reclaim = cutoff.filter(_ => floor.isEmpty && !protectedRuns.contains(threadId)).flatMap { cut =>
-                query(
-                  c,
-                  """SELECT first_seq FROM llm4s_checkpoint_threads th
+          .visit[RetentionSweep.PrunePlan](visited, sweepBudget, s"SqliteCheckpointer($path)", shut) {
+            (threadId, floor) =>
+              writing("sweep") { c =>
+                val reclaim = cutoff.filter(_ => floor.isEmpty && !protectedRuns.contains(threadId)).flatMap { cut =>
+                  query(
+                    c,
+                    """SELECT first_seq FROM llm4s_checkpoint_threads th
                     |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.next_seq = th.first_seq
                     |  AND th.metadata_json IS NULL AND th.deleted_nanos IS NOT NULL AND th.deleted_nanos < ?
                     |  AND (th.claim_token IS NULL OR th.claim_expires_second * 1000000000 + th.claim_expires_nano < ?)
                     |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = th.thread_id)
                     |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_pending_writes w WHERE w.thread_id = th.thread_id)""".stripMargin,
-                  threadId.value,
-                  cut,
-                  cut
-                )(_.getLong(1)).headOption
+                    threadId.value,
+                    cut,
+                    cut
+                  )(_.getLong(1)).headOption
+                }
+                reclaim match
+                  case Some(first) =>
+                    // readers of the reclaimed log are still refused: a new thread of the id starts past it
+                    update(
+                      c,
+                      "UPDATE llm4s_checkpoint_meta SET value = MAX(value, ?) WHERE key = 'reclaimed_first'",
+                      first
+                    )
+                    update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
+                    Right(RetentionSweep.Step.Reclaimed)
+                  case None if policy.retention != RetentionPolicy.keepAll =>
+                    val runs = protectedRuns.getOrElse(threadId, Set.empty)
+                    pruneStep(c, threadId, policy.retention, runs, floor, RetentionSweep.ChunkRows)
+                  case None => Right(RetentionSweep.Step.Done)
               }
-              reclaim match
-                case Some(first) =>
-                  // readers of the reclaimed log are still refused: a new thread of the id starts past it
-                  update(
-                    c,
-                    "UPDATE llm4s_checkpoint_meta SET value = MAX(value, ?) WHERE key = 'reclaimed_first'",
-                    first
-                  )
-                  update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
-                  Right(RetentionSweep.Step.Reclaimed)
-                case None if policy.retention != RetentionPolicy.keepAll =>
-                  val runs = protectedRuns.getOrElse(threadId, Set.empty)
-                  pruneStep(c, threadId, policy.retention, runs, floor, RetentionSweep.ChunkRows)
-                case None => Right(RetentionSweep.Step.Done)
-            }
           }
           .map(v => SweepPage(v.examined, v.reclaimed, v.cursor(page, policy.batchSize)))
       }

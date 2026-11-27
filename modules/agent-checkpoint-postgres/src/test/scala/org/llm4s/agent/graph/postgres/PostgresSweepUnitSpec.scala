@@ -166,6 +166,30 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     made.lastIndexOf(Sql.setFloor(t)) should be < made.indexOf(Sql.deleteHistoryAtAny(t))
   }
 
+  it should "plan a thread once per call, however many steps its checkpoints take to remove" in {
+    // #3086: 10,000 checkpoints to drop are ten steps; each step reading the whole history again would be quadratic
+    lazy val s: ScriptedPostgres = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("b"))
+        case (sql, _) if sql == Sql.lockedRow(t) => Vector(Vector(null, 3L, 2L, 1L, null, null, null, null, null))
+        case (sql, _) if sql == Sql.historyAges(t) =>
+          val gone = s.madeWith(Sql.deleteHistoryAtAny(t)).flatMap(_(1).asInstanceOf[Vector[Any]]).toSet
+          (1L to 10001L).filterNot(p => gone(java.lang.Long.valueOf(p))).toVector.map(p => Vector(p, s"h$p", now, "r"))
+        case (sql, _) if sql == Sql.firstEventOf(t) => Vector(Vector(2L))
+      }
+    )
+    val store = s.store()
+    store.sweep(SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1))), None, SweepGuard.none).value shouldBe
+      SweepPage(1, 0, None)
+    s.madeWith(Sql.historyAges(t)).size shouldBe 1
+    s.madeWith(Sql.deleteHistoryAtAny(t)).map(_(1).asInstanceOf[Vector[Any]].size) shouldBe Vector.fill(10)(1000)
+    // a later call plans it again from the rows: nothing is left to drop
+    store.sweep(SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1))), None, SweepGuard.none).value
+    s.madeWith(Sql.historyAges(t)).size shouldBe 2
+    s.madeWith(Sql.deleteHistoryAtAny(t)).size shouldBe 10
+  }
+
   "A reader of an id with no row" should "be judged against the reclamation mark" in {
     val script = Script {
       case (sql, _) if sql == Sql.reclaimedFirst(t) => Vector(Vector(5L))

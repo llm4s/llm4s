@@ -780,7 +780,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       // each thread under the lock on its own, so a sweep never holds every other call for a whole page, and a
       // thread whose prune fails is skipped rather than failing the page (#3086)
       RetentionSweep
-        .visit(visited, InMemorySweepBudget, "InMemoryCheckpointer", closed = false) { (threadId, _) =>
+        .visit[Unit](visited, InMemorySweepBudget, "InMemoryCheckpointer", closed = false) { (threadId, _) =>
           withLock(lock) {
             threads.get(threadId.value) match
               case Some(current) if !protectedRuns.contains(threadId) && cutoff.exists(current.reclaimable) =>

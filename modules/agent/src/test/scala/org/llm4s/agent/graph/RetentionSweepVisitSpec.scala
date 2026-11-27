@@ -17,7 +17,7 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
 
   "RetentionSweep.visit" should "skip a thread whose step fails and finish the rest of the page" in {
     val steps = mutable.Buffer.empty[String]
-    val visited = RetentionSweep.visit(page, 1.minute, "spec", closed = false) { (t, _) =>
+    val visited = RetentionSweep.visit[Long](page, 1.minute, "spec", closed = false) { (t, _) =>
       steps += t.value
       if t.value == "b" then Left(ValidationError("prune", "refused")) else Right(Step.Done)
     }
@@ -28,7 +28,7 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "call a thread's step again with the floor it returned until it is done, counting reclaimed tombstones" in {
     val floors = mutable.Buffer.empty[(String, Option[Long])]
-    val visited = RetentionSweep.visit(page.take(2), 1.minute, "spec", closed = false) { (t, floor) =>
+    val visited = RetentionSweep.visit[Long](page.take(2), 1.minute, "spec", closed = false) { (t, floor) =>
       floors += (t.value -> floor)
       // a: history in two steps, the second working out the floor, then its events towards it
       if t.value == "b" then Right(Step.Reclaimed)
@@ -43,7 +43,7 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
   it should "always finish the first thread, then stop between threads once its budget has passed" in {
     val steps = mutable.Buffer.empty[String]
     // the budget is gone from the start: the first thread is still finished, in all its steps
-    val visited = RetentionSweep.visit(page, Duration.Zero, "spec", closed = false) { (t, floor) =>
+    val visited = RetentionSweep.visit[Long](page, Duration.Zero, "spec", closed = false) { (t, floor) =>
       steps += t.value
       if floor.contains(2L) then Right(Step.Done) else Right(Step.More(Some(floor.fold(1L)(_ + 1))))
     }
@@ -56,7 +56,7 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
   it should "stop inside a later thread once its budget has passed, its cursor the last thread it finished" in {
     // #3086: the thread it stopped in must come back first in the next call, not be paged past
     val steps = mutable.Buffer.empty[String]
-    val visited = RetentionSweep.visit(page, 200.millis, "spec", closed = false) { (t, _) =>
+    val visited = RetentionSweep.visit[Long](page, 200.millis, "spec", closed = false) { (t, _) =>
       steps += t.value
       if t.value == "a" then Right(Step.Done)
       else
@@ -71,10 +71,10 @@ class RetentionSweepVisitSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "end the call on a cancel, or on any failure once the store is closed" in {
     val cancelled = CancelledError("sweep", None)
-    RetentionSweep.visit(page, 1.minute, "spec", closed = false)((_, _) => Left(cancelled)).left.value shouldBe
+    RetentionSweep.visit[Long](page, 1.minute, "spec", closed = false)((_, _) => Left(cancelled)).left.value shouldBe
       cancelled
     val failed = ValidationError("prune", "the store is closed")
-    RetentionSweep.visit(page, 1.minute, "spec", closed = true)((_, _) => Left(failed)).left.value shouldBe failed
+    RetentionSweep.visit[Long](page, 1.minute, "spec", closed = true)((_, _) => Left(failed)).left.value shouldBe failed
   }
 
   "RetentionSweep.chunkFloor" should "raise the floor towards the target by at most one chunk, never lowering it" in {
