@@ -328,4 +328,67 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
   it should "carry the policy through withUrlPolicy" in {
     WebCrawlerLoader("https://example.com").withUrlPolicy(loopbackPolicy).config.urlPolicy shouldBe loopbackPolicy
   }
+
+  // ==========================================================================
+  // robots.txt (#2999)
+  // ==========================================================================
+
+  "WebCrawlerLoader and robots.txt" should "match a rule against the page's query string" in {
+    withServer(
+      "/robots.txt" -> Reply(200, "User-agent: *\n# no sessions\nDisallow: /*?\n"),
+      "/page"       -> html("<html><body><p>page</p></body></html>")
+    ) { site =>
+      val config = noDelay.withUrlPolicy(loopbackPolicy).withQueryParams(true)
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/page?session=1"), config).load().next() shouldBe a[LoadResult.Skipped]
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/page"), config).load().next() shouldBe a[LoadResult.Success]
+      site.paths should not contain "/page?session=1"
+    }
+  }
+
+  it should "fail a page, without fetching it, while robots.txt answers a server error" in {
+    withServer(
+      "/robots.txt" -> Reply(503, "unavailable"),
+      "/page"       -> html("<html><body><p>page</p></body></html>")
+    ) { site =>
+      val config = noDelay.withUrlPolicy(loopbackPolicy)
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/page"), config).load().next() match {
+        // A failure naming no document, so RAG.sync deletes nothing while robots.txt is unreachable
+        case f: LoadResult.Failure =>
+          f.documentId shouldBe None
+          f.error.message should include("robots.txt")
+        case other => fail(s"expected a failure, got $other")
+      }
+      site.paths should not contain "/page"
+    }
+  }
+
+  it should "crawl everything when robots.txt is missing" in {
+    withServer("/page" -> html("<html><body><p>page</p></body></html>")) { site =>
+      val config = noDelay.withUrlPolicy(loopbackPolicy)
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/page"), config).load().next() shouldBe a[LoadResult.Success]
+    }
+  }
+
+  "delayBeforeFetch" should "cap a robots.txt crawl-delay at the configured maximum" in {
+    WebCrawlerLoader.delayBeforeFetch(
+      configDelay = 500.millis,
+      robotsCrawlDelay = Some(99999999.seconds),
+      isFirstRequest = false,
+      maxCrawlDelay = 60.seconds
+    ) shouldBe Some(60.seconds)
+  }
+
+  it should "keep a configured delay longer than the crawl-delay cap" in {
+    WebCrawlerLoader.delayBeforeFetch(
+      configDelay = 90.seconds,
+      robotsCrawlDelay = Some(99999999.seconds),
+      isFirstRequest = false,
+      maxCrawlDelay = 60.seconds
+    ) shouldBe Some(90.seconds)
+  }
+
+  "CrawlerConfig.maxCrawlDelay" should "default to 60 seconds and be settable" in {
+    CrawlerConfig().maxCrawlDelay shouldBe 60.seconds
+    CrawlerConfig().withMaxCrawlDelay(5.seconds).maxCrawlDelay shouldBe 5.seconds
+  }
 }

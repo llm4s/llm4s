@@ -95,10 +95,18 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     }
   }
 
-  it should "allow every path when /robots.txt answers 500" in {
-    withServer(500, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe true
-      server.requests.map(_.path) shouldBe Seq("/robots.txt")
+  it should "disallow every path, and not cache it, while /robots.txt answers 500 (RFC 9309 2.3.1.4)" in {
+    withServer(500, "") { server =>
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe false
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/", agent, timeout, local) shouldBe false
+      server.requests.map(_.path) shouldBe Seq("/robots.txt", "/robots.txt")
+    }
+  }
+
+  it should "match the URL's query string" in {
+    withServer(200, "User-agent: *\nDisallow: /search?q=\n") { server =>
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/search?q=scala", agent, timeout, local) shouldBe false
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/search", agent, timeout, local) shouldBe true
     }
   }
 
@@ -157,14 +165,14 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     }
   }
 
-  it should "be empty when /robots.txt answers 500" in {
-    withServer(500, "User-agent: *\nDisallow: /\n") { server =>
+  it should "disallow everything when /robots.txt answers 500" in {
+    withServer(500, "") { server =>
       RobotsTxtParser.getRules(
         s"${server.baseUrl}/anything",
         agent,
         timeout,
         local
-      ) shouldBe RobotsTxtParser.RobotsTxt.empty
+      ) shouldBe RobotsTxtParser.RobotsTxt.disallowAll
     }
   }
 

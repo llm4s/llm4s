@@ -71,6 +71,10 @@ final case class WebCrawlerLoader(
   def withDelay(delay: FiniteDuration): WebCrawlerLoader =
     copy(config = config.withDelay(delay))
 
+  /** Set the longest robots.txt `Crawl-delay` honoured (default 60 seconds) */
+  def withMaxCrawlDelay(max: FiniteDuration): WebCrawlerLoader =
+    copy(config = config.withMaxCrawlDelay(max))
+
   /** Set request timeout */
   def withTimeout(timeout: FiniteDuration): WebCrawlerLoader =
     copy(config = config.withTimeout(timeout))
@@ -139,17 +143,23 @@ final case class WebCrawlerLoader(
      */
     private def fetchAndProcess(fetchUrl: String, canonicalUrl: String, depth: Int): LoadResult = {
       val robotsRules = if (config.respectRobotsTxt) {
-        Some(RobotsTxtParser.getRules(fetchUrl, config.userAgent, config.timeout, config.urlPolicy))
+        RobotsTxtParser.rulesFor(fetchUrl, config.userAgent, config.timeout, config.urlPolicy) match {
+          case Right(rules) => Some(rules)
+          case Left(reason) =>
+            // RFC 9309 2.3.1.4: an unreachable robots.txt allows nothing. Deliberately no documentId, as for a
+            // failed fetch: the page and those below it are unknown this run, so RAG.sync deletes none of them.
+            return LoadResult.failure(fetchUrl, NetworkError(s"robots.txt unreachable: $reason", None, "robots.txt"))
+        }
       } else {
         None
       }
 
-      if (robotsRules.exists(rules => !rules.isAllowed(extractPath(fetchUrl)))) {
+      if (robotsRules.exists(rules => !rules.isAllowed(WebCrawlerLoader.robotsPath(fetchUrl)))) {
         return LoadResult.skipped(fetchUrl, "Blocked by robots.txt")
       }
 
       WebCrawlerLoader
-        .delayBeforeFetch(config.delay, robotsRules.flatMap(_.crawlDelay), isFirstRequest)
+        .delayBeforeFetch(config.delay, robotsRules.flatMap(_.crawlDelay), isFirstRequest, config.maxCrawlDelay)
         .foreach(delay => Thread.sleep(delay.toMillis))
 
       // Fetch the page
@@ -279,11 +289,6 @@ final case class WebCrawlerLoader(
       val ct = contentType.toLowerCase.split(";").head.trim
       config.acceptContentTypes.exists(accepted => ct.contains(accepted) || accepted.contains(ct))
     }
-
-    private def extractPath(url: String): String = {
-      val path = Try(new URI(url)).toOption.flatMap(uri => Option(uri.getRawPath)).getOrElse("")
-      if (path.trim.isEmpty) "/" else path
-    }
   }
 }
 
@@ -315,16 +320,21 @@ object WebCrawlerLoader {
   def singlePage(url: String): WebCrawlerLoader =
     WebCrawlerLoader(Seq(url), CrawlerConfig.singlePage)
 
+  /** What robots.txt rules are matched against: the URL's raw path (`/` when empty) and its query (#2999). */
+  private[loader] def robotsPath(url: String): String =
+    Try(new URI(url)).toOption.fold("/")(RobotsTxtParser.pathAndQuery)
+
   /**
    * How long to wait before the next fetch, given the configured delay and any
-   * robots.txt crawl-delay. None means fetch immediately.
+   * robots.txt crawl-delay, which is capped at `maxCrawlDelay`. None means fetch immediately.
    */
   private[loader] def delayBeforeFetch(
     configDelay: FiniteDuration,
     robotsCrawlDelay: Option[FiniteDuration],
-    isFirstRequest: Boolean
+    isFirstRequest: Boolean,
+    maxCrawlDelay: FiniteDuration = CrawlerConfig.DefaultMaxCrawlDelay
   ): Option[FiniteDuration] = {
-    val effectiveDelay = robotsCrawlDelay.fold(configDelay)(_.max(configDelay))
+    val effectiveDelay = robotsCrawlDelay.fold(configDelay)(_.min(maxCrawlDelay).max(configDelay))
     if (!isFirstRequest && effectiveDelay > Duration.Zero) Some(effectiveDelay) else None
   }
 }

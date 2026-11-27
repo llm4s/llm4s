@@ -369,6 +369,7 @@ it in test scope and extend `VectorStoreContract` or `KeywordIndexContract`; see
 A test that matched the section's old heading, or a memory's line breaks in a rendered context, matches the new text.
 A prompt you build yourself from `getRelevantContext` should fence it the same way, as the
 [guide's example](../guide/agents/memory#injecting-context) does.
+
 ## Consolidation keeps its sources' scope, and never replaces them with a cut summary (#3035)
 
 `llm4s-memory` is Beta, `llm4s-agent-memory` Experimental. No signature changes; which memories are merged, and when a
@@ -390,6 +391,23 @@ import org.llm4s.agent.memory.{ ConsolidationProvenance, MemoryStore }
 
 def dropLegacySummaries(store: MemoryStore) = store.deleteMatching(ConsolidationProvenance.legacySummaries)
 ```
+
+## A directory that cannot be listed fails `sync`, and robots.txt follows RFC 9309 (#2998, #2999)
+
+`llm4s-rag` is Beta. `CrawlerConfig` gains a last field, `maxCrawlDelay` (default 60 seconds), and
+`withMaxCrawlDelay`; code built against 1.0.0 that calls its constructor, `copy` or `unapply` recompiles.
+
+| Before (1.0.0) | After |
+|---|---|
+| `DirectoryLoader` read a directory it could not list (permissions, an I/O error) as empty, and skipped an entry whose real path could not be read, so `RAG.sync` deleted every indexed document under it | Either is a `LoadResult.ListingFailure`, after the documents that were listed: `sync` and `ingest` return its error and `sync` deletes nothing. `estimatedCount` is `None`. A link to a missing file is still skipped |
+| A blank or comment line inside a robots.txt group ended it, dropping the rules after it, and a second group for the same agent was ignored | Blank and comment lines are ignored; a `User-agent` line after a rule starts a new group; every group for the agent (or every `*` group) is merged |
+| Rules were matched against the path alone, so `Disallow: /*?` never applied | Rules are matched against the path and query, percent-encodings compared alike |
+| A robots.txt answering 5xx, or that could not be fetched, allowed everything | It allows nothing: each page is a `Failure` with no `documentId` (so `sync` deletes nothing), and `getRules` returns `RobotsTxt.disallowAll`. A 4xx still allows everything |
+| A `Crawl-delay` of any length was slept | It is capped at `maxCrawlDelay` |
+
+A `sync` over a tree holding a directory the process cannot read now fails until the directory is readable or the
+loader's root leaves it out. A crawl of a site whose robots.txt is failing now loads nothing from it; turn
+`respectRobotsTxt` off only for a site you are allowed to crawl regardless.
 
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 

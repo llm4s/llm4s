@@ -83,7 +83,7 @@ A loaded document is a `Document`:
 | `LoadResult.Success(document)` | The document was loaded. |
 | `LoadResult.Failure(source, error, recoverable, documentId)` | One document could not be read: a missing file, a failed extraction, an HTTP error. |
 | `LoadResult.Skipped(source, reason)` | The loader chose not to load it: blocked by robots.txt, a content type the crawler does not accept, a page with no text. |
-| `LoadResult.ListingFailure(source, error)` | The loader could not enumerate its documents at all: a directory that does not exist, an S3 listing with no credentials or a missing bucket. |
+| `LoadResult.ListingFailure(source, error)` | The loader could not enumerate its documents, or all of them: a directory that does not exist or cannot be listed, an S3 listing with no credentials or a missing bucket. |
 
 **Why a failure names its document.** `source` is a path or a URL, not necessarily the `id` the
 document is indexed under, so a `Failure` can also carry `documentId`. `sync` uses it to tell
@@ -168,7 +168,10 @@ val markdownOnly = DirectoryLoader.markdown("./docs")
 | `confineToRoot` | `true`: a symbolic link whose real path is outside the directory is skipped (`withConfineToRoot(false)` follows it) |
 
 `DirectoryLoader.markdown`, `.code`, `.text`, `.pdf` and `.docx` preset the extensions. A
-directory that does not exist, or a path that is not a directory, is a `ListingFailure`. Only regular files are
+directory that does not exist, or a path that is not a directory, is a `ListingFailure`. So is a directory under it
+that cannot be listed (permissions, an I/O error), or an entry whose real path cannot be read; it comes after the
+documents that were listed, and `sync` returns its error and deletes nothing. An entry that is gone by the time it is
+resolved, such as a link to a missing file, is skipped. Only regular files are
 read: a FIFO, device or socket is skipped, even when a link points at it. A link to a file or directory inside the
 root is followed, and a directory reached twice through links is listed once.
 
@@ -233,7 +236,8 @@ val onePage = WebCrawlerLoader.singlePage("https://example.com/about")
 | `maxPages` | `1000` | Pages to fetch in total |
 | `followPatterns` / `excludePatterns` | `*` / none | Glob patterns (`*` wildcards) a URL must match / must not match |
 | `respectRobotsTxt` | `true` | See [robots.txt](#robotstxt) |
-| `delay` | `500.millis` | Pause between requests; a longer robots.txt `Crawl-delay` wins |
+| `delay` | `500.millis` | Pause between requests; a longer robots.txt `Crawl-delay` wins, up to `maxCrawlDelay` |
+| `maxCrawlDelay` | `60.seconds` | The longest robots.txt `Crawl-delay` honoured; a longer one is capped |
 | `timeout` | `30.seconds` | Connect and read timeout |
 | `userAgent` | `LLM4S-Crawler/1.0` | Sent with every request, and used to pick robots.txt rules |
 | `maxQueueSize` | `10000` | Cap on queued URLs |
@@ -457,14 +461,17 @@ body as UTF-8. Request headers are sent on every redirect hop, including one to 
 
 ### robots.txt
 
-With `respectRobotsTxt = true` (the default), `WebCrawlerLoader` fetches `/robots.txt` once per
-scheme, host and port, caches the parsed rules for an hour, and uses the group for its `userAgent`
-(the longest matching `User-agent`, else `*`). A disallowed page is `Skipped` with
-"Blocked by robots.txt" and its links are not followed. The longest matching `Allow`/`Disallow`
-rule wins, and `Allow` wins a tie; `*` and `$` patterns are supported. The robots.txt request and its redirects
-are checked by the crawler's `UrlPolicy` like a page: a refused one is never requested. A robots.txt that is refused,
-cannot be fetched, or answers anything other than 200, allows everything. A `Crawl-delay` longer than
-`CrawlerConfig.delay` replaces it.
+With `respectRobotsTxt = true` (the default), `WebCrawlerLoader` follows [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309).
+It fetches `/robots.txt` once per scheme, host and port, caches the parsed rules for an hour, and uses the groups for
+its `userAgent`: every group naming the longest matching `User-agent`, merged, else the `*` groups. Blank and comment
+lines never end a group; a `User-agent` line after a rule starts the next one. A disallowed page is `Skipped` with
+"Blocked by robots.txt" and its links are not followed. Rules are matched against the URL's path and query
+(`Disallow: /*?` blocks every URL with a query), with percent-encodings compared alike. The longest matching
+`Allow`/`Disallow` rule wins, and `Allow` wins a tie; `*` and `$` patterns are supported. The robots.txt request and
+its redirects are checked by the crawler's `UrlPolicy` like a page: a refused one is never requested. A robots.txt
+that answers 4xx allows everything. One that answers 5xx, or cannot be fetched, allows nothing: each page is a
+`Failure` without a `documentId`, so `sync` deletes nothing, and robots.txt is asked again for the next page. A
+`Crawl-delay` longer than `CrawlerConfig.delay` replaces it, up to `maxCrawlDelay` (60 seconds by default).
 
 `UrlLoader` does not read robots.txt: it fetches exactly the URLs you give it.
 
