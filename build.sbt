@@ -417,6 +417,7 @@ lazy val llm4s = (project in file("."))
     media,
     core,
     rag,
+    ragTestkit,
     vectorstoreElasticsearch,
     vectorstoreRedis,
     knowledgegraph,
@@ -1099,6 +1100,30 @@ lazy val rag = (project in file("modules/rag"))
       Deps.hikariCP,
       Deps.scalatest % Test,
       Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-rag-testkit` (#3000) is what a `VectorStore`'s or `KeywordIndex`'s spec is written with: `VectorStoreContract`
+// and `KeywordIndexContract`, the behaviour both traits promise as ScalaTest suites, and `MetadataFilterMatrix`, the
+// filters every backend answers alike. Published so that a store outside this repository proves itself the way the
+// in-repo ones do, as `llm4s-agent-testkit` is for checkpointers. A test library, so ScalaTest is a compile
+// dependency. `llm4s-rag`'s own tests cannot use it - that would be a project cycle - so the SQLite stores pass it
+// here, in the testkit's own tests; the Postgres, Qdrant, Elasticsearch, OpenSearch, Redis and Valkey stores pass it
+// in `modules/it` (@Docker).
+lazy val ragTestkit = (project in file("modules/rag-testkit"))
+  .dependsOn(rag)
+  .settings(
+    name := "llm4s-rag-testkit",
+    commonSettings,
+    // Measured 94.47% statement coverage (`sbt coverage ragTestkit/test ragTestkit/coverageReport`) on its first
+    // version: the suites run themselves against the SQLite stores. Floor is the measured value rounded down to the
+    // nearest 5. Never lower it.
+    coverageFloor(90),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest
     )
   )
 
@@ -2646,6 +2671,8 @@ lazy val it = (project in file("modules/it"))
     vectorstoreElasticsearch,
     // RedisVectorStoreSpec (#1470), a @Docker suite against Redis Stack
     vectorstoreRedis,
+    // the VectorStoreContract and KeywordIndexContract suites of the Postgres, Qdrant, search-engine and Redis stores (#3000)
+    ragTestkit % Test,
     knowledgegraph,
     memory % "compile->compile;test->test",
     memoryPostgres,
@@ -2753,6 +2780,7 @@ lazy val docs = (project in file("modules/docs"))
     media,
     core,
     rag,
+    ragTestkit,
     vectorstoreElasticsearch,
     vectorstoreRedis,
     knowledgegraph,
@@ -2829,6 +2857,7 @@ lazy val docs = (project in file("modules/docs"))
       (media / Compile / sources).value,
       (core / Compile / sources).value,
       (rag / Compile / sources).value,
+      (ragTestkit / Compile / sources).value,
       (vectorstoreElasticsearch / Compile / sources).value,
       (vectorstoreRedis / Compile / sources).value,
       (knowledgegraph / Compile / sources).value,

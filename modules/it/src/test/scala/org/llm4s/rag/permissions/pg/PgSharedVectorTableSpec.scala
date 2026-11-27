@@ -29,8 +29,9 @@ import scala.util.{ Try, Using }
  * whether the other could open it: `RAG.build` after `PgSearchIndex.initializeSchema()` failed with
  * `column "created_at" does not exist`.
  *
- * These tests use their own vectors and keyword tables and leave the shared permission tables
- * (`llm4s_collections`, `llm4s_principals`) in place, so they do not disturb other suites.
+ * These tests use their own vectors and keyword tables, and a collection under a root of their own, and remove exactly
+ * those afterwards ([[PgSuiteCleanup]]); the shared permission tables (`llm4s_collections`, `llm4s_principals`) stay in
+ * place, so they do not disturb other suites.
  *
  * Needs PostgreSQL with pgvector; set `PGVECTOR_TEST_URL` (CI's Docker tier provides it).
  */
@@ -101,17 +102,20 @@ class PgSharedVectorTableSpec extends AnyFlatSpec with Matchers with BeforeAndAf
       Right(EmbeddingResponse(embeddings = request.input.map(_ => Seq(0.1, 0.2, 0.3))))
   }
 
+  // The suite's collection: under a root of its own, so cleanup removes exactly it (PgSuiteCleanup).
+  private val root                             = PgSuiteCleanup.runRoot("shared-vec")
+  private var rootIndex: Option[PgSearchIndex] = None
+
   override def afterAll(): Unit = {
-    openIndexes.foreach(i => Try(i.close()))
     pgUrl.foreach { url =>
-      Try {
-        Using.resource(connect(url)) { conn =>
-          Using.resource(conn.createStatement()) { stmt =>
-            createdTables.foreach(t => stmt.execute(s"DROP TABLE IF EXISTS $t"))
-          }
-        }
+      // Each base name is a vectors table, or the base of the keyword table its index creates as <base>_keyword.
+      val tables = createdTables.toSeq.flatMap(t => Seq(t, s"${t}_keyword"))
+      rootIndex match {
+        case Some(index) => PgSuiteCleanup.removeOwn(index, root, url, pgUser, pgPassword, tables)
+        case None        => PgSuiteCleanup.dropOwnTables(url, pgUser, pgPassword, tables)
       }
     }
+    openIndexes.foreach(i => Try(i.close()))
     super.afterAll()
   }
 
@@ -221,7 +225,8 @@ class PgSharedVectorTableSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     val store = PgVectorStore(url, pgUser, pgPassword, table).fold(e => fail(e.formatted), identity)
     try {
       val index = newIndex(url, table)
-      val path  = CollectionPath.unsafe(s"shared-vec-$suffix")
+      rootIndex = Some(index)
+      val path = root
       val result = for {
         _ <- index.initializeSchema()
         _ <- index.collections.ensureExists(CollectionConfig.publicLeaf(path))

@@ -100,6 +100,7 @@ guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.Metadat
 guide/vector-store.md | 7cfa35e8f5 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | 50faf924a4 | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
+guide/vector-store.md | fcf9891d96 | skip | needs llm4s-rag-testkit, which llm4s-samples does not depend on; the testkit's own SQLiteContractSpecs run the same suite
 guide/reliability.md | bf415fab7f | skip | the factory's signature, with parameter types in place of arguments; the call is in the next block
 guide/reliability.md | 920c90ecff | skip | API reference: the class's signature and members without their bodies
 guide/reliability.md | f4a41421d1 | with | import org.llm4s.reliability._

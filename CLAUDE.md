@@ -83,6 +83,7 @@ llm4s/
 ├── modules/
 │   ├── core/                  # Core library (published)
 │   ├── rag/                   # RAG, vector stores, chunking, reranking, extraction (published)
+│   ├── rag-testkit/           # VectorStoreContract, KeywordIndexContract: the suites every store must pass (published)
 │   ├── vectorstore-elasticsearch/ # ElasticsearchVectorStore and OpenSearchVectorStore over their REST APIs (published)
 │   ├── vectorstore-redis/     # RedisVectorStore over Redis Query Engine or valkey-search, via Jedis (published)
 │   ├── knowledgegraph/        # Knowledge graph model, storage, query (published)

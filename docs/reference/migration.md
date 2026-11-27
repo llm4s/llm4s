@@ -322,6 +322,13 @@ reads the cluster's system identifier with `pg_control_system()`, which PostgreS
 server revoked it, the middleware refuses the turn until you
 `GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>`.
 
+## `llm4s-rag-testkit`, a new module (#3000)
+
+Nothing to change: `llm4s-rag-testkit` is a new, experimental test library over `llm4s-rag`, and no published module
+depends on it. To test a `VectorStore` or `KeywordIndex` of your own against the behaviour the in-repo stores pass, add
+it in test scope and extend `VectorStoreContract` or `KeywordIndexContract`; see
+[Vector Store](../guide/vector-store#testing-a-store-with-the-contract-suites).
+
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;

@@ -900,6 +900,17 @@ explicit registration and the config-to-client round trip. It requires JDK 21: i
 and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
+### For vector store authors (testing a `VectorStore` or `KeywordIndex`)
+
+```scala
+// same version as llm4s-rag; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-rag-testkit" % llm4sVersion % Test
+```
+
+`VectorStoreContract` and `KeywordIndexContract`, the suites every `VectorStore` and `KeywordIndex` in this
+repository passes, and `MetadataFilterMatrix`, the filters they all answer alike. See
+[Vector Store](../guide/vector-store#testing-a-store-with-the-contract-suites).
+
 ### For checkpoint store authors (testing a `Checkpointer`)
 
 ```scala

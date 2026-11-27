@@ -60,6 +60,11 @@ object PlatformTests {
       "org.llm4s.agent.testkit.HostFileBackendContractSpec",
       "org.llm4s.agent.testkit.HostFileBackendReplaySpec"
     ),
+    // SQLite files: the file-backed stores' contract suites (#3000)
+    "ragTestkit" -> Seq(
+      "org.llm4s.vectorstore.testkit.FileSQLiteVectorStoreContractSpec",
+      "org.llm4s.vectorstore.testkit.FileSQLiteKeywordIndexContractSpec"
+    ),
     "knowledgegraph" -> Seq(
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec",
       "org.llm4s.knowledgegraph.storage.JsonGraphStoreTest",
