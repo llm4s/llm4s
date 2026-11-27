@@ -34,7 +34,7 @@ Fix the P0 issues of several epics in parallel, one lane worker per epic and one
 | `codex=...:completed:unresolved=false` | Codex is clean for that head. |
 | `codex=<sha>:stale:...` | The latest review is of an older commit. The head is unreviewed: wait for Codex, and comment `@codex review` if none is running. |
 | `merge=DIRTY` | It conflicts with main. The worker rebases on `origin/main`, re-runs the module's tests and force-pushes with lease. The new head needs Codex and CI again. A queued PR is dropped by the conflict. |
-| `fail=<job>` | Find the cause from the job's annotations: `gh api repos/llm4s/llm4s/check-runs/<job>/annotations` (`--log-failed` is often empty while the run is still going). A real failure goes to the worker. |
+| `fail=<job>` | The watcher prints the check's name; the annotations API takes its numeric id. Resolve it: `id=$(gh pr checks N --json name,link -q '.[]|select(.name=="<job>")|.link' | sed -E 's#.*/job/([0-9]+).*#\1#')`, then read `gh api repos/llm4s/llm4s/check-runs/$id/annotations` (`--log-failed` is often empty while the run is still going). A real failure goes to the worker. |
 | Infra failure (HTTP 429/5xx, `Error downloading`, coursier `jvm-index` 504) | Rerun with `gh run rerun ID --failed` once the run completes ("already running" otherwise): use a background `until` loop. If the same job fails the same way again, it is an outage: curl the failing URL in a background loop until it returns 200, then rerun. If it is still down after an hour, tell the user. |
 | `merge=CLEAN fail= pending=0` with Codex clean | Merge (below). |
 | `MERGED` | Close-out (below). |
