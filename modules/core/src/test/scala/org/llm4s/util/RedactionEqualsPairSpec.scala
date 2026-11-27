@@ -239,12 +239,16 @@ class RedactionEqualsPairSpec extends AnyFlatSpec with Matchers {
     result.getOrElse(fail("redaction produced no result"))
   }
 
-  it should "redact a key=value before a megabyte-long run of backslashes, and many '=', on a small stack" in {
-    onSmallStack("token=a" + ("\\" * 1000001) + "\"") shouldBe s"token=$R\\\""
-    onSmallStack("token=a" + ("\\" * 1000000) + "\"") shouldBe s"token=$R\""
-    onSmallStack("token=" * 200000 + "\\\"") shouldBe s"token=$R\\\""
-    onSmallStack("a=" * 500000) shouldBe "a=" * 500000
-    val pairs = onSmallStack(nested(1, "note" -> ("token=hunter2value " * 50000), "x" -> "y"))
+  // These inputs prove that the stack does not grow with the input, so they need only be far past the length at which a
+  // per-character recursion overflows a 256 KB stack (a few hundred characters for java.util.regex, under 3,000 for a
+  // one-line recursive method), not a megabyte: 64 Ki characters is twenty times past both (#3215). How the time grows
+  // is the PerformanceTest's, and a megabyte's the hang guard's, above.
+  it should "redact a key=value before a long run of backslashes, and many '=', on a small stack" in {
+    onSmallStack("token=a" + ("\\" * 65537) + "\"") shouldBe s"token=$R\\\""
+    onSmallStack("token=a" + ("\\" * 65536) + "\"") shouldBe s"token=$R\""
+    onSmallStack("token=" * 12000 + "\\\"") shouldBe s"token=$R\\\""
+    onSmallStack("a=" * 32768) shouldBe "a=" * 32768
+    val pairs = onSmallStack(nested(1, "note" -> ("token=hunter2value " * 3500), "x" -> "y"))
     (pairs should not).include("hunter2value")
     parses(pairs) shouldBe true
   }

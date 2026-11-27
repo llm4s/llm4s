@@ -22,7 +22,7 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
 
   // Sizes for the large-value tests at the end of the file. Declared here, before the first test is registered.
   private val SmallStackBytes = 256L * 1024
-  private val MegaChars       = 1000000
+  private val LongChars       = 64 * 1024
 
   // ---------------------------------------------------------------------------------------------
   // JSON inside a string: a prompt or a response body carries the credential with escaped quotes
@@ -1092,10 +1092,16 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "redact a megabyte of JWT prefixes well inside the hang guard, and a JWT at the end of a long run (#2824)" in {
-    LinearTime.timed("a megabyte of JWT prefixes", LinearTime.MegabyteHangGuard)(Redaction.redact("eyJ" * 350000))
+  // The spec's one megabyte hang guard is the single-quoted fields above, the costlier input; a run of JWT prefixes is
+  // timed by the PerformanceTest above (#3215). This keeps what a run of them must redact: the JWT at its end, and
+  // nothing of the run.
+  it should "redact a JWT at the end of a long run of JWT prefixes, and leave the run (#2824)" in {
     val jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
-    Redaction.redact(("a-" * 500000) + jwt + " done") shouldBe ("a-" * 500000) + "[REDACTED] done"
+    Seq("a-", "eyJ").foreach { unit =>
+      val run = unit * (64 * 1024 / unit.length)
+      withClue(s"a run of '$unit': ")(Redaction.redact(run + " " + jwt + " done") shouldBe run + " [REDACTED] done")
+    }
+    Redaction.redact(("a-" * 32768) + jwt + " done") shouldBe ("a-" * 32768) + "[REDACTED] done"
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1157,9 +1163,17 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   // ---------------------------------------------------------------------------------------------
 
   // java.util.regex recurses once per iteration of a repeated group, so a pattern like `(?:[^"\\]|\\.)*` overflows the
-  // stack on a string value of a few hundred characters on a small stack. A payload of a megabyte (a prompt, a file's
-  // contents) must redact on a thread with a deliberately small stack, so that a regression fails on any machine and
-  // does not depend on the default stack size of the runner.
+  // stack on a string value of a few hundred characters on a small stack. A long payload (a prompt, a file's contents)
+  // must redact on a thread with a deliberately small stack, so that a regression fails on any machine and does not
+  // depend on the default stack size of the runner.
+  //
+  // These tests prove that the stack does not grow with the input, so their inputs need only be far past the length at
+  // which a per-character recursion overflows the small stack, not a megabyte (#3215). On a 256 KB stack the pattern
+  // above overflows at about 300 characters, and a one-line Scala method that recurses once per character at under
+  // 3,000; `LongChars` (64 Ki) is twenty times past the second and two hundred past the first, so a recursion per
+  // character - or per few characters - still overflows. 256 KB is kept rather than a smaller stack because the JVM
+  // rounds a smaller request up to its platform minimum, which would make the margin differ by platform. Time is not
+  // these tests' concern: the megabyte hang guard above and the PerformanceTests measure it.
   private def onSmallStack(input: String): String = {
     @volatile var result: Option[String]     = None
     @volatile var failure: Option[Throwable] = None
@@ -1173,61 +1187,61 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     result.getOrElse(fail("redaction produced no result"))
   }
 
-  "Redaction.redact" should "redact a megabyte-long JSON string value under a credential key" in {
-    onSmallStack("{\"password\": \"" + ("a" * MegaChars) + "\", \"user\": \"ann\"}") shouldBe
+  "Redaction.redact" should "redact a long JSON string value under a credential key" in {
+    onSmallStack("{\"password\": \"" + ("a" * LongChars) + "\", \"user\": \"ann\"}") shouldBe
       s"""{"password": "$R", "user": "ann"}"""
   }
 
-  it should "redact a megabyte-long value that is all escape sequences" in {
-    onSmallStack("{\"password\": \"" + ("\\n" * (MegaChars / 2)) + "\"}") shouldBe s"""{"password": "$R"}"""
+  it should "redact a long value that is all escape sequences" in {
+    onSmallStack("{\"password\": \"" + ("\\n" * (LongChars / 2)) + "\"}") shouldBe s"""{"password": "$R"}"""
   }
 
-  it should "redact a megabyte-long single-quoted value" in {
-    onSmallStack("{'password': '" + ("a" * MegaChars) + "'}") shouldBe s"{'password': '$R'}"
+  it should "redact a long single-quoted value" in {
+    onSmallStack("{'password': '" + ("a" * LongChars) + "'}") shouldBe s"{'password': '$R'}"
   }
 
-  it should "redact a megabyte-long value of JSON that sits inside a string" in {
-    onSmallStack("{\"c\": \"{\\\"password\\\": \\\"" + ("a" * MegaChars) + "\\\"}\"}") shouldBe
+  it should "redact a long value of JSON that sits inside a string" in {
+    onSmallStack("{\"c\": \"{\\\"password\\\": \\\"" + ("a" * LongChars) + "\\\"}\"}") shouldBe
       s"""{"c": "{\\"password\\": \\"$R\\"}"}"""
   }
 
-  it should "leave a megabyte-long string value under a key that is not a credential" in {
-    val input = "{\"city\": \"" + ("a" * MegaChars) + "\"}"
+  it should "leave a long string value under a key that is not a credential" in {
+    val input = "{\"city\": \"" + ("a" * LongChars) + "\"}"
     onSmallStack(input) shouldBe input
   }
 
-  it should "redact a megabyte-long value that is never closed, to the end of the input" in {
-    onSmallStack("{\"password\": \"" + ("a" * MegaChars)) shouldBe s"""{"password": "$R"""
+  it should "redact a long value that is never closed, to the end of the input" in {
+    onSmallStack("{\"password\": \"" + ("a" * LongChars)) shouldBe s"""{"password": "$R"""
   }
 
   it should "redact every one of many credential fields in a large document" in {
     val field = "\"password\": \"hunter2value\", "
-    val out   = onSmallStack("{" + (field * 50000) + "\"end\": 1}")
+    val out   = onSmallStack("{" + (field * 2500) + "\"end\": 1}")
     (out should not).include("hunter2value")
     out should startWith(s"""{"password": "$R", "password": "$R", """)
     out should endWith(""""end": 1}""")
   }
 
-  it should "redact a megabyte-long key=value value" in {
-    onSmallStack("password=" + ("a" * MegaChars)) shouldBe s"password=$R"
+  it should "redact a long key=value value" in {
+    onSmallStack("password=" + ("a" * LongChars)) shouldBe s"password=$R"
   }
 
-  it should "redact a megabyte-long header-style value, and one behind a megabyte of spaces" in {
-    onSmallStack("x-api-key: " + ("a" * MegaChars)) shouldBe s"x-api-key: $R"
-    onSmallStack("x-api-key:" + (" " * MegaChars) + "v") shouldBe s"x-api-key:" + (" " * MegaChars) + R
+  it should "redact a long header-style value, and one behind a long run of spaces" in {
+    onSmallStack("x-api-key: " + ("a" * LongChars)) shouldBe s"x-api-key: $R"
+    onSmallStack("x-api-key:" + (" " * LongChars) + "v") shouldBe s"x-api-key:" + (" " * LongChars) + R
   }
 
-  it should "redact a megabyte-long number" in {
-    onSmallStack("{\"password\": " + ("1" * MegaChars) + "}") shouldBe s"""{"password": "$R"}"""
+  it should "redact a long number" in {
+    onSmallStack("{\"password\": " + ("1" * LongChars) + "}") shouldBe s"""{"password": "$R"}"""
   }
 
-  it should "redact an array of many elements, and one element of a megabyte, under a credential key" in {
-    val many = "{\"token\": [" + ("\"hunter2value\", " * 50000) + "\"end\"], \"n\": 1}"
+  it should "redact an array of many elements, and one long element, under a credential key" in {
+    val many = "{\"token\": [" + ("\"hunter2value\", " * 4000) + "\"end\"], \"n\": 1}"
     val out  = onSmallStack(many)
     (out should not).include("hunter2value")
     out should startWith(s"""{"token": ["$R", "$R", """)
     out should endWith(s""""$R"], "n": 1}""")
-    onSmallStack("{\"token\": [\"" + ("a" * MegaChars) + "\", 1]}") shouldBe s"""{"token": ["$R", "$R"]}"""
+    onSmallStack("{\"token\": [\"" + ("a" * LongChars) + "\", 1]}") shouldBe s"""{"token": ["$R", "$R"]}"""
   }
 
   it should "redact an array nested a hundred thousand levels deep under a credential key" in {
@@ -1236,24 +1250,24 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     onSmallStack(input) shouldBe "{\"token\": " + ("[" * depth) + s""""$R"""" + ("]" * depth) + "}"
   }
 
-  it should "leave a megabyte-long array under a key that is not a credential" in {
-    val input = "{\"messages\": [" + ("\"hunter2value\", " * 50000) + "\"end\"]}"
+  it should "leave a long array under a key that is not a credential" in {
+    val input = "{\"messages\": [" + ("\"hunter2value\", " * 4000) + "\"end\"]}"
     onSmallStack(input) shouldBe input
   }
 
-  it should "leave a megabyte of word characters, of spaces and of newlines unchanged" in {
-    Seq("x" * MegaChars, " " * MegaChars, "a\n" * (MegaChars / 2), "api_key" * (MegaChars / 7)).foreach { input =>
+  it should "leave long runs of word characters, of spaces and of newlines unchanged" in {
+    Seq("x" * LongChars, " " * LongChars, "a\n" * (LongChars / 2), "api_key" * (LongChars / 7)).foreach { input =>
       withClue(s"input starting ${input.take(8)}: ")(onSmallStack(input) shouldBe input)
     }
   }
 
-  it should "redact megabyte-long Python repr values on a small stack (#1675, #1687)" in {
-    onSmallStack("{'token': ['" + ("a:" * (MegaChars / 2)) + "']}") shouldBe s"{'token': ['$R']}"
-    onSmallStack("{'password': \"" + ("it's " * (MegaChars / 5)) + "\", 'n': 1}") shouldBe
+  it should "redact long Python repr values on a small stack (#1675, #1687)" in {
+    onSmallStack("{'token': ['" + ("a:" * (LongChars / 2)) + "']}") shouldBe s"{'token': ['$R']}"
+    onSmallStack("{'password': \"" + ("it's " * (LongChars / 5)) + "\", 'n': 1}") shouldBe
       s"""{'password': "$R", 'n': 1}"""
-    onSmallStack("{\"c\": \"{'token': [\\\"" + ("a'" * (MegaChars / 2)) + "\\\"]}\"}") shouldBe
+    onSmallStack("{\"c\": \"{'token': [\\\"" + ("a'" * (LongChars / 2)) + "\\\"]}\"}") shouldBe
       s"""{"c": "{'token': [\\"$R\\"]}"}"""
-    onSmallStack("{'password': " + ("1" * MegaChars) + "}") shouldBe s"{'password': '$R'}"
+    onSmallStack("{'password': " + ("1" * LongChars) + "}") shouldBe s"{'password': '$R'}"
   }
 
   it should "redact quote-heavy Python repr shapes in time linear in their length (#1675, #1687)" taggedAs PerformanceTest in {
