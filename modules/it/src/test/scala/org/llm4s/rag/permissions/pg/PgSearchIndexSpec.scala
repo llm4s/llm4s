@@ -69,4 +69,26 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
     id.value should be > 0
     lookup shouldBe Some(id)
   }
+
+  "PgCollectionStore" should "not let _ in an AllDescendants prefix match sibling collections (#2989)" in {
+    requirePg()
+    val store = searchIndex.get.collections
+    val paths = Seq("tenant_1", "tenant11", "tenant-1", "tenantA1")
+
+    val created = paths.foldLeft[org.llm4s.types.Result[Unit]](Right(())) { (acc, p) =>
+      for {
+        _ <- acc
+        _ <- store.create(CollectionConfig.publicParent(CollectionPath.unsafe(p)))
+        _ <- store.create(CollectionConfig.publicLeaf(CollectionPath.unsafe(s"$p/docs")))
+      } yield ()
+    }
+    created shouldBe Right(())
+
+    val pattern  = CollectionPattern.AllDescendants(CollectionPath.unsafe("tenant_1"))
+    val expected = Seq("tenant_1", "tenant_1/docs")
+
+    store.list(pattern).map(_.map(_.path.value)) shouldBe Right(expected)
+    store.findAccessible(UserAuthorization.Admin, pattern).map(_.map(_.path.value)) shouldBe Right(expected)
+    store.findAccessible(UserAuthorization.Anonymous, pattern).map(_.map(_.path.value)) shouldBe Right(expected)
+  }
 }
