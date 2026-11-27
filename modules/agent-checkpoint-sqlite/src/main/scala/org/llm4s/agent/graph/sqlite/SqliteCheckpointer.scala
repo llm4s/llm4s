@@ -399,10 +399,12 @@ final class SqliteCheckpointer private (
 
   /**
    * One step of [[prune]] inside the caller's write transaction, also keeping the newest checkpoint each of
-   * `protectedRuns` committed: it removes at most `limit` of the checkpoints the policy drops, oldest first, and
-   * then - in the step that removes the last of them, which works out the events' floor - at most `limit` events
-   * below that floor, raising the floor as far as it removed. A later step, given that `floor`, removes the next
-   * `limit` events towards it. With `limit` `Int.MaxValue` one step is the whole prune, as [[prune]] runs it.
+   * `protectedRuns` committed. Events go first, then checkpoints, so the floor a prune works towards can always be
+   * worked out again from the file - the checkpoints it drops are still there until the events are gone (#3086): a
+   * step raises the events' floor towards it by at most `limit` events, and once it is reached removes at most
+   * `limit` of the checkpoints the policy drops, oldest first. `floor`, a target an earlier step of the same call
+   * worked out, saves decoding the event log again while events remain. With `limit` `Int.MaxValue` one step is the
+   * whole prune, as [[prune]] runs it.
    */
   private def pruneStep(
     c: Connection,
@@ -415,11 +417,12 @@ final class SqliteCheckpointer private (
     readRow(c, threadId) match
       case None => Right(RetentionSweep.Step.Done)
       case Some(current) =>
-        floor
-          .fold(prunedHistory(c, threadId, current, policy, protectedRuns, limit))(f => Right(Some(f)))
-          .map {
-            case None => RetentionSweep.Step.More(None)
-            case Some(target) =>
+        val planned: Result[(Option[Vector[Long]], Long)] = floor match
+          case Some(f) => Right((None, f))
+          case None    => plan(c, threadId, current, policy, protectedRuns).map((d, f) => (Some(d), f))
+        planned.map { (dropped, target) =>
+          val eventsDone =
+            current.earliestSeq >= target || {
               val nth =
                 if limit == Int.MaxValue then None
                 else
@@ -434,21 +437,35 @@ final class SqliteCheckpointer private (
               val to = RetentionSweep.chunkFloor(current.earliestSeq, target, nth)
               update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ? AND seq < ?", threadId.value, to)
               update(c, "UPDATE llm4s_checkpoint_threads SET earliest_seq = ? WHERE thread_id = ?", to, threadId.value)
-              if to >= target then RetentionSweep.Step.Done else RetentionSweep.Step.More(Some(target))
-          }
+              to >= target
+            }
+          if !eventsDone then RetentionSweep.Step.More(Some(target))
+          else
+            dropped match
+              case None => RetentionSweep.Step.More(None)
+              case Some(positions) =>
+                positions.take(limit).foreach { position =>
+                  update(
+                    c,
+                    "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
+                    threadId.value,
+                    position
+                  )
+                }
+                if positions.size > limit then RetentionSweep.Step.More(None) else RetentionSweep.Step.Done
+        }
 
   /**
-   * Removes at most `limit` of the checkpoints `policy` drops, oldest first; once none is left to drop, the events'
-   * floor the policy prunes to, else `None`.
+   * What `policy` prunes of the thread: the positions of the checkpoints it drops, oldest first, and the events' floor
+   * it prunes to - worked out while those checkpoints are still stored.
    */
-  private def prunedHistory(
+  private def plan(
     c: Connection,
     threadId: ThreadId,
     current: Row,
     policy: RetentionPolicy,
-    protectedRuns: Set[RunId],
-    limit: Int
-  ): Result[Option[Long]] =
+    protectedRuns: Set[RunId]
+  ): Result[(Vector[Long], Long)] =
     val now    = clock.instant()
     val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
     // oldest first: (position, id, committed at, run) - a row from before schema 7 has its producer's time instead,
@@ -479,59 +496,42 @@ final class SqliteCheckpointer private (
       threadId.value
     )(_.getLong(1)).toSet
     val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
-    val dropped       = history.filterNot(h => keptPositions(h._1))
-    dropped.take(limit).foreach { h =>
-      val position = h._1
-      update(
+    val dropped       = history.filterNot(h => keptPositions(h._1)).map(_._1)
+    val keptIds       = kept.map(_._2).toSet
+    decoding("prune", "event") {
+      query(
         c,
-        "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
-        threadId.value,
-        position
-      )
-    }
-    val keptIds = kept.map(_._2).toSet
-    if dropped.size > limit then Right(None)
-    else
-      decoding("prune", "event") {
-        query(
-          c,
-          """SELECT seq, record_json, committed_second, committed_nano FROM llm4s_checkpoint_events
-              |WHERE thread_id = ? ORDER BY seq""".stripMargin,
-          threadId.value
-        ) { rows =>
-          val seq    = rows.getLong(1)
-          val json   = rows.getString(2)
-          val second = rows.getLong(3)
-          (seq, json, Option.when(!rows.wasNull())(Instant.ofEpochSecond(second, rows.getLong(4))))
-        }.map { (seq, json, committed) =>
-          val event = upickle.default.read[EventRecord](json)
-          // a row from before schema 7 has its producer's timestamp in place of its commit time
-          (seq, event, committed.getOrElse(event.timestamp))
-        }
-      }.map { events =>
-        // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-        val firstKept = events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
-        // and when nothing is left to drop, an event below that naming a checkpoint the thread no longer holds is
-        // left over from a prune cut short after its checkpoints went (#3086): the floor is recovered from the file
-        val byCheckpoint =
-          if kept.size != history.size then firstKept
-          else
-            firstKept.filter(f =>
-              events.exists((seq, e, _) => seq >= current.earliestSeq && seq < f && e.checkpointId.isDefined)
-            )
-        val byAge = cutoff.map { cut =>
-          events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
-        }
-        val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-        Some((Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
+        """SELECT seq, record_json, committed_second, committed_nano FROM llm4s_checkpoint_events
+            |WHERE thread_id = ? ORDER BY seq""".stripMargin,
+        threadId.value
+      ) { rows =>
+        val seq    = rows.getLong(1)
+        val json   = rows.getString(2)
+        val second = rows.getLong(3)
+        (seq, json, Option.when(!rows.wasNull())(Instant.ofEpochSecond(second, rows.getLong(4))))
+      }.map { (seq, json, committed) =>
+        val event = upickle.default.read[EventRecord](json)
+        // a row from before schema 7 has its producer's timestamp in place of its commit time
+        (seq, event, committed.getOrElse(event.timestamp))
       }
+    }.map { events =>
+      // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+      val byCheckpoint =
+        if kept.size == history.size then None
+        else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
+      val byAge = cutoff.map { cut =>
+        events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
+      }
+      val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+      (dropped, (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
+    }
 
   /**
    * One page of the sweep (design 4.53): the page's thread ids read in one read transaction by the primary key, the
    * guard asked outside any transaction, then each thread of the page in write transactions of its own (#3086), so
    * the store's lock and the file's write gate are never held for more than one bounded step and the live runs'
    * commits and renewals go between them: a thread's old tombstone reclaimed, or its history pruned at most
-   * `RetentionSweep.ChunkRows` checkpoints and then events at a time. A thread whose step fails is logged and
+   * `RetentionSweep.ChunkRows` events and then checkpoints at a time. A thread whose step fails is logged and
    * skipped, and the page still hands back its cursor; once the busy timeout has passed - after the page's first
    * thread, which is always finished - the page stops after the step in flight and hands back the last thread it
    * finished, so the next call starts with the one it stopped in; the events' floor is worked out again from the rows

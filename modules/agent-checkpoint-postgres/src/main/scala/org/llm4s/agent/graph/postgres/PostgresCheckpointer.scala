@@ -396,11 +396,12 @@ final class PostgresCheckpointer private (
 
   /**
    * One step of [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest
-   * checkpoint each of `protectedRuns` committed (a sweep's protected thread, design 4.53): it removes at most `limit`
-   * of the checkpoints the policy drops, oldest first, and then - in the step that removes the last of them, which
-   * works out the events' floor - at most `limit` events below that floor, raising the floor as far as it removed.
-   * A later step, given that `floor`, removes the next `limit` events towards it. With `limit` `Int.MaxValue` one step
-   * is the whole prune, as [[prune]] runs it.
+   * checkpoint each of `protectedRuns` committed (a sweep's protected thread, design 4.53). Events go first, then
+   * checkpoints, so the floor a prune works towards can always be worked out again from what is stored - the
+   * checkpoints it drops are still there until the events are gone (#3086): a step raises the events' floor towards
+   * it by at most `limit` events, and once it is reached removes at most `limit` of the checkpoints the policy drops,
+   * oldest first. `floor`, a target an earlier step of the same call worked out, saves reading the history again
+   * while events remain. With `limit` `Int.MaxValue` one step is the whole prune, as [[prune]] runs it.
    */
   private def pruneStep(
     c: Connection,
@@ -411,29 +412,41 @@ final class PostgresCheckpointer private (
     floor: Option[Long],
     limit: Int
   ): RetentionSweep.Step =
-    floor.orElse(prunedHistory(c, threadId, current, policy, protectedRuns, limit)) match
-      case None => RetentionSweep.Step.More(None)
-      case Some(target) =>
+    val (dropped, target) = floor match
+      case Some(f) => (None, f)
+      case None =>
+        val (d, f) = plan(c, threadId, current, policy, protectedRuns)
+        (Some(d), f)
+    val eventsDone =
+      current.earliestSeq >= target || {
         val nth =
           if limit == Int.MaxValue then None
           else query(c, Sql.eventAtOffset(t), threadId.value, current.earliestSeq, limit)(_.getLong(1)).headOption
         val to = RetentionSweep.chunkFloor(current.earliestSeq, target, nth)
         update(c, Sql.deleteEventsBefore(t), threadId.value, to)
         update(c, Sql.setFloor(t), to, threadId.value)
-        if to >= target then RetentionSweep.Step.Done else RetentionSweep.Step.More(Some(target))
+        to >= target
+      }
+    if !eventsDone then RetentionSweep.Step.More(Some(target))
+    else
+      dropped match
+        case None => RetentionSweep.Step.More(None)
+        case Some(positions) =>
+          val removing = positions.take(limit).map(java.lang.Long.valueOf).toArray
+          if removing.nonEmpty then update(c, Sql.deleteHistoryAtAny(t), threadId.value, removing)
+          if positions.size > limit then RetentionSweep.Step.More(None) else RetentionSweep.Step.Done
 
   /**
-   * Removes at most `limit` of the checkpoints `policy` drops, oldest first; once none is left to drop, the events'
-   * floor the policy prunes to, else `None`.
+   * What `policy` prunes of the thread: the positions of the checkpoints it drops, oldest first, and the events' floor
+   * it prunes to - worked out while those checkpoints are still stored.
    */
-  private def prunedHistory(
+  private def plan(
     c: Connection,
     threadId: ThreadId,
     current: Row,
     policy: RetentionPolicy,
-    protectedRuns: Set[RunId],
-    limit: Int
-  ): Option[Long] =
+    protectedRuns: Set[RunId]
+  ): (Vector[Long], Long) =
     val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
     // oldest first: (position, id, committed at, run)
     val history =
@@ -445,34 +458,22 @@ final class PostgresCheckpointer private (
     // committed, read in this transaction
     val queued        = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
     val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
-    val dropped       = history.filterNot(h => keptPositions(h._1))
-    val removing      = dropped.take(limit).map(h => java.lang.Long.valueOf(h._1)).toArray
-    if removing.nonEmpty then update(c, Sql.deleteHistoryAtAny(t), threadId.value, removing)
-    if dropped.size > limit then None
-    else
-      // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-      val firstKept =
-        if kept.isEmpty then None
-        else
-          query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
-            Option(rows.getObject(1)).map(_ => rows.getLong(1))
-          ).head
-      // and when nothing is left to drop, an event below that naming a checkpoint the thread no longer holds is left
-      // over from a prune cut short after its checkpoints went (#3086): the floor is recovered from what is stored
-      val byCheckpoint =
-        if kept.size != history.size then firstKept
-        else
-          firstKept.filter(f =>
-            query(c, Sql.namedEventBelow(t), threadId.value, current.earliestSeq, f)(_ => ()).nonEmpty
-          )
-      val byAge = cutoff.map { cut =>
-        query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
+    val dropped       = history.filterNot(h => keptPositions(h._1)).map(_._1)
+    // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+    val byCheckpoint =
+      if kept.size == history.size then None
+      else
+        query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
           Option(rows.getObject(1)).map(_ => rows.getLong(1))
         ).head
-          .getOrElse(current.nextSeq)
-      }
-      val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-      Some((Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
+    val byAge = cutoff.map { cut =>
+      query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
+        Option(rows.getObject(1)).map(_ => rows.getLong(1))
+      ).head
+        .getOrElse(current.nextSeq)
+    }
+    val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+    (dropped, (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq))
 
   /**
    * One page of the sweep (design 4.53). The page's ids are read by the primary key, and the guard asked outside any

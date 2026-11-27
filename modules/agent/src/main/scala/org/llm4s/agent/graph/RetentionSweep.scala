@@ -132,7 +132,7 @@ private[graph] object RetentionSweep:
     case Reclaimed
     case Done
 
-    /** More to remove; `floor` is the events' floor the thread is being pruned to, once its history is done. */
+    /** More to remove; `floor`, while events remain below it, is the events' floor the thread is being pruned to. */
     case More(floor: Option[Long])
 
   /**

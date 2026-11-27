@@ -138,7 +138,7 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     s.madeWith(Sql.setFloor(t)) shouldBe Vector(Vector(9L, "a"), Vector(9L, "c"))
   }
 
-  it should "prune a large backlog in steps of at most ChunkRows checkpoints or events, raising the floor as it goes" in {
+  it should "prune a large backlog in steps of at most ChunkRows events, then checkpoints, raising the floor" in {
     // b: checkpoints at positions 1 to 1501 and events 1 to 3000; maxCheckpoints = 1 keeps position 1501, whose
     // first event is 3000
     lazy val s: ScriptedPostgres = ScriptedPostgres(
@@ -161,8 +161,9 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     s.madeWith(Sql.deleteHistoryAtAny(t)).map(_(1).asInstanceOf[Vector[Any]].size) shouldBe Vector(1000, 500)
     s.madeWith(Sql.deleteEventsBefore(t)).map(_(1)) shouldBe Vector(1001L, 2001L, 3000L)
     s.madeWith(Sql.setFloor(t)).map(_.head) shouldBe Vector(1001L, 2001L, 3000L)
-    // the events' floor is worked out once, in the step that removes the last of the checkpoints
-    s.madeWith(Sql.firstEventOf(t)).size shouldBe 1
+    // events go first, so the checkpoints the floor follows are still stored whenever a step works it out again
+    val made = s.made.map(_._1)
+    made.lastIndexOf(Sql.setFloor(t)) should be < made.indexOf(Sql.deleteHistoryAtAny(t))
   }
 
   "A reader of an id with no row" should "be judged against the reclamation mark" in {

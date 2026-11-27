@@ -242,10 +242,6 @@ private[postgres] object Sql:
   def eventAtOffset(t: Tables): String =
     s"SELECT seq FROM ${t.events} WHERE thread_id = ? AND seq >= ? ORDER BY seq LIMIT 1 OFFSET ?"
 
-  /** Whether the thread has an event from the second bound up to, not including, the third that names a checkpoint. */
-  def namedEventBelow(t: Tables): String =
-    s"SELECT 1 FROM ${t.events} WHERE thread_id = ? AND seq >= ? AND seq < ? AND checkpoint_id IS NOT NULL LIMIT 1"
-
   def deleteEventsBefore(t: Tables): String = s"DELETE FROM ${t.events} WHERE thread_id = ? AND seq < ?"
 
   def setFloor(t: Tables): String = s"UPDATE ${t.threads} SET earliest_seq = ? WHERE thread_id = ?"

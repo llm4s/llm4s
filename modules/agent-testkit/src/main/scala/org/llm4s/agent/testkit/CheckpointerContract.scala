@@ -1802,25 +1802,46 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(on, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(on.value, 2L * n - 1)
     s.store.eventsAfter(on, 2L * n - 2, 10).value.map(_.seq) shouldBe Vector(2L * n - 1, 2L * n)
 
-  it should "finish, by a later sweep or prune, a thread whose prune was cut short after its checkpoints went" in {
+  it should "finish, by a later sweep or prune, a thread whose prune was cut short in its events or its checkpoints" in {
     // #3086: what is left of a cut-off prune is worked out from what the store holds, never carried between calls
-    val s       = Store(isolated = true)
-    val threads = Vector.fill(2)(newThread())
-    threads.foreach(backlog(s, _, 1050))
-    // events from 1500 on cannot be removed: each thread's prune stops part of the way through its events
-    val undo = threads.flatMap(t => refuseDeletes(s.store, t, Some(1500L)))
-    assume(undo.size == threads.size, "the store cannot fail a thread's prune (refuseDeletes)")
+    val s         = Store(isolated = true)
+    val inEvents  = newThread()
+    val inHistory = newThread()
+    Vector(inEvents, inHistory).foreach(backlog(s, _, 1050))
+    // inEvents' events from 1500 on cannot be removed, nor any of inHistory's checkpoints: each prune stops part way
+    val undo = refuseDeletes(s.store, inEvents, Some(1500L)).toVector ++ refuseDeletes(s.store, inHistory, None)
+    assume(undo.size == 2, "the store cannot fail a thread's prune (refuseDeletes)")
     val policy = RetentionPolicy(maxCheckpoints = Some(1))
     sweepAll(s.store, SweepPolicy(policy))
-    threads.foreach { t =>
-      s.historyIds(t) shouldBe Vector("c1050")
-      s.store.eventsAfter(t, 1500L, 1).value.map(_.seq) shouldBe Vector(1501L)
-    }
+    s.store.eventsAfter(inEvents, 1500L, 1).value.map(_.seq) shouldBe Vector(1501L)
+    s.historyIds(inHistory).size should be > 1
     undo.foreach(_())
-    s.store.prune(threads(0), policy).value shouldBe (())
-    prunedToLatest(s, threads(0), 1050)
+    s.store.prune(inEvents, policy).value shouldBe (())
+    prunedToLatest(s, inEvents, 1050)
     sweepAll(s.store, SweepPolicy(policy))
-    prunedToLatest(s, threads(1), 1050)
+    prunedToLatest(s, inHistory, 1050)
+  }
+
+  it should "leave a retracted turn's events and the floor alone when a prune or a sweep drops nothing" in {
+    // a blocked turn's retraction removes its checkpoints but keeps their durable events: nothing to prune (#3086)
+    val s     = Store(isolated = true)
+    val token = s.claim("run").value.token
+    s.chain(token, Vector("a", "b"))
+    val blocked = s.checkpoint("x", Some("b"), status = CheckpointStatus.Failed)
+    // the closing commit records its event against the checkpoint it keeps, as GraphRuntime's block does
+    val closing = Vector(s.event("failed", Some("x")))
+    s.store.commit(s.thread, Commit(token, Some(blocked), events = closing, retractTurn = true)).value
+    s.historyIds() shouldBe Vector("x")
+    def events = s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq)
+    val before = events
+    before shouldBe Vector(1L, 2L, 3L)
+    val keepsAll = RetentionPolicy(maxCheckpoints = Some(10))
+    s.store.prune(s.thread, RetentionPolicy.keepAll).value shouldBe (())
+    s.store.prune(s.thread, keepsAll).value shouldBe (())
+    events shouldBe before
+    sweepAll(s.store, SweepPolicy(keepsAll))
+    events shouldBe before
+    s.historyIds() shouldBe Vector("x")
   }
 
   it should "resume, in its next call, a sweep its budget cut short, pruning every thread as prune does" in {
