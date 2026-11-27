@@ -186,7 +186,7 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
     delete should be > docLock
     insert should be > delete
     sql(delete) should include("collection_id = ?")
-    sql(delete) should include("metadata->>'docId' = ?")
+    sql(delete) should include(PgSearchIndex.DocIdMatch)
     db.writes(delete)._2 shouldBe Map(1 -> 7, 2 -> "doc-1")
     db.writes(docLock)._2 shouldBe Map(1 -> PgSearchIndex.DocumentLockClass, 2 -> "doc-1")
     db.commits shouldBe 1
@@ -215,7 +215,7 @@ class PgSearchIndexIngestSpec extends AnyFlatSpec with Matchers {
     val sql    = db.statements
     val delete = sql.indexWhere(_.contains("DELETE FROM vectors"))
     sql(delete) should include("collection_id IS NOT NULL")
-    sql(delete) should include("metadata->>'docId' = ?")
+    sql(delete) should include(PgSearchIndex.DocIdMatch)
     db.writes(delete)._2 shouldBe Map(1 -> "doc-1")
     sql.indexWhere(_.contains("INSERT INTO vectors")) should be > delete
     db.commits shouldBe 1

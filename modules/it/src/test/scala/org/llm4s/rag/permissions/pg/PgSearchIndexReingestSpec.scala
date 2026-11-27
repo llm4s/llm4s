@@ -114,6 +114,43 @@ class PgSearchIndexReingestSpec extends AnyFlatSpec with Matchers with BeforeAnd
     search(hrUser, CollectionPattern.Exact(restricted)) should have size 2
   }
 
+  it should "find the document's chunks through the metadata index, not a scan of the collection" in {
+    val path = under("bulk")
+    index.collections.create(CollectionConfig.publicLeaf(path)).isRight shouldBe true
+    index.ingest(path, "bulk-7", chunks(5, i => s"bulk 7 part $i")).isRight shouldBe true
+
+    Using.resource(DriverManager.getConnection(pgUrl.get, pgUser, pgPassword.reveal)) { conn =>
+      Using.resource(conn.createStatement()) { stmt =>
+        val collectionId =
+          Using.resource(stmt.executeQuery(s"SELECT id FROM llm4s_collections WHERE path = '${path.value}'")) { rs =>
+            rs.next(); rs.getInt(1)
+          }
+        // A bulk-loaded collection, the rows as ingest writes them, large enough that a scan is the costly plan
+        stmt.execute(s"""
+          INSERT INTO $table (id, embedding, embedding_dim, content, metadata, collection_id, readable_by)
+          SELECT 'coll-$collectionId-bulk-' || g || '-chunk-0', '[0.1,0.2,0.3]', 3, 'bulk',
+                 jsonb_build_object('docId', 'bulk-' || g, 'chunkIndex', '0'), $collectionId, '{}'
+          FROM generate_series(1000, 60999) AS g
+        """)
+        stmt.execute(s"ANALYZE $table")
+        def plan(where: String): String =
+          Using.resource(stmt.executeQuery(s"EXPLAIN DELETE FROM $table WHERE $where")) { rs =>
+            Iterator.continually(rs).takeWhile(_.next()).map(_.getString(1)).mkString("\n")
+          }
+        val doc = "metadata @> jsonb_build_object('docId', 'bulk-7'::text)"
+        Seq(s"collection_id = $collectionId AND $doc", s"collection_id IS NOT NULL AND $doc").foreach { where =>
+          val p = plan(where)
+          withClue(p) {
+            p should include(s"idx_${table}_metadata")
+            (p should not).include("Seq Scan")
+          }
+        }
+      }
+    }
+    index.ingest(path, "bulk-7", chunks(2, i => s"bulk 7 again $i")).isRight shouldBe true
+    rows("bulk-7") shouldBe 2
+  }
+
   it should "leave the old version in place when the new one fails to insert" in {
     val path = under("refused")
     index.collections.create(CollectionConfig.publicLeaf(path)).isRight shouldBe true

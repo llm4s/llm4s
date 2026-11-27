@@ -387,7 +387,7 @@ final class PgSearchIndex private (
   private def deleteChunks(conn: Connection, collectionId: Int, documentId: String, everywhere: Boolean): Unit = {
     val scope = if (everywhere) "collection_id IS NOT NULL" else "collection_id = ?"
     Using.resource(
-      conn.prepareStatement(s"DELETE FROM $vectorTableName WHERE $scope AND metadata->>'docId' = ?")
+      conn.prepareStatement(s"DELETE FROM $vectorTableName WHERE $scope AND ${PgSearchIndex.DocIdMatch}")
     ) { stmt =>
       if (everywhere) stmt.setString(1, documentId)
       else {
@@ -418,7 +418,7 @@ final class PgSearchIndex private (
     withConnection { conn =>
       Using.resource(conn.prepareStatement(s"""
         DELETE FROM $vectorTableName
-        WHERE collection_id = ? AND metadata->>'docId' = ?
+        WHERE collection_id = ? AND ${PgSearchIndex.DocIdMatch}
       """)) { stmt =>
         stmt.setInt(1, collectionId)
         stmt.setString(2, documentId)
@@ -432,7 +432,7 @@ final class PgSearchIndex private (
     withConnection { conn =>
       Using.resource(conn.prepareStatement(s"""
         DELETE FROM $vectorTableName
-        WHERE collection_id IS NOT NULL AND metadata->>'docId' = ?
+        WHERE collection_id IS NOT NULL AND ${PgSearchIndex.DocIdMatch}
       """)) { stmt =>
         stmt.setString(1, documentId)
         stmt.executeUpdate().toLong
@@ -525,6 +525,13 @@ object PgSearchIndex {
 
   /** The first key of the advisory lock a write of one document takes: `pg_advisory_xact_lock(class, hashtext(id))`. */
   private[pg] val DocumentLockClass: Int = 0x6c347264 // "l4rd"
+
+  /**
+   * Selects a document's chunks by the `docId` each carries, binding the id as one parameter. A containment test, not
+   * `metadata->>'docId' = ?`, so the GIN index on `metadata` serves it: a re-ingest's delete would otherwise scan the
+   * whole collection, and a bulk load would grow quadratically.
+   */
+  private[pg] val DocIdMatch = "metadata @> jsonb_build_object('docId', ?::text)"
 
   /** The text search configuration of [[PgSearchIndex.keywordQuery]]. */
   private[pg] val TextSearchConfig = "english"
