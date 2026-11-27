@@ -410,12 +410,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
           // the tool's natural completion race to complete the promise first. Repeating this
           // narrows in on the window where the timeout wins just as the worker thread is
           // already returning to the pool - the case a naive fix (clearing the interrupt only
-          // from inside the worker's own task body) cannot cover.
+          // from inside the worker's own task body) cannot cover. The race is as close at 5 ms as
+          // at 15, so the 200 races take a third of the time.
           for (_ <- 1 to 200) {
             ToolExecutor.execute(
               registry,
-              ToolCallRequest("sleep", ujson.Obj("ms" -> 15)),
-              ToolExecutionConfig(timeout = Some(15.millis))
+              ToolCallRequest("sleep", ujson.Obj("ms" -> 5)),
+              ToolExecutionConfig(timeout = Some(5.millis))
             )
             val afterRace = ToolExecutor.execute(
               registry,
@@ -533,8 +534,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     interruptSafeSleepTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry   = ToolRegistry.of(Seq(sleepTool)).toOption.get
-        val config     = ToolExecutionConfig(timeout = Some(50.millis))
+        val registry = ToolRegistry.of(Seq(sleepTool)).toOption.get
+        // the tool sleeps 500 ms, so a 10 ms timeout fires every time
+        val config     = ToolExecutionConfig(timeout = Some(10.millis))
         val threadBean = ManagementFactory.getThreadMXBean
         val request    = ToolCallRequest("sleep-interruptible", ujson.Obj("ms" -> 500))
 
@@ -549,8 +551,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
           result.isLeft shouldBe true
         }
 
-        // Let interrupted worker threads finish unwinding after the timeout fires.
-        Thread.sleep(1000)
+        // Let interrupted worker threads finish unwinding after the timeout fires: a leaked thread never does, so
+        // the count stays up and the check fails once the 5 s pass
+        val settled = 5.seconds.fromNow
+        while (threadBean.getThreadCount - baseline > 10 && settled.hasTimeLeft()) Thread.sleep(20)
 
         val afterCount = threadBean.getThreadCount
         (afterCount - baseline) should be <= 10

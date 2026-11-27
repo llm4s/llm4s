@@ -110,9 +110,17 @@ final class AgentWorker private (
   agents: Map[AgentId, QueuedAgent],
   val settings: WorkerSettings,
   val queueSettings: RunQueueSettings,
-  meter: QueueMetrics
+  meter: QueueMetrics,
+  probeTtl: FiniteDuration
 ):
   import AgentWorker.*
+
+  /**
+   * This worker, not yet started, with its busy-thread probe's claim lasting `ttl` rather than `ProbeTtl`
+   * (5 seconds) when its release does not land: a seam for tests, which would otherwise wait the probe out.
+   */
+  private[service] def withProbeTtl(ttl: FiniteDuration): AgentWorker =
+    new AgentWorker(queue, checkpointer, agents, settings, queueSettings, meter, ttl)
 
   /** The lease holder this worker takes entries as: its label, if any, and a random suffix. */
   val holder: String =
@@ -390,7 +398,7 @@ final class AgentWorker private (
    * back at once, so the store judges the claim it already holds, and no attempt is recorded for a thread that is busy.
    */
   private def liveClaim(entry: QueueEntry): Result[Boolean] =
-    checkpointer.claim(entry.threadId, ClaimRequest(RunId.random(), entry.tenantId, ProbeTtl)) match
+    checkpointer.claim(entry.threadId, ClaimRequest(RunId.random(), entry.tenantId, probeTtl)) match
       case Left(_: GraphError.ThreadBusy) => Right(true)
       case Left(error)                    => Left(error)
       // a probe whose release failed may still hold the thread: the run would meet it as ThreadBusy, spending an
@@ -859,7 +867,8 @@ object AgentWorker:
           agents.map(a => a.id -> a).toMap,
           settings,
           queueSettings,
-          new QueueMetrics(metrics)
+          new QueueMetrics(metrics),
+          ProbeTtl
         )
       )
 
