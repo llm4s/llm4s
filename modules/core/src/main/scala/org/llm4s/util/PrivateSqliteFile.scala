@@ -29,6 +29,8 @@ private[llm4s] object PrivateSqliteFile:
   /** `rw-------`: the mode a new database file is created with. */
   val OwnerOnly: Set[PosixFilePermission] = PosixFilePermissions.fromString("rw-------").asScala.toSet
 
+  private val JdbcPrefix = "jdbc:sqlite:"
+
   /** The files SQLite keeps beside a database `x.db`: `x.db-wal`, `x.db-shm` and `x.db-journal`. */
   val CompanionSuffixes: Seq[String] = Seq("-wal", "-shm", "-journal")
 
@@ -55,20 +57,24 @@ private[llm4s] object PrivateSqliteFile:
       .foreach(path => prepare(path))
 
   /**
-   * The file name sqlite-jdbc (3.53.2.0, `SQLiteConnection.extractPragmasFromFilename`) opens for `jdbc:sqlite:<dbPath>`:
-   * each `&`-separated parameter after the first `?` whose key is a pragma is removed, and the others stay in the
-   * name, in reverse order, as `?b&a`. `None` when a parameter has no key, which sqlite-jdbc fails to open.
+   * The file name sqlite-jdbc (3.53.2.0) opens for `jdbc:sqlite:<dbPath>`, by its whole path from the URL to the
+   * name: `JDBC.createConnection` trims the URL (so trailing characters up to `U+0020` go; leading ones, after the
+   * prefix, stay) and takes what follows `jdbc:sqlite:`; `SQLiteConnection.extractPragmasFromFilename` then removes
+   * each `&`-separated parameter after the first `?` whose key is a pragma, keeping the others in the name in reverse
+   * order, as `?b&a`; the name is resolved against the working directory, as a [[Path]] is. `None` when a parameter
+   * has no key, which sqlite-jdbc fails to open.
    */
   def jdbcFileName(dbPath: String, pragmaNames: Set[String]): Option[String] =
-    dbPath.indexOf('?') match
-      case -1 => Some(dbPath)
+    val address = s"$JdbcPrefix$dbPath".trim.substring(JdbcPrefix.length)
+    address.indexOf('?') match
+      case -1 => Some(address)
       case delimiter =>
         val parameters =
-          dbPath.substring(delimiter + 1).split("&").reverseIterator.map(_.trim).filter(_.nonEmpty).toVector
+          address.substring(delimiter + 1).split("&").reverseIterator.map(_.trim).filter(_.nonEmpty).toVector
         val keys = parameters.map(_.split("=").headOption.map(_.trim.toLowerCase))
         Option.when(keys.forall(_.isDefined)) {
           val kept = parameters.zip(keys.flatten).collect { case (parameter, key) if !pragmaNames(key) => parameter }
-          dbPath.substring(0, delimiter) + (if kept.isEmpty then "" else kept.mkString("?", "&", ""))
+          address.substring(0, delimiter) + (if kept.isEmpty then "" else kept.mkString("?", "&", ""))
         }
 
   /** Creates the database file at `path` owner-only if it is missing, else warns if it is shared (see above). */

@@ -55,6 +55,15 @@ class SQLiteFilePermissionsSpec extends AnyFlatSpec with Matchers with BeforeAnd
     Files.exists(dir.resolve("store")) shouldBe false
   }
 
+  it should "create the file sqlite-jdbc opens when the path has trailing whitespace" in {
+    // sqlite-jdbc trims the URL, so the spaces are not part of the file's name
+    modeOfNew("trailing.db", "  ") { p =>
+      val s = opened(SQLiteVectorStore(p))
+      () => s.close()
+    } shouldBe "rw-------"
+    Files.exists(dir.resolve("trailing.db  ")) shouldBe false
+  }
+
   "SQLiteKeywordIndex" should "create its database file readable only by its owner" in {
     modeOfNew("keywords.db") { p =>
       val s = opened(SQLiteKeywordIndex(p))

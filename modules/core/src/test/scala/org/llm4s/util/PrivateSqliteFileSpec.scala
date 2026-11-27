@@ -105,6 +105,11 @@ class PrivateSqliteFileSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     PrivateSqliteFile.jdbcFileName("/d/s?a=1&journal_mode=WAL&b=2", pragmas) shouldBe Some("/d/s?b=2&a=1")
     PrivateSqliteFile.jdbcFileName("/d/s.db?", pragmas) shouldBe Some("/d/s.db")
     PrivateSqliteFile.jdbcFileName("/d/s.db?=", pragmas) shouldBe None
+    // JDBC.createConnection trims the whole URL: trailing whitespace goes, leading (after the prefix) stays
+    PrivateSqliteFile.jdbcFileName("/d/s.db \t\n", pragmas) shouldBe Some("/d/s.db")
+    PrivateSqliteFile.jdbcFileName(" s.db ", pragmas) shouldBe Some(" s.db")
+    PrivateSqliteFile.jdbcFileName("/d/s?tenant=a ", pragmas) shouldBe Some("/d/s?tenant=a")
+    PrivateSqliteFile.jdbcFileName("   ", pragmas) shouldBe Some("")
   }
 
   "PrivateSqliteFile.prepare(dbPath)" should "create the file sqlite-jdbc opens, without the pragmas it takes out" in {
