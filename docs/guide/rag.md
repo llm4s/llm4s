@@ -26,6 +26,7 @@ Elasticsearch and OpenSearch stores and the Redis and Valkey store are separate 
 | Load | **[Document Loaders](document-loaders)** | Text, files, directories, URLs, a web crawl or S3 as a `DocumentLoader`; composing loaders; `ingest`, `sync` and `refresh`; SSRF protection and robots.txt |
 | Embed | **[Embeddings](embeddings)** | Choosing a provider and model, creating an `EmbeddingClient`, embedding documents and queries, and keeping dimensions in step with the store |
 | Chunk, store, search | **[Vector Store](vector-store)** | The `VectorStore` API and its backends, metadata filtering, hybrid search (keyword plus vector), reranking and document chunking |
+| Follow relationships | **[Knowledge Graph](knowledge-graph)** | Building and querying graphs, extracting relationships from documents, and answering questions with graph context |
 | Rewrite the query | **[Query Transformers](rag-query-transformers)** | Rewriting the user's query before it is embedded: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and your own transformer |
 | Restrict | **[Permission-Based RAG](permission-based-rag)** | Collections, principals and document-level permissions, so that a query retrieves only what the user may read |
 | Measure | **[RAG Evaluation](rag-evaluation)** | RAGAS metrics (faithfulness, answer relevancy, context precision and recall) and the benchmarking harness that compares chunking, fusion and embedding strategies |

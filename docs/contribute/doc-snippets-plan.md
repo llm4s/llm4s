@@ -84,6 +84,7 @@ not convert the same one.
 | `guide/image-generation.md` | 4 | checked |
 | `guide/jev.md` | 6 | checked |
 | `guide/kafka.md` | 9 | checked |
+| `guide/knowledge-graph.md` | 3 | checked |
 | `guide/modular-rag-example.md` | 1 | checked |
 | `guide/multimodal.md` | 2 | checked |
 | `guide/observability/agents.md` | 5 | checked |

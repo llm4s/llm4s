@@ -3,7 +3,8 @@ layout: page
 title: Knowledge Graph
 description: "Build, store and query a knowledge graph in Scala, extract relationships from documents, and answer questions with graph context."
 search_title: "Knowledge graphs in Scala with LLM4S"
-parent: User Guide
+parent: RAG and Data
+grand_parent: User Guide
 nav_order: 311
 ---
 
@@ -13,10 +14,15 @@ Use `llm4s-knowledgegraph` when your application needs to follow relationships b
 
 ## Installation
 
-Add the graph module using the same `llm4sVersion` as your other LLM4S dependencies. The `llm4s-rag` module already brings in `llm4s-knowledgegraph`. Add the second dependency when you use Neo4j. See [Installation](../getting-started/installation#optional-dependencies) for version setup.
+Add the graph module using the same `llm4sVersion` as your other LLM4S dependencies. The `llm4s-rag` module already brings in `llm4s-knowledgegraph`. See [Installation](../getting-started/installation#optional-dependencies) for version setup.
 
 ```sbt
 libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph" % llm4sVersion
+```
+
+Add this dependency if you use `Neo4jGraphStore`.
+
+```sbt
 libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersion
 ```
 
@@ -172,4 +178,4 @@ Graph store operations, extraction and question answering return `Result[A]`. Co
 - Malformed model JSON, missing required fields and dangling edges fail graph extraction. A dangling edge produces a `ProcessingError` with operation `graph_integrity_violation`. Loading a JSON file also validates edge endpoints.
 - Free-form extraction propagates store write errors. Earlier successful writes can remain in the store after a failure.
 - Multi-document extraction stops on the first document error. Schema validation can instead return a filtered graph and report violations through logging.
-- Graph QA treats malformed entity-identification replies as an empty list of mentions. Model call failures during identification, query translation or answer generation return `Left`. The agent tool maps a pipeline failure to a tool handler error.
+- Graph QA treats malformed entity-identification replies as an empty list of mentions. A malformed query-translation reply, such as invalid JSON, an unknown query type or a missing required `node_id`, fails `ask` with a `ProcessingError` whose operation is `query_parse`. Model call failures during identification, query translation or answer generation also return `Left`. The agent tool maps a pipeline failure to a tool handler error.
