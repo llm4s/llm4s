@@ -77,6 +77,24 @@ class PgVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEac
       retrieved.toOption.flatten.map(_.metadata) shouldBe Some(Map("source" -> "test", "type" -> "document"))
     }
 
+    "store and read back metadata a hand-written JSON writer broke on (#2993)" in skipIfNoPg {
+      val metadata = Map(
+        "quote"     -> "say \"hi\"",
+        "backslash" -> """C:\docs\""",
+        "escape"    -> """a\nb""",
+        "newline"   -> "line one\nline two",
+        "tab"       -> "a\tb",
+        "unicode"   -> "héllo 世界 🚀",
+        "title"     -> """x","tenant":"other""",
+        "tenant"    -> "acme"
+      )
+      store.upsertBatch(Seq(VectorRecord("tricky", Array(0.1f, 0.2f), metadata = metadata))) shouldBe Right(())
+      store.get("tricky").map(_.map(_.metadata)) shouldBe Right(Some(metadata))
+      store.search(Array(0.1f, 0.2f), 5, Some(MetadataFilter.Equals("tenant", "acme"))).map(_.map(_.record.id)) shouldBe
+        Right(Seq("tricky"))
+      store.search(Array(0.1f, 0.2f), 5, Some(MetadataFilter.Equals("tenant", "other"))) shouldBe Right(Seq.empty)
+    }
+
     "return None for non-existent record" in skipIfNoPg {
       val result = store.get("non-existent")
       result shouldBe Right(None)
