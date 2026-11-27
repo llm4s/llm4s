@@ -61,12 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `AwsSecretsManagerApiKeyProvider` no longer sends a whole JSON key/value secret to the vendor as the API key when `withField` is not set: it is a `ConfigurationError` naming the object's keys [#3102](https://github.com/llm4s/llm4s/issues/3102).
 - **Changed** `VaultSettings` and `AwsSecretsManagerSettings` refuse cleartext `http` to a non-loopback host (`withCleartext(true)` allows it) and user info, and no `toString` or error prints a password given in the URL [#3102](https://github.com/llm4s/llm4s/issues/3102).
 
-### Embeddings & RAG
-
-- **Fixed** `PgCollectionStore` escapes the prefix of a `CollectionPattern.AllDescendants` in its `LIKE`, so
-  `tenant_1/**` no longer also matches `tenant11/...` or `tenant-1/...`; `_` and `%` in a path match literally, as
-  `CollectionPattern.matches` does [#2989](https://github.com/llm4s/llm4s/issues/2989).
-
 ### Build & tooling
 
 - **Changed** the MiMa baseline is 1.0.0: `sbt mimaReportBinaryIssues` compares the seven frozen modules with their 1.0.0 artifacts, with no filter ([#1281](https://github.com/llm4s/llm4s/issues/1281); [API Stability](docs/reference/api-stability.md#the-baseline)).
