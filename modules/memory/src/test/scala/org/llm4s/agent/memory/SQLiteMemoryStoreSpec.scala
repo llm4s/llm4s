@@ -631,8 +631,38 @@ class SQLiteMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     // on a case-insensitive file system (macOS, Windows) `ALICE.db` opens the same file
     if (java.nio.file.Files.exists(dir.resolve("ALICE.db"))) identity(dir.resolve("ALICE.db").toString) shouldBe plain
     store.storageIdentity shouldBe Right(None)
-    SQLiteMemoryStore.fileIdentity("file::memory:?cache=shared") shouldBe Right(None)
     SQLiteMemoryStore.fileIdentity("file:x?mode=memory") shouldBe Right(None)
+    SQLiteMemoryStore.fileIdentity("file:x?mode=memory&cache=private") shouldBe Right(None)
+  }
+
+  // Codex on #3166: a shared-cache in-memory database is one database for every connection that names it
+  it should "name an in-memory database shared by name, and only that one" in {
+    val shared = SQLiteMemoryStore.fileIdentity("file:tenants?mode=memory&cache=shared")
+    shared shouldBe Right(Some("sqlite-memory:tenants"))
+    SQLiteMemoryStore.fileIdentity("file:tenants?cache=shared&mode=memory#frag") shouldBe shared
+    SQLiteMemoryStore.fileIdentity("file:%74enants?mode=memory&cache=shared") shouldBe shared
+    SQLiteMemoryStore.fileIdentity("file:others?mode=memory&cache=shared") should not be shared
+    SQLiteMemoryStore.fileIdentity("file::memory:?cache=shared") shouldBe Right(Some("sqlite-memory::memory:"))
+    val opened = SQLiteMemoryStore("file:llm4s-identity-shared?mode=memory&cache=shared").toOption.get
+    opened.storageIdentity shouldBe Right(Some("sqlite-memory:llm4s-identity-shared"))
+    opened.close()
+  }
+
+  // Codex on #3166: a file: URI is read as SQLite reads it, and a file not created yet agrees with its later opens
+  it should "decode a file: URI and canonicalise a file that does not exist yet" in {
+    val dir    = java.nio.file.Files.createTempDirectory("llm4s-identity-uri")
+    val file   = dir.resolve("alice.db")
+    val ahead  = SQLiteMemoryStore.fileIdentity(file.toString).toOption.get
+    val opened = SQLiteMemoryStore(file.toString).toOption.get
+    val plain  = opened.storageIdentity.toOption.get
+    opened.close()
+    ahead shouldBe plain
+    if (java.io.File.separatorChar == '/') {
+      SQLiteMemoryStore.fileIdentity(s"file:${dir.resolve("%61lice.db")}").toOption.get shouldBe plain
+      SQLiteMemoryStore.fileIdentity(s"file://localhost${file}?mode=rw").toOption.get shouldBe plain
+      SQLiteMemoryStore.fileIdentity(s"file://${file}").toOption.get shouldBe plain
+    }
+    SQLiteMemoryStore.fileIdentity("file://elsewhere/x.db").isLeft shouldBe true
     InMemoryStore.empty.storageIdentity shouldBe Right(None)
   }
 }

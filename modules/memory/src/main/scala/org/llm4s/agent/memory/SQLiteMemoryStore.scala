@@ -613,23 +613,71 @@ object SQLiteMemoryStore {
   def inMemory(config: MemoryStoreConfig = MemoryStoreConfig.testing): Result[SQLiteMemoryStore] =
     apply(":memory:", config)
 
-  /** The identity of the database `dbPath` opens: `sqlite:` and the file's real path, or `None` in memory. */
-  private[memory] def fileIdentity(dbPath: String): Result[Option[String]] = {
-    val uri  = dbPath.startsWith("file:")
-    val path = if (uri) dbPath.stripPrefix("file:").takeWhile(_ != '?').replaceFirst("^//(?=/)", "") else dbPath
-    val inMemory =
-      dbPath.isEmpty || dbPath == ":memory:" || (uri && (path.isEmpty || path == ":memory:" || dbPath.contains(
-        "mode=memory"
-      )))
-    if (inMemory) Right(None)
-    else
-      Try {
-        val file = java.nio.file.Paths.get(path)
-        val real = Try(file.toRealPath()).getOrElse(file.toAbsolutePath.normalize())
-        Some(s"sqlite:$real")
-      }.toEither.left.map(e =>
-        ProcessingError("sqlite-identity", s"Cannot resolve the path of $dbPath: ${e.getMessage}")
-      )
+  /**
+   * The identity of the database `dbPath` opens, read as SQLite reads it (https://sqlite.org/uri.html).
+   *
+   *   - A file: `sqlite:` and its canonical path - the real path, or, for a file not created yet, its directory's real
+   *     path and its name, so a later open of the created file agrees.
+   *   - A `file:` URI: the path percent-decoded, the query and fragment dropped, an empty or `localhost` authority
+   *     dropped (another authority is refused, as SQLite refuses it), and on Windows the `/` before a drive letter.
+   *   - An in-memory database shared by name (`file:x?mode=memory&cache=shared`, `file::memory:?cache=shared`), which
+   *     every connection of this process that names it opens: `sqlite-memory:` and the name.
+   *   - A private in-memory database (`:memory:`, an empty path, `mode=memory` without `cache=shared`): `None`, only
+   *     its own connection sees it.
+   */
+  private[memory] def fileIdentity(dbPath: String): Result[Option[String]] =
+    Try {
+      if (dbPath.isEmpty || dbPath == ":memory:") None
+      else if (!dbPath.startsWith("file:")) Some(s"sqlite:${canonical(dbPath)}")
+      else {
+        val rest        = dbPath.stripPrefix("file:").takeWhile(_ != '#')
+        val (target, q) = rest.span(_ != '?')
+        val params      = queryParams(q.drop(1))
+        val path        = decode(withoutAuthority(target))
+        val memory      = path.isEmpty || path == ":memory:" || params.get("mode").contains("memory")
+        val shared      = params.get("cache").contains("shared")
+        if (memory) if (shared) Some(s"sqlite-memory:$path") else None
+        else Some(s"sqlite:${canonical(onWindows(path))}")
+      }
+    }.toEither.left.map(e => ProcessingError("sqlite-identity", s"Cannot resolve the path of $dbPath: ${e.getMessage}"))
+
+  /** `target` without its `//authority`: SQLite accepts only an empty one or `localhost`. */
+  private def withoutAuthority(target: String): String =
+    if (!target.startsWith("//")) target
+    else {
+      val (authority, path) = target.drop(2).span(_ != '/')
+      if (authority.isEmpty || authority.equalsIgnoreCase("localhost")) path
+      else throw new IllegalArgumentException(s"invalid uri authority: $authority")
+    }
+
+  /** The query's parameters, names and values percent-decoded; a later one wins, as in SQLite. */
+  private def queryParams(query: String): Map[String, String] =
+    query
+      .split('&')
+      .iterator
+      .filter(_.nonEmpty)
+      .map { p =>
+        val (k, v) = p.span(_ != '=')
+        decode(k) -> decode(v.drop(1))
+      }
+      .toMap
+
+  /** `s` with every `%XX` escape decoded as UTF-8 bytes; `+` is a plus, as SQLite reads it. */
+  private def decode(s: String): String =
+    if (!s.contains('%')) s
+    else java.net.URLDecoder.decode(s.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8)
+
+  /** On Windows, `/C:/x` is `C:/x`. */
+  private def onWindows(path: String): String =
+    if (java.io.File.separatorChar == '\\' && path.matches("^/[A-Za-z]:.*")) path.drop(1) else path
+
+  /** `path`'s real path, or, if it does not exist, its directory's real path and its name. */
+  private def canonical(path: String): java.nio.file.Path = {
+    val named = java.nio.file.Paths.get(path).toAbsolutePath
+    Try(named.toRealPath()).getOrElse {
+      val file = named.normalize()
+      Option(file.getParent).flatMap(dir => Try(dir.toRealPath()).toOption).fold(file)(_.resolve(file.getFileName))
+    }
   }
 
   /**
