@@ -97,7 +97,8 @@ class GraphQAPipelineTest extends AnyFunSuite with Matchers with MockFactory {
     result should be(a[Right[_, _]])
     val qaResult = result.toOption.get
     qaResult.answer should include("Alice")
-    qaResult.queryResult.nodes should have size 2 // Alice and Bob
+    // The query found Alice and Bob; Alice, identified but found by FindNodes only, is traversed to maxHops (#2975)
+    (qaResult.queryResult.nodes.map(_.id) should contain).allOf("alice", "bob")
   }
 
   test("ask should handle entity identification failure gracefully") {

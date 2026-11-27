@@ -300,4 +300,41 @@ class GraphQueryFixesSpec extends AnyFunSuite with Matchers {
     descriptions(Direction.Incoming) should include("only against their direction")
     descriptions(Direction.Both) should include("either way")
   }
+
+  test("an entity the query explored to depth 1 is still traversed to maxHops (#2975, Codex)") {
+    val s = store(
+      Seq(person("alice", "Alice"), person("bob", "Bob"), person("carol", "Carol")),
+      Seq(Edge("alice", "bob", "KNOWS"), Edge("bob", "carol", "KNOWS"))
+    )
+    val llm =
+      new ScriptedLLM("""[{"mention": "Alice"}]""", """{"type": "find_neighbors", "node_id": "alice"}""", "answer")
+    val r = new GraphQAPipeline(llm, s, GraphQAConfig(maxHops = 3)).ask("Who is near Alice?").toOption.get
+    r.queryResult.nodes.map(_.id) should contain("carol")
+    llm.prompts.last should include("] carol:")
+  }
+
+  test("a FindNeighbors that already reached maxHops is not traversed again (#2975, Codex)") {
+    val s = store(
+      Seq(person("alice", "Alice"), person("bob", "Bob"), person("carol", "Carol")),
+      Seq(Edge("alice", "bob", "KNOWS"), Edge("bob", "carol", "KNOWS"))
+    )
+    val llm = new ScriptedLLM("""[{"mention": "Alice"}]""", "answer")
+    val r = new GraphQAPipeline(llm, s, GraphQAConfig(maxHops = 1))
+      .askWithQuery("?", GraphQuery.FindNeighbors("alice"))
+      .toOption
+      .get
+    r.queryResult.nodes.map(_.id) shouldBe Seq("alice", "bob")
+  }
+
+  test("citations cover only what the token budget let into the prompt (#2975, Codex)") {
+    val s      = store((1 to 30).map(i => person(f"p$i%02d", s"Person number $i")), Nil)
+    val llm    = new ScriptedLLM("[]", "answer")
+    val config = GraphQAConfig(useRanking = false, maxContextTokens = Some(25))
+    val r      = new GraphQAPipeline(llm, s, config).askWithQuery("?", GraphQuery.FindNodes(label = Some("Person")))
+    val shown = llm.prompts.last.linesIterator.collect {
+      case l if l.startsWith("- [Person] ") => l.split(' ')(2).stripSuffix(":")
+    }.toSet
+    shown.size should ((be >= 1).and(be < 30))
+    r.toOption.get.citations.map(_.nodeId).toSet shouldBe shown
+  }
 }

@@ -89,11 +89,12 @@ class GraphQAPipeline(
           entities    <- identifyEntities(question)
           graphQuery  <- preset.fold(queryTranslator.translate(question, entities))(Right(_))
           queryResult <- queryExecutor.execute(graphQuery)
-          enriched    <- enrichWithTraversal(queryResult, entities)
-          ranked  = applyRanking(enriched, entities)
-          context = buildContext(ranked)
+          enriched    <- enrichWithTraversal(queryResult, entities, graphQuery)
+          ranked           = applyRanking(enriched, entities)
+          (context, shown) = selectContext(ranked)
           answer <- generateAnswer(question, context)
-          citations = if (config.includeCitations) buildCitations(ranked) else Seq.empty
+          // Only what the model was shown is cited, after any token budget (#2975)
+          citations = if (config.includeCitations) buildCitations(shown) else Seq.empty
         } yield GraphQAResult(
           answer = answer,
           citations = citations,
@@ -119,22 +120,37 @@ class GraphQAPipeline(
     } yield entities
 
   /**
-   * Adds the identified entities the query result lacks, with one traversal of `maxHops` (clamped to
-   * `maxQueryDepth`; 0 adds only the entities) from all of them at once (#2975).
+   * Traverses `maxHops` (clamped to `maxQueryDepth`; 0 adds only the entities) from the identified entities the query
+   * did not already explore that far, all at once (#2975). A `FindNeighbors` from an entity covers it to the query's
+   * depth; any other appearance in the result covers it to depth 0, so an entity the query only found still gets
+   * its neighbourhood.
    */
   private def enrichWithTraversal(
     queryResult: GraphQueryResult,
-    entities: Seq[IdentifiedEntity]
+    entities: Seq[IdentifiedEntity],
+    query: GraphQuery
   ): Result[GraphQueryResult] = {
-    val present = queryResult.nodes.map(_.id).toSet
-    val missing = entities.map(_.nodeId).distinct.filterNot(present.contains)
-    if (missing.isEmpty) Right(queryResult)
-    else {
-      val depth = math.max(0, math.min(config.maxHops, config.maxQueryDepth))
-      queryExecutor.neighborhood(missing, depth, Direction.Both, None).map { case (nodes, edges, _) =>
+    val depth = math.max(0, math.min(config.maxHops, config.maxQueryDepth))
+    def covered(q: GraphQuery): Map[String, Int] = q match {
+      case GraphQuery.FindNeighbors(id, Direction.Both, None, d) =>
+        Map(id -> math.max(1, math.min(d, config.maxQueryDepth)))
+      case GraphQuery.CompositeQuery(steps) =>
+        steps.map(covered).foldLeft(Map.empty[String, Int]) { (acc, m) =>
+          m.foldLeft(acc) { case (a, (id, d)) => a.updated(id, math.max(d, a.getOrElse(id, 0))) }
+        }
+      case _ => Map.empty
+    }
+    val coverage = covered(query)
+    val present  = queryResult.nodes.map(_.id).toSet
+    val pending = entities.map(_.nodeId).distinct.filter { id =>
+      val reached = coverage.get(id).orElse(if (present.contains(id)) Some(0) else None)
+      reached.forall(_ < depth)
+    }
+    if (pending.isEmpty) Right(queryResult)
+    else
+      queryExecutor.neighborhood(pending, depth, Direction.Both, None).map { case (nodes, edges, _) =>
         queryResult.merge(GraphQueryResult(nodes, edges))
       }
-    }
   }
 
   /**
@@ -188,7 +204,10 @@ class GraphQAPipeline(
   /**
    * Builds a human-readable context string from the query result for the LLM.
    */
-  private[query] def buildContext(queryResult: GraphQueryResult): String = {
+  private[query] def buildContext(queryResult: GraphQueryResult): String = selectContext(queryResult)._1
+
+  /** The context string and the nodes, edges and paths it shows, after the token budget. */
+  private def selectContext(queryResult: GraphQueryResult): (String, GraphQueryResult) = {
     val nodeLines = queryResult.nodes.map { node =>
       val propsStr = node.properties.toSeq.sortBy(_._1).map { case (k, v) => s"$k: ${renderValue(v)}" }.mkString(", ")
       s"- [${node.label}] ${node.id}: $propsStr"
@@ -196,7 +215,8 @@ class GraphQAPipeline(
 
     val edgeLines = queryResult.edges.map(edge => s"- ${edge.source} -[${edge.relationship}]-> ${edge.target}")
 
-    val pathLines = queryResult.paths.take(config.maxPaths).zipWithIndex.map { case (path, idx) =>
+    val shownPaths = queryResult.paths.take(config.maxPaths)
+    val pathLines = shownPaths.zipWithIndex.map { case (path, idx) =>
       val steps = path.map(e => s"${e.source} -[${e.relationship}]-> ${e.target}").mkString(" -> ")
       s"Path ${idx + 1}: $steps"
     }
@@ -220,12 +240,20 @@ class GraphQAPipeline(
 
     val pathsSection = if (pathsIn.nonEmpty) s"\nPaths:\n${pathsIn.mkString("\n")}" else ""
 
-    s"""Entities:
-       |${nodesIn.mkString("\n")}
-       |
-       |Relationships:
-       |${edgesIn.mkString("\n")}
-       |$pathsSection""".stripMargin
+    val context =
+      s"""Entities:
+         |${nodesIn.mkString("\n")}
+         |
+         |Relationships:
+         |${edgesIn.mkString("\n")}
+         |$pathsSection""".stripMargin
+    // fit keeps a prefix of each list, so the shown elements are the same-length prefixes
+    val shown = queryResult.copy(
+      nodes = queryResult.nodes.take(nodesIn.size),
+      edges = queryResult.edges.take(edgesIn.size),
+      paths = shownPaths.take(pathsIn.size)
+    )
+    (context, shown)
   }
 
   /**
