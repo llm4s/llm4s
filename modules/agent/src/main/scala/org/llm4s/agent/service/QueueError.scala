@@ -1,9 +1,13 @@
 package org.llm4s.agent.service
 
+import org.llm4s.agent.graph.ThreadId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.LLMError
 
-/** Errors a [[RunQueue]] answers with (design 4.55). Every case is non-recoverable: retrying the same call changes nothing. */
+/**
+ * Errors a [[RunQueue]] answers with (design 4.55). Every case is non-recoverable: retrying the same call at once
+ * changes nothing.
+ */
 @Experimental
 sealed trait QueueError extends LLMError
 
@@ -42,3 +46,17 @@ object QueueError:
   final case class SubmissionKeyReused(key: SubmissionKey, entryId: EntryId) extends QueueError:
     override val message: String =
       s"Submission key '${key.value}' already names queue entry ${entryId.value}, a different submission"
+
+  /**
+   * A submission was refused because its tenant already has `limit` open entries on thread `threadId`
+   * ([[Submission.maxOpenPerThread]], #3095): it may be submitted again once some of them close.
+   */
+  final case class ThreadQueueFull(threadId: ThreadId, limit: Int) extends QueueError:
+    override val message: String = s"Thread '${threadId.value}' already has $limit open queue entries"
+
+  /**
+   * A submission was refused because its input's stored JSON is `bytes` bytes long, more than `limit`
+   * ([[Submission.maxInputBytes]], #3095).
+   */
+  final case class InputTooLarge(bytes: Long, limit: Long) extends QueueError:
+    override val message: String = s"A queued input of $bytes bytes is larger than the limit of $limit bytes"

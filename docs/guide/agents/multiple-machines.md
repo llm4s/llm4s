@@ -91,9 +91,10 @@ yield (store, runtime, queue)
 - Instances that start together migrate the schema once, under an advisory lock.
 - Every store call returns within `connectionTimeout + callTimeout`. Keep that well inside the claim's
   `ttl - renewEvery` (below), so a slow database makes a run lose its claim cleanly rather than hang.
-- Each instance holds up to `maxPoolSize` connections plus one listening connection (commits are announced with
-  `LISTEN`/`NOTIFY`, so a run committed on one machine reaches a subscriber on another at once). Size the database's
-  `max_connections` for every instance.
+- Each instance holds up to `maxPoolSize` connections plus one listening connection (commits and queue entry closes
+  are announced with `LISTEN`/`NOTIFY`, so a run committed on one machine reaches a subscriber on another at once,
+  and `submitter.await` wakes when the entry closes rather than polling). Size the database's `max_connections` for
+  every instance.
 
 The store's details - fencing, notification, the registry - are in
 [Durable Checkpointers](durable-checkpointers#the-postgresql-store).
@@ -144,7 +145,15 @@ AgentId.of("assistant").flatMap { agentId =>
   run's events continue the same log, with no gap and no repeat. Recovery takes about the longer of the lease
   and claim `ttl`s.
 - **Attempts are bounded** by `llm4s.agent.queue.maxAttempts`; an entry that runs out is closed `failed` (a dead
-  letter), and so is one no worker's graph version can run for `unrunnableAfter`.
+  letter), and so is one no worker's graph version can run for `unrunnableAfter`. A worker that cannot read the
+  entry's thread spends an attempt each time, so a thread that never reads dead-letters its entry too. The sweep
+  closes `failed` (`Unrunnable`) a thread's head that no worker has taken within `unrunnableAfter` of its
+  submission, such as one for an agent id no worker serves; `queue.allDepths()` shows every agent's open entries,
+  served or not. An entry whose stored form this build cannot read (written by a newer release, or by hand) is closed
+  `failed` when a take reaches it, and the take goes on to the next.
+- **Queues are bounded**: a tenant may have `maxOpenPerThread` open entries on one thread, and a queued input (its
+  history included) may be `maxInputBytes` long; a submission past either is refused with
+  `QueueError.ThreadQueueFull` or `QueueError.InputTooLarge`.
 - **Submission keys** make a retried request idempotent: the same `submissionKey` from the same tenant returns the
   first entry's ticket.
 
@@ -155,6 +164,8 @@ llm4s.agent {
     maxAttempts = 5
     ticketLifetime = 24 hours          # how long a closed entry stays readable
     lease { ttl = 30 seconds, renewEvery = 10 seconds }
+    maxOpenPerThread = 1000            # open entries one tenant may have on one thread
+    maxInputBytes = 4 MiB              # the longest queued input, its history included
   }
   worker {
     concurrency = 4                    # runs one worker has at once
@@ -199,7 +210,7 @@ own tenant's entries. A submission to a thread another tenant already owns is re
 |---|---|
 | `Reject` (default) | Refused with `GraphError.ThreadBusy`; the caller retries later. |
 | `Enqueue` | Queued behind the thread's entries; runs after them, in submission order. |
-| `Interrupt` | Queued ahead of them. The running queued run stops at its next superstep boundary: the model call in flight is cut, tool calls already started finish and keep their results, unstarted ones get a synthetic "interrupted" result, so the history stays valid for the provider. Its entry closes `interrupted` and the new message runs next. |
+| `Interrupt` | Queued ahead of them. The running queued run stops at its next superstep boundary: the model call in flight is cut, tool calls already started finish and keep their results, unstarted ones get a synthetic "interrupted" result, so the history stays valid for the provider. Its entry closes `interrupted` and the new message runs next. Cancelling the interrupting entry before it starts withdraws the stop, so the running one carries on. |
 
 A run started directly (`agent.run`, outside the queue) is never interrupted or adopted by a worker: it is its
 owner's, who calls `recover` after a crash. Pending approvals or questions are not a busy thread: answer them with a

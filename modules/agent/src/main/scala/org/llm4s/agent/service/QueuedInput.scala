@@ -28,11 +28,19 @@ enum QueuedInput:
   case Resume(answers: Map[InterruptId, ujson.Value])
   case Recover
 
-  /** `start`, `resume` or `recover`. */
+  /**
+   * What a store answers for an entry whose stored input it cannot read (#3091): such an entry is closed
+   * `Failed(Unrunnable)` when a take reaches it, never run, and is read back with this in place of its input.
+   * `problem` says why it cannot be read. A submission never carries it.
+   */
+  case Unreadable(problem: String)
+
+  /** `start`, `resume`, `recover` or `unreadable`. */
   def kind: String = this match
-    case Start(_)  => "start"
-    case Resume(_) => "resume"
-    case Recover   => "recover"
+    case Start(_)      => "start"
+    case Resume(_)     => "resume"
+    case Recover       => "recover"
+    case Unreadable(_) => "unreadable"
 
 @Experimental
 object QueuedInput:
@@ -59,7 +67,8 @@ object QueuedInput:
         "kind"    -> "resume",
         "answers" -> ujson.Obj.from(answers.toSeq.sortBy(_._1.value).map((id, a) => id.value -> ujson.copy(a)))
       )
-    case Recover => ujson.Obj("kind" -> "recover")
+    case Recover             => ujson.Obj("kind" -> "recover")
+    case Unreadable(problem) => ujson.Obj("kind" -> "unreadable", "problem" -> problem)
 
   /** The input [[toJson]] stored, or why it cannot be read. */
   private[llm4s] def fromJson(json: ujson.Value): Either[String, QueuedInput] =
@@ -73,4 +82,6 @@ object QueuedInput:
           .map(answers => Resume(answers.iterator.map((k, v) => InterruptId(k) -> ujson.copy(v)).toMap))
           .toRight("a resume input has no `answers` object")
       case Some("recover") => Right(Recover)
-      case other           => Left(s"unknown input kind ${other.getOrElse("<none>")}")
+      case Some("unreadable") =>
+        json.obj.get("problem").flatMap(_.strOpt).map(Unreadable(_)).toRight("an unreadable input has no `problem`")
+      case other => Left(s"unknown input kind ${other.getOrElse("<none>")}")

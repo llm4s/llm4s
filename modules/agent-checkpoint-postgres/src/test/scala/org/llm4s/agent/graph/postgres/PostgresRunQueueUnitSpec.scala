@@ -78,15 +78,26 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
 
   private def leased(id: Long, token: Long) = Lease(EntryId.unsafe(id), LeaseToken(token), "w", later.toInstant)
 
+  /** An entry row in `Sql.openQueueEntriesLight`'s columns: what a submission decides by (#3095). */
+  private def light(id: Long, policy: String = "Enqueue", attempts: Int = 0, stop: String = null): Vector[Any] =
+    Vector(id, policy == "Interrupt", attempts, stop)
+
+  /** Every entry is first among its tenant's unless a case says otherwise (`Sql.queuePosition`). */
   private def script(answer: PartialFunction[(String, Vector[Any]), Vector[Vector[Any]]]) =
-    ScriptedPostgres(now, answer)
+    ScriptedPostgres(
+      now,
+      answer.orElse { case (sql, _) if sql == Sql.queuePosition(t) => Vector(Vector(0)) }
+    )
 
   // ---- submissions ----
 
   "PostgresRunQueue.submit" should "insert under the thread's lock, from the sequence, and answer the entry's position" in {
     val s = script {
-      case (sql, _) if sql == Sql.nextQueueEntryId(t)            => Vector(Vector(7L))
-      case (sql, Vector("t1")) if sql == Sql.openQueueEntries(t) => Vector(entry(5), entry(7))
+      case (sql, _) if sql == Sql.nextQueueEntryId(t)                             => Vector(Vector(7L))
+      case (sql, Vector("t1", null, null)) if sql == Sql.openQueueEntriesLight(t) => Vector(light(5))
+      case (sql, Vector(7L)) if sql == Sql.queueEntry(t)                          => Vector(entry(7))
+      // counted in SQL from the run order's columns, reading no input (#3095)
+      case (sql, Vector("t1", null, null, true, true, 7L)) if sql == Sql.queuePosition(t) => Vector(Vector(1))
     }
     val ticket = s
       .store()
@@ -96,7 +107,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     ticket shouldBe Ticket(EntryId.unsafe(7), thread, Some(1), existing = false)
     // no key: only the thread's lock, taken before anything is read
     s.madeWith(lockSql) shouldBe Vector(Vector(lockName("thread:t1")))
-    s.made.indexWhere(_._1 == lockSql) should be < s.made.indexWhere(_._1 == Sql.openQueueEntries(t))
+    s.made.indexWhere(_._1 == lockSql) should be < s.made.indexWhere(_._1 == Sql.openQueueEntriesLight(t))
+    (Sql.openQueueEntriesLight(t) should not).include("input_json")
     s.madeWith(Sql.insertQueueEntry(t)) shouldBe Vector(
       Vector(
         7L,
@@ -118,9 +130,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "store the submitter's trace context as its traceparent, and read it back onto the entry" in {
     val context = org.llm4s.trace.TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
     val s = script {
-      case (sql, _) if sql == Sql.nextQueueEntryId(t)            => Vector(Vector(7L))
-      case (sql, Vector("t1")) if sql == Sql.openQueueEntries(t) => Vector(entry(7, trace = context.traceParent))
-      case (sql, Vector(7L)) if sql == Sql.queueEntry(t)         => Vector(entry(7, trace = context.traceParent))
+      case (sql, _) if sql == Sql.nextQueueEntryId(t)    => Vector(Vector(7L))
+      case (sql, Vector(7L)) if sql == Sql.queueEntry(t) => Vector(entry(7, trace = context.traceParent))
     }
     val queue = s.store().runQueue
     queue
@@ -134,7 +145,7 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
 
   it should "refuse a Reject submission to a thread with an open entry, inserting nothing" in {
     val s = script {
-      case (sql, _) if sql == Sql.openQueueEntries(t) => Vector(entry(5))
+      case (sql, _) if sql == Sql.openQueueEntriesLight(t) => Vector(light(5))
     }
     s.store().runQueue.submit(Submission(thread, agent, QueuedInput.query("q"))).left.value shouldBe
       GraphError.ThreadBusy("t1", None, GraphError.BusyHolder.Unnamed)
@@ -145,9 +156,10 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "close the thread's unstarted Interrupt entries when an Interrupt entry is submitted, and keep a started one" in {
     val s = script {
       case (sql, _) if sql == Sql.nextQueueEntryId(t) => Vector(Vector(9L))
-      case (sql, _) if sql == Sql.openQueueEntries(t) =>
-        Vector(entry(3, policy = "Interrupt", attempts = 1), entry(5, policy = "Interrupt"), entry(6))
+      case (sql, _) if sql == Sql.openQueueEntriesLight(t) =>
+        Vector(light(3, policy = "Interrupt", attempts = 1), light(5, policy = "Interrupt"), light(6))
       case (sql, Vector(5L)) if sql == Sql.queueEntry(t) => Vector(entry(5, policy = "Interrupt"))
+      case (sql, Vector(9L)) if sql == Sql.queueEntry(t) => Vector(entry(9, policy = "Interrupt"))
     }
     val ticket = s
       .store()
@@ -171,8 +183,9 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     val cancel = ujson.write(StopRequest.toJson(StopRequest.Cancel(CancelReason.Requested(None))))
     val s = script {
       case (sql, _) if sql == Sql.nextQueueEntryId(t) => Vector(Vector(9L))
-      case (sql, _) if sql == Sql.openQueueEntries(t) =>
-        Vector(entry(3, attempts = 1), entry(4, attempts = 1, stop = cancel), entry(6))
+      case (sql, _) if sql == Sql.openQueueEntriesLight(t) =>
+        Vector(light(3, attempts = 1), light(4, attempts = 1, stop = cancel), light(6))
+      case (sql, Vector(9L)) if sql == Sql.queueEntry(t) => Vector(entry(9, policy = "Interrupt"))
     }
     s.store()
       .runQueue
@@ -195,9 +208,10 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
 
   "PostgresRunQueue.cancel" should "under the thread's lock, close the unstarted entries and ask the started to stop" in {
     val s = script {
-      case (sql, _) if sql == Sql.openQueueEntries(t)    => Vector(entry(3, attempts = 1), entry(6))
-      case (sql, Vector(3L)) if sql == Sql.queueEntry(t) => Vector(entry(3, attempts = 1))
-      case (sql, Vector(6L)) if sql == Sql.queueEntry(t) => Vector(entry(6))
+      case (sql, _) if sql == Sql.openQueueEntries(t) => Vector(entry(3, attempts = 1), entry(6))
+      // read back in one pass (#3095)
+      case (sql, _) if sql == Sql.queueEntriesOf(t)    => Vector(entry(3, attempts = 1), entry(6))
+      case (sql, _) if sql == Sql.openQueueEntryIds(t) => Vector(Vector(3L))
     }
     val reason = CancelReason.Requested(Some("n"))
     s.store().runQueue.cancel(None, CancelTarget.Thread(thread), reason).value.closed shouldBe Set(EntryId.unsafe(6))
@@ -206,6 +220,24 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     val asked = s.madeWith(Sql.setQueueStop(t))
     asked.map(_.last) shouldBe Vector(3L)
     StopRequest.fromJson(ujson.read(asked.head.head.toString)).value shouldBe StopRequest.Cancel(reason)
+    s.madeWith(Sql.queueEntriesOf(t)) shouldBe Vector(Vector(Vector("3", "6")))
+  }
+
+  it should "withdraw the stop an unstarted Interrupt entry asked of its thread's other entries when it closes (#3094)" in {
+    val interrupt = ujson.write(StopRequest.toJson(StopRequest.Interrupt(EntryId.unsafe(6))))
+    val other     = ujson.write(StopRequest.toJson(StopRequest.Interrupt(EntryId.unsafe(8))))
+    val s = script {
+      case (sql, Vector(6L)) if sql == Sql.queueEntryThread(t)         => Vector(Vector("t1"))
+      case (sql, Vector(6L)) if sql == Sql.queueEntry(t)               => Vector(entry(6, policy = "Interrupt"))
+      case (sql, Vector(6L)) if sql == Sql.lockedQueueEntry(t)         => Vector(entry(6, policy = "Interrupt"))
+      case (sql, Vector(6L)) if sql == Sql.unstartedInterruptThread(t) => Vector(Vector("t1"))
+      case (sql, Vector("t1", 6L)) if sql == Sql.siblingStops(t) => Vector(Vector(3L, interrupt), Vector(4L, other))
+      case (sql, _) if sql == Sql.queueEntriesOf(t)              => Vector(entry(6, policy = "Interrupt"))
+    }
+    s.store().runQueue.cancel(None, CancelTarget.Entry(EntryId.unsafe(6)), CancelReason.Requested(None)).value
+    s.madeWith(Sql.clearQueueStop(t)) shouldBe Vector(Vector(3L))
+    // the close notifies the schema's channel with the entry's payload, for its waiters (#3092)
+    s.madeWith(ChangeNotifier.NotifySql).map(_.last) should contain(ChangeNotifier.payload(EntryId.unsafe(6)))
   }
 
   "PostgresRunQueue.renew" should "answer the stop asked of the entry with the renewed lease (W3)" in {
@@ -257,8 +289,9 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
 
   it should "list only the tenant's open entries, each at its place among the tenant's entries (#3085)" in {
     val s = script {
-      case (sql, _) if sql == Sql.openQueueEntries(t) =>
-        Vector(entry(2, tenant = "acme"), entry(3), entry(5, tenant = "acme"))
+      // the tenant is chosen in SQL (#3095)
+      case (sql, Vector("t1", "acme", "acme")) if sql == Sql.openQueueEntries(t) =>
+        Vector(entry(2, tenant = "acme"), entry(5, tenant = "acme"))
     }
     s.store().runQueue.openEntries(Some(TenantId("acme")), thread).value.map(e => e.id.value -> e.position) shouldBe
       Vector(2L -> Some(0), 5L -> Some(1))
@@ -300,7 +333,9 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     s.madeWith(Sql.endSiblingLeases(t)) shouldBe Vector(Vector("free", 100L))
     s.madeWith(Sql.setLease(t)) shouldBe Vector(Vector("w", 42L, later, 100L))
     s.made.indexWhere(_._1 == Sql.endSiblingLeases(t)) should be < s.made.indexWhere(_._1 == Sql.setLease(t))
-    Sql.queueCandidates(t) should include("FOR UPDATE OF e SKIP LOCKED")
+    // candidates are read, not locked; only the row a take tries is (#3096)
+    (Sql.queueCandidates(t) should not).include("FOR UPDATE")
+    Sql.queueTakeable(t) should include("FOR UPDATE OF e SKIP LOCKED")
   }
 
   it should "stop at a batch shorter than the limit, and skip a head whose sibling still holds a live lease" in {
@@ -328,7 +363,7 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       case (sql, Vector(5L)) if sql == Sql.queueEntry(t)       => Vector(row)
       case (sql, Vector(5L)) if sql == Sql.queueEntryThread(t) => Vector(Vector("t1"))
       case (sql, _) if sql == Sql.runIdUsed(t)                 => Vector(Vector(false))
-      case (sql, _) if sql == Sql.openQueueEntries(t)          => Vector(row)
+      case (sql, Vector("t1")) if sql == Sql.queueHeadIdOf(t)  => Vector(Vector(5L))
     })
 
   "A call under a lease" should "renew, release and close only under the entry's current lease, locking its row first" in {

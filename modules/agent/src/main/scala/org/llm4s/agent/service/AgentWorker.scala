@@ -235,7 +235,7 @@ final class AgentWorker private (
       if Try(permits.tryAcquire(settings.pollInterval.toNanos, TimeUnit.NANOSECONDS)).getOrElse(false) then
         if stopRequested then permits.release()
         else
-          queue.take(TakeRequest(holder, agents.keySet, lease.ttl, passedOver())) match
+          takeNext() match
             case Right(Some(leased)) =>
               takeProblem = None
               meter.taken(leased)
@@ -253,11 +253,34 @@ final class AgentWorker private (
               takeProblem = None
               permits.release()
               pause(settings.pollInterval)
-            case Left(error) =>
-              takeProblem = Some(error.message)
-              logger.warn(s"Worker $holder could not take an entry: ${error.message}")
+            case Left(problem) =>
+              takeProblem = Some(problem)
+              logger.warn(s"Worker $holder could not take an entry: $problem")
               permits.release()
               pause(settings.pollInterval)
+
+  /**
+   * The next entry to run: a take that passes over every entry the worker is passing over (#3096). A take carries at
+   * most `TakeRequest.MaxSkip` of them, the oldest; a head it returns that is one of the rest is given back at once and
+   * the next take starts past it (`TakeRequest.after`) - every head before it was passed over too - so however many
+   * heads the worker passes over, none hides a runnable one behind it. A take that throws is a problem, like a failed
+   * one (#3091), so the loop goes on.
+   */
+  private def takeNext(): Either[String, Option[LeasedEntry]] =
+    val passing = passedOver()
+    @tailrec def from(after: Option[EntryId], rounds: Int): Either[String, Option[LeasedEntry]] =
+      val beyond = passing.filter(id => after.forall(id.value > _.value))
+      val skip   = beyond.take(TakeRequest.MaxSkip).toSet
+      Try(queue.take(TakeRequest(holder, agents.keySet, lease.ttl, skip, after))).toEither match
+        case Left(thrown)       => Left(s"the queue threw ${thrown.getClass.getName}: ${thrown.getMessage}")
+        case Right(Left(error)) => Left(error.message)
+        case Right(Right(Some(leased))) if beyond.contains(leased.entry.id) =>
+          queue.release(leased.lease).left.foreach { e =>
+            logger.debug(s"Worker $holder: giving back passed-over entry ${leased.entry.id.value}: ${e.message}")
+          }
+          if rounds < MaxTakeRounds then from(Some(leased.entry.id), rounds + 1) else Right(None)
+        case Right(Right(taken)) => Right(taken)
+    from(None, 0)
 
   /** Samples the queue's depth for the worker's agents every `settings.queueDepthEvery`, until shutdown begins. */
   private def depthLoop(): Unit =
@@ -270,11 +293,11 @@ final class AgentWorker private (
   /** Waits `d`, or until shutdown begins. */
   private def pause(d: FiniteDuration): Unit = Try(stopping.await(d.toNanos, TimeUnit.NANOSECONDS))
 
-  /** The entries a take passes over now: those whose pass-over time has not run out, at most `TakeRequest.MaxSkip`. */
-  private def passedOver(): Set[EntryId] =
+  /** The entries a take passes over now, oldest first: those whose pass-over time has not run out. */
+  private def passedOver(): Vector[EntryId] =
     val now = System.nanoTime()
     skipped.entrySet.asScala.toVector.foreach(e => if e.getValue.longValue <= now then skipped.remove(e.getKey))
-    skipped.keySet.asScala.take(TakeRequest.MaxSkip).toSet
+    skipped.keySet.asScala.toVector.sortBy(_.value)
 
   private def passOver(id: EntryId, d: FiniteDuration): Unit =
     skipped.put(id, java.lang.Long.valueOf(System.nanoTime() + d.toNanos))
@@ -365,9 +388,14 @@ final class AgentWorker private (
     else
       // the tenant first (rule 9): probing another tenant's busy thread would defer to its run, which the entry's
       // tenant could then time
-      read(entry).flatMap(_ => liveClaim(entry)) match
-        case Left(mismatch: GraphError.TenantMismatch) => unread(entry, mismatch)
-        case Left(error) =>
+      // a thread that cannot be read spends an attempt (#3093); a claim probe that fails does not (#3084)
+      read(entry).left.map(Left(_)).flatMap(_ => liveClaim(entry).left.map(Right(_))) match
+        case Left(Left(mismatch: GraphError.TenantMismatch)) => unread(entry, mismatch)
+        case Left(Left(error)) =>
+          unread(entry, error) match
+            case Next.Expire => unreadable(slot)
+            case next        => next
+        case Left(Right(error)) =>
           logger.warn(s"Worker $holder: reading the claim of entry ${entry.id.value}'s thread failed: ${error.message}")
           Next.Expire
         case Right(true) =>
@@ -377,7 +405,10 @@ final class AgentWorker private (
           Next.Release
         case Right(false) =>
           read(entry) match
-            case Left(error) => unread(entry, error)
+            case Left(error) =>
+              unread(entry, error) match
+                case Next.Expire => unreadable(slot)
+                case next        => next
             case Right((admitted, latest)) =>
               val continues = AttemptPlan.of(entry, admitted, latest) match
                 case AttemptPlan.Close(_) => Right(())
@@ -386,7 +417,7 @@ final class AgentWorker private (
                 case Left(rejected: GraphError.RestoreRejected) => unrunnable(slot, rejected)
                 case Left(error) =>
                   logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread cannot be read: ${error.message}")
-                  Next.Expire
+                  unreadable(slot)
                 case Right(_) =>
                   slot.stop.get match
                     // a stop asked of an entry no run of ours is running - its worker died: acted on with no attempt
@@ -431,6 +462,24 @@ final class AgentWorker private (
     case _ =>
       logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
       Next.Expire
+
+  /**
+   * An entry whose thread could not be read: the failed read spends one of the entry's attempts (#3093), recorded as an
+   * attempt that never touched the thread, before the lease is left to lapse - so a thread that never reads (a
+   * checkpoint that does not decode) dead-letters the entry after `maxAttempts`, rather than keeping it, and its thread,
+   * open for ever. A store that cannot record the attempt either - it is down - records nothing, and the entry comes
+   * back as before.
+   */
+  private def unreadable(slot: Slot): Next =
+    queue.recordAttempt(slot.lease.get, RunId.random()) match
+      case Right(AttemptStart.Recorded(_)) => Next.Expire
+      case Right(AttemptStart.Exhausted(entry)) =>
+        Next.Close(EntryOutcome.Failed(FailureReason.AttemptsExhausted(entry.attempts.size)))
+      case Right(AttemptStart.ThreadDeleted(_)) => Next.Leave
+      case Left(_: QueueError)                  => Next.Leave
+      case Left(error) =>
+        logger.warn(s"Worker $holder: recording a failed read of entry ${slot.entryId.value} failed: ${error.message}")
+        Next.Expire
 
   /**
    * An entry whose thread this worker's graph cannot take on: left for a worker whose graph can, passed over for a
@@ -478,7 +527,11 @@ final class AgentWorker private (
   private def exhausted(entry: QueueEntry, agent: QueuedAgent): Next =
     val dead = EntryOutcome.Failed(FailureReason.AttemptsExhausted(entry.attempts.size))
     read(entry) match
-      case Left(error) => unread(entry, error)
+      // a thread that cannot be read cannot be settled either: the entry is dead-lettered as it is (#3093)
+      case Left(error) =>
+        unread(entry, error) match
+          case Next.Expire => Next.Close(dead)
+          case next        => next
       case Right((admitted, latest)) =>
         AttemptPlan.of(entry, admitted, latest) match
           case AttemptPlan.Close(outcome) => Next.Close(outcome)
@@ -575,6 +628,8 @@ final class AgentWorker private (
                 agent.input(input).flatMap(agent.agent.startQueued(entry.threadId, _, config))
               case QueuedInput.Resume(answers) => agent.agent.startResume(entry.threadId, answers, config)
               case QueuedInput.Recover         => agent.agent.startRecover(entry.threadId, config)
+              // a take closes an entry it cannot read (#3091); one read so here is never run
+              case QueuedInput.Unreadable(problem) => Left(ValidationError("queue.input", problem))
             )
         begun match
           case Left(next)                            => next
@@ -667,7 +722,8 @@ final class AgentWorker private (
             case Right(n)                                                            => Right(total + n)
         // closed entries are reclaimed whether or not the checkpoint sweep got through (#3086): a page that fails
         // must not keep the queue's inputs past their lifetime; the pass reports the sweep's error first
-        val swept   = pages(None, 0, 0)
+        val swept = pages(None, 0, 0)
+        untaken()
         val entries = reclaimed(0)
         val pass = (swept, entries) match
           case (Right((e, t)), Right(n)) => Right(SweepReport(e, t, n, skipped = false))
@@ -681,6 +737,25 @@ final class AgentWorker private (
           logger.debug(s"Worker $holder: releasing the sweep's claim: ${e.message}")
         }
         pass
+
+  /**
+   * Closes the queue's heads no worker has taken within `settings.unrunnableAfter` of their submission (#3093) - an
+   * agent no worker serves - a batch at a time while the sweep holds its claim, counting and logging each.
+   */
+  private def untaken(): Unit =
+    @tailrec def next(): Unit =
+      queue.closeUntaken(settings.unrunnableAfter, settings.sweep.batchSize) match
+        case Left(error) => logger.warn(s"Worker $holder: closing untaken queue entries failed: ${error.message}")
+        case Right(closed) =>
+          closed.foreach { e =>
+            logger.warn(
+              s"Worker $holder: closed queue entry ${e.id.value}: no worker took it within ${settings.unrunnableAfter} " +
+                s"(agent '${e.agentId.value}')"
+            )
+            e.outcome.foreach(meter.closed(e.agentId, _))
+          }
+          if closed.size == settings.sweep.batchSize && !stopRequested then next()
+    next()
 
   /** One entry the worker took: its lease, its run once started, and how it is being stopped. */
   final private class Slot(leased: LeasedEntry, val takenAt: Long):
@@ -753,6 +828,9 @@ object AgentWorker:
 
   /** How long the claim a worker asks for to judge whether a thread is busy lasts, if its release does not land. */
   private val ProbeTtl: FiniteDuration = 5.seconds
+
+  /** The most takes one turn of the loop makes going on past passed-over heads before it pauses (#3096). */
+  private val MaxTakeRounds: Int = 16
 
   /** The reserved thread id whose claim keeps two instances from sweeping one store at once. */
   val SweepLock: ThreadId = ThreadId("llm4s-worker-retention-sweep")

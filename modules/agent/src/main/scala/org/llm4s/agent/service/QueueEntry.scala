@@ -306,6 +306,124 @@ object QueueEntry:
     )
 
 /**
+ * An entry as a store read it from its stored columns (#3091), decoded leniently: what cannot be read is replaced -
+ * the input by [[QueuedInput.Unreadable]], an unknown policy by the one its interrupt flag names, a trace context or
+ * stop request by none, an outcome by `Failed(Unrunnable)` - and named in `problems`, so a store can close an open
+ * entry that does not decode rather than fail every call that reads it.
+ */
+final private[llm4s] case class DecodedEntry(entry: QueueEntry, problems: Vector[String]):
+  def readable: Boolean = problems.isEmpty
+
+  /** Why the entry cannot be run, for the `Failed(Unrunnable)` outcome a store closes it with. */
+  def unrunnable: EntryOutcome =
+    EntryOutcome.Failed(FailureReason.Unrunnable(s"the stored entry cannot be read: ${problems.mkString("; ")}"))
+
+private[llm4s] object DecodedEntry:
+
+  /** The stored columns of an entry, decoded leniently; see [[DecodedEntry]]. */
+  def apply(
+    id: EntryId,
+    threadId: ThreadId,
+    agentId: AgentId,
+    tenantId: Option[TenantId],
+    input: String,
+    policy: String,
+    interrupt: Boolean,
+    submissionKey: Option[SubmissionKey],
+    maxAttempts: Int,
+    traceParent: Option[String],
+    submittedAt: Instant,
+    attempts: Vector[Attempt],
+    admitted: Boolean,
+    leaseHolder: Option[String],
+    leaseExpiresAt: Option[Instant],
+    outcome: Option[String],
+    closedAt: Option[Instant],
+    closedAtSeq: Option[Long],
+    position: Option[Int],
+    stop: Option[String]
+  ): DecodedEntry =
+    val problems = Vector.newBuilder[String]
+    def json(what: String, raw: String): Option[ujson.Value] =
+      Try(ujson.read(raw)).toEither match
+        case Right(value) => Some(value)
+        case Left(e) =>
+          problems += s"its $what is not JSON (${e.getClass.getSimpleName})"
+          None
+    def read[A](what: String, raw: String)(decode: ujson.Value => Either[String, A]): Option[A] =
+      json(what, raw).flatMap { value =>
+        decode(value) match
+          case Right(a) => Some(a)
+          case Left(problem) =>
+            problems += s"its $what cannot be read: $problem"
+            None
+      }
+    val readInput = read("input", input)(QueuedInput.fromJson)
+    val readPolicy = Try(BusyThreadPolicy.valueOf(policy)).toOption.orElse {
+      problems += s"its policy '$policy' is unknown"
+      None
+    }
+    val readTrace = traceParent.flatMap { t =>
+      TraceContext.parse(t) match
+        case Right(context) => Some(context)
+        case Left(error) =>
+          problems += s"its trace context cannot be read: ${error.message}"
+          None
+    }
+    val readOutcome = outcome.map(raw =>
+      read("outcome", raw)(EntryOutcome.fromJson).getOrElse(
+        EntryOutcome.Failed(FailureReason.Unrunnable("the stored outcome cannot be read"))
+      )
+    )
+    val readStop = stop.flatMap(raw => read("stop request", raw)(StopRequest.fromJson))
+    val found    = problems.result()
+    val entry = QueueEntry.stored(
+      id,
+      threadId,
+      agentId,
+      tenantId,
+      readInput.getOrElse(QueuedInput.Unreadable(found.mkString("; "))),
+      readPolicy.getOrElse(if interrupt then BusyThreadPolicy.Interrupt else BusyThreadPolicy.Enqueue),
+      submissionKey,
+      maxAttempts,
+      readTrace,
+      submittedAt,
+      attempts,
+      admitted,
+      leaseHolder,
+      leaseExpiresAt,
+      readOutcome,
+      closedAt,
+      closedAtSeq,
+      position,
+      readStop
+    )
+    DecodedEntry(entry, found)
+
+  /** A stored outcome; one that cannot be read is `Failed(Unrunnable)`, as [[DecodedEntry]] reads it. */
+  def outcomeOf(raw: String): EntryOutcome =
+    Try(ujson.read(raw)).toEither.left
+      .map(_.getMessage)
+      .flatMap(EntryOutcome.fromJson)
+      .getOrElse(EntryOutcome.Failed(FailureReason.Unrunnable("the stored outcome cannot be read")))
+
+  /** Whether a stored stop request is a cancel; one that cannot be read is not. */
+  def cancelling(stop: Option[String]): Boolean =
+    stop.exists(raw =>
+      Try(ujson.read(raw)).toOption.flatMap(StopRequest.fromJson(_).toOption).exists(_.isInstanceOf[StopRequest.Cancel])
+    )
+
+  /** Whether a stored stop request is an interrupt for entry `by`. */
+  def interruptsFor(stop: Option[String], by: EntryId): Boolean =
+    stop.exists(raw =>
+      Try(ujson.read(raw)).toOption.flatMap(StopRequest.fromJson(_).toOption).contains(StopRequest.Interrupt(by))
+    )
+
+  /** Whether a submission and a stored input are the same; an input that cannot be read is never the same. */
+  def sameInput(stored: String, submission: Submission): Boolean =
+    Try(ujson.read(stored)).toOption.contains(QueuedInput.toJson(submission.input))
+
+/**
  * A lease on an open entry, as [[RunQueue.take]] grants it: the worker holding it may record attempts at the entry,
  * renew the lease and close the entry, for as long as no other lease replaced it - expiry, by the store's clock, only
  * lets another worker take the entry over. `token` fences every call made under it. `stop` is the stop asked of the
@@ -372,19 +490,26 @@ enum AttemptStart:
  * `ttl` from now, by the store's clock - passing over the entries of `skip`, which the worker has just found it cannot
  * run (W2: its agent's graph version cannot restore the thread), so they do not hide the heads behind them. A skipped
  * head still holds its own thread back (rule 5); only other threads' heads are taken past it. `skip` is bounded by
- * [[TakeRequest.MaxSkip]].
+ * [[TakeRequest.MaxSkip]]; `after`, if set, passes over every head whose id is not greater than it, so a worker passing
+ * over more heads than `skip` holds goes on past them a batch at a time (#3096).
  */
 @Experimental
 final case class TakeRequest private (
   holder: String,
   agents: Set[AgentId],
   ttl: scala.concurrent.duration.FiniteDuration,
-  skip: Set[EntryId]
+  skip: Set[EntryId],
+  after: Option[EntryId]
 ):
-  def withHolder(h: String): TakeRequest                                = TakeRequest(h, agents, ttl, skip)
-  def withAgents(a: Set[AgentId]): TakeRequest                          = TakeRequest(holder, a, ttl, skip)
-  def withTtl(t: scala.concurrent.duration.FiniteDuration): TakeRequest = TakeRequest(holder, agents, t, skip)
-  def withSkip(ids: Set[EntryId]): TakeRequest                          = TakeRequest(holder, agents, ttl, ids)
+  def withHolder(h: String): TakeRequest                                = TakeRequest(h, agents, ttl, skip, after)
+  def withAgents(a: Set[AgentId]): TakeRequest                          = TakeRequest(holder, a, ttl, skip, after)
+  def withTtl(t: scala.concurrent.duration.FiniteDuration): TakeRequest = TakeRequest(holder, agents, t, skip, after)
+  def withSkip(ids: Set[EntryId]): TakeRequest                          = TakeRequest(holder, agents, ttl, ids, after)
+  def withAfter(id: EntryId): TakeRequest                               = withAfter(Some(id))
+  def withAfter(id: Option[EntryId]): TakeRequest                       = TakeRequest(holder, agents, ttl, skip, id)
+
+  /** Whether a head of id `id` may be taken by this request: not skipped, and past `after`. */
+  private[llm4s] def admits(id: EntryId): Boolean = !skip.contains(id) && after.forall(id.value > _.value)
 
 @Experimental
 object TakeRequest:
@@ -396,8 +521,9 @@ object TakeRequest:
     holder: String,
     agents: Set[AgentId],
     ttl: scala.concurrent.duration.FiniteDuration,
-    skip: Set[EntryId] = Set.empty
+    skip: Set[EntryId] = Set.empty,
+    after: Option[EntryId] = None
   ): TakeRequest =
     require(ttl > scala.concurrent.duration.Duration.Zero, s"ttl must be positive, was $ttl")
     require(skip.size <= MaxSkip, s"skip holds ${skip.size} entries, more than $MaxSkip")
-    new TakeRequest(holder, agents, ttl, skip)
+    new TakeRequest(holder, agents, ttl, skip, after)

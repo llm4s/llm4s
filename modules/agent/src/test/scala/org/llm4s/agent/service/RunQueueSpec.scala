@@ -340,11 +340,12 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val loaded = RunQueueConfigLoader
       .load(
         ConfigSource.string(
-          "llm4s.agent.queue { maxAttempts = 2, ticketLifetime = 1 hour, lease { ttl = 9 seconds, renewEvery = 3 seconds } }"
+          """llm4s.agent.queue { maxAttempts = 2, ticketLifetime = 1 hour, lease { ttl = 9 seconds, renewEvery = 3 seconds },
+            |  maxOpenPerThread = 7, maxInputBytes = 2 KiB }""".stripMargin
         )
       )
       .value
-    loaded shouldBe RunQueueSettings(2, 1.hour, LeasePolicy(9.seconds, 3.seconds))
+    loaded shouldBe RunQueueSettings(2, 1.hour, LeasePolicy(9.seconds, 3.seconds), 7, 2048L)
     val badLease = RunQueueConfigLoader.load(
       ConfigSource.string(
         "llm4s.agent.queue { maxAttempts = 2, ticketLifetime = 1 hour, lease { ttl = 3 seconds, renewEvery = 3 seconds } }"
@@ -352,6 +353,13 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     )
     badLease.left.value shouldBe a[ConfigurationError]
     badLease.left.value.message should include("llm4s.agent.queue.lease")
+    val badBound = RunQueueConfigLoader.load(
+      ConfigSource.string(
+        """llm4s.agent.queue { maxAttempts = 2, ticketLifetime = 1 hour, lease { ttl = 9 seconds, renewEvery = 3 seconds },
+          |  maxOpenPerThread = 0, maxInputBytes = 1 KiB }""".stripMargin
+      )
+    )
+    badBound.left.value.message should include("maxOpenPerThread")
     val missing = RunQueueConfigLoader.load(ConfigSource.string("llm4s.agent.queue { maxAttempts = 2 }"))
     missing.left.value.message should include("ticketLifetime")
   }

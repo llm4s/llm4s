@@ -665,6 +665,25 @@ A custom `Checkpointer` should do the same. The new `CheckpointerContract` cases
 store that can make one thread's prune fail overrides `refuseDeletes`, and one whose sweep has a budget overrides
 `shortenSweepBudget`, so those cases run.
 
+## The run queue closes what no worker can run, and bounds what a thread holds (#3091, #3093, #3094, #3095, #3096)
+
+The run queue (`RunQueue`, `RunSubmitter`, `AgentWorker`, the in-memory, SQLite and PostgreSQL queues and
+`EncryptingRunQueue`) is experimental. The stored schema is the same.
+
+| Before (1.0.0) | After |
+|---|---|
+| An entry whose stored form did not decode failed every `take` of its agents, and `entry`, `openEntries` and `cancel` with it; the in-memory queue threw | It is read back with `QueuedInput.Unreadable` in place of its input (a new case: a `match` on `QueuedInput` needs it), and a `take` that reaches it closes it `Failed(Unrunnable)` and takes the next. `EncryptingRunQueue` does the same for a ciphertext that does not open; an entry whose key is missing still fails the take |
+| A worker that could not read an entry's thread let its lease lapse, recording nothing, for ever | Each failed read records an attempt, so the entry is dead-lettered (`AttemptsExhausted`) after `maxAttempts` |
+| An entry of an agent no worker serves stayed open for ever | The worker's sweep closes a thread's head that no worker has taken within `unrunnableAfter` of its submission `Failed(Unrunnable)`, unless a live claim holds its thread. A backlog that keeps every worker busy for that long closes heads too: raise `unrunnableAfter` if yours can |
+| Cancelling an unstarted `Interrupt` entry left the running entry asked to stop | Closing it withdraws the stop |
+| A thread could hold any number of entries of any size | A submission past `llm4s.agent.queue.maxOpenPerThread` (1,000) open entries of its tenant on the thread, or with an input longer than `maxInputBytes` (4 MiB), is refused with `QueueError.ThreadQueueFull` or `QueueError.InputTooLarge` |
+| A worker passing over more than 256 heads kept taking the ones it could not send in `skip` | `TakeRequest.after` (a new field) lets it go on past them; the PostgreSQL `take` locks only the row it tries, and its `awaitClosed` waits on `LISTEN`/`NOTIFY` |
+
+A custom `RunQueue` implements two new methods, `allDepths()` and `closeUntaken(age, limit)`, and honours
+`TakeRequest.after` and the submission's bounds; a store that can write an entry it cannot read overrides
+`RunQueueContract.spoilInput`, so the new contract case runs. `Submission`, `RunQueueSettings` and `TakeRequest` gain
+fields with defaults: `apply`, `of` and the setters keep compiling.
+
 ## The Whisper engine writes into a temporary directory, and refuses subtitle formats (#3138)
 
 `llm4s-speech` is Beta. No signature changed; `WhisperSpeechToText` behaves differently:

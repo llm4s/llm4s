@@ -19,8 +19,13 @@ import org.llm4s.types.Result
  * whatever worker or machine, sit in the submitter's trace. A retry under the same key may carry another context (a
  * new request's span): it is not part of [[sameAs]], and the entry keeps the first submission's.
  *
- * `apply` and the `with*` setters throw `IllegalArgumentException` for `maxAttempts` below 1; [[Submission.of]]
- * returns it as a `ValidationError`.
+ * `maxOpenPerThread` and `maxInputBytes` bound what the submission may add (#3095): the store refuses it with
+ * [[QueueError.ThreadQueueFull]] when its tenant already has `maxOpenPerThread` open entries on the thread, and with
+ * [[QueueError.InputTooLarge]] when its input's stored JSON is longer than `maxInputBytes` bytes
+ * ([[RunQueueSettings.maxOpenPerThread]] and [[RunQueueSettings.maxInputBytes]] when built by [[RunSubmitter]]).
+ *
+ * `apply` and the `with*` setters throw `IllegalArgumentException` for `maxAttempts`, `maxOpenPerThread` or
+ * `maxInputBytes` below 1, or a [[QueuedInput.Unreadable]] input; [[Submission.of]] returns it as a `ValidationError`.
  */
 @Experimental
 final case class Submission private (
@@ -31,45 +36,78 @@ final case class Submission private (
   policy: BusyThreadPolicy,
   submissionKey: Option[SubmissionKey],
   maxAttempts: Int,
-  traceContext: Option[TraceContext]
+  traceContext: Option[TraceContext],
+  maxOpenPerThread: Int,
+  maxInputBytes: Long
 ):
-  def withThreadId(t: ThreadId): Submission =
-    Submission(t, agentId, input, tenantId, policy, submissionKey, maxAttempts, traceContext)
-  def withAgentId(a: AgentId): Submission =
-    Submission(threadId, a, input, tenantId, policy, submissionKey, maxAttempts, traceContext)
-  def withInput(i: QueuedInput): Submission =
-    Submission(threadId, agentId, i, tenantId, policy, submissionKey, maxAttempts, traceContext)
-  def withTenantId(t: TenantId): Submission = withTenantId(Some(t))
-  def withTenantId(t: Option[TenantId]): Submission =
-    Submission(threadId, agentId, input, t, policy, submissionKey, maxAttempts, traceContext)
-  def withPolicy(p: BusyThreadPolicy): Submission =
-    Submission(threadId, agentId, input, tenantId, p, submissionKey, maxAttempts, traceContext)
-  def withSubmissionKey(k: SubmissionKey): Submission = withSubmissionKey(Some(k))
-  def withSubmissionKey(k: Option[SubmissionKey]): Submission =
-    Submission(threadId, agentId, input, tenantId, policy, k, maxAttempts, traceContext)
-  def withMaxAttempts(n: Int): Submission =
-    Submission(threadId, agentId, input, tenantId, policy, submissionKey, n, traceContext)
-  def withTraceContext(c: TraceContext): Submission = withTraceContext(Some(c))
-  def withTraceContext(c: Option[TraceContext]): Submission =
-    Submission(threadId, agentId, input, tenantId, policy, submissionKey, maxAttempts, c)
+  private def changed(
+    threadId: ThreadId = threadId,
+    agentId: AgentId = agentId,
+    tenantId: Option[TenantId] = tenantId,
+    input: QueuedInput = input,
+    policy: BusyThreadPolicy = policy,
+    submissionKey: Option[SubmissionKey] = submissionKey,
+    maxAttempts: Int = maxAttempts,
+    traceContext: Option[TraceContext] = traceContext,
+    maxOpenPerThread: Int = maxOpenPerThread,
+    maxInputBytes: Long = maxInputBytes
+  ): Submission =
+    Submission(
+      threadId,
+      agentId,
+      input,
+      tenantId,
+      policy,
+      submissionKey,
+      maxAttempts,
+      traceContext,
+      maxOpenPerThread,
+      maxInputBytes
+    )
+
+  def withThreadId(t: ThreadId): Submission                   = changed(threadId = t)
+  def withAgentId(a: AgentId): Submission                     = changed(agentId = a)
+  def withInput(i: QueuedInput): Submission                   = changed(input = i)
+  def withTenantId(t: TenantId): Submission                   = withTenantId(Some(t))
+  def withTenantId(t: Option[TenantId]): Submission           = changed(tenantId = t)
+  def withPolicy(p: BusyThreadPolicy): Submission             = changed(policy = p)
+  def withSubmissionKey(k: SubmissionKey): Submission         = withSubmissionKey(Some(k))
+  def withSubmissionKey(k: Option[SubmissionKey]): Submission = changed(submissionKey = k)
+  def withMaxAttempts(n: Int): Submission                     = changed(maxAttempts = n)
+  def withTraceContext(c: TraceContext): Submission           = withTraceContext(Some(c))
+  def withTraceContext(c: Option[TraceContext]): Submission   = changed(traceContext = c)
+  def withMaxOpenPerThread(n: Int): Submission                = changed(maxOpenPerThread = n)
+  def withMaxInputBytes(n: Long): Submission                  = changed(maxInputBytes = n)
 
   /**
    * Whether `other` is this submission again, as a retry under the same key would send it: everything but
-   * `maxAttempts`, which a retry may have read from changed settings, and `traceContext`, which a retry's own request
-   * names afresh.
+   * `maxAttempts` and the bounds, which a retry may have read from changed settings, and `traceContext`, which a
+   * retry's own request names afresh.
    */
   def sameAs(other: Submission): Boolean =
     threadId == other.threadId && agentId == other.agentId && tenantId == other.tenantId &&
       QueuedInput.toJson(input) == QueuedInput.toJson(other.input) && policy == other.policy &&
       submissionKey == other.submissionKey
 
+  /** The length in bytes of the input's stored JSON, which `maxInputBytes` bounds. */
+  def inputBytes: Long = Submission.bytesOf(input)
+
 @Experimental
 object Submission:
 
-  private def problems(maxAttempts: Int): List[String] =
-    Option.when(maxAttempts < 1)(s"maxAttempts must be at least 1, was $maxAttempts").toList
+  private def problems(maxAttempts: Int, maxOpenPerThread: Int, maxInputBytes: Long, input: QueuedInput) =
+    List(
+      Option.when(maxAttempts < 1)(s"maxAttempts must be at least 1, was $maxAttempts"),
+      Option.when(maxOpenPerThread < 1)(s"maxOpenPerThread must be at least 1, was $maxOpenPerThread"),
+      Option.when(maxInputBytes < 1)(s"maxInputBytes must be at least 1, was $maxInputBytes"),
+      Option.when(input.isInstanceOf[QueuedInput.Unreadable])("an unreadable input cannot be submitted")
+    ).flatten
 
-  /** Throws `IllegalArgumentException` for `maxAttempts` below 1; use [[of]] for untrusted input. */
+  /** The length in bytes of `input`'s stored JSON. */
+  private[llm4s] def bytesOf(input: QueuedInput): Long =
+    ujson.write(QueuedInput.toJson(input)).getBytes(java.nio.charset.StandardCharsets.UTF_8).length.toLong
+
+  /** Throws `IllegalArgumentException` for an invalid submission; use [[of]] for untrusted input. */
   def apply(
     threadId: ThreadId,
     agentId: AgentId,
@@ -78,11 +116,24 @@ object Submission:
     policy: BusyThreadPolicy = BusyThreadPolicy.Reject,
     submissionKey: Option[SubmissionKey] = None,
     maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts,
-    traceContext: Option[TraceContext] = None
+    traceContext: Option[TraceContext] = None,
+    maxOpenPerThread: Int = RunQueueSettings.DefaultMaxOpenPerThread,
+    maxInputBytes: Long = RunQueueSettings.DefaultMaxInputBytes
   ): Submission =
-    val found = problems(maxAttempts)
+    val found = problems(maxAttempts, maxOpenPerThread, maxInputBytes, input)
     require(found.isEmpty, found.mkString("; "))
-    new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts, traceContext)
+    new Submission(
+      threadId,
+      agentId,
+      tenantId,
+      input,
+      policy,
+      submissionKey,
+      maxAttempts,
+      traceContext,
+      maxOpenPerThread,
+      maxInputBytes
+    )
 
   def of(
     threadId: ThreadId,
@@ -92,12 +143,38 @@ object Submission:
     policy: BusyThreadPolicy = BusyThreadPolicy.Reject,
     submissionKey: Option[SubmissionKey] = None,
     maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts,
-    traceContext: Option[TraceContext] = None
+    traceContext: Option[TraceContext] = None,
+    maxOpenPerThread: Int = RunQueueSettings.DefaultMaxOpenPerThread,
+    maxInputBytes: Long = RunQueueSettings.DefaultMaxInputBytes
   ): Result[Submission] =
-    problems(maxAttempts) match
+    problems(maxAttempts, maxOpenPerThread, maxInputBytes, input) match
       case Nil =>
-        Right(new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts, traceContext))
+        Right(
+          new Submission(
+            threadId,
+            agentId,
+            tenantId,
+            input,
+            policy,
+            submissionKey,
+            maxAttempts,
+            traceContext,
+            maxOpenPerThread,
+            maxInputBytes
+          )
+        )
       case found => Left(ValidationError("submission", found))
+
+  /**
+   * The store's check of `submission`'s bounds (#3095), given how many open entries its tenant has on the thread:
+   * [[QueueError.InputTooLarge]] or [[QueueError.ThreadQueueFull]], or nothing.
+   */
+  private[llm4s] def refusal(submission: Submission, open: Int): Option[QueueError] =
+    val bytes = submission.inputBytes
+    if bytes > submission.maxInputBytes then Some(QueueError.InputTooLarge(bytes, submission.maxInputBytes))
+    else if open >= submission.maxOpenPerThread then
+      Some(QueueError.ThreadQueueFull(submission.threadId, submission.maxOpenPerThread))
+    else None
 
 /**
  * What [[RunQueue.submit]] answers (design 4.55): the entry `entryId` made for the submission on `threadId`, and its

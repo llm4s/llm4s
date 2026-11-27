@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.graph.{ Checkpointer, ThreadId }
+import org.llm4s.agent.service.EntryId
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 import org.postgresql.PGConnection
@@ -59,8 +60,13 @@ final private[postgres] class ChangeNotifier(
    * A waiter for commits on `threadId`, registered before the caller reads the log, so a commit that lands after that
    * read wakes it; close it when the call ends. Starts the listener on first use.
    */
-  def register(threadId: ThreadId): Waiter =
-    val waiter = new Waiter(payload(threadId), this)
+  def register(threadId: ThreadId): Waiter = registerKey(payload(threadId))
+
+  /** A waiter for the close of queue entry `entryId` (#3092); see [[register]]. */
+  def register(entryId: EntryId): Waiter = registerKey(payload(entryId))
+
+  private def registerKey(key: String): Waiter =
+    val waiter = new Waiter(key, this)
     // added inside the map's own update, so a concurrent removal of the key's last waiter cannot orphan this one
     waiters.compute(
       waiter.key,
@@ -187,6 +193,12 @@ private[postgres] object ChangeNotifier:
    * (rule 10); two threads whose hashes collide only wake each other's waiters, which read again and find nothing.
    */
   def payload(threadId: ThreadId): String = digest(threadId.value)
+
+  /**
+   * A queue entry's notification payload, sent when the entry closes (#3092): a hash, as a thread's is, of a name no
+   * thread id has (a NUL, which a thread id never holds, then the entry's id).
+   */
+  def payload(entryId: EntryId): String = digest(s"\u0000queue-entry:${entryId.value}")
 
   /**
    * `read` (a read of `threadId`'s log), waiting on `waiter` when it finds nothing yet - the body of

@@ -12,8 +12,8 @@ import scala.jdk.DurationConverters.*
 import scala.util.Try
 
 /**
- * Loads the run queue's settings (design 4.55) from `llm4s.agent.queue`: `maxAttempts`, `ticketLifetime` and the
- * `lease` block (`ttl`, `renewEvery`), with the defaults of `llm4s-agent`'s `reference.conf`. The store the queue lives
+ * Loads the run queue's settings (design 4.55) from `llm4s.agent.queue`: `maxAttempts`, `ticketLifetime`, the
+ * `lease` block (`ttl`, `renewEvery`), `maxOpenPerThread` and `maxInputBytes` (a size, such as `4 MiB`; #3095), with the defaults of `llm4s-agent`'s `reference.conf`. The store the queue lives
  * in is chosen with the checkpoint store, not here.
  */
 @Experimental
@@ -38,7 +38,12 @@ object RunQueueConfigLoader:
       ttl            <- field("lease.ttl")(c.getDuration("lease.ttl").toScala)
       renewEvery     <- field("lease.renewEvery")(c.getDuration("lease.renewEvery").toScala)
       lease          <- LeasePolicy.of(ttl, renewEvery).left.map(invalid(s"$Path.lease"))
-      settings       <- RunQueueSettings.of(maxAttempts, ticketLifetime, lease).left.map(invalid(Path))
+      maxOpen        <- field("maxOpenPerThread")(c.getInt("maxOpenPerThread"))
+      maxBytes       <- field("maxInputBytes")(c.getBytes("maxInputBytes").longValue)
+      settings <- RunQueueSettings
+        .of(maxAttempts, ticketLifetime, lease, maxOpen, maxBytes)
+        .left
+        .map(invalid(Path))
     yield settings
 
   private def invalid(path: String)(error: LLMError): LLMError =

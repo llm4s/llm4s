@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.agent.service.EntryId
 import org.llm4s.agent.testkit.{ ManualClock, RunQueueContract }
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -29,5 +30,22 @@ class SqliteRunQueueContractSpec extends AnyFlatSpec with RunQueueContract {
     current.checkpointer match {
       case sqlite: SqliteCheckpointer => stores(SqliteFiles.opened(sqlite.path, clock))
       case other                      => fail(s"not a SqliteCheckpointer: $other")
+    }
+
+  override protected def spoilInput(current: RunQueueContract.Stores, entryId: EntryId): Boolean =
+    current.checkpointer match {
+      case sqlite: SqliteCheckpointer =>
+        sqlite
+          .writing("spoil") { c =>
+            SqliteCheckpointer.update(
+              c,
+              "UPDATE llm4s_checkpoint_queue_entries SET input_json = ? WHERE entry_id = ?",
+              """{"kind":"from-a-newer-build"}""",
+              entryId.value
+            )
+            Right(())
+          }
+          .isRight
+      case _ => false
     }
 }

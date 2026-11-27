@@ -1,6 +1,7 @@
 package org.llm4s.agent.testkit
 
 import org.llm4s.agent.graph.InMemoryCheckpointer
+import org.llm4s.agent.service.{ EntryId, InMemoryRunQueue }
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.time.Clock
@@ -11,4 +12,10 @@ class InMemoryRunQueueContractSpec extends AnyFlatSpec with RunQueueContract {
     val store = InMemoryCheckpointer(clock)
     RunQueueContract.Stores(store, store.runQueue)
   }
+
+  override protected def spoilInput(stores: RunQueueContract.Stores, entryId: EntryId): Boolean =
+    stores.queue match {
+      case queue: InMemoryRunQueue => queue.corruptInput(entryId); true
+      case _                       => false
+    }
 }

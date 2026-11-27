@@ -657,6 +657,8 @@ class AgentWorkerStopSpec
     def reclaim(d: FiniteDuration, n: Int)             = inner.reclaim(d, n)
     def openRuns(ts: Vector[ThreadId])                 = inner.openRuns(ts)
     def depth(as: Set[AgentId])                        = inner.depth(as)
+    def allDepths()                                    = inner.allDepths()
+    def closeUntaken(age: FiniteDuration, limit: Int)  = inner.closeUntaken(age, limit)
     def renew(l: Lease, ttl: FiniteDuration)           = inner.renew(l, ttl)
     def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason) = { before(); inner.cancel(t, c, r) }
   }

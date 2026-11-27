@@ -318,8 +318,69 @@ private[postgres] object Sql:
   def queueEntryByKey(t: Tables): String =
     s"SELECT $queueColumns FROM ${t.queueEntries} WHERE key_scope = ? AND submission_key = ? FOR UPDATE"
 
+  /** The open entries of thread `?` and tenant `?` (null for none), in the order they run. */
   def openQueueEntries(t: Tables): String =
-    s"SELECT $queueColumns FROM (${queueRanked(t, "thread_id = ?")}) q ORDER BY ${queueRunOrder("q")}"
+    s"SELECT $queueColumns FROM (${queueRanked(t, s"thread_id = ? AND $TenantIs")}) q ORDER BY ${queueRunOrder("q")}"
+
+  /** [[openQueueEntries]] without their inputs (#3095): what a submission decides by. */
+  def openQueueEntriesLight(t: Tables): String =
+    s"""SELECT entry_id, is_interrupt, attempt_count, stop_json
+       |FROM (${queueRanked(t, s"thread_id = ? AND $TenantIs")}) q ORDER BY ${queueRunOrder("q")}""".stripMargin
+
+  /** The ids of [[openQueueEntries]], in run order: each one's position (#3095). */
+  def openQueueEntryIds(t: Tables): String =
+    s"SELECT entry_id FROM (${queueRanked(t, s"thread_id = ? AND $TenantIs")}) q ORDER BY ${queueRunOrder("q")}"
+
+  /** The head of thread `?` in the run order of every tenant's entries. */
+  def queueHeadIdOf(t: Tables): String =
+    s"SELECT h.entry_id FROM (${queueRanked(t, "thread_id = ?")}) h ORDER BY ${queueRunOrder("h")} LIMIT 1"
+
+  /**
+   * How many open entries of thread `?` and tenant `?` run before an entry whose `attempt_count = 0`,
+   * `NOT is_interrupt` and id are bound next: counted from the run order's columns, reading no input (#3095).
+   */
+  def queuePosition(t: Tables): String =
+    s"""SELECT COUNT(*) FROM ${t.queueEntries} o
+       |WHERE o.thread_id = ? AND (o.tenant_id = CAST(? AS text) OR (o.tenant_id IS NULL AND CAST(? AS text) IS NULL))
+       |  AND o.state = 'open' AND ((o.attempt_count = 0), (NOT o.is_interrupt), o.entry_id) < (?, ?, ?)""".stripMargin
+
+  /** The entries of the ids `?` (an array of their text forms). */
+  def queueEntriesOf(t: Tables): String =
+    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE entry_id = ANY(?::text[]::bigint[])"
+
+  /** Entry `?`'s state, if it is tenant `?`'s (bound twice): what a wait for its close reads (#3092). */
+  def queueEntryState(t: Tables): String =
+    s"""SELECT state FROM ${t.queueEntries}
+       |WHERE entry_id = ? AND (tenant_id = CAST(? AS text) OR (tenant_id IS NULL AND CAST(? AS text) IS NULL))""".stripMargin
+
+  /** Entry `?`'s thread, if it is an `Interrupt` entry that never started: one whose close withdraws its stops. */
+  def unstartedInterruptThread(t: Tables): String =
+    s"SELECT thread_id FROM ${t.queueEntries} WHERE entry_id = ? AND is_interrupt AND attempt_count = 0"
+
+  /** The stop requests of thread `?`'s open entries other than entry `?`. */
+  def siblingStops(t: Tables): String =
+    s"""SELECT entry_id, stop_json FROM ${t.queueEntries}
+       |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND stop_json IS NOT NULL FOR UPDATE""".stripMargin
+
+  def clearQueueStop(t: Tables): String = s"UPDATE ${t.queueEntries} SET stop_json = NULL WHERE entry_id = ?"
+
+  /**
+   * Each thread's head that no worker has taken (#3093): no attempt, no live lease on the thread at the time bound
+   * second, submitted at or before the time bound first; oldest first, at most the limit bound third.
+   */
+  def queueUntaken(t: Tables): String =
+    s"""SELECT e.entry_id, e.thread_id, e.tenant_id, e.agent_id FROM ${t.queueEntries} e
+       |WHERE e.entry_id IN (
+       |    SELECT (${queueHeadOf(t, "th.thread_id")})
+       |    FROM (SELECT DISTINCT thread_id FROM ${t.queueEntries} WHERE state = 'open') th)
+       |  AND e.state = 'open' AND e.attempt_count = 0 AND e.submitted_at <= ?
+       |  AND NOT EXISTS (
+       |    SELECT 1 FROM ${t.queueEntries} o WHERE o.thread_id = e.thread_id AND o.state = 'open'
+       |      AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?)
+       |ORDER BY e.entry_id LIMIT ?""".stripMargin
+
+  /** A tenant column matching the tenant bound twice, null for none. */
+  private val TenantIs = "(tenant_id = CAST(? AS text) OR (tenant_id IS NULL AND CAST(? AS text) IS NULL))"
 
   def nextQueueEntryId(t: Tables): String = s"SELECT nextval('${t.queueEntryIds}')"
   def nextLeaseToken(t: Tables): String   = s"SELECT nextval('${t.queueLeaseTokens}')"
@@ -334,8 +395,9 @@ private[postgres] object Sql:
        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open', ?)""".stripMargin
 
   /**
-   * Candidate heads for `take` past entry id `?` (the agents twice, the time, that id, then the time again), skipping
-   * rows another worker holds: each thread with an open entry of the agents, its head found once (#3085).
+   * Candidate heads for `take` past entry id `?` (the agents twice, the time, that id, then the time again): each thread
+   * with an open entry of the agents, its head found once (#3085). Read, not locked: a take locks only the one row it
+   * leases ([[queueTakeable]], #3096), so a batch of candidates never hides heads from other workers' takes.
    */
   def queueCandidates(t: Tables): String =
     s"""SELECT e.entry_id, e.thread_id FROM ${t.queueEntries} e
@@ -345,20 +407,24 @@ private[postgres] object Sql:
        |  AND e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
        |  AND e.entry_id > ?
        |  AND NOT EXISTS (${queueLiveSibling(t)})
-       |ORDER BY e.entry_id
-       |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
+       |ORDER BY e.entry_id LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
 
   /**
    * Per agent of `?` (an array), its open entries waiting and leased at the time bound three times, and the oldest
    * waiting one's submission time.
    */
-  def queueDepth(t: Tables): String =
+  def queueDepth(t: Tables): String = queueDepthWhere(t, "AND agent_id = ANY(?)")
+
+  /** [[queueDepth]] for every agent with open entries (#3093). */
+  def queueAllDepths(t: Tables): String = queueDepthWhere(t, "")
+
+  private def queueDepthWhere(t: Tables, agents: String): String =
     s"""SELECT agent_id,
        |  COUNT(*) FILTER (WHERE NOT (lease_token IS NOT NULL AND lease_expires_at > ?)),
        |  COUNT(*) FILTER (WHERE lease_token IS NOT NULL AND lease_expires_at > ?),
        |  MIN(submitted_at) FILTER (WHERE NOT (lease_token IS NOT NULL AND lease_expires_at > ?))
        |FROM ${t.queueEntries}
-       |WHERE state = 'open' AND agent_id = ANY(?)
+       |WHERE state = 'open' $agents
        |GROUP BY agent_id""".stripMargin
 
   /** The attempts' run ids of the open entries of the threads `?` (an array), one row per entry or attempt. */
@@ -367,12 +433,16 @@ private[postgres] object Sql:
        |LEFT JOIN ${t.queueAttempts} a ON a.entry_id = e.entry_id
        |WHERE e.state = 'open' AND e.thread_id = ANY(?)""".stripMargin
 
-  /** Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock. */
+  /**
+   * Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock; its row is
+   * locked, skipping it if another call holds it: the one row a take locks (#3096).
+   */
   def queueTakeable(t: Tables): String =
     s"""SELECT 1 FROM ${t.queueEntries} e
        |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
        |  AND e.entry_id = (${queueHeadOf(t)})
-       |  AND NOT EXISTS (${queueLiveSibling(t)})""".stripMargin
+       |  AND NOT EXISTS (${queueLiveSibling(t)})
+       |FOR UPDATE OF e SKIP LOCKED""".stripMargin
 
   def siblingLeases(t: Tables): String =
     s"""SELECT lease_expires_at FROM ${t.queueEntries}

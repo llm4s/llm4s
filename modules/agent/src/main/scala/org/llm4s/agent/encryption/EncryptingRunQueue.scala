@@ -28,9 +28,15 @@ import scala.concurrent.duration.FiniteDuration
  * ticket. The store compares what it holds, and two encryptions of one input differ, so it reports the key as reused;
  * this queue then reads that entry, opens it and compares the submissions itself.
  *
- * An entry whose input cannot be opened fails the call that read it ([[EncryptionError]]) - after `inner` has acted:
- * a `take` has leased it, a `cancel` has cancelled it. Such an entry stays at the head of its thread's queue, leased
- * again as each lease expires, until its key is supplied or the entry is cancelled.
+ * An entry whose input cannot be opened is answered with
+ * [[org.llm4s.agent.service.QueuedInput.Unreadable QueuedInput.Unreadable]] in place of its input - except an open one
+ * whose key is missing, which fails the call that read it ([[EncryptionError]]). A `take` that reaches an entry whose
+ * ciphertext cannot be opened with the key it names - altered, malformed, or not
+ * encrypted at all - closes it `Failed(Unrunnable)` and takes the next one, as a store does with an entry it cannot
+ * decode (#3091). An entry whose key is missing ([[EncryptionError.UnknownKey]], [[EncryptionError.InvalidKey]],
+ * [[EncryptionError.NoCurrentKey]]) is a configuration problem a worker cannot fix by failing the entry: its take
+ * fails, and the entry stays at the head of its thread's queue, leased again as each lease expires, until its key is
+ * supplied or the entry is cancelled.
  */
 @Experimental
 final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKeySource, settings: EncryptionSettings)
@@ -51,32 +57,45 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
       case QueuedInput.Resume(answers) =>
         traverse(answers.toVector)((id, answer) => codec(place ++ Vector("resume", id.value), answer).map(id -> _))
           .map(opened => QueuedInput.Resume(opened.toMap))
-      case QueuedInput.Recover => Right(QueuedInput.Recover)
+      case QueuedInput.Recover                => Right(QueuedInput.Recover)
+      case unreadable: QueuedInput.Unreadable => Right(unreadable)
 
+  /**
+   * `entry` with its input opened; one whose ciphertext cannot be opened, or a closed one whose key is missing, is
+   * answered without it (#3091).
+   */
   private def opened(entry: QueueEntry): Result[QueueEntry] =
-    through(cipher(entry.threadId).open, entry.tenantId, entry.agentId, entry.input).map { input =>
-      QueueEntry.stored(
-        entry.id,
-        entry.threadId,
-        entry.agentId,
-        entry.tenantId,
-        input,
-        entry.policy,
-        entry.submissionKey,
-        entry.maxAttempts,
-        entry.trace,
-        entry.submittedAt,
-        entry.attempts,
-        entry.admitted,
-        entry.leaseHolder,
-        entry.leaseExpiresAt,
-        entry.outcome,
-        entry.closedAt,
-        entry.closedAtSeq,
-        entry.position,
-        entry.stopRequest
-      )
+    sealedOpen(entry).left.flatMap {
+      case error: EncryptionError if !entry.isOpen || unopenable(error) =>
+        Right(withInput(entry, QueuedInput.Unreadable(s"its input cannot be opened: ${error.message}")))
+      case other => Left(other)
     }
+
+  private def sealedOpen(entry: QueueEntry): Result[QueueEntry] =
+    through(cipher(entry.threadId).open, entry.tenantId, entry.agentId, entry.input).map(withInput(entry, _))
+
+  private def withInput(entry: QueueEntry, input: QueuedInput): QueueEntry =
+    QueueEntry.stored(
+      entry.id,
+      entry.threadId,
+      entry.agentId,
+      entry.tenantId,
+      input,
+      entry.policy,
+      entry.submissionKey,
+      entry.maxAttempts,
+      entry.trace,
+      entry.submittedAt,
+      entry.attempts,
+      entry.admitted,
+      entry.leaseHolder,
+      entry.leaseExpiresAt,
+      entry.outcome,
+      entry.closedAt,
+      entry.closedAtSeq,
+      entry.position,
+      entry.stopRequest
+    )
 
   /** Submits `submission` with its input encrypted; a reused submission key is compared against the stored entry in plain. */
   def submit(submission: Submission): Result[Ticket] =
@@ -126,12 +145,38 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     inner.openEntries(tenantId, threadId).flatMap(traverse(_)(opened))
 
-  /** Leases the next entry, with its input decrypted; an entry that cannot be decrypted is a `Left` and stays leased until the lease expires. */
+  /**
+   * Leases the next entry, with its input decrypted. An entry whose ciphertext cannot be opened is closed
+   * `Failed(Unrunnable)` and the next one taken; one whose key is missing is a `Left`, and stays leased until the lease
+   * expires (see the class doc).
+   */
   def take(request: TakeRequest): Result[Option[LeasedEntry]] =
-    inner.take(request).flatMap {
-      case None         => Right(None)
-      case Some(leased) => opened(leased.entry).map(entry => Some(leased.copy(entry = entry)))
-    }
+    @scala.annotation.tailrec
+    def next(closed: Int): Result[Option[LeasedEntry]] =
+      inner.take(request) match
+        case Right(Some(leased)) =>
+          sealedOpen(leased.entry) match
+            case Right(entry) => Right(Some(leased.copy(entry = entry)))
+            case Left(error: EncryptionError) if unopenable(error) && closed < EncryptingRunQueue.MaxClosedPerTake =>
+              val outcome =
+                EntryOutcome.Failed(
+                  FailureReason.Unrunnable(
+                    s"the stored entry cannot be read: its input cannot be opened: ${error.message}"
+                  )
+                )
+              inner.close(leased.lease, outcome) match
+                case Right(_) | Left(_: QueueError) => next(closed + 1)
+                case Left(other)                    => Left(other)
+            case Left(error) => Left(error)
+        case other => other
+    next(0)
+
+  /** Whether `error` says the ciphertext itself cannot be opened, rather than that its key is missing. */
+  private def unopenable(error: EncryptionError): Boolean = error match
+    case _: EncryptionError.DecryptionFailed | _: EncryptionError.MalformedCiphertext |
+        _: EncryptionError.NotEncrypted =>
+      true
+    case _ => false
 
   /** Passed to the store unchanged: a cancellation carries nothing that is encrypted. */
   def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation] =
@@ -153,6 +198,13 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] = inner.depth(agents)
 
   /** Passed to the store unchanged. */
+  def allDepths(): Result[Map[AgentId, QueueDepth]] = inner.allDepths()
+
+  /** Passed to the store; the entries it closed are answered with their inputs opened, where they can be. */
+  def closeUntaken(age: FiniteDuration, limit: Int): Result[Vector[QueueEntry]] =
+    inner.closeUntaken(age, limit).flatMap(traverse(_)(opened))
+
+  /** Passed to the store unchanged. */
   def renew(lease: Lease, ttl: FiniteDuration): Result[Lease] = inner.renew(lease, ttl)
 
   /** Passed to the store unchanged. */
@@ -162,6 +214,9 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
 
 @Experimental
 object EncryptingRunQueue:
+
+  /** The most entries one take closes for an input that cannot be opened before it answers none, for its bound. */
+  private val MaxClosedPerTake: Int = 16
 
   /** `inner`, storing its entries' inputs encrypted with `keys`. */
   def apply(
