@@ -215,6 +215,23 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     ds.sent.last.sql should startWith("SELECT id, content, memory_type, (SELECT jsonb_object_agg(")
   }
 
+  // Codex on #3166: the identity names the cluster by its system identifier, never the address it was reached on
+  it should "name its cluster, database, schema-qualified table and tenant, and no cluster when refused one" in {
+    def answering(control: Boolean): String => Seq[Map[String, Any]] = sql =>
+      if (sql.contains("pg_control_system"))
+        if (control) Seq(Map("system_identifier" -> "7712809643900526635"))
+        else throw new SQLException("permission denied for function pg_control_system")
+      else if (sql.contains("current_database()")) Seq(Map("db" -> "app", "nspname" -> "public", "relname" -> "t"))
+      else Seq.empty
+    val allowed = new RecordingDataSource()(Some(answering(control = true)))
+    new PostgresMemoryStore(allowed, "t", None, ownsDataSource = false, Some("alice")).storageIdentity shouldBe
+      Right(Some("postgresql://7712809643900526635/app/public.t?tenant=alice"))
+    allowed.sent.exists(_.sql.contains("inet_server_addr")) shouldBe false
+    val refused = new RecordingDataSource()(Some(answering(control = false)))
+    store(refused).storageIdentity shouldBe Right(Some("postgresql://unknown/app/public.t?tenant="))
+    store(new RecordingDataSource()()).storageIdentity.isLeft shouldBe true
+  }
+
   it should "count with COUNT(*) when the filter is exact" in {
     val ds = new RecordingDataSource(Seq(Map("count" -> 7L)))()
     store(ds).count(MemoryFilter.Not(MemoryFilter.MinImportance(0.5))) shouldBe Right(7L)

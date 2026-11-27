@@ -114,6 +114,33 @@ class PostgresMemoryStoreTenantSpec extends AnyFlatSpec with Matchers with Eithe
       b.storageIdentity.value should not be alice
       n.storageIdentity.value should not be alice
       n.storageIdentity.value should not be b.storageIdentity.value
+      // the cluster is its system identifier, never the address the connection came in on (Codex on #3166)
+      (alice.get should not).include("unknown")
+      val host = config(table).host
+      if (host == "localhost") {
+        val byAddress =
+          PostgresMemoryStore(config(table, Some("alice")).copy(host = "127.0.0.1"))
+            .fold(e => fail(e.message), identity)
+        TransactionalMemoryStoreContract.after(byAddress.close())(byAddress.storageIdentity.value shouldBe alice)
+      }
+    }
+  }
+
+  // Codex on #3166: opening a store over an up-to-date table never waits for the table's readers
+  "Opening a store over a migrated table" should "take no lock that waits for a reader" in withTable { table =>
+    open(table, Some("alice")).close()
+    val reader = connect(table)
+    TransactionalMemoryStoreContract.after(reader.close()) {
+      reader.setAutoCommit(false)
+      val st = reader.createStatement()
+      st.execute(s"LOCK TABLE $table IN ACCESS SHARE MODE") // a long read, holding its lock until it ends
+      Seq("", "_applied", "_fences").foreach(suffix => st.execute(s"LOCK TABLE $table$suffix IN ACCESS SHARE MODE"))
+      val pool   = java.util.concurrent.Executors.newSingleThreadExecutor()
+      val opened = pool.submit(() => open(table, Some("bob")))
+      val store  = opened.get(20, java.util.concurrent.TimeUnit.SECONDS)
+      store.close()
+      pool.shutdown()
+      reader.rollback()
     }
   }
 

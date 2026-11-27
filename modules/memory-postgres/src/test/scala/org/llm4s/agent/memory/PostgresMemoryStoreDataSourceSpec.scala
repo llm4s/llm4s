@@ -94,10 +94,14 @@ class PostgresMemoryStoreDataSourceSpec extends AnyFlatSpec with Matchers with E
     val store = PostgresMemoryStore.fromDataSource(ds, "mem", tenant = Some("alice")).value
     store.tenant shouldBe Some("alice")
     Seq("mem", "mem_applied", "mem_fences").foreach { table =>
-      ds.statements should contain(s"ALTER TABLE $table ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT ''")
+      // one statement per table, the column added only inside the locked branch (Codex on #3166)
       ds.statements.exists(s => s.startsWith("DO $$") && s.contains(s"LOCK TABLE $table ")) shouldBe true
+      ds.statements.exists(s => s.startsWith(s"ALTER TABLE $table")) shouldBe false
     }
-    PostgresMemoryStore.tenantKeyMigration("mem", "id") should include("ADD PRIMARY KEY (tenant, id)")
+    val migration = PostgresMemoryStore.tenantKeyMigration("mem", "id")
+    migration should include("ARRAY['tenant', 'id']")
+    migration.indexOf("ADD COLUMN IF NOT EXISTS tenant") should be > migration.indexOf("LOCK TABLE mem ")
+    migration should include("ADD PRIMARY KEY (tenant, id)")
   }
 
   it should "report an unreachable DataSource as a Left and leave it open" in {

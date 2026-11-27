@@ -53,23 +53,43 @@ final class PostgresMemoryStore private[memory] (
   }
 
   /**
-   * The server, database, table and tenant this store reads and writes: two stores over one table and one tenant have
-   * one identity, whichever data source or instance reaches them, so a resolver that hands two tenants the same rows is
-   * caught. The server is its address and port, or, over a Unix socket, the JDBC URL.
+   * The cluster, database, table and tenant this store reads and writes: two stores over one table and one tenant have
+   * one identity, whichever data source, address or instance reaches them, so a resolver that hands two tenants the
+   * same rows is caught.
+   *
+   * The cluster is its `system_identifier` (`pg_control_system()`), which does not depend on the address a connection
+   * came in on (`127.0.0.1`, `::1`, a host name, a pooler). PostgreSQL grants that function to every role (checked on
+   * 14, 16 and 17); where a server refuses it, the identity names no cluster - `postgresql://unknown/...` - which is
+   * conservative: two stores over tables of the same database, schema, name and tenant on different clusters are then
+   * taken for one and refused, never two tenants on one table accepted. The table is its schema-qualified name, as
+   * `search_path` resolves it.
    */
   override def storageIdentity: Result[Option[String]] =
     attempt("Failed to read the store's identity") {
       withConnection { conn =>
-        val url = Option(conn.getMetaData.getURL).getOrElse("").takeWhile(_ != '?')
+        val cluster = Try(
+          runQuery(conn, "SELECT system_identifier::text FROM pg_control_system()", Seq.empty, stream = false)(rows =>
+            if (rows.hasNext) Option(rows.next().getString(1)) else None
+          )
+        ).toOption.flatten
         runQuery(
           conn,
-          "SELECT host(inet_server_addr()) || ':' || inet_server_port(), current_database(), to_regclass(?)::oid::text",
+          "SELECT current_database(), n.nspname, c.relname FROM pg_class c " +
+            "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)",
           Seq(SqlParam.PString(tableName)),
           stream = false
         ) { rows =>
-          val rs     = rows.next()
-          val server = Option(rs.getString(1)).getOrElse(url)
-          Right(Some(s"postgresql://$server/${rs.getString(2)}?table=${rs.getString(3)}&tenant=$tenantKey"))
+          if (!rows.hasNext)
+            Left(ProcessingError("postgres-memory-store", s"Failed to read the store's identity: no table $tableName"))
+          else {
+            val rs = rows.next()
+            Right(
+              Some(
+                s"postgresql://${cluster.getOrElse("unknown")}/${rs.getString(1)}/${rs.getString(2)}.${rs.getString(3)}" +
+                  s"?tenant=$tenantKey"
+              )
+            )
+          }
         }
       }
     }
@@ -114,9 +134,9 @@ final class PostgresMemoryStore private[memory] (
             "token BIGINT NOT NULL, PRIMARY KEY (tenant, scope))"
         )
 
-        // 5. A table created before tenants (#3032) gains the column, its rows the tenant '', and a key per tenant
+        // 5. A table created before tenants (#3032) gains the column, its rows the tenant '', and a key per tenant;
+        //    an up-to-date table is only checked, in the catalog, and never locked
         Seq(tableName -> "id", appliedTable -> "key", fencesTable -> "scope").foreach { case (table, key) =>
-          stmt.execute(s"ALTER TABLE $table ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT ''")
           stmt.execute(PostgresMemoryStore.tenantKeyMigration(table, key))
         }
       }
@@ -1064,20 +1084,25 @@ object PostgresMemoryStore {
       initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false, tenant))
 
   /**
-   * One statement making `(tenant, key)` the primary key of `table` if it is not yet: it locks the table and checks
-   * again before it changes the key, so two processes opening an older table at once migrate it once. An up-to-date
-   * table is checked without the lock. `table` is a validated identifier.
+   * One statement making `(tenant, key)` the primary key of `table`, adding the `tenant` column first, if it is not
+   * yet. The check reads only the catalog, so on an up-to-date table - every open but the first - it takes no lock on
+   * the table, and never queues behind its readers. Only when the key is not `(tenant, key)` does it lock the table
+   * and check again before it changes anything, so two processes opening an older table at once migrate it once.
+   * `table` is a validated identifier.
    */
   private[memory] def tenantKeyMigration(table: String, key: String): String = {
     val keyed =
-      s"""EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-         |WHERE c.conrelid = '$table'::regclass AND c.contype = 'p' AND a.attname = 'tenant')""".stripMargin
+      s"""COALESCE((SELECT array_agg(a.attname::text ORDER BY k.ord) FROM pg_constraint c
+         |CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+         |JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+         |WHERE c.conrelid = '$table'::regclass AND c.contype = 'p') = ARRAY['tenant', '$key'], false)""".stripMargin
     s"""DO $$$$
        |DECLARE pk name;
        |BEGIN
        |  IF NOT $keyed THEN
        |    LOCK TABLE $table IN ACCESS EXCLUSIVE MODE;
        |    IF NOT $keyed THEN
+       |      ALTER TABLE $table ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT '';
        |      SELECT conname INTO pk FROM pg_constraint WHERE conrelid = '$table'::regclass AND contype = 'p';
        |      IF pk IS NOT NULL THEN EXECUTE format('ALTER TABLE $table DROP CONSTRAINT %I', pk); END IF;
        |      ALTER TABLE $table ADD PRIMARY KEY (tenant, $key);
