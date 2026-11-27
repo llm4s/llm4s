@@ -117,14 +117,14 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       statusLine should include("413")
     }
 
-    it("should return 200 for a POST notification (no id field)") {
+    it("should return 202 for a POST notification (no id field)") {
       val conn = openConn(port, "/mcp", "POST")
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
       conn.getOutputStream.write(
         """{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}""".getBytes("UTF-8")
       )
-      conn.getResponseCode shouldBe 200
+      conn.getResponseCode shouldBe 202
     }
 
     it("should return a JSON-RPC parse error for a POST with malformed JSON") {
@@ -132,19 +132,19 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
       conn.getOutputStream.write("not-json-at-all".getBytes("UTF-8"))
-      conn.getResponseCode shouldBe 200
-      val body = scala.io.Source.fromInputStream(conn.getInputStream).mkString
+      conn.getResponseCode shouldBe 400
+      val body = scala.io.Source.fromInputStream(conn.getErrorStream).mkString
       body should include("Parse error")
     }
 
-    it("should return a parse error for a POST body with id but un-parseable as JsonRpcRequest") {
+    it("should return Invalid Request for a POST body with id but un-parseable as JsonRpcRequest") {
       val conn = openConn(port, "/mcp", "POST")
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
       conn.getOutputStream.write("""{"id":"x","invalid":true}""".getBytes("UTF-8"))
-      conn.getResponseCode shouldBe 200
-      val body = scala.io.Source.fromInputStream(conn.getInputStream).mkString
-      body should include("Parse error")
+      conn.getResponseCode shouldBe 400
+      val body = scala.io.Source.fromInputStream(conn.getErrorStream).mkString
+      body should include(MCPErrorCodes.INVALID_REQUEST.toString)
     }
 
     it("should return METHOD_NOT_FOUND for an unknown JSON-RPC method") {

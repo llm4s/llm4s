@@ -419,6 +419,25 @@ none of the protections. With `ContainerisedWorkspace`, nothing changes in your 
 
 To run the image by hand, see [Workspace sandbox](workspace-sandbox#example-locked-down-sandbox).
 
+## `MCPServer` refuses rebound and cross-origin requests, and speaks strict JSON-RPC (#3069, #3071)
+
+`llm4s-mcp` is Beta. Clients that call an `MCPServer` on `localhost` with `Content-Type: application/json`, which
+includes llm4s's own client, need no changes. Check the table if a browser, a proxy or a hand-written client reaches it.
+
+| Before (1.0.0) | After |
+|---|---|
+| Any `Host` and `Origin` were served | A server bound to a loopback `host` refuses (403) a `Host` that is not `localhost`, `127.x.x.x` or `[::1]`. Any server refuses an `Origin` that is not loopback. Name the others in the new `MCPServerOptions.allowedHosts` and `allowedOrigins` |
+| A POST of any `Content-Type` was read | A POST must declare `application/json` (415 otherwise) |
+| A notification was answered 200 | 202 with no body, as is a JSON-RPC response a client posts |
+| Malformed JSON, or an object that is not a JSON-RPC request, was answered 200 with a parse error and id `"unknown"` | 400 with `-32700` (parse error) or `-32600` (invalid request). The id is `null` when it cannot be read. A batch is `-32600` |
+| Replies had no `jsonrpc`, a numeric id came back as a string, and `capabilities` was `{}` | `"jsonrpc":"2.0"` on every reply, the id as it was sent, and `capabilities` is `{"tools":{"listChanged":false}}` |
+
+```scala
+// A server reached as https://mcp.example.com from a browser app at https://app.example.com
+MCPServerOptions(8080, "/mcp", "tools", "1.0", apiKey = Some(key), host = "0.0.0.0",
+  allowedHosts = Set("mcp.example.com"), allowedOrigins = Set("https://app.example.com"))
+```
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

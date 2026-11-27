@@ -233,4 +233,18 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
 
     transport.close()
   }
+
+  it should "not take a server request with a numeric id for the reply to the request with that id as a string (#3071)" in {
+    // The server first sends a request of its own, id 7 (a number), then its reply to the client's request "7".
+    val scriptCommand = StdioTestServers.echo(
+      "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"ping\"}\n{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"ok\":true}}",
+      "--ready"
+    )
+    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "numeric-id-server")
+    try {
+      val reply = transport.sendRequest(JsonRpcRequest("2.0", "7", "test/method", None))
+      reply.map(_.id) shouldBe Right("7")
+      reply.toOption.flatMap(_.result).map(_("ok").bool) shouldBe Some(true)
+    } finally transport.close()
+  }
 }

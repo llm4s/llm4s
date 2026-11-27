@@ -82,27 +82,28 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     it("should return PARSE_ERROR for completely invalid JSON body") {
       val c = postConn()
       c.getOutputStream.write("not-valid-json".getBytes("UTF-8"))
-      c.getResponseCode shouldBe 200
+      c.getResponseCode shouldBe 400
       readBody(c) should include("Parse error")
     }
 
-    it("should return PARSE_ERROR when JSON has id but cannot be parsed as JsonRpcRequest") {
+    it("should return INVALID_REQUEST when JSON has id but cannot be parsed as JsonRpcRequest") {
       val c = postConn()
       c.getOutputStream.write("""{"id":"x","nope":1}""".getBytes("UTF-8"))
-      c.getResponseCode shouldBe 200
-      readBody(c) should include("Parse error")
+      c.getResponseCode shouldBe 400
+      readBody(c) should include(MCPErrorCodes.INVALID_REQUEST.toString)
     }
 
-    it("should return 200 for a valid JSON-RPC notification (no id)") {
+    it("should return 202 for a valid JSON-RPC notification (no id)") {
       val c = postConn()
       c.getOutputStream.write("""{"jsonrpc":"2.0","method":"notifications/initialized"}""".getBytes("UTF-8"))
-      c.getResponseCode shouldBe 200
+      c.getResponseCode shouldBe 202
     }
 
-    it("should return 200 for a malformed notification (no id, no method) hitting failure path") {
+    it("should return INVALID_REQUEST for a message with no id and no method") {
       val c = postConn()
       c.getOutputStream.write("""{"foo":"bar"}""".getBytes("UTF-8"))
-      c.getResponseCode shouldBe 200
+      c.getResponseCode shouldBe 400
+      readBody(c) should include(MCPErrorCodes.INVALID_REQUEST.toString)
     }
   }
 
