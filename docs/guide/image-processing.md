@@ -229,19 +229,25 @@ The cases of `ImageOperation`, as the local processor applies them:
 
 | Operation | Effect | Refused with `InvalidInputError` when |
 |-----------|--------|---------------------------------------|
-| `Resize(width, height, maintainAspectRatio = true)` | Fits the image inside `width` x `height` keeping its proportions; with `false`, uses exactly that size | `width` or `height` is 0 or less |
+| `Resize(width, height, maintainAspectRatio = true)` | Fits the image inside `width` x `height` keeping its proportions (a side is at least 1 pixel); with `false`, uses exactly that size | `width` or `height` is 0 or less, or the result is over the pixel limit |
 | `Crop(x, y, width, height)` | Keeps the rectangle whose top-left corner is at `x`, `y` | The rectangle is empty or not wholly inside the image |
-| `Rotate(degrees)` | Rotates about the centre and resizes the canvas to the rotated bounds; uncovered corners are black | Never |
-| `Blur(radius)` | Box blur; the window is at least 3 x 3, even for a radius of 0 | Never |
-| `Brightness(level)` | Adds `level` percent of 255 to each colour channel, clamped to 0 to 255; intended range -100 to 100 | Never; the range is not checked |
-| `Contrast(level)` | Scales each colour channel about 128; intended range -100 to 100 | Never; the range is not checked |
+| `Rotate(degrees)` | Rotates about the centre and resizes the canvas to the rotated bounds; uncovered corners are black | `degrees` is not finite, or the canvas is over the pixel limit |
+| `Blur(radius)` | Box blur, in time proportional to the image's size whatever the radius; the window is at least 3 x 3, even for a radius of 0 | `radius` is below 0 or above 100 |
+| `Brightness(level)` | Adds `level` percent of 255 to each colour channel, clamped to 0 to 255 | `level` is outside -100 to 100 |
+| `Contrast(level)` | Scales each colour channel about 128 | `level` is outside -100 to 100 |
 | `Grayscale` | Converts to an 8-bit greyscale image | Never |
 | `Normalize` | Currently does nothing: the image is returned unchanged | Never |
 
 Every operation except `Normalize` drops transparency: `Grayscale` produces a greyscale image, the others an RGB one.
 
-With `maintainAspectRatio`, the computed side is truncated to a whole number. If a very elongated image is fitted into
-a very small box, that side can become 0, and the JDK then throws an exception instead of returning a `Left`.
+### Size limits
+
+`LocalImageProcessor` reads the width and height from the file's header and refuses, with `InvalidInputError`, a file
+over 50 MiB or an image over 50 million pixels before decoding it; an operation whose result would be over that pixel
+count is refused too. `analyzeImage` reads only the header, so it describes any size. Set other limits with
+`new LocalImageProcessor(maxPixels = ..., maxFileBytes = ...)`. The OpenAI, Anthropic and Gemini clients refuse to
+upload a file over 20 MiB. Any failure while decoding, processing or encoding, running out of memory included, is a
+`Left`.
 
 ---
 
@@ -253,7 +259,7 @@ The client methods and `saveToFile` report failures as a `Left` holding an `LLME
 |-----------|-------|
 | The file does not exist or reading it fails | `ProcessingError` |
 | The file is not an image `ImageIO` can decode | `InvalidInputError` |
-| A resize or crop with invalid values | `InvalidInputError` |
+| A file over the byte limit, an image over the pixel limit, or an operation with invalid values | `InvalidInputError` |
 | A blank API key (OpenAI and Gemini clients) or a blank model name (Gemini client) | `ConfigurationError` |
 | The provider answers with a status other than 200 | `ServiceError` |
 | A timeout, connection failure or interruption during the request | `TimeoutError`, `NetworkError` or `CancelledError` |

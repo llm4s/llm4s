@@ -568,6 +568,20 @@ store that can make one thread's prune fail overrides `refuseDeletes`, and one w
 | `language = Some("en-US")` was passed verbatim and the CLI exited 2 | `--language en`; the transcription still reports `en-US` |
 | A failed run said only "non-zero exit code" | The message has the exit code and the end of stderr |
 
+## Image reads have size limits, and operation ranges are checked (#3139)
+
+`llm4s-image` is Beta. `LocalImageProcessor` gains two constructor parameters with defaults, so `new LocalImageProcessor()`
+still compiles; what it accepts changes:
+
+| Before (1.0.0) | After |
+|---|---|
+| Any image was fully decoded, so a small file declaring 50000 x 50000 pixels exhausted the heap | `InvalidInputError` for a file over 50 MiB or more than 50 million pixels, checked from the header; `new LocalImageProcessor(maxPixels = ..., maxFileBytes = ...)` changes the limits |
+| `analyzeImage` decoded the whole image for its metadata | It reads the header only |
+| The vision clients uploaded a file of any size | A file over 20 MiB is refused before the request |
+| `Brightness` and `Contrast` outside -100 to 100 were applied (`Contrast(259)` divided by zero) | `InvalidInputError` |
+| `Blur` took any radius, in time growing with its square | A radius from 0 to 100, in time proportional to the image |
+| A resize to a huge size, a side truncated to 0 or a writer failure threw | A `Left`; a fitted side is at least 1 pixel |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on
