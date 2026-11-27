@@ -53,6 +53,10 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
   override def afterAll(): Unit =
     if (neo4jAvailable && store != null) store.close()
 
+  /** One test at a time across the Neo4j suites, its clear included: they share the database (Neo4jSuiteLock). */
+  override protected def runTest(testName: String, args: org.scalatest.Args): org.scalatest.Status =
+    Neo4jSuiteLock.exclusively(super.runTest(testName, args))
+
   /** Clear all LLM4S nodes before each test for isolation. */
   override def beforeEach(): Unit =
     if (neo4jAvailable)
@@ -130,11 +134,16 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     store.upsertEdge(Edge("1", "2", "KNOWS")) shouldBe Right(())
   }
 
-  test("upsertEdge: rejects invalid relationship type characters") {
+  test(
+    "upsertEdge: a relationship type with a backslash is refused, so a \\u0060 escape cannot end the quoting (#2970)"
+  ) {
     requireNeo4j()
     store.upsertNode(Node("1", "A"))
     store.upsertNode(Node("2", "B"))
-    store.upsertEdge(Edge("1", "2", "WORKS-FOR")) shouldBe a[Left[_, _]]
+    store.upsertEdge(Edge("1", "2", "x\\u0060]->(b) DETACH DELETE a //")) shouldBe a[Left[_, _]]
+    store.upsertEdge(Edge("1", "2", "")) shouldBe a[Left[_, _]]
+    store.getNode("1").map(_.isDefined) shouldBe Right(true)
+    store.loadAll().map(_.edges) shouldBe Right(Nil)
   }
 
   test("upsertEdge: replacement semantics remove old edge properties") {
@@ -206,11 +215,26 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     matching("42.5") shouldBe Set("3")
   }
 
-  test("query: rejects unsafe propertyKey input") {
+  test("query: a propertyKey is a parameter, so query-shaping input matches nothing (#2970)") {
     requireNeo4j()
     store.upsertNode(Node("1", "Person", Map("city" -> ujson.Str("NYC"))))
     val result = store.query(GraphFilter(propertyKey = Some("city` OR 1=1 OR n.`x"), propertyValue = Some("NYC")))
-    result shouldBe a[Left[_, _]]
+    result.map(_.nodes) shouldBe Right(Map.empty)
+  }
+
+  test("the factory creates the id constraint and the label index (#2970)") {
+    requireNeo4j()
+    val names = store
+      .executeRead("SHOW INDEXES YIELD name RETURN name")
+      .toOption
+      .get
+      .flatMap(_.get("name").map(_.str))
+    (names should contain).allOf("llm4s_id_unique", "llm4s_label_index")
+  }
+
+  test("a factory whose schema cannot be created is a Left (#2970)") {
+    requireNeo4j()
+    Neo4jGraphStore(neo4jUri, neo4jUser, Secret(neo4jPass), database = "no-such-database") shouldBe a[Left[_, _]]
   }
 
   test("query: filters edges by relationship type") {

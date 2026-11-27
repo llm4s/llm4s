@@ -355,6 +355,27 @@ as text reads back as a `ujson.Str`. Re-upsert those nodes to store them in the 
 | `load()` re-read the file but the store kept serving its cache | `load()` refreshes what the store serves |
 | A read of a missing file created it | It reads as an empty graph, and the first write creates the file |
 
+## Graph stores share one contract: Neo4j relationship types, self-loops, ordering and schema (#2970)
+
+`llm4s-knowledgegraph` and `llm4s-knowledgegraph-neo4j` are Experimental. The in-memory, JSON and Neo4j stores now
+pass one contract suite, and `GraphStore`'s Scaladoc states the behaviour.
+
+| Before (1.0.0) | After |
+|---|---|
+| `Neo4jGraphStore` refused a relationship type outside `[A-Za-z0-9_]+` (`"WORKS FOR"`, `"works-for"`, non-ASCII), and `"3D_PRINTS"` failed as a Cypher syntax error | Any non-empty type without a backslash is written, backtick-quoted; `deleteEdge` takes any type and is a `Right` |
+| A Neo4j property filter refused a key outside `[A-Za-z0-9_]+`, such as `first-name` | Any key a node is written with can be filtered on |
+| `getNeighbors(_, Both)` on Neo4j dropped self-loops | Every store returns a self-loop, once, in every direction |
+| `traverse` ordered a level by id on Neo4j and by insertion order elsewhere | Every store orders by depth, then by node id within a depth |
+| `stats().averageDegree` on Neo4j counted relationships to nodes outside the store; `densestNodeId` broke ties arbitrarily | `averageDegree` is `2 * edgeCount / nodeCount`; ties go to the smallest id |
+| A `GraphFilter` with `propertyKey` but no `propertyValue` (or the reverse) was ignored | It is a `Left` from `query` |
+| A failure to create the Neo4j uniqueness constraint was a logged warning, and the factory still returned the store | The factories create the constraint and an index on `llm4s_label`, and return a `Left` (closing a driver they opened) when they cannot. The constructor no longer calls the server |
+
+`Neo4jGraphStore` is `AutoCloseable`, and `Neo4jGraphStore.Config` gains `connectionTimeout: FiniteDuration`
+(default 30 seconds), so a positional pattern on `Config` needs one more field. A user without schema rights now
+gets a `Left`: have an administrator create `llm4s_id_unique` and `llm4s_label_index` (the statements are in
+`Neo4jGraphStore`'s Scaladoc); the factories then find them and succeed. Code that relied on traversal order within a
+level should sort by its own key.
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

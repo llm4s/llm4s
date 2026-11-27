@@ -80,7 +80,7 @@ class InMemoryGraphStore(initialGraph: Graph = Graph.empty) extends GraphStore {
     }
   }
 
-  override def query(filter: GraphFilter): Result[Graph] = {
+  override def query(filter: GraphFilter): Result[Graph] = GraphTraversal.checkPropertyFilter(filter).map { _ =>
     val graph = graphRef.get()
 
     // Apply label filter
@@ -118,7 +118,7 @@ class InMemoryGraphStore(initialGraph: Graph = Graph.empty) extends GraphStore {
         }
     }
 
-    Right(Graph(nodesByProperty, filteredEdges))
+    Graph(nodesByProperty, filteredEdges)
   }
 
   override def traverse(startId: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] = {
@@ -176,17 +176,8 @@ class InMemoryGraphStore(initialGraph: Graph = Graph.empty) extends GraphStore {
   override def loadAll(): Result[Graph] =
     Right(graphRef.get())
 
-  override def stats(): Result[GraphStats] = {
-    val graph     = graphRef.get()
-    val nodeCount = graph.nodes.size.toLong
-    val edgeCount = graph.edges.size.toLong
-    val avgDegree = if (nodeCount > 0) (edgeCount * 2.0) / nodeCount else 0.0
-
-    val densestNodeId = graph.nodes.keys
-      .maxByOption(nodeId => graph.getConnectedEdges(nodeId).size)
-
-    Right(GraphStats(nodeCount, edgeCount, avgDegree, densestNodeId))
-  }
+  override def stats(): Result[GraphStats] =
+    Right(GraphTraversal.stats(graphRef.get()))
 
   /**
    * Atomically updates the graph state using Compare-And-Swap.
