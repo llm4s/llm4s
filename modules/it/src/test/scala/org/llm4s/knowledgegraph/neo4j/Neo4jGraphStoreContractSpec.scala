@@ -28,9 +28,12 @@ class Neo4jGraphStoreContractSpec extends GraphStoreContract with BeforeAndAfter
   override protected def withStore(body: GraphStore => Unit): Unit = {
     val store = opened.get()
     Tier.require(store.isDefined, s"No Neo4j reachable at $neo4jUri")
+    // One test at a time across the Neo4j suites, which share the database and clear it (Neo4jSuiteLock)
     store.foreach { s =>
-      s.executeWrite("MATCH (n:LLM4S) DETACH DELETE n").fold(e => fail(s"Failed to clear graph: $e"), identity)
-      body(s)
+      Neo4jSuiteLock.exclusively {
+        s.executeWrite("MATCH (n:LLM4S) DETACH DELETE n").fold(e => fail(s"Failed to clear graph: $e"), identity)
+        body(s)
+      }
     }
   }
 }

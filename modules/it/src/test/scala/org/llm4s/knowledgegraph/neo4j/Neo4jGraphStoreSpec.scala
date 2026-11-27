@@ -53,6 +53,10 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
   override def afterAll(): Unit =
     if (neo4jAvailable && store != null) store.close()
 
+  /** One test at a time across the Neo4j suites, its clear included: they share the database (Neo4jSuiteLock). */
+  override protected def runTest(testName: String, args: org.scalatest.Args): org.scalatest.Status =
+    Neo4jSuiteLock.exclusively(super.runTest(testName, args))
+
   /** Clear all LLM4S nodes before each test for isolation. */
   override def beforeEach(): Unit =
     if (neo4jAvailable)
