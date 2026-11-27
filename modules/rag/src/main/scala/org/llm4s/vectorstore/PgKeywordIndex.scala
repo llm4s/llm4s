@@ -379,36 +379,7 @@ final class PgKeywordIndex private (
     builder.toSeq
   }
 
-  private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
-    case MetadataFilter.All => ("TRUE", Seq.empty)
-
-    case MetadataFilter.Equals(key, value) =>
-      ("metadata->>? = ?", Seq(key, value))
-
-    case MetadataFilter.Contains(key, substring) =>
-      ("metadata->>? LIKE ?", Seq(key, s"%$substring%"))
-
-    case MetadataFilter.HasKey(key) =>
-      ("metadata ? ?", Seq(key))
-
-    case MetadataFilter.In(key, values) =>
-      val placeholders = values.map(_ => "?").mkString(",")
-      (s"metadata->>? IN ($placeholders)", Seq(key) ++ values.toSeq)
-
-    case MetadataFilter.And(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      (s"($leftSql AND $rightSql)", leftParams ++ rightParams)
-
-    case MetadataFilter.Or(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      (s"($leftSql OR $rightSql)", leftParams ++ rightParams)
-
-    case MetadataFilter.Not(inner) =>
-      val (innerSql, innerParams) = filterToSql(inner)
-      (s"NOT ($innerSql)", innerParams)
-  }
+  private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = PgMetadataFilterSql(filter)
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
     case s: String  => stmt.setString(index, s)

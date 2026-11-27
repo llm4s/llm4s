@@ -30,13 +30,18 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
   private val testTableName                      = "test_permission_vectors"
   private var searchIndex: Option[PgSearchIndex] = None
 
+  // Collections go under a root of this run's own, and only they and this suite's table are removed: never
+  // dropSchema(), which drops the llm4s_collections and llm4s_principals tables other suites share.
+  private val root                             = PgSuiteCleanup.runRoot("pg-search-index")
+  private def under(p: String): CollectionPath = CollectionPath.unsafe(s"${root.value}/$p")
+
   override def beforeAll(): Unit = {
     super.beforeAll()
     pgUrl.foreach { url =>
       PgSearchIndex.fromJdbcUrl(url, pgUser, pgPassword, testTableName) match {
         case Right(index) =>
-          index.dropSchema()
-          index.initializeSchema() match {
+          PgSuiteCleanup.dropOwnTables(url, pgUser, pgPassword, Seq(testTableName))
+          index.initializeSchema().flatMap(_ => index.collections.create(CollectionConfig.publicParent(root))) match {
             case Right(_) => searchIndex = Some(index)
             case Left(e)  => println(s"Failed to initialize schema: ${e.message}")
           }
@@ -47,6 +52,10 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
   }
 
   override def afterAll(): Unit = {
+    for {
+      index <- searchIndex
+      url   <- pgUrl
+    } PgSuiteCleanup.removeOwn(index, root, url, pgUser, pgPassword, Seq(testTableName))
     searchIndex.foreach(_.close())
     super.afterAll()
   }
@@ -78,14 +87,14 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
     val created = paths.foldLeft[org.llm4s.types.Result[Unit]](Right(())) { (acc, p) =>
       for {
         _ <- acc
-        _ <- store.create(CollectionConfig.publicParent(CollectionPath.unsafe(p)))
-        _ <- store.create(CollectionConfig.publicLeaf(CollectionPath.unsafe(s"$p/docs")))
+        _ <- store.create(CollectionConfig.publicParent(under(p)))
+        _ <- store.create(CollectionConfig.publicLeaf(under(s"$p/docs")))
       } yield ()
     }
     created shouldBe Right(())
 
-    val pattern  = CollectionPattern.AllDescendants(CollectionPath.unsafe("tenant_1"))
-    val expected = Seq("tenant_1", "tenant_1/docs")
+    val pattern  = CollectionPattern.AllDescendants(under("tenant_1"))
+    val expected = Seq(under("tenant_1").value, under("tenant_1/docs").value)
 
     store.list(pattern).map(_.map(_.path.value)) shouldBe Right(expected)
     store.findAccessible(UserAuthorization.Admin, pattern).map(_.map(_.path.value)) shouldBe Right(expected)
@@ -105,7 +114,7 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
       "title"     -> """x","tenant":"other""",
       "tenant"    -> "acme"
     )
-    val path = CollectionPath.unsafe("meta2993")
+    val path = under("meta2993")
 
     index.collections.create(CollectionConfig(path, metadata = metadata)).map(_.metadata) shouldBe Right(metadata)
     index.collections.get(path).map(_.map(_.metadata)) shouldBe Right(Some(metadata))

@@ -335,14 +335,21 @@ final class SQLiteKeywordIndex private (
   private def buildFilterClause(filter: MetadataFilter): Result[String] = filter match {
     case MetadataFilter.All =>
       Right("1=1")
+    // Each comparison is wrapped in COALESCE(..., 0): json_extract is NULL for a missing key, and a NULL condition
+    // would make Not(...) drop the record too, unlike SQLiteVectorStore (#2996).
     case MetadataFilter.Equals(key, value) =>
-      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') = '${escapeString(value)}'")
+      jsonPathForKey(key).map(path => s"COALESCE(json_extract(d.metadata, '$path') = '${escapeString(value)}', 0)")
     case MetadataFilter.Contains(key, substring) =>
-      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') LIKE '%${escapeString(substring)}%'")
+      // instr is a literal, case-sensitive substring test: LIKE would read % and _ as wildcards and fold ASCII case
+      jsonPathForKey(key).map(path =>
+        s"COALESCE(instr(json_extract(d.metadata, '$path'), '${escapeString(substring)}') > 0, 0)"
+      )
+    case MetadataFilter.In(key, values) if values.isEmpty =>
+      jsonPathForKey(key).map(_ => "0")
     case MetadataFilter.In(key, values) =>
       jsonPathForKey(key).map { path =>
         val escaped = values.map(v => s"'${escapeString(v)}'").mkString(",")
-        s"json_extract(d.metadata, '$path') IN ($escaped)"
+        s"COALESCE(json_extract(d.metadata, '$path') IN ($escaped), 0)"
       }
     case MetadataFilter.HasKey(key) =>
       jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') IS NOT NULL")

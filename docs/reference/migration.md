@@ -268,6 +268,23 @@ store.embedAll() // Result[Int]: how many memories were embedded
 A store without an `EmbeddingService` now reads every row a filter narrows to for `search`; give it one, or a narrow
 filter, on a large table. See [Postgres Memory Store](postgres-memory-store#search).
 
+## Metadata filters on the SQL stores agree with `SQLiteVectorStore` (#2996)
+
+`llm4s-rag` is Beta, and no signature changed. `PgVectorStore`, `PgKeywordIndex`, `PgSearchIndex` and
+`SQLiteKeywordIndex` now select the records that `SQLiteVectorStore` selects for a `MetadataFilter`.
+
+| Before (1.0.0) | After |
+|---|---|
+| `Contains` on the Postgres stores was a `LIKE`, so `%` and `_` in the substring were wildcards | `Contains` is a literal substring test: `%` and `_` match only themselves |
+| `SQLiteKeywordIndex`'s `Contains` was a `LIKE`: wildcards, and case-insensitive for ASCII letters | It is literal and case-sensitive, like every other SQL store |
+| `Not(Equals(...))`, `Not(Contains(...))` and `Not(In(...))` left out records without the key, so `deleteByFilter(Not(...))` deleted fewer rows on Postgres | Those records are kept, and deleted |
+| `HasKey` failed on the Postgres stores, an empty `In` was a syntax error, and `PgSearchIndex` read `Not(All)` as no condition | `HasKey` works, and an empty `In` and `Not(All)` match nothing |
+
+`MetadataFilter` has no case-insensitive match. If you relied on `SQLiteKeywordIndex`'s case folding, store a
+lower-cased copy of the value under its own key when you index, such as `"title_lc" -> title.toLowerCase`. Then filter
+with `Contains("title_lc", query.toLowerCase)`. Neither form of `Contains` takes a pattern, so a wildcard search
+needs its own key, such as a prefix stored separately, or filtering in your code after the search.
+
 ## Secret providers refuse cleartext `http` and a JSON-object secret without a field, and share a failed read (#3102)
 
 Three behaviour changes to `llm4s-secrets-vault` and `llm4s-secrets-aws`, both experimental. No signature changed;

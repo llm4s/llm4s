@@ -644,6 +644,10 @@ val complex = Equals("type", "doc")
   .and(!Equals("draft", "true"))
 ```
 
+The SQLite and PostgreSQL stores and keyword indexes all give the same answers. `Contains` is a literal,
+case-sensitive substring test, so `%` and `_` are ordinary characters. `Not` keeps a record that lacks the key, so
+`!Equals("draft", "true")` matches a record with no `draft` key. An empty `In` matches nothing.
+
 ### Using Filters
 
 With `byType` and `complex` from the filters above:
