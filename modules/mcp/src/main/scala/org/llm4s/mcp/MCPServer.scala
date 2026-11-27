@@ -378,6 +378,12 @@ class MCPServer(
     override def handle(exchange: HttpExchange): Unit = {
       // DNS-rebinding gate (#3069), before the key: a rebound page is same-origin to the browser, so only the
       // name it used (Host) and the page's origin (Origin) give it away.
+      if (exchange.getRequestHeaders.getFirst("Host") == null) {
+        // RFC 9112 section 3.2: a request without Host is answered 400. Newer JDK HttpServers send that themselves
+        // before any handler runs; this makes an older one answer the same.
+        sendErrorResponse(exchange, 400, "Bad Request: missing Host header")
+        return
+      }
       if (!MCPServer.hostAllowed(exchange.getRequestHeaders.getFirst("Host"), loopbackBound, allowedHostNames)) {
         sendErrorResponse(exchange, 403, "Forbidden: Host not allowed")
         return

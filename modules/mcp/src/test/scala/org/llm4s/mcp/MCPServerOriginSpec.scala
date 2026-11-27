@@ -105,8 +105,9 @@ class MCPServerOriginSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       messages(lp, "Host: localhost", json, "Origin: http://evil.example") shouldBe 403
     }
 
-    it("refuses a request without a Host") {
-      status(lp, "POST", "/mcp", Seq(json), list) shouldBe 403
+    it("refuses a request without a Host with 400, as RFC 9112 requires, on every JDK") {
+      // JDK 21.0.13's HttpServer answers 400 before the handler runs; on 21.0.12 the handler sees it and answers 400
+      status(lp, "POST", "/mcp", Seq(json), list) shouldBe 400
     }
 
     it("refuses a POST that does not declare a JSON body, on both POST routes") {
