@@ -818,6 +818,15 @@ No signature changed and no stored format changed; what is refused is new:
 | `PathPolicy` compared blocked entries by spelling and real path only, so on macOS every default blocked path was readable through its `/System/Volumes/Data/...` firmlink spelling (#3237) | A path with an existing ancestor whose file key is a blocked entry's is blocked, so the firmlink spelling of a blocked directory is blocked too. Where the platform reports file keys (not Windows), each check reads the attributes of the path's existing ancestors |
 | `VectorMemoryStore.storageIdentity` was `None`, so `SemanticMemoryMiddleware` gave two tenants two instances over one file (#3238) | It names the file's real path, as `SQLiteMemoryStore` does: a resolver that maps two tenants to one file is refused |
 
+## Guardrails see and keep every rewrite, and fail closed (#3231, #3232, #3233, #3234, #3235)
+
+The guardrails and the streaming path are experimental, and `Agent.run`'s history import keeps its `@Stable`
+signature. No signature changed and the stored format is the same; what changed is what passes:
+
+| Before (1.0.0) | After |
+|---|---|
+| `CompositeGuardrail.all` ran every guardrail on the original value and returned it, so a masking guardrail inside it masked nothing (#3232) | Each guardrail sees the value as the one before it rewrote it, and `all` returns the last rewrite. A failing guardrail leaves the value unchanged for the next, and every failure is still reported |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

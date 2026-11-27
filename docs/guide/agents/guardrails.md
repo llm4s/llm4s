@@ -358,7 +358,10 @@ composite has its model calls counted in the thread's usage (a hand-written wrap
 `validate(value)` loses that). An `InputGuardrail` passed to `InputGuardrail.from` comes back unchanged.
 
 `all` runs every guardrail and reports every failure; `any` stops at the first guardrail that passes, so
-those after it do not run; `sequential` stops at the first failure.
+those after it do not run; `sequential` stops at the first failure. `all` and `sequential` thread the value
+through their guardrails as a guardrail list does: each sees the value as the one before it rewrote it, and a
+masking guardrail's rewrite (`PIIMasker`, `PIIDetector.masking`) is what the composite returns. `any` returns
+the passing guardrail's value.
 
 ---
 
