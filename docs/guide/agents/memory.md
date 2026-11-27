@@ -449,7 +449,10 @@ for {
   `result.usage`.
 - **Consolidation** (`consolidate = Some(MemoryConsolidation(olderThan = 1.day, minCount = 10))`)
   replaces groups of old memories with a summary after each turn. It needs a
-  `TransactionalMemoryStore`: `InMemoryStore`, `SQLiteMemoryStore` or `PostgresMemoryStore`.
+  `TransactionalMemoryStore`: `InMemoryStore`, `SQLiteMemoryStore` or `PostgresMemoryStore`. A
+  summary carries its sources' `llm4s.writer`, so it counts against `bounds` only when they did; one
+  that would merge two writers' memories, or is longer than `maxRecordChars`, is refused, never cut,
+  and its sources kept.
 - **Bounded, by what it wrote.** Every memory the middleware writes carries the metadata
   `llm4s.writer` (`SemanticMemoryMiddleware.WriterKey`) set to its id, and `bounds` (default 1000
   memories, 4 MiB) counts only those: each write evicts the middleware's own memories of lowest
@@ -615,6 +618,18 @@ def consolidate(manager: MemoryManager): Result[MemoryManager] =
 `minCount` applies to each group of old memories (same type and context) separately, not to their
 total. Nothing consolidates on its own: call `consolidateMemories` when you want it (for example
 from a scheduled job).
+
+A group holds only memories of one scope: every metadata value except `role`, `chunk_index`,
+`entity_name` and `entity_type` is the same in each, so facts from two conversations, two users or
+two writers are never merged, and a user fact with no `user_id` is never consolidated. The summary
+carries that scope, so an erasure by `conversation_id`, `user_id`, `entity_id`, `source` or a key of
+your own (`deleteMatching`) removes it with the rest. It also records its provenance
+(`ConsolidationProvenance`): `original_ids` lists every memory it stands for, and
+`consolidation_version` is `2`. A summary replaces its sources only when it is whole: one that
+stopped at its token limit, or for any reason but its end, that is empty or longer than
+`LLMMemoryManager.MaxSummaryChars` (2000), is refused and its sources kept. A summary written by
+1.0.0 has no `consolidation_version`, may hold other conversations' content, and is never
+consolidated again; `ConsolidationProvenance.legacySummaries` finds such summaries.
 
 ---
 

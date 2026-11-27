@@ -31,6 +31,7 @@ final case class LLMMemoryManager(
 ) extends BaseMemoryManagerOps {
 
   private val logger = LoggerFactory.getLogger(getClass)
+  import LLMMemoryManager.MaxSummaryChars
 
   // ============================================================
   // LLM-powered consolidation (NEW IMPLEMENTATION)
@@ -127,50 +128,31 @@ final case class LLMMemoryManager(
       first +: rest
     }
 
-    // Group by conversation (only Conversation type, sorted by timestamp for stable summaries)
-    val byConversation = memories
-      .filter(_.memoryType == MemoryType.Conversation)
-      .filter(_.conversationId.isDefined)
-      .groupBy(_.metadata.getOrElse("conversation_id", ""))
-      .filter(_._1.nonEmpty)
-      .values
-      .map(group => takeUntilBudget(group.toSeq.sortBy(_.timestamp)))
-      .filter(_.length >= minCount)
-      .toSeq
+    // Only memories with one scope are merged: every metadata value but the descriptive keys is the same in each,
+    // so the summary carries each source's conversation, user, entity, source and writer, and an erasure by any of
+    // them finds it (#3035). A summary written before #3035 has no provenance and is never consolidated again.
+    val candidates = memories.filterNot(ConsolidationProvenance.isLegacySummary)
 
-    // Group by entity
-    val byEntity = memories
-      .filter(_.memoryType == MemoryType.Entity)
-      .groupBy(_.getMetadata("entity_id"))
-      .collect { case (Some(_), facts) => takeUntilBudget(facts.toSeq) }
-      .filter(_.length >= minCount)
-      .toSeq
+    def scoped(of: MemoryType, required: String*)(order: Seq[Memory] => Seq[Memory]): Seq[Seq[Memory]] =
+      candidates
+        .filter(_.memoryType == of)
+        .filter(m => required.forall(k => m.getMetadata(k).exists(_.nonEmpty)))
+        .groupBy(ConsolidationProvenance.scopeOf)
+        .values
+        .map(group => takeUntilBudget(order(group.toSeq)))
+        .filter(_.length >= minCount)
+        .toSeq
 
-    // Group user facts by user ID
-    val byUser = memories
-      .filter(_.memoryType == MemoryType.UserFact)
-      .groupBy(_.getMetadata("user_id"))
-      .values
-      .map(group => takeUntilBudget(group.toSeq))
-      .filter(_.length >= minCount)
-      .toSeq
-
-    // Group knowledge by source
-    val byKnowledge = memories
-      .filter(_.memoryType == MemoryType.Knowledge)
-      .groupBy(_.source)
-      .collect { case (Some(_), entries) => takeUntilBudget(entries.toSeq) }
-      .filter(_.length >= minCount)
-      .toSeq
-
-    // Group tasks by success status
-    val byTask = memories
-      .filter(_.memoryType == MemoryType.Task)
-      .groupBy(_.getMetadata("success").getOrElse("unknown"))
-      .values
-      .map(group => takeUntilBudget(group.toSeq))
-      .filter(_.length >= minCount)
-      .toSeq
+    // Conversations by conversation id, sorted by timestamp for stable summaries
+    val byConversation = scoped(MemoryType.Conversation, "conversation_id")(_.sortBy(_.timestamp))
+    // Entity facts by entity
+    val byEntity = scoped(MemoryType.Entity, "entity_id")(identity)
+    // User facts by user: a fact with no user id belongs to no one an erasure can name, so it is never merged
+    val byUser = scoped(MemoryType.UserFact, "user_id")(identity)
+    // Knowledge by source
+    val byKnowledge = scoped(MemoryType.Knowledge, "source")(identity)
+    // Tasks by success status
+    val byTask = scoped(MemoryType.Task)(identity)
 
     byConversation ++ byEntity ++ byUser ++ byKnowledge ++ byTask
   }
@@ -207,40 +189,40 @@ final case class LLMMemoryManager(
     completionResult.flatMap { completion =>
       val consolidatedText = completion.content.trim
 
-      // 3. Validate output
-      if (consolidatedText.isEmpty) {
-        Left(
-          org.llm4s.error.ValidationError(
-            "consolidation_output",
-            "Consolidation produced empty output"
+      // 3. Validate output: a summary replaces its sources only when it is whole. One that stopped at its token
+      // limit, or for any reason but its end, or that runs past the cap, is refused and its sources are kept (#3035).
+      completion.finishReason match {
+        case FinishReason.Stop | FinishReason.Unknown if consolidatedText.isEmpty =>
+          Left(refused("Consolidation produced empty output"))
+        case FinishReason.Stop | FinishReason.Unknown if consolidatedText.length > MaxSummaryChars =>
+          Left(
+            refused(
+              s"Consolidation output too long (${consolidatedText.length} chars, at most $MaxSummaryChars): sources kept"
+            )
           )
-        )
-      } else {
-        // Cap consolidated text length (sanity check)
-        val cappedText = if (consolidatedText.length > 2000) {
-          logger.warn(
-            s"Consolidation output too long (${consolidatedText.length} chars), truncating to 2000"
+        case FinishReason.Stop | FinishReason.Unknown =>
+          // 4. Create consolidated memory
+          val consolidatedMemory = Memory(
+            id = MemoryId.generate(),
+            content = consolidatedText,
+            memoryType = group.head.memoryType,
+            metadata = mergeMetadata(group),
+            timestamp = group.map(_.timestamp).max,
+            importance = group.flatMap(_.importance).maxOption,
+            embedding = None // a store with an embedding service embeds it on write
           )
-          consolidatedText.take(2000) + "..."
-        } else consolidatedText
 
-        // 4. Create consolidated memory
-        val consolidatedMemory = Memory(
-          id = MemoryId.generate(),
-          content = cappedText,
-          memoryType = group.head.memoryType,
-          metadata = mergeMetadata(group),
-          timestamp = group.map(_.timestamp).max,
-          importance = group.flatMap(_.importance).maxOption,
-          embedding = None // a store with an embedding service embeds it on write
-        )
-
-        // 5. Replace the group with its summary in one write, naming exactly the group's ids: a store
-        // that writes in place does it in one transaction, and a replayable store keys it by those ids
-        currentStore.replace(Seq(consolidatedMemory), group.map(_.id))
+          // 5. Replace the group with its summary in one write, naming exactly the group's ids: a store
+          // that writes in place does it in one transaction, and a replayable store keys it by those ids
+          currentStore.replace(Seq(consolidatedMemory), group.map(_.id))
+        case reason =>
+          Left(refused(s"Consolidation stopped before its end (finish reason $reason): sources kept"))
       }
     }
   }
+
+  private def refused(message: String): org.llm4s.error.LLMError =
+    org.llm4s.error.ValidationError("consolidation_output", message)
 
   /**
    * Select the appropriate consolidation prompt for a memory group.
@@ -269,26 +251,25 @@ final case class LLMMemoryManager(
     }
 
   /**
-   * Merge metadata from multiple memories.
-   *
-   * Collects all unique key-value pairs across memories. For keys that appear
-   * in multiple memories with different values, keeps the first occurrence.
-   * Adds consolidation tracking metadata.
+   * The summary's metadata: the scope its sources share, each descriptive key on which every source agrees, and its
+   * provenance ([[ConsolidationProvenance]]). The group was formed by scope, so no scoping value is lost.
    */
   private def mergeMetadata(memories: Seq[Memory]): Map[String, String] = {
-    // Merge all metadata, keeping first value for conflicting keys
-    val mergedMetadata = memories.foldLeft(Map.empty[String, String]) { (acc, memory) =>
-      memory.metadata.foldLeft(acc) { case (m, (key, value)) =>
-        if (m.contains(key)) m else m + (key -> value)
+    import ConsolidationProvenance._
+    val keys = memories.flatMap(_.metadata.keys).distinct.filterNot(BookkeepingKeys)
+    val agreed = keys.flatMap { key =>
+      memories.map(_.getMetadata(key)).distinct match {
+        case Seq(Some(value)) => Some(key -> value)
+        case _                => None
       }
-    }
+    }.toMap
 
-    // Add consolidation metadata
-    mergedMetadata ++ Map(
-      "consolidated_from"    -> memories.length.toString,
-      "consolidated_at"      -> Instant.now().toString,
-      "original_ids"         -> memories.map(_.id.value).take(10).mkString(","),
-      "consolidation_method" -> "llm_summary"
+    agreed ++ Map(
+      ConsolidatedFrom    -> memories.length.toString,
+      ConsolidatedAt      -> Instant.now().toString,
+      OriginalIds         -> memories.flatMap(sourceIds).map(_.value).distinct.mkString(","),
+      ConsolidationMethod -> LlmSummary,
+      Version             -> CurrentVersion
     )
   }
 
@@ -477,6 +458,9 @@ final case class LLMMemoryManager(
 }
 
 object LLMMemoryManager {
+
+  /** The longest summary kept, in characters: a longer one is refused and its sources kept, never cut. */
+  val MaxSummaryChars: Int = 2000
 
   /**
    * Create a new LLM-powered memory manager.
