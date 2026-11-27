@@ -711,4 +711,27 @@ class JsonGraphStoreSpec extends AnyFunSuite with Matchers {
     filesIn(dir) shouldBe Set(path.getFileName.toString)
     store.loadAll().map(_.nodes.keySet) shouldBe Right(Set("a"))
   }
+
+  test("a write keeps an existing file's POSIX permissions") {
+    val path  = createTempJsonPath()
+    val store = new JsonGraphStore(path)
+    store.upsertNode(Node("a", "A")) shouldBe Right(())
+    assume(Files.getFileStore(path).supportsFileAttributeView("posix"), "needs POSIX permissions")
+    val groupReadable = java.nio.file.attribute.PosixFilePermissions.fromString("rw-r-----")
+    Files.setPosixFilePermissions(path, groupReadable)
+
+    store.upsertNode(Node("b", "B")) shouldBe Right(())
+    store.save(Graph(Map("c" -> Node("c", "C")), Nil)) shouldBe Right(())
+    Files.getPosixFilePermissions(path) shouldBe groupReadable
+  }
+
+  test("a new file gets the default permissions a plain write gives, not owner-only ones") {
+    val dir = createTempJsonPath().getParent
+    assume(Files.getFileStore(dir).supportsFileAttributeView("posix"), "needs POSIX permissions")
+    val plain = Files.write(dir.resolve("plain.json"), Array[Byte]('x'))
+    val path  = dir.resolve("graph.json")
+
+    new JsonGraphStore(path).upsertNode(Node("a", "A")) shouldBe Right(())
+    Files.getPosixFilePermissions(path) shouldBe Files.getPosixFilePermissions(plain)
+  }
 }

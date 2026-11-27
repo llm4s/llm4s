@@ -6,6 +6,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.syntax.toResult
 
 import java.nio.file.{ AtomicMoveNotSupportedException, Files, Path, StandardCopyOption }
+import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
@@ -234,8 +235,11 @@ class JsonGraphStore(path: Path) extends GraphStore {
 
   private def writeAtomically(bytes: Array[Byte]): Unit = {
     val target = path.toAbsolutePath
-    val tmp    = Files.createTempFile(target.getParent, s".${target.getFileName}.", ".tmp")
+    // createFile, not createTempFile: a new graph file gets the umask's permissions, as Files.write gave it, rather
+    // than createTempFile's owner-only ones
+    val tmp = Files.createFile(target.resolveSibling(s".${target.getFileName}.${java.util.UUID.randomUUID()}.tmp"))
     val moved = Try {
+      keepPermissions(target, tmp)
       Files.write(tmp, bytes)
       Try(Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)).recover {
         case _: AtomicMoveNotSupportedException => Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING)
@@ -244,6 +248,14 @@ class JsonGraphStore(path: Path) extends GraphStore {
     if (moved.isFailure) Files.deleteIfExists(tmp)
     moved.map(_ => ()).get
   }
+
+  /** Gives `tmp` the POSIX permissions of an existing `target`, so replacing the file does not change who can read it. */
+  private def keepPermissions(target: Path, tmp: Path): Unit =
+    if (Files.exists(target)) {
+      Option(Files.getFileAttributeView(target, classOf[PosixFileAttributeView])).foreach { view =>
+        Files.setPosixFilePermissions(tmp, view.readAttributes().permissions())
+      }
+    }
 
   /** Writes `graph` if it is valid, and makes it what the store serves. */
   private def replaceWith(graph: Graph): Result[Unit] =
