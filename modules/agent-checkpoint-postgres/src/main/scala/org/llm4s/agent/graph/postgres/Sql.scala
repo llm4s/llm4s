@@ -203,7 +203,9 @@ private[postgres] object Sql:
        |JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id AND e.state = 'open'
        |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin
 
-  def deleteHistoryAt(t: Tables): String = s"DELETE FROM ${t.history} WHERE thread_id = ? AND position = ?"
+  /** The thread's checkpoints at any of the positions bound second (a `bigint[]`). */
+  def deleteHistoryAtAny(t: Tables): String =
+    s"DELETE FROM ${t.history} WHERE thread_id = ? AND position = ANY (?)"
 
   // ---- pending writes ----
 
@@ -235,6 +237,10 @@ private[postgres] object Sql:
   /** The first event committed at or after the time bound second; NULL if none. */
   def firstEventSince(t: Tables): String =
     s"SELECT MIN(seq) FROM ${t.events} WHERE thread_id = ? AND committed_at >= ?"
+
+  /** The seq of the event the third parameter places past the thread's first event at or after the second, by the key. */
+  def eventAtOffset(t: Tables): String =
+    s"SELECT seq FROM ${t.events} WHERE thread_id = ? AND seq >= ? ORDER BY seq LIMIT 1 OFFSET ?"
 
   def deleteEventsBefore(t: Tables): String = s"DELETE FROM ${t.events} WHERE thread_id = ? AND seq < ?"
 

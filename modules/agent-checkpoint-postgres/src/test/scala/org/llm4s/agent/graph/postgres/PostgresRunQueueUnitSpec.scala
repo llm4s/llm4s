@@ -492,7 +492,7 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     }
     s.store().prune(thread, RetentionPolicy(maxCheckpoints = Some(1))).value
     // c2 by the policy, c0 as the queue's evidence: only c1 goes
-    s.madeWith(Sql.deleteHistoryAt(t)) shouldBe Vector(Vector("t1", 1L))
+    s.madeWith(Sql.deleteHistoryAtAny(t)) shouldBe Vector(Vector("t1", Vector(1L)))
     s.madeWith(Sql.queueEvidence(t)) shouldBe Vector(Vector("t1"))
     // the events' floor still follows the policy's checkpoints alone
     s.madeWith(Sql.firstEventOf(t)) shouldBe Vector(Vector("t1", Vector("c2")))

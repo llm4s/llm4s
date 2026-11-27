@@ -39,6 +39,19 @@ object SqliteFiles:
   def opened(path: Path, clock: Clock): SqliteCheckpointer =
     SqliteCheckpointer.open(path, clock).fold(e => throw new IllegalStateException(e.message), identity)
 
+  /** Installs, through a connection of its own, a trigger refusing to delete any of `threadId`'s checkpoints. */
+  def failPrunes(path: Path, threadId: ThreadId): Boolean =
+    Using.resource(DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))) { c =>
+      val id = threadId.value.replace("'", "''")
+      Using.resource(c.createStatement())(
+        _.execute(
+          s"""CREATE TRIGGER "refuse_prune_${UUID.randomUUID()}" BEFORE DELETE ON llm4s_checkpoint_history
+             |WHEN OLD.thread_id = '$id' BEGIN SELECT RAISE(ABORT, 'pruning this thread is refused'); END""".stripMargin
+        )
+      ): Unit
+      true
+    }
+
 /**
  * The SQLite store passes the contract every store must pass, each case on a file of its own, and with `reopen`
  * closing the connection and opening the same file again, as a restarted process would.
@@ -46,6 +59,12 @@ object SqliteFiles:
 class SqliteCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract {
 
   protected def newCheckpointer(clock: Clock): Checkpointer = SqliteFiles.opened(SqliteFiles.fresh(), clock)
+
+  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean =
+    store match {
+      case sqlite: SqliteCheckpointer => SqliteFiles.failPrunes(sqlite.path, threadId)
+      case other                      => fail(s"not a SqliteCheckpointer: $other")
+    }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer =
     store match {
@@ -100,6 +119,12 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     val path = SqliteFiles.fresh()
     Alternating(path, clock, Vector(SqliteFiles.opened(path, clock), SqliteFiles.opened(path, clock)))
   }
+
+  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean =
+    store match {
+      case alternating: Alternating => SqliteFiles.failPrunes(alternating.path, threadId)
+      case other                    => fail(s"not an alternating store: $other")
+    }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer =
     store match {

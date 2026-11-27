@@ -819,9 +819,13 @@ def sweepAll(after: Option[ThreadId]): Result[Unit] =
 ```
 
 - Each call visits at most `batchSize` threads (1 to 1000), tombstones included, and returns the cursor of the next
-  page, so every call stays within the store's bound however many threads it holds. The PostgreSQL store makes a call
-  in up to three short transactions, so one returns within three times its bound.
-- Each thread is pruned exactly as `prune(threadId, policy.retention)` would prune it, by the store's commit times.
+  page. The SQLite and PostgreSQL stores prune each thread in transactions of their own, each removing at most 1,000
+  checkpoints or events, so live runs' commits go between them and a large backlog never times out. A page that
+  reaches the store's bound (`callTimeout`, SQLite's `busyTimeout`) stops early and returns the thread it stopped in as
+  its cursor. The next page finishes that thread.
+- Each thread ends up pruned exactly as `prune(threadId, policy.retention)` would prune it, by the store's commit times.
+  A thread whose prune fails is logged at WARN and skipped, and the page still returns its cursor. The next pass tries
+  it again.
 - A tombstone is reclaimed once the store deleted the thread more than `tombstoneAge` ago, by its clock, and nothing was
   stored under the id since (a claim counts until it has lapsed for `tombstoneAge` too).
 - A reader of a reclaimed log is still refused with `ThreadDeleted`: reclaiming raises the store's reclamation mark,

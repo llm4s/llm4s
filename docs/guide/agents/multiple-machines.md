@@ -268,7 +268,9 @@ llm4s.agent.worker.sweep {
 ```
 
 - Each pass prunes every thread by `retention`, reclaims the tombstones of threads deleted more than `tombstoneAge`
-  ago, and reclaims closed queue entries older than `llm4s.agent.queue.ticketLifetime`.
+  ago, and reclaims closed queue entries older than `llm4s.agent.queue.ticketLifetime`. Entries are reclaimed even
+  when the checkpoint sweep fails. A thread that cannot be pruned is logged and skipped, and tried again on the next
+  pass.
 - A thread with an open queue entry is still pruned, but keeps the newest checkpoint each of the entry's attempts
   committed and its tombstone, so a run in flight can always be recovered once.
 - **A reader of a reclaimed thread** - a client resuming an old event stream - is answered `GraphError.ThreadDeleted`,

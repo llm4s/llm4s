@@ -628,7 +628,8 @@ final class AgentWorker private (
   /**
    * One pass of the retention sweep, if no other instance is sweeping the store: every page of `Checkpointer.sweep` by
    * `settings.sweep`, its guard keeping each open entry's runs and its thread's tombstone ([[RunQueue.openRuns]]),
-   * then every closed entry past the ticket lifetime (`RunQueue.reclaim`). Other instances are kept out by a store
+   * then every closed entry past the ticket lifetime (`RunQueue.reclaim`) - also when a page of the sweep failed, so
+   * one failing page never keeps the queue's closed entries, inputs included, past their lifetime. Other instances are kept out by a store
    * claim on a reserved thread id, held and renewed while the pass runs; a pass that loses it stops.
    */
   private[service] def sweepOnce(): Result[SweepReport] =
@@ -656,11 +657,18 @@ final class AgentWorker private (
             case Left(error)                                                         => Left(error)
             case Right(n) if n == settings.sweep.batchSize && !stopRequested && held => reclaimed(total + n)
             case Right(n)                                                            => Right(total + n)
-        val pass =
-          for
-            swept   <- pages(None, 0, 0)
-            entries <- reclaimed(0)
-          yield SweepReport(swept._1, swept._2, entries, skipped = false)
+        // closed entries are reclaimed whether or not the checkpoint sweep got through (#3086): a page that fails
+        // must not keep the queue's inputs past their lifetime; the pass reports the sweep's error first
+        val swept   = pages(None, 0, 0)
+        val entries = reclaimed(0)
+        val pass = (swept, entries) match
+          case (Right((e, t)), Right(n)) => Right(SweepReport(e, t, n, skipped = false))
+          case (Left(error), other) =>
+            other.left.foreach(e =>
+              logger.warn(s"Worker $holder: reclaiming closed queue entries failed: ${e.message}")
+            )
+            Left(error)
+          case (_, Left(error)) => Left(error)
         checkpointer.release(SweepLock, claim.token).left.foreach { e =>
           logger.debug(s"Worker $holder: releasing the sweep's claim: ${e.message}")
         }

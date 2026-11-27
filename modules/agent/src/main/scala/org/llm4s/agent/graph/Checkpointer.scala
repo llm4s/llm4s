@@ -342,8 +342,12 @@ trait Checkpointer:
    *    [[children]] after a reclaimed child refuses its cursor.
    *
    * Like [[prune]], it needs no claim and changes nothing a run reads or writes; it reads no tenant, for it is the
-   * operator's, store-wide. Each call returns within the store's bound, whatever the store holds. Run one sweep at a
-   * time per store (a worker's schedule does: Stage 5, W2); two at once are safe, only wasteful.
+   * operator's, store-wide. Each call returns within the store's bound, whatever the store holds, and always makes
+   * progress (#3086): a store may prune a thread in several bounded steps, and a call that reaches its bound stops
+   * early, its `next` the thread it stopped in, which the next call finishes; a thread whose prune fails is logged
+   * and skipped, and the page still returns its `next`. Only a `CancelledError`, a closed store, or a failure of the
+   * page as a whole - reading it, the guard, reclaiming its tombstones - is a `Left`. Run one sweep at a time per
+   * store (a worker's schedule does: Stage 5, W2); two at once are safe, only wasteful.
    */
   def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage]
 
@@ -491,6 +495,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private val childIndex = mutable.Map.empty[String, mutable.TreeMap[Long, String]]
   private var lastChild  = 0L
   private val lock       = new java.util.concurrent.locks.ReentrantLock()
+
+  /** How long one sweep call works before it hands back its cursor: in memory, each thread is pruned in one step. */
+  private val InMemorySweepBudget = FiniteDuration(5, TimeUnit.SECONDS)
 
   /** Signalled, under `lock`, whenever a commit appends events or a thread is deleted. */
   private val appended = lock.newCondition()
@@ -768,24 +775,25 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val visited = page.take(policy.batchSize)
     // asked outside the lock: the guard may read another store
     guard.retained(visited).flatMap { protectedRuns =>
-      withLock(lock) {
-        val cutoff = policy.tombstoneAge.map(age => clock.instant().minusNanos(age.toNanos))
-        visited
-          .foldLeft[Result[Int]](Right(0)) { (reclaimed, threadId) =>
-            reclaimed.flatMap { count =>
-              threads.get(threadId.value) match
-                case Some(current) if !protectedRuns.contains(threadId) && cutoff.exists(current.reclaimable) =>
-                  // readers of the reclaimed log are still refused: a new thread of the id starts past it
-                  reclaimedFirst = math.max(reclaimedFirst, current.firstSeq)
-                  remove(threadId)
-                  Right(count + 1)
-                case Some(_) if policy.retention != RetentionPolicy.keepAll =>
-                  pruned(threadId, policy.retention, protectedRuns.getOrElse(threadId, Set.empty)).map(_ => count)
-                case _ => Right(count)
-            }
+      val cutoff = policy.tombstoneAge.map(age => clock.instant().minusNanos(age.toNanos))
+      // each thread under the lock on its own, so a sweep never holds every other call for a whole page, and a
+      // thread whose prune fails is skipped rather than failing the page (#3086)
+      RetentionSweep
+        .visit(visited, InMemorySweepBudget, "InMemoryCheckpointer", closed = false) { (threadId, _) =>
+          withLock(lock) {
+            threads.get(threadId.value) match
+              case Some(current) if !protectedRuns.contains(threadId) && cutoff.exists(current.reclaimable) =>
+                // readers of the reclaimed log are still refused: a new thread of the id starts past it
+                reclaimedFirst = math.max(reclaimedFirst, current.firstSeq)
+                remove(threadId)
+                Right(RetentionSweep.Step.Reclaimed)
+              case Some(_) if policy.retention != RetentionPolicy.keepAll =>
+                pruned(threadId, policy.retention, protectedRuns.getOrElse(threadId, Set.empty))
+                  .map(_ => RetentionSweep.Step.Done)
+              case _ => Right(RetentionSweep.Step.Done)
           }
-          .map(SweepPage(visited.size, _, RetentionSweep.next(page, policy.batchSize)))
-      }
+        }
+        .map(v => SweepPage(v.examined, v.reclaimed, v.cursor(page, policy.batchSize)))
     }
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = withLock(lock) {

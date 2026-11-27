@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.encryption.{ EncryptingCheckpointer, EncryptionKey, KeyId, StaticKeySource }
-import org.llm4s.agent.graph.Checkpointer
+import org.llm4s.agent.graph.{ Checkpointer, ThreadId }
 import org.llm4s.agent.testkit.{ CheckpointerContract, ManualClock }
 import org.llm4s.it.tags.Docker
 import org.scalatest.{ BeforeAndAfterAll, Outcome }
@@ -73,6 +73,21 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
     val isolated = PgCheckpointerDb.freshSchema()
     schemas.add(isolated)
     wrapped(open(clock, PostgresCheckpointerConfig(schema = isolated)))
+  }
+
+  // a trigger refusing to delete any of the thread's checkpoints, so every prune of it fails (#3086)
+  override protected def failPrunes(store: Checkpointer, threadId: ThreadId): Boolean = {
+    val in = configOf(store).schema
+    val id = threadId.value.replace("'", "''")
+    PgCheckpointerDb.execute(
+      s"""CREATE OR REPLACE FUNCTION "$in".refuse_prune() RETURNS trigger LANGUAGE plpgsql AS
+         |$$$$ BEGIN RAISE EXCEPTION 'pruning this thread is refused'; END $$$$""".stripMargin
+    )
+    PgCheckpointerDb.execute(
+      s"""CREATE TRIGGER "refuse_prune_${java.util.UUID.randomUUID()}" BEFORE DELETE ON "$in".checkpoint_history
+         |FOR EACH ROW WHEN (OLD.thread_id = '$id') EXECUTE FUNCTION "$in".refuse_prune()""".stripMargin
+    )
+    true
   }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {

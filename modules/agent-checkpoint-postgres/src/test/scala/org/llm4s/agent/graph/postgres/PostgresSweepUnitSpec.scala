@@ -80,7 +80,7 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     made.filter(_._1 == Sql.setFloor(t)).map(_._2.last) shouldBe Vector("b")
     // maxEvents = 1 of events 1 to 9: the floor is 9
     made.filter(_._1 == Sql.setFloor(t)).map(_._2.head) shouldBe Vector(9L)
-    made.map(_._1) should not contain Sql.deleteHistoryAt(t)
+    made.map(_._1) should not contain Sql.deleteHistoryAtAny(t)
   }
 
   it should "skip, not wait for, a tombstone whose row another call holds" in {
@@ -115,6 +115,49 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     store.sweep(SweepPolicy(tombstoneAge = Some(1.day)), None, _ => Left(unreachable)).left.value shouldBe unreachable
     script.made.map(_._1) should not contain Sql.lockReclamation
     script.made.map(_._1).filter(_.startsWith("DELETE")) shouldBe empty
+  }
+
+  it should "skip a thread whose prune fails, prune the rest of the page, and still hand back its cursor (#3086)" in {
+    val s = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+          Vector(Vector("a"), Vector("b"), Vector("c"), Vector("d"))
+        case (sql, Vector("b")) if sql == Sql.lockedRow(t) => throw new SQLException("pruning this thread is refused")
+        case (sql, _) if sql == Sql.lockedRow(t)           => Vector(threadRow(10L, 1L))
+      }
+    )
+    val policy = SweepPolicy(RetentionPolicy(maxEvents = Some(1)), batchSize = 3)
+    s.store().sweep(policy, None, SweepGuard.none).value shouldBe SweepPage(3, 0, Some(ThreadId("c")))
+    // each thread in a transaction of its own: a and c are pruned although b failed between them
+    s.madeWith(Sql.setFloor(t)) shouldBe Vector(Vector(9L, "a"), Vector(9L, "c"))
+  }
+
+  it should "prune a large backlog in steps of at most ChunkRows checkpoints or events, raising the floor as it goes" in {
+    // b: checkpoints at positions 1 to 1501 and events 1 to 3000; maxCheckpoints = 1 keeps position 1501, whose
+    // first event is 3000
+    lazy val s: ScriptedPostgres = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("b"))
+        case (sql, _) if sql == Sql.lockedRow(t) =>
+          val floor = s.madeWith(Sql.setFloor(t)).lastOption.fold(1L)(_.head.asInstanceOf[Long])
+          Vector(Vector(null, 3001L, floor, 1L, null, null, null, null, null))
+        case (sql, _) if sql == Sql.historyAges(t) =>
+          val gone = s.madeWith(Sql.deleteHistoryAtAny(t)).flatMap(_(1).asInstanceOf[Vector[Any]]).toSet
+          (1L to 1501L).filterNot(p => gone(java.lang.Long.valueOf(p))).toVector.map(p => Vector(p, s"h$p", now, "r"))
+        case (sql, _) if sql == Sql.firstEventOf(t) => Vector(Vector(3000L))
+        case (sql, Vector(_, floor: java.lang.Long, _)) if sql == Sql.eventAtOffset(t) =>
+          Option(floor + 1000L).filter(_ < 3000L).toVector.map(Vector(_))
+      }
+    )
+    val page = s.store().sweep(SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1))), None, SweepGuard.none)
+    page.value shouldBe SweepPage(1, 0, None)
+    s.madeWith(Sql.deleteHistoryAtAny(t)).map(_(1).asInstanceOf[Vector[Any]].size) shouldBe Vector(1000, 500)
+    s.madeWith(Sql.deleteEventsBefore(t)).map(_(1)) shouldBe Vector(1001L, 2001L, 3000L)
+    s.madeWith(Sql.setFloor(t)).map(_.head) shouldBe Vector(1001L, 2001L, 3000L)
+    // the events' floor is worked out once, in the step that removes the last of the checkpoints
+    s.madeWith(Sql.firstEventOf(t)).size shouldBe 1
   }
 
   "A reader of an id with no row" should "be judged against the reclamation mark" in {
