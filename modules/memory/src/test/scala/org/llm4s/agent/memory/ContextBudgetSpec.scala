@@ -181,4 +181,18 @@ class ContextBudgetSpec extends AnyFlatSpec with Matchers with EitherValues {
       s"\n- $flat\n"
     )
   }
+
+  "Making a memory one line" should "keep blanks without a break, and collapse every run that holds one" in {
+    BaseMemoryManagerOps.oneLine("a  \t b") shouldBe "a  \t b"
+    BaseMemoryManagerOps.oneLine(" \n a \r\n\t  b \n") shouldBe " a b "
+    BaseMemoryManagerOps.oneLine("") shouldBe ""
+  }
+
+  it should "take linear time on a megabyte of blanks with no line break (#3033)" in {
+    val spaces = " " * (1 << 20)
+    org.llm4s.testutil.LinearTime.timed("a megabyte of spaces", org.llm4s.testutil.LinearTime.MegabyteHangGuard) {
+      BaseMemoryManagerOps.oneLine(s"a${spaces}b") shouldBe s"a${spaces}b"
+      BaseMemoryManagerOps.oneLine(s"a$spaces\nb") shouldBe "a b"
+    }
+  }
 }

@@ -300,13 +300,36 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
 
 private[memory] object BaseMemoryManagerOps {
 
-  /** A run of line breaks of any kind, with the blanks around it. */
-  private val LineBreaks = "[ \\t]*[\\r\\n\\u000B\\u000C\\u0085\\u2028\\u2029]+[ \\t]*".r
+  private def isBreak(c: Char): Boolean =
+    c == '\r' || c == '\n' || c == '\u000B' || c == '\u000C' || c == '\u0085' || c == ' ' || c == ' '
+
+  private def isBlank(c: Char): Boolean = c == ' ' || c == '\t'
 
   /**
-   * `s` on one line: each run of line breaks, with the blanks around it, becomes one space. A memory
-   * rendered as a `- ` entry then cannot start a line, so it forges no heading and ends no section.
+   * `s` on one line: each run of blanks and line breaks that holds a line break becomes one space;
+   * a run of blanks alone is kept. A memory rendered as a `- ` entry then cannot start a line, so it
+   * forges no heading and ends no section. One pass, linear in `s` (no regex backtracking).
    */
-  def oneLine(s: String): String = LineBreaks.replaceAllIn(s, " ")
-  private val logger             = org.slf4j.LoggerFactory.getLogger(classOf[BaseMemoryManagerOps])
+  def oneLine(s: String): String = {
+    val out = new java.lang.StringBuilder(s.length)
+    var i   = 0
+    while (i < s.length) {
+      val c = s.charAt(i)
+      if (isBlank(c) || isBreak(c)) {
+        val start = i
+        var broke = false
+        while (i < s.length && (isBlank(s.charAt(i)) || isBreak(s.charAt(i)))) {
+          if (isBreak(s.charAt(i))) broke = true
+          i += 1
+        }
+        if (broke) out.append(' ') else out.append(s, start, i)
+      } else {
+        out.append(c)
+        i += 1
+      }
+    }
+    out.toString
+  }
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BaseMemoryManagerOps])
 }
