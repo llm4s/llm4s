@@ -63,7 +63,7 @@ class SqliteSchemaFiveSpec extends AnyFlatSpec with Matchers with EitherValues w
     )
     val store = SqliteFiles.opened(db, Clock.systemUTC())
     schemaVersion(store) shouldBe SqliteSchema.Current
-    SqliteSchema.Current shouldBe 11
+    SqliteSchema.Current shouldBe 12
 
     val stored = store.latest(thread).value.value.checkpoint
     stored.formatVersion shouldBe Checkpoint.CurrentFormat

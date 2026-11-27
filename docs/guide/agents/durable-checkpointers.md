@@ -494,10 +494,13 @@ The file records its schema version: 2 since the fenced delete (which added `fir
 continues its event numbering), 3 and 4 for effect records, and 5 since claims record their tenant (`claim_tenant`,
 with `claim_tenant_token`, the token of the claim the tenant belongs to), 6 for child threads, and 7 since each
 checkpoint and event records when the store committed it, which retention judges age by (rows from before 7 are judged
-by their producer's timestamps), and 8 for the thread registry (see [Finding threads](#finding-threads)), filled from
-each thread's latest checkpoint when a version-7 file is opened, and 9 for tombstone reclamation (see
-[Sweeping the whole store](#sweeping-the-whole-store)), which dates the tombstones a version-8 file holds from the
-upgrade. A claim a version-4 file holds when it is
+by their producer's timestamps). Version 8 adds the thread registry (see [Finding threads](#finding-threads)), filled
+from each thread's latest checkpoint when a version-7 file is opened; version 9 adds tombstone reclamation (see
+[Sweeping the whole store](#sweeping-the-whole-store)), dating tombstones a version-8 file holds from the upgrade;
+version 10 adds run-queue tables and run IDs on history rows; version 11 adds queue stop requests; and version 12 adds
+event checkpoint IDs and an index used by retention. During the version-12 migration, decodable events are backfilled
+in batches; for a row from before version 7, its producer timestamp fills the missing commit-time columns. A claim a
+version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one: an
@@ -512,9 +515,9 @@ Only data: checkpoints, pending writes and events as JSON, never closures or cla
 any build that knows the graph. Its tables are prefixed `llm4s_checkpoint_`, so the file can hold other tables
 too. It keeps every checkpoint of a thread's history, as the next section describes: `history` pages through it
 newest first by an index, so a long history costs a page, not a scan, and `prune` and `deleteThread` remove from it
-in one transaction each, safely beside other stores writing the file. `prune` reads the thread's whole history and
-event log inside its transaction, so on a very long log it holds the file for a while and other stores' writes wait,
-up to `busyTimeout`; prune regularly, or off-peak, rather than once after months.
+in one transaction each, safely beside other stores writing the file. `prune` reads the thread's checkpoint history
+and numeric event-retention metadata inside its transaction; it finds the first event of a retained checkpoint
+through an index and does not decode `record_json` while holding the write lock.
 
 ### File permissions
 
