@@ -357,7 +357,7 @@ jobs:
         run: scripts/retry-on-transient-network.sh sbt --client "scalafmtCheckAll; scalafmtSbtCheck"
 
       - name: Run Scalafix
-        run: sbt --client scalafixAll
+        run: sbt --client "scalafixAll --check"
 
       # Fails when any module declares neither a coverage floor nor an explicit opt-out.
       # Coverage floors are per-module and never inherited, so a new (e.g. carved-out)
@@ -1885,15 +1885,17 @@ jobs:
           VAULT_TEST_TOKEN: llm4s-it-root-token
           AWS_SECRETS_MANAGER_TEST_ENDPOINT: http://localhost:5000
         run: |
+          # One `set Seq(...)`: each `set` reapplies every setting of the build (~9 s), once per setting (#3205).
           settings=()
           reports=()
           for m in $COVERAGE_MODULES; do
-            settings+=("set $m / coverageEnabled := true" "set $m / coverageFailOnMinimum := false"
-                       "set $m / coverageMinimumStmtTotal := 0")
+            settings+=("$m / coverageEnabled := true" "$m / coverageFailOnMinimum := false"
+                       "$m / coverageMinimumStmtTotal := 0")
             reports+=("$m/coverageReport")
           done
-          echo "sbt ${settings[*]} testIntegration ${reports[*]}"
-          sbt "${settings[@]}" testIntegration "${reports[@]}"
+          set_all="set Seq($(IFS=,; echo "${settings[*]}"))"
+          echo "sbt \"$set_all\" testIntegration ${reports[*]}"
+          sbt "$set_all" testIntegration "${reports[@]}"
 
       # One upload per module in COVERAGE_MODULES, under the same flag as that module's coverage-leg upload.
       - name: Upload rag integration coverage to Codecov
