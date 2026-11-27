@@ -40,14 +40,19 @@ class ProcessRegistrySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
 
-  /** A workspace whose every process is `stub`, and whose gate refuses a file operation after 200 ms. */
+  /**
+   * A workspace whose every process is `stub`, whose gate refuses a file operation after 200 ms, and whose kill gives
+   * up waiting for the stub after 200 ms (production's [[ProcessRegistry.KillWait]] is 5 s): the stub never exits
+   * when killed, so every kill here waits that long and reports that the process did not terminate.
+   */
   private def workspaceWith(stub: StubbornProcess) =
     new WorkspaceAgentInterfaceImpl(
       Files.createTempDirectory("process-registry").toString,
       isWindowsHost,
       Some(WorkspaceSandboxConfig.Permissive),
       gateWait = 200.millis,
-      startProcess = _ => stub
+      startProcess = _ => stub,
+      killWait = 200.millis
     )
 
   private def command(id: String) =

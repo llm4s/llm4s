@@ -45,10 +45,13 @@ final private[runner] case class RunningCommand(
  *
  * @param gateWait how long a command or a file operation waits at the gate before it is refused
  * @param start    starts a process; the platform's, bar in tests
+ * @param killWait how long a kill waits for the process to exit before it reports that it did not;
+ *                 [[ProcessRegistry.KillWait]] bar in tests
  */
 final private[runner] class ProcessRegistry(
   gateWait: FiniteDuration,
-  start: java.lang.ProcessBuilder => Process = _.start()
+  start: java.lang.ProcessBuilder => Process = _.start(),
+  killWait: FiniteDuration = ProcessRegistry.KillWait
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -239,7 +242,7 @@ final private[runner] class ProcessRegistry(
     // gone only once the registry has released it: the parent, every descendant found and every orphan the exit swept
     // have exited (`released`), within the one wait. Every caller - a cancellation's acknowledgement, a timeout, a
     // disconnect - judges the outcome by this, never by the part of the tree it could see
-    val gone = Try(entry.released.get(ProcessRegistry.KillWait.toMillis, TimeUnit.MILLISECONDS)).isSuccess
+    val gone = Try(entry.released.get(killWait.toMillis, TimeUnit.MILLISECONDS)).isSuccess
     if (!gone) logger.warn(s"Command ${entry.commandId} did not terminate when killed; it stays tracked until it exits")
     gone
   }

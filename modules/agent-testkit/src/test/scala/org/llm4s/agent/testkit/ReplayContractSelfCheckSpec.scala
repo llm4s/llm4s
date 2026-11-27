@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import java.time.Clock
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.collection.mutable
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** [[ReplayContract]] fails targets and stores that break it: the suite has teeth. */
@@ -146,6 +147,9 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
   "ReplayContract" should "fail a target that performs its effect without a guard" in {
     val failed = failures(new AnyFlatSpec with ReplayContract {
       protected def newSubject(): ReplayContract.Subject = new Unguarded
+      // an unguarded effect never looks its key up, so the stale-claimant cases wait out the whole bound for a
+      // pause that never comes; those cases fail either way, and this one need not take 10 s each to do it
+      override protected def contractWait: FiniteDuration = 500.millis
     })
     failed should contain(
       "should not perform again an effect that ran before its outcome was written, replaying its outcome"

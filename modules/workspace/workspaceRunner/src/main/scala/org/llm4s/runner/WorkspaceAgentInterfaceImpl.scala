@@ -38,6 +38,8 @@ import scala.util.chaining._
  *                      daemon a command starts can then outlive it
  * @param matchTimeLimit how long one `searchFiles` or `modifyFile` may spend matching before it is refused
  *                      (`TIMEOUT`); [[WorkspaceAgentInterfaceImpl.MatchTimeLimit]] bar in tests
+ * @param killWait      how long a kill waits for the process to exit before it reports that it did not;
+ *                      [[ProcessRegistry.KillWait]] bar in tests
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -49,7 +51,8 @@ class WorkspaceAgentInterfaceImpl(
   commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate,
   confiner: Option[Confiner] = Confiner.platform(),
   cgroups: => Either[String, CommandCgroups] = CommandCgroups.platform,
-  matchTimeLimit: FiniteDuration = WorkspaceAgentInterfaceImpl.MatchTimeLimit
+  matchTimeLimit: FiniteDuration = WorkspaceAgentInterfaceImpl.MatchTimeLimit,
+  killWait: FiniteDuration = ProcessRegistry.KillWait
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -157,7 +160,8 @@ class WorkspaceAgentInterfaceImpl(
    * Cancel, disconnect, shutdown and the gate all act through it, and a process leaves it only when it has exited.
    */
   // each start, inside the registry's locked start step, first re-checks where the command runs
-  private[runner] val processes = new ProcessRegistry(gateWait, b => { checkWorkingDirectory(b); startProcess(b) })
+  private[runner] val processes =
+    new ProcessRegistry(gateWait, b => { checkWorkingDirectory(b); startProcess(b) }, killWait)
 
   /** The owner of the processes the direct [[executeCommand]] starts. */
   private val DirectOwner = new Object

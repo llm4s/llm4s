@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import scala.annotation.tailrec
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Using
 
 /**
@@ -24,7 +25,8 @@ final class AgentStream private[javaapi] (
   token: FacadeToken,
   run: AgentRun,
   buffer: AgentEventBuffer,
-  listener: AgentStreamListener
+  listener: AgentStreamListener,
+  cancelWait: Option[FiniteDuration]
 ) {
 
   FacadeToken.check(token, "AgentStream")
@@ -53,7 +55,7 @@ final class AgentStream private[javaapi] (
   def cancel(): Unit = {
     cancelled.set(true)
     // a turn that ended is awaited once more, the interrupt flag kept, so its tracing detaches
-    if (run.cancelAndAwaitEnd()) run.awaitEnded(): Unit
+    if (cancelWait.fold(run.cancelAndAwaitEnd())(run.cancelAndAwaitEnd(_))) run.awaitEnded(): Unit
     buffer.close()
   }
 
