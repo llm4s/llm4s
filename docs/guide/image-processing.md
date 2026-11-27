@@ -265,6 +265,7 @@ The client methods and `saveToFile` report failures as a `Left` holding an `LLME
 | A timeout, connection failure or interruption during the request | `TimeoutError`, `NetworkError` or `CancelledError` |
 | A Gemini reply with status 200 and no text | `ServiceError` |
 | `saveToFile` is given a path that climbs out with `..` | `InvalidInputError` |
+| `saveToFile` is given an existing file without `overwrite = true` | `InvalidInputError` |
 | Writing the file fails, for example because the directory does not exist | `ProcessingError` |
 
 The OpenAI and Anthropic clients can return a `Right` for a status 200 reply they cannot read, with the description
@@ -297,8 +298,10 @@ def saveOutsideWorkingDirectory(image: ProcessedImage): Either[LLMError, Unit] =
   image.saveToFile(Paths.get("out/../../escaped.png"))
 ```
 
-This is not a sandbox: an absolute path is accepted, symbolic links are not resolved, and an existing file is
-overwritten. If the path comes from a user, check it against the directory you allow before calling `saveToFile`.
+This is not a sandbox: an absolute path is accepted and symbolic links are not resolved. If the path comes from a
+user, check it against the directory you allow before calling `saveToFile`. The image is written to a temporary file
+beside `path` and moved into place, so a failed write leaves no partial file; an existing file, the source image
+included, is an `InvalidInputError` unless you pass `overwrite = true`.
 
 ---
 

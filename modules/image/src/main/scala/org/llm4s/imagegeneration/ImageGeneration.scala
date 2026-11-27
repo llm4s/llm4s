@@ -222,19 +222,43 @@ case class GeneratedImage(
   url: Option[String] = None
 ) {
 
-  /** Get the image data as bytes */
+  /**
+   * The decoded image, or a `Left` (`ImageValidationError`) when `data` is empty, as for a response that
+   * carried only a `url`, or is not valid base64.
+   */
+  def bytes: Either[ImageGenerationError, Array[Byte]] =
+    if (data.isEmpty)
+      Left(
+        ImageValidationError(
+          "The image has no inline data" + url.fold("")(u => s"; the provider returned it as a URL: $u")
+        )
+      )
+    else
+      Try(java.util.Base64.getDecoder.decode(data)).toEither.left
+        .map(e => ImageValidationError(s"The image data is not valid base64: ${e.getMessage}"))
+
+  /** Get the image data as bytes; throws `IllegalArgumentException` on invalid base64. */
+  @deprecated("use bytes, which returns a Left instead of throwing", since = "1.1.0")
   def asBytes: Array[Byte] = {
     import java.util.Base64
     Base64.getDecoder.decode(data)
   }
 
-  /** Save image to file and return updated GeneratedImage with file path */
-  def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] = {
-    import java.nio.file.Files
-    Try(Files.write(path, asBytes)).toEither.left
-      .map(ImageUnknownError.apply)
-      .map(_ => copy(filePath = Some(path)))
-  }
+  /**
+   * Save the image to `path` and return it with `filePath` set. The bytes are written to a temporary file in
+   * the same directory and then moved into place, so a failed write never leaves a partial file at `path`.
+   * An existing file at `path` is a `Left` unless `overwrite` is true. An image with no inline data is a
+   * `Left` and writes nothing.
+   */
+  def saveToFile(path: Path, overwrite: Boolean = false): Either[ImageGenerationError, GeneratedImage] =
+    for {
+      decoded <- bytes
+      _ <- ImageFiles.writeAtomically(path, decoded, overwrite).left.map {
+        case e: java.nio.file.FileAlreadyExistsException =>
+          ImageValidationError(s"File already exists: ${e.getFile}; pass overwrite = true to replace it")
+        case e => ImageUnknownError(e)
+      }
+    } yield copy(filePath = Some(path))
 }
 
 // ===== CONFIGURATION =====

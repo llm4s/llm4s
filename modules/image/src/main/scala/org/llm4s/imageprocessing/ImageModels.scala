@@ -6,7 +6,6 @@ import org.llm4s.error.{ InvalidInputError, LLMError, ProcessingError }
 import org.llm4s.media.ImageMediaType
 import cats.data.Validated
 import cats.syntax.validated._
-import scala.util.Try
 
 /**
  * Represents various image processing operations.
@@ -68,27 +67,29 @@ case class ProcessedImage(
 ) {
 
   /**
-   * Save the processed image to a file.
+   * Save the processed image to a file. The bytes are written to a temporary file in the same directory and
+   * then moved into place, so a failed write never leaves a partial file. An existing file at `path` (the
+   * source image included) is an `InvalidInputError` unless `overwrite` is true.
    */
-  def saveToFile(path: Path): Either[LLMError, Unit] = {
-    import java.nio.file.Files
-
+  def saveToFile(path: Path, overwrite: Boolean = false): Either[LLMError, Unit] =
     // Use cats Validated for path validation, then safely write
     validatePath(path).toEither.flatMap { normalizedPath =>
-      Try(Files.write(normalizedPath, data)).toEither.left
+      org.llm4s.imagegeneration.ImageFiles
+        .writeAtomically(normalizedPath, data, overwrite)
+        .left
         .map {
+          case _: java.nio.file.FileAlreadyExistsException =>
+            InvalidInputError("path", path.toString, "File already exists; pass overwrite = true to replace it")
           case e: java.nio.file.AccessDeniedException =>
             ProcessingError("save", s"Access denied: ${e.getMessage}", Some(e))
           case e: java.nio.file.NoSuchFileException =>
             ProcessingError("save", s"Directory does not exist: ${e.getMessage}", Some(e))
           case e: java.nio.file.FileSystemException =>
             ProcessingError("save", s"File system error: ${e.getMessage}", Some(e))
-          case e: Exception =>
+          case e =>
             ProcessingError("save", s"Unexpected error: ${e.getMessage}", Some(e))
         }
-        .map(_ => ())
     }
-  }
 
   /**
    * Validate path for security using cats Validated.

@@ -32,7 +32,10 @@ Everything is in `org.llm4s.imagegeneration`:
   `stableDiffusionClient` each return `Either[LLMError, ImageGenerationClient]`; `ImageGeneration.client(config)` takes
   a config (`OpenAIConfig`, `StabilityAIConfig`, `HuggingFaceConfig`, `StableDiffusionConfig`).
 - `ImageGenerationOptions`: size, format, seed, negative prompt and the provider-specific options below.
-- `GeneratedImage`: the image (base64 `data`, `format`, `size`, `prompt`, `seed`), with `saveToFile(path)`.
+- `GeneratedImage`: the image (base64 `data`, `format`, `size`, `prompt`, `seed`, and `url` when the provider
+  returned one), with `bytes` (the decoded image, or a `Left`) and `saveToFile(path, overwrite = false)`. Saving
+  writes a temporary file beside `path` and moves it into place; an existing file is a `Left` unless `overwrite` is
+  true, and so is an image with no inline data (a URL-only response): download `url` yourself.
 
 The library reads no API key for image generation itself: read the key from your application's configuration at its
 edge and pass it in.

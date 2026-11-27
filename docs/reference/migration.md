@@ -582,6 +582,17 @@ still compiles; what it accepts changes:
 | `Blur` took any radius, in time growing with its square | A radius from 0 to 100, in time proportional to the image |
 | A resize to a huge size, a side truncated to 0 or a writer failure threw | A `Left`; a fitted side is at least 1 pixel |
 
+## Saving an image never overwrites by default, and `GeneratedImage.bytes` replaces `asBytes` (#3140)
+
+`llm4s-image` is Beta. Both `saveToFile` methods gain `overwrite: Boolean = false`, so existing calls compile:
+
+| Before (1.0.0) | After |
+|---|---|
+| `GeneratedImage.saveToFile` wrote a 0-byte file for a URL-only image and returned `Right` | `Left(ImageValidationError)` naming the URL; nothing is written. Download `url` yourself |
+| An OpenAI response entry with neither `b64_json` nor `url` became an empty image | `Left(ImageValidationError)` from the client |
+| Both `saveToFile`s truncated an existing file in place, the source image included | A `Left` (`ImageValidationError`, or `InvalidInputError` for `ProcessedImage`) unless `overwrite = true`; the write goes to a temporary file that is then moved into place |
+| `asBytes` threw `IllegalArgumentException` on invalid base64 | Deprecated: use `bytes`, an `Either[ImageGenerationError, Array[Byte]]` |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on
