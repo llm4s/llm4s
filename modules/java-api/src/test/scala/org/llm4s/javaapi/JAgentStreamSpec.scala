@@ -151,7 +151,8 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
   }
 
   it should "fail every stream of an agent that did not build" in {
-    val broken = new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")))
+    val broken =
+      new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")), FacadeAsync.virtualThreadPerCall, None)
     broken.stream("j", "q", Recorder()).getError().getMessage should include("broken")
   }
 
@@ -447,9 +448,16 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
   }
 
   it should "give up after its bound on a run whose provider ignores the interrupt, leaving the thread busy until it ends" in {
-    val linger   = new CountDownLatch(1)
-    val model    = parksOnce(linger = linger)
-    val agent    = jAgentOf(model.client)(_.withStreaming())
+    val linger = new CountDownLatch(1)
+    val model  = parksOnce(linger = linger)
+    // the facade waits 5 seconds (the agent runtime's bound); a short bound here, so the case does not wait it out
+    val bound = 300.millis
+    val agent = new JAgent(
+      FacadeToken.INSTANCE,
+      Right(agentOf(model.client)(_.withStreaming())),
+      FacadeAsync.virtualThreadPerCall,
+      Some(bound)
+    )
     val threadId = "j27"
     val stream   = agent.stream(threadId, "hi", Recorder()).get()
     model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
@@ -457,8 +465,8 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     val began = System.nanoTime()
     stream.cancel()
     val waited = (System.nanoTime() - began).nanos
-    // the 5-second bound of the blocking JAgent calls, not the model's lingering (DeadlineSeconds)
-    waited should be >= 4500.millis
+    // the bound, not the model's lingering (DeadlineSeconds)
+    waited should be >= bound * 9 / 10
     waited should be < DeadlineSeconds.seconds
     // the model saw the interrupt but lingers: the run has not ended, so its thread is still busy
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true

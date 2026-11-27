@@ -17,6 +17,16 @@ import java.time.Instant
 
 class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModuleChecks:
 
+  // the checks' bound, short here: a client that misbehaves fails a case only after it, while one that honours the
+  // interrupt returns in milliseconds, well inside it
+  override protected def interruptionWait: FiniteDuration = 1.second
+
+  "interruptionWait" should "be 10 seconds unless a spec overrides it" in {
+    class Defaults extends ProviderModuleChecks:
+      def bound: FiniteDuration = this.interruptionWait
+    Defaults().bound shouldBe 10.seconds
+  }
+
   /** Calls `url` with Llm4sHttpClient; streams one chunk per line received. */
   final private class HttpStub(url: String, honour: Boolean) extends LLMClient:
     private val http = Llm4sHttpClient.create()

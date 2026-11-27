@@ -190,7 +190,12 @@ object Llm4s {
     Objects.requireNonNull(client, "client must not be null")
     Objects.requireNonNull(tools, "tools must not be null")
     val builder = Agent.builder("assistant", client.underlying).withTools(tools)
-    new JAgent(FacadeToken.INSTANCE, (if (streaming) builder.withStreaming() else builder).build())
+    new JAgent(
+      FacadeToken.INSTANCE,
+      (if (streaming) builder.withStreaming() else builder).build(),
+      FacadeAsync.virtualThreadPerCall,
+      None
+    )
   }
 
   /**
@@ -228,6 +233,6 @@ object Llm4s {
    */
   def wrapAgent(agent: Agent): JAgent = {
     Objects.requireNonNull(agent, "agent must not be null")
-    new JAgent(FacadeToken.INSTANCE, Right(agent))
+    new JAgent(FacadeToken.INSTANCE, Right(agent), FacadeAsync.virtualThreadPerCall, None)
   }
 }

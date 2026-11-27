@@ -44,7 +44,15 @@ private[shell] object ShellProcess {
     new File(if (System.getProperty("os.name", "").toLowerCase.startsWith("windows")) "NUL" else "/dev/null")
 
   /** Starts `builder` with stdin from the null device and runs it to completion, timeout or interrupt. */
-  def run(builder: ProcessBuilder, timeout: FiniteDuration, maxOutputSize: Int): Outcome = {
+  def run(builder: ProcessBuilder, timeout: FiniteDuration, maxOutputSize: Int): Outcome =
+    runUntil(builder, maxOutputSize)(_.waitFor(DurationRounding.ceilMillis(timeout), TimeUnit.MILLISECONDS))
+
+  /**
+   * [[run]], with `awaitExit` in place of the timeout: it waits for the started process and returns whether it exited,
+   * `false` meaning it timed out. A seam for tests, which time a command out once it is in the state they test,
+   * rather than after a fixed wait long enough for it to get there.
+   */
+  def runUntil(builder: ProcessBuilder, maxOutputSize: Int)(awaitExit: Process => Boolean): Outcome = {
     builder.redirectErrorStream(false).redirectInput(Redirect.from(NullDevice))
     val process = builder.start()
     val stdout  = new Capture(process.getInputStream, maxOutputSize)
@@ -54,7 +62,7 @@ private[shell] object ShellProcess {
 
     // scalafix:off
     try {
-      val completed = process.waitFor(DurationRounding.ceilMillis(timeout), TimeUnit.MILLISECONDS)
+      val completed = awaitExit(process)
       // An exited process is not destroyed before its readers finish: destroying it closes its streams, and with them
       // any output still in the pipe. Its descendants hold the pipes open, so they go first either way.
       if (completed) killDescendants(process) else killTree(process)
