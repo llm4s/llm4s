@@ -225,7 +225,7 @@ object EntryOutcome:
  * holds it, if one does - a lease that has expired by the store's clock may be taken over.
  *
  * @param maxAttempts the most attempts the entry may make: fixed at submission, raised by one for each attempt a
- *   drain cut short (#3241)
+ *   drain cut short (#3241) or a crash ended (#3287)
  * @param trace the submitter's trace context ([[Submission.traceContext]]), which every attempt continues
  *   ([[attemptConfig]]); `None` when the submission named none
  * @param attempts the attempts recorded, oldest first, each before it touched the thread

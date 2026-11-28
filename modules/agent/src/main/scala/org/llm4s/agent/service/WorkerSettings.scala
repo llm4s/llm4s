@@ -35,8 +35,11 @@ import scala.concurrent.duration.*
  *    `retryDelay` after its first attempt, doubling with each attempt after it, never more than `maxRetryDelay`, less
  *    a random part of up to half, so entries that failed together do not come back together (defaults 30 seconds and
  *    10 minutes). A failure no retry can mend - an authentication or invalid-request error - is not retried.
+ *  - `maxCrashes`: how many of an entry's attempts may end in a crash - their lease lapsed, the worker gone - before a
+ *    worker dead-letters it (default 5, #3287). A crash is given back to the entry's `maxAttempts`, so restarts never
+ *    use those up; this bound is what still closes an entry whose run crashes its worker every time.
  *
- * Every duration must be positive, `maxRetryDelay` at least `retryDelay`, `concurrency` at least 1 and a label not
+ * Every duration must be positive, `maxRetryDelay` at least `retryDelay`, `concurrency` and `maxCrashes` at least 1 and a label not
  * blank: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[WorkerSettings.of]] returns a `ValidationError`.
  */
@@ -52,7 +55,8 @@ final case class WorkerSettings private (
   label: Option[String],
   queueDepthEvery: FiniteDuration,
   retryDelay: FiniteDuration,
-  maxRetryDelay: FiniteDuration
+  maxRetryDelay: FiniteDuration,
+  maxCrashes: Int
 ):
   private def changed(
     concurrency: Int = concurrency,
@@ -65,7 +69,8 @@ final case class WorkerSettings private (
     label: Option[String] = label,
     queueDepthEvery: FiniteDuration = queueDepthEvery,
     retryDelay: FiniteDuration = retryDelay,
-    maxRetryDelay: FiniteDuration = maxRetryDelay
+    maxRetryDelay: FiniteDuration = maxRetryDelay,
+    maxCrashes: Int = maxCrashes
   ): WorkerSettings =
     WorkerSettings(
       concurrency,
@@ -78,7 +83,8 @@ final case class WorkerSettings private (
       label,
       queueDepthEvery,
       retryDelay,
-      maxRetryDelay
+      maxRetryDelay,
+      maxCrashes
     )
 
   def withConcurrency(n: Int): WorkerSettings                   = changed(concurrency = n)
@@ -94,6 +100,7 @@ final case class WorkerSettings private (
   def withQueueDepthEvery(d: FiniteDuration): WorkerSettings    = changed(queueDepthEvery = d)
   def withRetryDelay(d: FiniteDuration): WorkerSettings         = changed(retryDelay = d)
   def withMaxRetryDelay(d: FiniteDuration): WorkerSettings      = changed(maxRetryDelay = d)
+  def withMaxCrashes(n: Int): WorkerSettings                    = changed(maxCrashes = n)
 
   /**
    * How long an entry waits after its `attempt`th attempt failed (from 1): `retryDelay` doubled per attempt after the
@@ -116,6 +123,7 @@ object WorkerSettings:
   val DefaultQueueDepthEvery: FiniteDuration = 15.seconds
   val DefaultRetryDelay: FiniteDuration      = 30.seconds
   val DefaultMaxRetryDelay: FiniteDuration   = 10.minutes
+  val DefaultMaxCrashes: Int                 = 5
 
   private def problems(
     concurrency: Int,
@@ -127,11 +135,13 @@ object WorkerSettings:
     label: Option[String],
     queueDepthEvery: FiniteDuration,
     retryDelay: FiniteDuration,
-    maxRetryDelay: FiniteDuration
+    maxRetryDelay: FiniteDuration,
+    maxCrashes: Int
   ): List[String] =
     def positive(name: String, d: FiniteDuration) = Option.when(d.length <= 0)(s"$name must be positive, was $d")
     List(
       Option.when(concurrency < 1)(s"concurrency must be at least 1, was $concurrency"),
+      Option.when(maxCrashes < 1)(s"maxCrashes must be at least 1, was $maxCrashes"),
       positive("pollInterval", pollInterval),
       positive("unrunnableAfter", unrunnableAfter),
       positive("drainGrace", drainGrace),
@@ -157,7 +167,8 @@ object WorkerSettings:
     label: Option[String] = None,
     queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery,
     retryDelay: FiniteDuration = DefaultRetryDelay,
-    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay
+    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay,
+    maxCrashes: Int = DefaultMaxCrashes
   ): WorkerSettings =
     val found =
       problems(
@@ -170,7 +181,8 @@ object WorkerSettings:
         label,
         queueDepthEvery,
         retryDelay,
-        maxRetryDelay
+        maxRetryDelay,
+        maxCrashes
       )
     require(found.isEmpty, found.mkString("; "))
     new WorkerSettings(
@@ -184,7 +196,8 @@ object WorkerSettings:
       label,
       queueDepthEvery,
       retryDelay,
-      maxRetryDelay
+      maxRetryDelay,
+      maxCrashes
     )
 
   def of(
@@ -198,7 +211,8 @@ object WorkerSettings:
     label: Option[String] = None,
     queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery,
     retryDelay: FiniteDuration = DefaultRetryDelay,
-    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay
+    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay,
+    maxCrashes: Int = DefaultMaxCrashes
   ): Result[WorkerSettings] =
     problems(
       concurrency,
@@ -210,7 +224,8 @@ object WorkerSettings:
       label,
       queueDepthEvery,
       retryDelay,
-      maxRetryDelay
+      maxRetryDelay,
+      maxCrashes
     ) match
       case Nil =>
         Right(
@@ -225,7 +240,8 @@ object WorkerSettings:
             label,
             queueDepthEvery,
             retryDelay,
-            maxRetryDelay
+            maxRetryDelay,
+            maxCrashes
           )
         )
       case found => Left(ValidationError("worker", found))

@@ -187,7 +187,9 @@ trait RunQueue:
    * against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its `attempts`, as history.
    * Internal to llm4s: only `AgentWorker` calls it, and only for a slot that recorded its own attempt under the lease it
    * releases, which is what keeps a refund to that attempt (the store does not check it: an attempt row does not name
-   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash is still charged.
+   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash - its lease
+   * lapsing with an attempt recorded under it - is given back by the take that finds it, and counted
+   * ([[QueueEntry.crashes]], #3287), in every llm4s queue.
    * The default is [[release]].
    */
   private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = release(lease)

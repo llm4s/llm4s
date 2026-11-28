@@ -803,7 +803,8 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       val leased = c.take(s"worker-$n").value
       val run    = RunId(s"run-${unique()}")
       c.queue.recordAttempt(leased.lease, run).value shouldBe a[AttemptStart.Recorded]
-      c.advance(31.seconds)
+      // given back charged, as a failed attempt is; a lapsed lease would be a crash, given back free (#3287)
+      c.queue.release(leased.lease).value
       run
     }
     val last = c.take("worker-3").value
@@ -897,8 +898,9 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.requeue(None, doneLease.entry.id).left.value shouldBe a[ValidationError]
   }
 
-  // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it
-  it should "not charge an attempt a drain gave back, and still charge one whose lease lapsed" in {
+  // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it;
+  // #3287: so does a crash - an attempt whose lease lapsed with it open - which is counted instead
+  it should "not charge an attempt a drain or a crash gave back, and count the crash" in {
     val c  = Case()
     val id = c.submit(maxAttempts = 1).value.entryId
     // drained twice: each recorded attempt is given back with the lease
@@ -907,27 +909,44 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       c.queue.recordAttempt(leased.lease, RunId(s"drained-$n-${unique()}")).value shouldBe a[AttemptStart.Recorded]
       c.queue.releaseDrained(leased.lease).value
     }
-    // a lease that lapses (a crashed worker) is charged
+    // a lease that lapses with its attempt open (a crashed worker) is counted as a crash, and given back
     val crashed = c.take("worker-3").value
+    crashed.entry.crashes shouldBe 0
     c.queue.recordAttempt(crashed.lease, RunId(s"crashed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
     c.advance(31.seconds)
-    val last = c.take("worker-4").value
+    val after = c.take("worker-4").value
+    after.expiredLease shouldBe true
+    after.entry.crashes shouldBe 1
+    c.queue.recordAttempt(after.lease, RunId(s"after-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // an attempt given back plainly is charged: the budget is spent
+    c.queue.release(after.lease).value
+    val last = c.take("worker-5").value
+    last.entry.crashes shouldBe 1
     c.queue.recordAttempt(last.lease, RunId(s"last-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
     // every attempt stays in the history
-    c.entry(id).attempts should have size 3
+    c.entry(id).attempts should have size 4
     c.entry(id).isOpen shouldBe true
+    c.reopened()
+    c.entry(id).crashes shouldBe 1
   }
 
-  it should "give nothing back when an entry released by a drain recorded no attempt" in {
+  it should "count no crash for a lapsed lease that recorded no attempt, nor for one given back (#3287)" in {
     val c     = Case()
     val id    = c.submit(maxAttempts = 1).value.entryId
     val first = c.take("worker-1").value
     c.queue.releaseDrained(first.lease).value
-    val second = c.take("worker-2").value
-    c.queue.recordAttempt(second.lease, RunId(s"only-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // a lease that lapses without an attempt: nothing to give back, no crash
+    c.take("worker-2").value
     c.advance(31.seconds)
     val third = c.take("worker-3").value
-    c.queue.recordAttempt(third.lease, RunId(s"over-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
+    third.entry.crashes shouldBe 0
+    c.queue.recordAttempt(third.lease, RunId(s"only-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // given back for a retry: charged, and no crash when its lease is next taken
+    c.queue.releaseRetry(third.lease, 1.second).value
+    c.advance(2.seconds)
+    val fourth = c.take("worker-4").value
+    fourth.entry.crashes shouldBe 0
+    c.queue.recordAttempt(fourth.lease, RunId(s"over-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
     c.entry(id).attempts should have size 1
   }
 

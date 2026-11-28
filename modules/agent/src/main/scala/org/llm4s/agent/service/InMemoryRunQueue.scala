@@ -49,7 +49,9 @@ final class InMemoryRunQueue private[agent] (
     closedAtSeq: Option[Long] = None,
     admitted: Boolean = false,
     stop: Option[StopRequest] = None,
-    retryAt: Option[Instant] = None
+    retryAt: Option[Instant] = None,
+    crashes: Int = 0,
+    attemptOpen: Boolean = false
   ):
     def open: Boolean = outcome.isEmpty
 
@@ -121,7 +123,7 @@ final class InMemoryRunQueue private[agent] (
         position,
         row.stop
       )
-      .withAccounting(0, row.retryAt)
+      .withAccounting(row.crashes, row.retryAt)
 
   private def live(row: Row, now: Instant): Boolean = row.lease.exists(l => now.isBefore(l.expiresAt))
 
@@ -260,7 +262,16 @@ final class InMemoryRunQueue private[agent] (
           .foreach(r => rows.update(r.id, r.copy(lease = None)))
         lastLease += 1
         val held = Held(request.holder, lastLease, now.plusNanos(request.ttl.toNanos))
-        val row  = head.copy(lease = Some(held), retryAt = None)
+        // an attempt whose lease lapsed with it still open ended in a crash, not a failure of its own (#3287): it is
+        // counted as one and given back to the entry's maxAttempts
+        val crashed = head.lease.isDefined && head.attemptOpen
+        val row = head.copy(
+          lease = Some(held),
+          retryAt = None,
+          crashes = if crashed then head.crashes + 1 else head.crashes,
+          maxAttempts = if crashed then head.maxAttempts + 1 else head.maxAttempts,
+          attemptOpen = false
+        )
         rows.update(row.id, row)
         // a takeable head still holding a lease holds an expired one, never released
         Right(Some(LeasedEntry(view(row), leaseOf(row, held), expiredLease = head.lease.isDefined)))
@@ -322,7 +333,7 @@ final class InMemoryRunQueue private[agent] (
   }
 
   def release(lease: Lease): Result[Unit] = withLock(lock) {
-    released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None))))
+    released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None, attemptOpen = false))))
   }
 
   override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = withLock(lock) {
@@ -330,13 +341,16 @@ final class InMemoryRunQueue private[agent] (
       // the drained attempt stays in the history, and the entry is given one more (#3241); an entry with no attempt
       // recorded has nothing to give back
       val budget = if row.attempts.isEmpty then row.maxAttempts else row.maxAttempts + 1
-      rows.update(row.id, row.copy(lease = None, maxAttempts = budget))
+      rows.update(row.id, row.copy(lease = None, maxAttempts = budget, attemptOpen = false))
     })
   }
 
   override private[llm4s] def releaseRetry(lease: Lease, delay: FiniteDuration): Result[Unit] = withLock(lock) {
     released(leased(lease)).map(_.foreach { row =>
-      rows.update(row.id, row.copy(lease = None, retryAt = Some(clock.instant().plusNanos(delay.toNanos))))
+      rows.update(
+        row.id,
+        row.copy(lease = None, retryAt = Some(clock.instant().plusNanos(delay.toNanos)), attemptOpen = false)
+      )
     })
   }
 
@@ -383,7 +397,8 @@ final class InMemoryRunQueue private[agent] (
         Right(AttemptStart.ThreadDeleted(view(closeRow(row, EntryOutcome.Cancelled(CancelReason.ThreadDeleted)))))
       else if row.attempts.size >= row.maxAttempts then Right(AttemptStart.Exhausted(view(row)))
       else
-        val recorded = row.copy(attempts = row.attempts :+ Attempt(runId, clock.instant(), lease.holder))
+        val recorded =
+          row.copy(attempts = row.attempts :+ Attempt(runId, clock.instant(), lease.holder), attemptOpen = true)
         rows.update(row.id, recorded)
         attemptRuns.getOrElseUpdate(row.threadId, mutable.Set.empty) += runId
         Right(AttemptStart.Recorded(view(recorded)))

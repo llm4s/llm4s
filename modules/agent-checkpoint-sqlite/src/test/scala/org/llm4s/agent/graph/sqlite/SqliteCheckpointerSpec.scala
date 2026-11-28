@@ -52,6 +52,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       path,
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN stop_json",
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
       "UPDATE llm4s_checkpoint_schema SET version = 10"
     )
 
@@ -60,6 +62,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
       "UPDATE llm4s_checkpoint_schema SET version = 12"
     )
 
@@ -260,6 +264,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "DELETE FROM llm4s_checkpoint_meta WHERE key = 'last_child'",
       "INSERT INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq, child_order) VALUES ('old', 1, 1, 41)",
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
       "UPDATE llm4s_checkpoint_schema SET version = 11"
     )
     SqliteCheckpointer.open(db).value.close()

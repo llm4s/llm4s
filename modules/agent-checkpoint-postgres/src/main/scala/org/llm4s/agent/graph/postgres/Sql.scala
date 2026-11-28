@@ -473,7 +473,11 @@ private[postgres] object Sql:
        |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin
 
   def setLease(t: Tables): String =
-    s"""UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ?, not_before = NULL
+    // an attempt whose lease lapsed with it still open ended in a crash (#3287): counted, and given back
+    s"""UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ?, not_before = NULL,
+       |  crashes = crashes + CASE WHEN lease_token IS NOT NULL AND attempt_open THEN 1 ELSE 0 END,
+       |  max_attempts = max_attempts + CASE WHEN lease_token IS NOT NULL AND attempt_open THEN 1 ELSE 0 END,
+       |  attempt_open = false
        |WHERE entry_id = ?""".stripMargin
 
   def renewLease(t: Tables): String = s"UPDATE ${t.queueEntries} SET lease_expires_at = ? WHERE entry_id = ?"
@@ -490,17 +494,20 @@ private[postgres] object Sql:
        |  AND (claim_tenant = CAST(? AS text) OR (claim_tenant IS NULL AND CAST(? AS text) IS NULL)) AND $LiveClaim""".stripMargin
 
   def releaseLease(t: Tables): String =
-    s"UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?"
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
+       |  attempt_open = false
+       |WHERE entry_id = ?""".stripMargin
 
   /** [[releaseLease]] for an attempt a drain cut short (#3241): the entry gets one more attempt if it made one. */
   def releaseDrainedLease(t: Tables): String =
     s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
-       |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END
+       |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END, attempt_open = false
        |WHERE entry_id = ?""".stripMargin
 
   /** [[releaseLease]] for a failed attempt (#3257): no take hands the entry out before the time bound first. */
   def releaseRetryLease(t: Tables): String =
-    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL, not_before = ?
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL, not_before = ?,
+       |  attempt_open = false
        |WHERE entry_id = ?""".stripMargin
 
   /** The closed entries in state `?` of tenant `?` (twice, for `NULL`) past entry `?`, oldest first, at most `?` (#3257). */
@@ -514,7 +521,7 @@ private[postgres] object Sql:
        |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
 
   def countQueueAttempt(t: Tables): String =
-    s"UPDATE ${t.queueEntries} SET attempt_count = attempt_count + 1 WHERE entry_id = ?"
+    s"UPDATE ${t.queueEntries} SET attempt_count = attempt_count + 1, attempt_open = true WHERE entry_id = ?"
 
   def queueAttemptsOf(t: Tables): String =
     s"SELECT run_id, started_at, holder FROM ${t.queueAttempts} WHERE entry_id = ? ORDER BY attempt"

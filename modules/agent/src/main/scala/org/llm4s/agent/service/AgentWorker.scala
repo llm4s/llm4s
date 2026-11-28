@@ -465,6 +465,12 @@ final class AgentWorker private (
     val agent = agents(entry.agentId)
     if slot.leaseLost.get then Next.Leave
     else if slot.drained.get then Next.Release
+    // its run crashed its worker `maxCrashes` times: dead-lettered, as exhausted attempts are (#3287)
+    else if entry.crashes >= settings.maxCrashes then
+      logger.warn(
+        s"Worker $holder: entry ${entry.id.value}'s attempts ended in ${entry.crashes} crashes; closing it"
+      )
+      exhausted(entry, agent)
     else
       // the tenant first (rule 9): probing another tenant's busy thread would defer to its run, which the entry's
       // tenant could then time

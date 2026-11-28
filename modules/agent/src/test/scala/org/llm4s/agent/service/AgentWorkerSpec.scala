@@ -393,7 +393,8 @@ class AgentWorkerSpec
     val first = submit(store, on, maxAttempts = 1)
     diedMidRun(store, agent, on, entered)
     val second = submit(store, on, QueuedInput.query("again"))
-    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    // the dead worker's crash is the one it may have (#3287): its next take dead-letters it
+    val worker = workerOf(store, Seq(QueuedAgent(agent)), fast.withMaxCrashes(1))
     worker.start()
     closed(store, first).outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))
     closed(store, second).outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe Some(CheckpointStatus.Completed)
@@ -412,7 +413,7 @@ class AgentWorkerSpec
     val id     = submit(store, on, maxAttempts = 1)
     val leased = store.runQueue.take(TakeRequest("dead-worker", Set(agentId), 200.millis)).value.value
     store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
-    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))))
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))), fast.withMaxCrashes(1))
     worker.start()
     closed(store, id).outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))
     store.latest(on).value shouldBe None
@@ -689,7 +690,9 @@ class AgentWorkerSpec
     refunds.get shouldBe 0
     val entry = store.runQueue.entry(None, id).value
     entry.isOpen shouldBe true
-    entry.maxAttempts shouldBe 2
+    // the earlier holder's attempt was a crash, given back by the take (#3287); the drain gave back nothing more
+    entry.crashes shouldBe 1
+    entry.maxAttempts shouldBe 3
     entry.attempts should have size 1
   }
 
@@ -979,6 +982,38 @@ class AgentWorkerSpec
     entry.attempts should have size 1
     client.calls shouldBe 1
     store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+  }
+
+  "An entry whose attempts keep crashing" should "be dead-lettered at maxCrashes, its crashes never spending maxAttempts (#3287)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    val id    = submit(store, on, maxAttempts = 2)
+    // three workers die mid-attempt: each lease lapses with its attempt open
+    (1 to 3).foreach { n =>
+      val leased = store.runQueue.take(TakeRequest(s"dead-$n", Set(agentId), 50.millis)).value.value
+      store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+      Thread.sleep(80)
+    }
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("never")))), fast.withMaxCrashes(3))
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(3))
+    entry.crashes shouldBe 3
+    // every crash was given back, so none of them spent maxAttempts
+    entry.maxAttempts shouldBe 5
+  }
+
+  it should "run once a crash is given back, however few attempts it had (#3287)" in {
+    val store  = InMemoryCheckpointer()
+    val id     = submit(store, thread(), maxAttempts = 1)
+    val leased = store.runQueue.take(TakeRequest("dead", Set(agentId), 50.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    Thread.sleep(80)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("done")))))
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe a[EntryOutcome.Done]
+    entry.crashes shouldBe 1
   }
 
   "WorkerSettings.retryAfter" should "double per attempt up to the cap, less at most half (#3257)" in {

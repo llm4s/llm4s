@@ -328,7 +328,7 @@ class PostgresCheckpointerSpec
     PgCheckpointerDb.execute(
       s"""DROP TABLE $q.checkpoint_store_items, $q.checkpoint_store_applied, $q.checkpoint_store_fences;
          |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
-         |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before;
+         |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
          |UPDATE $q.checkpoint_schema SET version = 4""".stripMargin
     )
   }
@@ -344,7 +344,7 @@ class PostgresCheckpointerSpec
     store.close()
     val q = s""""${config.schema}""""
     PgCheckpointerDb.execute(
-      s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before;
+      s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
          |UPDATE $q.checkpoint_schema SET version = 6""".stripMargin
     )
     val reopened = PgCheckpointerDb.store(config)

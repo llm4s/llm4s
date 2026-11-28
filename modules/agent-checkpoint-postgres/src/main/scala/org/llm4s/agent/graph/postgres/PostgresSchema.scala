@@ -69,12 +69,18 @@ private[postgres] object PostgresSchema:
     )
 
   /**
-   * Version 7: retry accounting (#3257). Each queue entry gains `not_before`, the time by the database's clock before
-   * which no take hands it out - set when a failed attempt is given back for a retry, cleared by the take that hands it
-   * out; `NULL` for none, so every entry of a version-6 schema may be taken as before.
+   * Version 7: retry and crash accounting (#3257, #3287). Each queue entry gains `not_before`, the time by the
+   * database's clock before which no take hands it out - set when a failed attempt is given back for a retry, cleared
+   * by the take that hands it out; `NULL` for none - and `crashes`, how many of its attempts ended with their lease
+   * lapsing, with `attempt_open`, whether the current lease recorded an attempt it has not given back. Every entry of a
+   * version-6 schema may be taken as before, has no crash counted and no attempt open.
    */
   private def addRetryAccounting(t: Tables): Vector[String] =
-    Vector(s"ALTER TABLE ${t.queueEntries} ADD COLUMN not_before timestamptz")
+    Vector(
+      s"ALTER TABLE ${t.queueEntries} ADD COLUMN not_before timestamptz",
+      s"ALTER TABLE ${t.queueEntries} ADD COLUMN crashes integer NOT NULL DEFAULT 0",
+      s"ALTER TABLE ${t.queueEntries} ADD COLUMN attempt_open boolean NOT NULL DEFAULT false"
+    )
 
   /**
    * Version 6: the long-term store (#2453, `PostgresCheckpointer.longTermStore`). It adds tables and changes none, so

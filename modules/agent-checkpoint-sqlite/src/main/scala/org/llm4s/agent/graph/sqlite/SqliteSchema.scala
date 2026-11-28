@@ -43,7 +43,8 @@ import scala.util.{ Try, Using }
  *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
  *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`); from version 11 an entry's stop request
  *    (`stop_json`, design 4.57).
- *  - from version 13, a queue entry's retry time (`not_before_nanos`, [[addRetryAccounting]]).
+ *  - from version 13, a queue entry's retry time and crash count (`not_before_nanos`, `crashes`, `attempt_open`,
+ *    [[addRetryAccounting]]).
  *  - from version 12, the meta table's `last_child`: the highest place a child thread has taken, so a new child's
  *    place is drawn from it rather than from a scan of every thread (#3101).
  *
@@ -80,13 +81,20 @@ private[sqlite] object SqliteSchema:
   )
 
   /**
-   * Version 13: retry accounting (#3257). Each queue entry gains `not_before_nanos`, the time by the store's clock
-   * before which no take hands it out - set when a failed attempt is given back for a retry, cleared by the take that
-   * hands it out; `NULL` for none, so every entry of a version-12 file may be taken as before. Needs only version 10's
-   * queue table.
+   * Version 13: retry and crash accounting (#3257, #3287). Each queue entry gains `not_before_nanos`, the time by the
+   * store's clock before which no take hands it out - set when a failed attempt is given back for a retry, cleared by
+   * the take that hands it out; `NULL` for none - and `crashes`, how many of its attempts ended with their lease
+   * lapsing, with `attempt_open`, whether the current lease recorded an attempt it has not given back (so a take of an
+   * expired lease with one open counts a crash). Every entry of a version-12 file may be taken as before, has no crash
+   * counted and no attempt open. Needs only version 10's queue table.
    */
   private def addRetryAccounting(connection: Connection): Unit =
-    statements(connection, "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN not_before_nanos INTEGER")
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN not_before_nanos INTEGER",
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN crashes INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN attempt_open INTEGER NOT NULL DEFAULT 0"
+    )
 
   /**
    * Version 9: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_nanos`, when

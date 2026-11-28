@@ -206,8 +206,12 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             val expires = epochNanos(clock.instant().plusNanos(request.ttl.toNanos))
             update(
               c,
+              // an attempt whose lease lapsed with it still open ended in a crash (#3287): counted, and given back
               """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = ?, lease_token = ?, lease_expires_nanos = ?,
-                |  not_before_nanos = NULL
+                |  not_before_nanos = NULL,
+                |  crashes = crashes + CASE WHEN lease_token IS NOT NULL AND attempt_open = 1 THEN 1 ELSE 0 END,
+                |  max_attempts = max_attempts + CASE WHEN lease_token IS NOT NULL AND attempt_open = 1 THEN 1 ELSE 0 END,
+                |  attempt_open = 0
                 |WHERE entry_id = ?""".stripMargin,
               request.holder,
               token,
@@ -332,7 +336,8 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   def release(lease: Lease): Result[Unit] = released(
     lease,
     "queue.release",
-    """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
+    """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL,
+      |  attempt_open = 0
       |WHERE entry_id = ?""".stripMargin
   )
 
@@ -341,7 +346,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     lease,
     "queue.releaseDrained",
     """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL,
-      |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END
+      |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END, attempt_open = 0
       |WHERE entry_id = ?""".stripMargin
   )
 
@@ -355,7 +360,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           update(
             c,
             """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL,
-              |  not_before_nanos = ?
+              |  not_before_nanos = ?, attempt_open = 0
               |WHERE entry_id = ?""".stripMargin,
             epochNanos(clock.instant().plusNanos(delay.toNanos)),
             row.id
@@ -438,7 +443,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           )
           update(
             c,
-            "UPDATE llm4s_checkpoint_queue_entries SET attempt_count = attempt_count + 1 WHERE entry_id = ?",
+            "UPDATE llm4s_checkpoint_queue_entries SET attempt_count = attempt_count + 1, attempt_open = 1 WHERE entry_id = ?",
             row.id
           )
           view(c, rowOf(c, row.id).get).map(e => Some(AttemptStart.Recorded(e)))
@@ -622,7 +627,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         position,
         row.stop
       )
-    }.map(d => d.copy(entry = d.entry.withAccounting(0, row.notBefore.map(fromEpochNanos))))
+    }.map(d => d.copy(entry = d.entry.withAccounting(row.crashes, row.notBefore.map(fromEpochNanos))))
 
   /** The meta counter `key`, moved on by one, inside the caller's write transaction. */
   private def bump(c: Connection, key: String): Long =
@@ -662,7 +667,7 @@ private[sqlite] object SqliteRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_nanos, thread_deleted, lease_holder, lease_token, lease_expires_nanos, outcome_json,
-      |closed_nanos, closed_seq, admitted, trace_parent, stop_json, not_before_nanos""".stripMargin
+      |closed_nanos, closed_seq, admitted, trace_parent, stop_json, not_before_nanos, crashes""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -686,7 +691,8 @@ private[sqlite] object SqliteRunQueue:
     admitted: Boolean,
     traceParent: Option[String],
     stop: Option[String],
-    notBefore: Option[Long]
+    notBefore: Option[Long],
+    crashes: Int
   )
 
   def raw(r: ResultSet): Raw =
@@ -713,7 +719,8 @@ private[sqlite] object SqliteRunQueue:
       r.getInt(19) == 1,
       Option(r.getString(20)),
       Option(r.getString(21)),
-      long(22)
+      long(22),
+      r.getInt(23)
     )
 
   def runIdUsed(threadId: String, runId: RunId): ValidationError =

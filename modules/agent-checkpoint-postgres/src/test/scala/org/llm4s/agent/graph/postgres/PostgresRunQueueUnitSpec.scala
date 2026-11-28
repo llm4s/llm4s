@@ -74,7 +74,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       admitted,
       trace,
       stop,
-      null
+      null,
+      0
     )
 
   private def leased(id: Long, token: Long) = Lease(EntryId.unsafe(id), LeaseToken(token), "w", later.toInstant)

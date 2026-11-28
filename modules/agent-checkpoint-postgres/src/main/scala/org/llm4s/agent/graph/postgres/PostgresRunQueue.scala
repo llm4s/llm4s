@@ -594,7 +594,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         position,
         row.stop
       )
-    }.map(d => d.copy(entry = d.entry.withAccounting(0, row.notBefore)))
+    }.map(d => d.copy(entry = d.entry.withAccounting(row.crashes, row.notBefore)))
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
@@ -624,7 +624,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       r.getBoolean(19),
       Option(r.getString(20)),
       Option(r.getString(21)),
-      at(22)
+      at(22),
+      r.getInt(23)
     )
 
 private[postgres] object PostgresRunQueue:
@@ -644,7 +645,7 @@ private[postgres] object PostgresRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at, closed_seq, admitted, trace_parent, stop_json, not_before""".stripMargin
+      |closed_at, closed_seq, admitted, trace_parent, stop_json, not_before, crashes""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -668,7 +669,8 @@ private[postgres] object PostgresRunQueue:
     admitted: Boolean,
     traceParent: Option[String],
     stop: Option[String],
-    notBefore: Option[Instant]
+    notBefore: Option[Instant],
+    crashes: Int
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */
