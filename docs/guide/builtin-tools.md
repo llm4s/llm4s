@@ -232,7 +232,10 @@ only when both locations are allowed. So with `data/l -> data/a/b`, `data/l/../x
 is `x.txt` beside `data`; spell such a path without the `..` after the link. `/srv/agent-data`
 covers `/srv/agent-data/notes.txt` but not `/srv/agent-data-secret`, and a link inside an allowed directory that leads
 outside it is refused, for reading, listing and writing alike. A link that cannot be resolved (a dangling link) is
-refused. `followSymlinks = false` (the default) additionally refuses a path that is itself a link when reading or
+refused. Before anything is looked up, the path's spelling is checked: with `allowedPaths` set, a path spelled outside
+every entry (as configured or as resolved) is refused, even where a link would lead back inside, and a Windows UNC or
+device path (`\\host\share\x`, `\\?\`, `\\.\`) is refused unless an allowed entry is on that share, because
+looking it up would open an SMB session to a host the model chose. `followSymlinks = false` (the default) additionally refuses a path that is itself a link when reading or
 listing; it does not decide whether a link may lead out of the allowed area, which is always refused. The tools open
 the resolved path; a directory swapped for a link between the check and the open is a race this narrows and does not
 close. A hard link inside an allowed directory to a file elsewhere is not contained: no path check can tell it from the

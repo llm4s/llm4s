@@ -448,7 +448,7 @@ object ShellTool {
       if (!charge(fullCost(base))) Unchecked
       else {
         resolutions += 1
-        baseReadings = PathPolicy.readings(base).filter(PathPolicy.permits(_, entries))
+        baseReadings = PathPolicy.allowedReadings(base, entries)
         if (baseReadings.isDefined) Allowed else Refused
       }
 

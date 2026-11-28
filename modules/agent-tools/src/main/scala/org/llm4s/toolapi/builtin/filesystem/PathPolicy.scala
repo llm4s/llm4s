@@ -97,7 +97,62 @@ private[builtin] object PathPolicy {
    * [[prepare]], for a caller that checks many paths in a row (the arguments of one shell command).
    */
   def resolve(path: Path, entries: Entries): Option[Path] =
-    readings(path).filter(permits(_, entries)).map(_.physical)
+    allowedReadings(path, entries).map(_.physical)
+
+  /**
+   * The readings of `path` when the policy allows it, otherwise `None`. The path's spelling is checked first, with no
+   * file-system access ([[lexicallyRefused]]), so a path the policy refuses by its text alone is never looked up:
+   * looking up a Windows UNC path (`\\host\share\x`) opens an SMB session to that host (#3270).
+   */
+  def allowedReadings(path: Path, entries: Entries): Option[Readings] =
+    if (lexicallyRefused(path, entries)) None else readings(path).filter(permits(_, entries))
+
+  /**
+   * Whether the policy refuses `path` by its absolute, normalised spelling alone, without touching the file system
+   * (#3270):
+   *
+   *   - its root is remote or a device namespace (a Windows UNC root `\\host\share\`, or `\\?\` and
+   *     `\\.\`), and no allowed entry has that root - with no allowed entries, such a path is always refused;
+   *   - allowed entries are configured and the spelling is inside none of them, neither as configured nor as
+   *     resolved. A path spelled outside every allowed entry that a symbolic link would lead back inside is refused:
+   *     spell it by where it is;
+   *   - the spelling is inside a blocked entry.
+   *
+   * Every check here is one the full rule ([[permits]]) also makes, or narrower, so this only refuses earlier.
+   */
+  def lexicallyRefused(path: Path, entries: Entries): Boolean =
+    Try(path.toAbsolutePath.normalize()).toOption match {
+      case None => true
+      case Some(spelled) =>
+        def inside(e: (Path, Path)): Boolean = within(spelled, e._1) || within(spelled, e._2)
+        (isRemoteRoot(spelled) && !entries.allowed.exists(_.exists { case (lexical, real) =>
+          (isRemoteRoot(lexical) && sameRoot(lexical, spelled)) || (isRemoteRoot(real) && sameRoot(real, spelled))
+        })) ||
+        entries.allowed.exists(roots => !roots.exists(inside)) ||
+        entries.blocked.exists(inside)
+    }
+
+  /**
+   * Whether `path`'s root names another host or a device namespace rather than a local drive or `/`: on Windows a
+   * UNC root (`\\host\share\`) and the `\\?\` and `\\.\` prefixes, all of which begin with two separators. A
+   * POSIX path never has one (`//x` is `/x`).
+   */
+  private[filesystem] def isRemoteRoot(path: Path): Boolean =
+    Option(path.getRoot).map(_.toString).exists { root =>
+      root.length >= 2 && isSeparator(root.charAt(0)) && isSeparator(root.charAt(1))
+    }
+
+  private def isSeparator(c: Char): Boolean = c == '\\' || c == '/'
+
+  private def sameRoot(a: Path, b: Path): Boolean =
+    (Option(a.getRoot), Option(b.getRoot)) match {
+      case (Some(x), Some(y)) => fold(x.toString) == fold(y.toString)
+      case (None, None)       => true
+      case _                  => false
+    }
+
+  private def fold(name: String): String =
+    Normalizer.normalize(name, Normalizer.Form.NFC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
 
   /**
    * The three locations the rule compares for a path: its absolute, normalised spelling, its physical reading
@@ -258,14 +313,7 @@ private[builtin] object PathPolicy {
    */
   private[filesystem] def within(path: Path, entry: Path): Boolean =
     path.startsWith(entry) || {
-      def fold(name: String): String =
-        Normalizer.normalize(name, Normalizer.Form.NFC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
-      val sameRoot = (Option(path.getRoot), Option(entry.getRoot)) match {
-        case (Some(a), Some(b)) => fold(a.toString) == fold(b.toString)
-        case (None, None)       => true
-        case _                  => false
-      }
-      sameRoot && entry.getNameCount <= path.getNameCount &&
+      sameRoot(path, entry) && entry.getNameCount <= path.getNameCount &&
       (0 until entry.getNameCount).forall(i => fold(path.getName(i).toString) == fold(entry.getName(i).toString))
     }
 

@@ -975,6 +975,14 @@ No signature changed and no stored format changed; what is refused is new:
 | `PathPolicy` compared blocked entries by spelling and real path only, so on macOS every default blocked path was readable through its `/System/Volumes/Data/...` firmlink spelling (#3237) | A path with an existing ancestor whose file key is a blocked entry's is blocked, so the firmlink spelling of a blocked directory is blocked too. Where the platform reports file keys (not Windows), each check reads the attributes of the path's existing ancestors |
 | `VectorMemoryStore.storageIdentity` was `None`, so `SemanticMemoryMiddleware` gave two tenants two instances over one file (#3238) | It names the file's real path, as `SQLiteMemoryStore` does: a resolver that maps two tenants to one file is refused |
 
+## File tools: lexical checks, hard links, CRLF edits, temporary files and long lines (#3265, #3266, #3267, #3270, #3272)
+
+`llm4s-agent-tools` is Beta; `HostFileBackend`, the file tools and `ToolOutputOffload` of `llm4s-agent` are experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| `PathPolicy` resolved a path (a lookup per component) before judging it, so on Windows `read_file \\host\share\x` opened an SMB session to a model-chosen host, with the process account's credentials, even when `allowedPaths` would refuse it; with the default `FileConfig()` a UNC path was read (#3270) | A path's spelling is judged first, with no lookup: a UNC or device-namespace root (`\\host\share\`, `\\?\`, `\\.\`) is refused unless an allowed entry is on that root, and with `allowedPaths` set a path spelled outside every entry, as configured or as resolved, is refused. A path spelled outside the allowed entries that a symbolic link leads back inside is now refused: spell it by where it is |
+
 ## Guardrails see and keep every rewrite, and fail closed (#3231, #3232, #3233, #3234, #3235)
 
 The guardrails and the streaming path are experimental, and `Agent.run`'s history import keeps its `@Stable`
