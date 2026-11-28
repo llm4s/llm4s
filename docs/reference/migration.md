@@ -813,6 +813,20 @@ tool without a `description` is kept (it was skipped as malformed), described by
 Arguments the server's schema refuses are now refused before they are sent, and arguments it accepts are no
 longer refused.
 
+**The registry (#3080).** `MCPToolRegistry` remembers a failed refresh: the server is not dialled again for 1
+second, then 2, 4, ... up to 60 seconds after successive failures, and a lookup in that time sees no tools from it
+at once instead of waiting for its timeout. `clearCache()`, `refreshCache()` and `healthCheck()` dial at once.
+Servers are contacted in parallel at startup and by `healthCheck`, and one refresh runs per server at a time.
+`healthCheck` calls the new `MCPClient.ping()` (an `MCPClientImpl` sends `ping`, falling back to `tools/list`), so a
+server that has died since its handshake is reported `false`; a custom `MCPClient` gets a default `ping()` that
+lists the tools.
+
+`MCPToolRegistry` is now an `org.llm4s.toolapi.ToolHintSource` (new, `@Experimental`, in `llm4s-core`), and
+`AgentBuilder.withTools(registry)` gives each tool of such a registry the hints it reports. A server configured
+`trustAnnotations = true` therefore has its tools' annotations applied without wiring `registry.toolHints` into
+`AgentTool.fromToolFunction` by hand. A read-only tool then passes `ApprovalMiddleware.unlessReadOnly` without
+approval. Untrusted servers' tools keep `ToolHints.default`.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

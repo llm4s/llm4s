@@ -17,6 +17,9 @@ import scala.jdk.CollectionConverters._
  */
 class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
 
+  // The registries' clock (#3080: a failed server is not dialled again until its backoff has passed)
+  private val clock = new java.util.concurrent.atomic.AtomicLong(0)
+
   private def probe: ujson.Value = ujson.Obj(
     "name"        -> "probe",
     "description" -> "probe",
@@ -212,6 +215,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
       initializeOnStartup = false
     ) {
       override private[mcp] def createMCPClient(server: MCPServerConfig): MCPClient = stub
+      override private[mcp] def nowMillis(): Long                                   = clock.get
     }
 
   "MCPToolRegistry" should "advertise no tool of a server whose refresh failed, and the tools again once it recovers" in {
@@ -226,6 +230,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
     stub.closes shouldBe 1
 
     stub.tools = Right(Seq(probeTool))
+    clock.addAndGet(MCPToolRegistry.retryDelay(1).toMillis) // the failure's backoff has passed (#3080)
     registry.getAllTools.map(_.name) shouldBe Seq("probe")
 
     stub.tools = Right(Seq.empty)

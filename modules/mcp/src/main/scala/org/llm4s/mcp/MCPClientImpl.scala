@@ -351,6 +351,21 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   override def getToolHints(): Map[String, ToolHints] = toolHints
 
+  /**
+   * Sends `ping` (#3080), running the handshake first if it has not run; a server that answers it with
+   * method-not-found is asked for its tools instead. A lost session is recovered as for any request.
+   */
+  override def ping(): Result[Unit] =
+    for {
+      _             <- initialize()
+      transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
+      _ <- sendRecovering(transportImpl, () => JsonRpcRequest("2.0", generateId(), "ping", Some(ujson.Obj()))) match {
+        case Left(error) if error.message.startsWith("JSON-RPC Error -32601") =>
+          sendRecovering(transportImpl, () => MCPClientImpl.listRequest.copy(id = generateId())).map(_ => ())
+        case other => other.map(_ => ())
+      }
+    } yield ()
+
   // Closes the transport connection and resets initialization state
   override def close(): Unit = {
     transport.foreach(_.close())

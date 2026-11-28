@@ -28,7 +28,7 @@ import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.CompletionOptions
-import org.llm4s.toolapi.{ SchemaDefinition, ToolRegistry }
+import org.llm4s.toolapi.{ SchemaDefinition, ToolHintSource, ToolRegistry }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import upickle.default.{ ReadWriter, Reader }
@@ -144,10 +144,11 @@ final class AgentBuilder private (
    * Adds the registry's tools to the agent's, after any added before, each adapted with
    * [[org.llm4s.agent.graph.tool.AgentTool.fromToolFunction]]; [[build]] checks them all as one
    * [[org.llm4s.agent.graph.tool.ToolSet]], and returns a `Left` naming a tool two calls defined
-   * (`tool 'name': duplicate tool name`).
+   * (`tool 'name': duplicate tool name`). A registry that is also an [[org.llm4s.toolapi.ToolHintSource]]
+   * (`MCPToolRegistry`) gives each tool the hints it reports for it; any other tool has `ToolHints.default`.
    */
   def withTools(registry: ToolRegistry): AgentBuilder = {
-    val added = registry.tools.map(AgentTool.fromToolFunction).toVector
+    val added = AgentBuilder.adapted(registry)
     copy(
       tools = tools ++ added,
       toolValidators = toolValidators ++ added.map(_.spec.name -> ToolArgumentValidator.default)
@@ -695,6 +696,19 @@ final class AgentBuilder private (
     settings
 
 object AgentBuilder:
+
+  /**
+   * The registry's tools as agent tools, each with the hints a [[org.llm4s.toolapi.ToolHintSource]] registry reports
+   * for it (#3080); the tools are listed first, since a registry that discovers them learns their hints doing so.
+   */
+  private[agent] def adapted(registry: ToolRegistry): Vector[AgentTool[?]] =
+    val functions = registry.tools.toVector
+    registry match
+      case source: ToolHintSource =>
+        functions.map(f =>
+          source.toolHints(f.name).fold(AgentTool.fromToolFunction(f))(AgentTool.fromToolFunction(f, _))
+        )
+      case _ => functions.map(AgentTool.fromToolFunction)
 
   /** The id of the `GuardrailMiddleware` that `withInputGuardrails` and `withOutputGuardrails` install. */
   private[agent] val GuardrailsId: MiddlewareId = MiddlewareId.AgentGuardrails
