@@ -128,6 +128,24 @@ class StdioProcessLifecycleSpec extends AnyFlatSpec with Matchers {
     withClue("the process the server started: ")(ended(child) shouldBe true)
   }
 
+  it should "close promptly when the server has exited and a process it started still holds its stdout" in {
+    val holderPid = tempFile(".holder.pid")
+    // The server starts a process that inherits its stdout, answers once and exits: the pipe stays open, so the
+    // reader never sees its end.
+    val transport = new StdioTransportImpl(
+      StdioTestServers.echo(Ok, "--spawn-holder=" + holderPid, "--exit-after-reply"),
+      "escaping",
+      30.seconds
+    )
+    transport.sendRequest(toolsList).map(_.id) shouldBe Right("1")
+    val holder = pidIn(holderPid)
+
+    val started = System.nanoTime()
+    transport.close()
+    withClue("close: ")((System.nanoTime() - started).nanos should be < 15.seconds)
+    withClue("the process holding the pipe: ")(ended(holder) shouldBe true)
+  }
+
   it should "start one process between calls that find the server gone at the same time" in {
     val record = tempFile(".record")
     // Every process the transport starts appends the requests it reads to the same file; one process reads both.

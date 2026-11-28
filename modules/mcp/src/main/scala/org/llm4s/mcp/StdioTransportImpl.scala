@@ -97,13 +97,20 @@ private[mcp] object StdioTransportImpl {
    *
    * A server is often a launcher (`npx` starting `node`, which starts a browser), and `Process.destroy` reaches the
    * launcher alone: the rest lived on, orphaned. The descendants are therefore listed first, while the tree is still
-   * whole (once a parent exits, its children are no longer its descendants), and each one still running once the
-   * server is gone is terminated, then killed, the same way.
+   * whole (once a parent exits, its children are no longer its descendants), together with `known`, the ones noted
+   * while the server ran, and each one still running once the server is gone is terminated, then killed, the same way.
    *
    * An interrupt of the calling thread skips the waits and kills at once, and stays set.
    */
-  def stopTree(process: Process, closeInput: () => Unit, grace: FiniteDuration, logger: Logger, name: String): Unit = {
-    val descendants = Try(process.descendants().iterator().asScala.toList).getOrElse(Nil)
+  def stopTree(
+    process: Process,
+    known: Seq[ProcessHandle],
+    closeInput: () => Unit,
+    grace: FiniteDuration,
+    logger: Logger,
+    name: String
+  ): Unit = {
+    val descendants = (Try(process.descendants().iterator().asScala.toList).getOrElse(Nil) ++ known).distinct
     closeInput()
     val exited = waitFor(process.toHandle, grace)
     if (!exited) Try(process.destroy())
@@ -210,6 +217,13 @@ class StdioTransportImpl(
 
     def alive: Boolean = !ended && process.isAlive
 
+    // The processes the server has been seen to start, noted while it runs: one whose parent exits first is no
+    // longer the server's descendant by the time it is stopped, and would otherwise escape (#3077)
+    private val knownDescendants = ConcurrentHashMap.newKeySet[ProcessHandle]()
+
+    def noteDescendants(): Unit =
+      Try(process.descendants().iterator().asScala.foreach(knownDescendants.add)): Unit
+
     /** Writes one message, a line of JSON; `Left` with the reason when the pipe is broken. */
     def write(json: String): Either[String, Unit] = writeLock.synchronized {
       stdin.print(json)
@@ -239,6 +253,7 @@ class StdioTransportImpl(
       stopping = true
       StdioTransportImpl.stopTree(
         process,
+        knownDescendants.asScala.toList,
         () => writeLock.synchronized(Try(stdin.close())): Unit,
         StdioTransportImpl.ShutdownGrace,
         logger,
@@ -255,8 +270,15 @@ class StdioTransportImpl(
             joinQuietly(thread, 1000)
           }
       }
-      Try(stdout.close())
-      Try(stderr.close())
+      // A thread still blocked in a read (a grandchild that escaped the tree holds the pipe open) is abandoned: it is a
+      // daemon, and closing its reader would wait on the reader's lock for as long as the grandchild lives.
+      Seq(readerThread -> stdout, stderrThread -> stderr).foreach { case (thread, reader) =>
+        if (thread.isAlive)
+          logger.warn(
+            s"StdioTransport($name) abandoning ${thread.getName}: a process the server started holds its pipe open"
+          )
+        else Try(reader.close())
+      }
       failPending("Transport closing")
     }
 
@@ -471,6 +493,7 @@ class StdioTransportImpl(
     }
     try {
       val line = reply.get(DurationRounding.ceilMillis(timeout), TimeUnit.MILLISECONDS)
+      c.noteDescendants()
       Try(read[JsonRpcResponse](line)) match {
         case Failure(e) => Left(SimpleError(s"Failed to parse response: ${e.getMessage}"))
         case Success(response) =>

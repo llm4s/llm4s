@@ -50,6 +50,8 @@ import java.util.regex.Pattern;
  *   <li>{@code --exit-after-reply} - exit 0 straight after writing the first reply.</li>
  *   <li>{@code --spawn-child=PATH} - first start a child JVM of this class that writes its process id to PATH and
  *       sleeps; it outlives this process unless it is stopped too.</li>
+ *   <li>{@code --spawn-holder=PATH} - as {@code --spawn-child}, but the child inherits this process's stdout, so it
+ *       holds the transport's pipe open after this process exits.</li>
  *   <li>{@code --sleep} - sleep for five minutes, reading nothing (the child of {@code --spawn-child}).</li>
  * </ul>
  * Lines are read with {@code readLine}, so CRLF and LF both work; replies end in {@code \n}.
@@ -66,7 +68,7 @@ public final class StdioTestServer {
     int delay = 0, stderrKb = 0;
     boolean dieAfterStderr = false, secretLine = false, endless = false, requireInit = false;
     boolean exitAfterReply = false, sleep = false;
-    String pidFile = null, gotFile = null, recordFile = null, childPidFile = null;
+    String pidFile = null, gotFile = null, recordFile = null, childPidFile = null, holderPidFile = null;
     for (String a : args) {
       if (a.equals("--ready")) ready = true;
       else if (a.equals("--require-init")) requireInit = true;
@@ -74,6 +76,7 @@ public final class StdioTestServer {
       else if (a.equals("--sleep")) sleep = true;
       else if (a.startsWith("--record=")) recordFile = a.substring(9);
       else if (a.startsWith("--spawn-child=")) childPidFile = a.substring(14);
+      else if (a.startsWith("--spawn-holder=")) holderPidFile = a.substring(15);
       else if (a.equals("--hello")) hello = true;
       else if (a.equals("--hang")) hang = true;
       else if (a.equals("--exit-after-read")) exitAfterRead = true;
@@ -99,6 +102,15 @@ public final class StdioTestServer {
       return;
     }
     if (recordFile != null) append(recordFile, "started");
+    if (holderPidFile != null) {
+      String java = ProcessHandle.current().info().command().orElse("java");
+      new ProcessBuilder(
+              java, "-cp", System.getProperty("java.class.path"), StdioTestServer.class.getName(),
+              "--pidfile=" + holderPidFile, "--sleep")
+          .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+          .redirectError(ProcessBuilder.Redirect.DISCARD)
+          .start();
+    }
     if (childPidFile != null) {
       String java = ProcessHandle.current().info().command().orElse("java");
       new ProcessBuilder(
