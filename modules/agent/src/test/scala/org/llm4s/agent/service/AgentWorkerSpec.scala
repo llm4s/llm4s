@@ -617,18 +617,20 @@ class AgentWorkerSpec
     val queue = new ForwardingRunQueue(store.runQueue) {
       override private[llm4s] def releaseDrained(l: Lease) = { refunds.incrementAndGet(); super.releaseDrained(l) }
     }
-    val deciding = new Semaphore(0)
-    val go       = new java.util.concurrent.CountDownLatch(1)
+    // the slot pauses before it decides; the drain marks it drained; only then does it decide
+    val deciding = new java.util.concurrent.CountDownLatch(1)
+    val drained  = new java.util.concurrent.CountDownLatch(1)
     val worker   = workerOf(store, Seq(QueuedAgent(agent)), fast.withDrainGrace(20.millis), queue = Some(queue))
-    worker.beforeDecide = _ => { deciding.release(); go.await(10, java.util.concurrent.TimeUnit.SECONDS): Unit }
+    worker.beforeDecide = _ => {
+      deciding.countDown()
+      drained.await(10, java.util.concurrent.TimeUnit.SECONDS): Unit
+    }
+    worker.onDrained = _ => drained.countDown()
     worker.start()
-    deciding.acquire()
-    // the drain cancels the slot once its grace has passed, before the slot decides or records anything
+    deciding.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
     val drain = Thread.ofVirtual().start(() => worker.shutdown(): Unit)
-    eventually(worker.currentState shouldBe WorkerState.Draining)
-    Thread.sleep(200)
-    go.countDown()
     drain.join()
+    drained.getCount shouldBe 0
     refunds.get shouldBe 0
     val entry = store.runQueue.entry(None, id).value
     entry.isOpen shouldBe true

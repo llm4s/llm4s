@@ -148,6 +148,9 @@ final class AgentWorker private (
   /** A test hook run by an entry's slot before it decides what to do with its entry; a no-op by default. */
   @volatile private[service] var beforeDecide: QueueEntry => Unit = _ => ()
 
+  /** A test hook run once a drain has marked an entry's slot drained, before it cancels the run; a no-op by default. */
+  @volatile private[service] var onDrained: EntryId => Unit = _ => ()
+
   // ---- life ----
 
   /** Starts taking entries, and the retention sweep's schedule. Once only: a second call changes nothing. */
@@ -889,6 +892,7 @@ final class AgentWorker private (
     /** The drain's cancel: the run is cancelled, and the entry given back once it has exited. */
     def cancelForDrain(): Unit =
       drained.set(true)
+      onDrained(entryId)
       run.get.foreach(_.cancel())
 
 @Experimental
