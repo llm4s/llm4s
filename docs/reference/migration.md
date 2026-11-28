@@ -752,6 +752,23 @@ the handshake and closes the transport. The agreed version, not a fixed `2025-06
 with its `data` when it has one: `JSON-RPC Error -32602: Invalid params (data: path must be absolute)`. A custom
 `MCPTransportImpl` may override the new `useProtocolVersion(version)`, a no-op by default.
 
+**Authentication and routing (#3078).** An HTTP server's headers, credential and HTTP client are an
+`MCPHttpOptions`, passed as `http` to `MCPServerConfig.streamableHTTP` or `sse` (the fallback transport uses it too):
+
+```scala
+val http = MCPHttpOptions()
+  .withApiKey(ApiKeyProvider.static(ApiKey(token)))                 // sent as Authorization: Bearer
+  .withHeader("X-Tenant", "acme")                                      // on every POST, GET and DELETE
+  .withHttpClient(routedClient)                                        // the application's proxy and TLS
+MCPServerConfig.streamableHTTP("docs", "https://mcp.example.com/mcp", http = http)
+```
+
+`StreamableHTTPTransport` and `SSETransport` gain the field `http` (default `MCPHttpOptions.default`), so
+`case StreamableHTTPTransport(url, name)` becomes `case StreamableHTTPTransport(url, name, _)`. The transport
+implementations' fourth parameter is an `MCPHttpOptions`; the overload taking an `Llm4sHttpClient` remains. A
+transport closes the HTTP client it created when it is closed, and never one it was given. The session id is no
+longer logged.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

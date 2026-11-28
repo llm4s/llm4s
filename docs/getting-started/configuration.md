@@ -577,6 +577,18 @@ import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 val routedClient = Llm4sConfig.httpNetwork().map(network => Llm4sHttpClient.create(HttpClientOptions(network)))
 ```
 
+An HTTP MCP server takes it through `MCPHttpOptions`, which also carries the headers and the bearer key sent with
+every request. The transport never closes a client it was given:
+
+```scala
+import org.llm4s.mcp.{ MCPHttpOptions, MCPServerConfig }
+
+val mcpServer = routedClient.map { client =>
+  MCPServerConfig.streamableHTTP("docs", "https://mcp.example.com/mcp",
+    http = MCPHttpOptions().withHttpClient(client).withHeader("X-Tenant", "acme"))
+}
+```
+
 Java builders take the same settings with `proxy`, `proxyCredentials`, `nonProxyHosts`, `trustStore` and `keyStore`
 (see [the Java guide](../guide/java#behind-a-proxy-or-a-corporate-ca)); the Spring Boot starter binds the
 `llm4s.http.*` properties (`llm4s.http.proxy.url`, `llm4s.http.proxy.non-proxy-hosts`, `llm4s.http.tls.trust-store`,

@@ -12,13 +12,30 @@ import org.llm4s.http.{ Llm4sHttpClient, StreamingHttpResponse }
 import scala.concurrent.duration._
 import HttpExchanges.flattened
 import PayloadLog.debugPayload
-// Streamable HTTP transport implementation (2025-06-18 spec)
+
+/**
+ * The Streamable HTTP transport (MCP 2025-03-26 and later): every message is a POST to one endpoint, answered with
+ * JSON or an SSE stream.
+ *
+ * @param url     the MCP endpoint
+ * @param name    the server's name, for logs and errors
+ * @param timeout the longest one exchange may take, reply included
+ * @param http    the headers and credential sent with every request, and the HTTP client (#3078); a client the
+ *                transport creates is closed with it, one it was given never is
+ */
 class StreamableHTTPTransportImpl(
   url: String,
   override val name: String,
   timeout: FiniteDuration = 30.seconds,
-  httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  http: MCPHttpOptions = MCPHttpOptions.default
 ) extends MCPTransportImpl {
+
+  /** A transport that sends with `httpClient`, which it never closes. */
+  def this(url: String, name: String, timeout: FiniteDuration, httpClient: Llm4sHttpClient) =
+    this(url, name, timeout, MCPHttpOptions.default.withHttpClient(httpClient))
+
+  private val httpClient: Llm4sHttpClient  = http.httpClient.getOrElse(Llm4sHttpClient.create())
+  private val ownsClient                   = http.httpClient.isEmpty
   private val logger                       = LoggerFactory.getLogger(getClass)
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
@@ -46,19 +63,10 @@ class StreamableHTTPTransportImpl(
       val requestJson = write(request)
       logger.debugPayload(s"StreamableHTTPTransport($name) request JSON: ", requestJson)
 
-      // Build headers according to 2025-06-18 spec
-      val headers = buildHeaders(request)
-
-      logger.debug(s"StreamableHTTPTransport($name) using URL: '$url'")
-
       // POST to MCP endpoint (single endpoint, no /sse suffix); the body is read below, against the deadline
-      httpClient
-        .postStream(
-          url = url,
-          headers = headers,
-          body = requestJson,
-          timeout = timeout
-        )
+      http
+        .requestHeaders(buildHeaders(request))
+        .flatMap(headers => httpClient.postStream(url = url, headers = headers, body = requestJson, timeout = timeout))
         .map { response =>
           logger.debug(s"StreamableHTTPTransport($name) received HTTP response: status=${response.statusCode}")
           response
@@ -94,7 +102,8 @@ class StreamableHTTPTransportImpl(
         val trimmed = sessionId.trim
         if (trimmed.nonEmpty) {
           mcpSessionId = Some(trimmed)
-          logger.info(s"StreamableHTTPTransport($name) established MCP session: $trimmed")
+          // The id is the session's credential with the server: it is never logged (#3078)
+          logger.info(s"StreamableHTTPTransport($name) established an MCP session")
         }
       }
 
@@ -316,17 +325,9 @@ class StreamableHTTPTransportImpl(
       val notificationJson = json
       logger.debugPayload(s"StreamableHTTPTransport($name) $kind JSON: ", notificationJson)
 
-      // Build headers for notification (same as requests)
-      val headers = buildNotificationHeaders()
-
-      // POST to MCP endpoint
-      httpClient
-        .post(
-          url = url,
-          headers = headers,
-          body = notificationJson,
-          timeout = timeout
-        )
+      http
+        .requestHeaders(buildNotificationHeaders())
+        .flatMap(headers => httpClient.post(url = url, headers = headers, body = notificationJson, timeout = timeout))
         .map { response =>
           logger.debug(
             s"StreamableHTTPTransport($name) received HTTP response for notification: status=${response.statusCode}"
@@ -377,11 +378,9 @@ class StreamableHTTPTransportImpl(
 
     // Send DELETE request to explicitly terminate session if we have one
     mcpSessionId.foreach { sessionId =>
-      httpClient.delete(
-        url = url,
-        headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-        timeout = timeout
-      ) match {
+      http
+        .requestHeaders(Map("mcp-session-id" -> sessionId)) // lowercase per spec
+        .flatMap(headers => httpClient.delete(url = url, headers = headers, timeout = timeout)) match {
         case Right(_) =>
           logger.debug(s"StreamableHTTPTransport($name) sent session termination request")
         case Left(e) =>
@@ -393,6 +392,8 @@ class StreamableHTTPTransportImpl(
 
     // Clear session
     mcpSessionId = None
+    // A client this transport created is its own to close; one it was given is the caller's (#3078)
+    if (ownsClient) httpClient.close()
     logger.debug(s"StreamableHTTPTransport($name) closed successfully")
   }
 

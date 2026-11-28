@@ -5,6 +5,8 @@ import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 import scala.util.Try
 import org.slf4j.Logger
+import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 
 // Transport type definitions
 
@@ -96,26 +98,109 @@ private[mcp] object StdioEnvironment {
 }
 
 /**
- * Server-Sent Events transport configuration using HTTP (MCP 2024-11-05 spec).
+ * How the client reaches an HTTP MCP server (#3078): the headers sent with every request, the credential, and the
+ * HTTP client that carries them.
  *
- * Connects to server via HTTP with SSE for streaming responses.
- * This is the legacy transport protocol for backwards compatibility.
+ * Build one with [[MCPHttpOptions.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a new field never breaks callers. `toString` shows header names, never their values.
  *
- * @param url HTTP URL of the SSE endpoint
- * @param name Unique identifier for this transport instance
+ * @param headers    sent with every request to the server: each POST, the event-stream `GET` of HTTP+SSE and the
+ *                   session `DELETE`. The transport's own headers (`Content-Type`, `Accept`, `mcp-session-id`,
+ *                   `MCP-Protocol-Version`) take precedence over one of the same name
+ * @param apiKey     read before each request and sent as `Authorization: Bearer <key>`, over an `Authorization` in
+ *                   `headers`; a key that cannot be read fails the request. `MCPServerOptions.apiKey` is what an
+ *                   llm4s `MCPServer` checks
+ * @param httpClient the client to send with, for the application's proxy and TLS settings
+ *                   (`Llm4sHttpClient.create(HttpClientOptions(network))`). The transport never closes a client it
+ *                   was given; with `None` it creates one and closes it when it is closed
  */
-case class SSETransport(url: String, name: String) extends MCPTransport
+final case class MCPHttpOptions private (
+  headers: Map[String, String],
+  apiKey: Option[ApiKeyProvider],
+  httpClient: Option[Llm4sHttpClient]
+) {
+
+  /** Replaces the headers sent with every request. */
+  def withHeaders(headers: Map[String, String]): MCPHttpOptions = copy(headers = headers)
+
+  /** Adds or replaces one header sent with every request. */
+  def withHeader(name: String, value: String): MCPHttpOptions = copy(headers = headers + (name -> value))
+
+  /** Sends the key `apiKey` provides as `Authorization: Bearer`. */
+  def withApiKey(apiKey: ApiKeyProvider): MCPHttpOptions = copy(apiKey = Some(apiKey))
+
+  /** Sets or clears the credential sent as `Authorization: Bearer`. */
+  def withApiKey(apiKey: Option[ApiKeyProvider]): MCPHttpOptions = copy(apiKey = apiKey)
+
+  /** Sends with `httpClient`, which the transport never closes. */
+  def withHttpClient(httpClient: Llm4sHttpClient): MCPHttpOptions = copy(httpClient = Some(httpClient))
+
+  /** Sets or clears the HTTP client to send with. */
+  def withHttpClient(httpClient: Option[Llm4sHttpClient]): MCPHttpOptions = copy(httpClient = httpClient)
+
+  /**
+   * The headers for one request: `headers`, then the bearer key, then `protocol` (the transport's own), each over
+   * the one before. A key that cannot be read is the request's error.
+   */
+  private[mcp] def requestHeaders(protocol: Map[String, String]): Result[Map[String, String]] =
+    apiKey
+      .fold[Result[Option[String]]](Right(None))(_.current().map(key => Some(s"Bearer ${key.asKey}")))
+      .map { bearer =>
+        val withoutAuth =
+          if (bearer.isDefined) headers.filterNot(_._1.equalsIgnoreCase("Authorization")) else headers
+        val sent = withoutAuth ++ bearer.map("Authorization" -> _)
+        // a transport header replaces a caller's header of the same name, whatever its case
+        sent.filterNot { case (n, _) => protocol.keys.exists(_.equalsIgnoreCase(n)) } ++ protocol
+      }
+
+  override def toString: String =
+    s"MCPHttpOptions(headers = ${headers.keys.toSeq.sorted.mkString("[", ", ", "]")}, " +
+      s"apiKey = ${apiKey.fold("none")(_ => "***")}, httpClient = ${httpClient.fold("default")(_ => "supplied")})"
+}
+
+object MCPHttpOptions {
+
+  /** No extra headers, no credential, and a client the transport creates. */
+  val default: MCPHttpOptions = new MCPHttpOptions(Map.empty, None, None)
+
+  /**
+   * Creates an [[MCPHttpOptions]].
+   *
+   * @param headers    sent with every request
+   * @param apiKey     sent as `Authorization: Bearer`
+   * @param httpClient the client to send with; never closed by the transport
+   */
+  def apply(
+    headers: Map[String, String] = Map.empty,
+    apiKey: Option[ApiKeyProvider] = None,
+    httpClient: Option[Llm4sHttpClient] = None
+  ): MCPHttpOptions = new MCPHttpOptions(headers, apiKey, httpClient)
+}
 
 /**
- * Streamable HTTP transport configuration (MCP 2025-03-26 spec).
+ * HTTP+SSE transport configuration (MCP 2024-11-05).
+ *
+ * The client `GET`s `url`, which opens an event stream whose first `endpoint` event names where to POST messages;
+ * replies arrive on the stream. `MCPClientImpl` still tries Streamable HTTP at `url` first.
+ *
+ * @param url  HTTP URL of the SSE endpoint (an llm4s `MCPServer`'s is `{path}/sse`)
+ * @param name Unique identifier for this transport instance
+ * @param http headers, credential and HTTP client (#3078)
+ */
+case class SSETransport(url: String, name: String, http: MCPHttpOptions = MCPHttpOptions.default) extends MCPTransport
+
+/**
+ * Streamable HTTP transport configuration (MCP 2025-03-26 and later).
  *
  * Connects to server via HTTP with support for streaming responses.
  * This is the modern transport protocol supporting single-endpoint design.
  *
- * @param url HTTP URL of the MCP endpoint
+ * @param url  HTTP URL of the MCP endpoint
  * @param name Unique identifier for this transport instance
+ * @param http headers, credential and HTTP client (#3078)
  */
-case class StreamableHTTPTransport(url: String, name: String) extends MCPTransport
+case class StreamableHTTPTransport(url: String, name: String, http: MCPHttpOptions = MCPHttpOptions.default)
+    extends MCPTransport
 
 /**
  * Base trait for transport implementations.
@@ -231,9 +316,9 @@ object MCPTransport {
   // Creates appropriate transport implementation based on configuration
   def create(config: MCPServerConfig): MCPTransportImpl =
     config.transport match {
-      case stdio: StdioTransport              => StdioTransportImpl.of(stdio, config.timeout)
-      case SSETransport(url, name)            => new SSETransportImpl(url, name, config.timeout)
-      case StreamableHTTPTransport(url, name) => new StreamableHTTPTransportImpl(url, name, config.timeout)
+      case stdio: StdioTransport      => StdioTransportImpl.of(stdio, config.timeout)
+      case t: SSETransport            => new SSETransportImpl(t.url, t.name, config.timeout, t.http)
+      case t: StreamableHTTPTransport => new StreamableHTTPTransportImpl(t.url, t.name, config.timeout, t.http)
     }
 }
 

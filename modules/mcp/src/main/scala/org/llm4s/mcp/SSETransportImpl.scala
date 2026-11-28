@@ -16,8 +16,15 @@ class SSETransportImpl(
   url: String,
   override val name: String,
   timeout: FiniteDuration = 30.seconds,
-  httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  http: MCPHttpOptions = MCPHttpOptions.default
 ) extends MCPTransportImpl {
+
+  /** A transport that sends with `httpClient`, which it never closes. */
+  def this(url: String, name: String, timeout: FiniteDuration, httpClient: Llm4sHttpClient) =
+    this(url, name, timeout, MCPHttpOptions.default.withHttpClient(httpClient))
+
+  private val httpClient: Llm4sHttpClient  = http.httpClient.getOrElse(Llm4sHttpClient.create())
+  private val ownsClient                   = http.httpClient.isEmpty
   private val logger                       = LoggerFactory.getLogger(getClass)
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
@@ -34,15 +41,9 @@ class SSETransportImpl(
       logger.debugPayload(s"SSETransport($name) request JSON: ", requestJson)
 
       // Build headers according to MCP 2024-11-05 specification
-      val headers = buildHeaders(request)
-
-      httpClient
-        .post(
-          url = url, // Remove /sse suffix - MCP servers use base URL
-          headers = headers,
-          body = requestJson,
-          timeout = timeout
-        )
+      http
+        .requestHeaders(buildHeaders(request))
+        .flatMap(headers => httpClient.post(url = url, headers = headers, body = requestJson, timeout = timeout))
         .map { response =>
           logger.debug(s"SSETransport($name) received HTTP response: status=${response.statusCode}")
           response
@@ -62,7 +63,7 @@ class SSETransportImpl(
             val trimmed = sessionId.trim
             if (trimmed.nonEmpty) {
               mcpSessionId = Some(trimmed)
-              logger.info(s"SSETransport($name) established MCP session: $trimmed")
+              logger.info(s"SSETransport($name) established an MCP session")
             }
           }
 
@@ -174,15 +175,9 @@ class SSETransportImpl(
       logger.debugPayload(s"SSETransport($name) notification JSON: ", notificationJson)
 
       // Build headers for notification
-      val headers = buildNotificationHeaders()
-
-      httpClient
-        .post(
-          url = url,
-          headers = headers,
-          body = notificationJson,
-          timeout = timeout
-        )
+      http
+        .requestHeaders(buildNotificationHeaders())
+        .flatMap(headers => httpClient.post(url = url, headers = headers, body = notificationJson, timeout = timeout))
         .map { response =>
           logger.debug(s"SSETransport($name) received HTTP response for notification: status=${response.statusCode}")
           response
@@ -230,11 +225,9 @@ class SSETransportImpl(
 
     // Send DELETE request to explicitly terminate session if we have one
     mcpSessionId.foreach { sessionId =>
-      httpClient.delete(
-        url = url,
-        headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-        timeout = timeout
-      ) match {
+      http
+        .requestHeaders(Map("mcp-session-id" -> sessionId))
+        .flatMap(headers => httpClient.delete(url = url, headers = headers, timeout = timeout)) match {
         case Right(_) =>
           logger.debug(s"SSETransport($name) sent session termination request")
         case Left(e) =>
@@ -244,6 +237,7 @@ class SSETransportImpl(
 
     // Clear session
     mcpSessionId = None
+    if (ownsClient) httpClient.close()
     logger.debug(s"SSETransport($name) closed successfully")
   }
 

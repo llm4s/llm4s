@@ -69,8 +69,8 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         }
       case None =>
         config.transport match {
-          case http: StreamableHTTPTransport => tryHttpTransportWithFallback(http.url, http.name)
-          case http: SSETransport            => tryHttpTransportWithFallback(http.url, http.name)
+          case http: StreamableHTTPTransport => tryHttpTransportWithFallback(http.url, http.name, http.http)
+          case http: SSETransport            => tryHttpTransportWithFallback(http.url, http.name, http.http)
           case stdio: StdioTransport =>
             val stdioTransport = StdioTransportImpl.of(stdio, config.timeout)
             transport = Some(stdioTransport)
@@ -79,9 +79,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     }
 
   // Unified HTTP transport logic: try Streamable HTTP first, fall back to HTTP+SSE
-  private def tryHttpTransportWithFallback(url: String, name: String): Result[(MCPTransportImpl, JsonRpcResponse)] = {
+  private def tryHttpTransportWithFallback(
+    url: String,
+    name: String,
+    http: MCPHttpOptions
+  ): Result[(MCPTransportImpl, JsonRpcResponse)] = {
     logger.info(s"Attempting to connect using Streamable HTTP transport to $url")
-    val newTransport = new StreamableHTTPTransportImpl(url, name, config.timeout)
+    val newTransport = new StreamableHTTPTransportImpl(url, name, config.timeout, http)
 
     newTransport.sendRequest(createInitializeRequest()) match {
       case Right(response) =>
@@ -94,7 +98,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         logger.info(s"Server refused Streamable HTTP (HTTP ${refused.status}), attempting fallback to HTTP+SSE")
         newTransport.close()
 
-        val oldTransport = new SSETransportImpl(url, name, config.timeout)
+        val oldTransport = new SSETransportImpl(url, name, config.timeout, http)
         oldTransport.sendRequest(createInitializeRequest()) match {
           case Right(response) =>
             logger.info(s"Connected to ${config.name} using HTTP+SSE transport (2024-11-05)")
