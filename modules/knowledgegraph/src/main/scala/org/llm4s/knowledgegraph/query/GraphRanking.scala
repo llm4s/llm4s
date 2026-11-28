@@ -29,6 +29,19 @@ import scala.annotation.tailrec
 object GraphRanking {
 
   /**
+   * Distinct neighbour ids per node, treating edges as undirected, built in one pass. An edge to a node outside the
+   * graph, and a self-loop, are left out (#2975).
+   */
+  private def undirectedAdjacency(graph: Graph): Map[String, Seq[String]] = {
+    val pairs = graph.edges.iterator
+      .filter(e => e.source != e.target && graph.nodes.contains(e.source) && graph.nodes.contains(e.target))
+      .flatMap(e => Iterator(e.source -> e.target, e.target -> e.source))
+      .toSeq
+    val grouped = pairs.groupMap(_._1)(_._2).map { case (k, v) => k -> v.distinct }
+    graph.nodes.keys.map(id => id -> grouped.getOrElse(id, Seq.empty)).toMap
+  }
+
+  /**
    * Computes PageRank scores for all nodes in the graph.
    *
    * PageRank measures the importance of a node based on the link structure.
@@ -54,11 +67,10 @@ object GraphRanking {
     val initialScore = 1.0 / numNodes
     val baseScore    = (1.0 - dampingFactor) / numNodes
 
-    // Precompute outgoing edges for each node
-    val outgoing: Map[String, Seq[String]] = nodeIds.map(id => id -> graph.getOutgoingEdges(id).map(_.target)).toMap
-
-    // Precompute incoming edges for each node
-    val incoming: Map[String, Seq[String]] = nodeIds.map(id => id -> graph.getIncomingEdges(id).map(_.source)).toMap
+    // One pass over the edges; an edge to a node outside the graph is left out, so its rank is not lost (#2975)
+    val known = graph.edges.filter(e => graph.nodes.contains(e.source) && graph.nodes.contains(e.target))
+    val outgoing: Map[String, Seq[String]] = known.groupMap(_.source)(_.target)
+    val incoming: Map[String, Seq[String]] = known.groupMap(_.target)(_.source)
 
     // Identify dangling nodes (no outgoing edges) whose rank must be redistributed
     val danglingNodes = nodeIds.filter(id => outgoing.getOrElse(id, Seq.empty).isEmpty)
@@ -99,7 +111,8 @@ object GraphRanking {
    * Computes degree centrality for all nodes in the graph.
    *
    * Degree centrality is the simplest centrality measure, equal to the number
-   * of edges connected to a node normalized by the maximum possible degree.
+   * of distinct neighbours of a node normalized by the maximum possible degree, so parallel edges and
+   * self-loops do not push it past 1.0 (#2975).
    *
    * @param graph The graph to analyze
    * @return Map of node ID to degree centrality score (0.0 to 1.0)
@@ -109,11 +122,9 @@ object GraphRanking {
     if (numNodes <= 1) return graph.nodes.keys.map(_ -> 0.0).toMap
 
     val maxDegree = numNodes - 1
+    val adjacency = undirectedAdjacency(graph)
 
-    graph.nodes.keys.map { nodeId =>
-      val degree = graph.getConnectedEdges(nodeId).size
-      nodeId -> degree.toDouble / maxDegree
-    }.toMap
+    graph.nodes.keys.map(nodeId => nodeId -> adjacency(nodeId).size.toDouble / maxDegree).toMap
   }
 
   /**
@@ -137,12 +148,8 @@ object GraphRanking {
     // Initialize betweenness scores
     var betweenness = nodeIds.map(_ -> 0.0).toMap
 
-    // Precompute adjacency (treating as undirected for centrality)
-    val adjacency: Map[String, Seq[String]] = nodeIds.map { id =>
-      val outgoing = graph.getOutgoingEdges(id).map(_.target)
-      val incoming = graph.getIncomingEdges(id).map(_.source)
-      id -> (outgoing ++ incoming).distinct
-    }.toMap
+    // Undirected, over known nodes only: an id outside the graph is never looked up (#2975)
+    val adjacency = undirectedAdjacency(graph)
 
     // Brandes' algorithm: BFS from each source node
     for (source <- nodeIds) {
@@ -185,9 +192,9 @@ object GraphRanking {
       }
     }
 
-    // Normalize for undirected graphs by (n-1)(n-2)/2 so scores lie in [0, 1]
-    val normalizationFactor =
-      if (numNodes > 2) ((numNodes - 1.0) * (numNodes - 2.0)) / 2.0 else 1.0
+    // Brandes from every source counts each unordered pair twice, so the undirected score is half the sum; normalised
+    // by (n-1)(n-2)/2 that is the sum over (n-1)(n-2), in [0, 1] (#2975)
+    val normalizationFactor = (numNodes - 1.0) * (numNodes - 2.0)
     betweenness.map { case (id, score) => id -> score / normalizationFactor }
   }
 
@@ -207,12 +214,8 @@ object GraphRanking {
 
     if (numNodes <= 1) return nodeIds.map(_ -> 0.0).toMap
 
-    // Precompute adjacency (treating as undirected)
-    val adjacency: Map[String, Seq[String]] = nodeIds.map { id =>
-      val outgoing = graph.getOutgoingEdges(id).map(_.target)
-      val incoming = graph.getIncomingEdges(id).map(_.source)
-      id -> (outgoing ++ incoming).distinct
-    }.toMap
+    // Undirected, over known nodes only (#2975)
+    val adjacency = undirectedAdjacency(graph)
 
     nodeIds.map { source =>
       val distances = bfsDistances(source, adjacency)

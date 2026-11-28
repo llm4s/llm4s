@@ -400,6 +400,47 @@ level should sort by its own key.
 A disambiguation candidate now needs a non-blank `name` on both nodes. `ExtractionSchema.simple` matches its
 `properties` keys to type names ignoring case.
 
+## Graph queries: robust translation, bounded execution, and QA context the question picks (#2973, #2974, #2975)
+
+`llm4s-knowledgegraph` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| A model reply of the wrong shape (`{"query": ...}`, `"node_id": {...}`, `"max_depth": "two"`) threw out of `translate` and `ask`; prose around the JSON was a `Left` | Every field is checked, so a wrong shape is a `Left`; the JSON object is found inside prose or a fence, a numeric id or `"2"` depth is accepted, and a `null` native-query explanation is empty |
+| The translator was given no node ids, so the model invented them | `translate(question, entities)` lists the resolved entities' ids; a composite step can name an earlier step's nodes as `$1`, `$2`, ... |
+| An unknown id gave an empty result that read "Found 0 neighbor(s)" | `GraphQueryResult.missingNodeIds` lists it, and the summary says "not found" |
+| A multi-hop `FindNeighbors` with a `relationshipType` traversed every relationship | Every depth follows only that type |
+| `FindNeighbors` results left out the start node | The start node comes first |
+| `FindPath` followed outgoing edges only, enumerated every simple path, and `from == to` was "1 path" | It returns at most `maxPaths` shortest paths, following edges either way by default (`direction`), and `from == to` is no path |
+| A depth, hop count or composite length from the model or the tool was unbounded | Clamped to `maxQueryDepth` (default 5); composites run at most `maxCompositeSteps` (8) |
+| `GraphEngine.traverseDFS` could miss a node within `maxDepth`; a negative distance returned the start node | It finds what `traverse` finds; a negative depth gives nothing; `traverse` and `traverseDFS` take a `direction` |
+| Every node with the guessed label was an entity, and a mention matched any substring of any property | Entities match by name (exact 1.0, other property 0.8, whole words 0.7), the label narrows, and the best `maxEntities` (10) are used |
+| Trimming could drop every edge of the hub the question named, and did not trim at all without ranking | Identified entities are kept first; nodes are trimmed either way; values are cut at `maxPropertyChars`, paths at `maxPaths`, and `maxContextTokens` bounds the whole context |
+| Betweenness threw on an edge to a node outside the result and doubled undirected scores; degree counted parallel edges | Edges to unknown nodes are ignored; betweenness is in [0, 1] (chain `a-b-c` gives `b = 1.0`); degree counts distinct neighbours |
+| An empty graph cost three model calls; a store failure building the entity prompt was dropped | An empty graph is answered without a call; the failure is the `Left` |
+
+`GraphQuery.FindPath` gains a `direction` field (default `Both`, where paths were directed before) and
+`GraphQueryResult` a `missingNodeIds` field, so positional patterns on them need one more field.
+
+## GraphRAG Hybrid shows its evidence; seeds match whole words (#2972)
+
+`llm4s-rag` is Beta. `GraphHybridSearchResult` gains `communities` (default empty); no other signature changed.
+
+| Before (1.0.0) | After |
+|---|---|
+| The Hybrid prompt held only `id score=... vector=... graph=...` lines and community summaries | It holds the retrieved passages (up to 10, each cut to 1,200 characters), the top 10 hits rendered with label, name and properties (each value cut to 300 characters) and the relationships between them, then the summaries |
+| Every Hybrid hit had the same `vectorScore`, the mean of all vector results, so `hybridVectorWeight` could not change the order | A hit's `vectorScore` is the best score of the vector results that name it in their metadata (`entityId`, `nodeId`, ...), share its provenance (`source`, `docId`, ...) or mention its name as whole words; 0 when none does |
+| Seeds matched any substring of the query (`the`, `is`), and a node scored once per property containing a word | Seeds match whole words of two or more characters outside a stopword list, and each query word counts once per field: 3 in the name, 2 in the id, 1 in any other property |
+| `route` found an entity in almost every question, so it almost never chose Global | It chooses Local only when a whole query word matches a node; a question naming none goes to Global, as do broad ones |
+| Local search sent 30 nodes and 40 edges in hash order, sometimes without the seed; `visitedNodeIds` was sorted by id | Nodes go seeds first, then by traversal depth, before the cut; edges nearest first. `visitedNodeIds` is in that order |
+| `GraphRAGAnswer.communityIds` was empty for Hybrid | It lists the communities Hybrid used, also in `GraphHybridSearchResult.communities` |
+| Nodes in no community of `minCommunitySize` were lumped together and summarised by the model as one community | The lump's summary lists them and says they were not summarised; the model is not called for it |
+
+`route` never selects Hybrid, and `RAG.queryWithGraphRAG` never runs vector retrieval: its Scaladoc said the router
+decides Global, Local or Hybrid, and now says what it does. Call `queryWithGraphRAGMode(question, GraphRAGMode.Hybrid)`
+or `GraphRAG.answer(question, vectorResults)` for Hybrid. A query that relied on a short or common word matching a
+node (`"AI"` still matches; `"it"`, `"the"`, `"show"` do not) now seeds differently or routes to Global.
+
 ## Memory stores embed what they store, and `PostgresMemoryStore` filters like `matches` (#3030, #3031)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. No signature changed; `PostgresMemoryStore` gains `embedAll`.

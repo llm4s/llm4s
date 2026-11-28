@@ -8,10 +8,11 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.HybridSearchResult
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.LoneElement
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 
-class GraphRAGSpec extends AnyFunSuite with Matchers {
+class GraphRAGSpec extends AnyFunSuite with Matchers with LoneElement {
 
   private class DeterministicLLM extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
@@ -50,6 +51,26 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
       completeCalls += 1
       super.complete(conversation, options)
     }
+  }
+
+  /** Records every prompt it receives, as (system, user) pairs. */
+  private class RecordingLLM extends DeterministicLLM {
+    val prompts = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      val system = conversation.messages.collectFirst { case s: SystemMessage => s.content }.getOrElse("")
+      val user   = conversation.messages.collect { case u: UserMessage => u.content }.mkString("\n")
+      synchronized(prompts += (system -> user))
+      super.complete(conversation, options)
+    }
+    def promptsFor(systemFragment: String): Seq[String] =
+      synchronized(prompts.toSeq).collect { case (s, u) if s.contains(systemFragment) => u }
+  }
+
+  private def storeOf(nodes: Seq[Node], edges: Seq[Edge]): InMemoryGraphStore = {
+    val store = new InMemoryGraphStore()
+    nodes.foreach(node => store.upsertNode(node).isRight shouldBe true)
+    edges.foreach(edge => store.upsertEdge(edge).isRight shouldBe true)
+    store
   }
 
   private def seededStore(): InMemoryGraphStore = {
@@ -293,5 +314,157 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
       graph = graph
     )
     lexicalSeeds should contain("alice")
+  }
+
+  // ==========================================================================
+  // #2972: retrieval quality
+  // ==========================================================================
+
+  test("the Hybrid prompt holds the retrieved chunk text, the rendered nodes and their edges") {
+    val store = seededStore()
+    store
+      .upsertNode(
+        Node(
+          "alice",
+          "Person",
+          Map(
+            "name"   -> ujson.Str("Alice"),
+            "source" -> ujson.Str("doc-a"),
+            "role"   -> ujson.Str("Chief risk officer " + ("x" * 2000))
+          )
+        )
+      )
+      .isRight shouldBe true
+    val llm = new RecordingLLM()
+    val rag = new GraphRAG(store, llm)
+    val vectorResults = Seq(
+      HybridSearchResult(
+        "doc-a-chunk-0",
+        "Alice signed the Q3 audit report.",
+        0.9,
+        metadata = Map("entityId" -> "alice")
+      )
+    )
+
+    rag.hybridSearch("Who signed the audit?", vectorResults).isRight shouldBe true
+
+    val prompt = llm.promptsFor("hybrid vector and graph evidence").loneElement
+    prompt should include("Alice signed the Q3 audit report.")
+    prompt should include("alice [Person] Alice")
+    prompt should include("role=Chief risk officer")
+    (prompt should not).include("x" * 1000)
+    prompt should include("alice -[WORKS_AT]-> fintech")
+    prompt should include("finance themes and relationships")
+  }
+
+  test("each Hybrid hit is scored from the vector results that seed or mention it, so the weights change the order") {
+    val vectorResults = Seq(
+      HybridSearchResult("c0", "A short note.", 0.2, metadata = Map("entityId" -> "alice")),
+      HybridSearchResult("c1", "Bob leads the platform team.", 0.9)
+    )
+    def order(vectorWeight: Double, graphWeight: Double): Seq[GraphHybridHit] = {
+      val config = GraphRAGConfig(hybridVectorWeight = vectorWeight, hybridGraphWeight = graphWeight)
+      new GraphRAG(seededStore(), new DeterministicLLM(), config)
+        .hybridSearch("Who leads?", vectorResults)
+        .toOption
+        .get
+        .hits
+    }
+
+    val vectorHeavy = order(0.9, 0.1)
+    val graphHeavy  = order(0.1, 0.9)
+    vectorHeavy.find(_.node.id == "alice").get.vectorScore shouldBe 0.2
+    vectorHeavy.find(_.node.id == "bob").get.vectorScore shouldBe 0.9
+    vectorHeavy.find(_.node.id == "fintech").get.vectorScore shouldBe 0.0
+    vectorHeavy.head.node.id shouldBe "bob"
+    graphHeavy.head.node.id shouldBe "alice"
+  }
+
+  test("seeds match whole words, ignore stopwords, and weight the name above other properties") {
+    val prose = (1 to 6).map { i =>
+      Node(
+        s"the-memo-$i",
+        "Memo",
+        Map(
+          "name"        -> ujson.Str(s"Thesis $i"),
+          "description" -> ujson.Str("This is the plan of the team; it is what the board asked for"),
+          "notes"       -> ujson.Str("Alice reviewed it. Alice approved it."),
+          "summary"     -> ujson.Str("alice"),
+          "body"        -> ujson.Str("alice"),
+          "extra"       -> ujson.Str("alice"),
+          "more"        -> ujson.Str("alice")
+        )
+      )
+    }
+    val store = storeOf(
+      prose :+ Node("alice", "Person", Map("name" -> ujson.Str("Alice"))) :+
+        Node("alicent", "Person", Map("name" -> ujson.Str("Alicent"))),
+      Seq.empty
+    )
+    val graph = store.loadAll().toOption.get
+
+    val seeds = GraphRAG.findSeedNodes("What is the role of Alice?", graph)
+    seeds.head.id shouldBe "alice"
+    seeds.map(_.id) should not contain "alicent"
+    GraphRAG.findSeedNodes("What is it?", graph) shouldBe empty
+  }
+
+  test("route no longer finds entities in a question made of stopwords and unmatched words") {
+    val store = seededStore()
+    store
+      .upsertNode(Node("memo", "Doc", Map("description" -> ujson.Str("This is the place where the data is kept"))))
+      .isRight shouldBe true
+    val rag = new GraphRAG(store, new DeterministicLLM())
+
+    rag.route("What is the answer to this?").toOption.get shouldBe GraphRAGMode.Global
+    rag.route("What does Alice do?").toOption.get shouldBe GraphRAGMode.Local
+  }
+
+  test("localSearch sends nodes in traversal order, seed first, and truncates after ordering") {
+    val near = (0 until 5).map(i => Node(f"near$i%02d", "Thing", Map("name" -> ujson.Str(f"Near $i%02d"))))
+    val far  = (0 until 40).map(i => Node(f"far$i%02d", "Thing", Map("name" -> ujson.Str(f"Far $i%02d"))))
+    val store = storeOf(
+      Node("hub", "Person", Map("name" -> ujson.Str("Zebulon"))) +: (near ++ far),
+      near.map(n => Edge("hub", n.id, "KNOWS")) ++ far.map(n => Edge("near00", n.id, "KNOWS"))
+    )
+    val llm = new RecordingLLM()
+    val rag = new GraphRAG(store, llm, GraphRAGConfig(minCommunitySize = 1))
+
+    val result = rag.localSearch("Who is Zebulon?", maxDepth = 2).toOption.get
+    result.visitedNodeIds.head shouldBe "hub"
+    result.visitedNodeIds.slice(1, 6) should contain theSameElementsAs near.map(_.id)
+
+    val prompt    = llm.promptsFor("local graph neighborhood").loneElement
+    val nodeLines = prompt.linesIterator.dropWhile(_ != "Nodes:").drop(1).takeWhile(_.nonEmpty).toSeq
+    nodeLines.size shouldBe 30
+    nodeLines.head should startWith("hub ")
+    nodeLines.slice(1, 6).map(_.takeWhile(_ != ' ')) should contain theSameElementsAs near.map(_.id)
+  }
+
+  test("GraphRAG.answer in Hybrid mode lists the communities it used") {
+    val rag = new GraphRAG(seededStore(), new DeterministicLLM())
+    val vectorResults =
+      Seq(HybridSearchResult("c0", "Alice works at FinTech Labs", 0.9, metadata = Map("entityId" -> "alice")))
+
+    val hybrid = rag.hybridSearch("Who is connected to Alice?", vectorResults).toOption.get
+    hybrid.communities should not be empty
+    val answer = rag.answer("Who is connected to Alice?", vectorResults).toOption.get
+    answer.communityIds should not be empty
+    answer.communityIds shouldBe hybrid.communities.map(_.id)
+  }
+
+  test("nodes in no community of minCommunitySize are listed, not summarised as if coherent") {
+    val store = seededStore()
+    store.upsertNode(Node("zed", "Person", Map("name" -> ujson.Str("Zed")))).isRight shouldBe true
+    store.upsertNode(Node("yan", "Person", Map("name" -> ujson.Str("Yan")))).isRight shouldBe true
+    val llm = new RecordingLLM()
+    val rag = new GraphRAG(store, llm, GraphRAGConfig(minCommunitySize = 2))
+
+    val hierarchy = rag.summarizeCommunities().toOption.get
+    val lump      = hierarchy.levels.head.find(_.nodeIds.contains("zed")).get
+    lump.nodeIds shouldBe Set("zed", "yan")
+    lump.summary.get should include("not summarised")
+    lump.summary.get should include("Zed")
+    llm.promptsFor("Summarize the graph community").exists(_.contains("zed")) shouldBe false
   }
 }

@@ -88,7 +88,8 @@ object GraphQueryTool {
         pipeline = new GraphQAPipeline(
           llmClient,
           graphStore,
-          maxHops.map(h => config.copy(maxHops = h)).getOrElse(config)
+          // A tool call's hop count is clamped to 0..maxQueryDepth (#2974)
+          maxHops.map(h => config.copy(maxHops = math.max(0, math.min(h, config.maxQueryDepth)))).getOrElse(config)
         )
         result <- pipeline.ask(question).left.map(e => ToolHandlerError.failed(e.formatted))
       } yield toToolResult(result)

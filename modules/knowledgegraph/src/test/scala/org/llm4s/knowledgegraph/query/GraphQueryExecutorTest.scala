@@ -73,7 +73,8 @@ class GraphQueryExecutorTest extends AnyFunSuite with Matchers {
 
     result should be(a[Right[_, _]])
     val qr = result.toOption.get
-    qr.nodes.map(_.id) should contain theSameElementsAs Seq("acme", "bob")
+    // The start node comes first, so its edges keep both ends in the result (#2975)
+    qr.nodes.map(_.id) shouldBe Seq("alice", "acme", "bob")
   }
 
   test("FindNeighbors should filter by relationship type") {
@@ -90,8 +91,7 @@ class GraphQueryExecutorTest extends AnyFunSuite with Matchers {
 
     result should be(a[Right[_, _]])
     val qr = result.toOption.get
-    qr.nodes should have size 1
-    qr.nodes.head.id shouldBe "acme"
+    qr.nodes.map(_.id) shouldBe Seq("alice", "acme")
   }
 
   test("FindNeighbors with multi-hop should traverse deeper") {

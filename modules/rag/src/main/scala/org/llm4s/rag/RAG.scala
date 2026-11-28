@@ -1094,10 +1094,9 @@ final class RAG private (
     }
 
   /**
-   * Query through GraphRAG using router-selected mode.
-   *
-   * The router decides Global/Local/Hybrid first.
-   * Vector retrieval is only executed when Hybrid is selected.
+   * Query through GraphRAG in the mode `GraphRAG.route` selects: Global for a broad question or one that names no
+   * entity of the graph, Local when a whole word of the question matches a node. The router never selects Hybrid, so
+   * this runs no vector retrieval; for Hybrid, call `queryWithGraphRAGMode(question, GraphRAGMode.Hybrid)`.
    */
   def queryWithGraphRAG(question: String, topK: Option[Int] = None): Result[GraphRAGAnswer] =
     graphRAG match {
@@ -1175,7 +1174,7 @@ final class RAG private (
           query = question,
           mode = GraphRAGMode.Hybrid,
           answer = hybrid.answer,
-          communityIds = Seq.empty,
+          communityIds = hybrid.communities.map(_.id),
           nodeIds = hybrid.hits.map(_.node.id)
         )
     }

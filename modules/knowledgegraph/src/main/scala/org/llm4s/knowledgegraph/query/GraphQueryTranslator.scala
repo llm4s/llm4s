@@ -5,7 +5,6 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
-import org.llm4s.util.BoundedJson
 
 /**
  * Translates natural language questions into structured [[GraphQuery]] operations using an LLM.
@@ -31,9 +30,19 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
    * @param question The natural language question
    * @return Right(query) on success, Left(error) on failure
    */
-  def translate(question: String): Result[GraphQuery] = for {
+  def translate(question: String): Result[GraphQuery] = translate(question, Seq.empty)
+
+  /**
+   * Translates a question, telling the model the ids of entities already resolved from it, so it never has to invent
+   * a node id (#2973).
+   *
+   * @param question The natural language question
+   * @param entities Entities resolved from the question, listed in the prompt with their ids, labels and names
+   * @return Right(query) on success, Left(error) on failure
+   */
+  def translate(question: String, entities: Seq[IdentifiedEntity]): Result[GraphQuery] = for {
     schema <- buildSchemaContext()
-    prompt = buildPrompt(question, schema)
+    prompt = buildPrompt(question, schema, entities)
     conversation = Conversation(
       messages = List(
         SystemMessage(systemPrompt),
@@ -108,147 +117,110 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
       |
       |Direction values: "outgoing", "incoming", "both"
       |
-      |When a question references entities by name, first use "find_nodes" to locate them,
-      |then use other query types with the found node IDs. Prefer "composite" for multi-step questions.
+      |Use only node IDs listed under "Known entities". Never invent a node ID. For an entity that is not listed,
+      |use "find_nodes" to locate it inside a "composite" query, and refer to the nodes a step found as "$1",
+      |"$2", ... (the step's 1-based position) in a later step's node_id, from_node_id or to_node_id:
+      |   {"type": "composite", "steps": [{"type": "find_nodes", "properties": {"name": "Alice"}},
+      |                                   {"type": "find_neighbors", "node_id": "$1"}]}
+      |
+      |find_path also takes "direction" (default "both": a path may follow an edge either way).
       |
       |Output ONLY the JSON object, nothing else.""".stripMargin
 
-  private def buildPrompt(question: String, schemaContext: String): String =
+  private def buildPrompt(question: String, schemaContext: String, entities: Seq[IdentifiedEntity]): String = {
+    val known =
+      if (entities.isEmpty) "Known entities: none"
+      else
+        "Known entities (use these node IDs):\n" + entities
+          .map(e => s"  - id: ${e.nodeId}, label: ${e.nodeLabel}, mentioned as: \"${e.mention}\"")
+          .mkString("\n")
     s"""$schemaContext
+       |
+       |$known
        |
        |Question: $question
        |
        |Translate this question into a graph query JSON:""".stripMargin
+  }
 
   /**
-   * Parses the LLM JSON response into a structured GraphQuery.
+   * Parses the LLM JSON response into a structured GraphQuery. The object may come fenced or with prose around it;
+   * a missing or wrong-typed field is a `Left`, never an exception (#2973).
    */
-  private[query] def parseQueryResponse(jsonStr: String): Result[GraphQuery] = {
-    val cleaned = jsonStr.trim
-      .stripPrefix("```json")
-      .stripPrefix("```")
-      .stripSuffix("```")
-      .trim
+  private[query] def parseQueryResponse(jsonStr: String): Result[GraphQuery] =
+    ModelJson.obj(jsonStr, "graph query").flatMap(json => parseStep(json, allowComposite = true))
 
-    // The reply is model output: a document nested more than 512 levels deep is refused before it
-    // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
-    BoundedJson
-      .read(cleaned)
-      .fold(
-        e => Left(ProcessingError("query_parse", s"Invalid JSON in LLM response: ${e.message}")),
-        json => {
-          val queryType = json("type").str
-          queryType match {
-            case "find_nodes"     => parseFindNodes(json)
-            case "find_neighbors" => parseFindNeighbors(json)
-            case "find_path"      => parseFindPath(json)
-            case "describe_node"  => parseDescribeNode(json)
-            case "composite"      => parseComposite(json)
-            case other            => Left(ProcessingError("query_parse", s"Unknown query type: $other"))
-          }
-        }
-      )
-  }
-
-  private def parseFindNodes(json: ujson.Value): Result[GraphQuery] = {
-    val label = json.obj.get("label").flatMap {
-      case ujson.Str(s) => Some(s)
-      case ujson.Null   => None
-      case _            => None
+  private def parseStep(json: ujson.Value, allowComposite: Boolean): Result[GraphQuery] =
+    ModelJson.string(json, "type", "graph query").flatMap {
+      case "find_nodes"                  => parseFindNodes(json)
+      case "find_neighbors"              => parseFindNeighbors(json)
+      case "find_path"                   => parseFindPath(json)
+      case "describe_node"               => parseDescribeNode(json)
+      case "composite" if allowComposite => parseComposite(json)
+      case other =>
+        Left(ProcessingError("query_parse", s"Unknown ${if (allowComposite) "query" else "step"} type: $other"))
     }
 
-    val properties = json.obj.get("properties") match {
-      case Some(obj: ujson.Obj) =>
-        obj.value.map { case (k, v) =>
-          k -> (v match {
-            case ujson.Str(s) => s
-            case other        => other.toString
-          })
-        }.toMap
-      case _ => Map.empty[String, String]
-    }
-
-    Right(GraphQuery.FindNodes(label = label, properties = properties))
-  }
-
-  private def parseFindNeighbors(json: ujson.Value): Result[GraphQuery] = {
-    val nodeId = json.obj.get("node_id").map(_.str)
-
-    nodeId match {
-      case None =>
-        Left(ProcessingError("query_parse", "find_neighbors requires 'node_id'"))
-      case Some(id) =>
-        val direction = json.obj.get("direction").map(_.str) match {
-          case Some("outgoing") => Direction.Outgoing
-          case Some("incoming") => Direction.Incoming
-          case _                => Direction.Both
-        }
-        val relType = json.obj.get("relationship_type").flatMap {
-          case ujson.Str(s) => Some(s)
-          case _            => None
-        }
-        val maxDepth = json.obj.get("max_depth").map(_.num.toInt).getOrElse(1)
-
-        Right(
-          GraphQuery.FindNeighbors(
-            nodeId = id,
-            direction = direction,
-            relationshipType = relType,
-            maxDepth = maxDepth
-          )
-        )
-    }
-  }
-
-  private def parseFindPath(json: ujson.Value): Result[GraphQuery] = {
-    val from = json.obj.get("from_node_id").map(_.str)
-    val to   = json.obj.get("to_node_id").map(_.str)
-
-    (from, to) match {
-      case (Some(f), Some(t)) =>
-        val maxHops = json.obj.get("max_hops").map(_.num.toInt).getOrElse(5)
-        Right(GraphQuery.FindPath(fromNodeId = f, toNodeId = t, maxHops = maxHops))
-      case _ =>
-        Left(ProcessingError("query_parse", "find_path requires 'from_node_id' and 'to_node_id'"))
-    }
-  }
-
-  private def parseDescribeNode(json: ujson.Value): Result[GraphQuery] = {
-    val nodeId = json.obj.get("node_id").map(_.str)
-
-    nodeId match {
-      case None =>
-        Left(ProcessingError("query_parse", "describe_node requires 'node_id'"))
-      case Some(id) =>
-        val includeNeighbors = json.obj.get("include_neighbors").forall {
-          case ujson.Bool(b) => b
-          case _             => true
-        }
-        Right(GraphQuery.DescribeNode(nodeId = id, includeNeighbors = includeNeighbors))
-    }
-  }
-
-  private def parseComposite(json: ujson.Value): Result[GraphQuery] = {
-    val stepsJson = json.obj.get("steps") match {
-      case Some(ujson.Arr(arr)) => Right(arr.toSeq)
-      case _                    => Left(ProcessingError("query_parse", "composite requires 'steps' array"))
-    }
-
-    stepsJson.flatMap { steps =>
-      val parsed = steps.map { stepJson =>
-        val queryType = stepJson("type").str
-        queryType match {
-          case "find_nodes"     => parseFindNodes(stepJson)
-          case "find_neighbors" => parseFindNeighbors(stepJson)
-          case "find_path"      => parseFindPath(stepJson)
-          case "describe_node"  => parseDescribeNode(stepJson)
-          case other            => Left(ProcessingError("query_parse", s"Unknown step type: $other"))
-        }
+  private def parseFindNodes(json: ujson.Value): Result[GraphQuery] =
+    for {
+      label <- ModelJson.optString(json, "label", "find_nodes")
+      properties <- json.obj.get("properties") match {
+        case Some(obj: ujson.Obj) =>
+          Right(obj.value.map { case (k, v) =>
+            k -> (v match {
+              case ujson.Str(s) => s
+              case other        => other.toString
+            })
+          }.toMap)
+        case None | Some(ujson.Null) => Right(Map.empty[String, String])
+        case Some(other) =>
+          Left(ProcessingError("query_parse", s"find_nodes: 'properties' must be an object, got $other"))
       }
+    } yield GraphQuery.FindNodes(label = label, properties = properties)
 
-      parsed
-        .collectFirst { case Left(e) => Left(e) }
-        .getOrElse(Right(GraphQuery.CompositeQuery(parsed.collect { case Right(q) => q })))
+  private def parseDirection(json: ujson.Value, context: String): Result[Direction] =
+    json.obj.get("direction") match {
+      case Some(ujson.Str(d)) if d.equalsIgnoreCase("outgoing") => Right(Direction.Outgoing)
+      case Some(ujson.Str(d)) if d.equalsIgnoreCase("incoming") => Right(Direction.Incoming)
+      case None | Some(ujson.Null) | Some(ujson.Str(_))         => Right(Direction.Both)
+      case Some(other) => Left(ProcessingError("query_parse", s"$context: 'direction' must be a string, got $other"))
     }
-  }
+
+  private def parseFindNeighbors(json: ujson.Value): Result[GraphQuery] =
+    for {
+      id        <- ModelJson.string(json, "node_id", "find_neighbors")
+      direction <- parseDirection(json, "find_neighbors")
+      relType   <- ModelJson.optString(json, "relationship_type", "find_neighbors")
+      maxDepth  <- ModelJson.optInt(json, "max_depth", "find_neighbors")
+    } yield GraphQuery.FindNeighbors(
+      nodeId = id,
+      direction = direction,
+      relationshipType = relType,
+      maxDepth = maxDepth.getOrElse(1)
+    )
+
+  private def parseFindPath(json: ujson.Value): Result[GraphQuery] =
+    for {
+      from      <- ModelJson.string(json, "from_node_id", "find_path")
+      to        <- ModelJson.string(json, "to_node_id", "find_path")
+      maxHops   <- ModelJson.optInt(json, "max_hops", "find_path")
+      direction <- parseDirection(json, "find_path")
+    } yield GraphQuery.FindPath(fromNodeId = from, toNodeId = to, maxHops = maxHops.getOrElse(5), direction = direction)
+
+  private def parseDescribeNode(json: ujson.Value): Result[GraphQuery] =
+    for {
+      id               <- ModelJson.string(json, "node_id", "describe_node")
+      includeNeighbors <- ModelJson.optBool(json, "include_neighbors", "describe_node")
+    } yield GraphQuery.DescribeNode(nodeId = id, includeNeighbors = includeNeighbors.getOrElse(true))
+
+  private def parseComposite(json: ujson.Value): Result[GraphQuery] =
+    json.obj.get("steps") match {
+      case Some(ujson.Arr(arr)) =>
+        arr.toSeq
+          .foldLeft[Result[Vector[GraphQuery]]](Right(Vector.empty)) { (acc, step) =>
+            acc.flatMap(done => parseStep(step, allowComposite = false).map(done :+ _))
+          }
+          .map(steps => GraphQuery.CompositeQuery(steps))
+      case _ => Left(ProcessingError("query_parse", "composite requires 'steps' array"))
+    }
 }

@@ -21,6 +21,13 @@ package org.llm4s.knowledgegraph.query
  * @param rankingAlgorithm Which ranking algorithm to use (when useRanking is true)
  * @param includeCitations Whether to track and return source citations
  * @param temperature LLM temperature for answer generation (lower = more deterministic)
+ * @param maxQueryDepth The ceiling on any depth or hop count, from the model's query, `maxHops` or a tool call (#2974)
+ * @param maxCompositeSteps The most steps a model's composite query runs
+ * @param maxPaths The most paths a path query returns, and the most the context shows
+ * @param maxEntities The most entities identified from a question, the best matches first (#2975)
+ * @param maxPropertyChars The longest property value the context shows; a longer one is cut and marked
+ * @param maxContextTokens An optional budget for the whole context, counted with the `cl100k_base` tokenizer; lines
+ *                         past it are left out
  */
 case class GraphQAConfig(
   maxHops: Int = 3,
@@ -29,7 +36,13 @@ case class GraphQAConfig(
   useRanking: Boolean = true,
   rankingAlgorithm: RankingAlgorithm = RankingAlgorithm.PageRank,
   includeCitations: Boolean = true,
-  temperature: Double = 0.2
+  temperature: Double = 0.2,
+  maxQueryDepth: Int = GraphQueryExecutor.DefaultMaxDepth,
+  maxCompositeSteps: Int = GraphQueryExecutor.DefaultMaxCompositeSteps,
+  maxPaths: Int = GraphQueryExecutor.DefaultMaxPaths,
+  maxEntities: Int = 10,
+  maxPropertyChars: Int = 500,
+  maxContextTokens: Option[Int] = None
 )
 
 /**
@@ -82,7 +95,8 @@ case class Citation(
  * @param mention The text mention from the question
  * @param nodeId The matched node ID in the graph
  * @param nodeLabel The label of the matched node
- * @param confidence Matching confidence score (0.0 to 1.0)
+ * @param confidence Matching confidence score (0.0 to 1.0): 1.0 for an exact name match, less for a whole-word one;
+ *                   entities are ranked by it
  */
 case class IdentifiedEntity(
   mention: String,
