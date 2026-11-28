@@ -235,8 +235,10 @@ final class InMemoryRunQueue private[agent] (
         val ordered = queueOf(thread)
         val head    = ordered.head
         // one run per thread: no other entry of the thread holds a live lease; a head waiting out a retry's delay holds
-        // its thread back (#3257)
-        Option.when(!live(head, now) && !head.waiting(now) && !ordered.tail.exists(live(_, now)))(head)
+        // its thread back (#3257), unless a stop was asked of it, which a worker acts on at once
+        Option.when(
+          !live(head, now) && (!head.waiting(now) || head.stop.isDefined) && !ordered.tail.exists(live(_, now))
+        )(head)
       }
       .filter(head => request.agents.contains(head.agentId) && request.admits(EntryId.unsafe(head.id)))
     // a head whose input cannot be read is closed, and the take goes on to the next (#3091)

@@ -840,6 +840,19 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.take().value.entry.id shouldBe behind
   }
 
+  it should "hand out an entry waiting out a retry's delay once a stop is asked of it (#3257)" in {
+    val c     = Case()
+    val id    = c.submit().value.entryId
+    val first = c.take().value
+    c.queue.recordAttempt(first.lease, RunId(s"failed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.releaseRetry(first.lease, 10.minutes).value
+    c.take() shouldBe None
+    c.queue.cancel(None, CancelTarget.Entry(id), CancelReason.Requested(Some("stop"))).value
+    val stopped = c.take().value
+    stopped.entry.id shouldBe id
+    stopped.lease.stop shouldBe Some(StopRequest.Cancel(CancelReason.Requested(Some("stop"))))
+  }
+
   it should "list closed entries by state, oldest first, a page at a time, of the caller's tenant only (#3257)" in {
     val c      = Case()
     val tenant = Some(TenantId(s"t-${unique()}"))

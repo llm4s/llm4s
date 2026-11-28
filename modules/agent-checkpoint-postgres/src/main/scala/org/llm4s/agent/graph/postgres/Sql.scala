@@ -423,7 +423,7 @@ private[postgres] object Sql:
        |    SELECT (${queueHeadOf(t, "th.thread_id")})
        |    FROM (SELECT DISTINCT thread_id FROM ${t.queueEntries} WHERE state = 'open' AND agent_id = ANY(?)) th)
        |  AND e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
-       |  AND (e.not_before IS NULL OR e.not_before <= ?)
+       |  AND (e.not_before IS NULL OR e.not_before <= ? OR e.stop_json IS NOT NULL)
        |  AND e.entry_id > ?
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |ORDER BY e.entry_id LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
@@ -459,7 +459,7 @@ private[postgres] object Sql:
   def queueTakeable(t: Tables): String =
     s"""SELECT 1 FROM ${t.queueEntries} e
        |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
-       |  AND (e.not_before IS NULL OR e.not_before <= ?)
+       |  AND (e.not_before IS NULL OR e.not_before <= ? OR e.stop_json IS NOT NULL)
        |  AND e.entry_id = (${queueHeadOf(t)})
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |FOR UPDATE OF e SKIP LOCKED""".stripMargin

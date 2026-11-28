@@ -166,7 +166,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
              |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = (${headOf("t.thread_id")})
              |WHERE e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed AND e.entry_id > ?
              |  AND (e.lease_token IS NULL OR e.lease_expires_nanos <= ?)
-             |  AND (e.not_before_nanos IS NULL OR e.not_before_nanos <= ?)
+             |  AND (e.not_before_nanos IS NULL OR e.not_before_nanos <= ? OR e.stop_json IS NOT NULL)
              |  AND NOT EXISTS (
              |    SELECT 1 FROM llm4s_checkpoint_queue_entries o
              |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
