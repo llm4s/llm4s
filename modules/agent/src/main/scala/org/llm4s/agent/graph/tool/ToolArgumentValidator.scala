@@ -11,7 +11,9 @@ import org.llm4s.security.RegexSafetyManager
  * `type` (a string or an array of strings), `description` (ignored), `properties`, `required`,
  * `additionalProperties` (boolean), `enum`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`,
  * `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems`,
- * `uniqueItems` and `anyOf` (a value must satisfy at least one alternative). A property that is not
+ * `uniqueItems` and `anyOf` (a value must satisfy at least one alternative). Annotation and metadata keywords, which
+ * never constrain a value, are accepted and ignored wherever they appear (#3300): `$schema`, `$id`, `$comment`,
+ * `title`, `examples`, `default`, `deprecated`, `readOnly` and `writeOnly`. A property that is not
  * required may be `null`, which is how a client that sends tools strict has the model leave it out.
  * Any other keyword, which only a `RawJsonSchema` writes, and a supported one with a malformed value (a bound that is not
  * a number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`,
@@ -71,6 +73,13 @@ object ToolArgumentValidator {
     "anyOf"
   )
 
+  /**
+   * Keywords that only annotate (#3300): a schema an MCP server or a generator writes carries them - the MCP reference
+   * server puts `$schema` on every tool - and no value is ever refused for them, so they are never unsupported.
+   */
+  private val Annotations: Set[String] =
+    Set("$schema", "$id", "$comment", "title", "examples", "default", "deprecated", "readOnly", "writeOnly")
+
   /** How much of a string a pattern violation quotes. */
   private val MaxQuotedCodePoints = 80
 
@@ -90,7 +99,8 @@ object ToolArgumentValidator {
       schema match {
         case ujson.Obj(fields) =>
           satisfiability(fields, path) ++ fields.toVector.flatMap { case (key, value) =>
-            if (!Supported.contains(key)) Vector(s"$path.$key")
+            if (Annotations.contains(key)) Vector.empty
+            else if (!Supported.contains(key)) Vector(s"$path.$key")
             else
               key match {
                 case "type" =>

@@ -575,4 +575,32 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
       Vector("$.format")
     v.unsupported(Schema.raw(ujson.Obj("type" -> "object")).toJsonSchema(false)) shouldBe Vector.empty
   }
+
+  it should "ignore annotation and metadata keywords, at the top and in subschemas (#3300)" in {
+    // as the MCP reference server writes an inputSchema: a draft's $schema on every tool
+    val schema = obj(
+      "$schema"              -> "http://json-schema.org/draft-07/schema#",
+      "$id"                  -> "urn:echo",
+      "$comment"             -> "generated",
+      "title"                -> "EchoArgs",
+      "type"                 -> "object",
+      "additionalProperties" -> false,
+      "required"             -> ujson.Arr("message"),
+      "properties" -> obj(
+        "message" -> obj(
+          "type"        -> "string",
+          "description" -> "Message to echo",
+          "examples"    -> ujson.Arr("hi"),
+          "default"     -> "hello",
+          "deprecated"  -> false,
+          "readOnly"    -> false,
+          "writeOnly"   -> false
+        )
+      )
+    )
+    v.unsupported(schema) shouldBe Vector.empty
+    check(schema, obj("message" -> "hi")) shouldBe Vector.empty
+    check(schema, obj("message" -> 1)) should have size 1
+    check(schema, obj()) should have size 1
+  }
 }
