@@ -61,7 +61,12 @@ final class StaticKeySource private (
   def withTenantKey(tenantId: TenantId, key: EncryptionKey): StaticKeySource =
     new StaticKeySource(default, tenants.updated(tenantId.value, key), holding(key))
 
-  /** This source, also reading what `key` wrote; nothing new is written with it unless it is also a current key. */
+  /**
+   * This source, also reading what `key` wrote; nothing new is written with it unless it is also a current key.
+   * Retention never removes everything a key wrote - every thread keeps its latest checkpoint and pending writes, and
+   * effect records are never pruned - so keep a retired key while any thread written before its rotation exists
+   * (#3242): without it, that thread's reads fail with `UnknownKey`.
+   */
   def withRetiredKey(key: EncryptionKey): StaticKeySource = new StaticKeySource(default, tenants, holding(key))
 
   def current(tenantId: Option[TenantId]): Result[EncryptionKey] =

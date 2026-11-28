@@ -7,7 +7,7 @@ nav_order: 6
 parent: Agents
 grand_parent: User Guide
 cites_closed_issues: [1739, 1919]
-cites_issues: [3087]
+cites_issues: [3087, 3242]
 ---
 
 # Durable Checkpointers
@@ -957,12 +957,20 @@ val keys = StaticKeySource(december)            // every thread without a key of
 - **Per tenant.** A thread is sealed with its tenant's key. `StaticKeySource.tenantsOnly` has no default, so a tenant
   you gave no key cannot write at all.
 - **Rotation.** Give the new key a new `KeyId` and keep the old one as retired. Every stored value names its key, so
-  old rows stay readable and new writes use the new key. Nothing is re-encrypted in place; drop the old key once
-  [retention](#retention) has pruned what it wrote (a read of a row whose key is gone is `UnknownKey`).
+  old rows stay readable and new writes use the new key. Nothing is re-encrypted in place, and **retention never
+  removes every row an old key wrote**: it always keeps each thread's latest checkpoint and its pending writes, and
+  never removes effect records. A thread idle since the rotation holds values sealed under the old key for as long as
+  it exists. So **keep every retired key in the key source for good**, or until each thread that may hold its values
+  has been deleted (`forget`, `deleteThread`): a read of a row whose key is gone is `UnknownKey`, and `latest`,
+  `history`, `recover` and `resume` of that thread fail ([#3242](https://github.com/llm4s/llm4s/issues/3242)). There is no inventory of the key ids in use and no
+  rewrap yet.
 - **Switching it on over an existing store.** Rows written before are plaintext, and by default reading one is
   refused (`NotEncrypted`), so that nobody who can write to the database can swap a ciphertext for a plaintext. Pass
   `EncryptionSettings().withPlaintextReads(true)` to the wrappers while old rows remain - writes are encrypted
-  either way - and remove it once retention has pruned them.
+  either way. For the same reason as a retired key, retention does not remove the old rows of a thread that is not
+  written again, so the setting cannot be removed while any thread from before the switch exists; with it on, the
+  swap protection above does not hold. To have it from the start, switch encryption on over an empty store, or
+  delete the threads written before the switch first.
 - **Losing a key loses the data.** There is no recovery without it.
 
 A thread put back to an earlier state of itself by someone who can write to the database still opens: encryption
