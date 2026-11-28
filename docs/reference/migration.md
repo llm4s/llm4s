@@ -594,6 +594,18 @@ A custom `Checkpointer` should do the same. The new `CheckpointerContract` cases
 store that can make one thread's prune fail overrides `refuseDeletes`, and one whose sweep has a budget overrides
 `shortenSweepBudget`, so those cases run.
 
+## SQLite checkpoint events gain checkpoint IDs (#3088)
+
+SQLite schema 12 adds `checkpoint_id` to each event row and indexes `(thread_id, checkpoint_id, seq)` for retention.
+Opening a schema-11 file backfills IDs from decodable event records in batches. The batches bound memory, not lock
+duration: every batch runs in the store-opening write transaction, so other writers wait until the full backfill ends.
+An undecodable event no longer makes `prune` fail. Its `checkpoint_id` stays `NULL`; a schema-7-or-later row can be
+removed when a later retained event advances the checkpoint floor past it. For a pre-schema-7 row, the migration also
+has no commit time to fill, so its `NULL` commit time keeps it at the age-retention floor. The migration logs one
+summary warning with the number of undecodable rows. For decodable events from before schema 7, the producer timestamp
+fills the missing commit-time columns. A build that only knows schema 11 refuses a schema-12 file, so stop older
+processes before upgrading every process sharing the file.
+
 ## The Whisper engine writes into a temporary directory, and refuses subtitle formats (#3138)
 
 `llm4s-speech` is Beta. No signature changed; `WhisperSpeechToText` behaves differently:
@@ -4049,15 +4061,6 @@ A queued run can be cancelled from any machine, and a submission's `BusyThreadPo
 - **`Reject` also refuses a thread a direct run holds.** A `Reject` submission (the default) is refused with `GraphError.ThreadBusy` while a live claim holds the thread, not only while it has an open queue entry. Submit with `Enqueue` to wait behind the direct run instead.
 - **A new abstract `RunQueue` method.** `cancel(tenantId, target, reason)` closes an unstarted entry at once and asks a started one to stop; a custom queue implements it, answers the request with every lease it grants or renews (`Lease.stop`) and on `QueueEntry.stopRequest`, and passes `RunQueueContract`'s new cases.
 - **Schemas move on again.** SQLite schema 11 and PostgreSQL schema 5 add each queue entry's stop request. An older build refuses the new schema, so upgrade every process sharing a file or database together.
-
-### SQLite checkpoint events gain checkpoint IDs (#3088)
-
-SQLite schema 12 adds `checkpoint_id` to each event row and indexes `(thread_id, checkpoint_id, seq)` for retention.
-Opening a schema-11 file backfills IDs from decodable event records in bounded batches; an undecodable record is left
-without checkpoint metadata and does not prevent the file from opening. For events from before schema 7, the migration
-copies the producer timestamp into the commit-time columns that were added in schema 7, preserving their age-retention
-fallback. New commits write the checkpoint ID beside the JSON. A build that only knows schema 11 refuses a schema-12
-file, so stop older processes before upgrading every process sharing the file.
 
 ## A workspace container has no egress (#870)
 

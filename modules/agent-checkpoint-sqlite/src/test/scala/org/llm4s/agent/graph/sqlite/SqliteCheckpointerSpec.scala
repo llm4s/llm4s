@@ -541,7 +541,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         Commit(
           token,
           Some(checkpoint(thread, "c2", Some("c1"), token)),
-          events = Vector(event("e2").withCheckpointId(Some("c2")))
+          events = Vector(
+            event("e2").withCheckpointId(Some("c2")),
+            event("e2-later").withCheckpointId(Some("c2"))
+          )
         )
       )
       .value: Unit
@@ -558,7 +561,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     ) shouldBe 2L
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'retention-no-decode'")(
       _.getInt(1)
-    ) shouldBe 1
+    ) shouldBe 2
     scalar(db, "SELECT MIN(seq) FROM llm4s_checkpoint_events WHERE thread_id = 'retention-no-decode'")(
       _.getLong(1)
     ) shouldBe 2L
@@ -587,7 +590,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         Commit(
           token,
           Some(checkpoint(thread, "c2", Some("c1"), token)),
-          events = Vector(event("e2").withCheckpointId(Some("c2")))
+          events = Vector(
+            event("e2").withCheckpointId(Some("c2")),
+            event("e2-later").withCheckpointId(Some("c2"))
+          )
         )
       )
       .value: Unit
@@ -600,9 +606,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(
       db,
       "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 257"
-    )(
-      _.getString(1)
-    ) shouldBe "c1"
+    )(_.getString(1)) shouldBe "c1"
     scalar(
       db,
       "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
@@ -613,7 +617,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
     exec(
       db,
-      "UPDATE llm4s_checkpoint_events SET record_json = '{not json' WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
+      "UPDATE llm4s_checkpoint_events SET record_json = '{not json' WHERE thread_id = 'event-checkpoint-migration' AND seq IN (257, 258)"
     )
     asVersionEleven(db)
     val reopened = SqliteFiles.opened(db, clock)
@@ -621,13 +625,19 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(
       db,
       "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 257"
-    )(
-      _.getString(1)
-    ) shouldBe "c1"
+    )(rows => Option(rows.getString(1))) shouldBe None
     scalar(
       db,
       "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 258"
     )(rows => Option(rows.getString(1))) shouldBe None
+    scalar(
+      db,
+      "SELECT checkpoint_id FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND seq = 259"
+    )(_.getString(1)) shouldBe "c2"
+    scalar(
+      db,
+      "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration' AND checkpoint_id IS NULL"
+    )(_.getInt(1)) shouldBe 2
     val checkpointPlan = plan(
       db,
       (
@@ -638,6 +648,77 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     checkpointPlan.exists(_.contains("llm4s_checkpoint_events_checkpoint")) shouldBe true
     reopened.prune(thread, RetentionPolicy().withMaxCheckpoints(1)).value
     reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration'")(
+      _.getInt(1)
+    ) shouldBe 1
+    scalar(db, "SELECT MIN(seq) FROM llm4s_checkpoint_events WHERE thread_id = 'event-checkpoint-migration'")(
+      _.getLong(1)
+    ) shouldBe 259L
+    reopened.close()
+  }
+
+  "A version-11 file" should "backfill a large single-thread log with a primary-key row cursor" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val store  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("large-event-checkpoint-migration")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store.close()
+
+    val eventCount = 200_000
+    val draft      = event("large-log").withCheckpointId(Some("c1"))
+    val cursorPlan = plan(
+      db,
+      (
+        SqliteSchema.eventBackfillBatchSql(hasCursor = true),
+        Vector(thread.value, 100_000L)
+      )
+    )
+    val cursorSeek = cursorPlan.find(_.contains("SEARCH llm4s_checkpoint_events USING PRIMARY KEY")).value
+    cursorSeek should include("thread_id")
+    cursorSeek should include("seq")
+
+    Using.resource(jdbc(db)) { connection =>
+      connection.setAutoCommit(false)
+      Using.resource(
+        connection.prepareStatement(
+          """INSERT INTO llm4s_checkpoint_events
+            |(thread_id, seq, checkpoint_id, record_json, committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+        )
+      ) { insert =>
+        (1 to eventCount).foreach { seq =>
+          insert.setString(1, thread.value)
+          insert.setLong(2, seq.toLong)
+          insert.setString(3, "c1")
+          insert.setString(
+            4,
+            upickle.default.write(EventRecord.committed(thread.value, seq.toLong, token, draft))
+          )
+          insert.setLong(5, start.getEpochSecond)
+          insert.setLong(6, start.getNano.toLong)
+          insert.addBatch()
+          if seq % 1000 == 0 then insert.executeBatch(): Unit
+        }
+        insert.executeBatch(): Unit
+      }
+      connection.commit()
+    }
+
+    asVersionEleven(db)
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'large-event-checkpoint-migration'")(
+      _.getInt(1)
+    ) shouldBe eventCount
+    scalar(
+      db,
+      "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'large-event-checkpoint-migration' AND checkpoint_id = 'c1'"
+    )(
+      _.getInt(1)
+    ) shouldBe eventCount
+    scalar(db, "SELECT MAX(seq) FROM llm4s_checkpoint_events WHERE thread_id = 'large-event-checkpoint-migration'")(
+      _.getLong(1)
+    ) shouldBe eventCount.toLong
     reopened.close()
   }
 

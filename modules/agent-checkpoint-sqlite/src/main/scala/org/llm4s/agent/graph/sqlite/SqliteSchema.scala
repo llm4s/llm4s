@@ -73,6 +73,13 @@ private[sqlite] object SqliteSchema:
     11 -> addEventCheckpointIds
   )
 
+  private val eventBackfillBatchSize = 256
+
+  private[sqlite] def eventBackfillBatchSql(hasCursor: Boolean): String =
+    val cursor = if hasCursor then "WHERE (thread_id, seq) > (?, ?)" else ""
+    s"""SELECT thread_id, seq, record_json FROM llm4s_checkpoint_events $cursor
+       |ORDER BY thread_id, seq LIMIT $eventBackfillBatchSize""".stripMargin
+
   /**
    * Version 9: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_nanos`, when
    * the store last deleted a thread of the id (epoch nanoseconds by the store's clock), which a sweep judges a
@@ -136,6 +143,7 @@ private[sqlite] object SqliteSchema:
   /**
    * Version 12: events carry their checkpoint id for indexed retention. Decodable legacy events are backfilled in
    * bounded batches; their producer timestamp fills the commit-time columns only when those columns were absent.
+   * Batches bound memory, but all of them still run in the store-opening write transaction.
    */
   private def addEventCheckpointIds(connection: Connection): Unit =
     statements(connection, "ALTER TABLE llm4s_checkpoint_events ADD COLUMN checkpoint_id TEXT")
@@ -146,19 +154,16 @@ private[sqlite] object SqliteSchema:
           |WHERE thread_id = ? AND seq = ?""".stripMargin
       )
     ) { backfill =>
-      var after = Option.empty[(String, Long)]
-      var done  = false
+      var after           = Option.empty[(String, Long)]
+      var done            = false
+      var undecodableRows = 0L
       while !done do
-        val cursor = after.fold("")(_ => "WHERE thread_id > ? OR (thread_id = ? AND seq > ?)")
         val rows = Using.resource(
-          connection.prepareStatement(
-            s"SELECT thread_id, seq, record_json FROM llm4s_checkpoint_events $cursor ORDER BY thread_id, seq LIMIT 256"
-          )
+          connection.prepareStatement(eventBackfillBatchSql(after.isDefined))
         ) { select =>
           after.foreach { (thread, seq) =>
             select.setString(1, thread)
-            select.setString(2, thread)
-            select.setLong(3, seq)
+            select.setLong(2, seq)
           }
           Using.resource(select.executeQuery()) { result =>
             val batch = Vector.newBuilder[(String, Long, String)]
@@ -176,14 +181,15 @@ private[sqlite] object SqliteSchema:
               backfill.setLong(5, seq)
               backfill.executeUpdate(): Unit
             case None =>
-              logger.warn(
-                "Event {}/{} cannot be decoded during checkpoint-id migration; leaving metadata unset",
-                thread,
-                seq
-              )
+              undecodableRows += 1L
         }
         after = rows.lastOption.map { case (thread, seq, _) => thread -> seq }
         done = rows.isEmpty
+      if undecodableRows > 0 then
+        logger.warn(
+          "Skipped checkpoint metadata for {} undecodable event rows during schema-12 migration",
+          Long.box(undecodableRows)
+        )
     }
     statements(
       connection,

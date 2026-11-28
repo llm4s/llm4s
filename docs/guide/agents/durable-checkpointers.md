@@ -499,7 +499,11 @@ from each thread's latest checkpoint when a version-7 file is opened; version 9 
 [Sweeping the whole store](#sweeping-the-whole-store)), dating tombstones a version-8 file holds from the upgrade;
 version 10 adds run-queue tables and run IDs on history rows; version 11 adds queue stop requests; and version 12 adds
 event checkpoint IDs and an index used by retention. During the version-12 migration, decodable events are backfilled
-in batches; for a row from before version 7, its producer timestamp fills the missing commit-time columns. A claim a
+in batches. Those batches bound memory, not lock duration: all of them run in the store-opening write transaction, so
+other writers wait until the full backfill ends. An undecodable event no longer makes `prune` fail. Its checkpoint ID
+stays `NULL`; a schema-7-or-later row can be removed when a later retained event advances the checkpoint floor past it.
+For a pre-schema-7 row, the commit time also stays `NULL`, so age retention keeps it at the floor. For decodable events
+from before schema 7, the producer timestamp fills the missing commit-time columns. A claim a
 version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
