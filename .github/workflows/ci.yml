@@ -1744,7 +1744,8 @@ jobs:
       - name: Run performance tests
         env:
           SELECTED: ${{ needs.changes.outputs.performance_modules }}
-        run: sbt "testPerformance${SELECTED:+ $SELECTED}"
+        run: |
+          if [ -n "$SELECTED" ]; then sbt "testPerformanceOnly $SELECTED"; else sbt testPerformance; fi
 
       - name: Upload test reports
         if: failure()

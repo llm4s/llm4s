@@ -396,6 +396,11 @@ owncase 'this repo: an image change runs image, and it'"'"'s vision-client suite
   '(w & %w[image it]).size == 2' "touchp modules/image/src/main/scala/org/llm4s/imageprocessing/X.scala"
 owncase 'this repo: a listed core source runs core'"'"'s suites, and it'"'"'s because it reaches image' \
   '(w & %w[core image it rag]).size == 4' "touchp modules/core/src/main/scala/org/llm4s/util/PrivateSqliteFile.scala"
+owncase 'this repo: a listed it suite runs it on Windows (its own file, despite WINDOWS_VIA)' \
+  'kv["windows"] == "true" && w == %w[it]' \
+  "touchp modules/it/src/test/scala/org/llm4s/imageprocessing/provider/OpenAIVisionClientTest.scala"
+owncase 'this repo: another it suite does not start Windows' 'kv["windows"] == "false"' \
+  "touchp modules/it/src/test/scala/org/llm4s/imageprocessing/provider/GeminiVisionClientTest.scala"
 owncase 'this repo: an agent-tools change runs agentTools on Windows, and no consumer, Spring or performance job' \
   'w.include?("agentTools") && kv["consumers"] == "false" && kv["spring"] == "false" && kv["performance"] == "false"' \
   "touchp modules/agent-tools/src/main/scala/org/llm4s/toolapi/builtin/X.scala"

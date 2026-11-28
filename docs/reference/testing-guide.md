@@ -229,7 +229,7 @@ cost - most of each CI test job's time - without adding a signal. `sbt testPerfo
 the tagged tests, in the modules that have them (`performanceTestProjects` in `build.sbt`: core and agent;
 `scripts/check-performance-tests.sh` fails Quick Checks when a test elsewhere uses the tag); CI runs it in the ubuntu-only `Performance tests` job, in parallel with
 the other test jobs, on a pull request whose change reaches core's or agent's tests, or that changes the build
-(`scripts/ci-changes.sh`), and in CI's nightly run on main. `sbt "testPerformance agent"` runs only the named
+(`scripts/ci-changes.sh`), and in CI's nightly run on main. `sbt "testPerformanceOnly agent"` runs only the named
 projects' tagged tests, as that job does for the ones a pull request reaches.
 `sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
 exclusion applies to `test`, not to a suite named explicitly.

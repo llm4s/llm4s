@@ -168,7 +168,8 @@ CONSUMER_PATHS=(
 # Spring AI: those projects' own tests.
 SPRING_ROOTS='springBootStarter springBootStarterBoot4 springAi'
 # PlatformTests projects whose named suites test another project's code, which the graph cannot see: `<project>
-# <the project they test>`. Windows runs such a project's entries only when the change reaches the tested project.
+# <the project they test>`. Windows runs such a project's entries only when the change reaches the tested project, or
+# touches a file of the project itself (a listed suite, its own sources).
 # `it` depends on nearly every module, so the graph alone would compile its tests on Windows for almost any change,
 # while its two listed suites (the vision clients' file encoding) test image.
 WINDOWS_VIA='it:image'
@@ -356,7 +357,8 @@ if decide
   else
     wsel, why = trace.(wfiles)
     via = ENV["WINDOWS_VIA"].to_s.split.to_h { |e| e.split(":", 2) }
-    hit = why ? [] : platform.select { |m| wsel.key?(m) && (!via.key?(m) || wsel.key?(via[m])) }
+    own = ->(m) { wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m } }
+    hit = why ? [] : platform.select { |m| wsel.key?(m) && (!via.key?(m) || wsel.key?(via[m]) || own.(m)) }
     if why
       say.("windows", true, why)
       puts "windows_modules="
