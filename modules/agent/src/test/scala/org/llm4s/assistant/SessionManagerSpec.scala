@@ -1,5 +1,8 @@
 package org.llm4s.assistant
 
+import scala.util.Using
+import scala.util.chaining.scalaUtilChainingOps
+
 import org.llm4s.testutil.TestTimeLimit
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -19,7 +22,12 @@ import scala.util.Try
  * Tests session save/load operations using temporary directories
  * to avoid file system side effects.
  */
-class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterEach {
+class SessionManagerSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with BeforeAndAfterEach
+    with org.scalatest.EitherValues {
 
   private var tempDir: Path = _
 
@@ -114,11 +122,128 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
       uniqueSuffix = () => { calls += 1; s"stub-$calls" }
     )
 
-    manager.saveSession(createTestState("s1"), Some("Same Title"))
-    manager.saveSession(createTestState("s2"), Some("Same Title"))
+    manager.saveSession(createTestState("s1"), Some("Same Title"), overwrite = false)
+    val second = manager.saveSession(createTestState("s2"), Some("Same Title"), overwrite = false)
 
     calls shouldBe 1
     Files.exists(tempDir.resolve("Same_Title-stub-1.json")) shouldBe true
+    // the name it reports is one loadSession finds
+    second.map(_.title) shouldBe Right("Same Title-stub-1")
+    manager.loadSession("Same Title-stub-1").map(_.sessionId.value) shouldBe Right("s2")
+  }
+
+  it should "replace an earlier save under the same title, so loading it restores the latest (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-overwrite")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    manager.saveSession(createTestState("first"), Some("notes")).map(_.title) shouldBe Right("notes")
+    manager.saveSession(createTestState("second"), Some("notes")).map(_.title) shouldBe Right("notes")
+    manager.loadSession("notes").map(_.sessionId.value) shouldBe Right("second")
+    Using.resource(Files.list(dir))(_.toArray.length) shouldBe 2 // notes.json and notes.md, no temporary file left
+  }
+
+  it should "keep titles in other scripts apart, and never name a file by a dot, nothing or a device (#3277)" in {
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
+    manager.sanitizeFilename("日本語") should not be manager.sanitizeFilename("中文版")
+    manager.sanitizeFilename("日本語") shouldBe "日本語"
+    manager.sanitizeFilename("") shouldBe "_"
+    manager.sanitizeFilename("..") shouldBe "_.."
+    manager.sanitizeFilename("CON") shouldBe "_CON"
+    manager.sanitizeFilename("con.txt") shouldBe "_con.txt"
+    manager.sanitizeFilename("a/b:c") shouldBe "a_b_c"
+  }
+
+  it should "load a session a release before #3277 saved under its ASCII-only name" in {
+    val dir     = Files.createTempDirectory("sessions-legacy")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    // the format before #3277: no stored title, the name with every non-ASCII character as `_`
+    manager.saveSession(createTestState("legacy"), Some("___"))
+    val json = dir.resolve("___.json")
+    Files.writeString(json, ujson.write(ujson.read(Files.readString(json)).obj.tap(_.remove("title"))))
+    manager.loadSession("日本語").map(_.sessionId.value) shouldBe Right("legacy")
+  }
+
+  it should "load every title a save returns or the listing shows, for titles of 1 to 60 characters (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-roundtrip")
+    var n       = 0
+    val manager = new SessionManager(DirectoryPath(dir.toString), uniqueSuffix = () => { n += 1; s"s$n" })
+    val saved   = scala.collection.mutable.Map.empty[String, String] // title -> session id last saved under it
+    for {
+      length <- 1 to 60
+      stem = "t" * (length - 1)
+      title     <- Seq(stem + "/", stem + ":", stem + "é") // three titles that sanitise alike, or nearly
+      overwrite <- Seq(true, false)
+    } {
+      val id       = s"$title|$overwrite"
+      val returned = manager.saveSession(createTestState(id), Some(title), overwrite).map(_.title).value
+      saved(returned) = id
+      withClue(s"'$returned' (length $length, overwrite $overwrite)") {
+        manager.loadSession(returned).map(_.sessionId.value) shouldBe Right(id)
+      }
+    }
+    saved.foreach { case (title, id) =>
+      withClue(title)(manager.loadSession(title).map(_.sessionId.value) shouldBe Right(id))
+    }
+    manager.listRecentSessions(Int.MaxValue).value.foreach { listed =>
+      withClue(listed)(manager.loadSession(listed).isRight shouldBe true)
+    }
+  }
+
+  it should "load every session the listing shows that a release before #3277 saved, however long its name" in {
+    val dir     = Files.createTempDirectory("sessions-legacy-list")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    // the format before #3277: no stored title, and a collision suffix after the 50-character name
+    Seq("y" * 50 + "-1234567890", "Untitled_Session").foreach { name =>
+      manager.saveSession(createTestState(name), Some("tmp-" + name.length))
+      val json = dir.resolve("tmp-" + name.length + ".json")
+      Files.writeString(
+        dir.resolve(s"$name.json"),
+        ujson.write(ujson.read(Files.readString(json)).obj.tap(_.remove("title")))
+      )
+      Files.delete(json)
+      Files.delete(dir.resolve("tmp-" + name.length + ".md"))
+    }
+    manager.listRecentSessions(10).value.foreach { listed =>
+      withClue(listed)(manager.loadSession(listed).map(_.sessionId.value) shouldBe Right(listed))
+    }
+  }
+
+  it should "never replace a save of a different title whose file name is the same (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-collide")
+    var n       = 0
+    val manager = new SessionManager(DirectoryPath(dir.toString), uniqueSuffix = () => { n += 1; s"s$n" })
+    manager.saveSession(createTestState("slash"), Some("project/a")).map(_.title) shouldBe Right("project/a")
+    manager.saveSession(createTestState("colon"), Some("project:a")).map(_.title) shouldBe Right("project:a")
+    manager.loadSession("project/a").map(_.sessionId.value) shouldBe Right("slash")
+    manager.loadSession("project:a").map(_.sessionId.value) shouldBe Right("colon")
+    // a save of the same title still replaces its own file, whichever name it has
+    manager.saveSession(createTestState("colon-2"), Some("project:a"))
+    manager.loadSession("project:a").map(_.sessionId.value) shouldBe Right("colon-2")
+    manager.loadSession("project/a").map(_.sessionId.value) shouldBe Right("slash")
+    // titles that agree in their first 50 sanitised characters
+    val prefix = "x" * 50
+    manager.saveSession(createTestState("one"), Some(prefix + "one"))
+    manager.saveSession(createTestState("two"), Some(prefix + "two"))
+    manager.loadSession(prefix + "one").map(_.sessionId.value) shouldBe Right("one")
+    manager.loadSession(prefix + "two").map(_.sessionId.value) shouldBe Right("two")
+    // a suffixed title the sanitised name cuts differently is still found by the title the save reported
+    val long = "y" * 49
+    manager.saveSession(createTestState("first"), Some(long), overwrite = false)
+    val second = manager.saveSession(createTestState("second"), Some(long), overwrite = false).map(_.title)
+    second.flatMap(manager.loadSession).map(_.sessionId.value) shouldBe Right("second")
+    manager.loadSession(long).map(_.sessionId.value) shouldBe Right("first")
+    manager.listRecentSessions(10).map(_.toSet -- Set(long) -- second.toOption) shouldBe Right(
+      Set("project/a", "project:a", prefix + "one", prefix + "two")
+    )
+  }
+
+  it should "write the session files owner-only where the file system has POSIX permissions" in {
+    val dir = Files.createTempDirectory("sessions-private")
+    assume(dir.getFileSystem.supportedFileAttributeViews.contains("posix"), "POSIX permissions")
+    new SessionManager(DirectoryPath(dir.toString)).saveSession(createTestState("p"), Some("private"))
+    Seq("private.json", "private.md").foreach { name =>
+      java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(dir.resolve(name))) shouldBe
+        "rw-------"
+    }
   }
 
   // ==========================================================================

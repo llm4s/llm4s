@@ -93,6 +93,7 @@ object JSONTool {
         result <- processJSON(operation, json, pathOpt).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Pure))
 
   private def processJSON(
     operation: String,

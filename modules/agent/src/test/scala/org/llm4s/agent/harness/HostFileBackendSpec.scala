@@ -568,6 +568,39 @@ class HostFileBackendSpec
     message should include("does not show")
   }
 
+  it should "never show or touch an excluded path, and refuse changes beneath a read-only one (#3273)" in {
+    Files.createDirectories(dir.resolve(".git/hooks"))
+    Files.writeString(dir.resolve(".git/hooks/pre-commit"), "original")
+    Files.writeString(dir.resolve(".env"), "TOKEN=secret")
+    Files.writeString(dir.resolve("src.txt"), "code")
+    Option(backend).foreach(_.close())
+    val guarded = HostFileBackend
+      .openWith(
+        dir,
+        locks,
+        allowUncheckedIdentity = !posix,
+        probe = defaultProbe,
+        excluded = Seq(p("/.env")),
+        readOnly = Seq(p("/.git"))
+      )
+      .left
+      .map(e => fail(e.message))
+      .merge
+    backend = guarded
+    guarded.read(p("/.env"), 0, 10, call()).left.value.message should include("excluded")
+    guarded.read(p("/.ENV"), 0, 10, call()).left.value.message should include("excluded")
+    guarded.write(p("/.env"), "x", call()).left.value.message should include("excluded")
+    guarded.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/.git"), p("/src.txt"))
+    guarded.grep("secret", VPath.root, None, 10, call()).value.items shouldBe empty
+    guarded.read(p("/.git/hooks/pre-commit"), 0, 10, call()).value.lines shouldBe Vector("original")
+    guarded.write(p("/.git/hooks/pre-commit"), "evil", call()).left.value.message should include("read-only")
+    guarded.edit(p("/.git/hooks/pre-commit"), "original", "evil", replaceAll = false, call()).left.value.message should
+      include("read-only")
+    guarded.delete(p("/.git/hooks/pre-commit"), call()).left.value.message should include("read-only")
+    onDisk(".git/hooks/pre-commit") shouldBe "original"
+    written(guarded.write(p("/src.txt"), "changed", call()))
+  }
+
   it should "refuse every symbolic link, inside the root or out, at any component" in {
     assume(posix)
     val outside = Files.createTempDirectory("llm4s-outside")

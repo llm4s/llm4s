@@ -20,8 +20,9 @@ import scala.concurrent.duration.*
  *                        comparison, never when matching a subdomain.
  * @param blockedDomains List of domains that are always blocked. A leading `www.` and trailing dots are ignored, so `example.com.` is blocked with `example.com`.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
- * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
- *                        result's `truncated` is `true`.
+ * @param maxResponseSize Maximum number of response body bytes read (default 1 MiB); the rest is never read, and
+ *                        the result's `truncated` is `true`. The tool hands the model at most `maxResultChars`
+ *                        characters of the body ([[HTTPTool.createSafe]]), whatever this allows.
  * @param timeout Deadline for the whole call: connecting, every redirect hop and reading the body must all finish
  *                within it (the SSRF check's name resolution too), so a server that sends slowly cannot hold the
  *                call longer. A call that runs out of time fails with a `TIMEOUT:` error. A zero or negative timeout
@@ -49,7 +50,7 @@ case class HttpConfig(
   allowedDomains: Option[Seq[String]] = None,
   blockedDomains: Seq[String] = HttpConfig.DefaultBlockedDomains,
   blockInternalIPs: Boolean = true,
-  maxResponseSize: Long = 10 * 1024 * 1024, // 10 MB
+  maxResponseSize: Long = 1024 * 1024, // 1 MiB (#3273)
   timeout: FiniteDuration = 30.seconds,
   followRedirects: Boolean = false, // Secure default: redirects are followed only when explicitly opted-in.
   maxRedirects: Int = 5,

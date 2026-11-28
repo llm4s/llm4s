@@ -327,6 +327,10 @@ object BraveSearchTool {
         )
       } yield result
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints
+          .register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyNetwork)
+      )
 
   /**
    * Create a Brave search tool with explicit API key and optional overrides.

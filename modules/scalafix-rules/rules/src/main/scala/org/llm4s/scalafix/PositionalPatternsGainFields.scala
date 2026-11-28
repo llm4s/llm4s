@@ -61,16 +61,17 @@ object PositionalPatternsGainFields {
    * them since removed, so a pattern on it is not widened by a `_`.
    */
   private val current: Map[String, Int] = Map(
-    "org/llm4s/llmconnect/config/OpenAIConfig"           -> 14,
-    "org/llm4s/model/ModelMetadata"                      -> 9,
-    "org/llm4s/agent/memory/MemoryBounds"                -> 3,
-    "org/llm4s/agent/memory/PostgresMemoryStore.Config"  -> 9,
-    "org/llm4s/agent/memory/ConsolidationConfig"         -> 3,
-    "org/llm4s/agent/harness/memory/MemoryRecall"        -> 4,
-    "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 3,
-    "org/llm4s/rag/RAGConfig"                            -> 29,
-    "org/llm4s/toolapi/builtin/filesystem/FileConfig"    -> 6,
-    "org/llm4s/toolapi/builtin/filesystem/WriteConfig"   -> 5
+    "org/llm4s/llmconnect/config/OpenAIConfig"            -> 14,
+    "org/llm4s/model/ModelMetadata"                       -> 9,
+    "org/llm4s/agent/memory/MemoryBounds"                 -> 3,
+    "org/llm4s/agent/memory/PostgresMemoryStore.Config"   -> 9,
+    "org/llm4s/agent/memory/ConsolidationConfig"          -> 3,
+    "org/llm4s/agent/harness/memory/MemoryRecall"         -> 4,
+    "org/llm4s/agent/harness/memory/MemoryConsolidation"  -> 3,
+    "org/llm4s/rag/RAGConfig"                             -> 29,
+    "org/llm4s/toolapi/builtin/filesystem/FileConfig"     -> 6,
+    "org/llm4s/toolapi/builtin/filesystem/WriteConfig"    -> 5,
+    "org/llm4s/toolapi/builtin/filesystem/ReadFileResult" -> 6
   )
 
   /** `old` (a type's arity in some release) as `(old, current)` pairs. */
@@ -147,16 +148,17 @@ object PositionalPatternsGainFields {
    */
   val arity10: Map[String, (Int, Int)] = toCurrent(
     Map(
-      "org/llm4s/llmconnect/config/OpenAIConfig"           -> 11,
-      "org/llm4s/model/ModelMetadata"                      -> 8,
-      "org/llm4s/agent/memory/MemoryBounds"                -> 2,
-      "org/llm4s/agent/memory/PostgresMemoryStore.Config"  -> 7,
-      "org/llm4s/agent/memory/ConsolidationConfig"         -> 2,
-      "org/llm4s/agent/harness/memory/MemoryRecall"        -> 2,
-      "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 2,
-      "org/llm4s/rag/RAGConfig"                            -> 28,
-      "org/llm4s/toolapi/builtin/filesystem/FileConfig"    -> 4,
-      "org/llm4s/toolapi/builtin/filesystem/WriteConfig"   -> 4
+      "org/llm4s/llmconnect/config/OpenAIConfig"            -> 11,
+      "org/llm4s/model/ModelMetadata"                       -> 8,
+      "org/llm4s/agent/memory/MemoryBounds"                 -> 2,
+      "org/llm4s/agent/memory/PostgresMemoryStore.Config"   -> 7,
+      "org/llm4s/agent/memory/ConsolidationConfig"          -> 2,
+      "org/llm4s/agent/harness/memory/MemoryRecall"         -> 2,
+      "org/llm4s/agent/harness/memory/MemoryConsolidation"  -> 2,
+      "org/llm4s/rag/RAGConfig"                             -> 28,
+      "org/llm4s/toolapi/builtin/filesystem/FileConfig"     -> 4,
+      "org/llm4s/toolapi/builtin/filesystem/WriteConfig"    -> 4,
+      "org/llm4s/toolapi/builtin/filesystem/ReadFileResult" -> 5
     )
   )
 

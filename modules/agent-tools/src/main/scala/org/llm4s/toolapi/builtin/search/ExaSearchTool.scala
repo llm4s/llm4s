@@ -374,6 +374,10 @@ object ExaSearchTool {
           )
         } yield result
       }.build()
+        .map(
+          org.llm4s.toolapi.builtin.BuiltinToolHints
+            .register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyNetwork)
+        )
     } yield tool
 
   /**

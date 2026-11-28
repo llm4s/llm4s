@@ -21,10 +21,10 @@ import org.llm4s.types.Result
  * import org.llm4s.toolapi.ToolRegistry
  * import org.llm4s.toolapi.builtin.BuiltinTools
  *
- * // Safe tools for production use
+ * // Safe tools for production use; `BuiltinTools.registry` also reports each tool's hints (read-only, ...)
  * for {
  *   tools <- BuiltinTools.withHttpSafe()
- *   registry <- ToolRegistry.of(tools)
+ *   registry <- BuiltinTools.registry(tools)
  * } yield registry
  *
  * // Development tools with file and shell access
@@ -37,6 +37,25 @@ import org.llm4s.types.Result
  * }}}
  */
 object BuiltinTools {
+
+  /**
+   * The most characters of one result the built-in tools hand the model by default: an HTTP body and a read file
+   * are cut there and marked `truncated`, and a shell command keeps half as many of stdout and of stderr each. As much
+   * as one result of the harness file tools; a larger one would crowd the context or exceed it (#3273).
+   */
+  val DefaultMaxResultChars: Int = 40000
+
+  /**
+   * A registry of `tools` that reports the [[org.llm4s.toolapi.ToolHints]] of each built-in tool among them, as built
+   * by its factory with its configuration ([[org.llm4s.toolapi.ToolHintSource]]): read-only for the core utilities,
+   * the read-only file tools, the search tools and an `http_request` limited to safe methods. `AgentBuilder.withTools`
+   * gives them to the agent, so `ApprovalMiddleware.unlessReadOnly` asks only for the tools that change something.
+   * A tool not built by a built-in factory keeps the conservative `ToolHints.default`, whatever its name (#3273).
+   *
+   * @return `Left(ValidationError)` naming every tool name that appears more than once, as `ToolRegistry.of`
+   */
+  def registry(tools: Seq[ToolFunction[_]]): Result[org.llm4s.toolapi.ToolRegistry] =
+    org.llm4s.toolapi.ToolRegistry.of(tools).map(new BuiltinToolHints.HintedRegistry(_))
 
   /**
    * Core utility tools (always safe, no external dependencies),

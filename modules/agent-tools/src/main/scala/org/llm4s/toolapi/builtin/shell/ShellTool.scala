@@ -136,6 +136,7 @@ object ShellTool {
         result  <- executeCommand(command, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Shell))
 
   private def executeCommand(
     command: String,
@@ -292,7 +293,9 @@ object ShellTool {
    * arguments as UTF-16, so an argument, the working directory or an environment value holding such a character is
    * refused, whatever the program and with or without a path policy (see [[WindowsBestFit]]). On a double-byte ANSI
    * host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it holds a character
-   * whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote (#1807).
+   * whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote (#1807). An
+   * argument holding `"` is refused on every Windows host, since the JDK does not escape it and the program splits
+   * it into several arguments the checks never saw (#3271).
    */
   private def bestFitRefusal(args: Seq[String], config: ShellConfig, ansiCodePage: Option[Charset]): Option[String] =
     args.iterator
@@ -300,6 +303,7 @@ object ShellTool {
         WindowsBestFit
           .refusal(arg, WindowsBestFit.isOptionLike(arg), ansiCodePage)
           .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
+          .orElse(doubleQuoteRefusal(arg))
           .map(why => s"Argument '$arg' is not allowed on Windows: it holds $why")
       )
       .nextOption()
@@ -319,6 +323,20 @@ object ShellTool {
           }
           .nextOption()
       )
+
+  /**
+   * Why `arg` may not be passed on Windows because it holds a double quote, or `None` (#3271). The JDK hands a child
+   * one command-line string, and in its default legacy mode wraps an argument that needs quoting in quotes without
+   * escaping the ones inside: `x" /O "C:\out.txt` reaches `sort.exe` as `"x" /O "C:\out.txt"`, which the child's
+   * parser (`CommandLineToArgvW` or the C runtime's) splits into three arguments, one of them `/O`. Every check here
+   * saw one operand, so an argument that holds `"` is refused, whatever the program and with or without a path
+   * policy (a path policy refuses it anyway: `"` is not valid in a Windows path).
+   */
+  private def doubleQuoteRefusal(arg: String): Option[String] =
+    Option.when(arg.indexOf('"') >= 0)(
+      "a double quote ('\"'), which the program may read as ending the argument, so the one argument the checks " +
+        "saw could reach it as several"
+    )
 
   /**
    * Every argument that looks like a flag, `--` or not before it. A `--` does not reliably end the options: when it

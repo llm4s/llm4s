@@ -22,24 +22,35 @@ private[assistant] object Command {
   case object Sessions           extends Command
   case object Quit               extends Command
 
+  /** The title `/save` uses when it is given none. */
+  val DefaultSaveTitle: String = "Saved Session"
+
+  /**
+   * The command `input` names. Only the command word is matched without regard to case (`/LOAD`); a title keeps
+   * its case, so `/load MyChat` finds the session `/save MyChat` wrote on a case-sensitive file system (#3277).
+   */
   def parse(input: String): Either[AssistantError, Command] =
-    input.toLowerCase.split("\\s+").toList match {
-      case "/help" :: _ => Right(Help)
-      case "/new" :: _  => Right(New)
-      case "/save" :: titleParts =>
-        val cleanTitle = titleParts.mkString(" ").trim
-        val finalTitle = if (cleanTitle.nonEmpty) cleanTitle else "Saved Session"
-        Right(Save(finalTitle))
-      case "/load" :: titleParts =>
-        val cleanTitle = titleParts.mkString(" ").trim.stripPrefix("\"").stripSuffix("\"")
-        if (cleanTitle.nonEmpty) {
-          Right(Load(cleanTitle))
-        } else {
-          Left(AssistantError.emptyCommandTitle("/load"))
+    input.trim.split("\\s+").toList match {
+      case Nil => Left(AssistantError.unknownCommand(input))
+      case word :: titleParts =>
+        word.toLowerCase(java.util.Locale.ROOT) :: titleParts match {
+          case "/help" :: _ => Right(Help)
+          case "/new" :: _  => Right(New)
+          case "/save" :: titleParts =>
+            val cleanTitle = titleParts.mkString(" ").trim
+            val finalTitle = if (cleanTitle.nonEmpty) cleanTitle else DefaultSaveTitle
+            Right(Save(finalTitle))
+          case "/load" :: titleParts =>
+            val cleanTitle = titleParts.mkString(" ").trim.stripPrefix("\"").stripSuffix("\"")
+            if (cleanTitle.nonEmpty) {
+              Right(Load(cleanTitle))
+            } else {
+              Left(AssistantError.emptyCommandTitle("/load"))
+            }
+          case "/sessions" :: _ => Right(Sessions)
+          case "/quit" :: _     => Right(Quit)
+          case _                => Left(AssistantError.unknownCommand(input))
         }
-      case "/sessions" :: _ => Right(Sessions)
-      case "/quit" :: _     => Right(Quit)
-      case _                => Left(AssistantError.unknownCommand(input))
     }
 }
 
@@ -94,8 +105,8 @@ class AssistantAgent(
             }
 
             displayResult.flatMap { _ =>
-              // Check if user wants to quit
-              if (input.trim.toLowerCase == "/quit") {
+              // the parsed command decides, so `/QUIT` and `/quit now` end the loop as `/quit` does (#3277)
+              if (isQuit(input)) {
                 Right(())
               } else {
                 loop(newState)
@@ -107,6 +118,10 @@ class AssistantAgent(
 
     loop(initialState)
   }
+
+  /** Whether `input` is the `/quit` command, in any case and with anything after it. */
+  private[assistant] def isQuit(input: String): Boolean =
+    input.trim.startsWith("/") && Command.parse(input).contains(Command.Quit)
 
   /**
    * Processes user input - either a command or a query for the agent
@@ -171,7 +186,10 @@ class AssistantAgent(
         handleNewSessionCommand(state)
 
       case Command.Save(title) =>
-        sessionManager.saveSession(state, Some(title)).map(_ => (state, s"Session saved as: $title"))
+        // a title the user typed replaces its earlier save, so `/load title` restores this one (#3277)
+        sessionManager
+          .saveSession(state, Some(title), overwrite = title != Command.DefaultSaveTitle)
+          .map(info => (state, s"Session saved as: ${info.title}"))
 
       case Command.Load(title) =>
         handleLoadSessionCommand(title, state)
@@ -193,14 +211,39 @@ class AssistantAgent(
    * Prompts user and gets clean session name with default
    */
   private def getSessionNameWithDefault(): Either[AssistantError, String] =
-    promptForSessionName("Enter a name for the current session (or press Enter for 'Untitled Session'): ")
-      .map(name => if (name.trim.nonEmpty) name.trim else "Untitled Session")
+    promptForSessionName(s"Enter a name for the current session (or press Enter for '$UntitledTitle'): ")
+      .map(name => if (name.trim.nonEmpty) name.trim else UntitledTitle)
+
+  private val UntitledTitle  = "Untitled Session"
+  private val AutoSavedTitle = "Auto-saved Session"
 
   /**
-   * Saves current session with given title
+   * Saves the current session under `title` and returns the name it was saved as: a name the user chose replaces
+   * its earlier save, a default one (`Untitled Session`, `Auto-saved Session`) never does, so it may gain a suffix.
    */
-  private def saveCurrentSession(state: SessionState, title: String): Either[AssistantError, Unit] =
-    sessionManager.saveSession(state, Some(title)).map(_ => ())
+  private def saveCurrentSession(state: SessionState, title: String): Either[AssistantError, String] =
+    sessionManager
+      .saveSession(state, Some(title), overwrite = title != UntitledTitle && title != AutoSavedTitle)
+      .map(_.title)
+
+  /**
+   * Saves the session before `action` (`Quit`, `Start a new session`), or, when the save fails, asks whether to go on
+   * without it: `Some(name)` when saved, `None` when the user chose to discard it, the save's error otherwise. So a
+   * session dir that cannot be written does not trap the user in the loop (#3277).
+   */
+  private def savedOrDiscarded(
+    state: SessionState,
+    title: String,
+    action: String
+  ): Either[AssistantError, Option[String]] =
+    saveCurrentSession(state, title) match {
+      case Right(name) => Right(Some(name))
+      case Left(error) =>
+        promptForSessionName(s"The session could not be saved: ${error.message}\n$action without saving it? (y/N): ")
+          .flatMap(answer =>
+            if (Set("y", "yes").contains(answer.trim.toLowerCase(java.util.Locale.ROOT))) Right(None) else Left(error)
+          )
+    }
 
   /**
    * Creates new session state
@@ -274,9 +317,9 @@ class AssistantAgent(
     if (hasContentToSave(state)) {
       for {
         title <- getSessionNameWithDefault()
-        _     <- saveCurrentSession(state, title)
+        saved <- savedOrDiscarded(state, title, "Start a new session")
         newState = createNewSessionState(state)
-        message  = formatSavedSessionMessage(title)
+        message  = saved.fold("Previous session discarded. Started new session.")(formatSavedSessionMessage)
       } yield (newState, message)
     } else {
       // Just start fresh session
@@ -296,7 +339,7 @@ class AssistantAgent(
       // Auto-save current session if it has content (reusing existing logic)
       _ <-
         if (hasContentToSave(state)) {
-          saveCurrentSession(state, "Auto-saved Session")
+          saveCurrentSession(state, AutoSavedTitle).map(_ => ())
         } else {
           Right(())
         }
@@ -314,8 +357,8 @@ class AssistantAgent(
       // Reuse existing session saving logic
       for {
         title <- getSessionNameWithDefault()
-        _     <- saveCurrentSession(state, title)
-        message = formatSavedGoodbyeMessage(title)
+        saved <- savedOrDiscarded(state, title, "Quit")
+        message = saved.fold("Session not saved. Goodbye!")(formatSavedGoodbyeMessage)
       } yield (state, message)
     } else {
       // Simple goodbye

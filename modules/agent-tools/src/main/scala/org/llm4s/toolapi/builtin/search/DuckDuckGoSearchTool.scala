@@ -163,6 +163,10 @@ object DuckDuckGoSearchTool {
         )
       } yield result
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints
+          .register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyNetwork)
+      )
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"

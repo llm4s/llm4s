@@ -89,7 +89,9 @@ final class HostFileBackend private (
   openDirectory: Path => java.nio.file.DirectoryStream[Path],
   canonical: Path => Path,
   move: (Path, Path) => Unit,
-  contendedReplace: Boolean
+  contendedReplace: Boolean,
+  excluded: Vector[VPath],
+  readOnlyPaths: Vector[VPath]
 ) extends FileBackend
     with AutoCloseable:
 
@@ -188,8 +190,25 @@ final class HostFileBackend private (
   private def resolve(operation: String, path: VPath): Result[Path] =
     rootIntact(operation, path).flatMap(_ => unmounted(operation, path)).flatMap(_ => resolveIn(operation, path))
 
+  /** Whether `path` is one of `prefixes` or beneath it, compared folded, as a case-insensitive volume would. */
+  private def within(path: VPath, prefixes: Vector[VPath]): Boolean =
+    prefixes.nonEmpty && {
+      val folded = path.segments.map(HostFileBackend.fold)
+      prefixes.exists(p => folded.startsWith(p.segments.map(HostFileBackend.fold)))
+    }
+
+  /** Whether the host path `p` (inside the root) is an excluded path or beneath one: listings never show it. */
+  private def isExcluded(p: Path): Boolean =
+    excluded.nonEmpty && {
+      val folded = root.relativize(p).iterator().asScala.map(n => HostFileBackend.fold(n.toString)).toVector
+      excluded.exists(e => folded.startsWith(e.segments.map(HostFileBackend.fold)))
+    }
+
   private def resolveIn(operation: String, path: VPath): Result[Path] =
-    if path.segments.exists(HostFileBackend.trailing) then
+    if within(path, excluded) then refused(operation, path, "is excluded from this backend")
+    else if HostFileBackend.Mutations(operation) && within(path, readOnlyPaths) then
+      refused(operation, path, "is read-only in this backend")
+    else if path.segments.exists(HostFileBackend.trailing) then
       refused(operation, path, "has a segment ending in a dot or a space, which Windows reads as another name")
     else if path.segments.exists(HostFileBackend.isReserved) then
       refused(operation, path, "has a segment named as the backend's temporary files or lock files, which is refused")
@@ -632,7 +651,7 @@ final class HostFileBackend private (
           val name = p.getFileName.toString
           val hidden =
             !roundTrips(dir, name, p) || HostFileBackend.trailing(name) || HostFileBackend.isReserved(name) ||
-              aliased(p) || !(isFile(p) || isDir(p))
+              aliased(p) || !(isFile(p) || isDir(p)) || isExcluded(p)
           if !hidden then kept += ((key(name, p), name, p))
     }
     if read > budget then (None, read)
@@ -814,9 +833,22 @@ object HostFileBackend:
     lockDirectory: Path,
     maxFileBytes: Long = DefaultMaxFileBytes,
     maxScanEntries: Int = DefaultMaxScanEntries,
-    allowUncheckedIdentity: Boolean = false
+    allowUncheckedIdentity: Boolean = false,
+    excluded: Seq[VPath] = Seq.empty,
+    readOnly: Seq[VPath] = Seq.empty
   ): Result[HostFileBackend] =
-    openWith(root, lockDirectory, maxFileBytes, maxScanEntries, allowUncheckedIdentity)
+    openWith(
+      root,
+      lockDirectory,
+      maxFileBytes,
+      maxScanEntries,
+      allowUncheckedIdentity,
+      excluded = excluded,
+      readOnly = readOnly
+    )
+
+  /** The operations that change the root, which `readOnly` paths refuse. */
+  private[harness] val Mutations: Set[String] = Set("write", "edit", "delete")
 
   /** [[open]], with the checks that depend on the machine given, for tests. */
   private[harness] def openWith(
@@ -834,7 +866,9 @@ object HostFileBackend:
     move: (Path, Path) => Unit = replaceAtomically,
     contendedReplace: Path => Boolean = refusesReplacingOpenFiles,
     // called at each named step before the lock is held and the root revalidated, for tests that race it
-    pause: String => Unit = _ => ()
+    pause: String => Unit = _ => (),
+    excluded: Seq[VPath] = Seq.empty,
+    readOnly: Seq[VPath] = Seq.empty
   ): Result[HostFileBackend] =
     if maxFileBytes <= 0 then Left(ValidationError("maxFileBytes", s"must be positive, was $maxFileBytes"))
     else if maxFileBytes > MaxFileBytes then
@@ -897,7 +931,9 @@ object HostFileBackend:
                 openDirectory,
                 canonical,
                 move,
-                contendedReplace(real)
+                contendedReplace(real),
+                excluded.toVector,
+                readOnly.toVector
               )
             } match
             case Left(error) =>

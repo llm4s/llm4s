@@ -107,6 +107,9 @@ object ListDirectoryTool {
         result        <- listDirectory(pathStr, maxEntries, includeHidden, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyLocal)
+      )
 
   /**
    * Default list directory tool instance, returning a Result for safe error handling.

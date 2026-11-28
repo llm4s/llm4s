@@ -121,6 +121,9 @@ object WriteFileTool {
         result   <- writeFile(pathStr, content, append, encoding, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.write(config))
+      )
 
   private def writeFile(
     pathStr: String,

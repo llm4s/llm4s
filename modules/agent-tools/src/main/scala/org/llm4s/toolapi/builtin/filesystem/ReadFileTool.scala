@@ -9,13 +9,18 @@ import scala.util.Try
 
 /**
  * Result from reading a file.
+ *
+ * @param truncated whether `content` is not the rest of the file: `max_lines` stopped it, or the result cap did
+ * @param nextOffset where the next page starts, as the `offset` to read it with, when the result cap cut `content`
+ *                   (#3273); `None` when this page reaches the end of what was asked for
  */
 case class ReadFileResult(
   path: String,
   content: String,
   size: Long,
   lines: Int,
-  truncated: Boolean
+  truncated: Boolean,
+  nextOffset: Option[Int] = None
 )
 
 object ReadFileResult {
@@ -62,6 +67,15 @@ object ReadFileTool {
     )
     .withProperty(
       Schema.property(
+        "offset",
+        Schema.integer(
+          "Character offset into the text to start from (optional, default 0): a result longer than the tool's " +
+            "limit is cut, and its nextOffset is the offset of the next page"
+        )
+      )
+    )
+    .withProperty(
+      Schema.property(
         "encoding",
         Schema
           .string("Character encoding (default: UTF-8)")
@@ -71,11 +85,23 @@ object ReadFileTool {
 
   /**
    * Create a read file tool with the given configuration, returning a Result for safe error handling.
+   *
+   * @param maxResultChars the most characters of content one call hands the model (#3273). The text the tool reads
+   *                       (the file's lines joined with `\n`, at most `max_lines` of them) is returned from `offset`
+   *                       in pages of at most this many characters, never cut inside a surrogate pair: a cut page is
+   *                       `truncated` and its `nextOffset` is the `offset` of the next, so successive calls read the
+   *                       whole text with no gap or overlap. The default is
+   *                       [[org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars]]
    */
-  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[ReadFileResult]] =
+  def createSafe(
+    config: FileConfig = FileConfig(),
+    maxResultChars: Int = org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars
+  ): Result[ToolFunction[ReadFileResult]] =
     ToolBuilder[ReadFileResult](
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
+        s"A result holds at most $maxResultChars characters; when it is cut, `truncated` is true and " +
+        "`nextOffset` is the `offset` to read the next page with. " +
         s"Blocked paths: ${config.describedBlockedPaths}. " +
         config.describedAllowedPaths.map(p => s"Allowed paths: $p").getOrElse(""),
       schema = createSchema
@@ -85,9 +111,36 @@ object ReadFileTool {
         // absent or null is the default; a wrong type refuses the call
         maxLines <- extractor.getOptionalInt("max_lines")
         encoding <- extractor.getOptionalString("encoding").map(_.getOrElse("UTF-8"))
+        offset   <- extractor.getOptionalInt("offset").map(_.getOrElse(0))
         result   <- readFile(pathStr, maxLines, encoding, config).left.map(ToolHandlerError.failed)
-      } yield result
+        page     <- paged(result, offset, maxResultChars).left.map(ToolHandlerError.failed)
+      } yield page
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyLocal)
+      )
+
+  /**
+   * The page of `result` from `offset`: at most `maxChars` characters, ending before a high surrogate whose pair
+   * would be cut, with `nextOffset` set when more follows. An offset past the end is refused; one inside a surrogate
+   * pair is moved back to the pair's start, so a page never starts with a lone low surrogate.
+   */
+  private[builtin] def paged(result: ReadFileResult, offset: Int, maxChars: Int): Either[String, ReadFileResult] = {
+    val text = result.content
+    if (offset < 0) Left(s"offset must not be negative, was $offset")
+    else if (offset > 0 && offset >= text.length)
+      Left(s"offset $offset is past the end of the text, which is ${text.length} characters")
+    else {
+      val start = if (offset > 0 && Character.isLowSurrogate(text.charAt(offset))) offset - 1 else offset
+      val limit = math.max(2, maxChars)
+      if (text.length - start <= limit) Right(result.copy(content = text.substring(start)))
+      else {
+        val cut = start + limit
+        val end = if (Character.isHighSurrogate(text.charAt(cut - 1))) cut - 1 else cut
+        Right(result.copy(content = text.substring(start, end), truncated = true, nextOffset = Some(end)))
+      }
+    }
+  }
 
   /**
    * Default read file tool instance, returning a Result for safe error handling.

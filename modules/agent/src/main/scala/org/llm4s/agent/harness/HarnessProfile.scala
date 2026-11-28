@@ -2,6 +2,7 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.RetentionPolicy
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, PermissionMiddleware, PermissionRule }
+import org.llm4s.agent.graph.tool.Operation
 import org.llm4s.agent.graph.tool.AgentTool
 import org.llm4s.annotation.Experimental
 import org.llm4s.context.ConversationTokenCounter
@@ -230,16 +231,27 @@ final case class HarnessProfile private (
   def withSummarization(c: Option[SummarizationConfig]): HarnessProfile = copy(summarization = c)
   def withOffload(c: OffloadConfig): HarnessProfile                     = copy(offload = Some(c))
   def withOffload(c: Option[OffloadConfig]): HarnessProfile             = copy(offload = c)
-  def withSkills(c: SkillsConfig): HarnessProfile                       = copy(skills = Some(c))
-  def withSkills(c: Option[SkillsConfig]): HarnessProfile               = copy(skills = c)
-  def withInstructions(c: InstructionsConfig): HarnessProfile           = copy(instructions = Some(c))
-  def withInstructions(c: Option[InstructionsConfig]): HarnessProfile   = copy(instructions = c)
-  def withSystemPrompt(m: PromptMode): HarnessProfile                   = copy(systemPrompt = m)
-  def withPermissions(rules: Vector[PermissionRule]): HarnessProfile    = copy(permissions = rules)
-  def withToolTimeout(t: FiniteDuration): HarnessProfile                = copy(toolTimeout = Some(t))
-  def withToolTimeout(t: Option[FiniteDuration]): HarnessProfile        = copy(toolTimeout = t)
-  def withRetention(r: RetentionPolicy): HarnessProfile                 = copy(retention = r)
-  def withSubagents(c: SubagentConfig): HarnessProfile                  = copy(subagents = c)
+  def withSkills(c: SkillsConfig): HarnessProfile                       = withSkills(Some(c))
+  def withSkills(c: Option[SkillsConfig]): HarnessProfile               = standingFilesFollow(copy(skills = c))
+  def withInstructions(c: InstructionsConfig): HarnessProfile           = withInstructions(Some(c))
+  def withInstructions(c: Option[InstructionsConfig]): HarnessProfile   = standingFilesFollow(copy(instructions = c))
+
+  /**
+   * `next`, with the preset's permission rules regenerated for its instruction paths and skill sources when this
+   * profile's rules are exactly the preset's for its own ([[HarnessProfile.presetPermissions]]), so moving the
+   * instructions or skills of `deepAgents` or a loaded profile moves the approval that guards them (#3268). Rules
+   * set with `withPermissions` are anything else, and are kept as they are.
+   */
+  private def standingFilesFollow(next: HarnessProfile): HarnessProfile =
+    if permissions.nonEmpty && permissions == HarnessProfile.presetPermissions(instructions, skills) then
+      next.copy(permissions = HarnessProfile.presetPermissions(next.instructions, next.skills))
+    else next
+  def withSystemPrompt(m: PromptMode): HarnessProfile                = copy(systemPrompt = m)
+  def withPermissions(rules: Vector[PermissionRule]): HarnessProfile = copy(permissions = rules)
+  def withToolTimeout(t: FiniteDuration): HarnessProfile             = copy(toolTimeout = Some(t))
+  def withToolTimeout(t: Option[FiniteDuration]): HarnessProfile     = copy(toolTimeout = t)
+  def withRetention(r: RetentionPolicy): HarnessProfile              = copy(retention = r)
+  def withSubagents(c: SubagentConfig): HarnessProfile               = copy(subagents = c)
 
   /** The names of the tools this profile can give: the file tools, and `execute` when it has a sandbox. */
   def toolNames: Vector[String] = FileTools.Names ++ sandbox.map(_ => ExecuteTool.Name)
@@ -417,18 +429,55 @@ object HarnessProfile:
   /**
    * The opinionated preset: the file tools over a new `StateFileBackend`, todos, summarisation (with the model-free
    * digest compressor), offload of large results, skills under `/skills` and instructions in `/AGENTS.md`, each at
-   * its component's defaults, with the default prompt and no permission rules, and the general-purpose subagent
+   * its component's defaults, with the default prompt, and the general-purpose subagent
    * ([[SubagentConfig.deepAgents]]), offered through the `task` tool. Each call has its own backend.
+   *
+   * Its permission rules are [[standingFileRules]] for those paths: a write or delete of `/AGENTS.md` or anything
+   * under `/skills` asks for approval, since what is written there becomes part of the system prompt from the next
+   * run - a prompt injection in a tool result could otherwise make itself a standing instruction (#3268) - and every
+   * other call is allowed. `withPermissions` replaces them; keep [[standingFileRules]] in front of your own rules, or
+   * serve the instructions and skills from a read-only `StaticFileBackend`.
    */
   def deepAgents: HarnessProfile =
+    val skills       = SkillsConfig()
+    val instructions = InstructionsConfig()
     HarnessProfile(
       todos = Some(TodoConfig()),
       summarization = Some(SummarizationConfig()),
       offload = Some(OffloadConfig()),
-      skills = Some(SkillsConfig()),
-      instructions = Some(InstructionsConfig()),
+      skills = Some(skills),
+      instructions = Some(instructions),
+      permissions = presetPermissions(Some(instructions), Some(skills)),
       subagents = SubagentConfig.deepAgents
     )
+
+  /**
+   * Rules that ask approval for a `Write` or `Delete` of each instruction file in `instructionPaths` and of anything
+   * under each skill source in `skillSources` (#3268). They decide only those operations on those paths, so put them
+   * first and follow them with the rules for everything else: a `PermissionMiddleware` denies a call no rule matches.
+   */
+  def standingFileRules(instructionPaths: Seq[VPath], skillSources: Seq[VPath]): Vector[PermissionRule] =
+    val targets = instructionPaths.map(_.value) ++
+      skillSources.map(s => if s == VPath.root then "/**" else s"${s.value}/**")
+    for
+      target    <- targets.distinct.toVector
+      operation <- Vector(Operation.Write, Operation.Delete)
+    yield PermissionRule.ask(operation, target)
+
+  /**
+   * The preset's rules for the instructions and skills it turns on: [[standingFileRules]] for their paths, then allow
+   * everything; none when neither is on, so nothing needs guarding (`HarnessConfigLoader` uses it too).
+   */
+  private[llm4s] def presetPermissions(
+    instructions: Option[InstructionsConfig],
+    skills: Option[SkillsConfig]
+  ): Vector[PermissionRule] =
+    if instructions.isEmpty && skills.isEmpty then Vector.empty
+    else standingFileRules(instructions.toSeq.flatMap(_.paths), skills.toSeq.flatMap(_.sources)) ++ allowEverything
+
+  /** A rule allowing every operation on every target: what a profile without rules allows, as rules. */
+  private val allowEverything: Vector[PermissionRule] =
+    Operation.values.toVector.map(PermissionRule.allow(_, "**"))
 
   /**
    * The prompt `PromptMode.Default` gives `profile`: how to plan, act and verify, manage context and use tools safely,

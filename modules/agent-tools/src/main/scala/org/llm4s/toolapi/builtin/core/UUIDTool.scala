@@ -111,5 +111,6 @@ object UUIDTool {
         UUIDsResult(uuids)
       }
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Pure))
 
 }

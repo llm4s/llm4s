@@ -42,13 +42,13 @@ class CommandSpec extends AnyFlatSpec with Matchers {
   // ============ Command.Save ============
 
   it should "parse /save with title" in {
-    // Note: implementation lowercases entire input including title
-    Command.parse("/save My Session") shouldBe Right(Command.Save("my session"))
+    // only the command word is matched without regard to case: the title keeps its case (#3277)
+    Command.parse("/save My Session") shouldBe Right(Command.Save("My Session"))
   }
 
   it should "parse /save with multi-word title" in {
-    // Note: implementation lowercases entire input including title
-    Command.parse("/save My Very Long Session Title") shouldBe Right(Command.Save("my very long session title"))
+    // only the command word is matched without regard to case: the title keeps its case (#3277)
+    Command.parse("/save My Very Long Session Title") shouldBe Right(Command.Save("My Very Long Session Title"))
   }
 
   it should "parse /save without title using default" in {
@@ -67,18 +67,18 @@ class CommandSpec extends AnyFlatSpec with Matchers {
   // ============ Command.Load ============
 
   it should "parse /load with title" in {
-    // Note: implementation lowercases entire input including title
-    Command.parse("/load My Session") shouldBe Right(Command.Load("my session"))
+    // only the command word is matched without regard to case: the title keeps its case (#3277)
+    Command.parse("/load My Session") shouldBe Right(Command.Load("My Session"))
   }
 
   it should "parse /load with quoted title" in {
-    // Note: implementation lowercases entire input including title
-    Command.parse("/load \"My Session\"") shouldBe Right(Command.Load("my session"))
+    // only the command word is matched without regard to case: the title keeps its case (#3277)
+    Command.parse("/load \"My Session\"") shouldBe Right(Command.Load("My Session"))
   }
 
   it should "parse /load with multi-word title" in {
-    // Note: implementation lowercases entire input including title
-    Command.parse("/load Previous Chat About Code") shouldBe Right(Command.Load("previous chat about code"))
+    // only the command word is matched without regard to case: the title keeps its case (#3277)
+    Command.parse("/load Previous Chat About Code") shouldBe Right(Command.Load("Previous Chat About Code"))
   }
 
   it should "return error for /load without title" in {
