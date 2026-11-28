@@ -784,6 +784,50 @@ A stream that ends fails the calls waiting on it; the next message opens a new s
 runs the handshake again. There is no session `DELETE` on this transport: closing it closes the stream. Both HTTP
 transports now read SSE the same way: `data:` with or without a space after the colon, several `data` lines joined.
 
+## MCP tools: results, listings, schemas and the registry (#3074, #3075, #3076, #3080)
+
+`llm4s-mcp` is Beta. What an MCP tool returns, which tools a server lists and how their schemas reach the model
+changed:
+
+**Results (#3074).** A tool result's `content` is every block, in order, separated by a blank line; only the first
+block's text was returned before. A non-text block is described rather than failing the call:
+`[image image/png (4096 base64 characters)]`, `[resource file:///notes.md text/markdown]` followed by an embedded
+resource's text, `[resource link report https://h/r.pdf application/pdf]`. An `isError` result's message carries
+every block too. `structuredContent`, when the server sends it, is still the result.
+
+**Listings (#3075).** Every page of `tools/list` is read, so a server that pages its tools shows all of them. A
+tool without a `description` is kept (it was skipped as malformed), described by its `title`, its
+`annotations.title`, or nothing.
+
+**Schemas (#3076).** An MCP tool's `inputSchema` is no longer rebuilt from `properties` and `required` alone:
+
+| Before | After |
+|---|---|
+| Every object `additionalProperties: false` | As the server wrote it. Absent: closed for an object with properties (what providers' strict modes need), open for a free-form `{"type":"object"}` |
+| A `$ref` kept as raw JSON, its `$defs` dropped | Resolved from `$defs` / `definitions`; an unresolvable or recursive one accepts any value |
+| `minLength`, `pattern`, `minimum`, `maxItems`, ... dropped | Kept, so an agent's argument validator checks them |
+| An `enum` of numbers dropped | Kept |
+| `oneOf`, a `type` of several names | Read as `anyOf` |
+| A missing description became `"Parameter"` | The `title`, or empty; a `default`, `format` or `examples` is added to the description |
+| A schema with a keyword the model cannot express (`allOf`, `not`, `if`, `patternProperties`, `minProperties`, a `required` name with no property, `additionalProperties` as a schema, ...) lost it | Kept as the server wrote it, local references inlined; an agent's argument validator refuses a keyword it cannot check when the agent is built |
+
+Arguments the server's schema refuses are now refused before they are sent, and arguments it accepts are no
+longer refused.
+
+**The registry (#3080).** `MCPToolRegistry` remembers a failed refresh: the server is not dialled again for 1
+second, then 2, 4, ... up to 60 seconds after successive failures, and a lookup in that time sees no tools from it
+at once instead of waiting for its timeout. `clearCache()`, `refreshCache()` and `healthCheck()` dial at once.
+Servers are contacted in parallel at startup and by `healthCheck`, and one refresh runs per server at a time.
+`healthCheck` calls the new `MCPClient.ping()` (an `MCPClientImpl` sends `ping`, falling back to `tools/list`), so a
+server that has died since its handshake is reported `false`; a custom `MCPClient` gets a default `ping()` that
+lists the tools.
+
+`MCPToolRegistry` is now an `org.llm4s.toolapi.ToolHintSource` (new, `@Experimental`, in `llm4s-core`), and
+`AgentBuilder.withTools(registry)` gives each tool of such a registry the hints it reports. A server configured
+`trustAnnotations = true` therefore has its tools' annotations applied without wiring `registry.toolHints` into
+`AgentTool.fromToolFunction` by hand. A read-only tool then passes `ApprovalMiddleware.unlessReadOnly` without
+approval. Untrusted servers' tools keep `ToolHints.default`.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

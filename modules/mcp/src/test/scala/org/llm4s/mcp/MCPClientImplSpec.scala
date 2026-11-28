@@ -262,12 +262,15 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     properties("rows")("items")("properties")("n")("type").str shouldBe "integer"
   }
 
-  it should "keep a schema the model has no case for as the server wrote it" in {
+  it should "accept any value for a reference it cannot resolve, and keep a free-form object open (#3076)" in {
     val reference = ujson.Obj("$ref" -> "#/$defs/Address")
     val freeForm  = ujson.Obj("type" -> "object", "description" -> "Any headers", "additionalProperties" -> true)
     val tool      = toolWithProperties(ujson.Obj("address" -> reference, "headers" -> freeForm), Seq.empty)
 
-    propertiesOf(tool)("address") shouldBe reference
-    propertiesOf(tool)("headers") shouldBe freeForm
+    propertiesOf(tool)("address") shouldBe ujson.Obj(
+      "description" -> "(unresolved reference #/$defs/Address: any value)"
+    )
+    propertiesOf(tool)("headers")("additionalProperties") shouldBe ujson.Bool(true)
+    propertiesOf(tool)("headers")("description").str shouldBe "Any headers"
   }
 }

@@ -57,6 +57,15 @@ trait MCPClient {
   def initialize(): Result[Unit]
 
   /**
+   * Checks the server answers (#3080): the handshake if it has not run, then a request that must reach the server.
+   * `MCPToolRegistry.healthCheck` uses it, so a server that has died since the handshake is reported unhealthy. The
+   * default lists the tools; [[MCPClientImpl]] sends `ping`, and lists the tools only if the server does not know it.
+   *
+   * @return `Right(())` when the server answered
+   */
+  def ping(): Result[Unit] = initialize().flatMap(_ => getTools().map(_ => ()))
+
+  /**
    * Closes the MCP client connection and releases resources.
    * Should be called when done with the client.
    */

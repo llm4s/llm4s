@@ -245,9 +245,8 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_]]] = {
     val result = for {
-      response   <- sendRecovering(transportImpl, () => MCPClientImpl.listRequest.copy(id = generateId()))
-      toolsValue <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
-      tools      <- parseTools(toolsValue)
+      entries <- listAllTools(transportImpl)
+      tools   <- parseTools(ujson.Obj("tools" -> ujson.Arr.from(entries)))
     } yield tools
 
     result.left.foreach {
@@ -257,6 +256,60 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         toolHints = Map.empty
     }
     result
+  }
+
+  /**
+   * Every page of the server's `tools/list` (#3075): the request is sent again with each `nextCursor` until a page
+   * has none. A cursor seen before, or more than [[MCPClientImpl.MaxToolPages]] pages, ends the listing with the
+   * tools read so far and a warning: a server that pages for ever cannot hang discovery.
+   */
+  private def listAllTools(transportImpl: MCPTransportImpl): Result[Seq[Value]] = {
+    def page(cursor: Option[String]): Result[(Seq[Value], Option[String])] =
+      for {
+        response <- sendRecovering(
+          transportImpl,
+          () =>
+            MCPClientImpl.listRequest.copy(
+              id = generateId(),
+              params = cursor.map(c => ujson.Obj("cursor" -> ujson.Str(c)))
+            )
+        )
+        value <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
+        tools <- value.objOpt
+          .flatMap(_.get("tools"))
+          .flatMap(_.arrOpt)
+          .map(_.toSeq)
+          .toRight(SimpleError(s"Failed to parse tools from ${config.name}: no tools array"): LLMError)
+      } yield tools -> value.objOpt.flatMap(_.get("nextCursor")).flatMap(_.strOpt).filter(_.nonEmpty)
+
+    @scala.annotation.tailrec
+    def loop(cursor: Option[String], seen: Set[String], pages: Int, acc: Seq[Value]): Result[Seq[Value]] =
+      page(cursor) match {
+        case Left(error) => Left(error)
+        case Right((tools, next)) =>
+          val all = acc ++ tools
+          next match {
+            case None => Right(all)
+            case Some(c) if seen.contains(c) =>
+              logger.warn(
+                "MCP server {} repeated a tools/list cursor; keeping the {} tools listed",
+                config.name,
+                all.size
+              )
+              Right(all)
+            case Some(_) if pages + 1 >= MCPClientImpl.MaxToolPages =>
+              logger.warn(
+                "MCP server {} listed more than {} pages of tools; keeping the {} tools listed",
+                config.name,
+                MCPClientImpl.MaxToolPages,
+                all.size
+              )
+              Right(all)
+            case Some(c) => loop(Some(c), seen + c, pages + 1, all)
+          }
+      }
+
+    loop(None, Set.empty, 0, Seq.empty)
   }
 
   private def parseTools(value: Value): Result[Seq[ToolFunction[_]]] = {
@@ -298,6 +351,21 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   override def getToolHints(): Map[String, ToolHints] = toolHints
 
+  /**
+   * Sends `ping` (#3080), running the handshake first if it has not run; a server that answers it with
+   * method-not-found is asked for its tools instead. A lost session is recovered as for any request.
+   */
+  override def ping(): Result[Unit] =
+    for {
+      _             <- initialize()
+      transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
+      _ <- sendRecovering(transportImpl, () => JsonRpcRequest("2.0", generateId(), "ping", Some(ujson.Obj()))) match {
+        case Left(error) if error.message.startsWith("JSON-RPC Error -32601") =>
+          sendRecovering(transportImpl, () => MCPClientImpl.listRequest.copy(id = generateId())).map(_ => ())
+        case other => other.map(_ => ())
+      }
+    } yield ()
+
   // Closes the transport connection and resets initialization state
   override def close(): Unit = {
     transport.foreach(_.close())
@@ -311,12 +379,18 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   // Converts an MCP tool definition to llm4s ToolFunction format
   private def convertMCPToolToToolFunction(toolJson: Value): ToolFunction[Value] = {
-    val name        = toolJson("name").str
-    val description = toolJson("description").str
+    val name = toolJson("name").str
+    // `description` is optional in MCP (#3075): a tool without one keeps its title, or an empty description
+    def text(v: Option[Value]) = v.flatMap(_.strOpt).filter(_.nonEmpty)
+    val fields                 = toolJson.obj
+    val description = text(fields.get("description"))
+      .orElse(text(fields.get("title")))
+      .orElse(text(fields.get("annotations").flatMap(_.objOpt).flatMap(_.get("title"))))
+      .getOrElse("")
     val inputSchema = toolJson("inputSchema")
 
-    // Convert MCP input schema to our ObjectSchema format
-    val schema = convertMCPSchemaToObjectSchema(name, inputSchema)
+    // The server's schema, kept as it declared it as far as the model can carry it (#3076)
+    val schema = MCPInputSchema.toSchema(name, inputSchema)
 
     ToolFunction[Value](
       name = name,
@@ -325,85 +399,6 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       handler = createMCPToolHandler(name).andThen(_.left.map(ToolHandlerError.failed))
     )
   }
-
-  // Converts MCP JSON Schema to ObjectSchema format
-  private def convertMCPSchemaToObjectSchema(toolName: String, mcpSchema: Value): ObjectSchema[Value] = {
-    // MCP uses JSON Schema format for inputSchema
-    val properties = mcpSchema.obj.get("properties") match {
-      case Some(props) =>
-        props.obj.map { case (propName, propSchema) =>
-          PropertyDefinition(
-            name = propName,
-            schema = convertJsonSchemaToSchemaDefinition(propSchema),
-            required = mcpSchema.obj
-              .get("required")
-              .flatMap(_.arrOpt)
-              .exists(_.value.exists(_.strOpt.contains(propName)))
-          )
-        }.toSeq
-      case None => Seq.empty
-    }
-
-    ObjectSchema[Value](
-      description = s"Parameters for $toolName",
-      properties = properties,
-      additionalProperties = false
-    )
-  }
-
-  /**
-   * A property's JSON Schema as the schema model: an object with its own properties, an array with its items, an
-   * `anyOf` with its alternatives, and a type that also allows `null` as nullable. A schema the model has no case
-   * for (no `type`, a `$ref`, a `oneOf`) is kept as the JSON the server sent, so the model is told what the server
-   * expects and never that an object is a string.
-   */
-  private def convertJsonSchemaToSchemaDefinition(jsonSchema: Value): SchemaDefinition[_] =
-    jsonSchema.objOpt match {
-      case None => RawJsonSchema(ujson.Obj())
-      case Some(fields) =>
-        val description = fields.get("description").flatMap(_.strOpt).getOrElse("Parameter")
-        val anyOf       = fields.get("anyOf").flatMap(_.arrOpt).map(_.toList).filter(_.nonEmpty)
-        val types = fields.get("type") match {
-          case Some(ujson.Str(name))  => List(name)
-          case Some(ujson.Arr(names)) => names.toList.flatMap(_.strOpt)
-          case _                      => Nil
-        }
-        (anyOf, types.filterNot(_ == "null")) match {
-          case (Some(alternatives), _) =>
-            val converted = alternatives.map(convertJsonSchemaToSchemaDefinition)
-            AnyOfSchema[Value](description, converted.head, converted.tail: _*)
-          case (None, List(single)) =>
-            val typed = convertTypedSchema(single, description, fields, jsonSchema)
-            if (types.contains("null")) NullableSchema(typed) else typed
-          case _ => RawJsonSchema(ujson.Obj.from(fields))
-        }
-    }
-
-  private def convertTypedSchema(
-    schemaType: String,
-    description: String,
-    fields: scala.collection.Map[String, Value],
-    jsonSchema: Value
-  ): SchemaDefinition[_] =
-    schemaType match {
-      case "string" =>
-        val enumValues = fields.get("enum").flatMap(_.arrOpt).map(_.value.flatMap(_.strOpt).toSeq)
-        StringSchema(description, enumValues)
-      case "number"  => NumberSchema(description)
-      case "integer" => IntegerSchema(description)
-      case "boolean" => BooleanSchema(description)
-      case "array" =>
-        val itemSchema = fields
-          .get("items")
-          .map(convertJsonSchemaToSchemaDefinition)
-          .getOrElse(StringSchema("Array item"))
-        ArraySchema(fields.get("description").flatMap(_.strOpt).getOrElse("Array parameter"), itemSchema)
-      case "object" if fields.get("properties").exists(_.objOpt.isDefined) =>
-        val nested = convertMCPSchemaToObjectSchema(description, jsonSchema)
-        nested.withDescription(description)
-      // a free-form object (no declared properties), and any type this model does not know: as the server wrote it
-      case _ => RawJsonSchema(ujson.Obj.from(fields))
-    }
 
   // Creates tool execution handler that delegates to MCP server
   private def createMCPToolHandler(toolName: String): SafeParameterExtractor => Either[String, Value] = { params =>
@@ -432,11 +427,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                   // that returned the string "24" is not handed back as the number 24.
                   val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
                   // `content` is read only when it is needed: a result that is only `structuredContent` has none.
-                  def content = result("content").arr
+                  // A result with neither is malformed: `content` is required, so its absence is a parse failure.
+                  def content = result("content").arr.toSeq
                   if (structured.exists(_ != ujson.Null)) {
                     structured.getOrElse(ujson.Null)
                   } else if (content.nonEmpty) {
-                    ujson.Str(content(0)("text").str)
+                    // Every block, in order (#3074): text as it is, any other kind described, never a failure
+                    ujson.Str(MCPClientImpl.contentText(content))
                   } else if (isToolError) {
                     ujson.Str("server reported an error")
                   } else {
@@ -479,11 +476,49 @@ object MCPClientImpl {
   private[mcp] def fallsBackToLegacy(status: Int): Boolean =
     status >= 400 && status < 500 && status != 401 && status != 403
 
+  /**
+   * A tool result's `content` as one text (#3074): every block in order, separated by a blank line. A `text` block is
+   * its text; an embedded `resource` its text when it has one; any other block (`image`, `audio`, `resource_link`,
+   * a `resource` of binary data, a kind this client does not know) is described by its type, MIME type and URI, so a
+   * call that succeeded is never reported as failed because its first block was not text. Binary data is never
+   * copied into the text: it would cost the model tokens it cannot read.
+   */
+  private[mcp] def contentText(blocks: Seq[Value]): String =
+    blocks.map(contentBlockText).mkString("\n\n")
+
+  private def contentBlockText(block: Value): String = {
+    val fields                = block.objOpt.getOrElse(scala.collection.mutable.LinkedHashMap.empty[String, Value])
+    def str(v: Option[Value]) = v.flatMap(_.strOpt)
+    def field(name: String)   = str(fields.get(name))
+    def described(kind: String, parts: Option[String]*) =
+      s"[$kind${parts.flatten.filter(_.nonEmpty).map(p => s" $p").mkString}]"
+    field("type") match {
+      case Some("text") => field("text").getOrElse("")
+      case Some("image") | Some("audio") =>
+        val kind = field("type").getOrElse("")
+        described(kind, field("mimeType"), field("data").map(d => s"(${d.length} base64 characters)"))
+      case Some("resource") =>
+        val resource = fields.get("resource").flatMap(_.objOpt)
+        val uri      = resource.flatMap(r => str(r.get("uri")))
+        val mime     = resource.flatMap(r => str(r.get("mimeType")))
+        resource.flatMap(r => str(r.get("text"))) match {
+          case Some(text) => s"${described("resource", uri, mime)}\n$text"
+          case None       => described("resource", uri, mime, Some("(binary)"))
+        }
+      case Some("resource_link") =>
+        described("resource link", field("name"), field("uri"), field("mimeType"))
+      case other => described(other.getOrElse("content"), field("mimeType"), field("uri"))
+    }
+  }
+
   /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
   private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =
     toolJson("name").str -> MCPToolAnnotations
       .fromJson(toolJson.objOpt.flatMap(_.get("annotations")).getOrElse(ujson.Null))
       .toToolHints
+
+  /** The most `tools/list` pages read from one server, a bound on a server that pages for ever (#3075). */
+  val MaxToolPages: Int = 100
 
   val listRequest: JsonRpcRequest = JsonRpcRequest(
     jsonrpc = "2.0",

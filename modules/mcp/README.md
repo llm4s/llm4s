@@ -53,7 +53,27 @@ client.close()
 ```
 
 To give an agent MCP tools alongside local ones, use `new MCPToolRegistry(Seq(config), localTools)`: it is a
-`ToolRegistry`, caches each server's tool list (`cacheTTL`, 10 minutes by default), and is `AutoCloseable`.
+`ToolRegistry`, caches each server's tool list (`cacheTTL`, 10 minutes by default), and is `AutoCloseable`. It
+contacts its servers in parallel at startup, runs one refresh per server at a time, and leaves a server that failed
+alone for a growing interval (1 second, doubling to a minute) before dialling it again; `clearCache()`,
+`refreshCache()` and `healthCheck()` dial at once. `healthCheck()` sends each server a `ping`.
+
+## Tool hints
+
+A server's tool annotations (`readOnlyHint`, `destructiveHint`, ...) are used only for a server you trust:
+
+```scala
+val files    = MCPServerConfig.stdio("files", Seq("my-files-server"), trustAnnotations = true)
+val registry = new MCPToolRegistry(Seq(files))
+val agent    = Agent.builder("assistant", client)
+  .withTools(registry)                                  // each tool carries its server's hints
+  .withMiddleware(ApprovalMiddleware.unlessReadOnly)        // a read-only tool runs without approval
+  .build()
+```
+
+`MCPToolRegistry` is a `ToolHintSource`, so `AgentBuilder.withTools` gives each of a trusted server's tools the hints
+its annotations declare; a read-only tool then runs without approval. Every tool of an untrusted server, and every
+local tool, keeps `ToolHints.default` (not read-only, destructive), which requires approval.
 
 ## Configuration
 

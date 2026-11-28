@@ -90,3 +90,37 @@ class AgentBuilderToolsSpec extends AnyFlatSpec with Matchers with EitherValues 
     client.callCount shouldBe 0
   }
 }
+
+/** `withTools` gives a tool the hints a `ToolHintSource` registry reports for it (#3080). */
+class AgentBuilderToolHintsSpec extends AnyFlatSpec with Matchers {
+
+  private def hintedTool(name: String): ToolFunction[String] =
+    ToolBuilder[String](name, "A tool", Schema.`object`[Map[String, Any]]("No parameters"))
+      .withHandler(_ => Right("ok"))
+      .build()
+      .fold(e => fail(s"tool did not build: $e"), identity)
+
+  private class Hinted(hints: Map[String, org.llm4s.toolapi.ToolHints])
+      extends ToolRegistry
+      with org.llm4s.toolapi.ToolHintSource {
+    private val inner =
+      ToolRegistry.of(Seq(hintedTool("read"), hintedTool("write"))).fold(e => fail(e.message), identity)
+    override def tools: Seq[ToolFunction[?]]                                  = inner.tools
+    override def execute(request: org.llm4s.toolapi.ToolCallRequest)          = inner.execute(request)
+    override def toolHints(name: String): Option[org.llm4s.toolapi.ToolHints] = hints.get(name)
+  }
+
+  "AgentBuilder.adapted" should "give each tool the hints its registry reports, and the defaults otherwise" in {
+    val readOnly = org.llm4s.toolapi.ToolHints.default.withReadOnly(true)
+    val tools    = AgentBuilder.adapted(new Hinted(Map("read" -> readOnly)))
+    tools.map(t => t.spec.name -> t.spec.hints) shouldBe Vector(
+      "read"  -> readOnly,
+      "write" -> org.llm4s.toolapi.ToolHints.default
+    )
+  }
+
+  it should "give a plain registry's tools the defaults" in {
+    val plain = ToolRegistry.of(Seq(hintedTool("read"))).fold(e => fail(e.message), identity)
+    AgentBuilder.adapted(plain).map(_.spec.hints) shouldBe Vector(org.llm4s.toolapi.ToolHints.default)
+  }
+}

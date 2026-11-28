@@ -73,14 +73,12 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "use only the first text part when an error carries several parts" in {
+  it should "carry every text part when an error has several (#3074)" in {
     val parts = ujson.Arr(
       ujson.Obj("type" -> "text", "text" -> "first"),
       ujson.Obj("type" -> "text", "text" -> "second")
     )
-    val msg = failure(ujson.Obj("content" -> parts, "isError" -> true))
-    msg should include("Tool call failed: first")
-    (msg should not).include("second")
+    failure(ujson.Obj("content" -> parts, "isError" -> true)) should include("Tool call failed: first\n\nsecond")
   }
 
   it should "report a generic failure when an error has empty content" in {
@@ -93,10 +91,10 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
     failure(ujson.Obj("isError" -> true)) should include("Tool call failed: server reported an error")
   }
 
-  it should "report a generic failure when an error has only a non-text part" in {
+  it should "describe a non-text part of an error (#3074)" in {
     val image = ujson.Arr(ujson.Obj("type" -> "image", "data" -> "AAAA", "mimeType" -> "image/png"))
     failure(ujson.Obj("content" -> image, "isError" -> true)) should include(
-      "Tool call failed: server reported an error"
+      "Tool call failed: [image image/png (4 base64 characters)]"
     )
   }
 

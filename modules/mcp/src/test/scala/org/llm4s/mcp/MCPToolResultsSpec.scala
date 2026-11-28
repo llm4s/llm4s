@@ -17,6 +17,9 @@ import scala.jdk.CollectionConverters._
  */
 class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
 
+  // The registries' clock (#3080: a failed server is not dialled again until its backoff has passed)
+  private val clock = new java.util.concurrent.atomic.AtomicLong(0)
+
   private def probe: ujson.Value = ujson.Obj(
     "name"        -> "probe",
     "description" -> "probe",
@@ -58,6 +61,60 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
     call(ujson.Obj("content" -> text("24"))) shouldBe Right(ujson.Str("24"))
     call(ujson.Obj("content" -> text("null"))) shouldBe Right(ujson.Str("null"))
     call(ujson.Obj("content" -> text("""{"a":1}"""))) shouldBe Right(ujson.Str("""{"a":1}"""))
+  }
+
+  it should "join every text block, in order, not keep only the first (#3074)" in {
+    val blocks = ujson.Arr(ujson.Obj("type" -> "text", "text" -> "one"), ujson.Obj("type" -> "text", "text" -> "two"))
+    call(ujson.Obj("content" -> blocks)) shouldBe Right(ujson.Str("one\n\ntwo"))
+  }
+
+  it should "describe an image that comes first, rather than fail a call that succeeded (#3074)" in {
+    val blocks = ujson.Arr(
+      ujson.Obj("type" -> "image", "data" -> "iVBORw0KGgo=", "mimeType" -> "image/png"),
+      ujson.Obj("type" -> "text", "text"  -> "a chart")
+    )
+    call(ujson.Obj("content" -> blocks)) shouldBe Right(
+      ujson.Str("[image image/png (12 base64 characters)]\n\na chart")
+    )
+  }
+
+  it should "give an embedded resource's text, and describe audio, links and binary resources (#3074)" in {
+    val blocks = ujson.Arr(
+      ujson.Obj("type" -> "audio", "data" -> "AAAA", "mimeType" -> "audio/wav"),
+      ujson.Obj(
+        "type"     -> "resource",
+        "resource" -> ujson.Obj("uri" -> "file:///notes.md", "mimeType" -> "text/markdown", "text" -> "# Notes")
+      ),
+      ujson.Obj("type" -> "resource", "resource" -> ujson.Obj("uri" -> "file:///a.bin", "blob" -> "AAAA")),
+      ujson.Obj(
+        "type"     -> "resource_link",
+        "name"     -> "report",
+        "uri"      -> "https://h/r.pdf",
+        "mimeType" -> "application/pdf"
+      ),
+      ujson.Obj("type" -> "hologram")
+    )
+    call(ujson.Obj("content" -> blocks)) shouldBe Right(
+      ujson.Str(
+        Seq(
+          "[audio audio/wav (4 base64 characters)]",
+          "[resource file:///notes.md text/markdown]\n# Notes",
+          "[resource file:///a.bin (binary)]",
+          "[resource link report https://h/r.pdf application/pdf]",
+          "[hologram]"
+        ).mkString("\n\n")
+      )
+    )
+  }
+
+  it should "report every text block of an error result (#3074)" in {
+    val blocks = ujson.Arr(
+      ujson.Obj("type" -> "text", "text" -> "bad input"),
+      ujson.Obj("type" -> "text", "text" -> "see field x")
+    )
+    call(ujson.Obj("content" -> blocks, "isError" -> true)).left.map(_.message).left.getOrElse("") should include(
+      "bad input\n\nsee field x"
+    )
   }
 
   it should "be the structured content when the server sends it" in {
@@ -158,6 +215,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
       initializeOnStartup = false
     ) {
       override private[mcp] def createMCPClient(server: MCPServerConfig): MCPClient = stub
+      override private[mcp] def nowMillis(): Long                                   = clock.get
     }
 
   "MCPToolRegistry" should "advertise no tool of a server whose refresh failed, and the tools again once it recovers" in {
@@ -172,6 +230,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
     stub.closes shouldBe 1
 
     stub.tools = Right(Seq(probeTool))
+    clock.addAndGet(MCPToolRegistry.retryDelay(1).toMillis) // the failure's backoff has passed (#3080)
     registry.getAllTools.map(_.name) shouldBe Seq("probe")
 
     stub.tools = Right(Seq.empty)

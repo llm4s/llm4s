@@ -7,6 +7,7 @@ import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -37,9 +38,22 @@ import scala.util.chaining.scalaUtilChainingOps
  * If an MCP server cannot be reached or returns an error, the failure is
  * logged and that server contributes no tools — the registry never throws during tool lookup.  Its
  * client is closed and evicted, and its cached tools and hints are dropped with it, because those
- * tools call through that client: the model is never offered a tool that cannot be called.  The next
- * lookup attempts a fresh connection.  A refresh that is only cancelled (the thread was interrupted)
- * keeps the client and the tools already fetched.
+ * tools call through that client: the model is never offered a tool that cannot be called.  The
+ * failure is remembered for a growing interval (1 second, doubling to at most a minute, #3080):
+ * until it has passed, a lookup does not dial the server again, so a dead server does not delay
+ * every call to a healthy one.  `clearCache()`, `refreshCache()` and `healthCheck()` dial at once.
+ * A refresh that is only cancelled (the thread was interrupted) keeps the client and the tools
+ * already fetched, and counts as no failure.
+ *
+ * == Concurrency ==
+ * One refresh runs per server at a time: a call that finds a refresh in progress waits for it and
+ * uses its result, so concurrent first use runs one handshake, not several.  At startup and in
+ * `healthCheck` the servers are contacted in parallel.
+ *
+ * == Hints ==
+ * The registry is a `ToolHintSource`: `AgentBuilder.withTools(registry)` gives each tool of a
+ * server configured with `trustAnnotations = true` the hints its annotations declare (see
+ * [[toolHints]]); every other tool keeps the conservative defaults.
  *
  * == Reconnects ==
  * A tool the registry hands out finds its server's current tool when it is called, so one an agent
@@ -62,11 +76,18 @@ class MCPToolRegistry(
   cacheTTL: FiniteDuration = 10.minutes,
   initializeOnStartup: Boolean = true
 ) extends ToolRegistry
+    with ToolHintSource
     with AutoCloseable {
 
   private val logger                                            = LoggerFactory.getLogger(getClass)
   private val mcpClients: ConcurrentHashMap[String, MCPClient]  = new ConcurrentHashMap()
   private val toolCache: ConcurrentHashMap[String, CachedTools] = new ConcurrentHashMap()
+  // A server's last failures: how many in a row, and when it may be dialled again (#3080)
+  private val failures: ConcurrentHashMap[String, FailedRefresh]     = new ConcurrentHashMap()
+  private val refreshLocks: ConcurrentHashMap[String, ReentrantLock] = new ConcurrentHashMap()
+
+  /** The clock the cache TTL and the failure backoff read; a spec replaces it. */
+  private[mcp] def nowMillis(): Long = System.currentTimeMillis()
 
   logger.info(s"Initializing MCPToolRegistry with ${mcpServers.size} MCP servers and ${localTools.size} local tools")
   if (!initializeOnStartup) {
@@ -125,7 +146,7 @@ class MCPToolRegistry(
    * `AgentTool.fromToolFunction` and an untrusted tool keeps the conservative defaults, which require
    * approval. See [[MCPClient.getToolHints]].
    */
-  def toolHints(name: String): Option[ToolHints] =
+  override def toolHints(name: String): Option[ToolHints] =
     if (localTools.exists(_.name == name)) None
     else
       mcpServers
@@ -178,21 +199,51 @@ class MCPToolRegistry(
     currentEntry(server).map(_.tools).getOrElse(Seq.empty)
 
   // The server's cache entry, refreshed first when it is stale or belongs to a client the registry no longer holds
-  // (closed by closeMCPClients, or evicted after a failure): its tools call through that client.
-  private def currentEntry(server: MCPServerConfig): Option[CachedTools] = {
-    val now = System.currentTimeMillis()
-    Option(toolCache.get(server.name)) match {
-      case Some(cached) if !cached.isExpired(now, cacheTTL) && (mcpClients.get(server.name) eq cached.client) =>
-        logger.debug(s"Cache hit for server ${server.name}, returning ${cached.tools.size} cached tools")
-        Some(cached)
-      case Some(_) =>
-        logger.debug(s"Cache for server ${server.name} is stale or its client was closed, refreshing tools")
-        refreshToolsFromServer(server, now): Unit
-        Option(toolCache.get(server.name))
-      case None =>
-        logger.debug(s"No cache entry for server ${server.name}, fetching tools")
-        refreshToolsFromServer(server, now): Unit
-        Option(toolCache.get(server.name))
+  // (closed by closeMCPClients, or evicted after a failure): its tools call through that client. A server that failed
+  // recently is not dialled until its backoff has passed; one refresh per server runs at a time (#3080).
+  private def currentEntry(server: MCPServerConfig): Option[CachedTools] =
+    fresh(server, nowMillis()).orElse {
+      if (backingOff(server, nowMillis())) None
+      else
+        withServerLock(server) {
+          // Another call may have refreshed it, or failed, while this one waited
+          val now = nowMillis()
+          fresh(server, now).orElse {
+            if (backingOff(server, now)) None
+            else {
+              refreshToolsFromServer(server, now): Unit
+              Option(toolCache.get(server.name))
+            }
+          }
+        }.flatten
+    }
+
+  private def fresh(server: MCPServerConfig, now: Long): Option[CachedTools] =
+    Option(toolCache.get(server.name)).filter { cached =>
+      !cached.isExpired(now, cacheTTL) && (mcpClients.get(server.name) eq cached.client)
+    }
+
+  private def backingOff(server: MCPServerConfig, now: Long): Boolean =
+    Option(failures.get(server.name)).exists { failed =>
+      val waiting = now < failed.retryAt
+      if (waiting) logger.debug(s"MCP server ${server.name} failed recently; not dialling it again yet")
+      waiting
+    }
+
+  /**
+   * Runs `body` holding `server`'s refresh lock; `None`, with the interrupt flag set again, when the wait is
+   * interrupted (the caller then reports a cancellation, as for an interrupted refresh).
+   */
+  private def withServerLock[A](server: MCPServerConfig)(body: => A): Option[A] = {
+    val lock = refreshLocks.computeIfAbsent(server.name, _ => new ReentrantLock())
+    CancelledError.catchInterrupt(lock.lockInterruptibly()) match {
+      case Left(_) =>
+        Thread.currentThread().interrupt()
+        None
+      case Right(()) =>
+        val outcome = Try(body)
+        lock.unlock()
+        Some(outcome.get)
     }
   }
 
@@ -224,13 +275,17 @@ class MCPToolRegistry(
       logger.debug(s"Successfully refreshed ${raw.size} tools from server ${server.name}")
       val tools = raw.map(tool => followingReconnects(server, tool))
       toolCache.put(server.name, CachedTools(tools, raw, client, timestamp))
+      failures.remove(server.name)
       tools
     }
     result.left.foreach {
       // An interrupted refresh is not a failed server: keep the client, cache nothing, report nothing.
       case _: CancelledError => logger.debug("Refreshing tools from {} was cancelled", server.name)
       case error =>
-        logger.error("Failed to refresh tools from ${}: {}", server.name, error.message)
+        val failed = Option(failures.get(server.name)).fold(1)(_.count + 1)
+        val delay  = MCPToolRegistry.retryDelay(failed)
+        failures.put(server.name, FailedRefresh(failed, nowMillis() + delay.toMillis))
+        logger.error("Failed to refresh tools from {}: {}; not retrying for {}", server.name, error.message, delay)
         // Closing the failed client ends the connection the cached tools call through, so those tools can no
         // longer be called: drop them with the client. Advertising them would have the model call tools that
         // are certain to fail. The next lookup reconnects and fetches the list again.
@@ -270,6 +325,7 @@ class MCPToolRegistry(
   def clearCache(): Unit = {
     logger.info("Clearing all tool caches")
     toolCache.clear()
+    failures.clear()
   }
 
   /**
@@ -280,8 +336,7 @@ class MCPToolRegistry(
    */
   def refreshCache(): Unit = {
     logger.info(s"Refreshing cache for all ${mcpServers.size} MCP servers")
-    val now = System.currentTimeMillis()
-    mcpServers.foreach(server => refreshToolsFromServer(server, now))
+    inParallel(mcpServers)(server => withServerLock(server)(refreshToolsFromServer(server, nowMillis())): Unit)
     logger.info("Cache refresh completed for all servers")
   }
 
@@ -295,13 +350,16 @@ class MCPToolRegistry(
     logger.info(s"Closing ${mcpClients.size} MCP clients")
     mcpClients.values.asScala.foreach(_.close())
     mcpClients.clear()
+    failures.clear()
     logger.info("All MCP clients closed")
   }
 
   private[mcp] def createAndInitializeClient(server: MCPServerConfig): ValidatedNel[String, MCPServerConfig] = {
+    // A request that reaches the server (#3080): `initialize` alone answers at once for a client already initialised,
+    // so a server that had died since reported healthy.
     val status: Either[String, MCPServerConfig] = for {
       mcpClient <- Try(getOrCreateClient(server)).toEither.leftMap(_.getMessage)
-      _         <- mcpClient.initialize().left.map(_.message)
+      _         <- mcpClient.ping().left.map(_.message)
     } yield server
     status.tap { x =>
       x.fold(
@@ -316,17 +374,18 @@ class MCPToolRegistry(
    * Attempts to initialise a connection to each configured MCP server and
    * reports whether the handshake succeeded.
    *
-   * Each server is tested by creating (or reusing) its client and calling
-   * `initialize()`. The returned map contains one entry per server, keyed by
+   * Each server is tested, in parallel, by creating (or reusing) its client and calling
+   * `ping()`: the handshake if it has not run, then a `ping` the server must answer.
+   * The returned map contains one entry per server, keyed by
    * `MCPServerConfig.name`, with `true` meaning the server responded
-   * successfully and `false` meaning initialisation failed (connection refused,
-   * timeout, protocol mismatch, etc.).
+   * successfully and `false` meaning it did not (connection refused,
+   * timeout, protocol mismatch, a server that has died, etc.).
    *
    * @return map from server name to health status; keys match `mcpServers.map(_.name)`
    */
   def healthCheck(): Map[String, Boolean] = {
     logger.info("Performing health check on all MCP servers")
-    val results = mcpServers.map(server => server.name -> createAndInitializeClient(server).isValid).toMap
+    val results = inParallel(mcpServers)(server => server.name -> createAndInitializeClient(server).isValid).toMap
 
     val healthyCount = results.values.count(identity)
     logger.info(s"Health check completed: $healthyCount/${mcpServers.size} servers healthy")
@@ -337,23 +396,36 @@ class MCPToolRegistry(
   private def initializeMCPTools(): Unit = {
     logger.info("Initializing MCP tools for all configured servers")
 
-    // Initialize servers in parallel for better performance
-    val results = mcpServers.map { server =>
-      Try {
-        refreshToolsFromServer(server, System.currentTimeMillis())
-        server.name -> "success"
-      }.recover { case e =>
-        logger.warn(s"Failed to initialize server ${server.name}: ${e.getMessage}")
-        server.name -> s"failed: ${e.getMessage}"
-      }.get
+    // In parallel (#3080): startup takes as long as the slowest server, not the sum of their timeouts
+    val results = inParallel(mcpServers) { server =>
+      withServerLock(server)(refreshToolsFromServer(server, nowMillis())): Unit
+      server.name -> toolCache.containsKey(server.name)
     }
 
-    val successCount = results.count(_._2 == "success")
+    val successCount = results.count(_._2)
     logger.info(s"MCP tools initialization completed: $successCount/${results.size} servers initialized successfully")
 
     if (successCount == 0) {
       logger.warn("No MCP servers were successfully initialized - all tools will be local only")
     }
+  }
+
+  /**
+   * `f` applied to each server on a virtual thread of its own, the results in the servers' order. An interrupt of the
+   * calling thread stops the wait, interrupts the workers and stays set; a server whose work did not finish has no
+   * result.
+   */
+  private def inParallel[A](servers: Seq[MCPServerConfig])(f: MCPServerConfig => A): Seq[A] = {
+    val slots = servers.map(_ => new java.util.concurrent.atomic.AtomicReference[Option[A]](None))
+    val workers =
+      servers.zip(slots).map { case (server, slot) => Thread.ofVirtual().start(() => slot.set(Some(f(server)))) }
+    CancelledError.catchInterrupt(workers.foreach(_.join())) match {
+      case Left(_) =>
+        workers.foreach(_.interrupt())
+        Thread.currentThread().interrupt()
+      case Right(()) => ()
+    }
+    slots.flatMap(_.get())
   }
 
   // Initialize tools during construction unless explicitly disabled (useful for tests)
@@ -366,6 +438,10 @@ class MCPToolRegistry(
 }
 
 object MCPToolRegistry {
+
+  /** How long a server is left alone after `failures` failed refreshes in a row: 1 s, doubling to at most 60 s. */
+  private[mcp] def retryDelay(failures: Int): FiniteDuration =
+    (1L << math.min(math.max(failures - 1, 0), 6)).seconds.min(60.seconds)
 
   /**
    * A stdio config for the Playwright MCP server, fetched by `npx` at run time and unpinned. It starts with the
@@ -394,6 +470,9 @@ object MCPToolRegistry {
       initializeOnStartup = true
     )
 }
+
+// A server's failed refreshes in a row, and when it may be dialled again
+final private case class FailedRefresh(count: Int, retryAt: Long)
 
 // Helper case class for cleaner caching
 // `tools` are what the registry hands out; `raw` the client's own, which call through `client`.
