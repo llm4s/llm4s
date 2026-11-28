@@ -799,6 +799,20 @@ every block too. `structuredContent`, when the server sends it, is still the res
 tool without a `description` is kept (it was skipped as malformed), described by its `title`, its
 `annotations.title`, or nothing.
 
+**Schemas (#3076).** An MCP tool's `inputSchema` is no longer rebuilt from `properties` and `required` alone:
+
+| Before | After |
+|---|---|
+| Every object `additionalProperties: false` | As the server wrote it. Absent: closed for an object with properties (what providers' strict modes need), open for a free-form `{"type":"object"}` |
+| A `$ref` kept as raw JSON, its `$defs` dropped | Resolved from `$defs` / `definitions`; an unresolvable or recursive one accepts any value |
+| `minLength`, `pattern`, `minimum`, `maxItems`, ... dropped | Kept, so an agent's argument validator checks them |
+| An `enum` of numbers dropped | Kept |
+| `oneOf`, a `type` of several names | Read as `anyOf` |
+| A missing description became `"Parameter"` | The `title`, or empty; a `default`, `format` or `examples` is added to the description |
+
+Arguments the server's schema refuses are now refused before they are sent, and arguments it accepts are no
+longer refused.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature
