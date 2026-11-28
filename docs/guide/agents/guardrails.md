@@ -663,6 +663,14 @@ type, so `summarize` counts that text once for each type (`123456789` gives `SSN
 `PIIType.all`), and `PIIDetector`'s block message lists both types. A finding is one match of one type, so the sum of
 the counts is how often the patterns fired, not how many stretches of PII the text holds.
 
+The patterns match a normalised copy of the text (#3244), as `SecretLeakGuardrail`'s do: format characters (a
+zero-width space, a soft hyphen, joiners) and combining marks are removed, every dash (a non-breaking hyphen, an en
+dash) reads as `-`, and everything else is in Unicode NFKC, so fullwidth digits and a fullwidth `@` or `.` read as
+ASCII. `123-45-\u200B6789`, `１２３-４５-６７８９` and `alice＠example.com` are all found, and an SSN or card number may
+also be written with dots (`123.45.6789`, `4111.1111.1111.1111`). A match is reported and masked at the original
+text's indices, so an invisible character inside it is masked with it. Groups on separate lines are still not joined
+into one number.
+
 ---
 
 ## Prompt Injection Protection

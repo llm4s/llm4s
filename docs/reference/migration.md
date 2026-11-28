@@ -989,6 +989,15 @@ stored format is the same; what changed is what passes:
 | `GroundingGuardrail`, `ContextRelevanceGuardrail`, `SourceAttributionGuardrail` and `TopicBoundaryGuardrail` read a score by stripping every non-digit and clamping, and fell back to a number anywhere in the reply, so `SCORE: 2/10` read as 210 and passed (#3234) | Each score is read as `LLMGuardrail` reads one: a plain number from 0 to 1. A scaled, unreadable or missing score is a `Left` (a missing `ATTRIBUTION_SCORE` or `RELEVANCE_SCORE` no longer defaults to 0.5 or 0.7), and so is a reply without its `SCORE` and `GROUNDED` lines. `GroundingGuardrail` with `onFail = Fix` blocks a context with no chunks, as it blocks a low score |
 | `agent.run(threadId, query, config, history)` admitted only the query: imported messages reached the store and the model unguarded, and a refused query still created the thread with the history in it, so the same import could not be retried (#3235) | Each imported user message's text goes through the input guardrails too, stored as they rewrite it. A refusal of the query or of an imported message ends the turn `AgentStatus.Blocked`, as before, but stores nothing and creates no thread, so the import can be retried on the same thread id. `Agent.admit` with `history` admits it too, and a refused `QueuedInput` imports nothing |
 
+## Guardrails match look-alike text, tell an outage from a refusal, and keep rewrites under review (#3244, #3247, #3248)
+
+The guardrails and their middleware are experimental. No public signature changed and the stored format is the same;
+what changed is what passes:
+
+| Before (1.0.0) | After |
+|---|---|
+| `PIIPatterns` and `SecretPatterns` matched the raw text, so an SSN or card number with a zero-width space, fullwidth digits or a non-breaking hyphen in it, `123.45.6789`, `4111.1111.1111.1111` and an email with a fullwidth `@` all passed `PIIDetector`, `PIIMasker` and `SecretLeakGuardrail` (#3244) | They match a normalised copy (format characters and combining marks removed, dashes as `-`, the rest NFKC) and report and mask at the original's indices; an SSN or card may be written with dots. **More text is now blocked or masked**: re-check a guardrail that must pass such text. A match's `value` is the original's characters, invisible ones included |
+
 ## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
 
 `AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. No public signature changed, and the

@@ -17,7 +17,8 @@ class PIIPatternsEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   // The patterns as they were before #1713, the reference for "nothing else changed".
   private val emailBefore: Regex = """[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
-  private val ssnBefore: Regex   = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)""".r
+  // The SSN reference takes a `.` between groups too, which #3244 added.
+  private val ssnBefore: Regex = """(?<!\d)(?!000|666|9\d{2})\d{3}[-.\s]?(?!00)\d{2}[-.\s]?(?!0000)\d{4}(?!\d)""".r
 
   // Every line break Java's `\R` matches.
   private val lineBreaks = Seq(

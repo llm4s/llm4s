@@ -66,15 +66,24 @@ object SecretPatterns {
     /**
      * Return all non-overlapping matches found in `text`.
      * Results are ordered by start position.
+     *
+     * The pattern runs on a normalised copy of the text: format characters (a zero-width space, a soft hyphen) and
+     * combining marks removed, dashes read as `-`, the rest in Unicode NFKC, so a key split by an invisible
+     * character or written in fullwidth letters is found (#3244). A match is reported at the text's own indices,
+     * with `value` the text's own characters.
      */
-    def findAll(text: String): Seq[SecretMatch] =
+    def findAll(text: String): Seq[SecretMatch] = {
+      val view = MatchView(text)
       pattern
-        .findAllMatchIn(text)
+        .findAllMatchIn(view.text)
         .collect {
           case m if m.start(secretGroup) >= 0 =>
-            SecretMatch(this, m.group(secretGroup), m.start(secretGroup), m.end(secretGroup))
+            val start = view.start(m.start(secretGroup))
+            val end   = view.end(m.start(secretGroup), m.end(secretGroup))
+            SecretMatch(this, text.substring(start, end), start, end)
         }
         .toSeq
+    }
 
     /** `text` with every match of this type replaced by [[placeholder]]. */
     def redact(text: String): String = {
