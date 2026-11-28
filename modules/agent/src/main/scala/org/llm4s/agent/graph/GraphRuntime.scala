@@ -1086,14 +1086,21 @@ final class GraphRuntime(
     execution: Execution,
     stored: StoredCheckpoint
   ): Result[Execution] =
-    reusableWrites(graph, execution, stored).flatMap { reused =>
-      val finished = execution.frontier.flatMap(task => reused.get(task.id)).collect {
-        case ReusedWrite(TaskResult.Done(command), _) => command.update
-      }
-      finished
-        .foldLeft[Result[ThreadState]](Right(execution.state))((state, update) => state.flatMap(_.applyUpdate(update)))
-        .map(state => if finished.isEmpty then execution else execution.edited(state, execution.superstep))
+    reusableWrites(graph, execution, stored).flatMap(reused =>
+      withFinished(execution, reused.view.mapValues(_.result).toMap)
+    )
+
+  /**
+   * `execution` with the updates of the tasks of its frontier that ran to their end (`results`'s [[TaskResult.Done]]),
+   * applied in the frontier's order; a suspended or blocked task's result is left out.
+   */
+  private def withFinished(execution: Execution, results: collection.Map[TaskId, TaskResult]): Result[Execution] =
+    val finished = execution.frontier.flatMap(task => results.get(task.id)).collect { case TaskResult.Done(command) =>
+      command.update
     }
+    finished
+      .foldLeft[Result[ThreadState]](Right(execution.state))((state, update) => state.flatMap(_.applyUpdate(update)))
+      .map(state => if finished.isEmpty then execution else execution.edited(state, execution.superstep))
 
   /**
    * Whether run `runId` ended as a guardrail's Block ([[NodeResult.Block]]): the thread's latest checkpoint is that
@@ -3048,6 +3055,12 @@ final class GraphRuntime(
     /** What the claim leaves for `execute`: pending writes `loop` reuses. */
     private var claimedReused: Map[TaskId, ReusedWrite] = Map.empty
 
+    /**
+     * The results of the tasks of `position`'s superstep that have finished, reused or run (#3252): a settling stop that
+     * cuts the superstep keeps a finished call's real result rather than settle it as cut, as `abandon` does.
+     */
+    private val finishedTasks = new java.util.concurrent.ConcurrentHashMap[TaskId, TaskResult]()
+
     /** The sequence number of the claim's event; set by the claim. */
     var claimSeq: Long = 0L
 
@@ -3494,6 +3507,8 @@ final class GraphRuntime(
         case Some(_) if !finishing() => cancelled()
         case Some(error)             => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None =>
+          finishedTasks.clear()
+          reused.foreach((id, write) => finishedTasks.put(id, write.result))
           position = execution -> checkpointId
           // the claim was found lost before the run could be interrupted: during admission, say
           if cause.get.contains(StopCause.ClaimLost) then lostClaim(execution, None)
@@ -3698,6 +3713,9 @@ final class GraphRuntime(
               case TaskResult.Done(_) | TaskResult.Held => RunEvent.TaskCompleted
               case TaskResult.Parked(_, _, _)           => RunEvent.TaskSuspended(task.id.value)
               case TaskResult.Blocked(_, e)             => RunEvent.TaskFailed(e.message)
+            // finished before any stop was asked - one that ends after it (it swallowed the interrupt) counts as cut - and
+            // recorded before its write is submitted, so a stop that sees the write stored sees the task finished
+            if !stopRecorded then finishedTasks.put(task.id, result)
             committer.submit(
               Commit(token, None, Vector(write), draft(Some(checkpointId), Some(task), event) +: sink.customEvents)
             )
@@ -3858,9 +3876,12 @@ final class GraphRuntime(
      * run as any closing commit does. Fails with [[GraphError.Cancelled]] naming the settled checkpoint.
      */
     private def closeSettled(execution: Execution, parent: String, settlement: StopSettlement): RunResult[O] =
-      val built = amended(execution, settlement.amend).flatMap { settled =>
-        newCheckpoint(settled, Some(parent), CheckpointStatus.Failed, Some(settlement.outcome)).map(settled -> _)
-      }
+      import scala.jdk.CollectionConverters.*
+      // the cut superstep's finished calls keep their results: only the cut ones are settled (#3252)
+      val built =
+        withFinished(execution, finishedTasks.asScala).flatMap(amended(_, settlement.amend)).flatMap { settled =>
+          newCheckpoint(settled, Some(parent), CheckpointStatus.Failed, Some(settlement.outcome)).map(settled -> _)
+        }
       built match
         case Left(problem) =>
           GraphRuntime.logger.warn(
