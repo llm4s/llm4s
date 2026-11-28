@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelMetadata
 import org.llm4s.rag.RAGConfig
 import org.llm4s.security.Secret
+import org.llm4s.toolapi.builtin.filesystem.{ FileConfig, WriteConfig }
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 // OpenAIConfig gained `api`, `reasoningSummary` and `keepReasoning`, ModelMetadata `supportedEndpoints`: a positional
@@ -38,6 +39,15 @@ object PositionalPatternsGainFieldsTest {
   // RAGConfig gained `legFailurePolicy` (#2995)
   def topK(config: RAGConfig): Int = config match {
     case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
+  }
+
+  // FileConfig gained `blockedNames` and `allowHardLinks`, WriteConfig `allowHardLinks` (#3272)
+  def allowedOf(config: FileConfig): Option[Seq[String]] = config match {
+    case FileConfig(_, allowed, _, _) => allowed
+  }
+
+  def writableOf(config: WriteConfig): Seq[String] = config match {
+    case WriteConfig(paths, _, _, _) => paths
   }
 
   // Not positional patterns: left as they are.

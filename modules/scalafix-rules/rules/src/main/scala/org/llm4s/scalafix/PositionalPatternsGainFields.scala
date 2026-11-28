@@ -68,7 +68,9 @@ object PositionalPatternsGainFields {
     "org/llm4s/agent/memory/ConsolidationConfig"         -> 3,
     "org/llm4s/agent/harness/memory/MemoryRecall"        -> 4,
     "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 3,
-    "org/llm4s/rag/RAGConfig"                            -> 29
+    "org/llm4s/rag/RAGConfig"                            -> 29,
+    "org/llm4s/toolapi/builtin/filesystem/FileConfig"    -> 6,
+    "org/llm4s/toolapi/builtin/filesystem/WriteConfig"   -> 5
   )
 
   /** `old` (a type's arity in some release) as `(old, current)` pairs. */
@@ -152,7 +154,9 @@ object PositionalPatternsGainFields {
       "org/llm4s/agent/memory/ConsolidationConfig"         -> 2,
       "org/llm4s/agent/harness/memory/MemoryRecall"        -> 2,
       "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 2,
-      "org/llm4s/rag/RAGConfig"                            -> 28
+      "org/llm4s/rag/RAGConfig"                            -> 28,
+      "org/llm4s/toolapi/builtin/filesystem/FileConfig"    -> 4,
+      "org/llm4s/toolapi/builtin/filesystem/WriteConfig"   -> 4
     )
   )
 
