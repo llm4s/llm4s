@@ -489,6 +489,12 @@ private[postgres] object Sql:
   def releaseLease(t: Tables): String =
     s"UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?"
 
+  /** [[releaseLease]] for an attempt a drain cut short (#3241): the entry gets one more attempt if it made one. */
+  def releaseDrainedLease(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
+       |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END
+       |WHERE entry_id = ?""".stripMargin
+
   def insertQueueAttempt(t: Tables): String =
     s"""INSERT INTO ${t.queueAttempts} (entry_id, attempt, thread_id, run_id, started_at, holder)
        |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin

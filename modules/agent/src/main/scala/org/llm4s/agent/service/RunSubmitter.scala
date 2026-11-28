@@ -57,26 +57,29 @@ final class RunSubmitter(
     submissionKey: Option[SubmissionKey] = None,
     traceContext: Option[TraceContext] = None
   ): Result[Ticket] =
-    // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store, which answers them in the
-    // ticket - only to the submit that closed them - and they are counted here (W3, #2368)
-    Submission
-      .of(
-        threadId,
-        agentId,
-        input,
-        tenantId,
-        policy,
-        submissionKey,
-        settings.maxAttempts,
-        traceContext,
-        settings.maxOpenPerThread,
-        settings.maxInputBytes
-      )
-      .flatMap(submission => ownedBy(threadId, tenantId).flatMap(_ => queue.submit(submission)))
-      .map { ticket =>
-        countClosed(ticket.interrupted)
-        ticket
-      }
+    // the worker's own thread ids are never queued (#3239): a run on one would hold the retention sweep's claim
+    if ThreadId.isReserved(threadId) then Left(ThreadId.reservedError(threadId))
+    else
+      // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store, which answers them in the
+      // ticket - only to the submit that closed them - and they are counted here (W3, #2368)
+      Submission
+        .of(
+          threadId,
+          agentId,
+          input,
+          tenantId,
+          policy,
+          submissionKey,
+          settings.maxAttempts,
+          traceContext,
+          settings.maxOpenPerThread,
+          settings.maxInputBytes
+        )
+        .flatMap(submission => ownedBy(threadId, tenantId).flatMap(_ => queue.submit(submission)))
+        .map { ticket =>
+          countClosed(ticket.interrupted)
+          ticket
+        }
 
   /**
    * Refuses a submission to a thread another tenant owns - its latest checkpoint records another tenant

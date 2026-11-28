@@ -2287,6 +2287,8 @@ final class GraphRuntime(
     admit: Admitting => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
     observer.filter(_.capacity < 2) match
+      // the worker's own thread ids are never run on (#3239)
+      case _ if ThreadId.isReserved(threadId) => Left(ThreadId.reservedError(threadId))
       case Some(o) =>
         Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was ${o.capacity}"))
       case None =>

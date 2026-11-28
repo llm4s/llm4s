@@ -583,6 +583,61 @@ class AgentWorkerSpec
 
   // ---- drain ----
 
+  // #3241: a run longer than the grace period, cut by every drain, is never dead-lettered for it
+  it should "drain: give a cut attempt back, so an entry with one attempt left survives the drain (#3241)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n <= 2) blocked(entered) else Right(CompletionFixture.simple("done")))
+    val agent   = agentOver(store, client)
+    val id      = submit(store, thread(), maxAttempts = 1)
+    (1 to 2).foreach { _ =>
+      val worker = workerOf(store, Seq(QueuedAgent(agent)), fast.withDrainGrace(100.millis))
+      worker.start()
+      entered.acquire()
+      worker.shutdown().cancelled shouldBe Vector(id)
+      store.runQueue.entry(None, id).value.isOpen shouldBe true
+    }
+    workerOf(store, Seq(QueuedAgent(agent))).start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe a[EntryOutcome.Done]
+    entry.attempts should have size 3
+  }
+
+  // #3241, Codex on #3286: a refund is for the slot's own attempt only. A slot that re-takes an entry whose earlier
+  // attempt's lease lapsed, and is drained before it records one, releases it plainly: nothing is refunded.
+  it should "drain: refund nothing for an earlier holder's attempt, when the slot recorded none of its own (#3241)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n == 1) blocked(entered) else Right(CompletionFixture.simple("done")))
+    val agent   = agentOver(store, client)
+    val on      = thread()
+    val id      = submit(store, on, maxAttempts = 2)
+    diedMidRun(store, agent, on, entered)
+    val refunds = new AtomicInteger(0)
+    val queue = new ForwardingRunQueue(store.runQueue) {
+      override private[llm4s] def releaseDrained(l: Lease) = { refunds.incrementAndGet(); super.releaseDrained(l) }
+    }
+    // the slot pauses before it decides; the drain marks it drained; only then does it decide
+    val deciding = new java.util.concurrent.CountDownLatch(1)
+    val drained  = new java.util.concurrent.CountDownLatch(1)
+    val worker   = workerOf(store, Seq(QueuedAgent(agent)), fast.withDrainGrace(20.millis), queue = Some(queue))
+    worker.beforeDecide = _ => {
+      deciding.countDown()
+      drained.await(10, java.util.concurrent.TimeUnit.SECONDS): Unit
+    }
+    worker.onDrained = _ => drained.countDown()
+    worker.start()
+    deciding.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+    val drain = Thread.ofVirtual().start(() => worker.shutdown(): Unit)
+    drain.join()
+    drained.getCount shouldBe 0
+    refunds.get shouldBe 0
+    val entry = store.runQueue.entry(None, id).value
+    entry.isOpen shouldBe true
+    entry.maxAttempts shouldBe 2
+    entry.attempts should have size 1
+  }
+
   it should "drain: cancel runs past the grace period and give their entries back once they exited" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)
@@ -786,5 +841,69 @@ class AgentWorkerSpec
     worker.sweepOnce().value.skipped shouldBe true
     store.release(AgentWorker.SweepLock, other.token).value
     worker.sweepOnce().value.skipped shouldBe false
+  }
+
+  // ---- reserved thread ids (#3239) ----
+
+  "The worker's reserved thread ids" should "be refused as a run's thread and as a queued submission's (#3239)" in {
+    val store = InMemoryCheckpointer()
+    val agent = agentOver(store, answering("x"))
+    Seq(AgentWorker.SweepLock, AgentWorker.HealthProbe).foreach { reserved =>
+      agent.run(reserved, "hi").left.value.message should include("reserved")
+      new RunSubmitter(store.runQueue, store)
+        .submit(reserved, agentId, QueuedInput.query("hi"))
+        .left
+        .value
+        .message should
+        include("reserved")
+      store.latest(reserved).value shouldBe None
+    }
+    // so the sweep is never skipped for a caller's run
+    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    worker.sweepOnce().value.skipped shouldBe false
+  }
+
+  // ---- a slot's run thread and the loops (#3240) ----
+
+  it should "give a slot back when its run thread dies of a fatal throwable, so the next entry runs (#3240)" in {
+    val store = InMemoryCheckpointer()
+    val overflowing = new org.llm4s.agent.guardrails.InputGuardrail {
+      val name: String = "Overflowing"
+      def validate(value: String): Result[String] =
+        if (value == "boom") throw new StackOverflowError("a guardrail's regex on a long input") else Right(value)
+    }
+    val agent =
+      Agent
+        .builder("assistant", answering("fine"))
+        .withRuntime(new GraphRuntime(store))
+        .withInputGuardrails(overflowing)
+    val worker = workerOf(store, Seq(QueuedAgent(agent.build().value)), fast.withConcurrency(1))
+    val boom   = submit(store, thread(), QueuedInput.query("boom"), maxAttempts = 2)
+    worker.start()
+    // the one slot comes back: an entry behind the fatal one runs, while the fatal one's lease runs out
+    val next = submit(store, thread())
+    closed(store, next).outcome.value shouldBe a[EntryOutcome.Done]
+    store.runQueue.entry(None, boom).value.isOpen shouldBe true
+  }
+
+  it should "keep sweeping after a pass throws, and report a sweep that is running (#3240)" in {
+    val store  = InMemoryCheckpointer()
+    val passes = new AtomicInteger(0)
+    val throwing = new ForwardingCheckpointer(store) {
+      override def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard) =
+        if (passes.getAndIncrement() < 2) throw new IllegalStateException("a store bug")
+        else super.sweep(policy, after, guard)
+    }
+    val worker = AgentWorker(
+      store.runQueue,
+      throwing,
+      Seq(QueuedAgent(agentOver(store, answering("x")))),
+      fast.withSweepEvery(30.millis),
+      shortLease
+    ).value
+    started.add(worker)
+    worker.start()
+    eventually(passes.get should be > 3)
+    worker.health().problems.filter(_.contains("sweep")) shouldBe empty
   }
 }

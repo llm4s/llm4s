@@ -326,16 +326,18 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       }
     }
 
-  def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
+  def release(lease: Lease): Result[Unit] = released(lease, "queue.release", Sql.releaseLease(t))
+
+  // the drained attempt stays in the history, and the entry is given one more (#3241)
+  override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] =
+    released(lease, "queue.releaseDrained", Sql.releaseDrainedLease(t))
+
+  private def released(lease: Lease, operation: String, sql: String): Result[Unit] = store.writing(operation) { c =>
     leased(c, lease) match
       case Left(_: QueueError.LeaseLost) => Right(())
       case Left(other)                   => Left(other)
       case Right(row) =>
-        update(
-          c,
-          Sql.releaseLease(t),
-          row.id
-        )
+        update(c, sql, row.id)
         Right(())
   }
 

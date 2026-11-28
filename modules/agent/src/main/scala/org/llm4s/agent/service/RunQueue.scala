@@ -183,6 +183,16 @@ trait RunQueue:
   def release(lease: Lease): Result[Unit]
 
   /**
+   * As [[release]], for an attempt a drain cut short (#3241): the entry is given back, and the attempt is not charged
+   * against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its `attempts`, as history.
+   * Internal to llm4s: only `AgentWorker` calls it, and only for a slot that recorded its own attempt under the lease it
+   * releases, which is what keeps a refund to that attempt (the store does not check it: an attempt row does not name
+   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash is still charged.
+   * The default is [[release]].
+   */
+  private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = release(lease)
+
+  /**
    * Records an attempt at `lease`'s entry running as `runId`, durably, before the caller touches the thread (rule 4);
    * see [[AttemptStart]]. Refused unless `lease` is current, and with a `ValidationError` for a `runId` that already
    * names a run on the thread - a checkpoint, or an attempt of any entry - since a reused `RunId` would name two runs

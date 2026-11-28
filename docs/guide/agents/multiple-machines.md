@@ -144,8 +144,8 @@ AgentId.of("assistant").flatMap { agentId =>
   the entry, records a new attempt and recovers the thread from its last checkpoint; a follower sees the recovered
   run's events continue the same log, with no gap and no repeat. Recovery takes about the longer of the lease
   and claim `ttl`s.
-- **Attempts are bounded** by `llm4s.agent.queue.maxAttempts`; an entry that runs out is closed `failed` (a dead
-  letter), and so is one no worker's graph version can run for `unrunnableAfter`. A worker that cannot read the
+- **Attempts are bounded** by `llm4s.agent.queue.maxAttempts` (an attempt a drain cut short is not counted; see
+  Shutdown drains below); an entry that runs out is closed `failed` (a dead letter), and so is one no worker's graph version can run for `unrunnableAfter`. A worker that cannot read the
   entry's thread spends an attempt each time, so a thread that never reads dead-letters its entry too. The sweep
   closes `failed` (`Unrunnable`) a thread's head that no worker has taken within `unrunnableAfter` of its
   submission, such as one for an agent id no worker serves; `queue.allDepths()` shows every agent's open entries,
@@ -178,7 +178,10 @@ llm4s.agent {
 
 **Shutdown drains.** `worker.shutdown()` stops taking entries, lets running runs reach rest within `drain.grace`,
 then cancels the rest and gives their entries back, so another instance recovers them at once instead of waiting for
-the lease to lapse. Give the process `grace + exitTimeout` plus a margin to stop (Kubernetes'
+the lease to lapse. An attempt a drain cuts short costs its entry nothing: the entry's `maxAttempts` rises by one
+(in the in-memory, SQLite and PostgreSQL queues; a custom `RunQueue` still charges it), so a run longer than `drain.grace` survives any number of rolling deploys. A worker that
+crashes gives nothing back, and that attempt does count: `maxAttempts` is what dead-letters an entry whose run crashes
+its worker every time. Give the process `grace + exitTimeout` plus a margin to stop (Kubernetes'
 `terminationGracePeriodSeconds`).
 
 **Readiness is `worker.health()`**: the worker is running, its loop is alive and the store answers. Keep liveness on

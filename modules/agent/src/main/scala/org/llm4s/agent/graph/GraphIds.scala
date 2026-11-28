@@ -47,6 +47,18 @@ object ThreadId:
   extension (id: ThreadId) def value: String = id
 
   /**
+   * The thread ids the agent worker keeps for itself (#3239): the retention sweep's lock and the health probe's
+   * address. A run on one of them - or a queued submission for one - is refused, so no caller can hold the sweep's
+   * claim and stall every worker's retention.
+   */
+  private[agent] val Reserved: Set[String] = Set("llm4s-worker-retention-sweep", "llm4s-worker-health")
+
+  private[agent] def isReserved(id: ThreadId): Boolean = Reserved.contains(id)
+
+  private[agent] def reservedError(id: ThreadId): org.llm4s.error.ValidationError =
+    org.llm4s.error.ValidationError("threadId", s"'$id' is reserved for the agent worker; use another thread id")
+
+  /**
    * The id of the child thread that the tool call `call` of a run on `parent` starts for agent `agent` (design 4.41):
    * `<parent>/~task/<agent>/<digest>`, where the digest is the first 24 hex characters of the SHA-256 of
    * `("llm4s-child-v1", parent, call, agent)`. The same call starting the same agent on the same thread always names
