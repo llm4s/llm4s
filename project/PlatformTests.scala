@@ -23,11 +23,19 @@ import sbt.Keys._
  * `scripts/check-platform-tests.sh` (Quick Checks) keeps the lists honest from the other side: every main source
  * file that touches one of those platform APIs must be listed in `scripts/platform-sensitive-sources.txt` with the
  * module or suite here that tests it on Windows. It reads these lists from the build model (`dumpBuildModel`).
+ *
+ * `sbt testPlatform` runs both lists in full. `sbt "testPlatform rag core"` runs only the named projects' entries (a
+ * whole module's suites, a module's named suites) and their checks: CI's Windows job passes the listed projects that a
+ * pull request's platform-sensitive change reaches (`windows_modules` from scripts/ci-changes.sh, #3187), and no name,
+ * so everything, on the nightly run. A name in neither list fails, rather than running nothing.
  */
 object PlatformTests {
 
   val testPlatform =
-    taskKey[Unit]("Runs only the tests that exercise platform-specific behaviour, as CI's Windows job does")
+    inputKey[Unit](
+      "Runs only the tests that exercise platform-specific behaviour, as CI's Windows job does; given project names, " +
+        "only those projects' entries"
+    )
 
   val wholeModules: Seq[String] = Seq(
     "workspaceShared",
@@ -127,24 +135,36 @@ object PlatformTests {
   private val itLocalTag = "org.llm4s.it.tags.Local"
 
   /**
-   * `testPlatform`, defined on the root project. Every module's tests are started together, as `sbt test` starts
-   * them, rather than one command after another. `excludeTag` is left out of the named suites as `sbt test` leaves
-   * it out of every module (`testOnly` does not apply `Test / test / testOptions`).
+   * `testPlatform`, defined on the root project. Every selected module's tests are started together, as `sbt test`
+   * starts them, rather than one command after another. `excludeTag` is left out of the named suites as `sbt test`
+   * leaves it out of every module (`testOnly` does not apply `Test / test / testOptions`).
    */
   def settings(excludeTag: String): Seq[Def.Setting[_]] = Seq(
     testPlatform / aggregate := false,
-    testPlatform := Def
-      .task(())
-      .dependsOn(
-        (unmatchedSuitesCheck +: itTierCheck +: (wholeModules
-          .map(m => (LocalProject(m) / Test / test): Def.Initialize[Task[Unit]]) ++
-          suites.map { case (m, names) =>
-            // `it` is also restricted to its Local tier, so a suite retagged to Docker/Cloud drops out, not runs.
-            val tier = if (m == "it") s" -n $itLocalTag" else ""
-            (LocalProject(m) / Test / testOnly).toTask(names.mkString(" ", " ", s" -- -l $excludeTag$tier"))
-          })): _*
-      )
-      .value
+    testPlatform := Def.inputTaskDyn {
+      val only    = Def.spaceDelimited("<project>").parsed.distinct
+      val unknown = only.filterNot((wholeModules ++ suites.map(_._1)).toSet)
+      if (unknown.nonEmpty)
+        throw new MessageOnlyException(
+          s"testPlatform: ${unknown.mkString(", ")} is in neither list of project/PlatformTests.scala (wholeModules, " +
+            "suites), so it would run nothing"
+        )
+      val selected: String => Boolean = if (only.isEmpty) _ => true else only.toSet
+      val chosen                      = suites.filter { case (m, _) => selected(m) }
+      val checks = unmatchedSuitesCheck(chosen) +: (if (chosen.exists(_._1 == "it")) Seq(itTierCheck) else Nil)
+      Def
+        .task(())
+        .dependsOn(
+          (checks ++ (wholeModules
+            .filter(selected)
+            .map(m => (LocalProject(m) / Test / test): Def.Initialize[Task[Unit]]) ++
+            chosen.map { case (m, names) =>
+              // `it` is also restricted to its Local tier, so a suite retagged to Docker/Cloud drops out, not runs.
+              val tier = if (m == "it") s" -n $itLocalTag" else ""
+              (LocalProject(m) / Test / testOnly).toTask(names.mkString(" ", " ", s" -- -l $excludeTag$tier"))
+            })): _*
+        )
+    }.evaluated
   )
 
   /**
@@ -171,8 +191,8 @@ object PlatformTests {
   }
 
   /** Fails when a name in [[suites]] matches none of its module's suites, which `testOnly` would run as nothing. */
-  private def unmatchedSuitesCheck: Def.Initialize[Task[Unit]] = {
-    val unmatched: Def.Initialize[Task[Seq[Seq[String]]]] = suites
+  private def unmatchedSuitesCheck(chosen: Seq[(String, Seq[String])]): Def.Initialize[Task[Unit]] = {
+    val unmatched: Def.Initialize[Task[Seq[Seq[String]]]] = chosen
       .map { case (m, names) =>
         Def.task {
           val defined = (LocalProject(m) / Test / definedTestNames).value

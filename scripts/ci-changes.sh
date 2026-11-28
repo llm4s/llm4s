@@ -4,23 +4,36 @@
 #
 # Prints one `<name>=<value>` line per output on stdout, for $GITHUB_OUTPUT, and why on stderr (the `Changes` log):
 #
-#   code         `Test (other modules)` and the Code Coverage gate: anything but the files NONCODE matches (docs/,
-#                the top-level markdown, other workflows, scripts/ that no test job runs, ...)
+#   code         the Code Coverage gate: anything but the files NONCODE matches (docs/, the top-level markdown, other
+#                workflows, scripts/ that no test job runs, ...)
 #   docs         `ScalaDoc`, and, when `code` is false, `Docs tests` (the suites tagged DocsSpec, which read docs/):
 #                docs/, a top-level markdown file, or a script the ScalaDoc job runs
-#   windows      `Test (Windows)`: a module that runs whole on Windows (PlatformTests.wholeModules), a file
-#                scripts/platform-sensitive-sources.txt lists, or a suite PlatformTests.suites names
 #   integration  `Integration Tests`: modules/it, deploy/, config/, or a module the @Docker suites reach (INTEGRATION)
-#   consumers    the consumers and Spring jobs: the Java, Kotlin, Spring and Quarkus modules, what they depend on, the
-#                Gradle and Maven samples, and the scripts and guides those jobs check (CONSUMERS)
 #   workspace    the @Workspace tier (scripts/workspace-tier-changes.sh, which has its own, narrower rules); always
 #                false in a merge group, where the queued pull request has already run it
-#   performance  `Performance tests`: `sbt testPerformance` runs only core's and agent's tagged tests
-#                (`performanceTestProjects` in build.sbt), so core, agent and media (core's one in-build dependency)
+#   windows      `Test (Windows)`: the change touches a module that runs whole on Windows (PlatformTests.wholeModules),
+#                a source scripts/platform-sensitive-sources.txt lists, or a suite PlatformTests.suites names, and those
+#                files reach the tests of a project the lists hold; windows_modules names those projects
+#   consumers    the consumers job: an affected project (`reached`, below) in CONSUMER_ROOTS, the modules it builds
+#                against the published library, or a file it reads outside them (CONSUMER_PATHS)
+#   spring       `Spring Boot and Spring AI (latest)`: an affected project in SPRING_ROOTS, the modules it tests
+#   performance  `Performance tests`: an affected project in `performanceTestProjects` (build.sbt), the modules with
+#                tagged tests; performance_modules names them
+#   other        `Test (other modules)`: an affected project in ci.yml's TEST_MODULES (the modules no coverage leg
+#                runs); test_modules names them
 #   modules      the projects whose tests the change reaches (#3185), space-separated, by the rule below
 #   legs         the coverage legs' matrix (#3186): .github/coverage-legs.json's rows, each cut to its modules in
 #                `modules`, and a row left with none dropped, as compact JSON (`[]` when no leg has work)
 #   full         true when every module is selected (a build file, the `ci:full` label, an unmapped path, --all)
+#   windows_modules, performance_modules, test_modules
+#                what the job runs when its decision is true: a space-separated list, or empty for everything the job
+#                knows (`sbt testPlatform`, `sbt testPerformance`, all of TEST_MODULES), which is what a full
+#                selection and every non-PR event (no decision is printed, so every job runs) get
+#
+# `reached` is `modules` before leg completeness (below), the projects whose tests run changed code or read a changed
+# file: the jobs other than the legs test those, so a module added only to keep a leg's report whole selects no job.
+# A full selection (any reason) sets every decision but `workspace` to true, so what the graph cannot place runs
+# everything, as it does in the legs.
 #
 # The module rule, over the committed project graph (.github/ci-graph.json, `sbt generateCiGraph`): each changed file
 # belongs to the project whose base directory is its longest prefix, as that project's `test` node (under src/test/)
@@ -139,11 +152,11 @@ INTEGRATION=(
 INTEGRATION_UNREACHED='mcp image speech ollama gemini anthropic azureIdentity voyage bedrock jina jev cohere watsonx
   perplexity jlama workspaceClient observabilityPrometheus traceOpentelemetry schemaDerivation'
 # The consumers job builds the Java, Maven, Gradle, Quarkus, Micronaut and Helidon consumers of llm4s-java-api, the BOM,
-# the doctor and the REPL against the published library; the Spring job tests the starter and llm4s-spring-ai.
-CONSUMERS=(
-  '^modules/(java-api|java-rag|reactor|kotlin-api|quarkus|spring-boot-starter|spring-ai|bom|doctor|repl)/'
-  '^modules/(media|core|agent|rag|knowledgegraph|observability|observability-micrometer|testkit)/'
-  '^modules/(openai|anthropic|ollama|gemini|openai-compatible)/'
+# the doctor and the REPL against the published library: a change it can see is one an affected project of
+# CONSUMER_ROOTS reaches (their dependencies, by the graph), or one of the files outside the sbt build it reads.
+CONSUMER_ROOTS='javaApi javaRag reactor springBootStarter springAi bom doctor repl'
+CONSUMER_PATHS=(
+  '^modules/(kotlin-api|quarkus)/'
   '^modules/samples/(gradle-java|maven-java|quarkus-java|micronaut-java|helidon-java)/'
   '^examples/repl/'
   '^docs/guide/(quarkus|micronaut|helidon|spring-boot|spring-ai)\.md$'
@@ -151,23 +164,33 @@ CONSUMERS=(
   '^docs/reference/doctor\.md$'
   '^scripts/check-(kotlin-publication|bom-consumers|doctor-launch|repl-scripts|quarkus-guide-snippets|framework-guide-snippets)\.sh$'
 )
-PERFORMANCE=(
-  '^modules/media/'
-  '^modules/core/'
-  '^modules/agent/'
-)
+# The Spring job tests the starter against the latest Spring Boot 3.x and 4.x, and llm4s-spring-ai against the latest
+# Spring AI: those projects' own tests.
+SPRING_ROOTS='springBootStarter springBootStarterBoot4 springAi'
+# PlatformTests projects whose named suites test another project's code, which the graph cannot see: `<project>
+# <the project they test>`. Windows runs such a project's entries only when the change reaches the tested project, or
+# touches a file of the project itself (a listed suite, its own sources).
+# `it` depends on nearly every module, so the graph alone would compile its tests on Windows for almost any change,
+# while its two listed suites (the vision clients' file encoding) test image.
+WINDOWS_VIA='it:image'
 
 re() { (IFS='|'; echo "$*"); }
 
-# select_modules FULL_WHY CODE_FILES: prints modules=, legs= and full=, and why on stderr
+# select_modules FULL_WHY CODE_FILES [ALL_FILES]: prints modules=, legs= and full=, and why on stderr; given ALL_FILES
+# (a pull request or merge group, not --all) also the module-based decisions (windows, consumers, spring, performance,
+# other) and their module lists
 select_modules() {
-  FULL_WHY="$1" CODE_FILES="$2" OUTSIDE_RE="$(re "${OUTSIDE_SBT[@]}")" READS_LIST="$(printf '%s\n' "${READS[@]}")" \
-  ruby -rjson - "$GRAPH" "$LEGS" <<'RUBY'
+  FULL_WHY="$1" CODE_FILES="$2" ALL_FILES="${3:-}" DECIDE="$([ $# -ge 3 ] && echo 1 || true)" \
+  OUTSIDE_RE="$(re "${OUTSIDE_SBT[@]}")" READS_LIST="$(printf '%s\n' "${READS[@]}")" \
+  ROOT="$ROOT" CONSUMER_ROOTS="$CONSUMER_ROOTS" CONSUMER_RE="$(re "${CONSUMER_PATHS[@]}")" SPRING_ROOTS="$SPRING_ROOTS" \
+  WINDOWS_VIA="$WINDOWS_VIA" ruby -rjson -ryaml - "$GRAPH" "$LEGS" <<'RUBY'
 graph_file, legs_file = ARGV
 graph = JSON.parse(File.read(graph_file))
 projects = graph.fetch("projects")
 legs = JSON.parse(File.read(legs_file))
 files = ENV["CODE_FILES"].to_s.split("\n").reject(&:empty?)
+all_files = ENV["ALL_FILES"].to_s.split("\n").reject(&:empty?)
+decide = !ENV["DECIDE"].to_s.empty?
 full_why = ENV["FULL_WHY"].to_s
 outside = ENV["OUTSIDE_RE"].to_s.empty? ? nil : Regexp.new(ENV["OUTSIDE_RE"])
 reads = ENV["READS_LIST"].to_s.split("\n").reject(&:empty?).map { |l| r, p = l.split(" ", 2); [Regexp.new(r), p.strip] }
@@ -193,12 +216,14 @@ bases = projects.reject { |_, p| p["base"] == "." }.map { |id, p| ["#{p['base']}
 borrowers = Hash.new { |h, k| h[k] = [] } # file => the nodes that compile it from outside their own directory
 projects.each { |id, p| Array(p["borrowed"]).each { |conf, path| borrowers[path] << "#{id}:#{side.(conf)}" } }
 
-changed = {} # node => the first changed file in it
-direct = {}  # project => why its tests are selected without the graph
-unless full_why.empty?
-  # every project: nothing to trace
-else
-  files.each do |f|
+dependents = Hash.new { |h, k| h[k] = [] }
+deps_of.each { |n, ds| ds.each { |d| dependents[d] << n } }
+
+# trace FILES: [the projects whose tests they reach (project => why), nil], or [nil, why] when one is in no project
+trace = lambda do |fs|
+  changed = {} # node => the first changed file in it
+  direct = {}  # project => why its tests are selected without the graph
+  fs.each do |f|
     b, id = bases.find { |base, _| f.start_with?(base) }
     nodes = borrowers.fetch(f, []).dup
     nodes << "#{id}:#{f[b.size..].start_with?('src/test/') ? 'test' : 'compile'}" if id
@@ -206,20 +231,11 @@ else
     if nodes.empty?
       next if outside&.match?(f)
       next if reads.any? { |r, _| r.match?(f) }
-      full_why = "#{f} is in no project of .github/ci-graph.json"
-      break
+      return [nil, "#{f} is in no project of .github/ci-graph.json"]
     end
     nodes.each { |n| changed[n] ||= f }
   end
-end
-
-selected = {} # project => why
-if !full_why.empty?
-  projects.each_key { |id| selected[id] = full_why }
-else
   # walk back from the changed nodes; toward[n] is the next node on a shortest path from n to a changed one
-  dependents = Hash.new { |h, k| h[k] = [] }
-  deps_of.each { |n, ds| ds.each { |d| dependents[d] << n } }
   toward = {}
   queue = changed.keys
   queue.each { |n| toward[n] = nil }
@@ -231,16 +247,31 @@ else
       queue << m
     end
   end
+  sel = {}
   projects.each_key do |id|
     node = "#{id}:test"
     if toward.key?(node)
       path = [node]
       path << toward[path.last] while toward[path.last]
-      selected[id] = "#{path.join(' > ')} (#{changed[path.last]})"
+      sel[id] = "#{path.join(' > ')} (#{changed[path.last]})"
     elsif direct.key?(id)
-      selected[id] = direct[id]
+      sel[id] = direct[id]
     end
   end
+  [sel, nil]
+end
+
+reached = {} # project => why: the projects whose tests run changed code or read a changed file
+if full_why.empty?
+  sel, why = trace.(files)
+  if why then full_why = why else reached = sel end
+end
+selected = {} # project => why: `reached`, and what leg completeness adds
+if !full_why.empty?
+  projects.each_key { |id| selected[id] = full_why }
+  reached = selected.dup
+else
+  selected = reached.dup
   # A leg's report for a module counts every measurement taken so far in the leg, so a selected module's report is the
   # full run's only if the modules ahead of it in its leg whose tests run its code run too: add them, to a fixpoint.
   reach = Hash.new do |h, n|
@@ -265,6 +296,90 @@ else
     end
     break unless added
   end
+end
+
+# The module-based decisions (#3187): each job's projects that `reached` holds, or everything when the selection is full.
+if decide
+  root = ENV.fetch("ROOT")
+  full = !full_why.empty?
+  say = ->(name, value, why) { warn "#{name}: #{why}"; puts "#{name}=#{value}" }
+  # a name that is not a project could never be reached: scripts/test-ci-changes.sh checks every list here against the
+  # committed graph, so a renamed project fails there; a smaller graph (the tests' own) just drops it
+  known = lambda do |what, ids|
+    missing = ids.reject { |m| projects.key?(m) }
+    warn "note: #{what} names #{missing.join(', ')}, not in the project graph" unless missing.empty?
+    ids - missing
+  end
+  # decide_on NAME LIST_NAME IDS [EXTRA_FILES]: NAME is true when the selection is full, or a project of IDS is
+  # reached, or EXTRA_FILES (files outside the sbt build the job reads) is not empty; LIST_NAME, when given, is the
+  # reached projects of IDS (empty, which the job reads as all of them, when the selection is full)
+  decide_on = lambda do |name, list_name, ids, extra = []|
+    hit = ids.select { |m| reached.key?(m) }
+    if full
+      say.(name, true, full_why)
+      puts "#{list_name}=" if list_name
+    elsif !hit.empty?
+      say.(name, true, "the change reaches #{hit.join(' ')}: #{hit.map { |m| "#{m}: #{reached[m]}" }.first}")
+      puts "#{list_name}=#{hit.join(' ')}" if list_name
+    elsif !extra.empty?
+      say.(name, true, "the change touches #{extra.first} (#{extra.size} file(s))")
+    else
+      say.(name, false, "the change reaches none of #{ids.join(' ')}")
+    end
+  end
+
+  # windows: the files of PlatformTests' whole modules, the sources platform-sensitive-sources.txt lists, and the suites
+  # PlatformTests names; Windows runs the listed projects those files reach (not every listed project the whole change
+  # reaches: a change elsewhere that is not platform-sensitive is pure JVM logic, which ubuntu tests)
+  pt = File.read(File.join(root, "project/PlatformTests.scala"))
+  whole = pt[/val wholeModules[^=]*=\s*Seq\((.*?)\)/m, 1].to_s.scan(/"(\w+)"/).flatten
+  suites_src = pt[/val suites[^=]*=\s*Seq\((.*)\)/m, 1].to_s
+  suite_mods = suites_src.scan(/"(\w+)"\s*->/).flatten
+  suite_names = suites_src.scan(/"([\w.*]+\.[\w*]+)"/).flatten
+  abort "ci-changes.sh: cannot read wholeModules and suites from project/PlatformTests.scala" if whole.empty? || suite_mods.empty?
+  platform = known.("project/PlatformTests.scala", (whole + suite_mods).uniq.sort)
+  src_list = File.join(root, "scripts/platform-sensitive-sources.txt")
+  listed = File.exist?(src_list) ?
+    File.readlines(src_list).map(&:strip).reject { |l| l.empty? || l.start_with?("#") }.map { |l| l.split.first } : []
+  prefixes = whole.select { |m| projects.key?(m) }.map { |m| "#{projects[m]['base']}/" }
+  suite_re = suite_names.map { |s| Regexp.new("\\A" + Regexp.escape(s).gsub("\\*", "[^.]*") + "\\z") }
+  wfiles = files.select do |f|
+    fqcn = f[%r{/src/test/(?:scala|java)/(.+)\.(?:scala|java)\z}, 1]&.tr("/", ".")
+    prefixes.any? { |p| f.start_with?(p) } ||
+      listed.any? { |l| l.end_with?("/") ? f.start_with?(l) : f == l } ||
+      (fqcn && suite_re.any? { |r| r.match?(fqcn) })
+  end
+  if full
+    say.("windows", true, full_why)
+    puts "windows_modules="
+  elsif wfiles.empty?
+    say.("windows", false, "nothing it covers changed")
+  else
+    wsel, why = trace.(wfiles)
+    via = ENV["WINDOWS_VIA"].to_s.split.to_h { |e| e.split(":", 2) }
+    own = ->(m) { wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m } }
+    hit = why ? [] : platform.select { |m| wsel.key?(m) && (!via.key?(m) || wsel.key?(via[m]) || own.(m)) }
+    if why
+      say.("windows", true, why)
+      puts "windows_modules="
+    elsif hit.empty?
+      say.("windows", false, "#{wfiles.first} reaches no project project/PlatformTests.scala lists")
+    else
+      say.("windows", true, "the change touches #{wfiles.first} (#{wfiles.size} file(s)), which reaches #{hit.join(' ')}")
+      puts "windows_modules=#{hit.join(' ')}"
+    end
+  end
+
+  consumer_re = ENV["CONSUMER_RE"].to_s.empty? ? nil : Regexp.new(ENV["CONSUMER_RE"])
+  decide_on.("consumers", nil, known.("CONSUMER_ROOTS", ENV["CONSUMER_ROOTS"].split),
+             consumer_re ? all_files.grep(consumer_re) : [])
+  decide_on.("spring", nil, known.("SPRING_ROOTS", ENV["SPRING_ROOTS"].split))
+  perf = File.read(File.join(root, "build.sbt"))[/lazy val performanceTestProjects\s*=\s*Seq\(([^)]*)\)/, 1]
+  abort "ci-changes.sh: cannot read performanceTestProjects from build.sbt" unless perf
+  decide_on.("performance", "performance_modules", known.("performanceTestProjects", perf.scan(/"(\w+)"/).flatten))
+  others = YAML.load_file(File.join(root, ".github/workflows/ci.yml")).dig("jobs", "test", "env", "TEST_MODULES").to_s.split
+  abort "ci-changes.sh: cannot read the test job's TEST_MODULES from ci.yml" if others.empty?
+  decide_on.("other", "test_modules", known.("TEST_MODULES", others))
 end
 
 warn "modules: #{full_why.empty? ? "#{selected.size} of #{projects.size} projects" : "every project: #{full_why}"}"
@@ -315,35 +430,11 @@ decide() {
 code_files="$(printf '%s\n' "$files" | grep -vE "$(re "${NONCODE[@]}")" | grep -v '^$' || true)"
 decide code "$code_files"
 decide docs "$(any "${DOCS[@]}")"
-
-# windows: PlatformTests' whole modules (their directories, from build.sbt), the listed sources, and the named suites
-windows_files="$(printf '%s\n' "$files" | ruby -e '
-  files = $stdin.read.split("\n").reject(&:empty?)
-  sbt = File.exist?("build.sbt") ? File.read("build.sbt") : ""
-  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h.transform_values { |d| d.squeeze("/") }
-  pt = File.exist?("project/PlatformTests.scala") ? File.read("project/PlatformTests.scala") : ""
-  whole = pt[/val wholeModules[^=]*=\s*Seq\((.*?)\)/m, 1].to_s.scan(/"(\w+)"/).flatten
-  suites = pt[/val suites[^=]*=\s*Seq\((.*)\)/m, 1].to_s.scan(/"([\w.*]+\.[\w*]+)"/).flatten
-  listed = File.exist?("scripts/platform-sensitive-sources.txt") ?
-    File.readlines("scripts/platform-sensitive-sources.txt").map(&:strip).reject { |l| l.empty? || l.start_with?("#") }
-      .map { |l| l.split.first } : []
-  prefixes = whole.map { |m| dirs[m] }.compact.map { |d| "#{d}/" } + ["scripts/platform-sensitive-sources.txt"]
-  suite_re = suites.map { |s| Regexp.new("\\A" + Regexp.escape(s).gsub("\\*", "[^.]*") + "\\z") }
-  files.each do |f|
-    fqcn = f[%r{/src/test/(?:scala|java)/(.+)\.(?:scala|java)\z}, 1]&.tr("/", ".")
-    hit = prefixes.any? { |p| f.start_with?(p) } ||
-          listed.any? { |l| l.end_with?("/") ? f.start_with?(l) : f == l } ||
-          (fqcn && suite_re.any? { |r| r.match?(fqcn) })
-    puts f if hit
-  end
-')"
-decide windows "$windows_files"
 decide integration "$(any "${INTEGRATION[@]}")"
-decide consumers "$(any "${CONSUMERS[@]}")"
 if [ "${CI_EVENT:-}" = merge_group ]; then
   say workspace false "a merge group: the queued pull request has already run the tier"
 else
   "$HERE/workspace-tier-changes.sh" "$BASE" "$HEAD" | sed 's/^changed=/workspace=/'
 fi
-decide performance "$(any "${PERFORMANCE[@]}")"
-select_modules "$full_why" "$code_files"
+# windows, consumers, spring, performance and other, by the project graph; then modules, legs and full
+select_modules "$full_why" "$code_files" "$files"

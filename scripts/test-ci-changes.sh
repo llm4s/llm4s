@@ -37,6 +37,7 @@ cp "$CI" "$repo/.github/workflows/ci.yml"
 cp "$SCRIPT" "$repo/scripts/ci-changes.sh"
 cp "$REPO_ROOT/scripts/workspace-tier-changes.sh" "$repo/scripts/workspace-tier-changes.sh"
 cat > "$repo/build.sbt" <<'SBT'
+lazy val performanceTestProjects = Seq("core", "agent")
 lazy val core = (project in file("modules/core"))
 lazy val memory = (project in file("modules/memory"))
 lazy val mcp = (project in file("modules/mcp"))
@@ -79,6 +80,7 @@ cat > "$repo/.github/ci-graph.json" <<'JSON'
     "springBootStarterBoot4": {"base":"modules/spring-boot-starter/boot4","deps":[["springBootStarter","compile->compile"]],"borrowed":[]},
     "agent": {"base":"modules/agent","deps":[["core","compile->compile;test->test"],["mcp","optional"]],"borrowed":[]},
     "agentCheckpointSqlite": {"base":"modules/agent-checkpoint-sqlite","deps":[["agent","compile->compile;test->test"]],"borrowed":[]},
+    "javaApi": {"base":"modules/java-api","deps":[["agent","compile->compile"]],"borrowed":[]},
     "samples": {"base":"modules/samples","deps":[["agent","compile->compile"]],"borrowed":[]},
     "it": {"base":"modules/it","deps":[["core","compile->compile"]],"borrowed":[["test","modules/samples/src/main/scala/org/llm4s/samples/kafka/TicketPipeline.scala"]]},
     "workspaceRunner": {"base":"modules/workspace/workspaceRunner","deps":[],"borrowed":[]}
@@ -97,7 +99,7 @@ echo base > "$repo/README.md"
 g add -A && g commit -qm base
 BASE="$(g rev-parse HEAD)"
 
-ORDER='code docs windows integration consumers workspace performance'
+ORDER='code docs integration workspace windows consumers spring performance other'
 # change <command run in the repo to make the change>: a commit on top of BASE
 change() {
   g checkout -q --detach "$BASE"
@@ -141,32 +143,40 @@ pick() {
   if [ "$got" = "$want" ]; then ok "$1"; else bad "$1" "expected: $want; got: $got"; fi
 }
 touchp() { mkdir -p "$(dirname "$1")" && echo x >> "$1"; }
-ALL_BUT_WS='code docs windows integration consumers performance'
+ALL_BUT_WS='code docs integration windows consumers spring performance other'
+# what the graph decides: windows, consumers (javaApi, springBootStarter here), spring (the starter, boot4),
+# performance (core, agent) and other (TEST_MODULES: samples, it and boot4 here) follow the projects a change reaches
+MOST='code integration consumers spring performance other'
 
 # code, and what reaches each gated job
-expect 'core'                  'code integration consumers performance' "touchp modules/core/src/main/scala/org/llm4s/util/Redaction.scala"
-expect 'a core test'           'code integration consumers performance' "touchp modules/core/src/test/scala/org/llm4s/util/RedactionSpec.scala"
-expect 'agent'                 'code integration consumers performance' "touchp modules/agent/src/main/scala/org/llm4s/agent/Agent.scala"
-expect 'media'                 'code integration consumers performance' "touchp modules/media/src/main/scala/M.scala"
+expect 'core'                  "$MOST"                                   "touchp modules/core/src/main/scala/org/llm4s/util/Redaction.scala"
+expect 'a core test: test->test dependents only, no consumer, Spring or other module' 'code integration performance' \
+  "touchp modules/core/src/test/scala/org/llm4s/util/RedactionSpec.scala"
+expect 'agent: java-api builds on it, the starter does not' 'code integration consumers performance other' \
+  "touchp modules/agent/src/main/scala/org/llm4s/agent/Agent.scala"
+expect 'media'                 "$MOST"                                   "touchp modules/media/src/main/scala/M.scala"
 expect 'a lookalike module'    'code'                                    "touchp modules/agent-tools/src/main/scala/T.scala"
-expect 'rag'                   'code integration consumers'              "touchp modules/rag/src/main/scala/Rag.scala"
+expect 'rag: no consumer builds on it here' 'code integration'           "touchp modules/rag/src/main/scala/Rag.scala"
 expect 'a provider the Docker tier does not reach' 'code'                "touchp modules/providers/voyage/src/main/scala/V.scala"
-expect 'the it module'         'code integration'                        "touchp modules/it/src/test/scala/org/llm4s/it/PgSpec.scala"
-expect 'deploy/'               'code integration'                        "touchp deploy/overlays/enterprise/application.conf"
+expect 'the it module'         'code integration other'                  "touchp modules/it/src/test/scala/org/llm4s/it/PgSpec.scala"
+expect 'deploy/'               'code integration other'                  "touchp deploy/overlays/enterprise/application.conf"
 expect 'java-api'              'code consumers'                          "touchp modules/java-api/src/main/scala/J.scala"
-expect 'the Spring starter'    'code consumers'                          "touchp modules/spring-boot-starter/src/main/scala/S.scala"
-expect 'a Gradle sample'       'code consumers'                          "touchp modules/samples/micronaut-java/build.gradle"
-expect 'the Kafka sample modules/it borrows' 'code integration'           "touchp modules/samples/src/main/scala/org/llm4s/samples/kafka/TicketPipeline.scala"
-expect 'a Scala sample'        'code'                                    "touchp modules/samples/src/main/scala/S.scala"
+expect 'the Spring starter'    'code consumers spring other'             "touchp modules/spring-boot-starter/src/main/scala/S.scala"
+expect 'boot4: Spring and other, not the consumers job' 'code spring other' \
+  "touchp modules/spring-boot-starter/boot4/src/main/scala/B.scala"
+expect 'a Gradle sample'       'code consumers other'                    "touchp modules/samples/micronaut-java/build.gradle"
+expect 'the Kafka sample modules/it borrows' 'code integration other'     "touchp modules/samples/src/main/scala/org/llm4s/samples/kafka/TicketPipeline.scala"
+expect 'a Scala sample'        'code other'                              "touchp modules/samples/src/main/scala/S.scala"
 expect 'kotlin-api'            'code consumers'                          "touchp modules/kotlin-api/build.gradle.kts"
 # Windows
-expect 'a whole Windows module' 'code windows integration'               "touchp modules/memory/src/main/scala/M.scala"
-expect 'a listed source'       'code windows integration consumers performance' "touchp modules/core/src/main/scala/org/llm4s/config/ApiKeyFile.scala"
-expect 'a listed directory'    'code windows'                            "touchp modules/mcp/src/main/scala/org/llm4s/mcp/stdio/Stdio.scala"
-expect 'a named suite'         'code windows integration consumers performance' "touchp modules/core/src/test/scala/org/llm4s/config/ApiKeyFileConfigSpec.scala"
+expect 'a whole Windows module' 'code integration windows'               "touchp modules/memory/src/main/scala/M.scala"
+expect 'a listed source'       "$MOST windows"                           "touchp modules/core/src/main/scala/org/llm4s/config/ApiKeyFile.scala"
+expect 'a listed directory'    'code windows consumers performance other' "touchp modules/mcp/src/main/scala/org/llm4s/mcp/stdio/Stdio.scala"
+expect 'a named suite'         'code integration windows performance'    "touchp modules/core/src/test/scala/org/llm4s/config/ApiKeyFileConfigSpec.scala"
 expect 'a suite by glob'       'code windows'                            "touchp modules/mcp/src/test/scala/org/llm4s/mcp/stdio/StdioSpec.scala"
 expect 'another mcp suite'     'code'                                    "touchp modules/mcp/src/test/scala/org/llm4s/mcp/HttpSpec.scala"
-expect 'the platform list'     'windows'                                 "echo 'x y' >> scripts/platform-sensitive-sources.txt"
+expect 'the platform list alone: no test (Quick Checks checks the list)' 'none' \
+  "echo 'x y' >> scripts/platform-sensitive-sources.txt"
 # not code
 expect 'docs only'             'docs'                                    "touchp docs/guide/agents.md"
 expect 'a top-level markdown'  'docs'                                    "touchp CONTRIBUTING.md"
@@ -176,8 +186,9 @@ expect 'a changelog fragment'  'none'                                    "touchp
 expect 'another script'        'none'                                    "touchp scripts/check-doc-seo.sh"
 expect 'a consumer script'     'consumers'                               "touchp scripts/check-bom-consumers.sh"
 expect 'another workflow'      'none'                                    "touchp .github/workflows/pages.yml"
-expect 'an unknown kind of file' 'code'                                  "touchp codecov.yml"
-expect 'docs and code'         'code docs integration consumers performance' "touchp docs/guide/agents.md; touchp modules/core/src/main/scala/C.scala"
+expect 'an unknown kind of file: every module, so every module-based job' 'code windows consumers spring performance other' \
+  "touchp codecov.yml"
+expect 'docs and code'         "$MOST docs"                              "touchp docs/guide/agents.md; touchp modules/core/src/main/scala/C.scala"
 # build files, and the ci:full label, set everything but the workspace tier
 expect 'build.sbt'             "$ALL_BUT_WS"                             "echo '// x' >> build.sbt"
 expect 'project/'              "$ALL_BUT_WS"                             "touchp project/Dependencies.scala"
@@ -190,27 +201,61 @@ expect 'the project graph'     "$ALL_BUT_WS"                             "echo '
 expect 'the coverage legs'     "$ALL_BUT_WS"                             "echo ' ' >> .github/coverage-legs.json"
 expect 'the ci:full label'     "$ALL_BUT_WS"                             "touchp docs/guide/agents.md" "CI_FULL=label"
 # the workspace tier keeps its own rules, and is never run by a merge group (its PR ran it)
-expect 'the workspace runner'  'code workspace'                                  "touchp modules/workspace/workspaceRunner/src/main/scala/R.scala"
-expect 'a harness file'        'code integration consumers workspace performance' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala"
-expect 'a harness file in a merge group' 'code integration consumers performance' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala" "CI_EVENT=merge_group"
-expect 'a deleted core file'   'code integration consumers performance' "touchp modules/core/x.txt; git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm add-x && git rm -q modules/core/x.txt"
+expect 'the workspace runner'  'code workspace other'                    "touchp modules/workspace/workspaceRunner/src/main/scala/R.scala"
+expect 'a harness file'        'code integration workspace consumers performance other' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala"
+expect 'a harness file in a merge group' 'code integration consumers performance other' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala" "CI_EVENT=merge_group"
+expect 'a deleted core file'   "$MOST"                                   "touchp modules/core/x.txt; git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm add-x && git rm -q modules/core/x.txt"
 expect 'no change'             'none'                                    ":"
+
+# What the module-based jobs run (#3187): windows_modules, performance_modules and test_modules, where empty is all.
+# lists <label> <want: "name=value;name=value;..." the list lines, ;-separated> <command> [env assignments]
+lists() {
+  change "$3"
+  local got want="$2"
+  got="$(cd "$repo" && env ${4:-} scripts/ci-changes.sh HEAD^1 HEAD 2>/dev/null |
+    grep -E '^(windows_modules|performance_modules|test_modules)=' | tr '\n' ';' | sed 's/;$//')"
+  if [ "$got" = "$want" ]; then ok "$1"; else bad "$1" "expected: $want; got: $got"; fi
+}
+lists 'a listed core source: every listed project it reaches, both performance projects, the other modules it reaches' \
+  'windows_modules=core mcp memory;performance_modules=core agent;test_modules=samples it springBootStarterBoot4' \
+  "touchp modules/core/src/main/scala/org/llm4s/config/ApiKeyFile.scala"
+lists 'a whole module: only it on Windows' 'windows_modules=memory' "touchp modules/memory/src/main/scala/M.scala"
+lists 'a listed mcp source: mcp on Windows, agent (optional on mcp) for performance, samples' \
+  'windows_modules=mcp;performance_modules=agent;test_modules=samples' \
+  "touchp modules/mcp/src/main/scala/org/llm4s/mcp/stdio/Stdio.scala"
+lists 'a whole module beside a core change that is not platform-sensitive: Windows runs only the whole module' \
+  'windows_modules=memory;performance_modules=core agent;test_modules=samples it springBootStarterBoot4' \
+  "touchp modules/memory/src/main/scala/M.scala; touchp modules/core/src/main/scala/org/llm4s/util/Redaction.scala"
+lists 'a core test: core and agent for performance, no other module' 'performance_modules=core agent' \
+  "touchp modules/core/src/test/scala/org/llm4s/util/RedactionSpec.scala"
+lists 'a build file: every list empty, so each job runs everything' 'windows_modules=;performance_modules=;test_modules=' \
+  "echo '// x' >> build.sbt"
+lists 'the ci:full label: every list empty' 'windows_modules=;performance_modules=;test_modules=' \
+  "touchp modules/mcp/src/test/scala/MSpec.scala" "CI_FULL=label"
+lists 'an unmapped path: every list empty' 'windows_modules=;performance_modules=;test_modules=' "touchp codecov.yml"
+label='the decisions log names why Windows runs what it runs'
+change "touchp modules/memory/src/main/scala/M.scala"
+(cd "$repo" && scripts/ci-changes.sh HEAD^1 HEAD > /dev/null 2> "$WORK/why")
+if grep -qF 'windows: the change touches modules/memory/src/main/scala/M.scala (1 file(s)), which reaches memory' "$WORK/why" &&
+   grep -qF 'spring: the change reaches none of springBootStarter springBootStarterBoot4' "$WORK/why"; then
+  ok "$label"; else bad "$label" "$(cat "$WORK/why")"; fi
+
 
 # The module rule (#3185) and the legs (#3186), on the scratch graph above.
 # main code: compile edges are transitive (media > core > everything), `provided` and `optional` are compile edges
 pick 'media main: every project, but not full' \
-  'agent,agentCheckpointSqlite,agentTools,core,it,knowledgegraph,llm4s,mcp,media,memory,providerTestkit,rag,samples,springBootStarter,springBootStarterBoot4,testkit,voyage' \
+  'agent,agentCheckpointSqlite,agentTools,core,it,javaApi,knowledgegraph,llm4s,mcp,media,memory,providerTestkit,rag,samples,springBootStarter,springBootStarterBoot4,testkit,voyage' \
   ALL false "touchp modules/media/src/main/scala/M.scala"
 pick 'core main: every leg in full, not full' \
-  'agent,agentCheckpointSqlite,agentTools,core,it,knowledgegraph,llm4s,mcp,memory,providerTestkit,rag,samples,springBootStarter,springBootStarterBoot4,testkit,voyage' \
+  'agent,agentCheckpointSqlite,agentTools,core,it,javaApi,knowledgegraph,llm4s,mcp,memory,providerTestkit,rag,samples,springBootStarter,springBootStarterBoot4,testkit,voyage' \
   'core:core,testkit,memory,agentTools rag:rag,knowledgegraph,mcp providers:providerTestkit,voyage,springBootStarter agent:agent,agentCheckpointSqlite' \
   false "touchp modules/core/src/main/scala/C.scala"
 pick 'mcp main: an optional dependency reaches agent and what builds on it' \
-  'agent,agentCheckpointSqlite,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' false \
+  'agent,agentCheckpointSqlite,javaApi,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' false \
   "touchp modules/mcp/src/main/scala/M.scala"
-pick 'a resource is main code' 'agent,agentCheckpointSqlite,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' false \
+pick 'a resource is main code' 'agent,agentCheckpointSqlite,javaApi,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' false \
   "touchp modules/mcp/src/main/resources/reference.conf"
-pick 'a file at a module root is main code' 'agent,agentCheckpointSqlite,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' \
+pick 'a file at a module root is main code' 'agent,agentCheckpointSqlite,javaApi,mcp,samples' 'rag:mcp agent:agent,agentCheckpointSqlite' \
   false "touchp modules/mcp/README.md"
 # test code: only the module, and what reaches its tests by test->test
 pick 'mcp test: mcp alone' 'mcp' 'rag:mcp' false "touchp modules/mcp/src/test/scala/MSpec.scala"
@@ -318,6 +363,81 @@ real 'this repo: an openai change reaches the providers leg and the agent, not c
   'sel.include?("openai") && sel.include?("agent") && !sel.include?("core")' \
   "touchp modules/openai/src/main/scala/org/llm4s/llmconnect/provider/X.scala"
 
+# The module-based jobs on this repository's own build (#3187): a scratch repo with its build.sbt, PlatformTests, the
+# platform-sensitive list, ci.yml, graph and legs, so each job's selection is the one CI would make.
+own="$WORK/own"
+git init -q "$own"
+og() { git -C "$own" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false "$@"; }
+mkdir -p "$own/.github/workflows" "$own/scripts" "$own/project"
+cp "$CI" "$own/.github/workflows/ci.yml"
+cp "$REPO_ROOT/.github/ci-graph.json" "$REPO_ROOT/.github/coverage-legs.json" "$own/.github/"
+cp "$SCRIPT" "$own/scripts/ci-changes.sh"
+cp "$REPO_ROOT/scripts/workspace-tier-changes.sh" "$REPO_ROOT/scripts/platform-sensitive-sources.txt" "$own/scripts/"
+cp "$REPO_ROOT/build.sbt" "$own/build.sbt"
+cp "$REPO_ROOT/project/PlatformTests.scala" "$own/project/PlatformTests.scala"
+og add -A && og commit -qm base
+OWN_BASE="$(og rev-parse HEAD)"
+# owncase <label> <ruby condition on `kv` (every output line, name => value) and `w` (windows_modules as a list)> <command>
+owncase() {
+  og checkout -q --detach "$OWN_BASE"
+  (cd "$own" && eval "$3")
+  og add -A && og commit -qm change --allow-empty
+  (cd "$own" && scripts/ci-changes.sh HEAD^1 HEAD > "$WORK/own.out" 2> "$WORK/own.err")
+  if ruby -e '
+      kv = File.readlines(ARGV[0]).map(&:chomp).select { |l| l.include?("=") }.to_h { |l| l.split("=", 2) }
+      w = kv["windows_modules"].to_s.split
+      exit(eval(ARGV[1]) ? 0 : 1)
+    ' "$WORK/own.out" "$2"; then ok "$1"; else bad "$1" "$(grep -vE '^(modules|legs)=' "$WORK/own.out" | tr '\n' ' ')"; fi
+}
+owncase 'this repo: a rag change runs rag on Windows, not the workspace, speech, image or it' \
+  'kv["windows"] == "true" && w.include?("rag") && (w & %w[workspaceShared workspaceRunner workspaceClient speech image it]).empty?' \
+  "touchp modules/rag/src/main/scala/org/llm4s/rag/X.scala"
+owncase 'this repo: an image change runs image, and it'"'"'s vision-client suites (WINDOWS_VIA)' \
+  '(w & %w[image it]).size == 2' "touchp modules/image/src/main/scala/org/llm4s/imageprocessing/X.scala"
+owncase 'this repo: a listed core source runs core'"'"'s suites, and it'"'"'s because it reaches image' \
+  '(w & %w[core image it rag]).size == 4' "touchp modules/core/src/main/scala/org/llm4s/util/PrivateSqliteFile.scala"
+owncase 'this repo: a listed it suite runs it on Windows (its own file, despite WINDOWS_VIA)' \
+  'kv["windows"] == "true" && w == %w[it]' \
+  "touchp modules/it/src/test/scala/org/llm4s/imageprocessing/provider/OpenAIVisionClientTest.scala"
+owncase 'this repo: another it suite does not start Windows' 'kv["windows"] == "false"' \
+  "touchp modules/it/src/test/scala/org/llm4s/imageprocessing/provider/GeminiVisionClientTest.scala"
+owncase 'this repo: an agent-tools change runs agentTools on Windows, and no consumer, Spring or performance job' \
+  'w.include?("agentTools") && kv["consumers"] == "false" && kv["spring"] == "false" && kv["performance"] == "false"' \
+  "touchp modules/agent-tools/src/main/scala/org/llm4s/toolapi/builtin/X.scala"
+owncase 'this repo: a core change that is not platform-sensitive: no Windows; consumers, Spring, both performance projects' \
+  'kv["windows"] == "false" && kv["consumers"] == "true" && kv["spring"] == "true" && kv["performance_modules"] == "core agent"' \
+  "touchp modules/core/src/main/scala/org/llm4s/util/X.scala"
+owncase 'this repo: an agent change runs only agent'"'"'s performance tests' 'kv["performance_modules"] == "agent"' \
+  "touchp modules/agent/src/main/scala/org/llm4s/agent/X.scala"
+owncase 'this repo: a java-api change runs the consumers and Spring jobs' 'kv["consumers"] == "true" && kv["spring"] == "true"' \
+  "touchp modules/java-api/src/main/scala/org/llm4s/javaapi/X.scala"
+owncase 'this repo: a voyage change runs no consumer, Spring, Windows or performance job' \
+  '%w[consumers spring windows performance].all? { |n| kv[n] == "false" }' \
+  "touchp modules/providers/voyage/src/main/scala/org/llm4s/X.scala"
+owncase 'this repo: a build file selects every list in full' \
+  '%w[windows consumers spring performance other].all? { |n| kv[n] == "true" } && %w[windows_modules performance_modules test_modules].all? { |n| kv[n] == "" }' \
+  "echo '// x' >> build.sbt"
+label='this repo: every project a module-based decision names is in the project graph'
+if out="$(cd "$own" && ruby -ryaml -rjson -e '
+    projects = JSON.parse(File.read(".github/ci-graph.json"))["projects"]
+    sh = File.read("scripts/ci-changes.sh")
+    pt = File.read("project/PlatformTests.scala")
+    lists = {
+      "CONSUMER_ROOTS" => sh[/^CONSUMER_ROOTS=.([^\x27]*)/, 1].to_s.split,
+      "SPRING_ROOTS" => sh[/^SPRING_ROOTS=.([^\x27]*)/, 1].to_s.split,
+      "WINDOWS_VIA" => sh[/^WINDOWS_VIA=.([^\x27]*)/, 1].to_s.split.flat_map { |e| e.split(":") },
+      "wholeModules" => pt[/val wholeModules[^=]*=\s*Seq\((.*?)\)/m, 1].to_s.scan(/"(\w+)"/).flatten,
+      "suites" => pt[/val suites[^=]*=\s*Seq\((.*)\)/m, 1].to_s.scan(/"(\w+)"\s*->/).flatten,
+      "performanceTestProjects" => File.read("build.sbt")[/lazy val performanceTestProjects\s*=\s*Seq\(([^)]*)\)/, 1].to_s.scan(/"(\w+)"/).flatten,
+      "TEST_MODULES" => YAML.load_file(".github/workflows/ci.yml").dig("jobs", "test", "env", "TEST_MODULES").to_s.split
+    }
+    errs = lists.flat_map do |name, ids|
+      ids.empty? ? ["#{name}: read nothing"] : ids.reject { |m| projects.key?(m) }.map { |m| "#{name}: #{m} is not a project" }
+    end
+    puts errs
+    exit(errs.empty? ? 0 : 1)
+  ')"; then ok "$label"; else bad "$label" "$out"; fi
+
 # Every module modules/it depends on is either reached by the integration decision or listed as not reached.
 label='every module modules/it depends on is classified for the integration decision'
 if out="$(ruby -rjson -e '
@@ -405,7 +525,7 @@ run_changes() {
 }
 change "touchp modules/mcp/src/test/scala/MSpec.scala; touchp modules/agent/src/main/scala/org/llm4s/agent/harness/H.scala"
 run_changes 'changes step: a draft writes every decision false and no leg' pull_request true false \
-  'draft=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false modules= legs=[] full=false'
+  'draft=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false modules= legs=[] full=false'
 run_changes 'changes step: a pull request runs the script on HEAD^1..HEAD' pull_request false false \
   'draft=false code=true workspace=true full=false'
 run_changes 'changes step: the ci:full label selects everything' pull_request false true 'draft=false code=true windows=true full=true'
@@ -438,12 +558,12 @@ if out="$(ruby -ryaml -e '
   pr = steps.find { |s| s["id"] == "pr" }
   errs << "no pull-request step reading the ci:full label" unless pr && pr["if"] == "github.event_name == '"'"'pull_request'"'"'" &&
     pr.dig("env", "FULL_LABEL") == "${{ contains(github.event.pull_request.labels.*.name, '"'"'ci:full'"'"') }}"
-  names = %w[draft] + ARGV[1].split + %w[modules legs full]
+  names = %w[draft] + ARGV[1].split + %w[windows_modules performance_modules test_modules modules legs full]
   names.each do |n|
     errs << "changes has no output #{n}" unless ch.dig("outputs", n) == "${{ steps.diff.outputs.#{n} }}"
   end
-  { "coverage-leg" => "code", "coverage" => "code", "test" => "code", "test-windows" => "windows",
-    "integration-tests" => "integration", "consumers" => "consumers", "spring-compat" => "consumers",
+  { "coverage-leg" => "code", "coverage" => "code", "test" => "other", "test-windows" => "windows",
+    "integration-tests" => "integration", "consumers" => "consumers", "spring-compat" => "spring",
     "performance-tests" => "performance", "workspace-integration" => "workspace", "scaladoc" => "docs",
     "docs-tests" => "docs" }.each do |job, n|
     j = jobs[job] or (errs << "no job #{job}"; next)
@@ -510,17 +630,23 @@ atp() { # atp <label> <want> <event> <ref> <"need=result ..." overrides> <"outpu
   for kv in $5; do r="$(printf '%s\n' $r | grep -v "^${kv%%=*}=") $kv"; done
   gate "All Tests Pass: $1" all-tests-pass 0 "$2" "$3" "$4" "$(echo $r)" "$6"
 }
-PART='draft=false code=true docs=false windows=false integration=false consumers=false workspace=false performance=false full=false'
+PART='draft=false code=true docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=true full=false'
 SKIPS='test-windows=skipped performance-tests=skipped integration-tests=skipped consumers=skipped spring-compat=skipped'
 atp 'a selective PR with its gated jobs skipped passes'        pass pull_request x "$SKIPS" "$PART legs=$LEGS1"
 atp 'a selective PR with Code Coverage skipped fails'          fail pull_request x "$SKIPS coverage=skipped" "$PART legs=$LEGS1"
 atp 'a selective PR with Test (other modules) skipped fails'   fail pull_request x "$SKIPS test=skipped" "$PART legs=$LEGS1"
+atp 'a PR reaching no other module with Test (other modules) skipped passes' pass pull_request x "$SKIPS test=skipped" "${PART/other=true/other=false} legs=$LEGS1"
+atp 'a PR reaching a consumer root with the consumers job skipped fails' fail pull_request x "$SKIPS" "${PART/consumers=false/consumers=true} legs=$LEGS1"
+atp 'a PR reaching the consumers but not Spring passes with Spring skipped' pass pull_request x "${SKIPS/consumers=skipped/consumers=success}" "${PART/consumers=false/consumers=true} legs=$LEGS1"
+atp 'a PR reaching Spring with the Spring job skipped fails'   fail pull_request x "$SKIPS" "${PART/spring=false/spring=true} legs=$LEGS1"
+atp 'a PR reaching Windows with Windows skipped fails'         fail pull_request x "$SKIPS" "${PART/windows=false/windows=true} legs=$LEGS1"
+atp 'a PR reaching performance with it skipped fails'          fail pull_request x "$SKIPS" "${PART/performance=false/performance=true} legs=$LEGS1"
 atp 'a PR whose change reaches no leg passes (the gate passed)' pass pull_request x "$SKIPS" "$PART legs=[]"
 atp 'a PR with docs and partial code without Docs tests fails' fail pull_request x "$SKIPS" "${PART/docs=false/docs=true} legs=$LEGS1"
 atp 'a PR with docs and partial code with Docs tests passes'   pass pull_request x "$SKIPS docs-tests=success" "${PART/docs=false/docs=true} legs=$LEGS1"
 atp 'a full PR with docs needs no Docs tests'                  pass pull_request x "" "${PART/docs=false/docs=true} full=true"
-atp 'a docs-only PR with Docs tests passes'                    pass pull_request x "test=skipped coverage=skipped $SKIPS docs-tests=success" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false full=false legs=[]"
-atp 'a docs-only PR without Docs tests fails'                  fail pull_request x "test=skipped coverage=skipped $SKIPS" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false full=false legs=[]"
+atp 'a docs-only PR with Docs tests passes'                    pass pull_request x "test=skipped coverage=skipped $SKIPS docs-tests=success" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]"
+atp 'a docs-only PR without Docs tests fails'                  fail pull_request x "test=skipped coverage=skipped $SKIPS" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]"
 atp 'a failed Docs tests fails'                                fail pull_request x "$SKIPS docs-tests=failure" "$PART legs=$LEGS1"
 atp 'a selective merge group passes'                           pass merge_group x "$SKIPS" "$PART legs=$LEGS1"
 atp 'a merge group with Code Coverage skipped fails'           fail merge_group x "$SKIPS coverage=skipped" "$PART legs=$LEGS1"

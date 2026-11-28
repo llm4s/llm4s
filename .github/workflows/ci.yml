@@ -64,9 +64,10 @@ permissions:
   contents: read
 
 jobs:
-  # What a change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`, `windows`,
-  # `integration`, `consumers`, `workspace`, `performance`; and the rule behind `modules`, `legs` and `full`), and
-  # whether it is a draft. A change to a build file (build.sbt, project/, this workflow, ...) or the `ci:full` label runs
+  # What a change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`, `integration`,
+  # `workspace`; the projects behind `windows`, `consumers`, `spring`, `performance` and `other`, and the lists
+  # `windows_modules`, `performance_modules` and `test_modules`, where empty means all; and the rule behind `modules`,
+  # `legs` and `full`), and whether it is a draft. A change to a build file (build.sbt, project/, this workflow, ...) or the `ci:full` label runs
   # every job and module; a docs-only change runs Quick Checks, ScalaDoc and the suites that read docs/ (`Docs tests`).
   # On a pull request the checkout is its merge commit, so its first parent is the base and HEAD^1..HEAD is exactly
   # the PR's change; a merge group compares its base_sha with its head_sha. Every other job needs this one and reads
@@ -92,6 +93,11 @@ jobs:
       consumers: ${{ steps.diff.outputs.consumers }}
       workspace: ${{ steps.diff.outputs.workspace }}
       performance: ${{ steps.diff.outputs.performance }}
+      spring: ${{ steps.diff.outputs.spring }}
+      other: ${{ steps.diff.outputs.other }}
+      windows_modules: ${{ steps.diff.outputs.windows_modules }}
+      performance_modules: ${{ steps.diff.outputs.performance_modules }}
+      test_modules: ${{ steps.diff.outputs.test_modules }}
       modules: ${{ steps.diff.outputs.modules }}
       legs: ${{ steps.diff.outputs.legs }}
       full: ${{ steps.diff.outputs.full }}
@@ -138,7 +144,7 @@ jobs:
           if [ "$EVENT" = pull_request ] && [ "$DRAFT" = true ]; then
             echo "A draft pull request: no job runs until it is marked ready for review"
             printf '%s\n' draft=true code=false docs=false windows=false integration=false consumers=false \
-              workspace=false performance=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
+              workspace=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
           elif [ "$EVENT" = pull_request ]; then
             echo draft=false >> "$GITHUB_OUTPUT"
             scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
@@ -1526,8 +1532,9 @@ jobs:
   test:
     name: Test (other modules, JDK ${{ matrix.java }})
     needs: [changes]
-    # On a pull request only when it changes code (`changes`; never on a draft).
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    # On a pull request or merge group only when the change reaches a TEST_MODULES project's tests (`other`; never on a
+    # draft), and then only those projects (`test_modules`; empty, on a full selection and every other event, is all).
+    if: ${{ !cancelled() && needs.changes.outputs.other != 'false' }}
     permissions:
       contents: read
     strategy:
@@ -1583,9 +1590,11 @@ jobs:
       # The unforked suites (samples, ...) run inside the sbt JVM, and outgrew .sbtopts' 2 GB heap (OutOfMemoryError in
       # the launcher from 00a4d3e8 on). The flag comes after .sbtopts' -J-Xmx2g, so it wins; local runs keep 2 GB.
       - name: Run tests
+        env:
+          SELECTED: ${{ needs.changes.outputs.test_modules }}
         run: |
           args=()
-          for m in $TEST_MODULES; do args+=("$m/test"); done
+          for m in ${SELECTED:-$TEST_MODULES}; do args+=("$m/test"); done
           echo "sbt -J-Xmx4g ${args[*]}"
           sbt -J-Xmx4g "${args[@]}"
 
@@ -1621,7 +1630,9 @@ jobs:
     needs: [changes]
     # On a pull request only when it changes something Windows tests (`changes`: a whole module of PlatformTests, a
     # source platform-sensitive-sources.txt lists, a suite it names, or a build file), and not on a push to main: the
-    # nightly run runs it there.
+    # nightly run runs it there. It runs only the listed projects those files reach (`windows_modules`, #3187): a rag
+    # change runs rag's and its dependents' entries, not workspace's, speech's and image's. Empty (a full selection,
+    # the nightly and manual runs) runs every entry.
     if: >-
       ${{ !cancelled() && needs.changes.outputs.windows != 'false' &&
       !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
@@ -1657,7 +1668,11 @@ jobs:
       # The step runs in PowerShell, which cannot run the bash retry wrapper; this job is not part of the parallel burst
       # that rate-limited the ubuntu jobs on 2026-11-20.
       - name: Run tests
-        run: sbt testPlatform
+        env:
+          WINDOWS_MODULES: ${{ needs.changes.outputs.windows_modules }}
+        run: |
+          if ($env:WINDOWS_MODULES) { sbt "testPlatform $env:WINDOWS_MODULES" } else { sbt testPlatform }
+          exit $LASTEXITCODE
 
       - name: Upload test reports
         if: failure()
@@ -1687,8 +1702,9 @@ jobs:
   performance-tests:
     name: Performance tests
     needs: [changes]
-    # Not on a draft, not on a push to main (the nightly run runs it there), and on a pull request only when it changes
-    # core, agent or media, or a build file (`changes`): the only modules with tagged tests, and what they test.
+    # Not on a draft, not on a push to main (the nightly run runs it there), and on a pull request only when the change
+    # reaches core's or agent's tests, the only modules with tagged tests (`performance`), and then only the ones it
+    # reaches (`performance_modules`, #3187; empty runs both).
     if: >-
       ${{ !cancelled() && needs.changes.outputs.draft != 'true' &&
       !(github.event_name == 'push' && github.ref == 'refs/heads/main') &&
@@ -1726,7 +1742,10 @@ jobs:
         run: scripts/retry-on-transient-network.sh sbt resolveAll
 
       - name: Run performance tests
-        run: sbt testPerformance
+        env:
+          SELECTED: ${{ needs.changes.outputs.performance_modules }}
+        run: |
+          if [ -n "$SELECTED" ]; then sbt "testPerformanceOnly $SELECTED"; else sbt testPerformance; fi
 
       - name: Upload test reports
         if: failure()
@@ -2082,8 +2101,10 @@ jobs:
   consumers:
     name: Kotlin, Java and framework consumers
     needs: [changes]
-    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
-    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    # On a pull request only when the change reaches a module it builds against (scripts/ci-changes.sh's CONSUMER_ROOTS:
+    # the Java, Spring, BOM, doctor and REPL modules, and so what they depend on), or touches a file it checks outside
+    # the sbt build (Kotlin, Quarkus, the Gradle and Maven samples, its guides and scripts), and not on a push to main:
+    # the nightly run runs it there.
     if: >-
       ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
       !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
@@ -2284,10 +2305,10 @@ jobs:
   spring-compat:
     name: Spring Boot and Spring AI (latest)
     needs: [changes]
-    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
-    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    # On a pull request only when the change reaches the tests of the starter, its Boot 4 build or llm4s-spring-ai
+    # (`spring`, #3187), and not on a push to main: the nightly run runs it there.
     if: >-
-      ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
+      ${{ !cancelled() && needs.changes.outputs.spring != 'false' &&
       !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     # Healthy runs take about 6 minutes.
@@ -2427,7 +2448,9 @@ jobs:
           WINDOWS: ${{ needs.changes.outputs.windows }}
           INTEGRATION: ${{ needs.changes.outputs.integration }}
           CONSUMERS: ${{ needs.changes.outputs.consumers }}
+          SPRING: ${{ needs.changes.outputs.spring }}
           PERFORMANCE: ${{ needs.changes.outputs.performance }}
+          OTHER: ${{ needs.changes.outputs.other }}
           FULL: ${{ needs.changes.outputs.full }}
         run: |
           failed=0
@@ -2450,7 +2473,7 @@ jobs:
           }
           not_pr_skip() { local d; for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done; echo false; }
           require "Quick Checks" "${{ needs.quick-checks.result }}"
-          require "Test (other modules)" "${{ needs.test.result }}" "$(not_pr_skip "$CODE")"
+          require "Test (other modules)" "${{ needs.test.result }}" "$(not_pr_skip "$OTHER")"
           require "Code Coverage" "${{ needs.coverage.result }}" "$(not_pr_skip "$CODE")"
           require "Integration Tests" "${{ needs.integration-tests.result }}" "$(not_pr_skip "$INTEGRATION")"
           require "Test (Windows)" "${{ needs.test-windows.result }}" "$(skip_ok "$WINDOWS")"
@@ -2458,7 +2481,7 @@ jobs:
           if [[ "$MAIN_PUSH" == "true" || ( "$CODE" == "false" && "$DOCS" == "false" ) ]]; then scaladoc_skip=true; fi
           require "ScalaDoc" "${{ needs.scaladoc.result }}" "$scaladoc_skip"
           require "Kotlin, Java and framework consumers" "${{ needs.consumers.result }}" "$(skip_ok "$CONSUMERS")"
-          require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$(skip_ok "$CONSUMERS")"
+          require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$(skip_ok "$SPRING")"
           require "Performance tests" "${{ needs.performance-tests.result }}" "$(skip_ok "$PERFORMANCE")"
           # Docs tests runs only on a change with docs and either no code or not every module selected (`full`);
           # anywhere else skipped is the pass.

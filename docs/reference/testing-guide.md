@@ -228,8 +228,9 @@ platform, so running these tests on Windows and under coverage instrumentation m
 cost - most of each CI test job's time - without adding a signal. `sbt testPerformance` runs only
 the tagged tests, in the modules that have them (`performanceTestProjects` in `build.sbt`: core and agent;
 `scripts/check-performance-tests.sh` fails Quick Checks when a test elsewhere uses the tag); CI runs it in the ubuntu-only `Performance tests` job, in parallel with
-the other test jobs, on a pull request that changes core, agent or the build (`scripts/ci-changes.sh`) and in CI's nightly
-run on main.
+the other test jobs, on a pull request whose change reaches core's or agent's tests, or that changes the build
+(`scripts/ci-changes.sh`), and in CI's nightly run on main. `sbt "testPerformanceOnly agent"` runs only the named
+projects' tagged tests, as that job does for the ones a pull request reaches.
 `sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
 exclusion applies to `test`, not to a suite named explicitly.
 
@@ -256,6 +257,12 @@ line endings written to a file; temporary files; the user's home and the environ
 * `suites` - the platform-facing suites of modules that are otherwise pure logic, by name or glob
   (`"agent" -> Seq("org.llm4s.assistant.*")`). `sbt testPlatform` fails when a name matches no suite,
   so a renamed suite cannot drop out silently.
+
+`sbt "testPlatform rag core"` runs only the named projects' entries. On a pull request the Windows job
+passes the listed projects that its platform-sensitive files (a whole module's files, a listed
+source, a named suite) reach in the project graph, so a rag change runs rag's suites and those of
+the listed projects that depend on rag, not the workspace's, speech's or image's. The nightly run
+and a build-file change run every entry.
 
 **The rule:** a test of platform-sensitive behaviour must run on Windows - put it in a whole module,
 or add its suite to `suites`. `scripts/check-platform-tests.sh`, in Quick Checks, enforces it for
