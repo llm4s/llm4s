@@ -378,8 +378,6 @@ level should sort by its own key.
 
 ## `EntityLinker` merges transitively and keeps provenance; schema extraction enforces the schema (#2967, #2962, #2971)
 
-## Graph queries: robust translation, bounded execution, and QA context the question picks (#2973, #2974, #2975)
-
 `llm4s-knowledgegraph` is Experimental.
 
 | Before (1.0.0) | After |
@@ -402,6 +400,12 @@ level should sort by its own key.
 A disambiguation candidate now needs a non-blank `name` on both nodes. `ExtractionSchema.simple` matches its
 `properties` keys to type names ignoring case.
 
+## Graph queries: robust translation, bounded execution, and QA context the question picks (#2973, #2974, #2975)
+
+`llm4s-knowledgegraph` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
 | A model reply of the wrong shape (`{"query": ...}`, `"node_id": {...}`, `"max_depth": "two"`) threw out of `translate` and `ask`; prose around the JSON was a `Left` | Every field is checked, so a wrong shape is a `Left`; the JSON object is found inside prose or a fence, a numeric id or `"2"` depth is accepted, and a `null` native-query explanation is empty |
 | The translator was given no node ids, so the model invented them | `translate(question, entities)` lists the resolved entities' ids; a composite step can name an earlier step's nodes as `$1`, `$2`, ... |
 | An unknown id gave an empty result that read "Found 0 neighbor(s)" | `GraphQueryResult.missingNodeIds` lists it, and the summary says "not found" |
