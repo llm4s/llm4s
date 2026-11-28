@@ -148,8 +148,13 @@ trait EncryptionKeySource:
 - `StaticKeySource(key)` is the shipped one: a default key, `withTenantKey` for a tenant's own, `withRetiredKey` for
   reading; `StaticKeySource.tenantsOnly` has no default, so a tenant with no key cannot write.
 - **Rotation** is `current` answering a key with a new id. Every envelope names its key, so old rows stay readable
-  while `key` still answers the old id, and new writes use the new key. Nothing is re-encrypted in place: a thread's
-  old checkpoints age out by retention, and the old key can be dropped when they have.
+  while `key` still answers the old id, and new writes use the new key. Nothing is re-encrypted in place. Retention
+  does not make an old key droppable (#3242): it keeps every thread's latest checkpoint and pending writes and never
+  removes effect records, so a thread not written since the rotation keeps values under the old key indefinitely. A
+  retired key stays in the key source while any thread written before the rotation exists, and so does
+  `plaintextReads` after switching encryption on over a store. A store scan reporting the key ids still referenced,
+  and a rewrap re-sealing a thread's latest checkpoint, pending writes and effects under its claim, are left for
+  later.
 - **Per tenant**: a commit is sealed with the key of its checkpoint's tenant; a commit with no checkpoint (a pending
   write, an effect, an event) with the key of the thread's latest checkpoint's tenant, read once per claim
   (`Checkpointer.owner`) and remembered. Reads choose the key by the id in the envelope, so `key` is not
