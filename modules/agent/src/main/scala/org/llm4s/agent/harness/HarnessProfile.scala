@@ -231,16 +231,27 @@ final case class HarnessProfile private (
   def withSummarization(c: Option[SummarizationConfig]): HarnessProfile = copy(summarization = c)
   def withOffload(c: OffloadConfig): HarnessProfile                     = copy(offload = Some(c))
   def withOffload(c: Option[OffloadConfig]): HarnessProfile             = copy(offload = c)
-  def withSkills(c: SkillsConfig): HarnessProfile                       = copy(skills = Some(c))
-  def withSkills(c: Option[SkillsConfig]): HarnessProfile               = copy(skills = c)
-  def withInstructions(c: InstructionsConfig): HarnessProfile           = copy(instructions = Some(c))
-  def withInstructions(c: Option[InstructionsConfig]): HarnessProfile   = copy(instructions = c)
-  def withSystemPrompt(m: PromptMode): HarnessProfile                   = copy(systemPrompt = m)
-  def withPermissions(rules: Vector[PermissionRule]): HarnessProfile    = copy(permissions = rules)
-  def withToolTimeout(t: FiniteDuration): HarnessProfile                = copy(toolTimeout = Some(t))
-  def withToolTimeout(t: Option[FiniteDuration]): HarnessProfile        = copy(toolTimeout = t)
-  def withRetention(r: RetentionPolicy): HarnessProfile                 = copy(retention = r)
-  def withSubagents(c: SubagentConfig): HarnessProfile                  = copy(subagents = c)
+  def withSkills(c: SkillsConfig): HarnessProfile                       = withSkills(Some(c))
+  def withSkills(c: Option[SkillsConfig]): HarnessProfile               = standingFilesFollow(copy(skills = c))
+  def withInstructions(c: InstructionsConfig): HarnessProfile           = withInstructions(Some(c))
+  def withInstructions(c: Option[InstructionsConfig]): HarnessProfile   = standingFilesFollow(copy(instructions = c))
+
+  /**
+   * `next`, with the preset's permission rules regenerated for its instruction paths and skill sources when this
+   * profile's rules are exactly the preset's for its own ([[HarnessProfile.presetPermissions]]), so moving the
+   * instructions or skills of `deepAgents` or a loaded profile moves the approval that guards them (#3268). Rules
+   * set with `withPermissions` are anything else, and are kept as they are.
+   */
+  private def standingFilesFollow(next: HarnessProfile): HarnessProfile =
+    if permissions.nonEmpty && permissions == HarnessProfile.presetPermissions(instructions, skills) then
+      next.copy(permissions = HarnessProfile.presetPermissions(next.instructions, next.skills))
+    else next
+  def withSystemPrompt(m: PromptMode): HarnessProfile                = copy(systemPrompt = m)
+  def withPermissions(rules: Vector[PermissionRule]): HarnessProfile = copy(permissions = rules)
+  def withToolTimeout(t: FiniteDuration): HarnessProfile             = copy(toolTimeout = Some(t))
+  def withToolTimeout(t: Option[FiniteDuration]): HarnessProfile     = copy(toolTimeout = t)
+  def withRetention(r: RetentionPolicy): HarnessProfile              = copy(retention = r)
+  def withSubagents(c: SubagentConfig): HarnessProfile               = copy(subagents = c)
 
   /** The names of the tools this profile can give: the file tools, and `execute` when it has a sandbox. */
   def toolNames: Vector[String] = FileTools.Names ++ sandbox.map(_ => ExecuteTool.Name)

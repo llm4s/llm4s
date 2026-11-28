@@ -35,6 +35,39 @@ class DeepAgentsStandingFilesSpec extends AnyFlatSpec with Matchers {
     statusAfterWriting("/notes.md") shouldBe AgentStatus.Completed("done")
   }
 
+  it should "move the approval with the instruction paths and skill sources, unless rules were set explicitly" in {
+    def asks(profile: HarnessProfile, operation: Operation, target: String): Boolean =
+      profile.permissions
+        .find(_.matches(ToolResource(operation, target)))
+        .map(_.decision)
+        .contains(
+          PermissionDecision.Ask
+        )
+    val moved = HarnessProfile.deepAgents
+      .withInstructions(InstructionsConfig(paths = Vector(VPath("/project/AGENTS.md").toOption.get)))
+      .withSkills(SkillsConfig(sources = Vector(VPath("/project/skills").toOption.get)))
+    asks(moved, Operation.Write, "/project/AGENTS.md") shouldBe true
+    asks(moved, Operation.Delete, "/project/skills/a/SKILL.md") shouldBe true
+    asks(moved, Operation.Write, "/AGENTS.md") shouldBe false
+    asks(moved, Operation.Write, "/notes.md") shouldBe false
+    moved.permissions.exists(_.matches(ToolResource(Operation.Write, "/notes.md"))) shouldBe true
+
+    val mine = Vector(PermissionRule.allow(Operation.Invoke, "**"))
+    // explicit rules, then new paths: the rules are kept
+    HarnessProfile.deepAgents
+      .withPermissions(mine)
+      .withInstructions(InstructionsConfig(paths = Vector(VPath("/x.md").toOption.get)))
+      .withSkills(None)
+      .permissions shouldBe mine
+    // new paths, then explicit rules: the explicit rules win
+    HarnessProfile.deepAgents
+      .withSkills(SkillsConfig(sources = Vector(VPath("/s").toOption.get)))
+      .withPermissions(mine)
+      .permissions shouldBe mine
+    // a profile without preset rules gets none
+    HarnessProfile().withInstructions(InstructionsConfig()).permissions shouldBe empty
+  }
+
   "HarnessProfile.standingFileRules" should "ask for writes and deletes of the paths, and decide nothing else" in {
     val rules = HarnessProfile.standingFileRules(Seq(InstructionsConfig.DefaultPath), Seq(SkillsConfig.DefaultSource))
     def decision(operation: Operation, target: String): Option[PermissionDecision] =
