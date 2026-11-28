@@ -414,9 +414,55 @@ owncase 'this repo: a java-api change runs the consumers and Spring jobs' 'kv["c
 owncase 'this repo: a voyage change runs no consumer, Spring, Windows or performance job' \
   '%w[consumers spring windows performance].all? { |n| kv[n] == "false" }' \
   "touchp modules/providers/voyage/src/main/scala/org/llm4s/X.scala"
-owncase 'this repo: a build file selects every list in full' \
+owncase 'this repo: a build file BUILD lists selects every list in full' \
   '%w[windows consumers spring performance other].all? { |n| kv[n] == "true" } && %w[windows_modules performance_modules test_modules].all? { |n| kv[n] == "" }' \
-  "echo '// x' >> build.sbt"
+  "touchp project/plugins.sbt"
+# Build files by the graph diff (#3189): the change edits build.sbt and regenerates the graph, as a PR must (Quick
+# Checks fails a stale one); `fp` edits the committed graph as sbt generateCiGraph would.
+fp() { # fp <ruby on `g` (the parsed graph)>: rewrites .github/ci-graph.json
+  ruby -rjson -e 'g = JSON.parse(File.read(ARGV[0])); eval(ARGV[1]); File.write(ARGV[0], JSON.pretty_generate(g))' \
+    .github/ci-graph.json "$1"
+}
+NOTHING='kv["full"] == "false" && kv["modules"] == "" && kv["legs"] == "[]" && %w[windows consumers spring performance other integration].all? { |n| kv[n] == "false" }'
+owncase 'this repo: a comment in build.sbt selects nothing' "$NOTHING" "echo '// x' >> build.sbt"
+owncase 'this repo: Dependencies.scala with no setting changed selects nothing' "$NOTHING" "echo '// x' >> project/Dependencies.scala"
+owncase 'this repo: a floor bump (memory fp.test) selects memory and its Windows suites, not core' \
+  'kv["modules"].split == %w[memory] && w == %w[memory] && kv["full"] == "false"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"memory\"][\"fp\"][\"test\"] = \"0\"'"
+owncase 'this repo: a library bump in rag (fp.compile) selects rag and its dependents' \
+  'm = kv["modules"].split; m.include?("rag") && m.include?("javaRag") && !m.include?("core") && kv["consumers"] == "true"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"rag\"][\"fp\"][\"compile\"] = \"0\"'"
+owncase 'this repo: a new test dependency of voyage selects voyage only' \
+  'kv["modules"].split == %w[voyage] && kv["windows"] == "false"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"voyage\"][\"deps\"] << [\"testkit\", \"test\"]'"
+owncase 'this repo: a memoryPostgres setting runs the Docker tier' \
+  'kv["integration"] == "true" && kv["modules"].split.include?("memoryPostgres")' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"memoryPostgres\"][\"fp\"][\"test\"] = \"0\"'"
+owncase 'this repo: changed aliases (global) select everything' 'kv["full"] == "true"' \
+  "echo '// x' >> build.sbt; fp 'g[\"global\"] = \"0\"'"
+owncase 'this repo: a project that moved selects everything' 'kv["full"] == "true"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"voyage\"][\"base\"] = \"modules/voyage\"'"
+owncase 'this repo: a project that moved after another changed one still selects everything' 'kv["full"] == "true"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"agent\"][\"fp\"][\"test\"] = \"0\"; g[\"projects\"][\"voyage\"][\"base\"] = \"modules/voyage\"'"
+owncase 'this repo: it'"'"'s own test settings run it on Windows (WINDOWS_VIA allows its own change)' \
+  'kv["windows"] == "true" && w.include?("it")' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"it\"][\"fp\"][\"test\"] = \"0\"'"
+owncase 'this repo: a base graph without fingerprints selects everything' 'kv["full"] == "true"' \
+  "fp 'g[\"projects\"].each_value { |p| p.delete(\"fp\") }'; git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qam strip; git checkout -q $OWN_BASE -- .github/ci-graph.json; echo '// x' >> build.sbt"
+owncase 'this repo: no base graph selects everything' 'kv["full"] == "true"' \
+  "git rm -q .github/ci-graph.json; git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm drop; git checkout -q $OWN_BASE -- .github/ci-graph.json; echo '// x' >> build.sbt"
+owncase 'this repo: PlatformTests.scala runs every Windows entry and no module' \
+  'kv["windows"] == "true" && w.empty? && kv["modules"] == "" && kv["consumers"] == "false"' "echo '// x' >> project/PlatformTests.scala"
+owncase 'this repo: ItTiers.scala runs it and the Docker tier' \
+  'kv["integration"] == "true" && kv["modules"].split.include?("it") && kv["test_modules"].split.include?("it")' \
+  "echo '// x' >> project/ItTiers.scala"
+owncase 'this repo: DocSnippets.scala runs samples'"'"' tests' 'kv["modules"].split == %w[samples]' \
+  "echo '// x' >> project/DocSnippets.scala"
+owncase 'this repo: PomDescriptions.scala runs the consumers job and no module' \
+  'kv["consumers"] == "true" && kv["modules"] == "" && kv["full"] == "false"' "echo '// x' >> project/PomDescriptions.scala"
+owncase 'this repo: StabilityTiers.scala needs only Quick Checks' "$NOTHING" "echo '// x' >> project/StabilityTiers.scala"
+owncase 'this repo: CiGraph.scala (the fingerprints themselves) selects everything' 'kv["full"] == "true"' \
+  "echo '// x' >> project/CiGraph.scala"
 label='this repo: every project a module-based decision names is in the project graph'
 if out="$(cd "$own" && ruby -ryaml -rjson -e '
     projects = JSON.parse(File.read(".github/ci-graph.json"))["projects"]

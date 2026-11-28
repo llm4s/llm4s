@@ -67,7 +67,9 @@ jobs:
   # What a change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`, `integration`,
   # `workspace`; the projects behind `windows`, `consumers`, `spring`, `performance` and `other`, and the lists
   # `windows_modules`, `performance_modules` and `test_modules`, where empty means all; and the rule behind `modules`,
-  # `legs` and `full`), and whether it is a draft. A change to a build file (build.sbt, project/, this workflow, ...) or the `ci:full` label runs
+  # `legs` and `full`), and whether it is a draft. A change to build.sbt or project/Dependencies.scala selects the
+  # projects whose settings fingerprint or dependencies changed in .github/ci-graph.json (base's against head's, #3189),
+  # a listed project/*.scala file its job; another build file (project/, this workflow, ...) or the `ci:full` label runs
   # every job and module; a docs-only change runs Quick Checks, ScalaDoc and the suites that read docs/ (`Docs tests`).
   # On a pull request the checkout is its merge commit, so its first parent is the base and HEAD^1..HEAD is exactly
   # the PR's change; a merge group compares its base_sha with its head_sha. Every other job needs this one and reads

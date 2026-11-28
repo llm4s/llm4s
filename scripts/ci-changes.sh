@@ -44,12 +44,23 @@
 # transitive, `% Test` (`test` = test->compile) is one hop into the dependency's main code, and `test->test` chains
 # through the dependency's tests. A source a project borrows (`borrowed` in the graph) is a changed node of the
 # borrower too. A project in READS is selected directly when a file its suites read changed. A code file in no
-# project and not in OUTSIDE_SBT selects everything, as does a build file (BUILD, until #3189) and the `ci:full` label
-# (CI_FULL). docs/ is not code: the suites that read it (tagged DocsSpec) run in `Docs tests` whenever docs changed
-# and the selection is not full (ci.yml), so a docs edit beside a rag change does not select core's whole test suite.
+# project and not in OUTSIDE_SBT selects everything, as does a build file (BUILD) and the `ci:full` label (CI_FULL).
+# docs/ is not code: the suites that read it (tagged DocsSpec) run in `Docs tests` whenever docs changed and the
+# selection is not full (ci.yml), so a docs edit beside a rag change does not select core's whole test suite.
 #
-# A build file (BUILD: build.sbt, project/, ci.yml, the composite actions, sbt's and the formatters' options, the
-# scripts every sbt job runs, the graph and the leg lists) sets every decision but `workspace` to true, and the
+# Build files (#3189). A file in FINGERPRINTED (build.sbt, project/Dependencies.scala, the graph itself) is judged by
+# what it does to the loaded build, not by its text: base's committed graph is compared with head's, which Quick
+# Checks proves is what head's build loads. A project whose dependencies, borrowed sources or `fp.compile`
+# fingerprint changed counts as a changed compile node, one whose test dependencies or `fp.test` changed as a changed
+# test node (project/CiGraph.scala lists what each fingerprint hashes), so a floor bump selects that module's tests, a
+# `dependsOn` its dependents, and a comment nothing. A changed `global` hash (the command aliases), a project that
+# moved or a base graph without fingerprints selects everything. A file in PROJECT_FILES (a project/*.scala that one
+# job or project uses) selects what it names. What no hash sees - the body of a task or command defined in build.sbt
+# or Dependencies.scala, and a source generator's code - is not selected; Quick Checks runs the build's own checks on
+# every pull request, and push, nightly and release runs run everything.
+#
+# Any other build file (BUILD: the rest of project/, ci.yml, the composite actions, sbt's and the formatters'
+# options, the scripts every sbt job runs, the leg lists) sets every decision but `workspace` to true, and the
 # `ci:full` label does the same. Renames are not folded: a moved file counts as a change to its old path too.
 #
 # Usage: scripts/ci-changes.sh BASE HEAD    a pull request (CI passes HEAD^1 HEAD on its merge commit) or a merge group
@@ -89,6 +100,24 @@ BUILD=(
   '^scripts/ci-changes\.sh$'
   '^scripts/merge-group-labels\.sh$'
   '^scripts/retry-on-transient-network\.sh$'
+)
+# Build files judged by the graph diff (above), not as BUILD.
+FINGERPRINTED=(
+  '^build\.sbt$'
+  '^project/Dependencies\.scala$'
+  '^\.github/ci-graph\.json$'
+)
+# project/*.scala files one job or project uses, not as BUILD: `<regex> <target>...`, a target being a project's node
+# (`samples:test`, `deployService:compile`), a job (`job:windows` runs every Windows entry, `job:consumers`,
+# `job:integration`), or `-`: only Quick Checks, which runs on every pull request, uses it.
+PROJECT_FILES=(
+  '^project/PlatformTests\.scala$ job:windows'
+  '^project/ItTiers\.scala$ it:test job:integration'
+  '^project/DocSnippets\.scala$ samples:test'
+  '^project/Relocation\.scala$ relocationCore:compile relocationWorkspaceClient:compile relocationWorkspaceShared:compile relocationTraceOpentelemetry:compile relocationKnowledgegraphNeo4j:compile'
+  '^project/DeployServiceDocker\.scala$ deployService:compile job:integration'
+  '^project/(PomDescriptions|PomMetadata|PublishedArtifacts|CentralBundle|Bom|JavadocPointer)\.scala$ job:consumers'
+  '^project/(StabilityTiers|LicencePolicy|FrozenDependencies|CompatibilityMatrix|BuildModel|SbomPrune)\.scala$ -'
 )
 # Not code: no compile or test reads them. Everything else is code, so a new kind of file runs the tests until it is
 # listed here. scripts/ is here because Quick Checks runs every script's own tests; the scripts a test job runs are
@@ -183,7 +212,8 @@ select_modules() {
   FULL_WHY="$1" CODE_FILES="$2" ALL_FILES="${3:-}" DECIDE="$([ $# -ge 3 ] && echo 1 || true)" \
   OUTSIDE_RE="$(re "${OUTSIDE_SBT[@]}")" READS_LIST="$(printf '%s\n' "${READS[@]}")" \
   ROOT="$ROOT" CONSUMER_ROOTS="$CONSUMER_ROOTS" CONSUMER_RE="$(re "${CONSUMER_PATHS[@]}")" SPRING_ROOTS="$SPRING_ROOTS" \
-  WINDOWS_VIA="$WINDOWS_VIA" ruby -rjson -ryaml - "$GRAPH" "$LEGS" <<'RUBY'
+  WINDOWS_VIA="$WINDOWS_VIA" EXTRA_NODES="${EXTRA_NODES:-}" FORCED_JOBS="${FORCED_JOBS:-}" \
+  ruby -rjson -ryaml - "$GRAPH" "$LEGS" <<'RUBY'
 graph_file, legs_file = ARGV
 graph = JSON.parse(File.read(graph_file))
 projects = graph.fetch("projects")
@@ -194,6 +224,9 @@ decide = !ENV["DECIDE"].to_s.empty?
 full_why = ENV["FULL_WHY"].to_s
 outside = ENV["OUTSIDE_RE"].to_s.empty? ? nil : Regexp.new(ENV["OUTSIDE_RE"])
 reads = ENV["READS_LIST"].to_s.split("\n").reject(&:empty?).map { |l| r, p = l.split(" ", 2); [Regexp.new(r), p.strip] }
+# the nodes the build files changed (`<node> <base|-> <why>` lines) and the jobs they need, from the bash part
+extra = ENV["EXTRA_NODES"].to_s.split("\n").reject(&:empty?).to_h { |l| n, _, w = l.split(" ", 3); [n, "build: #{w}"] }
+forced_jobs = ENV["FORCED_JOBS"].to_s.split
 
 KNOWN = %w[compile default runtime provided optional test].freeze
 side = ->(c) { c == "test" ? "test" : "compile" }
@@ -219,9 +252,10 @@ projects.each { |id, p| Array(p["borrowed"]).each { |conf, path| borrowers[path]
 dependents = Hash.new { |h, k| h[k] = [] }
 deps_of.each { |n, ds| ds.each { |d| dependents[d] << n } }
 
-# trace FILES: [the projects whose tests they reach (project => why), nil], or [nil, why] when one is in no project
-trace = lambda do |fs|
-  changed = {} # node => the first changed file in it
+# trace FILES [NODES]: [the projects whose tests FILES and the changed NODES (node => why) reach (project => why),
+# nil], or [nil, why] when a file is in no project
+trace = lambda do |fs, extra_nodes = {}|
+  changed = extra_nodes.select { |n, _| projects.key?(n.split(":").first) } # node => the first changed file in it
   direct = {}  # project => why its tests are selected without the graph
   fs.each do |f|
     b, id = bases.find { |base, _| f.start_with?(base) }
@@ -263,7 +297,7 @@ end
 
 reached = {} # project => why: the projects whose tests run changed code or read a changed file
 if full_why.empty?
-  sel, why = trace.(files)
+  sel, why = trace.(files, extra)
   if why then full_why = why else reached = sel end
 end
 selected = {} # project => why: `reached`, and what leg completeness adds
@@ -313,16 +347,16 @@ if decide
   # decide_on NAME LIST_NAME IDS [EXTRA_FILES]: NAME is true when the selection is full, or a project of IDS is
   # reached, or EXTRA_FILES (files outside the sbt build the job reads) is not empty; LIST_NAME, when given, is the
   # reached projects of IDS (empty, which the job reads as all of them, when the selection is full)
-  decide_on = lambda do |name, list_name, ids, extra = []|
+  decide_on = lambda do |name, list_name, ids, extra_files = []|
     hit = ids.select { |m| reached.key?(m) }
-    if full
-      say.(name, true, full_why)
+    if full || forced_jobs.include?(name)
+      say.(name, true, full ? full_why : "a project file it uses changed")
       puts "#{list_name}=" if list_name
     elsif !hit.empty?
       say.(name, true, "the change reaches #{hit.join(' ')}: #{hit.map { |m| "#{m}: #{reached[m]}" }.first}")
       puts "#{list_name}=#{hit.join(' ')}" if list_name
-    elsif !extra.empty?
-      say.(name, true, "the change touches #{extra.first} (#{extra.size} file(s))")
+    elsif !extra_files.empty?
+      say.(name, true, "the change touches #{extra_files.first} (#{extra_files.size} file(s))")
     else
       say.(name, false, "the change reaches none of #{ids.join(' ')}")
     end
@@ -349,15 +383,22 @@ if decide
       listed.any? { |l| l.end_with?("/") ? f.start_with?(l) : f == l } ||
       (fqcn && suite_re.any? { |r| r.match?(fqcn) })
   end
-  if full
-    say.("windows", true, full_why)
+  # and the build settings of a listed project (its own nodes, from the build files)
+  wextra = extra.select { |n, _| platform.include?(n.split(":").first) }
+  if full || forced_jobs.include?("windows")
+    say.("windows", true, full ? full_why : "a project file it runs changed (project/PlatformTests.scala)")
     puts "windows_modules="
-  elsif wfiles.empty?
+  elsif wfiles.empty? && wextra.empty?
     say.("windows", false, "nothing it covers changed")
   else
-    wsel, why = trace.(wfiles)
+    wsel, why = trace.(wfiles, wextra)
+    wfiles = wfiles + wextra.values
     via = ENV["WINDOWS_VIA"].to_s.split.to_h { |e| e.split(":", 2) }
-    own = ->(m) { wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m } }
+    # the project's own file, or its own build settings, changed
+    own = lambda do |m|
+      wextra.keys.any? { |n| n.split(":").first == m } ||
+        wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m }
+    end
     hit = why ? [] : platform.select { |m| wsel.key?(m) && (!via.key?(m) || wsel.key?(via[m]) || own.(m)) }
     if why
       say.("windows", true, why)
@@ -409,13 +450,87 @@ say() { # say NAME VALUE WHY
   echo "$1=$2"
 }
 
-build="$(any "${BUILD[@]}")"
+fingerprinted="$(any "${FINGERPRINTED[@]}")"
+mapped="" # the PROJECT_FILES entries' targets, one per line: `<target> <file>`
+handled="$fingerprinted"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  for e in "${PROJECT_FILES[@]}"; do
+    if [[ "$f" =~ ${e%% *} ]]; then
+      for t in ${e#* }; do mapped+="$t $f"$'\n'; done
+      handled+=$'\n'"$f"
+      break
+    fi
+  done
+done <<< "$files"
+handled="$(printf '%s\n' "$handled" | grep -v '^$' || true)"
+build="$(any "${BUILD[@]}" | { if [ -n "$handled" ]; then grep -vxF "$handled"; else cat; fi; } || true)"
 full_why=""
 if [ -n "$build" ]; then
   full_why="a build file changed ($(printf '%s\n' "$build" | head -1))"
 elif [ -n "${CI_FULL:-}" ]; then
   full_why="$CI_FULL"
 fi
+
+# The build files' own selection: the nodes they change (`<node> <why>` lines, EXTRA_NODES), the jobs they need
+extra_nodes=""
+forced_jobs=""
+if [ -z "$full_why" ] && [ -n "$fingerprinted" ]; then
+  base_graph="$(git show "$BASE:.github/ci-graph.json" 2>/dev/null || true)"
+  diff_out="$(BASE_GRAPH="${CI_BASE_GRAPH:+$(cat "$CI_BASE_GRAPH")}" BASE_GRAPH_GIT="$base_graph" ruby -rjson - "$GRAPH" <<'RUBY'
+head = JSON.parse(File.read(ARGV[0]))
+src = ENV["BASE_GRAPH"].to_s.empty? ? ENV["BASE_GRAPH_GIT"].to_s : ENV["BASE_GRAPH"]
+full = ->(why) { puts "full #{why}"; exit 0 }
+full.("the base has no project graph") if src.strip.empty?
+base = JSON.parse(src)
+bp, hp = base.fetch("projects", {}), head.fetch("projects", {})
+full.("the base's project graph has no fingerprints") if base["global"].nil? || bp.values.any? { |p| p["fp"].nil? }
+full.("head's project graph has no fingerprints") if head["global"].nil? || hp.values.any? { |p| p["fp"].nil? }
+full.("the command aliases changed (the graph's global hash)") if base["global"] != head["global"]
+side = ->(c) { c.to_s.strip == "test" ? "test" : "compile" }
+# edges SIDE P: the project's dependency edges that start at its SIDE node, as `dep:from->to`
+edges = lambda do |s, p|
+  Array(p["deps"]).flat_map { |d, conf| conf.to_s.split(";").map { |part| f, t = part.split("->", 2); [d, side.(f), (t || "compile").strip] } }
+    .select { |_, f, _| f == s }.map { |d, _, t| "#{d}->#{t}" }.sort
+end
+# the changed nodes, printed only once every project has passed the checks that select everything
+nodes = []
+hp.sort.each do |id, h|
+  b = bp[id]
+  if b.nil?
+    nodes << "#{id}:compile #{h['base']} a new project"
+    next
+  end
+  full.("#{id} moved from #{b['base']} to #{h['base']}") if b["base"] != h["base"]
+  %w[compile test].each do |s|
+    why = []
+    why << "its #{s} dependencies changed" if edges.(s, b) != edges.(s, h)
+    why << "its #{s} borrowed sources changed" if
+      Array(b["borrowed"]).select { |c, _| side.(c) == s }.sort != Array(h["borrowed"]).select { |c, _| side.(c) == s }.sort
+    why << "its #{s} settings changed (fp.#{s})" if b["fp"][s] != h["fp"][s]
+    nodes << "#{id}:#{s} #{h['base']} #{why.join(', ')}" unless why.empty?
+  end
+end
+puts nodes
+RUBY
+)"
+  if full_line="$(printf '%s\n' "$diff_out" | grep -m1 '^full ')"; then
+    full_why="${full_line#full }"
+  else
+    extra_nodes="$diff_out"
+  fi
+fi
+while IFS=' ' read -r t f; do
+  [ -n "${t:-}" ] || continue
+  case "$t" in
+    -) echo "build: $f is used only by Quick Checks" >&2 ;;
+    job:*) forced_jobs+=" ${t#job:}"; echo "build: $f needs ${t#job:}" >&2 ;;
+    *) extra_nodes+=$'\n'"$t - $f changed" ;;
+  esac
+done <<< "$mapped"
+extra_nodes="$(printf '%s\n' "$extra_nodes" | grep -v '^$' || true)"
+[ -z "$extra_nodes" ] || printf 'build: %s\n' "$extra_nodes" >&2
+forced() { [[ " $forced_jobs " == *" $1 "* ]]; }
 # decide NAME [FILES]: NAME is true when a build file changed (or CI_FULL), or FILES (those it covers) is not empty
 decide() {
   if [ -n "$full_why" ]; then
@@ -430,11 +545,18 @@ decide() {
 code_files="$(printf '%s\n' "$files" | grep -vE "$(re "${NONCODE[@]}")" | grep -v '^$' || true)"
 decide code "$code_files"
 decide docs "$(any "${DOCS[@]}")"
-decide integration "$(any "${INTEGRATION[@]}")"
+# integration: its paths, a project in them whose build settings changed (its base directory), or a project file it uses
+integration_files="$(any "${INTEGRATION[@]}")"
+build_dirs="$(printf '%s\n' "$extra_nodes" | awk '$2 != "-" && $2 != "" { print $2 "/" }' |
+  grep -E "$(re "${INTEGRATION[@]}")" || true)"
+if forced integration; then build_dirs+=$'\n'"$(printf '%s\n' "$mapped" | awk '$1 == "job:integration" { print $2 }')"; fi
+decide integration "$(printf '%s\n' "$integration_files" "$build_dirs" | grep -v '^$' || true)"
 if [ "${CI_EVENT:-}" = merge_group ]; then
   say workspace false "a merge group: the queued pull request has already run the tier"
 else
   "$HERE/workspace-tier-changes.sh" "$BASE" "$HEAD" | sed 's/^changed=/workspace=/'
 fi
-# windows, consumers, spring, performance and other, by the project graph; then modules, legs and full
-select_modules "$full_why" "$code_files" "$files"
+# windows, consumers, spring, performance and other, by the project graph; then modules, legs and full. The build
+# files handled above are not traced as files (build.sbt is in no project): their nodes are EXTRA_NODES.
+EXTRA_NODES="$extra_nodes" FORCED_JOBS="$forced_jobs" select_modules "$full_why" \
+  "$(printf '%s\n' "$code_files" | { if [ -n "$handled" ]; then grep -vxF "$handled"; else cat; fi; } || true)" "$files"
