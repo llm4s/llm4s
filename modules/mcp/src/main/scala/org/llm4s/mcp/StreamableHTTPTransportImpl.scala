@@ -1,4 +1,4 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
+// scalafix:off DisableSyntax.NoKeywordFinally
 package org.llm4s.mcp
 
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
@@ -373,4 +373,3 @@ class StreamableHTTPTransportImpl(
 
   def generateId(): String = requestId.incrementAndGet().toString
 }
-

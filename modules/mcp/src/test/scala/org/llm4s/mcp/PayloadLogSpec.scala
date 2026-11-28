@@ -59,7 +59,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "StdioTransportImpl" should "log a one-megabyte request as a bounded, redacted preview" in {
     val echoServer = StdioTestServers.echo("""{"jsonrpc":"2.0","id":"$id","result":{}}""", "--ready")
-    val transport  = new StdioTransportImpl(echoServer, startupTimeout = 500.millis, name = "payload-log")
+    val transport  = new StdioTransportImpl(echoServer, timeout = 30.seconds, name = "payload-log")
     val request = JsonRpcRequest(
       "2.0",
       "big",
@@ -86,7 +86,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
     // reports the server's stderr in its ERROR log and in the returned error. The server assembles the secret at
     // run time, because the transport logs its command line.
     val failingServer = StdioTestServers.command("--stderr-flood")
-    val transport     = new StdioTransportImpl(failingServer, startupTimeout = 500.millis, name = "stderr-log")
+    val transport     = new StdioTransportImpl(failingServer, timeout = 30.seconds, name = "stderr-log")
 
     val started = System.nanoTime()
     val (result, logged) = capturingDebug(classOf[StdioTransportImpl]) {

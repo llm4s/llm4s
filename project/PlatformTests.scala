@@ -79,7 +79,8 @@ object PlatformTests {
       "org.llm4s.mcp.StdioStderrDrainSpec",
       "org.llm4s.mcp.MCPClientImplSpec",
       "org.llm4s.mcp.MCPSessionRecoverySpec",
-      "org.llm4s.mcp.StdioEnvironmentSpec"
+      "org.llm4s.mcp.StdioEnvironmentSpec",
+      "org.llm4s.mcp.StdioProcessLifecycleSpec"
     ),
     "anthropic" -> Seq(
       "org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec",

@@ -250,4 +250,3 @@ class SSETransportImpl(
   // Generates unique request IDs
   def generateId(): String = requestId.incrementAndGet().toString
 }
-

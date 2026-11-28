@@ -29,7 +29,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
       "--ready"
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "echo-server")
+    val transport = new StdioTransportImpl(scriptCommand, timeout = 30.seconds, name = "echo-server")
 
     // Warm up: send a single request to ensure the process is started before concurrent access
     // This prevents the race condition where multiple threads try to start the process simultaneously
@@ -106,7 +106,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
       "--ready"
     )
 
-    val transport   = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "sequential-server")
+    val transport   = new StdioTransportImpl(scriptCommand, timeout = 30.seconds, name = "sequential-server")
     val numRequests = 20
 
     // Send requests sequentially but rapidly
@@ -144,7 +144,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
       "--delay=20"
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "mixed-server")
+    val transport = new StdioTransportImpl(scriptCommand, timeout = 30.seconds, name = "mixed-server")
 
     // Warm up: send a single request to ensure the process is started before concurrent access
     val warmupRequest = JsonRpcRequest("2.0", "warmup", "test/warmup", None)
@@ -207,7 +207,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
       "--ready"
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "notification-server")
+    val transport = new StdioTransportImpl(scriptCommand, timeout = 30.seconds, name = "notification-server")
 
     // Send a notification (no response expected)
     val notification = JsonRpcNotification(
@@ -240,7 +240,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
       "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"ping\"}\n{\"jsonrpc\":\"2.0\",\"id\":\"$id\",\"result\":{\"ok\":true}}",
       "--ready"
     )
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "numeric-id-server")
+    val transport = new StdioTransportImpl(scriptCommand, timeout = 30.seconds, name = "numeric-id-server")
     try {
       val reply = transport.sendRequest(JsonRpcRequest("2.0", "7", "test/method", None))
       reply.map(_.id) shouldBe Right("7")

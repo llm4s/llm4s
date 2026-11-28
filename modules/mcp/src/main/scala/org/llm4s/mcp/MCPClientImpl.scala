@@ -60,7 +60,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
             tryHttpTransportWithFallback(url, name)
           case stdio: StdioTransport =>
             // Stdio transport uses 2024-11-05 protocol version
-            val stdioTransport = StdioTransportImpl.of(stdio)
+            val stdioTransport = StdioTransportImpl.of(stdio, config.timeout)
             transport = Some(stdioTransport)
             protocolVersion = "2024-11-05"
             Right(stdioTransport)

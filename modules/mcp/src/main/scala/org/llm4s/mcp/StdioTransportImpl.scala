@@ -3,26 +3,36 @@ package org.llm4s.mcp
 
 import org.llm4s.error.{ CancelledError, SimpleError }
 import org.llm4s.types.Result
-import org.llm4s.util.{ DurationRounding, Redaction }
-import scala.util.{ Try, Success, Failure }
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, TimeUnit }
-import java.util.concurrent.locks.ReentrantLock
+import org.llm4s.util.DurationRounding
+import org.slf4j.{ Logger, LoggerFactory }
 import upickle.default._
-import org.slf4j.LoggerFactory
+
+import java.io.{ BufferedReader, IOException, InputStreamReader, OutputStreamWriter, PrintWriter }
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, ExecutionException, TimeUnit, TimeoutException }
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
+import scala.util.{ Failure, Success, Try }
 import PayloadLog.debugPayload
+
 private[mcp] object StdioTransportImpl {
 
   /** The transport a [[StdioTransport]] config describes, its environment and working directory included. */
-  def of(config: StdioTransport): StdioTransportImpl =
+  def of(config: StdioTransport, timeout: FiniteDuration): StdioTransportImpl =
     new StdioTransportImpl(
       config.command,
       config.name,
+      timeout,
       env = config.env,
       workingDirectory = config.workingDirectory,
       inheritEnvironment = config.inheritEnvironment
     )
+
+  /**
+   * How long a server is given to exit once its stdin is closed, and again once it has been asked to terminate,
+   * before it is killed: the shutdown sequence the MCP specification gives for stdio.
+   */
+  val ShutdownGrace: FiniteDuration = 2.seconds
 
   /**
    * Turns a server's stderr, arriving in chunks cut anywhere, into lines that are safe to log and to put in an error.
@@ -80,77 +90,302 @@ private[mcp] object StdioTransportImpl {
       val nl   = tail.indexOf('\n')
       if (nl >= 0 && nl < tail.length - 1) tail.drop(nl + 1) else tail
     }
+
+  /**
+   * Stops `process` and every process it started (#3077), as the MCP specification's stdio shutdown says: close its
+   * stdin, give it `grace` to exit, then terminate it, and kill it if it is still running `grace` later.
+   *
+   * A server is often a launcher (`npx` starting `node`, which starts a browser), and `Process.destroy` reaches the
+   * launcher alone: the rest lived on, orphaned. The descendants are therefore listed first, while the tree is still
+   * whole (once a parent exits, its children are no longer its descendants), and each one still running once the
+   * server is gone is terminated, then killed, the same way.
+   *
+   * An interrupt of the calling thread skips the waits and kills at once, and stays set.
+   */
+  def stopTree(process: Process, closeInput: () => Unit, grace: FiniteDuration, logger: Logger, name: String): Unit = {
+    val descendants = Try(process.descendants().iterator().asScala.toList).getOrElse(Nil)
+    closeInput()
+    val exited = waitFor(process.toHandle, grace)
+    if (!exited) Try(process.destroy())
+    val survivors = descendants.filter(_.isAlive)
+    if (survivors.nonEmpty)
+      logger.debug(s"StdioTransport($name) stopping ${survivors.size} process(es) the server started")
+    survivors.foreach(handle => Try(handle.destroy()))
+    val deadline = Deadline.now + grace
+    (if (exited) survivors else process.toHandle +: survivors).foreach { handle =>
+      if (!waitFor(handle, deadline.timeLeft)) {
+        logger.debug(s"StdioTransport($name) killing process ${handle.pid()}, still running after termination")
+        Try(handle.destroyForcibly())
+      }
+    }
+  }
+
+  /** Whether `handle` has exited within `within`; an interrupt ends the wait at once and stays set. */
+  private def waitFor(handle: ProcessHandle, within: FiniteDuration): Boolean =
+    if (!handle.isAlive) true
+    else if (Thread.currentThread().isInterrupted || within <= Duration.Zero) false
+    else
+      try {
+        handle.onExit().get(DurationRounding.ceilMillis(within), TimeUnit.MILLISECONDS)
+        true
+      } catch {
+        case _: InterruptedException =>
+          Thread.currentThread().interrupt()
+          !handle.isAlive
+        case _: TimeoutException | _: ExecutionException => !handle.isAlive
+      }
 }
 
-// Stdio transport implementation using subprocess communication with proper MCP protocol compliance.
-// Uses CompletableFuture and a background reader thread to handle concurrent requests safely.
-// This fixes the race condition where multiple threads could get mismatched responses.
-// Note: This class legitimately needs try/catch/finally for:
-// - Lock management (ReentrantLock release in finally)
-// - Thread interrupt handling (catching InterruptedException)
-// - Low-level concurrent I/O error handling
+/**
+ * The stdio transport: the MCP server runs as a child process, and JSON-RPC messages are exchanged one per line on its
+ * stdin and stdout. Its stderr is the server's log, drained and kept (redacted, bounded) for diagnostics.
+ *
+ * The process starts on the first message and the first request is written at once: a server is ready when it has
+ * answered `initialize`, which is what the client sends first, and a server that correctly says nothing until then
+ * costs no wait (#3077). One reader thread per process reads stdout to its end and hands each response to the call
+ * waiting for its id; a request the server sends the client (`ping`, or a capability the client does not declare) is
+ * answered at once and is never taken for a reply (#3077, #3079).
+ *
+ * A process that has exited is started again on the next request. A restarted server has not been through the
+ * handshake, so until `initialize` is sent again every other request is refused unsent with [[MCPSessionLost]]
+ * (#3072). A call that times out or is interrupted while waiting for its reply to `initialize` stops the process, so
+ * the next attempt starts afresh.
+ *
+ * Thread-safe: requests may be sent from several threads at once; starting a process is serialised.
+ *
+ * @param command            the command line that starts the server
+ * @param name               the server's name, for logs and errors
+ * @param timeout            the longest wait for the reply to one request: `MCPServerConfig.timeout`
+ * @param env                variables set for the server over the allowlisted ones it inherits
+ * @param workingDirectory   the directory to start it in; `None` is the JVM's
+ * @param inheritEnvironment `true` passes the JVM's whole environment, plus `env`
+ */
 class StdioTransportImpl(
   command: Seq[String],
   override val name: String,
-  startupTimeout: FiniteDuration = 10.seconds,
+  timeout: FiniteDuration = 30.seconds,
   env: Map[String, String] = Map.empty,
   workingDirectory: Option[java.nio.file.Path] = None,
   inheritEnvironment: Boolean = false
 ) extends MCPTransportImpl {
 
-  /** Binary-compatible auxiliary constructor matching the pre-timeout 2-param signature. */
-  def this(command: Seq[String], name: String) = this(command, name, 10.seconds)
+  /** The 2-parameter constructor: the default 30-second reply timeout. */
+  def this(command: Seq[String], name: String) = this(command, name, 30.seconds)
 
-  private val logger                                       = LoggerFactory.getLogger(getClass)
-  private var process: Option[Process]                     = None
-  private val requestId                                    = new AtomicLong(0)
-  private var stdinWriter: Option[java.io.PrintWriter]     = None
-  private var stdoutReader: Option[java.io.BufferedReader] = None
-  private var stderrReader: Option[java.io.BufferedReader] = None
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  // Concurrent request handling - maps request IDs to their pending futures
-  private val pendingRequests = new ConcurrentHashMap[String, CompletableFuture[String]]()
-  // Lock for writing to stdin to ensure atomic request transmission
-  private val writeLock = new ReentrantLock()
-  // Background reader thread for routing responses
-  @volatile private var readerThread: Option[Thread] = None
-  @volatile private var shutdownRequested            = false
-
-  // The server's stderr is drained on its own thread for as long as the process lives: nothing else reads it while a
-  // request is in flight, and a server that logs more than the pipe buffer holds would block in its write and never
-  // answer (#1952). What it writes is kept here, redacted, newest last, cut to the last StderrBufferChars characters, until
-  // readAvailableStderr takes it for a diagnostic.
+  // The server's stderr: how much of it is kept for a diagnostic, how much of one line is read before it is redacted
+  // and cut, and how many lines per process are logged at info before the rest go to debug (#1952).
   private val StderrBufferChars = 8192
-  // How much of one stderr line is read before it is redacted and cut; the rest of a longer line is dropped
-  private val StderrLineChars = 16384
-  // Lines logged at info per process; the rest go to debug, so a chatty server cannot flood the log
-  private val StderrInfoLines                        = 100
-  private val stderrLock                             = new Object
-  private val stderrBuffer                           = new StringBuilder
-  @volatile private var stderrSeen                   = false
-  @volatile private var stderrThread: Option[Thread] = None
+  private val StderrLineChars   = 16384
+  private val StderrInfoLines   = 100
 
-  // Timeout for server responses (30 seconds)
-  private val RESPONSE_TIMEOUT_MS = 30000L
-  // Timeout for server startup
-  private val STARTUP_TIMEOUT_MS = DurationRounding.ceilMillis(startupTimeout)
+  private val startLock                      = new Object
+  @volatile private var child: Option[Child] = None
+  @volatile private var hasRun               = false
+  @volatile private var handshakeNeeded      = false
 
   logger.info(s"StdioTransport($name) initialized with command: ${command.mkString(" ")}")
 
-  // Whether a process of this transport has run since it was created or last closed: a process started after that
-  // is a restart, and a restarted server has not been through the handshake (#3072).
-  @volatile private var hasRun          = false
-  @volatile private var handshakeNeeded = false
+  /**
+   * One run of the server process, with its pipes, its reader and stderr threads and the requests waiting on it. A
+   * restart is a new `Child`, so a reply, a failure or a shutdown of one process never reaches another's calls.
+   */
+  final private class Child(val process: Process) {
+    private val stdin     = new PrintWriter(new OutputStreamWriter(process.getOutputStream, StandardCharsets.UTF_8))
+    private val stdout    = new BufferedReader(new InputStreamReader(process.getInputStream, StandardCharsets.UTF_8))
+    private val stderr    = new BufferedReader(new InputStreamReader(process.getErrorStream, StandardCharsets.UTF_8))
+    private val writeLock = new Object
 
-  // Gets existing process or starts new one if needed
-  private def getOrStartProcess(): Result[Process] =
-    process match {
-      case Some(p) if p.isAlive =>
-        logger.debug(s"StdioTransport($name) reusing existing process")
-        Right(p)
-      case _ =>
+    val pending = new ConcurrentHashMap[String, CompletableFuture[String]]()
+
+    // Set by the reader once stdout has ended: the server will answer nothing more, and `endReason` says why.
+    @volatile var ended              = false
+    @volatile var endReason: String  = ""
+    @volatile private var stopping   = false
+    private val stderrLock           = new Object
+    private val stderrBuffer         = new StringBuilder
+    private val stderrThread: Thread = daemon("stderr")(drainStderr())
+    private val readerThread: Thread = daemon("reader")(readStdout())
+
+    def alive: Boolean = !ended && process.isAlive
+
+    /** Writes one message, a line of JSON; `Left` with the reason when the pipe is broken. */
+    def write(json: String): Either[String, Unit] = writeLock.synchronized {
+      stdin.print(json)
+      stdin.print('\n')
+      stdin.flush()
+      if (stdin.checkError()) Left(s"Failed to write to process stdin (broken pipe); ${deathNote()}") else Right(())
+    }
+
+    /** Why the server cannot answer: its exit code once it has exited, and the last of its stderr. */
+    def deathNote(): String = {
+      val code =
+        if (Try(process.waitFor(1, TimeUnit.SECONDS)).getOrElse(false)) s"exited with code ${process.exitValue()}"
+        else "closed its stdout"
+      val err = stderrText()
+      s"the MCP server process $code" + (if (err.nonEmpty) s". Server stderr: $err" else "")
+    }
+
+    /** What has been collected of the server's stderr, bounded, for an error; waits briefly for its last words. */
+    def stderrText(): String = {
+      if (!process.isAlive) joinQuietly(stderrThread, 1000)
+      val text = stderrLock.synchronized(stderrBuffer.toString)
+      PayloadLog.preview(StdioTransportImpl.lastLines(text, PayloadLog.MaxChars)).trim
+    }
+
+    /** Stops the process tree, fails the calls still waiting, and ends both threads. */
+    def stop(): Unit = {
+      stopping = true
+      StdioTransportImpl.stopTree(
+        process,
+        () => writeLock.synchronized(Try(stdin.close())): Unit,
+        StdioTransportImpl.ShutdownGrace,
+        logger,
+        name
+      )
+      // The process is gone, so its pipes have ended and both threads end with them. Closing the raw streams is the
+      // backstop for a grandchild that kept one open; a reader is closed only after its thread, since closing a reader
+      // that another thread is blocked in waits for that thread.
+      Seq(readerThread -> process.getInputStream, stderrThread -> process.getErrorStream).foreach {
+        case (thread, stream) =>
+          joinQuietly(thread, 1000)
+          if (thread.isAlive) {
+            Try(stream.close())
+            joinQuietly(thread, 1000)
+          }
+      }
+      Try(stdout.close())
+      Try(stderr.close())
+      failPending("Transport closing")
+    }
+
+    private def failPending(reason: String): Unit =
+      pending.keySet.asScala.toList.foreach { id =>
+        Option(pending.remove(id)).foreach(_.completeExceptionally(new IOException(reason)))
+      }
+
+    // Reads stdout to its end: a reply written just before the server exits is still delivered (#3077).
+    private def readStdout(): Unit = {
+      var failure: Option[String] = None
+      try {
+        var line = stdout.readLine()
+        while (line != null) {
+          if (line.trim.nonEmpty) route(line)
+          line = stdout.readLine()
+        }
+      } catch {
+        case e: IOException =>
+          if (!stopping) failure = Some(s"reading the server's stdout failed: ${e.getMessage}")
+      } finally {
+        val reason =
+          if (stopping) "Transport closing"
+          else failure.fold(deathNote())(f => s"$f; ${deathNote()}")
+        endReason = reason
+        ended = true
+        if (!stopping) logger.warn(s"StdioTransport($name) server stopped answering: $reason")
+        failPending(reason)
+        logger.debug(s"StdioTransport($name) reader thread exiting")
+      }
+    }
+
+    // A response goes to the call waiting for its id; a request the server sends is answered, never taken for a reply
+    // (#3077); a notification is logged.
+    private def route(line: String): Unit = {
+      logger.debugPayload(s"StdioTransport($name) received: ", line)
+      Try(ujson.read(line)) match {
+        case Failure(e) =>
+          logger.warn(
+            s"StdioTransport($name) ignoring a line that is not JSON (${e.getClass.getSimpleName}): " +
+              PayloadLog.preview(line)
+          )
+        case Success(json) =>
+          JsonRpcReplies.serverRequest(json) match {
+            case Some((id, method)) =>
+              logger.debug(s"StdioTransport($name) answering the server's request $method")
+              val answer = JsonRpcReplies.answerToServerRequest(id, method).render()
+              // Written off the reader thread: a server blocked writing stdout would never read its stdin.
+              val _ = Thread.ofVirtual().name(s"StdioTransport-$name-answer").start { () =>
+                write(answer).left.foreach(r => logger.debug(s"StdioTransport($name) could not answer the server: $r"))
+              }
+            case None =>
+              // A response to this client: no `method`, and the id as this client sent it, a string (#3071).
+              json.objOpt.filterNot(_.contains("method")).flatMap(_.get("id")).flatMap(_.strOpt) match {
+                case Some(id) =>
+                  Option(pending.remove(id)) match {
+                    case Some(future) => future.complete(line): Unit
+                    case None         => logger.warn(s"StdioTransport($name) received a reply to unknown request $id")
+                  }
+                case None =>
+                  logger.debugPayload(s"StdioTransport($name) received a notification or an unmatched message: ", line)
+              }
+          }
+      }
+    }
+
+    // Reads the server's stderr until it ends, for as long as the process lives: nothing else reads it while a request
+    // is in flight, and a server that logs more than the pipe holds would block in its write and never answer (#1952).
+    private def drainStderr(): Unit = {
+      val chunk  = new Array[Char](4096)
+      var logged = 0
+      // Each line arrives redacted whole and bounded; the buffer for diagnostics keeps these, never raw chunks
+      val lines = new StdioTransportImpl.StderrLines(
+        StderrLineChars,
+        line => {
+          if (logged < StderrInfoLines) {
+            logger.info(s"StdioTransport($name) stderr: $line")
+            logged += 1
+            if (logged == StderrInfoLines)
+              logger.info(s"StdioTransport($name) stderr: further lines are logged at debug level")
+          } else logger.debug(s"StdioTransport($name) stderr: $line")
+          stderrLock.synchronized {
+            stderrBuffer.append(line).append('\n')
+            val kept = StdioTransportImpl.lastLines(stderrBuffer.toString, StderrBufferChars)
+            if (kept.length != stderrBuffer.length) {
+              stderrBuffer.clear()
+              stderrBuffer.append(kept)
+            }
+          }
+        }
+      )
+      Iterator
+        .continually(Try(stderr.read(chunk)).getOrElse(-1))
+        .takeWhile(_ >= 0)
+        .foreach(n => lines.feed(new String(chunk, 0, n)))
+      lines.finish()
+      logger.debug(s"StdioTransport($name) stderr drain thread exiting")
+    }
+
+    private def daemon(role: String)(body: => Unit): Thread = {
+      val thread = new Thread(() => body, s"StdioTransport-$name-$role")
+      thread.setDaemon(true)
+      thread.start()
+      thread
+    }
+  }
+
+  // Waits up to `millis` for `thread` to end, keeping an interrupt of this thread set
+  private def joinQuietly(thread: Thread, millis: Long): Unit =
+    Try(thread.join(millis)).failed.foreach {
+      case _: InterruptedException => Thread.currentThread().interrupt()
+      case _                       => ()
+    }
+
+  /**
+   * The running process for `message`, started if there is none or the last one has exited; serialised, so two calls
+   * that find the server gone start one process between them (#3077). `request` is checked against the handshake
+   * gate: a restarted server gets `initialize` first, and any other request is refused unsent with
+   * [[MCPSessionLost]], so the client can run the handshake and retry it without the server having run it twice.
+   */
+  private def childFor(request: Option[JsonRpcRequest]): Result[Child] = startLock.synchronized {
+    val running = child match {
+      case Some(c) if c.alive => Right(c)
+      case previous =>
+        previous.foreach(_.stop())
+        child = None
         val restart = hasRun
-        startNewProcess().map { started =>
+        start().map { started =>
+          child = Some(started)
           hasRun = true
           if (restart) {
             logger.warn(
@@ -161,515 +396,139 @@ class StdioTransportImpl(
           started
         }
     }
+    running.flatMap { c =>
+      request match {
+        case Some(r) if r.method == "initialize" => handshakeNeeded = false; Right(c)
+        case Some(_) if handshakeNeeded          => Left(MCPSessionLost.Restarted)
+        case _                                   => Right(c)
+      }
+    }
+  }
 
-  // A restarted server gets `initialize` first: any other request is refused unsent, so the client can run the
-  // handshake and retry it without the server having run it twice.
-  private def handshakeGate(request: JsonRpcRequest): Result[Unit] =
-    if (request.method == "initialize") { handshakeNeeded = false; Right(()) }
-    else if (handshakeNeeded) Left(MCPSessionLost.Restarted)
-    else Right(())
-
-  // Starts a new MCP server process with proper initialization
-  private def startNewProcess(): Result[Process] = {
+  private def start(): Result[Child] = {
     logger.info(s"StdioTransport($name) starting new process: ${command.mkString(" ")}")
-
     Try {
-      val processBuilder = new ProcessBuilder(command: _*)
-      processBuilder.redirectErrorStream(false) // Keep stderr separate for monitoring
-      StdioEnvironment.prepare(processBuilder.environment(), env, inheritEnvironment)
-      workingDirectory.foreach(dir => processBuilder.directory(dir.toFile))
-      val newProcess = processBuilder.start()
-
-      // Set up I/O streams
-      stdinWriter = Some(
-        new java.io.PrintWriter(
-          new java.io.OutputStreamWriter(newProcess.getOutputStream, "UTF-8"),
-          true // auto-flush
-        )
-      )
-      stdoutReader = Some(
-        new java.io.BufferedReader(
-          new java.io.InputStreamReader(newProcess.getInputStream, "UTF-8")
-        )
-      )
-      stderrReader = Some(
-        new java.io.BufferedReader(
-          new java.io.InputStreamReader(newProcess.getErrorStream, "UTF-8")
-        )
-      )
-
-      process = Some(newProcess)
-      stderrLock.synchronized(stderrBuffer.clear())
-      stderrSeen = false
-      stderrReader.foreach(startStderrDrain)
-      newProcess
+      val builder = new ProcessBuilder(command: _*)
+      builder.redirectErrorStream(false)
+      StdioEnvironment.prepare(builder.environment(), env, inheritEnvironment)
+      workingDirectory.foreach(dir => builder.directory(dir.toFile))
+      new Child(builder.start())
     } match {
+      case Success(started) => Right(started)
       case Failure(e) =>
-        cleanupProcess()
-        logger.error(s"StdioTransport($name) failed to start process: ${e.getMessage}", e)
+        logger.error(s"StdioTransport($name) failed to start process: ${e.getMessage}")
         Left(SimpleError(s"Failed to start MCP server process: ${e.getMessage}"))
-      case Success(newProcess) =>
-        // Wait for server to be ready (check if it's responsive)
-        CancelledError.catchInterrupt(waitForServerReady(newProcess)) match {
-          case Left(interrupted) =>
-            // Cancelled during startup (design section 4.4): stop the half-started process, so that the
-            // next request starts afresh instead of finding a live process that has no reader thread.
-            cleanupProcess()
-            Thread.currentThread().interrupt()
-            Left(CancelledError("mcp.stdio.start", Some(interrupted)))
-          case Right(Right(_)) =>
-            logger.info(s"StdioTransport($name) process started and ready")
-            // Start the background reader thread
-            startReaderThread()
-            Right(newProcess)
-          case Right(Left(error)) =>
-            // Clean up failed process
-            cleanupProcess()
-            logger.error(s"StdioTransport($name) failed to start process: Server startup failed: ${error.message}")
-            Left(SimpleError(s"Failed to start MCP server process: Server startup failed: ${error.message}"))
-        }
     }
   }
 
-  // Starts the daemon thread that reads `reader` (the server's stderr) until it ends: when the process exits, or when
-  // cleanupProcess closes the stream.
-  private def startStderrDrain(reader: java.io.Reader): Unit = {
-    val thread = new Thread(
-      new Runnable {
-        override def run(): Unit = {
-          val chunk  = new Array[Char](4096)
-          var logged = 0
-          // Each line arrives redacted whole and bounded; the buffer for diagnostics keeps these, never raw chunks
-          val lines = new StdioTransportImpl.StderrLines(
-            StderrLineChars,
-            line => {
-              if (logged < StderrInfoLines) {
-                logger.info(s"StdioTransport($name) stderr: $line")
-                logged += 1
-                if (logged == StderrInfoLines)
-                  logger.info(s"StdioTransport($name) stderr: further lines are logged at debug level")
-              } else logger.debug(s"StdioTransport($name) stderr: $line")
-              stderrLock.synchronized {
-                stderrBuffer.append(line).append('\n')
-                val kept = StdioTransportImpl.lastLines(stderrBuffer.toString, StderrBufferChars)
-                if (kept.length != stderrBuffer.length) {
-                  stderrBuffer.clear()
-                  stderrBuffer.append(kept)
-                }
-              }
-            }
-          )
-          Iterator
-            .continually(Try(reader.read(chunk)).getOrElse(-1))
-            .takeWhile(_ >= 0)
-            .foreach { n =>
-              stderrSeen = true
-              lines.feed(new String(chunk, 0, n))
-            }
-          lines.finish()
-          logger.debug(s"StdioTransport($name) stderr drain thread exiting")
-        }
-      },
-      s"StdioTransport-$name-stderr"
-    )
-    thread.setDaemon(true)
-    thread.start()
-    stderrThread = Some(thread)
-  }
-
-  // Waits up to `millis` for `thread` to end, keeping an interrupt of this thread set
-  private def joinQuietly(thread: Thread, millis: Long): Unit =
-    Try(thread.join(millis)).failed.foreach {
-      case _: InterruptedException => Thread.currentThread().interrupt()
-      case _                       => ()
+  // Stops `c` if it is still the current process: after an `initialize` that was never answered, so the next attempt
+  // gets a fresh server rather than one that may be half way through the handshake.
+  private def abandon(c: Child): Unit = {
+    val mine = startLock.synchronized {
+      if (child.contains(c)) { child = None; true }
+      else false
     }
-
-  // Starts the background reader thread that routes responses to pending futures
-  private def startReaderThread(): Unit = {
-    shutdownRequested = false
-    val thread = new Thread(
-      new Runnable {
-        override def run(): Unit = {
-          logger.debug(s"StdioTransport($name) reader thread started")
-          try
-            while (!shutdownRequested && process.exists(_.isAlive))
-              stdoutReader match {
-                case Some(reader) =>
-                  try
-                    // Use ready() check with short sleep to allow checking shutdown flag
-                    if (reader.ready()) {
-                      val line = reader.readLine()
-                      if (line != null && line.trim.nonEmpty) {
-                        routeResponse(line)
-                      }
-                    } else {
-                      Thread.sleep(10) // Short sleep to avoid busy-waiting
-                    }
-                  catch {
-                    case _: InterruptedException =>
-                      logger.debug(s"StdioTransport($name) reader thread interrupted")
-                      return
-                    case _: java.io.IOException if shutdownRequested =>
-                      logger.debug(s"StdioTransport($name) reader thread I/O closed during shutdown")
-                      return
-                    case e: Exception =>
-                      logger.warn(s"StdioTransport($name) reader thread error: ${e.getMessage}")
-                      // Complete all pending requests with error
-                      failAllPendingRequests(s"Reader thread error: ${e.getMessage}")
-                      return
-                  }
-                case None =>
-                  logger.debug(s"StdioTransport($name) reader thread: stdout reader not available")
-                  return
-              }
-          finally {
-            logger.debug(s"StdioTransport($name) reader thread exiting")
-            // Fail any remaining pending requests
-            if (!shutdownRequested) {
-              failAllPendingRequests("Reader thread exited unexpectedly")
-            }
-          }
-        }
-      },
-      s"StdioTransport-$name-reader"
-    )
-    thread.setDaemon(true)
-    thread.start()
-    readerThread = Some(thread)
-  }
-
-  // Routes a response line to the appropriate pending request future
-  private def routeResponse(line: String): Unit = {
-    logger.debugPayload(s"StdioTransport($name) routing response: ", line)
-    Try {
-      // A response to one of this client's requests: no `method`, and the id as this client sent it, a string. A
-      // server's own request (it has a `method`) or a numeric id, which `toString` would have turned into the text of
-      // a pending string id, is not one (#3071).
-      val json = ujson.read(line)
-      val responseId = json.objOpt
-        .filterNot(_.contains("method"))
-        .flatMap(_.get("id"))
-        .flatMap(_.strOpt)
-        .getOrElse("")
-
-      if (responseId.nonEmpty) {
-        val future = pendingRequests.remove(responseId)
-        if (future != null) {
-          logger.debug(s"StdioTransport($name) completing future for request $responseId")
-          future.complete(line)
-        } else {
-          logger.warn(s"StdioTransport($name) received response for unknown request ID: $responseId")
-        }
-      } else {
-        // This might be a notification from the server (no ID field)
-        logger.debugPayload(s"StdioTransport($name) received message without ID (possibly notification): ", line)
-      }
-    }.recover { case e =>
-      logger.warn(s"StdioTransport($name) failed to parse response: ${e.getMessage}, line: ${PayloadLog.preview(line)}")
+    if (mine) {
+      logger.warn(s"StdioTransport($name) stopping a server that did not answer initialize")
+      c.stop()
     }
   }
 
-  // Fails all pending requests with the given error message
-  private def failAllPendingRequests(errorMessage: String): Unit = {
-    import scala.jdk.CollectionConverters._
-    val pending = pendingRequests.keys().asScala.toList
-    pending.foreach { id =>
-      val future = pendingRequests.remove(id)
-      if (future != null) {
-        future.completeExceptionally(new RuntimeException(errorMessage))
-      }
-    }
-  }
-
-  // Wait for the server to be ready to accept requests
-  private def waitForServerReady(proc: Process): Result[Unit] = {
-    val startTime = System.currentTimeMillis()
-
-    while (System.currentTimeMillis() - startTime < STARTUP_TIMEOUT_MS) {
-      if (!proc.isAlive) {
-        // Check stderr for error messages
-        val errorOutput = readAvailableStderr()
-        return Left(SimpleError(s"Process died during startup. Error output: $errorOutput"))
-      }
-
-      // Check if there's any output indicating the server is ready
-      if (stdoutReader.exists(_.ready()) || stderrSeen) {
-        logger.debug(s"StdioTransport($name) server appears ready (has output)")
-        return Right(())
-      }
-
-      Thread.sleep(10) // Small delay before checking again
-    }
-
-    // Server might be ready even without immediate output
-    if (proc.isAlive) {
-      logger.debug(s"StdioTransport($name) server process is alive, assuming ready")
-      Right(())
-    } else {
-      Left(SimpleError("Server process died during startup"))
-    }
-  }
-
-  // Takes what the drain thread has collected of the server's stderr, for diagnostics, bounded: the result goes into
-  // error logs and returned errors. Once the process has exited it first gives the drain thread a moment to read what
-  // is left in the pipe, so a server's last words are not missed.
-  private def readAvailableStderr(): String = {
-    if (!process.exists(_.isAlive)) stderrThread.foreach(joinQuietly(_, 1000))
-    val output = stderrLock.synchronized {
-      val text = stderrBuffer.toString
-      stderrBuffer.clear()
-      text
-    }
-    PayloadLog.preview(StdioTransportImpl.lastLines(output, PayloadLog.MaxChars))
-  }
-
-  // Sends JSON-RPC request via subprocess stdin/stdout with proper MCP protocol.
-  // Thread-safe: uses write lock for sending and CompletableFuture for receiving.
+  /**
+   * Sends `request` and waits up to `timeout` for its reply. Thread-safe: each call waits on its own future, matched
+   * by id. An interrupt returns `Left(CancelledError)` with the flag set and leaves nothing pending.
+   */
   override def sendRequest(request: JsonRpcRequest): Result[JsonRpcResponse] =
     CancelledError.attempt("mcp.stdio.request") {
       logger.debug(s"StdioTransport($name) sending request: method=${request.method}, id=${request.id}")
-
-      getOrStartProcess().flatMap(_ => handshakeGate(request)).flatMap { _ =>
-        stdinWriter match {
-          case Some(writer) =>
-            // Create a future for this request's response
-            val responseFuture = new CompletableFuture[String]()
-            pendingRequests.put(request.id, responseFuture)
-
-            try {
-              // Acquire write lock to ensure atomic request transmission
-              val writeError: Option[String] = {
-                writeLock.lock()
-                try {
-                  // Read any pending stderr for diagnostics
-                  readAvailableStderr()
-
-                  val requestJson = write(request)
-                  logger.debugPayload(s"StdioTransport($name) writing to stdin: ", requestJson)
-
-                  // Write request as line-delimited JSON (one complete JSON object per line)
-                  writer.println(requestJson)
-                  writer.flush() // Ensure the request is immediately sent to the server
-
-                  if (writer.checkError()) {
-                    pendingRequests.remove(request.id)
-                    Some("Stdio transport error: Failed to write to process stdin (broken pipe)")
-                  } else None
-                } finally writeLock.unlock()
-              }
-
-              if (writeError.isDefined) Left(SimpleError(writeError.get))
-              else {
-                // Wait for response with timeout (blocking on the future)
-                Try {
-                  responseFuture.get(RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                } match {
-                  case Success(responseLine) =>
-                    if (responseLine.isEmpty) {
-                      Left(SimpleError(s"No response from MCP server for request ${request.id}"))
-                    } else {
-                      logger.debugPayload(s"StdioTransport($name) received from stdout: ", responseLine)
-
-                      // Parse JSON response
-                      Try(read[JsonRpcResponse](responseLine)) match {
-                        case Success(response) =>
-                          response.error match {
-                            case Some(error) =>
-                              val message = Redaction.safeBody(error.message)
-                              logger.error(
-                                s"StdioTransport($name) JSON-RPC error: code=${error.code}, message=$message"
-                              )
-                              Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
-                            case None =>
-                              logger.debug(s"StdioTransport($name) request successful: id=${response.id}")
-                              Right(response)
-                          }
-                        case Failure(parseError) =>
-                          Left(SimpleError(s"Failed to parse response: ${parseError.getMessage}"))
-                      }
-                    }
-                  case Failure(_: java.util.concurrent.TimeoutException) =>
-                    pendingRequests.remove(request.id)
-                    val stderrOutput = readAvailableStderr()
-                    val errorMsg =
-                      s"Timeout waiting for response to request ${request.id} after ${RESPONSE_TIMEOUT_MS}ms. Server stderr: $stderrOutput"
-                    logger.error(s"StdioTransport($name) $errorMsg")
-                    Left(SimpleError(s"Stdio transport error: $errorMsg"))
-                  case Failure(e) =>
-                    pendingRequests.remove(request.id)
-                    val stderrOutput = readAvailableStderr()
-                    val errorMsg = if (stderrOutput.nonEmpty) {
-                      s"${e.getMessage}. Server stderr: $stderrOutput"
-                    } else {
-                      e.getMessage
-                    }
-                    logger.error(s"StdioTransport($name) transport error: $errorMsg", e)
-                    Left(SimpleError(s"Stdio transport error: $errorMsg"))
-                }
-              } // end else
-            } catch {
-              case e: InterruptedException =>
-                // The wait for the response was interrupted: a cancellation (design section 4.4), with the
-                // flag the throw cleared set again, and no request left pending.
-                pendingRequests.remove(request.id)
-                Thread.currentThread().interrupt()
-                Left(CancelledError("mcp.stdio.request", Some(e)))
-              case e: Exception =>
-                pendingRequests.remove(request.id)
-                val stderrOutput = readAvailableStderr()
-                val errorMsg = if (stderrOutput.nonEmpty) {
-                  s"${e.getMessage}. Server stderr: $stderrOutput"
-                } else {
-                  e.getMessage
-                }
-                logger.error(s"StdioTransport($name) transport error: $errorMsg", e)
-                Left(SimpleError(s"Stdio transport error: $errorMsg"))
-            }
-          case None =>
-            Left(SimpleError("Process stdin writer not available"))
-        }
-      }
+      childFor(Some(request)).flatMap(exchange(_, request))
     }
 
-  // Clean up process and streams
-  private def cleanupProcess(): Unit = {
-    // Signal shutdown to reader thread
-    shutdownRequested = true
-
-    // Fail all pending requests
-    failAllPendingRequests("Transport closing")
-
-    // Stop reader thread
-    readerThread.foreach { thread =>
-      Try {
-        thread.interrupt()
-        thread.join(1000) // Wait up to 1 second for thread to finish
-      }.recover { case e =>
-        logger.debug(s"Error stopping reader thread: ${e.getMessage}")
-      }
+  private def exchange(c: Child, request: JsonRpcRequest): Result[JsonRpcResponse] = {
+    val reply = new CompletableFuture[String]()
+    c.pending.put(request.id, reply)
+    // The reader may have ended between childFor and the put, and failed every call pending then: this one too.
+    if (c.ended) reply.completeExceptionally(new IOException(c.endReason))
+    val json = write(request)
+    logger.debugPayload(s"StdioTransport($name) writing to stdin: ", json)
+    c.write(json) match {
+      case Left(reason) =>
+        c.pending.remove(request.id)
+        logger.error(s"StdioTransport($name) $reason")
+        Left(SimpleError(s"Stdio transport error: $reason"))
+      case Right(()) => awaitReply(c, request, reply)
     }
-    readerThread = None
-
-    stdinWriter.foreach { writer =>
-      Try(writer.close()).recover { case e =>
-        logger.debug(s"Error closing stdin writer: ${e.getMessage}")
-      }
-    }
-    stdinWriter = None
-
-    stdoutReader.foreach { reader =>
-      Try(reader.close()).recover { case e =>
-        logger.debug(s"Error closing stdout reader: ${e.getMessage}")
-      }
-    }
-    stdoutReader = None
-
-    process.foreach { p =>
-      Try {
-        // First try graceful termination
-        p.destroy()
-
-        // Wait a bit for graceful shutdown
-        val terminated = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-        if (!terminated) {
-          logger.debug(s"StdioTransport($name) forcing process termination")
-          p.destroyForcibly()
-        }
-
-        logger.debug(s"StdioTransport($name) process terminated with exit code: ${p.exitValue()}")
-      }.recover { case e =>
-        logger.warn(s"StdioTransport($name) error during process cleanup: ${e.getMessage}")
-      }
-    }
-    val stderrStream = process.map(_.getErrorStream)
-    process = None
-
-    // The process is gone, so its stderr has ended and the drain thread ends with it. Closing the pipe is the
-    // backstop for a grandchild that kept it open; the reader itself is closed only after the thread, since closing
-    // a reader that another thread is blocked in waits for that thread.
-    stderrThread.foreach { thread =>
-      joinQuietly(thread, 1000)
-      if (thread.isAlive) {
-        stderrStream.foreach(stream => Try(stream.close()))
-        joinQuietly(thread, 1000)
-      }
-    }
-    stderrThread = None
-    stderrReader.foreach { reader =>
-      Try(reader.close()).recover { case e =>
-        logger.debug(s"Error closing stderr reader: ${e.getMessage}")
-      }
-    }
-    stderrReader = None
-    // Process and streams cleaned up
   }
 
-  // Sends JSON-RPC notification via subprocess stdin (no response expected).
-  // Thread-safe: uses write lock for sending.
-  override def sendNotification(notification: JsonRpcNotification): Result[Unit] = {
-    logger.debug(s"StdioTransport($name) sending notification: method=${notification.method}")
-
-    getOrStartProcess().flatMap { _ =>
-      stdinWriter match {
-        case Some(writer) =>
-          Try {
-            // Acquire write lock to ensure atomic notification transmission
-            writeLock.lock()
-            try {
-              // Read any pending stderr for diagnostics
-              readAvailableStderr()
-
-              val notificationJson = write(notification)
-              logger.debugPayload(s"StdioTransport($name) writing notification to stdin: ", notificationJson)
-
-              // Write notification as line-delimited JSON (one complete JSON object per line)
-              writer.println(notificationJson)
-              writer.flush() // Ensure the notification is immediately sent to the server
-
-              if (writer.checkError()) {
-                // For notifications, we don't wait for a response - just return success
-                logger.debug(s"StdioTransport($name) notification sent successfully")
-                false // indicates write error
-              } else {
-                logger.debug(s"StdioTransport($name) notification sent successfully")
-                true // indicates success
-              }
-            } finally writeLock.unlock()
-          } match {
-            case Success(true) =>
-              logger.debug(s"StdioTransport($name) notification successful")
-              Right(())
-            case Success(false) =>
-              val msg =
-                "Stdio notification error: Failed to write notification to process stdin (broken pipe)"
-              logger.error(s"StdioTransport($name) $msg")
-              Left(SimpleError(msg))
-            case Failure(exception) =>
-              // Read stderr for additional context
-              val stderrOutput = readAvailableStderr()
-              val errorMsg = if (stderrOutput.nonEmpty) {
-                s"${exception.getMessage}. Server stderr: $stderrOutput"
-              } else {
-                exception.getMessage
-              }
-
-              logger.error(s"StdioTransport($name) notification error: $errorMsg", exception)
-              Left(SimpleError(s"Stdio notification error: $errorMsg"))
+  private def awaitReply(
+    c: Child,
+    request: JsonRpcRequest,
+    reply: CompletableFuture[String]
+  ): Result[JsonRpcResponse] = {
+    def unanswered(): Unit = {
+      c.pending.remove(request.id)
+      if (request.method == "initialize") abandon(c)
+    }
+    try {
+      val line = reply.get(DurationRounding.ceilMillis(timeout), TimeUnit.MILLISECONDS)
+      Try(read[JsonRpcResponse](line)) match {
+        case Failure(e) => Left(SimpleError(s"Failed to parse response: ${e.getMessage}"))
+        case Success(response) =>
+          response.error match {
+            case Some(error) =>
+              val message = JsonRpcReplies.errorMessage(error)
+              logger.error(s"StdioTransport($name) $message")
+              Left(SimpleError(message))
+            case None =>
+              logger.debug(s"StdioTransport($name) request successful: id=${response.id}")
+              Right(response)
           }
-        case None =>
-          Left(SimpleError("Process stdin writer not available"))
       }
+    } catch {
+      case e: InterruptedException =>
+        // A cancellation (design section 4.4): the flag the throw cleared is set again, and nothing is left pending.
+        unanswered()
+        Thread.currentThread().interrupt()
+        Left(CancelledError("mcp.stdio.request", Some(e)))
+      case _: TimeoutException =>
+        unanswered()
+        val err = c.stderrText()
+        val message = s"Timeout waiting for response to request ${request.id} after $timeout" +
+          (if (err.nonEmpty) s". Server stderr: $err" else "")
+        logger.error(s"StdioTransport($name) $message")
+        Left(SimpleError(s"Stdio transport error: $message"))
+      case e: ExecutionException =>
+        c.pending.remove(request.id)
+        val reason = Option(e.getCause).map(_.getMessage).getOrElse(e.getMessage)
+        logger.error(s"StdioTransport($name) request ${request.id} failed: $reason")
+        Left(SimpleError(s"Stdio transport error: $reason"))
     }
   }
 
-  // Terminates the subprocess and closes streams
+  /** Writes `notification`; no reply is awaited. An interrupt returns `Left(CancelledError)` with the flag set. */
+  override def sendNotification(notification: JsonRpcNotification): Result[Unit] =
+    CancelledError.attempt("mcp.stdio.notification") {
+      logger.debug(s"StdioTransport($name) sending notification: method=${notification.method}")
+      childFor(None).flatMap { c =>
+        val json = write(notification)
+        logger.debugPayload(s"StdioTransport($name) writing notification to stdin: ", json)
+        c.write(json).left.map { reason =>
+          logger.error(s"StdioTransport($name) notification error: $reason")
+          SimpleError(s"Stdio notification error: $reason")
+        }
+      }
+    }
+
+  /** Stops the server and every process it started, and fails any call still waiting. */
   override def close(): Unit = {
     logger.info(s"StdioTransport($name) closing process and streams")
-    cleanupProcess()
-    hasRun = false
-    handshakeNeeded = false
+    val stopped = startLock.synchronized {
+      val c = child
+      child = None
+      hasRun = false
+      handshakeNeeded = false
+      c
+    }
+    stopped.foreach(_.stop())
   }
-
-  // Generates unique request IDs
-  def generateId(): String = requestId.incrementAndGet().toString
 }

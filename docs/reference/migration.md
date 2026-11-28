@@ -720,6 +720,29 @@ MCPServerConfig.stdio("github", Seq("github-mcp-server", "stdio"),
 `MCPToolRegistry()` and `MCPToolRegistry.mcpServerConfig`, which ran the unpinned `@playwright/mcp@latest`, are
 deprecated: build the config yourself with a pinned version, as the `PlaywrightExample` sample does.
 
+## The MCP client's transports and handshake (#3073, #3077, #3078, #3079)
+
+`llm4s-mcp` is Beta. The client's three transports and its handshake were brought in line with the MCP
+specification. What changes for a caller:
+
+**Stdio (#3077).** A stdio server's replies wait as long as `MCPServerConfig.timeout` says (the Playwright default's
+60 s now applies); they used to wait a fixed 30 s. The start-up wait is gone: the first request is written as soon as
+the process starts, and the server's reply to `initialize` is the readiness signal, so a server that says nothing
+until then no longer costs 10 s per start. `StdioTransportImpl`'s third constructor parameter, `startupTimeout`
+before, is now `timeout`, the reply timeout:
+
+```scala
+new StdioTransportImpl(command, "files", startupTimeout = 5.seconds)   // before
+new StdioTransportImpl(command, "files", timeout = 30.seconds)         // after
+```
+
+A request the server sends the client is answered (`ping` with an empty result, anything else with -32601) and is
+never taken for the reply to the client's request with the same id. Closing the transport closes the server's stdin,
+waits up to 2 s for it to exit, then terminates it and every process it started (`npx` -> `node` -> a browser), and
+kills any still running 2 s later; only the direct child was stopped before. A call that times out or is
+interrupted while waiting for its reply to `initialize` stops the process, so the next attempt starts afresh. The
+error for a server that exits names its exit code (`the MCP server process exited with code 3`).
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

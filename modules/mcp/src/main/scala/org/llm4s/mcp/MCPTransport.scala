@@ -167,6 +167,51 @@ private[mcp] object JsonRpcReplies {
       !fields.contains("method") && fields.get("id").contains(ujson.Str(requestId))
     case _ => false
   }
+
+  /**
+   * A request the server sent the client (#3079): an object with both a `method` and an `id`. A notification has
+   * no `id`, a response no `method`.
+   */
+  def serverRequest(json: ujson.Value): Option[(ujson.Value, String)] = json match {
+    case obj: ujson.Obj =>
+      for {
+        method <- obj.value.get("method").flatMap(_.strOpt)
+        id     <- obj.value.get("id").filter(id => id.strOpt.isDefined || id.numOpt.isDefined)
+      } yield id -> method
+    case _ => None
+  }
+
+  /**
+   * The client's answer to a request the server sent it (#3079), `id` as the server sent it: an empty result for
+   * `ping`, which the specification requires a receiver to answer promptly, and method-not-found (-32601) for
+   * anything else. The client declares no capability (no `roots`, no `sampling`), so a server has no business
+   * sending it any other request, and an answer is still owed, or the server waits for one that never comes.
+   */
+  def answerToServerRequest(id: ujson.Value, method: String): ujson.Obj =
+    if (method == "ping") ujson.Obj("jsonrpc" -> "2.0", "id" -> id, "result" -> ujson.Obj())
+    else
+      ujson.Obj(
+        "jsonrpc" -> "2.0",
+        "id"      -> id,
+        "error"   -> ujson.Obj("code" -> MethodNotFound, "message" -> "Method not found")
+      )
+
+  /** JSON-RPC's method-not-found code. */
+  val MethodNotFound: Int = -32601
+
+  /**
+   * How every transport reports a JSON-RPC error: its code, its message and, when it has one, its `data` (#3079),
+   * which is where a server puts the detail (the invalid parameter, the reason). The server's text is redacted and
+   * the `data` cut to [[PayloadLog.MaxChars]].
+   */
+  def errorMessage(error: JsonRpcError): String = {
+    val message = Redaction.safeBody(error.message)
+    val data = error.data.filterNot(_ == ujson.Null).map { d =>
+      val text = d.strOpt.getOrElse(ujson.write(d))
+      s" (data: ${PayloadLog.preview(text)})"
+    }
+    s"JSON-RPC Error ${error.code}: $message${data.getOrElse("")}"
+  }
 }
 
 // Factory for creating transport implementations
@@ -174,7 +219,7 @@ object MCPTransport {
   // Creates appropriate transport implementation based on configuration
   def create(config: MCPServerConfig): MCPTransportImpl =
     config.transport match {
-      case stdio: StdioTransport              => StdioTransportImpl.of(stdio)
+      case stdio: StdioTransport              => StdioTransportImpl.of(stdio, config.timeout)
       case SSETransport(url, name)            => new SSETransportImpl(url, name, config.timeout)
       case StreamableHTTPTransport(url, name) => new StreamableHTTPTransportImpl(url, name, config.timeout)
     }

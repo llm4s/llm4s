@@ -98,7 +98,7 @@ class StdioStderrRedactionSpec extends AnyWordSpec with Matchers {
     appender.start()
     logger.addAppender(appender)
     logger.setLevel(Level.DEBUG)
-    val transport = new StdioTransportImpl(command, name, 500.millis)
+    val transport = new StdioTransportImpl(command, name, 30.seconds)
     val result    = transport.sendRequest(request)
     transport.close()
     logger.detachAppender(appender)
