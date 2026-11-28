@@ -19,7 +19,8 @@ import ujson.Value
  *    type's typed schema carries faithfully, with a value of a shape it holds (an allowlist, [[expressible]]).
  *  - `oneOf` is read as `anyOf`, and a `type` of several names as an `anyOf` of each.
  *  - A missing `description` is the property's `title`, or empty; a `default`, `format` or `examples` the model cannot
- *    carry as a keyword is added to the description, so the model still learns it.
+ *    carry as a keyword is added to the description, so the model still learns it, as is `deprecated: true`. Metadata
+ *    (`$schema`, `$id`, `$comment`, `readOnly`, `writeOnly`) is dropped (#3300).
  */
 private[mcp] object MCPInputSchema {
 
@@ -45,8 +46,24 @@ private[mcp] object MCPInputSchema {
     } else objectSchema(top, defs, Nil, Some(s"Parameters for $toolName"))
   }
 
-  /** Keywords that only describe: the model is told them in the description, wherever they appear. */
-  private val Annotations: Set[String] = Set("description", "title", "default", "examples", "format", "$comment")
+  /**
+   * Keywords that only describe or identify, never constrain: dropped from the schema wherever they appear, the model
+   * told those [[describe]] reads in the description. `$schema` is on every tool the MCP reference server lists
+   * (#3300), and kept it would make the schema one the model cannot express.
+   */
+  private val Annotations: Set[String] = Set(
+    "description",
+    "title",
+    "default",
+    "examples",
+    "format",
+    "deprecated",
+    "$comment",
+    "$schema",
+    "$id",
+    "readOnly",
+    "writeOnly"
+  )
 
   /**
    * The keywords the typed schema of each type carries faithfully. A schema is converted to a typed one only when every
@@ -328,12 +345,13 @@ private[mcp] object MCPInputSchema {
 
   /**
    * The description the model is shown: the schema's `description`, else its `title`, followed by what the model
-   * cannot be told as a keyword: the `default`, the `format`, `examples`.
+   * cannot be told as a keyword: that it is `deprecated`, the `default`, the `format`, `examples`.
    */
   private def describe(fields: Fields): String = {
     def text(key: String) = fields.get(key).flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty)
     val base              = text("description").orElse(text("title")).getOrElse("")
     val notes = Seq(
+      Option.when(fields.get("deprecated").contains(ujson.Bool(true)))("deprecated"),
       fields.get("default").map(d => s"default: ${d.render()}"),
       text("format").map(f => s"format: $f"),
       fields

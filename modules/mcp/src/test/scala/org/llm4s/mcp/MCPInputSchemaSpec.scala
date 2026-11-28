@@ -286,4 +286,46 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
   it should "give an array without items items of any kind, not strings" in {
     property(withProperty("xs", ujson.Obj("type" -> "array")), "xs")("items") shouldBe ujson.Obj()
   }
+
+  it should "read a schema the MCP reference server writes, with its $schema, as a typed object (#3300)" in {
+    val inputSchema = ujson.Obj(
+      "type"       -> "object",
+      "properties" -> ujson.Obj("message" -> ujson.Obj("type" -> "string", "description" -> "Message to echo")),
+      "required"   -> ujson.Arr("message"),
+      "additionalProperties" -> false,
+      "$schema"              -> "http://json-schema.org/draft-07/schema#"
+    )
+    MCPInputSchema.toSchema("echo", inputSchema) shouldBe a[org.llm4s.toolapi.ObjectSchema[?]]
+    val json = rendered(inputSchema)
+    json.obj.keySet should not contain "$schema"
+    json("required") shouldBe ujson.Arr("message")
+    json("additionalProperties") shouldBe ujson.Bool(false)
+    property(inputSchema, "message")("type") shouldBe ujson.Str("string")
+  }
+
+  it should "drop metadata keywords and keep a schema with them typed, describing a deprecated property (#3300)" in {
+    val inputSchema = withProperty(
+      "old",
+      ujson.Obj("type" -> "string", "deprecated" -> true, "readOnly" -> false, "writeOnly" -> false, "$id" -> "x"),
+      "$id"      -> "urn:t",
+      "$comment" -> "generated"
+    )
+    MCPInputSchema.toSchema("t", inputSchema) shouldBe a[org.llm4s.toolapi.ObjectSchema[?]]
+    val json = rendered(inputSchema)
+    json.obj.keySet.intersect(Set("$id", "$comment")) shouldBe empty
+    val old = property(inputSchema, "old")
+    old.obj.keySet.intersect(Set("deprecated", "readOnly", "writeOnly", "$id")) shouldBe empty
+    old("description").str should include("deprecated")
+  }
+
+  it should "drop $schema from a schema it keeps as written (#3300)" in {
+    val inputSchema = ujson.Obj(
+      "$schema"    -> "http://json-schema.org/draft-07/schema#",
+      "type"       -> "object",
+      "properties" -> ujson.Obj("a" -> ujson.Obj("type" -> "string")),
+      "not"        -> ujson.Obj("required" -> ujson.Arr("b"))
+    )
+    MCPInputSchema.toSchema("t", inputSchema) shouldBe a[org.llm4s.toolapi.RawJsonSchema]
+    rendered(inputSchema).obj.keySet should not contain "$schema"
+  }
 }

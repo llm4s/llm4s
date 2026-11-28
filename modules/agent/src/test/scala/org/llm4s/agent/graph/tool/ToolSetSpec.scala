@@ -42,6 +42,19 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     ToolSet.of(permissive, tool("a")).value.validator shouldBe permissive
   }
 
+  it should "build a set over a raw schema that carries $schema and other annotations (#3300)" in {
+    val schema = Schema.raw(
+      ujson.Obj(
+        "$schema"    -> "http://json-schema.org/draft-07/schema#",
+        "type"       -> "object",
+        "title"      -> "EchoArgs",
+        "properties" -> ujson.Obj("message" -> ujson.Obj("type" -> "string", "description" -> "Message to echo"))
+      )
+    )
+    val echo = AgentTool.fromToolFunction(ToolFunction[String]("echo", "d", schema, _ => Right("x")))
+    ToolSet.of(echo).value.get("echo") shouldBe Some(echo)
+  }
+
   it should "refuse an invalid name" in {
     val error = ToolSet.of(badlyNamed("bad name")).left.value
     error shouldBe a[ValidationError]
