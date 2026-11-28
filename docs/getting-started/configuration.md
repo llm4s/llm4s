@@ -581,9 +581,12 @@ An HTTP MCP server takes it through `MCPHttpOptions`, which also carries the hea
 every request. The transport never closes a client it was given:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.mcp.{ MCPHttpOptions, MCPServerConfig }
 
-val mcpServer = routedClient.map { client =>
+val mcpServer = Llm4sConfig.httpNetwork().map { network =>
+  val client = Llm4sHttpClient.create(HttpClientOptions(network))
   MCPServerConfig.streamableHTTP("docs", "https://mcp.example.com/mcp",
     http = MCPHttpOptions().withHttpClient(client).withHeader("X-Tenant", "acme"))
 }
