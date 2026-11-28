@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, Semaphore, TimeUnit }
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference }
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -351,7 +351,8 @@ final class AgentWorker private (
     slots.put(slot.entryId, slot)
     Try(startSlot(leased, slot)).failed.foreach { thrown =>
       slot.renewing.set(false)
-      slots.remove(slot.entryId)
+      // only this slot: the entry may have been taken again by a slot of its own (#3259)
+      slots.remove(slot.entryId, slot)
       slot.ended.countDown()
       throw thrown
     }
@@ -360,6 +361,7 @@ final class AgentWorker private (
 
   private def startSlot(leased: LeasedEntry, slot: Slot): Unit =
     Thread.ofVirtual().name(s"llm4s-worker-lease-${leased.entry.id.value}").start(() => renewLoop(slot))
+    Thread.ofVirtual().name(s"llm4s-worker-lease-watch-${leased.entry.id.value}").start(() => leaseWatch(slot))
     Thread.ofVirtual().name(s"llm4s-worker-run-${leased.entry.id.value}").start { () =>
       // The slot is given up however its body ends (#3240): `Try` does not catch a fatal throwable - a guardrail's
       // regex overflowing the stack on a long input, out of memory, a linkage error - which would otherwise leave the
@@ -377,7 +379,7 @@ final class AgentWorker private (
           throw fatal
       finally
         slot.renewing.set(false)
-        slots.remove(slot.entryId)
+        slots.remove(slot.entryId, slot)
         slot.ended.countDown()
         permits.release()
       // scalafix:on DisableSyntax.NoKeywordFinally
@@ -396,10 +398,13 @@ final class AgentWorker private (
         val sent = System.nanoTime()
         queue.renew(slot.lease.get, lease.ttl) match
           case Right(renewed) =>
+            slot.lastRenewed.set(sent)
             slot.lease.set(renewed)
             // a cancel or an interrupt asked of the entry since the last renewal (W3)
             renewed.stop.foreach(slot.requestStop)
             beat(sent)
+          // a refusal that lands once the slot stopped renewing - its entry closed meanwhile - loses nothing (#3259)
+          case Left(_) if !slot.renewing.get => ()
           case Left(error @ (_: QueueError.LeaseLost | _: QueueError.EntryClosed)) =>
             meter.leaseLost(slot.entry.agentId, "refused")
             slot.lost(s"its lease renewal was refused: ${error.message}")
@@ -411,6 +416,25 @@ final class AgentWorker private (
               logger.warn(s"Worker $holder: renewing the lease of entry ${slot.entryId.value} failed: ${error.message}")
               beat(lastSent)
     beat(slot.takenAt)
+
+  /**
+   * Stops `slot`'s run once no renewal has landed for nearly a whole `lease.ttl` (#3259): by the worker's clock, from
+   * the sending of the last renewal that landed (or the take), less a margin of a tenth of the ttl, so the run stops
+   * before its lease can lapse and the entry be taken by another worker - also while a renewal is still waiting on a
+   * slow store, which [[renewLoop]] alone would notice only once it returned.
+   */
+  private def leaseWatch(slot: Slot): Unit =
+    val margin = lease.ttl.toNanos / 10
+    @tailrec def watch(): Unit =
+      val due   = slot.lastRenewed.get + lease.ttl.toNanos - margin
+      val wait  = math.max(due - System.nanoTime(), 0L)
+      val ended = Try(slot.ended.await(math.min(wait, lease.renewEvery.toNanos), TimeUnit.NANOSECONDS)).getOrElse(true)
+      if !ended && slot.renewing.get && !slot.leaseLost.get then
+        if System.nanoTime() - slot.lastRenewed.get >= lease.ttl.toNanos - margin then
+          meter.leaseLost(slot.entry.agentId, "unrenewed")
+          slot.lost(s"no lease renewal landed within ${lease.ttl}, less a margin")
+        else watch()
+    watch()
 
   // ---- one entry ----
 
@@ -656,7 +680,9 @@ final class AgentWorker private (
           case AttemptPlan.Close(outcome) => Next.Close(outcome)
           case AttemptPlan.Recover if admitted.isDefined =>
             val message = s"attempts exhausted: queue entry ${entry.id.value} made ${entry.attempts.size} attempts"
-            settled(entry, agent, dead, RunOutcome.Failed("AttemptsExhausted", message), ExhaustedResult)
+            // as the admitted run, so the entry's followers see the dead letter's RunFailed, and a later take finds the
+            // settlement by the entry's run ids (#3259)
+            settled(entry, agent, dead, RunOutcome.Failed("AttemptsExhausted", message), ExhaustedResult, admitted)
           case _ => Next.Close(dead)
 
   /**
@@ -669,7 +695,8 @@ final class AgentWorker private (
     agent: QueuedAgent,
     closing: EntryOutcome,
     outcome: RunOutcome.Failed,
-    result: String
+    result: String,
+    admitted: Option[Checkpoint]
   ): Next =
     agent.agent.settleQueued(
       entry.threadId,
@@ -677,7 +704,7 @@ final class AgentWorker private (
       outcome,
       outcome.message,
       result,
-      entry.attemptConfig(RunId.random())
+      entry.attemptConfig(admitted.fold(RunId.random())(a => RunId(a.runId)))
     ) match
       case Right(_) => Next.Close(closing)
       case Left(_: GraphError.ThreadBusy) =>
@@ -819,7 +846,8 @@ final class AgentWorker private (
                 agent,
                 EntryOutcome.Failed(FailureReason.RunFailed(error.message)),
                 RunOutcome.Failed("RunFailed", message),
-                FailedResult
+                FailedResult,
+                admitted
               )
             case _ =>
               result.left.foreach(e =>
@@ -920,6 +948,9 @@ final class AgentWorker private (
     val renewing: AtomicBoolean       = new AtomicBoolean(true)
     val leaseLost: AtomicBoolean      = new AtomicBoolean(false)
     val drained: AtomicBoolean        = new AtomicBoolean(false)
+
+    /** When the last renewal that landed was sent (`System.nanoTime`), or the take: what [[leaseWatch]] times from. */
+    val lastRenewed: AtomicLong = new AtomicLong(takenAt)
 
     /** This slot recorded an attempt at its entry: one a drain that cuts it gives back (#3241). */
     val attemptRecorded: AtomicBoolean = new AtomicBoolean(false)
