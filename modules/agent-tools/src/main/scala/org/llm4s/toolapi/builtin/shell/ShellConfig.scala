@@ -61,7 +61,8 @@ import scala.concurrent.duration.*
  *                        If empty, no commands are allowed.
  * @param workingDirectory Optional working directory for command execution.
  * @param timeout Maximum execution time.
- * @param maxOutputSize Maximum output size in characters.
+ * @param maxOutputSize Maximum characters kept of stdout and of stderr each (default 20,000, so a result stays near
+ *                      the 40,000 characters of [[org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars]]; #3273).
  * @param environment Additional environment variables to set. They are set after the inherited ones and win.
  * @param inheritedEnvironment Names of the process variables a command receives. `None` passes the whole
  *                             environment through.
@@ -71,7 +72,7 @@ case class ShellConfig(
   allowedCommands: Seq[String] = Seq.empty,
   workingDirectory: Option[String] = None,
   timeout: FiniteDuration = 30.seconds,
-  maxOutputSize: Int = 100000, // 100KB
+  maxOutputSize: Int = 20000,
   environment: Map[String, String] = Map.empty,
   inheritedEnvironment: Option[Seq[String]] = Some(ShellConfig.DefaultInheritedEnvironment),
   pathPolicy: Option[FileConfig] = None

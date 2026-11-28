@@ -72,7 +72,15 @@ object ReadFileTool {
   /**
    * Create a read file tool with the given configuration, returning a Result for safe error handling.
    */
-  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[ReadFileResult]] =
+  /**
+   * @param maxResultChars the most characters of content handed to the model; a longer read is cut there and the
+   *                       result's `truncated` is `true` (#3273): read the rest with `max_lines` or the shell. The
+   *                       default is [[org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars]]
+   */
+  def createSafe(
+    config: FileConfig = FileConfig(),
+    maxResultChars: Int = org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars
+  ): Result[ToolFunction[ReadFileResult]] =
     ToolBuilder[ReadFileResult](
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
@@ -86,8 +94,17 @@ object ReadFileTool {
         maxLines <- extractor.getOptionalInt("max_lines")
         encoding <- extractor.getOptionalString("encoding").map(_.getOrElse("UTF-8"))
         result   <- readFile(pathStr, maxLines, encoding, config).left.map(ToolHandlerError.failed)
-      } yield result
+      } yield
+        if (result.content.length <= maxResultChars) result
+        else {
+          val at  = math.max(0, maxResultChars)
+          val end = if (at > 0 && Character.isHighSurrogate(result.content.charAt(at - 1))) at - 1 else at
+          result.copy(content = result.content.take(end), truncated = true)
+        }
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyLocal)
+      )
 
   /**
    * Default read file tool instance, returning a Result for safe error handling.

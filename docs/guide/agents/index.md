@@ -799,6 +799,11 @@ the root and volumes that make 8.3 short names; on Windows, which reports no har
 never give it a root an untrusted process can write, and run untrusted commands in the workspace
 sandbox.
 
+A root that is a project checkout holds files the agent should not see or change: pass
+`excluded = Seq(VPath("/.env"))` to `open` to hide a path and everything beneath it from every
+operation and listing, and `readOnly = Seq(VPath("/.git"))` to refuse writes, edits and deletes
+beneath a path while still reading it. Both compare without regard to case or Unicode normalisation.
+
 The backend holds the root's lock until `close()`, so give it a managed lifetime: one that closes it
 however the work ends. Until it is closed, every other open of the root is refused.
 

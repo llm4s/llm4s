@@ -84,6 +84,9 @@ object FileInfoTool {
         result  <- getFileInfo(pathStr, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.ReadOnlyLocal)
+      )
 
   /**
    * Default file info tool instance, returning a Result for safe error handling.

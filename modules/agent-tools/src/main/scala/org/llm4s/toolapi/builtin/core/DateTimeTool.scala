@@ -130,6 +130,7 @@ object DateTimeTool {
         )
       } yield describe(ZonedDateTime.ofInstant(clock.instant(), zoneId), timezone, format)
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Pure))
 
   private def describe(now: ZonedDateTime, timezone: String, format: Format): DateTimeResult = {
     val iso = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)

@@ -192,6 +192,17 @@ not for general web search. Whatever the model searches for is sent to the searc
 Each tool that can reach outside the process takes a configuration. The defaults below are what you get when you do
 not pass one.
 
+A result goes whole into the next model request, so each tool bounds what it hands the model:
+`BuiltinTools.DefaultMaxResultChars` (40,000 characters, as one result of the harness file tools) of a read file
+or an HTTP body, cut and marked `truncated`, and half as much of a command's stdout and of its stderr each.
+`ReadFileTool.createSafe(config, maxResultChars)` and `HTTPTool.createSafe(config, maxResultChars)` change it.
+
+Build the agent's registry with `BuiltinTools.registry(tools)` rather than `ToolRegistry.of(tools)`, and each
+built-in tool declares its `ToolHints`: the core utilities, the read-only file tools, the search tools and an
+`http_request` limited to `GET`, `HEAD` and `OPTIONS` are read-only, so `ApprovalMiddleware.unlessReadOnly` asks
+only for `write_file`, `shell_command` and an `http_request` that may write. A tool of your own with the same name
+keeps `ToolHints.default`.
+
 ### Files: `FileConfig` and `WriteConfig`
 
 | Setting | `FileConfig` (read tools) | `WriteConfig` (`write_file`) |
@@ -288,7 +299,7 @@ The default blocklist includes `/var`, which on macOS is where the system tempor
 | `followRedirects` | `false` |
 | `redirectSafeHeaders` | `Accept`, `Accept-Language`, `Accept-Encoding`, `User-Agent`, `Content-Type` (only with a re-sent body): the only caller-set headers a redirect carries to another origin |
 | `timeout` | 30 seconds, for the whole call: connecting, every redirect hop and reading the body |
-| `maxResponseSize` | 10 MB: at most this many bytes of the body are read; the rest is never read, and `truncated` is `true` |
+| `maxResponseSize` | 1 MiB: at most this many bytes of the body are read; the rest is never read, and `truncated` is `true`. The model is handed at most 40,000 characters of the body (`HTTPTool.createSafe(config, maxResultChars)`), also marked `truncated` |
 
 `HttpConfig.restricted(Seq("api.example.com"))` allows only those domains and their subdomains. A leading `www.` is
 ignored only when comparing the exact host: an entry `www.example.com` admits `example.com` and `www.example.com`,
@@ -303,7 +314,7 @@ sandbox.
 | `allowedCommands` | none: an empty list allows nothing |
 | `workingDirectory` | the process's own |
 | `timeout` | 30 seconds |
-| `maxOutputSize` | 100,000 characters |
+| `maxOutputSize` | 20,000 characters of stdout and of stderr each |
 | `environment` | none: extra variables, set on top of the environment the command receives |
 | `inheritedEnvironment` | `PATH`, `LANG`, `LC_ALL`, `TERM` and `SystemRoot` (those that exist); `development()` passes the whole environment |
 | `pathPolicy` | none: the file-like arguments of a command are not checked |

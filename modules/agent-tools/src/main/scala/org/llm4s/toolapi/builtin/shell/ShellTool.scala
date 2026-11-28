@@ -136,6 +136,7 @@ object ShellTool {
         result  <- executeCommand(command, config).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Shell))
 
   private def executeCommand(
     command: String,

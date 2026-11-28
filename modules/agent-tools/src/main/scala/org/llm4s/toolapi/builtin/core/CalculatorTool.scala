@@ -84,6 +84,7 @@ object CalculatorTool {
         result <- calculate(operation, a, bOpt).left.map(ToolHandlerError.failed)
       } yield result
     }.build()
+      .map(org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.Pure))
 
   private def calculate(operation: String, a: Double, bOpt: Option[Double]): Either[String, CalculatorResult] = {
     def requireB: Either[String, Double] =

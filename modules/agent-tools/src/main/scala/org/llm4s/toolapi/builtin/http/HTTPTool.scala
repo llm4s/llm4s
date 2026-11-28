@@ -105,8 +105,15 @@ object HTTPTool {
 
   /**
    * Create an HTTP tool with the given configuration, returning a Result for safe error handling.
+   *
+   * @param maxResultChars the most characters of a response body handed to the model; a longer body is cut there and
+   *                       the result's `truncated` is `true` (#3273). The default is
+   *                       [[org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars]]
    */
-  def createSafe(config: HttpConfig = HttpConfig()): Result[ToolFunction[HTTPResult]] =
+  def createSafe(
+    config: HttpConfig = HttpConfig(),
+    maxResultChars: Int = org.llm4s.toolapi.builtin.BuiltinTools.DefaultMaxResultChars
+  ): Result[ToolFunction[HTTPResult]] =
     ToolBuilder[HTTPResult](
       name = "http_request",
       description = s"Make HTTP requests to fetch or send data. " +
@@ -127,8 +134,20 @@ object HTTPTool {
         result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config).left.map(
           ToolHandlerError.failed
         )
-      } yield result
+      } yield capped(result, maxResultChars)
     }.build()
+      .map(
+        org.llm4s.toolapi.builtin.BuiltinToolHints.register(_, org.llm4s.toolapi.builtin.BuiltinToolHints.http(config))
+      )
+
+  /** `result` with its body cut to `maxChars` characters (never inside a surrogate pair), marked `truncated`. */
+  private[builtin] def capped(result: HTTPResult, maxChars: Int): HTTPResult =
+    if (result.body.length <= maxChars) result
+    else {
+      val end =
+        if (maxChars > 0 && Character.isHighSurrogate(result.body.charAt(maxChars - 1))) maxChars - 1 else maxChars
+      result.copy(body = result.body.take(math.max(0, end)), truncated = true)
+    }
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))

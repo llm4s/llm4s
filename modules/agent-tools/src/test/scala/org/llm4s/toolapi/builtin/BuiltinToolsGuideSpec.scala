@@ -354,12 +354,12 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   // ---- HTTP tool
 
-  "HttpConfig" should "default to read-only, no redirects, a 30 second timeout and a 10 MB limit" in {
+  "HttpConfig" should "default to read-only, no redirects, a 30 second timeout and a 1 MiB limit" in {
     val config = HttpConfig()
     config.allowedMethods shouldBe Seq("GET", "HEAD")
     config.followRedirects shouldBe false
     config.timeout shouldBe 30.seconds
-    config.maxResponseSize shouldBe 10L * 1024L * 1024L
+    config.maxResponseSize shouldBe 1024L * 1024L
     config.blockInternalIPs shouldBe true
   }
 
@@ -457,7 +457,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       .allowedCommands should contain).allOf("env", "git", "sbt", "make", "npm", "grep", "find", "cp", "mv", "rm")
     ShellConfig().allowedCommands shouldBe empty
     ShellConfig().timeout shouldBe 30.seconds
-    ShellConfig().maxOutputSize shouldBe 100000
+    ShellConfig().maxOutputSize shouldBe 20000
   }
 
   "The shell tool" should "run an allowed program and refuse any other" in {
