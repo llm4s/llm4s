@@ -40,7 +40,13 @@ class AgentWorkerSpec
   /** A short lease, so an abandoned one expires within a test. */
   private val shortLease = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
 
-  private val fast = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
+  private val fast = WorkerSettings(
+    pollInterval = 20.millis,
+    sweepEvery = None,
+    drainGrace = 2.seconds,
+    retryDelay = 50.millis,
+    maxRetryDelay = 200.millis
+  )
 
   private val started = new ConcurrentLinkedQueue[AgentWorker]()
 
@@ -933,6 +939,57 @@ class AgentWorkerSpec
     val next = submit(store, thread())
     closed(store, next).outcome.value shouldBe a[EntryOutcome.Done]
     store.runQueue.entry(None, boom).value.isOpen shouldBe true
+  }
+
+  // ---- retries (#3257) ----
+
+  "A failed attempt" should "be given back for a retry that waits out its backoff, growing per attempt (#3257)" in {
+    val store   = InMemoryCheckpointer()
+    val started = new ConcurrentLinkedQueue[Long]()
+    val client = new FnClient((n, _) => {
+      started.add(System.nanoTime())
+      if (n <= 2) Left(ProcessingError("provider", "overloaded")) else Right(CompletionFixture.simple("at last"))
+    })
+    val worker = workerOf(
+      store,
+      Seq(QueuedAgent(agentOver(store, client))),
+      fast.withMaxRetryDelay(2.seconds).withRetryDelay(400.millis)
+    )
+    val id = submit(store, thread(), maxAttempts = 3)
+    worker.start()
+    closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
+    val at = started.asScala.toVector
+    at should have size 3
+    // the first retry waits at least half of 400ms, the second at least half of 800ms
+    (at(1) - at(0)).nanos should be >= 200.millis
+    (at(2) - at(1)).nanos should be >= 400.millis
+  }
+
+  it should "not be retried when its error is one no retry can mend, closing the entry and settling the thread" in {
+    val store = InMemoryCheckpointer()
+    val client = new FnClient((_, _) =>
+      Left(org.llm4s.error.AuthenticationError(org.llm4s.types.ProviderModelTypes.ProviderId("fixture"), "bad key"))
+    )
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, client))))
+    val on     = thread()
+    val id     = submit(store, on, maxAttempts = 5)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.RunFailed]
+    entry.attempts should have size 1
+    client.calls shouldBe 1
+    store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+  }
+
+  "WorkerSettings.retryAfter" should "double per attempt up to the cap, less at most half (#3257)" in {
+    val s = fast.withMaxRetryDelay(5.seconds).withRetryDelay(1.second)
+    s.retryAfter(1, 0.0) shouldBe 1.second
+    s.retryAfter(2, 0.0) shouldBe 2.seconds
+    s.retryAfter(3, 0.0) shouldBe 4.seconds
+    s.retryAfter(4, 0.0) shouldBe 5.seconds
+    s.retryAfter(50, 0.0) shouldBe 5.seconds
+    s.retryAfter(1, 0.999999) should be >= 500.millis
+    an[IllegalArgumentException] should be thrownBy fast.withMaxRetryDelay(10.millis)
   }
 
   // ---- how a run's outcome closes its entry (#3255) ----

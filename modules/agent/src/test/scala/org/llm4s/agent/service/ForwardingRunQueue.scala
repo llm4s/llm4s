@@ -19,8 +19,11 @@ private[agent] class ForwardingRunQueue(to: RunQueue) extends RunQueue {
   def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason)             = to.cancel(t, c, r)
   def release(l: Lease)                                                         = to.release(l)
   override private[llm4s] def releaseDrained(l: Lease)                          = to.releaseDrained(l)
-  def recordAttempt(l: Lease, r: RunId)                                         = to.recordAttempt(l, r)
-  def close(l: Lease, o: EntryOutcome)                                          = to.close(l, o)
-  def reclaim(d: FiniteDuration, n: Int)                                        = to.reclaim(d, n)
-  def openRuns(ts: Vector[ThreadId])                                            = to.openRuns(ts)
+  override private[llm4s] def releaseRetry(l: Lease, d: FiniteDuration)         = to.releaseRetry(l, d)
+  override def closedEntries(t: Option[TenantId], s: String, a: Option[EntryId], n: Int) =
+    to.closedEntries(t, s, a, n)
+  def recordAttempt(l: Lease, r: RunId)  = to.recordAttempt(l, r)
+  def close(l: Lease, o: EntryOutcome)   = to.close(l, o)
+  def reclaim(d: FiniteDuration, n: Int) = to.reclaim(d, n)
+  def openRuns(ts: Vector[ThreadId])     = to.openRuns(ts)
 }

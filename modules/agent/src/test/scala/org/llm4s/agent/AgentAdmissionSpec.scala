@@ -347,9 +347,15 @@ class AgentAdmissionSpec
   // ---- the run queue ----
 
   private def workerOf(store: InMemoryCheckpointer, agent: Agent): AgentWorker = {
-    val settings = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
-    val queue    = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
-    val worker   = AgentWorker(store.runQueue, store, Seq(QueuedAgent(agent)), settings, queue).value
+    val settings = WorkerSettings(
+      pollInterval = 20.millis,
+      sweepEvery = None,
+      drainGrace = 2.seconds,
+      retryDelay = 50.millis,
+      maxRetryDelay = 200.millis
+    )
+    val queue  = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
+    val worker = AgentWorker(store.runQueue, store, Seq(QueuedAgent(agent)), settings, queue).value
     started.add(worker)
     worker
   }

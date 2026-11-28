@@ -31,8 +31,13 @@ import scala.concurrent.duration.*
  *  - `queueDepthEvery`: how often a worker given a `MetricsCollector` samples its agents' queue depth
  *    (`RunQueue.depth`) for the `llm4s.agent.queue.depth` and `llm4s.agent.queue.oldest.seconds` gauges (default 15
  *    seconds; design 4.59). A worker with no collector never samples.
+ *  - `retryDelay` and `maxRetryDelay`: how long an entry whose attempt failed waits before it is taken again (#3257):
+ *    `retryDelay` after its first attempt, doubling with each attempt after it, never more than `maxRetryDelay`, less
+ *    a random part of up to half, so entries that failed together do not come back together (defaults 30 seconds and
+ *    10 minutes). A failure no retry can mend - an authentication or invalid-request error - is not retried.
  *
- * Every duration must be positive, `concurrency` at least 1 and a label not blank: `apply` and the `with*` setters throw
+ * Every duration must be positive, `maxRetryDelay` at least `retryDelay`, `concurrency` at least 1 and a label not
+ * blank: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[WorkerSettings.of]] returns a `ValidationError`.
  */
 @Experimental
@@ -45,7 +50,9 @@ final case class WorkerSettings private (
   sweepEvery: Option[FiniteDuration],
   sweep: SweepPolicy,
   label: Option[String],
-  queueDepthEvery: FiniteDuration
+  queueDepthEvery: FiniteDuration,
+  retryDelay: FiniteDuration,
+  maxRetryDelay: FiniteDuration
 ):
   private def changed(
     concurrency: Int = concurrency,
@@ -56,7 +63,9 @@ final case class WorkerSettings private (
     sweepEvery: Option[FiniteDuration] = sweepEvery,
     sweep: SweepPolicy = sweep,
     label: Option[String] = label,
-    queueDepthEvery: FiniteDuration = queueDepthEvery
+    queueDepthEvery: FiniteDuration = queueDepthEvery,
+    retryDelay: FiniteDuration = retryDelay,
+    maxRetryDelay: FiniteDuration = maxRetryDelay
   ): WorkerSettings =
     WorkerSettings(
       concurrency,
@@ -67,7 +76,9 @@ final case class WorkerSettings private (
       sweepEvery,
       sweep,
       label,
-      queueDepthEvery
+      queueDepthEvery,
+      retryDelay,
+      maxRetryDelay
     )
 
   def withConcurrency(n: Int): WorkerSettings                   = changed(concurrency = n)
@@ -81,6 +92,17 @@ final case class WorkerSettings private (
   def withLabel(l: String): WorkerSettings                      = changed(label = Some(l))
   def withLabel(l: Option[String]): WorkerSettings              = changed(label = l)
   def withQueueDepthEvery(d: FiniteDuration): WorkerSettings    = changed(queueDepthEvery = d)
+  def withRetryDelay(d: FiniteDuration): WorkerSettings         = changed(retryDelay = d)
+  def withMaxRetryDelay(d: FiniteDuration): WorkerSettings      = changed(maxRetryDelay = d)
+
+  /**
+   * How long an entry waits after its `attempt`th attempt failed (from 1): `retryDelay` doubled per attempt after the
+   * first, capped at `maxRetryDelay`, less a random part of up to half of it (`jitter`, in `[0, 1)`).
+   */
+  private[service] def retryAfter(attempt: Int, jitter: Double): FiniteDuration =
+    val doublings = math.min(math.max(attempt - 1, 0), 40)
+    val full = math.min(retryDelay.toNanos.toDouble * math.pow(2, doublings.toDouble), maxRetryDelay.toNanos.toDouble)
+    math.max((full * (1 - jitter / 2)).toLong, 1L).nanos
 
 @Experimental
 object WorkerSettings:
@@ -92,6 +114,8 @@ object WorkerSettings:
   val DefaultExitTimeout: FiniteDuration     = 10.seconds
   val DefaultSweepEvery: FiniteDuration      = 5.minutes
   val DefaultQueueDepthEvery: FiniteDuration = 15.seconds
+  val DefaultRetryDelay: FiniteDuration      = 30.seconds
+  val DefaultMaxRetryDelay: FiniteDuration   = 10.minutes
 
   private def problems(
     concurrency: Int,
@@ -101,7 +125,9 @@ object WorkerSettings:
     exitTimeout: FiniteDuration,
     sweepEvery: Option[FiniteDuration],
     label: Option[String],
-    queueDepthEvery: FiniteDuration
+    queueDepthEvery: FiniteDuration,
+    retryDelay: FiniteDuration,
+    maxRetryDelay: FiniteDuration
   ): List[String] =
     def positive(name: String, d: FiniteDuration) = Option.when(d.length <= 0)(s"$name must be positive, was $d")
     List(
@@ -112,6 +138,10 @@ object WorkerSettings:
       positive("exitTimeout", exitTimeout),
       sweepEvery.flatMap(positive("sweepEvery", _)),
       positive("queueDepthEvery", queueDepthEvery),
+      positive("retryDelay", retryDelay),
+      Option.when(maxRetryDelay < retryDelay)(
+        s"maxRetryDelay ($maxRetryDelay) must be at least retryDelay ($retryDelay)"
+      ),
       Option.when(label.exists(_.isBlank))("label must not be blank")
     ).flatten
 
@@ -125,10 +155,23 @@ object WorkerSettings:
     sweepEvery: Option[FiniteDuration] = Some(DefaultSweepEvery),
     sweep: SweepPolicy = SweepPolicy.keepAll,
     label: Option[String] = None,
-    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery
+    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery,
+    retryDelay: FiniteDuration = DefaultRetryDelay,
+    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay
   ): WorkerSettings =
     val found =
-      problems(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, label, queueDepthEvery)
+      problems(
+        concurrency,
+        pollInterval,
+        unrunnableAfter,
+        drainGrace,
+        exitTimeout,
+        sweepEvery,
+        label,
+        queueDepthEvery,
+        retryDelay,
+        maxRetryDelay
+      )
     require(found.isEmpty, found.mkString("; "))
     new WorkerSettings(
       concurrency,
@@ -139,7 +182,9 @@ object WorkerSettings:
       sweepEvery,
       sweep,
       label,
-      queueDepthEvery
+      queueDepthEvery,
+      retryDelay,
+      maxRetryDelay
     )
 
   def of(
@@ -151,7 +196,9 @@ object WorkerSettings:
     sweepEvery: Option[FiniteDuration] = Some(DefaultSweepEvery),
     sweep: SweepPolicy = SweepPolicy.keepAll,
     label: Option[String] = None,
-    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery
+    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery,
+    retryDelay: FiniteDuration = DefaultRetryDelay,
+    maxRetryDelay: FiniteDuration = DefaultMaxRetryDelay
   ): Result[WorkerSettings] =
     problems(
       concurrency,
@@ -161,7 +208,9 @@ object WorkerSettings:
       exitTimeout,
       sweepEvery,
       label,
-      queueDepthEvery
+      queueDepthEvery,
+      retryDelay,
+      maxRetryDelay
     ) match
       case Nil =>
         Right(
@@ -174,7 +223,9 @@ object WorkerSettings:
             sweepEvery,
             sweep,
             label,
-            queueDepthEvery
+            queueDepthEvery,
+            retryDelay,
+            maxRetryDelay
           )
         )
       case found => Left(ValidationError("worker", found))

@@ -816,6 +816,87 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     failed.outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(2)))
   }
 
+  // #3257: a failed attempt waits out its backoff, by the store's clock, and holds its thread back meanwhile
+  it should "hold an entry given back for a retry, and its thread, until the delay has passed, the attempt charged" in {
+    val c      = Case()
+    val id     = c.submit(maxAttempts = 2).value.entryId
+    val behind = c.submit().value.entryId
+    val first  = c.take().value
+    first.entry.id shouldBe id
+    c.queue.recordAttempt(first.lease, RunId(s"failed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.releaseRetry(first.lease, 20.seconds).value
+    c.entry(id).retryAt.isDefined shouldBe true
+    c.take() shouldBe None
+    c.advance(10.seconds)
+    c.take() shouldBe None
+    c.advance(11.seconds)
+    val again = c.take().value
+    again.entry.id shouldBe id
+    again.entry.attempts should have size 1
+    again.entry.retryAt shouldBe None
+    c.queue.recordAttempt(again.lease, RunId(s"second-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(again.lease, EntryOutcome.Done(None, None)).value
+    c.take().value.entry.id shouldBe behind
+  }
+
+  it should "list closed entries by state, oldest first, a page at a time, of the caller's tenant only (#3257)" in {
+    val c      = Case()
+    val tenant = Some(TenantId(s"t-${unique()}"))
+    def closedAs(outcome: EntryOutcome, on: ThreadId = c.newThread(), by: Option[TenantId] = tenant): EntryId =
+      val id     = c.submit(on = on, tenant = by).value.entryId
+      val leased = c.take().value
+      leased.entry.id shouldBe id
+      c.queue.close(leased.lease, outcome).value
+      id
+    val dead1 = closedAs(EntryOutcome.Failed(FailureReason.AttemptsExhausted(3)))
+    closedAs(EntryOutcome.Done(None, None))
+    val dead2 = closedAs(EntryOutcome.Failed(FailureReason.RunFailed("boom")))
+    closedAs(EntryOutcome.Failed(FailureReason.Abandoned), by = None)
+    val dead3 = closedAs(EntryOutcome.Failed(FailureReason.Unrunnable("no worker")))
+    c.submit(on = c.newThread(), tenant = tenant).value
+    c.queue.closedEntries(tenant, "failed", None, 10).value.map(_.id) shouldBe Vector(dead1, dead2, dead3)
+    c.queue.closedEntries(tenant, "failed", None, 2).value.map(_.id) shouldBe Vector(dead1, dead2)
+    c.queue.closedEntries(tenant, "failed", Some(dead2), 2).value.map(_.id) shouldBe Vector(dead3)
+    c.queue.closedEntries(tenant, "done", None, 10).value should have size 1
+    c.queue.closedEntries(tenant, "open", None, 10).left.value shouldBe a[ValidationError]
+    c.queue.closedEntries(tenant, "failed", None, 0).left.value shouldBe a[ValidationError]
+    c.reopened()
+    c.queue.closedEntries(tenant, "failed", None, 10).value.map(_.outcome) shouldBe Vector(
+      Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(3))),
+      Some(EntryOutcome.Failed(FailureReason.RunFailed("boom"))),
+      Some(EntryOutcome.Failed(FailureReason.Unrunnable("no worker")))
+    )
+  }
+
+  it should "re-drive a dead letter as a new entry with its input, and refuse an open or a done one (#3257)" in {
+    val c       = Case()
+    val context = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
+    val input   = QueuedInput.query("try me again")
+    val dead = c.queue
+      .submit(Submission(c.thread, c.agent, input, policy = BusyThreadPolicy.Enqueue).withTraceContext(context))
+      .value
+      .entryId
+    val leased = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"dead-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(leased.lease, EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))).value
+    val open  = c.submit(on = c.newThread()).value.entryId
+    val again = c.queue.requeue(None, dead, maxAttempts = 4).value
+    again.entryId should not be dead
+    val redriven = c.entry(again.entryId)
+    redriven.isOpen shouldBe true
+    redriven.threadId shouldBe c.thread
+    redriven.agentId shouldBe c.agent
+    same(redriven.input, input)
+    redriven.trace shouldBe Some(context)
+    redriven.maxAttempts shouldBe 4
+    redriven.attempts shouldBe empty
+    c.entry(dead).outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(1)))
+    c.queue.requeue(None, open).left.value shouldBe a[ValidationError]
+    val doneLease = c.take().value
+    c.queue.close(doneLease.lease, EntryOutcome.Done(None, None)).value
+    c.queue.requeue(None, doneLease.entry.id).left.value shouldBe a[ValidationError]
+  }
+
   // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it
   it should "not charge an attempt a drain gave back, and still charge one whose lease lapsed" in {
     val c  = Case()

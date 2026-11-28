@@ -51,7 +51,7 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 6
+  val Current: Int = 7
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
@@ -64,8 +64,17 @@ private[postgres] object PostgresSchema:
       2 -> addReclamation,
       3 -> addRunQueue,
       4 -> addStopRequests,
-      5 -> addLongTermStore
+      5 -> addLongTermStore,
+      6 -> addRetryAccounting
     )
+
+  /**
+   * Version 7: retry accounting (#3257). Each queue entry gains `not_before`, the time by the database's clock before
+   * which no take hands it out - set when a failed attempt is given back for a retry, cleared by the take that hands it
+   * out; `NULL` for none, so every entry of a version-6 schema may be taken as before.
+   */
+  private def addRetryAccounting(t: Tables): Vector[String] =
+    Vector(s"ALTER TABLE ${t.queueEntries} ADD COLUMN not_before timestamptz")
 
   /**
    * Version 6: the long-term store (#2453, `PostgresCheckpointer.longTermStore`). It adds tables and changes none, so

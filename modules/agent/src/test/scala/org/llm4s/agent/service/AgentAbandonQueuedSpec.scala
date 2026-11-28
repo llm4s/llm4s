@@ -32,7 +32,13 @@ class AgentAbandonQueuedSpec
 
   private val shortLease = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
 
-  private val fast = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
+  private val fast = WorkerSettings(
+    pollInterval = 20.millis,
+    sweepEvery = None,
+    drainGrace = 2.seconds,
+    retryDelay = 50.millis,
+    maxRetryDelay = 200.millis
+  )
 
   private val started = new ConcurrentLinkedQueue[AgentWorker]()
 

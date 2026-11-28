@@ -237,6 +237,11 @@ object EntryOutcome:
  *   entry's runs is at or below it, so following the entry stops there ([[RunSubmitter.follow]])
  * @param stopRequest the stop asked of the entry's running attempt, if any (W3): a cancel, or an interrupt by a later
  *   `Interrupt` entry; kept until the entry closes
+ * @param crashes how many of its attempts ended with their lease lapsing - the worker crashed or lost the lease - rather
+ *   than being given back (#3287): each is given back to `maxAttempts`, as a drain's is, and a worker dead-letters the
+ *   entry once they reach its `maxCrashes`; `0` in a store that does not count them
+ * @param retryAt when a failed attempt was given back for a retry (#3257), the time by the store's clock before which
+ *   no take hands the entry out; `None` once it may be taken
  */
 @Experimental
 final case class QueueEntry private (
@@ -258,10 +263,16 @@ final case class QueueEntry private (
   closedAt: Option[Instant],
   closedAtSeq: Option[Long],
   position: Option[Int],
-  stopRequest: Option[StopRequest]
+  stopRequest: Option[StopRequest],
+  crashes: Int = 0,
+  retryAt: Option[Instant] = None
 ):
   /** Whether the entry is still to run or running: it has no outcome. */
   def isOpen: Boolean = outcome.isEmpty
+
+  /** The entry with a store's crash count and retry time ([[crashes]], [[retryAt]]). */
+  private[llm4s] def withAccounting(crashes: Int, retryAt: Option[Instant]): QueueEntry =
+    copy(crashes = crashes, retryAt = retryAt)
 
   /**
    * The `RunConfig` an attempt at the entry runs with (Stage 5 rule 4, design 4.58): as run `runId` - the attempt's,

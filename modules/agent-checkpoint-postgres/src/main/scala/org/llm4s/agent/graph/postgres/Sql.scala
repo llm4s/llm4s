@@ -413,7 +413,7 @@ private[postgres] object Sql:
        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open', ?)""".stripMargin
 
   /**
-   * Candidate heads for `take` past entry id `?` (the agents twice, the time, that id, then the time again): each thread
+   * Candidate heads for `take` past entry id `?` (the agents twice, the time twice, that id, then the time again): each thread
    * with an open entry of the agents, its head found once (#3085). Read, not locked: a take locks only the one row it
    * leases ([[queueTakeable]], #3096), so a batch of candidates never hides heads from other workers' takes.
    */
@@ -423,6 +423,7 @@ private[postgres] object Sql:
        |    SELECT (${queueHeadOf(t, "th.thread_id")})
        |    FROM (SELECT DISTINCT thread_id FROM ${t.queueEntries} WHERE state = 'open' AND agent_id = ANY(?)) th)
        |  AND e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND (e.not_before IS NULL OR e.not_before <= ?)
        |  AND e.entry_id > ?
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |ORDER BY e.entry_id LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
@@ -452,12 +453,13 @@ private[postgres] object Sql:
        |WHERE e.state = 'open' AND e.thread_id = ANY(?)""".stripMargin
 
   /**
-   * Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock; its row is
+   * Whether entry `?` is still a takeable head at the time bound three times, checked under the thread's lock; its row is
    * locked, skipping it if another call holds it: the one row a take locks (#3096).
    */
   def queueTakeable(t: Tables): String =
     s"""SELECT 1 FROM ${t.queueEntries} e
        |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND (e.not_before IS NULL OR e.not_before <= ?)
        |  AND e.entry_id = (${queueHeadOf(t)})
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |FOR UPDATE OF e SKIP LOCKED""".stripMargin
@@ -471,7 +473,8 @@ private[postgres] object Sql:
        |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin
 
   def setLease(t: Tables): String =
-    s"UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ? WHERE entry_id = ?"
+    s"""UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ?, not_before = NULL
+       |WHERE entry_id = ?""".stripMargin
 
   def renewLease(t: Tables): String = s"UPDATE ${t.queueEntries} SET lease_expires_at = ? WHERE entry_id = ?"
 
@@ -494,6 +497,17 @@ private[postgres] object Sql:
     s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
        |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END
        |WHERE entry_id = ?""".stripMargin
+
+  /** [[releaseLease]] for a failed attempt (#3257): no take hands the entry out before the time bound first. */
+  def releaseRetryLease(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL, not_before = ?
+       |WHERE entry_id = ?""".stripMargin
+
+  /** The closed entries in state `?` of tenant `?` (twice, for `NULL`) past entry `?`, oldest first, at most `?` (#3257). */
+  def queueClosedEntries(t: Tables): String =
+    s"""SELECT $queueColumns FROM ${t.queueEntries}
+       |WHERE state = ? AND (tenant_id = CAST(? AS text) OR (tenant_id IS NULL AND CAST(? AS text) IS NULL))
+       |  AND entry_id > ? ORDER BY entry_id LIMIT ?""".stripMargin
 
   def insertQueueAttempt(t: Tables): String =
     s"""INSERT INTO ${t.queueAttempts} (entry_id, attempt, thread_id, run_id, started_at, holder)

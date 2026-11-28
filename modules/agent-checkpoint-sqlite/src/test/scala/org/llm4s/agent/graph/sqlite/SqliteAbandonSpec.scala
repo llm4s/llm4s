@@ -127,7 +127,13 @@ class SqliteAbandonSpec extends AnyFlatSpec with Matchers with EitherValues with
       store.runQueue,
       store,
       Seq(QueuedAgent(agent)),
-      WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds),
+      WorkerSettings(
+        pollInterval = 20.millis,
+        sweepEvery = None,
+        drainGrace = 2.seconds,
+        retryDelay = 50.millis,
+        maxRetryDelay = 200.millis
+      ),
       RunQueueSettings(lease = LeasePolicy(ttl = 2.seconds, renewEvery = 100.millis))
     ).value
     worker.start()

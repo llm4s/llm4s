@@ -39,8 +39,7 @@ class PostgresLongTermStoreUnitSpec extends AnyFlatSpec with Matchers with Eithe
   private def statements(script: ScriptedPostgres): Vector[String] = script.made.map(_._1)
 
   "The long-term store's schema step" should "add its three tables to a version-5 schema, and change no other" in {
-    PostgresSchema.Current shouldBe 6
-    PostgresSchema.plan("s", 5, PostgresSchema.Current, PostgresSchema.steps).value shouldBe Vector(5)
+    PostgresSchema.plan("s", 5, 6, PostgresSchema.steps).value shouldBe Vector(5)
     val ddl = PostgresSchema.steps(5)(PostgresSchema.Tables("s"))
     ddl.count(_.startsWith("CREATE TABLE")) shouldBe 3
     Vector(""""s".checkpoint_store_items""", """"s".checkpoint_store_applied""", """"s".checkpoint_store_fences""")

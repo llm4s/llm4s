@@ -152,6 +152,14 @@ AgentId.of("assistant").flatMap { agentId =>
   submission, such as one for an agent id no worker serves; `queue.allDepths()` shows every agent's open entries,
   served or not. An entry whose stored form this build cannot read (written by a newer release, or by hand) is closed
   `failed` when a take reaches it, and the take goes on to the next.
+- **A failed attempt is retried after a backoff**: `llm4s.agent.worker.retry.delay` (30 seconds) after the first,
+  doubling with each attempt up to `retry.maxDelay` (10 minutes), less a random part of up to half, so a provider
+  outage of a few minutes does not use up every entry's attempts. The thread's later entries wait behind it. A failure
+  no retry can mend - the provider refused the credentials, the request's content or length, or the model - is not
+  retried: the thread is settled and the entry closed `failed` (`RunFailed`).
+- **Dead letters can be listed and re-driven**: `queue.closedEntries(tenant, "failed", after, limit)` pages through a
+  tenant's failed entries, oldest first, until the ticket lifetime reclaims them, and `queue.requeue(tenant, entryId)`
+  submits a failed entry's input again as a new entry on its thread, leaving the dead letter as it was.
 - **Queues are bounded**: a tenant may have `maxOpenPerThread` open entries on one thread, and a queued input (its
   history included) may be `maxInputBytes` long; a submission past either is refused with
   `QueueError.ThreadQueueFull` or `QueueError.InputTooLarge`.

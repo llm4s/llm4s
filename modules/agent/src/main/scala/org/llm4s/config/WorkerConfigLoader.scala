@@ -52,6 +52,8 @@ object WorkerConfigLoader:
       maxEvents       <- optional(c, "sweep.retention.maxEvents")(p => field(p)(c.getInt(p)))
       label           <- optional(c, "label")(p => field(p)(c.getString(p)))
       depthEvery      <- duration(c, "metrics.queueDepthEvery")
+      retryDelay      <- duration(c, "retry.delay")
+      maxRetryDelay   <- duration(c, "retry.maxDelay")
       retention <- RetentionPolicy.of(maxAge, maxCheckpoints, maxEvents).left.map(invalid(s"$Path.sweep.retention"))
       sweep     <- SweepPolicy.of(retention, tombstoneAge, batchSize).left.map(invalid(s"$Path.sweep"))
       settings <- WorkerSettings
@@ -64,7 +66,9 @@ object WorkerConfigLoader:
           Option.when(enabled)(every),
           sweep,
           label,
-          depthEvery
+          depthEvery,
+          retryDelay,
+          maxRetryDelay
         )
         .left
         .map(invalid(Path))
