@@ -316,7 +316,8 @@ Whether instances can be replaced one at a time depends on what the release chan
   drains on SIGTERM and gives back what it could not finish; new instances take it. If the agent's graph changed, a
   run in flight at the old graph version is passed over by new workers until an old one takes it, and closed `failed`
   if none does within `llm4s.agent.worker.unrunnableAfter` (1 hour by default): keep at least one old instance until
-  its runs drain.
+  its runs drain. A cancel of such an entry whose input never ran is acted on at once. An entry for a thread another
+  agent created (its graph id differs, not just its version) is closed `failed` (`Unrunnable`) as soon as it is taken.
 - **A new store schema version or checkpoint format: full stop.** Stop every instance, then start the new release.
   The first new instance migrates the schema; an old instance that meets the newer schema refuses to open with
   `GraphError.UnsupportedStoreSchema` and writes nothing, and one still running fails each write with the same

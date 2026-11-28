@@ -1008,6 +1008,7 @@ the SQLite and PostgreSQL run queues.
 | Before (1.0.0) | After |
 |---|---|
 | A queued turn a guardrail blocked closed `Failed(RunFailed)`, as a crash does, and counted as `queue.closed{failed,run_failed}`; a typed answer that failed its schema the same (#3255) | It closes `Failed(FailureReason.Blocked(guardrail))` or `Failed(FailureReason.OutputInvalid(errors))`, counted `blocked` / `output_invalid`; a settled failure's `RunFailed` message carries the run's own. `FailureReason` has two new cases: a `match` on it needs them. Stored outcomes written before read back unchanged |
+| An entry for a thread another agent's graph created was passed over for `unrunnableAfter` (1 hour), holding the thread's queue, and a cancel of an entry passed over as unrunnable waited as long (#3256) | Another graph's thread closes the entry `Failed(Unrunnable)` as soon as a worker takes it; a version difference is still passed over. A stop asked of a passed-over entry whose input never ran closes it at once |
 
 ## Memory stores share one contract and one score rule (#3036, #3037, #3038)
 

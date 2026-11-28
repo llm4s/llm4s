@@ -414,11 +414,30 @@ class AgentWorkerSpec
 
   // ---- graph versions ----
 
+  /**
+   * A thread left `Running` by a direct run of `assistant` at another version of its graph (another system prompt),
+   * cancelled in its model call: a worker's `assistant` cannot take that run on, but a worker at the old version could.
+   */
+  private def inFlightAtOtherVersion(store: InMemoryCheckpointer, on: ThreadId): Unit = {
+    val entered = new Semaphore(0)
+    val older = Agent
+      .builder("assistant", new FnClient((_, _) => blocked(entered)))
+      .withSystemPrompt("an older version")
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .value
+    val running = older.start(on, "hi").value
+    entered.acquire()
+    running.cancel()
+    running.await().isLeft shouldBe true
+    store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Running
+  }
+
   it should "leave an entry its graph cannot take on for another worker, taking the other threads' entries past it" in {
     val store = InMemoryCheckpointer()
     val other = thread()
-    // a thread of another graph: this worker's agent cannot take it on
-    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    // a run in flight at another version of the graph: this worker's agent cannot take it on
+    inFlightAtOtherVersion(store, other)
     val stuck  = submit(store, other)
     val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
     worker.start()
@@ -432,7 +451,7 @@ class AgentWorkerSpec
   it should "close an entry no worker could take on Failed(Unrunnable) once it has waited unrunnableAfter" in {
     val store = InMemoryCheckpointer()
     val other = thread()
-    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    inFlightAtOtherVersion(store, other)
     val stuck  = submit(store, other)
     val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))), fast.withUnrunnableAfter(1.milli))
     Thread.sleep(5)
@@ -442,13 +461,43 @@ class AgentWorkerSpec
     entry.attempts shouldBe empty
   }
 
+  it should "close an entry for a thread of another agent's graph Failed(Unrunnable) at once (#3256)" in {
+    val store = InMemoryCheckpointer()
+    val other = thread()
+    // a thread the agent `writer` created: no version of `assistant` can ever take it on
+    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    val stuck  = submit(store, other)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
+    worker.start()
+    val entry = closed(store, stuck)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason match {
+      case FailureReason.Unrunnable(message) => message should include("writer")
+      case other                             => fail(s"unexpected $other")
+    }
+    entry.attempts shouldBe empty
+  }
+
+  it should "act on a cancel of an entry it cannot take on whose input was never admitted, without waiting (#3256)" in {
+    val store = InMemoryCheckpointer()
+    val other = thread()
+    inFlightAtOtherVersion(store, other)
+    val stuck = submit(store, other)
+    // taken once by a worker whose graph cannot run it, so the entry has started and a cancel is a stop request
+    val leased = store.runQueue.take(TakeRequest("earlier", Set(agentId), 100.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    store.runQueue.cancel(None, CancelTarget.Entry(stuck), CancelReason.Requested(Some("stop"))).value
+    Thread.sleep(150)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
+    worker.start()
+    closed(store, stuck).outcome.value shouldBe EntryOutcome.Cancelled(CancelReason.Requested(Some("stop")))
+  }
+
   it should "take a runnable entry behind more passed-over heads than one take can skip (#3096)" in {
-    val store  = InMemoryCheckpointer()
-    val writer = agentOver(store, answering("x"), "writer")
-    // threads of another graph, each with a head this worker passes over for a whole lease ttl
+    val store = InMemoryCheckpointer()
+    // runs in flight at another version, each with a head this worker passes over for a whole lease ttl
     val stuck = (0 until TakeRequest.MaxSkip + 40).map { _ =>
       val on = thread()
-      writer.run(on, "hi").value
+      inFlightAtOtherVersion(store, on)
       submit(store, on)
     }
     val runnable = submit(store, thread())

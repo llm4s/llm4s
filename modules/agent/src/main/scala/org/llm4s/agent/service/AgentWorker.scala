@@ -477,6 +477,14 @@ final class AgentWorker private (
                 case AttemptPlan.Close(_) => Right(())
                 case _                    => latest.fold[Result[Unit]](Right(()))(agent.agent.canContinue)
               continues match
+                // another agent's thread: no version of this agent ever takes it on, so it fails now (#3256)
+                case Left(_: GraphError.RestoreRejected) if latest.exists(_.snapshot.graphId != agent.agent.graphId) =>
+                  foreign(entry, latest.get)
+                // a stop asked of an entry whose input never ran: nothing to settle, so it is acted on now rather
+                // than after the unrunnable wait (#3256)
+                case Left(_: GraphError.RestoreRejected)
+                    if slot.stop.get.isDefined && admitted.isEmpty && !entry.admitted =>
+                  Next.Close(slot.stop.get.get.outcome)
                 case Left(rejected: GraphError.RestoreRejected) => unrunnable(slot, rejected)
                 case Left(error) =>
                   logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread cannot be read: ${error.message}")
@@ -568,6 +576,21 @@ final class AgentWorker private (
       meter.deferred(entry.agentId, "unrunnable")
       passOver(entry.id, lease.ttl)
       Next.Release
+
+  /**
+   * An entry for a thread another agent's graph created (`latest` names that graph, #3256): told apart from a version
+   * difference, which another worker may run, it is closed `Failed(Unrunnable)` at once - also with a stop asked of
+   * it - running nothing, rather than holding the thread's queue for `unrunnableAfter`.
+   */
+  private def foreign(entry: QueueEntry, latest: Checkpoint): Next =
+    logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread belongs to another agent's graph; closing it")
+    Next.Close(
+      EntryOutcome.Failed(
+        FailureReason.Unrunnable(
+          s"the thread belongs to graph '${latest.snapshot.graphId}', which agent '${entry.agentId.value}' cannot take on"
+        )
+      )
+    )
 
   private def attempt(slot: Slot, agent: QueuedAgent): Next =
     beforeAttempt(slot.entry)
