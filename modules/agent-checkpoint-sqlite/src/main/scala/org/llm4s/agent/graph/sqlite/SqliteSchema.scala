@@ -72,7 +72,8 @@ private[sqlite] object SqliteSchema:
     8  -> addReclamation,
     9  -> addRunQueue,
     10 -> addStopRequests,
-    11 -> addChildCounter
+    // the newest step, keyed off Current so it renumbers with it; it reads only what version 6 added (#3101)
+    (Current - 1) -> addChildCounter
   )
 
   /**
@@ -134,7 +135,8 @@ private[sqlite] object SqliteSchema:
    */
   /**
    * Version 12: the child-place counter (#3101). The meta table's `last_child` starts at the file's highest
-   * `child_order` - a tombstone's included - so places keep growing from where a version-11 build left them.
+   * `child_order` - a tombstone's included - so places keep growing from where an older build left them. Needs only
+   * version 6's `child_order`, and is idempotent (`INSERT OR IGNORE`), so it may move to a later version unchanged.
    */
   private def addChildCounter(connection: Connection): Unit =
     statements(

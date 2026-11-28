@@ -242,19 +242,19 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     store.close()
   }
 
-  it should "place new children from the file's counter, carrying a version-11 file's places on (#3101)" in {
+  it should "place new children from the file's counter, carrying the previous version's places on (#3101)" in {
     val db = SqliteFiles.fresh()
     SqliteCheckpointer.open(db).value.close()
-    // a version-11 file whose children took places up to 41, and no counter
+    // a file at the version before the counter's, whose children took places up to 41
     exec(
       db,
       "DELETE FROM llm4s_checkpoint_meta WHERE key = 'last_child'",
       "INSERT INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq, child_order) VALUES ('old', 1, 1, 41)",
-      "UPDATE llm4s_checkpoint_schema SET version = 11"
+      s"UPDATE llm4s_checkpoint_schema SET version = ${SqliteSchema.Current - 1}"
     )
     SqliteCheckpointer.open(db).value.close()
     scalar(db, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'last_child'")(_.getLong(1)) shouldBe 41L
-    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 12
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
   }
 
   it should "refuse a file that is not a database, and close the connection it opened" in {
