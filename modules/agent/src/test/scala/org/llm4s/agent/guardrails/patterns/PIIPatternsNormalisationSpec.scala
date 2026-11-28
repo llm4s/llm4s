@@ -56,12 +56,45 @@ class PIIPatternsNormalisationSpec extends AnyFlatSpec with Matchers with org.sc
     PIIPatterns.maskAll("call 555-123-4567 or a@b.io") shouldBe "call [REDACTED_PHONE] or [REDACTED_EMAIL]"
   }
 
+  digitLike.foreach { after =>
+    it should s"keep a match the original holds when NFKC turns the ${after.codePointAt(0).toHexString} after it into a digit" in {
+      Seq(
+        PIIType.SSN        -> "123-45-6789",
+        PIIType.CreditCard -> "4111-1111-1111-1111",
+        PIIType.Phone      -> "555-123-4567"
+      ).foreach { case (piiType, value) =>
+        val text = s"id: $value$after end"
+        withClue(s"${piiType.name}: ") {
+          piiType.findAll(text).map(_.value) shouldBe Seq(value)
+          PIIPatterns.maskAll(text, Seq(piiType)) shouldBe s"id: ${piiType.mask(value)}$after end"
+        }
+      }
+      PIIDetector().validate(s"SSN: 123-45-6789$after").isLeft shouldBe true
+      PIIMasker().validate(s"SSN: 123-45-6789$after") shouldBe Right(s"SSN: [REDACTED_SSN]$after")
+    }
+  }
+
+  it should "report a stretch both the original and the copy match once" in {
+    val text = s"123-45-6789 and 123-45-${zwsp}6789"
+    PIIType.SSN.findAll(text).map(_.value) shouldBe Seq("123-45-6789", s"123-45-${zwsp}6789")
+    PIIPatterns.summarize(text, Seq(PIIType.SSN)) shouldBe Map("SSN" -> 2)
+  }
+
   "PIIMasker and PIIDetector" should "mask and block the variants" in {
     PIIMasker().validate(s"ssn 123-45-${zwsp}6789") shouldBe Right("ssn [REDACTED_SSN]")
     PIIDetector().validate("card 4111.1111.1111.1111").isLeft shouldBe true
   }
 
-  "SecretPatterns" should "find a key split by a zero-width space or written in fullwidth" in {
+  "SecretPatterns" should "keep a key the original holds whatever NFKC makes of the characters around it" in {
+    val key = "AKIAIOSFODNN7EXAMPLE"
+    digitLike.foreach { after =>
+      val text = s"$after$key$after"
+      SecretType.AwsAccessKey.findAll(text).map(_.value) shouldBe Seq(key)
+      SecretPatterns.redactAll(text) shouldBe s"${after}[REDACTED_AWS_KEY]$after"
+    }
+  }
+
+  it should "find a key split by a zero-width space or written in fullwidth" in {
     val key = "AKIAIOSFODNN7EXAMPLE"
     Seq(key.patch(8, zwsp, 0), fullwidth(key)).foreach { variant =>
       val text = s"key=$variant;"
@@ -73,6 +106,10 @@ class PIIPatternsNormalisationSpec extends AnyFlatSpec with Matchers with org.sc
 }
 
 object PIIPatternsNormalisationSpec {
+
+  // NFKC turns each of these into a digit, which would join the number before it: superscript two, circled one,
+  // mathematical bold nine (a surrogate pair)
+  val digitLike = Seq("\u00B2", "\u2460", "\uD835\uDFD7")
 
   val zwsp = "\u200B"
 

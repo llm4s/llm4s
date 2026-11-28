@@ -21,8 +21,8 @@ import scala.util.matching.Regex
  * Note: These patterns favor recall over precision - they may have false
  * positives but minimize false negatives for security-sensitive use cases.
  *
- * The patterns match a normalised copy of the text, so look-alike spellings of a number or address are found too
- * (#3244): format characters (zero-width space, soft hyphen, joiners) and combining marks are removed, every dash
+ * The patterns match the text and a normalised copy of it, so look-alike spellings of a number or address are
+ * found too (#3244), and nothing the text itself holds is lost to normalising: format characters (zero-width space, soft hyphen, joiners) and combining marks are removed, every dash
  * (a non-breaking hyphen, an en dash) reads as `-`, and everything else is in Unicode NFKC (fullwidth digits, a
  * fullwidth `@` or `.`). A match is reported, and masked, at the original text's indices, so an invisible
  * character inside a match is masked with it and the text around it is kept as it was.
@@ -53,20 +53,13 @@ object PIIPatterns {
     /**
      * Find all matches of this PII type in text.
      *
-     * The pattern runs on a normalised copy of the text (see [[PIIPatterns]]), and each match is reported at the
-     * text's own indices, with `value` the text's own characters.
+     * The pattern runs on the text and on a normalised copy of it (see [[PIIPatterns]]); each match is reported at
+     * the text's own indices, with `value` the text's own characters, and matches of the two that overlap are one.
      */
-    def findAll(text: String): Seq[PIIMatch] = {
-      val view = MatchView(text)
-      pattern
-        .findAllMatchIn(view.text)
-        .map { m =>
-          val start = view.start(m.start)
-          val end   = view.end(m.start, m.end)
-          PIIMatch(this, text.substring(start, end), start, end)
-        }
-        .toSeq
-    }
+    def findAll(text: String): Seq[PIIMatch] =
+      MatchView
+        .spans(text)(t => pattern.findAllMatchIn(t).map(m => (m.start, m.end)))
+        .map((start, end) => PIIMatch(this, text.substring(start, end), start, end))
   }
 
   object PIIType {
