@@ -394,7 +394,11 @@ if decide
     wsel, why = trace.(wfiles, wextra)
     wfiles = wfiles + wextra.values
     via = ENV["WINDOWS_VIA"].to_s.split.to_h { |e| e.split(":", 2) }
-    own = ->(m) { wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m } }
+    # the project's own file, or its own build settings, changed
+    own = lambda do |m|
+      wextra.keys.any? { |n| n.split(":").first == m } ||
+        wfiles.any? { |f| bases.find { |b, _| f.start_with?(b) }&.last == m }
+    end
     hit = why ? [] : platform.select { |m| wsel.key?(m) && (!via.key?(m) || wsel.key?(via[m]) || own.(m)) }
     if why
       say.("windows", true, why)
@@ -489,11 +493,12 @@ edges = lambda do |s, p|
   Array(p["deps"]).flat_map { |d, conf| conf.to_s.split(";").map { |part| f, t = part.split("->", 2); [d, side.(f), (t || "compile").strip] } }
     .select { |_, f, _| f == s }.map { |d, _, t| "#{d}->#{t}" }.sort
 end
+# the changed nodes, printed only once every project has passed the checks that select everything
+nodes = []
 hp.sort.each do |id, h|
   b = bp[id]
-  why = []
   if b.nil?
-    puts "#{id}:compile #{h['base']} a new project"
+    nodes << "#{id}:compile #{h['base']} a new project"
     next
   end
   full.("#{id} moved from #{b['base']} to #{h['base']}") if b["base"] != h["base"]
@@ -503,13 +508,14 @@ hp.sort.each do |id, h|
     why << "its #{s} borrowed sources changed" if
       Array(b["borrowed"]).select { |c, _| side.(c) == s }.sort != Array(h["borrowed"]).select { |c, _| side.(c) == s }.sort
     why << "its #{s} settings changed (fp.#{s})" if b["fp"][s] != h["fp"][s]
-    puts "#{id}:#{s} #{h['base']} #{why.join(', ')}" unless why.empty?
+    nodes << "#{id}:#{s} #{h['base']} #{why.join(', ')}" unless why.empty?
   end
 end
+puts nodes
 RUBY
 )"
-  if [[ "$diff_out" == full\ * ]]; then
-    full_why="${diff_out#full }"
+  if full_line="$(printf '%s\n' "$diff_out" | grep -m1 '^full ')"; then
+    full_why="${full_line#full }"
   else
     extra_nodes="$diff_out"
   fi

@@ -442,6 +442,11 @@ owncase 'this repo: changed aliases (global) select everything' 'kv["full"] == "
   "echo '// x' >> build.sbt; fp 'g[\"global\"] = \"0\"'"
 owncase 'this repo: a project that moved selects everything' 'kv["full"] == "true"' \
   "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"voyage\"][\"base\"] = \"modules/voyage\"'"
+owncase 'this repo: a project that moved after another changed one still selects everything' 'kv["full"] == "true"' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"agent\"][\"fp\"][\"test\"] = \"0\"; g[\"projects\"][\"voyage\"][\"base\"] = \"modules/voyage\"'"
+owncase 'this repo: it'"'"'s own test settings run it on Windows (WINDOWS_VIA allows its own change)' \
+  'kv["windows"] == "true" && w.include?("it")' \
+  "echo '// x' >> build.sbt; fp 'g[\"projects\"][\"it\"][\"fp\"][\"test\"] = \"0\"'"
 owncase 'this repo: a base graph without fingerprints selects everything' 'kv["full"] == "true"' \
   "fp 'g[\"projects\"].each_value { |p| p.delete(\"fp\") }'; git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qam strip; git checkout -q $OWN_BASE -- .github/ci-graph.json; echo '// x' >> build.sbt"
 owncase 'this repo: no base graph selects everything' 'kv["full"] == "true"' \

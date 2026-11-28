@@ -111,7 +111,10 @@ object CiGraph {
           s"test options ${task(ref / Test / test / testOptions).map(option).mkString(" ")}",
           s"fork ${opt(ref / Test / fork)} ${opt(ref / Test / parallelExecution)} ${opt(ref / Test / testForkedParallel)}",
           s"jvm ${unversioned(task(ref / Test / javaOptions))}",
-          s"env ${unversioned(task(ref / Test / envVars).toSeq.sorted.map { case (k, v) => s"$k=$v" })}",
+          // not the `*_API_KEY` entries core forwards from an untracked .env: a developer's own credentials
+          s"env ${unversioned(task(ref / Test / envVars).toSeq.filterNot(_._1.endsWith("_API_KEY")).sorted.map {
+              case (k, v) => s"$k=$v"
+            })}",
           s"coverage ${opt(ref / Coverage.coveragePolicy)} ${opt(ref / ScoverageKeys.coverageEnabled)} " +
             s"${opt(ref / ScoverageKeys.coverageMinimumStmtTotal)} ${opt(ref / ScoverageKeys.coverageFailOnMinimum)} " +
             s"${opt(ref / ScoverageKeys.coverageExcludedPackages)} ${opt(ref / ScoverageKeys.coverageExcludedFiles)}",
