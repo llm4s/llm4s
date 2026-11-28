@@ -557,19 +557,36 @@ final class PostgresCheckpointer private (
         val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
         val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
           case Some(age) if candidates.nonEmpty =>
-            writing("sweep") { c =>
-              query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+            // the page's tombstones old enough, read without a lock (#3261): only they are locked, under the exclusive
+            // reclamation lock, a few at a time, so a page never holds every live thread's row - or every new id's
+            // first claim - for the length of one transaction; the DELETE checks every condition again
+            reading("sweep") { c =>
               val cutoff = clockNow(c).minusNanos(age.toNanos)
-              val gone = candidates.flatMap { threadId =>
-                readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
-                  query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
+              Right(
+                query(c, Sql.tombstoneCandidates(t), candidates.map(_.value).toArray, cutoff)(r =>
+                  ThreadId(r.getString(1))
+                )
+              )
+            }.flatMap { tombstones =>
+              tombstones.grouped(ReclaimChunk).foldLeft[Result[Set[ThreadId]]](Right(Set.empty)) { (done, chunk) =>
+                done.flatMap { reclaimedSoFar =>
+                  writing("sweep") { c =>
+                    query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+                    val cutoff = clockNow(c).minusNanos(age.toNanos)
+                    val gone = chunk.flatMap { threadId =>
+                      readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
+                        query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption
+                          .map(threadId -> _)
+                      }
+                    }
+                    // the long-term store's fence of a reclaimed thread goes with its row (#2453)
+                    gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
+                    // readers of a reclaimed log are still refused: a new thread of the id starts past it
+                    gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
+                    Right(reclaimedSoFar ++ gone.map(_._1))
+                  }
                 }
               }
-              // the long-term store's fence of a reclaimed thread goes with its row (#2453)
-              gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
-              // readers of a reclaimed log are still refused: a new thread of the id starts past it
-              gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
-              Right(gone.map(_._1).toSet)
             }
           case _ => Right(Set.empty)
         reclaimed.flatMap { gone =>
@@ -599,6 +616,9 @@ final class PostgresCheckpointer private (
         }
       }
     }
+
+  /** The most tombstones one reclaiming transaction locks and deletes (#3261). */
+  private val ReclaimChunk: Int = 50
 
   /** The key of the reclamation lock (see `Sql.lockReclamation`): one per schema. */
   private val reclamationLock = PostgresSchema.lockName(config.schema) + ":reclamation"

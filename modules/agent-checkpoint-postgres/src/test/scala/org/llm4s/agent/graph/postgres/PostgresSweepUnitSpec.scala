@@ -51,6 +51,7 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
       {
         case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
           Vector(Vector("a"), Vector("b"), Vector("c"))
+        case (sql, _) if sql == Sql.tombstoneCandidates(t)                                 => Vector(Vector("a"))
         case (sql, Vector(id)) if sql == Sql.lockedRow(t) || sql == Sql.lockedRowIfFree(t) => Vector(rowOf(id))
         case (sql, Vector("a", _, _)) if sql == Sql.reclaim(t)                             => Vector(Vector(7L))
         case (sql, _) if sql == Sql.reclaim(t)                                             => Vector.empty
@@ -88,9 +89,26 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     made.map(_._1) should not contain Sql.deleteHistoryAtAny(t)
   }
 
+  // #3261: a page of live threads takes neither the exclusive reclamation lock nor any row's lock
+  it should "lock nothing when the page holds no tombstone old enough, and lock only the tombstones otherwise" in {
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+        Vector(Vector("a"), Vector("b"))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t) => Vector.empty
+    }
+    script.store().sweep(SweepPolicy(tombstoneAge = Some(1.day)), None, SweepGuard.none).value shouldBe
+      SweepPage(2, 0, None)
+    script.made.map(_._1) should not contain Sql.lockReclamation
+    script.made.map(_._1) should not contain Sql.lockedRowIfFree(t)
+    // the candidates are read once for the page, every unprotected thread asked about, without a lock
+    script.made.filter(_._1 == Sql.tombstoneCandidates(t)) should have size 1
+    (Sql.tombstoneCandidates(t) should not).include("FOR UPDATE")
+  }
+
   it should "skip, not wait for, a tombstone whose row another call holds" in {
     val script = Script {
       case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("a"))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => Vector(Vector("a"))
       // SKIP LOCKED reads no row: a claim of the id holds it
       case (sql, _) if sql == Sql.lockedRowIfFree(t) => Vector.empty
     }
@@ -228,7 +246,8 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
    * the clock as `now`; every other query reads no row. `made` is every statement prepared, with its parameters.
    */
   final private case class Script(answer: PartialFunction[(String, Vector[Any]), Vector[Vector[Any]]]) {
-    private val log = new CopyOnWriteArrayList[(String, Vector[Any])]()
+    private val log    = new CopyOnWriteArrayList[(String, Vector[Any])]()
+    private val arrays = new java.util.IdentityHashMap[AnyRef, Vector[AnyRef]]()
 
     def made: Vector[(String, Vector[Any])] = log.asScala.toVector
 
@@ -253,8 +272,20 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     private def connection(): Connection = {
       val handler: InvocationHandler = (_: Any, method: Method, args: Array[AnyRef]) =>
         method.getName match {
-          case "prepareStatement"                                          => statement(args(0).toString)
-          case "createStatement"                                           => statement("")
+          case "prepareStatement" => statement(args(0).toString)
+          case "createStatement"  => statement("")
+          // an array parameter (the sweep's tombstone candidates, #3261): bound as its elements
+          case "createArrayOf" =>
+            val elements = args(1).asInstanceOf[Array[AnyRef]].toVector
+            val array = Proxy
+              .newProxyInstance(
+                getClass.getClassLoader,
+                Array(classOf[java.sql.Array]),
+                (_: Any, m: Method, _: Array[AnyRef]) => if m.getName == "hashCode" then Integer.valueOf(0) else null
+              )
+              .asInstanceOf[java.sql.Array]
+            arrays.put(array, elements)
+            array
           case "setAutoCommit" | "rollback" | "commit" | "abort" | "close" => null
           case "isClosed"                                                  => java.lang.Boolean.FALSE
           case other => throw new UnsupportedOperationException(other)
@@ -270,7 +301,11 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
           case "setString" | "setLong" | "setInt" | "setObject" =>
             params(args(0).asInstanceOf[Int]) = args(1)
             null
-          case "execute" => java.lang.Boolean.FALSE
+          case "setArray" =>
+            params(args(0).asInstanceOf[Int]) = arrays.get(args(1))
+            null
+          case "getConnection" => connection()
+          case "execute"       => java.lang.Boolean.FALSE
           case "executeUpdate" =>
             log.add(prepared -> bound)
             Integer.valueOf(1)
