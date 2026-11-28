@@ -1651,7 +1651,9 @@ object ToolLoop:
             }
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
-          val handedOff = appended(Set.empty)
+          // built once the target's admission has run, so the usage it commits counts the admission's model calls
+          // (a judge's), and the target's model step is checked against the budget with them
+          def handedOff = appended(Set.empty)
             .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
             .update(LoopKeys.activeAgent, target.agent.id)
             .update(LoopKeys.transfer, Some(Transfer(agent.id, target.agent.id, stored.id)))
@@ -1674,9 +1676,10 @@ object ToolLoop:
                 .fold(NodeResult.Fail(_), boundary(error, _, context, GuardrailPhase.Input))
             case Right(rewritten) =>
               AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
+              val command = handedOff
               NodeResult.Continue(
-                rewritten.fold(handedOff) { case (id, text) =>
-                  handedOff.update(messages, MessageUpdate.Replace(id, StoredMessage(id, UserMessage(text))))
+                rewritten.fold(command) { case (id, text) =>
+                  command.update(messages, MessageUpdate.Replace(id, StoredMessage(id, UserMessage(text))))
                 }
               )
         case _ =>
