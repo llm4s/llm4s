@@ -66,21 +66,22 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
         .flatMap(FileTree.validated(operation, _, bounds))
 
   /**
-   * The files at and under `path`, for a read (#3269): `path`'s own item, by key, and the items whose keys start with
-   * it as a directory, by prefix - never the whole namespace, which every read and grep used to fetch and decode.
-   * What is read is validated as [[filesOf]] validates the namespace; the tree's shape as a whole (no file under a
-   * file) is a write's to keep, checked in its transaction.
+   * The files at and under `path`, for a read (#3269): one listing of the keys that start with `path` - one store call,
+   * so one snapshot, never a file read at one moment and its directory at another (Codex) - keeping `path` itself and
+   * what is under it as a directory, never a sibling such as `/ab` for `/a`. Never the whole namespace, which every
+   * read and grep used to fetch and decode, but from the root, where it is the whole namespace (a key that is no path
+   * included, so a listing from `/` still finds what another writer left corrupt). What is read is validated as
+   * [[filesOf]] validates the namespace; the tree's shape as a whole is a write's to keep, checked in its transaction.
+   * A namespace holds at most `maxItems` items, so the listing is never cut by a sibling's.
    */
   private def under(operation: String, path: VPath, ctx: FileContext): Result[Map[VPath, FileEntry]] =
-    val ns = namespace(ctx)
-    // the root is the whole namespace: every item, a key that is no path included, so a listing from it still finds
-    // what another writer left corrupt
-    val prefix = if path == VPath.root then "" else s"${path.value}/"
-    for
-      own    <- if path == VPath.root then Right(None) else store.get(ns, path.value)
-      listed <- store.list(ns, prefix, store.limits.maxItems)
-      files  <- filesOf(operation, own.map(StoreEntry(path.value, _)).toVector ++ listed.items, listed.truncated)
-    yield files
+    if path == VPath.root then
+      store.list(namespace(ctx), "", store.limits.maxItems).flatMap(l => filesOf(operation, l.items, l.truncated))
+    else
+      val dir = s"${path.value}/"
+      store.list(namespace(ctx), path.value, store.limits.maxItems).flatMap { l =>
+        filesOf(operation, l.items.filter(e => e.key == path.value || e.key.startsWith(dir)), l.truncated)
+      }
 
   /** The files as `view` sees them, in the transaction: the one point a mutation but `delete` takes them. */
   private def viewed(operation: String, view: StoreView): Result[Map[VPath, FileEntry]] =

@@ -242,7 +242,44 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     asked.toArray.toVector shouldBe Vector("get /a/one")
     asked.clear()
     files.ls(p("/a"), 10, call()).value
-    asked.toArray.toVector shouldBe Vector("get /a", "list '/a/'")
+    asked.toArray.toVector shouldBe Vector("list '/a'")
+  }
+
+  // Codex on #3269: a file and what is under it come from one listing - one snapshot - so another run replacing the
+  // file /a with a directory /a/ between two reads can never be read as /a being both, a spurious Corrupt
+  it should "never read a file and its directory from two moments, whatever another run changes in between" in {
+    val inner = InMemoryLongTermStore()
+    val files = storeFiles(inner)
+    files.write(p("/a"), "file", call()).value
+    // a store answering `get` from before another run replaced /a with a directory, and `list` from after
+    val replaced = new LongTermStore {
+      def limits                          = inner.limits
+      def get(ns: Namespace, key: String) = inner.get(ns, key)
+      def list(ns: Namespace, prefix: String, n: Int) = {
+        inner.delete(ns, "/a", call()).value
+        inner
+          .modify[Unit](
+            ns,
+            "/a/b",
+            org.llm4s.agent.graph.HarnessTestSupport.runOn("swap").effectKey("swap", "/a/b"),
+            FencingToken(0)
+          )(_ => Right(StoreChange.Put(ujson.Obj("content" -> "now a directory"), ())))
+          .value
+        inner.list(ns, prefix, n)
+      }
+      def search(ns: Namespace, q: String, n: Int) = inner.search(ns, q, n)
+      def modify[A: upickle.default.ReadWriter](
+        ns: Namespace,
+        key: String,
+        effect: org.llm4s.agent.graph.EffectKey,
+        token: FencingToken
+      )(
+        change: StoreView => Result[StoreChange[A]]
+      ) = inner.modify(ns, key, effect, token)(change)
+      def forget(key: org.llm4s.agent.graph.EffectKey, token: FencingToken) = inner.forget(key, token)
+    }
+    val listing = storeFiles(replaced).ls(p("/a"), 10, call()).value
+    listing.items.map(_.path.value) shouldBe Vector("/a/b")
   }
 
   it should "refuse a namespace another writer left invalid as Corrupt, for every operation but delete and a read" in {

@@ -555,7 +555,11 @@ final class PostgresCheckpointer private (
           }
         }
         val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
-        val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
+        // one budget for the whole page, reclamation and pruning together (Codex, #3261): a chunk past it is left to
+        // the next call, which starts from the cursor this one returns
+        val deadline = System.nanoTime() + sweepBudget.toNanos
+        // the tombstones reclaimed, and the first one the budget left for the next call
+        val reclaimed: Result[(Set[ThreadId], Option[ThreadId])] = policy.tombstoneAge match
           case Some(age) if candidates.nonEmpty =>
             // the page's tombstones old enough, read without a lock (#3261): only they are locked, under the exclusive
             // reclamation lock, a few at a time, so a page never holds every live thread's row - or every new id's
@@ -568,35 +572,45 @@ final class PostgresCheckpointer private (
                 )
               )
             }.flatMap { tombstones =>
-              tombstones.grouped(ReclaimChunk).foldLeft[Result[Set[ThreadId]]](Right(Set.empty)) { (done, chunk) =>
-                done.flatMap { reclaimedSoFar =>
-                  writing("sweep") { c =>
-                    query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
-                    val cutoff = clockNow(c).minusNanos(age.toNanos)
-                    val gone = chunk.flatMap { threadId =>
-                      readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
-                        query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption
-                          .map(threadId -> _)
+              val chunks = tombstones.grouped(ReclaimChunk).toVector
+              chunks.zipWithIndex.foldLeft[Result[(Set[ThreadId], Option[ThreadId])]](Right(Set.empty -> None)) {
+                case (done, (chunk, i)) =>
+                  done.flatMap {
+                    // the budget ran out: the rest of the page's tombstones wait for the next call
+                    case (reclaimedSoFar, cut @ Some(_)) => Right(reclaimedSoFar -> cut)
+                    case (reclaimedSoFar, None) if i > 0 && System.nanoTime() - deadline > 0 =>
+                      Right(reclaimedSoFar -> chunk.headOption)
+                    case (reclaimedSoFar, None) =>
+                      writing("sweep") { c =>
+                        query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+                        val cutoff = clockNow(c).minusNanos(age.toNanos)
+                        val gone = chunk.flatMap { threadId =>
+                          readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
+                            query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption
+                              .map(threadId -> _)
+                          }
+                        }
+                        // the long-term store's fence of a reclaimed thread goes with its row (#2453)
+                        gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
+                        // readers of a reclaimed log are still refused: a new thread of the id starts past it
+                        gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
+                        Right((reclaimedSoFar ++ gone.map(_._1)) -> None)
                       }
-                    }
-                    // the long-term store's fence of a reclaimed thread goes with its row (#2453)
-                    gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
-                    // readers of a reclaimed log are still refused: a new thread of the id starts past it
-                    gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
-                    Right(reclaimedSoFar ++ gone.map(_._1))
                   }
-                }
               }
             }
-          case _ => Right(Set.empty)
-        reclaimed.flatMap { gone =>
+          case _ => Right(Set.empty -> None)
+        reclaimed.flatMap { (gone, cut) =>
+          // a page the budget cut short in its reclamation ends before its first tombstone left: pruned up to it
+          val visitedNow = cut.fold(visited)(first => visited.filter(_.value < first.value))
           // one row locked per transaction, so in the page's own order: its cursor is the last thread finished
           val pruned =
-            if policy.retention == RetentionPolicy.keepAll then Right(RetentionSweep.Visited(visited.size, 0, false))
+            if policy.retention == RetentionPolicy.keepAll then
+              Right(RetentionSweep.Visited(visitedNow.size, 0, cutShort = cut.isDefined))
             else
               RetentionSweep.visit[RetentionSweep.PrunePlan](
-                visited,
-                sweepBudget,
+                visitedNow,
+                math.max(0L, deadline - System.nanoTime()).nanos,
                 s"PostgresCheckpointer(${config.schema})",
                 shut
               ) { (threadId, floor) =>
@@ -612,7 +626,13 @@ final class PostgresCheckpointer private (
                     )
                   }
               }
-          pruned.map(v => SweepPage(v.examined, gone.size, v.cursor(page, policy.batchSize)))
+          pruned.map { v =>
+            val next =
+              if v.cutShort then v.cursor(visitedNow, policy.batchSize)
+              else if cut.isDefined then visitedNow.lastOption
+              else v.cursor(page, policy.batchSize)
+            SweepPage(v.examined, gone.size, next)
+          }
         }
       }
     }

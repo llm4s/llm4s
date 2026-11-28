@@ -105,6 +105,26 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     (Sql.tombstoneCandidates(t) should not).include("FOR UPDATE")
   }
 
+  // #3261 (Codex): reclamation and pruning share the page's one budget; a page that runs out of it mid-reclamation
+  // stops between chunks, and its cursor makes the next call start at the first tombstone left
+  it should "stop reclaiming between chunks once the page's budget is spent, handing back a cursor to resume from" in {
+    val ids = (1 to 60).map(i => f"t$i%03d").toVector
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.lockedRowIfFree(t)                                  => Vector(rowOf("a"))
+      case (sql, _) if sql == Sql.reclaim(t)                                          => Vector(Vector(7L))
+    }
+    val store = script.store()
+    // spent at once: the first chunk always runs, so every call makes progress, and no other does
+    store.sweepBudget = Duration.Zero
+    val page = store.sweep(SweepPolicy(tombstoneAge = Some(1.day), batchSize = 100), None, SweepGuard.none).value
+    script.made.count(_._1 == Sql.reclaim(t)) shouldBe 50
+    page.reclaimed shouldBe 50
+    page.examined shouldBe 50
+    page.next shouldBe Some(ThreadId("t050"))
+  }
+
   it should "skip, not wait for, a tombstone whose row another call holds" in {
     val script = Script {
       case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("a"))
