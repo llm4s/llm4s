@@ -1,6 +1,6 @@
 package fix.v10
 
-import org.llm4s.agent.memory.{ MemoryBounds, PostgresMemoryStore }
+import org.llm4s.agent.memory.{ ConsolidationConfig, MemoryBounds, PostgresMemoryStore }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelMetadata
 import org.llm4s.rag.RAGConfig
@@ -25,6 +25,11 @@ object PositionalPatternsGainFieldsTest {
 
   def tableOf(config: PostgresMemoryStore.Config): String = config match {
     case PostgresMemoryStore.Config(_, _, _, _, _, table, _, _, _) => table
+  }
+
+  // ConsolidationConfig gained `maxMemoriesScanned` (#3040)
+  def groupOf(config: ConsolidationConfig): Int = config match {
+    case ConsolidationConfig(max, _, _) => max
   }
 
   // RAGConfig gained `legFailurePolicy` (#2995)

@@ -1,6 +1,6 @@
 package org.llm4s.agent.harness.memory
 
-import org.llm4s.agent.memory.{ EntityId, Memory, MemoryFilter, MemoryId, MemoryStore, ScoredMemory }
+import org.llm4s.agent.memory.{ EntityId, Memory, MemoryFilter, MemoryId, MemoryStats, MemoryStore, ScoredMemory }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -35,6 +35,8 @@ final private[memory] class MemoryView private (
     cell.read(_.search(query, topK, filter))
 
   override def count(filter: MemoryFilter): Result[Long] = cell.read(_.count(filter))
+
+  override def stats: Result[MemoryStats] = cell.read(_.stats)
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] = cell.read(_.recent(limit, filter))
 

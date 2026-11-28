@@ -61,11 +61,14 @@ object PositionalPatternsGainFields {
    * them since removed, so a pattern on it is not widened by a `_`.
    */
   private val current: Map[String, Int] = Map(
-    "org/llm4s/llmconnect/config/OpenAIConfig"          -> 14,
-    "org/llm4s/model/ModelMetadata"                     -> 9,
-    "org/llm4s/agent/memory/MemoryBounds"               -> 3,
-    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 9,
-    "org/llm4s/rag/RAGConfig"                           -> 29
+    "org/llm4s/llmconnect/config/OpenAIConfig"           -> 14,
+    "org/llm4s/model/ModelMetadata"                      -> 9,
+    "org/llm4s/agent/memory/MemoryBounds"                -> 3,
+    "org/llm4s/agent/memory/PostgresMemoryStore.Config"  -> 9,
+    "org/llm4s/agent/memory/ConsolidationConfig"         -> 3,
+    "org/llm4s/agent/harness/memory/MemoryRecall"        -> 4,
+    "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 3,
+    "org/llm4s/rag/RAGConfig"                            -> 29
   )
 
   /** `old` (a type's arity in some release) as `(old, current)` pairs. */
@@ -135,17 +138,21 @@ object PositionalPatternsGainFields {
   /**
    * Each type's extractor arity in 1.0.0 and on main, for the types that gained fields in 1.x, by their 1.0.0 symbol:
    * `OpenAIConfig` gained `api`, `reasoningSummary` and `keepReasoning`, `ModelMetadata` `supportedEndpoints` (#2900),
-   * `MemoryBounds` `owner`, `PostgresMemoryStore.Config` `tenant` (#3032, #3034) and `RAGConfig` `legFailurePolicy`
-   * (#2995). 0.7.0 had the same arities, so
+   * `MemoryBounds` `owner`, `PostgresMemoryStore.Config` `tenant` and `embeddingDimensions` (#3032, #3034, #3037),
+   * `ConsolidationConfig` `maxMemoriesScanned`, `MemoryRecall` `excludeCurrentThread` and `scope`, `MemoryConsolidation`
+   * `interval` (#3040) and `RAGConfig` `legFailurePolicy` (#2995). 0.7.0 had the same arities, so
    * [[Llm4sMigrateFrom_0_7]] and [[Llm4sMigrateFrom_1_0]] both run this map.
    */
   val arity10: Map[String, (Int, Int)] = toCurrent(
     Map(
-      "org/llm4s/llmconnect/config/OpenAIConfig"          -> 11,
-      "org/llm4s/model/ModelMetadata"                     -> 8,
-      "org/llm4s/agent/memory/MemoryBounds"               -> 2,
-      "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 7,
-      "org/llm4s/rag/RAGConfig"                           -> 28
+      "org/llm4s/llmconnect/config/OpenAIConfig"           -> 11,
+      "org/llm4s/model/ModelMetadata"                      -> 8,
+      "org/llm4s/agent/memory/MemoryBounds"                -> 2,
+      "org/llm4s/agent/memory/PostgresMemoryStore.Config"  -> 7,
+      "org/llm4s/agent/memory/ConsolidationConfig"         -> 2,
+      "org/llm4s/agent/harness/memory/MemoryRecall"        -> 2,
+      "org/llm4s/agent/harness/memory/MemoryConsolidation" -> 2,
+      "org/llm4s/rag/RAGConfig"                            -> 28
     )
   )
 

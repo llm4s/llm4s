@@ -4,8 +4,6 @@ import org.llm4s.error.NotFoundError
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
-import java.time.Instant
-
 /**
  * In-memory implementation of MemoryStore.
  *
@@ -109,7 +107,7 @@ final case class InMemoryStore private (
     limit: Int
   ): Result[Seq[Memory]] = {
     val filtered = memories.values.filter(filter.matches).toSeq
-    val sorted   = filtered.sortBy(_.timestamp)(Ordering[Instant].reverse)
+    val sorted   = filtered.sorted(MemoryFilter.RecallOrder)
     Right(sorted.take(limit))
   }
 
@@ -215,7 +213,7 @@ final case class InMemoryStore private (
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] = {
     val filtered = memories.values.filter(filter.matches).toSeq
-    val sorted   = filtered.sortBy(_.timestamp)(Ordering[Instant].reverse)
+    val sorted   = filtered.sorted(MemoryFilter.RecallOrder)
     Right(sorted.take(limit))
   }
 

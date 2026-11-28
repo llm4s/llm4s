@@ -1024,6 +1024,24 @@ After a change of embedding model, re-embed what the old one wrote, with the sto
 `store.reembedAll(newDimension)` (both `VectorMemoryStore` and `PostgresMemoryStore`). See
 [Postgres Memory Store](postgres-memory-store#declaring-the-dimension).
 
+## One SQLite schema for both memory stores, and `SemanticMemoryMiddleware` releases what it opens (#3039, #3040)
+
+`llm4s-memory` and `llm4s-memory-postgres` are Beta, `llm4s-agent-memory` is Experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| `VectorMemoryStore` had its own `memories` columns: a `SQLiteMemoryStore` file opened with it failed on the first write, and no store was both semantic and transactional | `SQLiteMemoryStore.withEmbeddingService(path, service)` embeds what it writes and searches by meaning, falling back to full-text; `VectorMemoryStore` is that store, and a `TransactionalMemoryStore`. A file the old `VectorMemoryStore` wrote is migrated when it is opened (schema version 3); **1.0 cannot open it afterwards**, so upgrade every process sharing the file together |
+| `VectorMemoryStore.search` failed when the query could not be embedded | It searches the full-text index instead, as `EmbeddingMemoryStore` does |
+| `SemanticMemoryMiddleware` kept every tenant's store open for good | It holds at most `maxTenants` (1000) open, releasing the least recently used idle one that is `durable` (an `InMemoryStore` or an in-memory SQLite database is kept, as its memories die with it); `close()` releases all. Releasing closes a store that is `AutoCloseable`: pass `release = _ => ()` if your resolver hands out stores it owns |
+| Recall included the current thread's own turns, and every principal's | The current thread is left out (`withExcludeCurrentThread(false)` to keep it); `withScope(MemoryRecall.byPrincipal)` recalls by `llm4s.principal`, which recorded memories now carry |
+| Consolidation ran after every turn and read every memory older than the cutoff | At most once per `MemoryConsolidation.interval` (15 minutes) per tenant, reading at most `ConsolidationConfig.maxMemoriesScanned` (1000), each run's page starting where the last ended; `withInterval(Duration.Zero)` restores every turn |
+| `PostgresMemoryStore`'s applied writes took one advisory lock per table, and its eviction read every row's content and metadata | One lock per table and tenant; eviction reads only the bounded owner's rows, with sizes computed in SQL |
+| `MemoryManager.stats` read every memory | `MemoryStore.stats` counts in SQL on the SQL stores; the default (and a custom store) still reads them |
+| Memories of one time came back from `recall` in no set order | Newest first, then by id descending (UTF-8 byte order) on every store; `MemoryFilter.Preceding(time, id)` gives the page after a memory. A `match` over `MemoryFilter` that lists every case needs the new one |
+
+`ConsolidationConfig` gains a third field, and `MemoryRecall` and `MemoryConsolidation` two and one: positional
+patterns over them gain a `_`.
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

@@ -322,6 +322,22 @@ that user. Pass `None` to include the facts of every user.
 
 ## Memory Stores
 
+| Store | Search | Embeds on write | Transactional | Lives |
+|---|---|---|---|---|
+| `InMemoryStore` | keyword | no | yes | in this process |
+| `InMemoryStore.withEmbeddingService` (`EmbeddingMemoryStore`) | by meaning, else keyword | yes | no | in this process |
+| `SQLiteMemoryStore` | full-text (FTS5) | no | yes | a SQLite file |
+| `SQLiteMemoryStore.withEmbeddingService`, `VectorMemoryStore` | by meaning, else full-text | yes | yes | a SQLite file |
+| `PostgresMemoryStore` | keyword, or by meaning with an `EmbeddingService` | with a service | yes | a PostgreSQL table, per tenant |
+
+Every store accepts every `MemoryFilter` and answers it as `MemoryFilter.matches` does; one shared contract suite
+runs each of them. *Transactional* means a `TransactionalMemoryStore`: what `SemanticMemoryMiddleware` needs to
+replay a recording without writing twice, and to consolidate. A store searching by meaning scores `(1 + cos) / 2`
+(1.0 the query's own direction, 0.5 unrelated), and compares the query only with embeddings of its dimension. One
+whose embeddings are all of another dimension - written with another model - is a `ConfigurationError`;
+`reembedAll(dimension)` embeds them again. Only `InMemoryStore` reads `MemoryStoreConfig.maxMemories`; bound the others
+with `MemoryBounds`, as the middleware does. `manager.stats` is counted in SQL on the SQL stores.
+
 ### In-Memory Store
 
 Fast but volatile - loses data on restart. Each store is an immutable value: a write returns a
@@ -354,9 +370,16 @@ for {
 A SQLite store is not safe for concurrent use: give each thread its own instance, or synchronise
 access yourself.
 
+`SQLiteMemoryStore.withEmbeddingService(path, embeddingService)` makes it a semantic store as well: it embeds every
+memory it writes without an embedding, searches by similarity, and falls back to its full-text index when nothing
+the filter admits has an embedding or the query cannot be embedded. It stays transactional, so it is the store to give
+`SemanticMemoryMiddleware` for recall by meaning in a file.
+
 ### Vector Store
 
-Semantic search with embeddings:
+Semantic search with embeddings. A `VectorMemoryStore` is a `SQLiteMemoryStore` with an embedding service, under the
+name older code builds it by; its file has the same schema, so either store opens it. A file an older
+`VectorMemoryStore` wrote is migrated when it is opened, and a 1.0 release cannot open it afterwards:
 
 ```scala
 import org.llm4s.agent.memory._
@@ -448,9 +471,20 @@ for {
   `MemoryRecording.maxRecordChars` (default 2000). With an `LLMMemoryManager`, its own model calls
   (entity extraction, summaries) go through the run's accounted client, so they count in
   `result.usage`.
+- **Recall scope.** A turn never recalls what its own thread recorded, which is already in its messages
+  (`MemoryRecall().withExcludeCurrentThread(false)` to include it). Every memory the middleware records carries
+  the run's principal, if it has one (`RunConfig.withPrincipal`), as `llm4s.principal`
+  (`SemanticMemoryMiddleware.PrincipalKey`): `MemoryRecall().withScope(MemoryRecall.byPrincipal)` recalls only
+  what runs of the same principal recorded, and `withScope` takes any `RunContext => MemoryFilter`.
 - **Consolidation** (`consolidate = Some(MemoryConsolidation(olderThan = 1.day, minCount = 10))`)
-  replaces groups of old memories with a summary after each turn. It needs a
-  `TransactionalMemoryStore`: `InMemoryStore`, `SQLiteMemoryStore` or `PostgresMemoryStore`. A
+  replaces groups of old memories with a summary after a turn, at most once per `interval` for a tenant (15 minutes
+  by default; `withInterval(Duration.Zero)` for every turn), reading at most
+  `ConsolidationConfig.maxMemoriesScanned` (1000) old memories. Each run goes on from where the last one's page ended
+  (`LLMMemoryManager.consolidatePage`, a keyset cursor of time and id) and wraps at the oldest, so every old memory is
+  reached in turn; a group spread over pages is carried to the next page and still forms. The schedule and the scan
+  position are kept per tenant even while its store is released. It needs a `TransactionalMemoryStore`:
+  `InMemoryStore`, `SQLiteMemoryStore` (with or without an embedding service), `VectorMemoryStore` or
+  `PostgresMemoryStore`. A
   summary carries its sources' `llm4s.writer`, so it counts against `bounds` only when they did; one
   that would merge two writers' memories, or is longer than `maxRecordChars`, is refused, never cut,
   and its sources kept.
@@ -465,6 +499,13 @@ for {
   the agent runtime: after a crash, `agent.recover` neither records a turn twice nor brings back a
   memory a later consolidation removed. A store that is not transactional records too, but a
   recording interrupted mid-write is skipped on recovery rather than repeated.
+- **Open stores are bounded.** The middleware holds at most `maxTenants` (1000) tenants' stores open; past that, it
+  releases the least recently used one no turn is using and resolves it again on its tenant's next turn, and a burst
+  of more tenants is brought back within the bound as its turns end. Only a store that names its storage (a SQLite
+  file, a Postgres table: `MemoryStore.durable`) is released: an `InMemoryStore` or an in-memory SQLite database, even
+  one shared by name, holds the tenant's memories only while it is open, so it stays open. Releasing
+  closes a store that is `AutoCloseable` (the SQLite and Postgres stores), or does what `release` says. `close()`
+  releases every store and refuses later turns.
 - **Failures never cost the answer.** A store that cannot be searched or written is skipped, and
   announced with a durable `MemoryEvents.Skipped` (the operation and the error's type, no content);
   `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only.
@@ -583,7 +624,10 @@ val results = store.search(
 ```
 
 The other cases are `ByTypes`, `HasMetadata`, `MetadataContains`, `ByEntity`, `ByConversation`,
-`ByTimeRange`, `ContentContains`, `Custom` (any `Memory => Boolean`), `All` and `None`.
+`ByTimeRange`, `ContentContains`, `Custom` (any `Memory => Boolean`), `All` and `None`. Every store accepts
+every case and answers it as `MemoryFilter.matches` does. A SQL store translates what SQL can say exactly and reads
+the rest to decide it: a `Custom` predicate, or a case-insensitive `ContentContains` on Postgres, reads every row the
+other parts of the filter leave, so combine it with an exact filter on a large store.
 
 ---
 

@@ -14,10 +14,25 @@ import scala.util.Using
  * serialised (design §4.31, "Tenant scope"). It is the `Transactional` target's `AppliedKeys` for C4's guard: its
  * `forget` is the store's `forgetApplied`, under the same lock and fenced by the same token.
  */
-final private[memory] class TenantMemory(val initial: MemoryStore, val identity: Option[String] = None)
-    extends AppliedKeys:
+final private[memory] class TenantMemory(
+  val initial: MemoryStore,
+  val identity: Option[String] = None,
+  val progress: ConsolidationProgress = new ConsolidationProgress
+) extends AppliedKeys:
   private val lock                        = new ReentrantLock()
   @volatile private var held: MemoryStore = initial
+
+  // Guarded by the middleware's resolving lock: how many calls hold this cell, and whether it was evicted or closed.
+  private[memory] var users: Int       = 0
+  private[memory] var retired: Boolean = false
+
+  /** Whether a consolidation is due, and where its page starts: the tenant's, kept by the middleware past eviction. */
+  def consolidationDue(now: java.time.Instant, interval: scala.concurrent.duration.FiniteDuration): Boolean =
+    progress.due(now, interval)
+
+  private[memory] def consolidationCursor: Option[org.llm4s.agent.memory.ConsolidationCursor] = progress.cursor
+  private[memory] def consolidationCursor_=(c: Option[org.llm4s.agent.memory.ConsolidationCursor]): Unit =
+    progress.cursor = c
 
   /**
    * `f` on the store as the last write left it, under the lock: a store need not be thread-safe
@@ -47,21 +62,21 @@ final private[memory] class TenantMemory(val initial: MemoryStore, val identity:
    */
   def writePlain(add: Seq[Memory], remove: Seq[MemoryId], bounds: MemoryBounds): Result[AppliedWrite] =
     locked {
+      // Only what the write touches and what the bounds count is read (#3040), never the whole store
+      val counted = bounds.owner.fold[MemoryFilter](MemoryFilter.All)(o => MemoryFilter.ByMetadata(o.key, o.value))
       for
-        present <- held.recall(MemoryFilter.All, Int.MaxValue)
-        ids = present.map(_.id).toSet
-        replaced <- held.replace(add, remove)
-        all      <- replaced.recall(MemoryFilter.All, Int.MaxValue)
+        present <- remove.distinct.foldLeft[Result[Vector[MemoryId]]](Right(Vector.empty))((acc, id) =>
+          acc.flatMap(found => held.exists(id).map(there => if there then found :+ id else found))
+        )
+        // as `applyAtomically`: a memory both added and removed is kept, written as added
+        replaced <- held.replace(add, remove.filterNot(add.map(_.id).toSet))
+        all      <- replaced.recall(counted, Int.MaxValue)
         evicted = bounds.overflow(all.filter(m => bounds.counts(m.metadata)).map(MemoryBounds.Entry.of))
         trimmed <- evicted.foldLeft[Result[MemoryStore]](Right(replaced))((acc, id) => acc.flatMap(_.delete(id)))
       yield
         held = trimmed
         val added = add.map(_.id).distinct.toVector
-        AppliedWrite(
-          added,
-          remove.distinct.filter(id => ids.contains(id) && !added.contains(id)).toVector,
-          evicted.size
-        )
+        AppliedWrite(added, present.filter(id => !added.contains(id)), evicted.size)
     }
 
   override def forget(key: EffectKey, token: FencingToken): Result[Unit] =
@@ -82,3 +97,19 @@ private[memory] object TenantMemory:
   final private class Held(lock: ReentrantLock) extends AutoCloseable:
     lock.lock()
     def close(): Unit = lock.unlock()
+
+/**
+ * A tenant's consolidation schedule and scan position (#3040): when its last consolidation began, and where the next
+ * page starts. Small, and kept by the middleware apart from the tenant's store, so neither is lost when the store is
+ * evicted and opened again.
+ */
+final private[memory] class ConsolidationProgress:
+  @volatile private var last: Option[java.time.Instant]                                    = None
+  @volatile private[memory] var cursor: Option[org.llm4s.agent.memory.ConsolidationCursor] = None
+
+  /** True, and the time recorded, if no consolidation began within `interval` of `now`. */
+  def due(now: java.time.Instant, interval: scala.concurrent.duration.FiniteDuration): Boolean = synchronized {
+    val isDue = last.forall(l => !now.isBefore(l.plusNanos(interval.toNanos)))
+    if isDue then last = Some(now)
+    isDue
+  }

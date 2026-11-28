@@ -26,12 +26,13 @@ package org.llm4s.agent
  *
  * {{{
  * import org.llm4s.agent.memory._
+ * import org.llm4s.types.Result
  *
  * // Create a memory manager
  * val manager = SimpleMemoryManager.empty
  *
- * // Record a user fact
- * val updated = manager.recordUserFact(
+ * // Record a user fact: a manager is a value, and each write returns the next one in a Result
+ * val updated: Result[MemoryManager] = manager.recordUserFact(
  *   "User prefers Scala over Java",
  *   userId = Some("user123")
  * )
@@ -70,11 +71,15 @@ package org.llm4s.agent
  *
  * == Storage Backends ==
  *
- * Multiple backends are available:
+ * Every backend passes one contract (`MemoryStoreContract`) and accepts every [[memory.MemoryFilter]]:
  *
- *  - [[memory.InMemoryStore]] - Fast, ephemeral storage for testing
- *  - (Future) SQLiteStore - Persistent local storage
- *  - (Future) VectorStore - Semantic search with embeddings
+ *  - [[memory.InMemoryStore]] - in this process, keyword search; `withEmbeddingService` searches by meaning
+ *  - [[memory.SQLiteMemoryStore]] - a SQLite file, full-text search; `withEmbeddingService` also by meaning
+ *  - [[memory.VectorMemoryStore]] - a `SQLiteMemoryStore` with an embedding service
+ *  - `PostgresMemoryStore` (`llm4s-memory-postgres`) - one PostgreSQL table for many tenants, pgvector search
+ *
+ * All but `InMemoryStore.withEmbeddingService` are [[memory.TransactionalMemoryStore]]s, as `SemanticMemoryMiddleware`
+ * (`llm4s-agent-memory`) needs to replay and consolidate.
  *
  * @see [[memory.SimpleMemoryManager]] for basic memory management
  * @see [[memory.MemoryFilter]] for filtering options

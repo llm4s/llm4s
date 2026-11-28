@@ -296,10 +296,30 @@ final case class MemoryManagerConfig private (
  *
  * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
  * @param strictMode If true, fail fast on any consolidation error. If false, log and continue (best-effort)
+ * @param maxMemoriesScanned The most old memories one call reads to group (#3040): the newest of those older than the
+ *                           cutoff. `LLMMemoryManager.consolidatePage` takes and returns a cursor, so repeated calls
+ *                           reach the older ones, as `SemanticMemoryMiddleware` does
  */
 final case class ConsolidationConfig(
   maxMemoriesPerGroup: Int = 50,
-  strictMode: Boolean = false
+  strictMode: Boolean = false,
+  maxMemoriesScanned: Int = 1000
+) {
+  require(
+    maxMemoriesScanned >= 1,
+    s"ConsolidationConfig: maxMemoriesScanned must be at least 1, was $maxMemoriesScanned"
+  )
+}
+
+/**
+ * Where a paged consolidation goes on (`LLMMemoryManager.consolidatePage`): after the memory of `timestamp` and `id`,
+ * in recall order, with `carried`, the members of groups still too small to merge, read again with the next page
+ * (#3040).
+ */
+final case class ConsolidationCursor(
+  timestamp: java.time.Instant,
+  id: MemoryId,
+  carried: Vector[MemoryId] = Vector.empty
 )
 
 object ConsolidationConfig {

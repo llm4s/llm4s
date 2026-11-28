@@ -27,6 +27,9 @@ trait MemoryStoreContract extends AnyFlatSpecLike with Matchers with EitherValue
   /** True if the store searches by embedding, with the service `withStore` hands it; false for a keyword store. */
   protected def semantic: Boolean
 
+  /** What `durable` must answer for the store under test. */
+  protected def expectDurable: Boolean = false
+
   /** Runs `body` on a fresh, empty store - built with `embeddings`, if it is semantic - then releases it. */
   protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A
 
@@ -130,6 +133,35 @@ trait MemoryStoreContract extends AnyFlatSpecLike with Matchers with EitherValue
     s1.count().value shouldBe 0L
     s1.search("alpha", 10, MemoryFilter.All).value shouldBe empty
   }
+
+  it should "report stats that agree with what recall reads, without reading it (#3040)" in run { (s0, _) =>
+    s0.stats.value shouldBe MemoryStore.statsOf(Seq.empty)
+    val s1 = put(
+      s0,
+      memory("a", "alpha", at = 1).withMetadata(Map("entity_id" -> "e1", "conversation_id" -> "c1")),
+      memory("b", "beta", at = 2).copy(memoryType = MemoryType.Task).withMetadata(Map("entity_id" -> "e1")),
+      memory("c", "gamma", at = 3).copy(memoryType = MemoryType.Custom("Report")).withEmbedding(Array(1f, 0f, 0f))
+    )
+    s1.stats.value shouldBe MemoryStore.statsOf(s1.recall(MemoryFilter.All, 10).value)
+  }
+
+  it should "recall memories of one time by id, descending, and page past them with Preceding (#3040)" in run {
+    (s0, _) =>
+      val s1 = put(
+        s0,
+        memory("b", "two", at = 5),
+        memory("c", "three", at = 5),
+        memory("a", "one", at = 5),
+        memory("z", "old", at = 1)
+      )
+      s1.recall(MemoryFilter.All, 10).value.map(_.id.value) shouldBe Seq("c", "b", "a", "z")
+      val t    = t0.plusSeconds(5)
+      val rest = s1.recall(MemoryFilter.Preceding(t, MemoryId("b")), 10).value.map(_.id.value)
+      rest shouldBe Seq("a", "z")
+      s1.count(MemoryFilter.Preceding(t, MemoryId("b"))).value shouldBe 2L
+  }
+
+  it should "say whether what it holds outlives it" in run((s0, _) => s0.durable shouldBe expectDurable)
 
   // ===== Limits and blank queries =====
 

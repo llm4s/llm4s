@@ -120,7 +120,7 @@ class MemoryManagerConfigSpec extends AnyFlatSpec with Matchers {
   }
 
   "MemoryManagerConfig.toString" should "be the case-class form the migration guide shows" in {
-    MemoryManagerConfig.default.toString shouldBe "MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))"
+    MemoryManagerConfig.default.toString shouldBe "MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false,1000))"
   }
 
   "MemoryManagerConfig" should "have no public constructor or copy, so it can gain options" in {

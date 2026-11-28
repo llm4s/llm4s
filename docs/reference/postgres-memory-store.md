@@ -44,7 +44,7 @@ and `llm4s-memory` with them. The package name is unchanged.
   Table names are validated; every filter value, metadata keys included, is a bound parameter.
 
 - **Explicit Error Handling**  
-  All operations return a `Result` type instead of throwing exceptions.
+  Every store operation returns a `Result`; only a `Config` with an invalid value throws, when it is built.
 
 ---
 
@@ -309,13 +309,31 @@ large table give the store an embedding service, or a narrow filter.
 
 ## Error Handling
 
-The store follows a functional error handling model.
+Every store operation returns a `Result[T]`; none throws. The exception is building a `Config`: a table name that
+fails [validation](#table-name-validation), an empty tenant or a dimension below 1 throws `IllegalArgumentException`
+when the `Config` is constructed. `PostgresMemoryStore.fromDataSource` checks the same things and returns a `Left`
+instead.
 
-- No public method throws exceptions
+## With `SemanticMemoryMiddleware`
 
-- All operations return Result[T]
+`PostgresMemoryStore` is a `TransactionalMemoryStore`, so `llm4s-agent-memory`'s `SemanticMemoryMiddleware` can
+record turns, replay them after a crash without writing twice, and consolidate. Give each tenant a store of its own
+tenant over one shared pool, built by the resolver; the middleware refuses two tenants with the same rows:
 
-- Errors are explicit and must be handled by the caller
+```scala
+val pool: javax.sql.DataSource = ??? // your application's pool
+val stores: Option[TenantId] => Result[MemoryStore] = tenant =>
+  PostgresMemoryStore.fromDataSource(
+    pool,
+    embeddingService = Some(embeddingService),
+    tenant = tenant.map(_.value),
+    embeddingDimensions = Some(1536)
+  )
+```
+
+A store over a caller-owned pool does not close it, so the middleware releasing an idle tenant's store
+(`maxTenants`, `close()`) leaves the pool open. A store built by `PostgresMemoryStore(config)` owns its own pool,
+which releasing it closes.
 
 ---
 

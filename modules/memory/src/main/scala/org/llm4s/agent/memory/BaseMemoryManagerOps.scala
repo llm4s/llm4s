@@ -193,47 +193,8 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
     }
   }
 
-  override def stats: Result[MemoryStats] =
-    for {
-      total             <- store.count()
-      conversationCount <- store.count(MemoryFilter.conversations)
-      entityCount       <- store.count(MemoryFilter.entities)
-      knowledgeCount    <- store.count(MemoryFilter.knowledge)
-      userFactCount     <- store.count(MemoryFilter.userFacts)
-      taskCount         <- store.count(MemoryFilter.tasks)
-      allMemories       <- store.recall(MemoryFilter.All, Int.MaxValue)
-    } yield {
-      val byType = Map[MemoryType, Long](
-        MemoryType.Conversation -> conversationCount,
-        MemoryType.Entity       -> entityCount,
-        MemoryType.Knowledge    -> knowledgeCount,
-        MemoryType.UserFact     -> userFactCount,
-        MemoryType.Task         -> taskCount
-      ).filter(_._2 > 0)
-
-      val timestamps = allMemories.map(_.timestamp)
-      val embedded   = allMemories.count(_.isEmbedded)
-
-      val distinctEntities = allMemories
-        .flatMap(_.getMetadata("entity_id"))
-        .distinct
-        .size
-
-      val distinctConversations = allMemories
-        .flatMap(_.getMetadata("conversation_id"))
-        .distinct
-        .size
-
-      MemoryStats(
-        totalMemories = total,
-        byType = byType,
-        entityCount = distinctEntities.toLong,
-        conversationCount = distinctConversations.toLong,
-        embeddedCount = embedded.toLong,
-        oldestMemory = if (timestamps.isEmpty) None else Some(timestamps.min),
-        newestMemory = if (timestamps.isEmpty) None else Some(timestamps.max)
-      )
-    }
+  /** The store's statistics: counted by the store, in SQL where it has SQL, never by loading every memory (#3040). */
+  override def stats: Result[MemoryStats] = store.stats
 
   /**
    * Format a sequence of memories into a structured context string grouped by memory type.

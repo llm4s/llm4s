@@ -61,8 +61,9 @@ private object PostgresContractDb {
  */
 @Docker
 class PostgresKeywordMemoryStoreContractSpec extends MemoryStoreContract {
-  protected def storeName: String = "PostgresMemoryStore (keyword)"
-  protected def semantic: Boolean = false
+  override protected def expectDurable: Boolean = true
+  protected def storeName: String               = "PostgresMemoryStore (keyword)"
+  protected def semantic: Boolean               = false
   protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A = {
     Tier.require(PostgresContractDb.isEnabled, "POSTGRES_TEST_ENABLED=true not set")
     val table = PostgresContractDb.freshTable()
@@ -74,8 +75,9 @@ class PostgresKeywordMemoryStoreContractSpec extends MemoryStoreContract {
 /** `MemoryStoreContract` over [[PostgresMemoryStore]] with an embedding service: pgvector search. `@Docker`. */
 @Docker
 class PostgresSemanticMemoryStoreContractSpec extends MemoryStoreContract {
-  protected def storeName: String = "PostgresMemoryStore (pgvector)"
-  protected def semantic: Boolean = true
+  override protected def expectDurable: Boolean = true
+  protected def storeName: String               = "PostgresMemoryStore (pgvector)"
+  protected def semantic: Boolean               = true
   protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A = {
     Tier.require(PostgresContractDb.isEnabled, "POSTGRES_TEST_ENABLED=true not set")
     val table = PostgresContractDb.freshTable()

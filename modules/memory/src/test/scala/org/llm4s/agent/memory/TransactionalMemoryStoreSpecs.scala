@@ -99,3 +99,15 @@ class SqliteTransactionalMemoryStoreSpec extends TransactionalMemoryStoreContrac
     }
   }
 }
+
+/** The contract over [[VectorMemoryStore]], transactional since it is a `SQLiteMemoryStore` (#3039). */
+class VectorTransactionalMemoryStoreSpec extends TransactionalMemoryStoreContract {
+  protected def storeName: String = "VectorMemoryStore"
+  protected def newStore(): TransactionalMemoryStore =
+    VectorMemoryStore.inMemory(MockEmbeddingService(8)).fold(e => fail(e.message), identity)
+
+  override protected def withStore[A](body: TransactionalMemoryStore => A): A = {
+    val store = VectorMemoryStore.inMemory(MockEmbeddingService(8)).fold(e => fail(e.message), identity)
+    TransactionalMemoryStoreContract.after(store.close())(body(store))
+  }
+}
