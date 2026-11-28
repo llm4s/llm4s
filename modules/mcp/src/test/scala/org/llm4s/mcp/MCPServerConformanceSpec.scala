@@ -38,11 +38,30 @@ class MCPServerConformanceSpec extends AnyFlatSpec with Matchers with BeforeAndA
   private class Clocked(options: MCPServerOptions, val time: AtomicLong = new AtomicLong(0))
       extends MCPServer(
         options,
-        Seq(echo, slow),
+        Seq(echo, slow, gate),
         Map("echo" -> MCPToolAnnotations(title = Some("Echo"), readOnlyHint = Some(true)))
       ) {
     override private[mcp] def nowMillis(): Long = time.get
   }
+
+  // `gate` waits until the test releases its key; it says whether it was interrupted, and whether its thread already
+  // carried an interrupt when it started (a stale one from a cancellation of another call)
+  private val gates = new java.util.concurrent.ConcurrentHashMap[String, (CountDownLatch, CountDownLatch)]()
+  private def gateFor(key: String) = gates.computeIfAbsent(key, _ => new CountDownLatch(1) -> new CountDownLatch(1))
+  private val gate = ToolBuilder[ujson.Value](
+    "gate",
+    "Waits for its key",
+    Schema.`object`[Map[String, Any]]("Gate").withRequiredField("key", Schema.string("key"))
+  ).withHandler { params =>
+    params.getString("key").map { key =>
+      val staleInterrupt     = Thread.currentThread().isInterrupted
+      val (entered, release) = gateFor(key)
+      entered.countDown()
+      val wasInterrupted = org.llm4s.error.CancelledError.catchInterrupt(release.await(30, TimeUnit.SECONDS)).isLeft
+      ujson.Obj("interrupted" -> wasInterrupted, "staleInterrupt" -> staleInterrupt): ujson.Value
+    }
+  }.build()
+    .fold(e => fail(e.formatted), identity)
 
   private val server = new Clocked(MCPServerOptions(0, "/mcp", "Conformance", "1.0", sessionIdleTimeout = 1.minute))
   private val http   = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()
@@ -144,6 +163,113 @@ class MCPServerConformanceSpec extends AnyFlatSpec with Matchers with BeforeAndA
     val (session, _) = initialize()
     val reply        = ujson.read(inSession(session, request(11, "tools/call", ujson.Obj("name" -> "nope"))).body())
     reply("error")("code").num shouldBe MCPErrorCodes.INVALID_PARAMS
+  }
+
+  private def gateCall(id: ujson.Value, key: String) =
+    ujson.Obj(
+      "jsonrpc" -> "2.0",
+      "id"      -> id,
+      "method"  -> "tools/call",
+      "params"  -> ujson.Obj("name" -> "gate", "arguments" -> ujson.Obj("key" -> key))
+    )
+
+  private def cancelOf(id: ujson.Value) =
+    ujson.Obj("jsonrpc" -> "2.0", "method" -> "notifications/cancelled", "params" -> ujson.Obj("requestId" -> id))
+
+  /** Sends `body` on a virtual thread; the reply, once the thread is joined. */
+  private def inBackground(send: => HttpResponse[String]) = {
+    @volatile var reply: Option[HttpResponse[String]] = None
+    val thread                                        = Thread.ofVirtual().start(() => reply = Some(send))
+    () => { thread.join(15_000); reply.getOrElse(fail("no reply")) }
+  }
+
+  private def gateResult(reply: HttpResponse[String]) = ujson.read(reply.body())("result")("structuredContent")
+
+  it should "never let a client without a session cancel a call, its own or another's" in {
+    val call =
+      inBackground(post(server, gateCall(ujson.Num(20), "sessionless"), "MCP-Protocol-Version" -> "2025-06-18"))
+    gateFor("sessionless")._1.await(10, TimeUnit.SECONDS) shouldBe true
+    post(server, cancelOf(ujson.Num(20))).statusCode() shouldBe 202
+    gateFor("sessionless")._2.countDown()
+    val reply = call()
+    reply.statusCode() shouldBe 200
+    gateResult(reply)("interrupted").bool shouldBe false
+  }
+
+  it should "tell a numeric id from a string one when cancelling" in {
+    val (session, _) = initialize()
+    val numeric      = inBackground(inSession(session, gateCall(ujson.Num(1), "numeric")))
+    val text         = inBackground(inSession(session, gateCall(ujson.Str("1"), "text")))
+    gateFor("numeric")._1.await(10, TimeUnit.SECONDS) shouldBe true
+    gateFor("text")._1.await(10, TimeUnit.SECONDS) shouldBe true
+
+    inSession(session, cancelOf(ujson.Num(1))).statusCode() shouldBe 202
+    val cancelled = numeric()
+    cancelled.statusCode() shouldBe 202
+    cancelled.body() shouldBe ""
+
+    gateFor("text")._2.countDown()
+    val kept = text()
+    ujson.read(kept.body())("id") shouldBe ujson.Str("1")
+    gateResult(kept)("interrupted").bool shouldBe false
+  }
+
+  /** A server that can hold a call between running and being marked completed, for a cancel to arrive then. */
+  private class Hooked extends MCPServer(MCPServerOptions(0, "/mcp", "Hooked", "1.0"), Seq(gate)) {
+    @volatile var hold: Option[(CountDownLatch, CountDownLatch)] = None
+    override private[mcp] def beforeCallCompletes(): Unit = hold.foreach { case (reached, proceed) =>
+      reached.countDown()
+      // Waits through the cancellation's interrupt, which is then set again for the server to clear
+      var interrupted = false
+      while (org.llm4s.error.CancelledError.catchInterrupt(proceed.await()).isLeft) interrupted = true
+      if (interrupted) Thread.currentThread().interrupt()
+    }
+  }
+
+  private def withHooked(test: Hooked => Unit): Unit = {
+    val hooked = new Hooked
+    hooked.start().fold(e => throw e, _ => ())
+    try test(hooked)
+    finally hooked.stop()
+  }
+
+  it should "let a cancellation that arrives after the tool ran but before it completed win, and leave no interrupt behind" in
+    withHooked { hooked =>
+      val (session, _) = initialize(hooked)
+      val reached      = new CountDownLatch(1)
+      val proceed      = new CountDownLatch(1)
+      hooked.hold = Some(reached -> proceed)
+      val call = inBackground(inSession(session, gateCall(ujson.Num(30), "late-cancel"), hooked))
+      gateFor("late-cancel")._2.countDown() // the tool returns at once
+      reached.await(10, TimeUnit.SECONDS) shouldBe true
+      inSession(session, cancelOf(ujson.Num(30)), hooked).statusCode() shouldBe 202
+      proceed.countDown()
+      val reply = call()
+      reply.statusCode() shouldBe 202
+      reply.body() shouldBe ""
+      hooked.hold = None
+
+      // The pool's threads carry no interrupt into the next calls
+      (1 to 4).foreach { n =>
+        gateFor(s"after-late-$n")._2.countDown()
+        gateResult(inSession(session, gateCall(ujson.Num(31 + n), s"after-late-$n"), hooked))(
+          "staleInterrupt"
+        ).bool shouldBe false
+      }
+    }
+
+  it should "ignore a cancellation that arrives after the call completed" in withHooked { hooked =>
+    val (session, _) = initialize(hooked)
+    gateFor("done")._2.countDown()
+    val reply = inSession(session, gateCall(ujson.Num(40), "done"), hooked)
+    reply.statusCode() shouldBe 200
+    inSession(session, cancelOf(ujson.Num(40)), hooked).statusCode() shouldBe 202
+    (1 to 4).foreach { n =>
+      gateFor(s"after-done-$n")._2.countDown()
+      gateResult(inSession(session, gateCall(ujson.Num(40 + n), s"after-done-$n"), hooked))(
+        "staleInterrupt"
+      ).bool shouldBe false
+    }
   }
 
   it should "interrupt a tool call the client cancels, and send no reply for it" in {

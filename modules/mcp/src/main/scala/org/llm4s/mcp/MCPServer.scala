@@ -104,8 +104,9 @@ case class MCPServerOptions(
  * latest otherwise. A later request without `MCP-Protocol-Version` is taken as 2025-03-26, as the specification
  * says; one naming an unsupported version is answered 400. `ping` is answered with an empty result. A request naming
  * a session the server does not know, or one that has expired ([[MCPServerOptions.sessionIdleTimeout]]), is
- * answered 404. A `notifications/cancelled` for a `tools/call` still running interrupts it, and its reply is not
- * sent. The legacy `endpoint` event is a path, so a client reaches the messages endpoint by the name and scheme it
+ * answered 404. A `notifications/cancelled` for a `tools/call` still running on the same session (or SSE stream)
+ * interrupts it, and its reply is not sent; a client that uses no session cannot cancel, since nothing would tell
+ * its calls from another sessionless client's. The legacy `endpoint` event is a path, so a client reaches the messages endpoint by the name and scheme it
  * used for the stream.
  *
  * @param options     Server configuration.
@@ -271,25 +272,65 @@ class MCPServer(
 
   // ── Cancellation (#3081) ──────────────────────────────────────────────────
 
-  // The thread running each tools/call, by the channel it came on (a session, an SSE connection, or none) and its id
-  private val runningCalls   = new ConcurrentHashMap[(String, String), Thread]()
-  private val cancelledCalls = ConcurrentHashMap.newKeySet[(String, String)]()
+  /**
+   * One `tools/call` that may be cancelled: the thread running it, and whether it is running, cancelled or completed.
+   * Cancelling and completing are mutually exclusive, decided under the call's lock: an interrupt is delivered only
+   * by a cancellation that won, and only while the call still runs, so it never reaches a completed call's reply or
+   * the next request on the pooled thread.
+   */
+  final private class RunningCall(val thread: Thread) {
+    private var state = 0 // 0 running, 1 cancelled, 2 completed; guarded by this
+
+    /** Marks the call cancelled and interrupts it; `false` when it had already completed. */
+    def cancel(): Boolean = synchronized {
+      if (state == 0) {
+        state = 1
+        thread.interrupt()
+        true
+      } else false
+    }
+
+    /** Marks the call completed; `false` when a cancellation won, whose interrupt has then been delivered. */
+    def complete(): Boolean = synchronized {
+      if (state == 0) { state = 2; true }
+      else false
+    }
+  }
+
+  // The calls that may be cancelled, by the session or SSE stream they came on and their id as sent (a number and a
+  // string are different ids). A call without a session is never registered: nothing would tell two such clients'
+  // calls apart, so no `notifications/cancelled` can reach one.
+  private val runningCalls = new ConcurrentHashMap[(String, ujson.Value), RunningCall]()
+
+  /** Called after a call has run and before it is marked completed; a spec forces an interleaving here. */
+  private[mcp] def beforeCallCompletes(): Unit = ()
 
   /**
    * Runs a `tools/call` so that a `notifications/cancelled` for it on the same channel can interrupt it. `Some` of the
    * reply, or `None` when the call was cancelled: the specification says no reply is sent for a cancelled request.
+   * A call on no channel (a sessionless Streamable HTTP client) runs without cancellation.
    */
-  private def cancellable(channel: String, request: JsonRpcRequest)(
+  private def cancellable(channel: Option[String], id: ujson.Value, request: JsonRpcRequest)(
     run: => JsonRpcResponse
   ): Option[JsonRpcResponse] = {
-    val key = channel -> request.id
-    runningCalls.put(key, Thread.currentThread())
+    val registered = channel.map { c =>
+      val key  = c -> id
+      val call = new RunningCall(Thread.currentThread())
+      runningCalls.put(key, call)
+      key -> call
+    }
     // A handler that lets the interrupt escape is still a cancelled (or failed) call, never a dead pool thread
     val reply = CancelledError.catchInterrupt(Try(run))
-    runningCalls.remove(key)
-    val cancelled = cancelledCalls.remove(key)
-    if (cancelled) Thread.interrupted(): Unit // the interrupt was for the call, not for this pooled thread
-    if (cancelled) {
+    beforeCallCompletes()
+    val completed = registered.forall { case (key, call) =>
+      val done = call.complete()
+      runningCalls.remove(key, call): Unit
+      done
+    }
+    if (!completed) {
+      // The cancellation's interrupt was delivered under the call's lock, before `complete` returned: clear it here,
+      // so it never reaches the next request on this pooled thread
+      Thread.interrupted(): Unit
       logger.info(s"Tool call ${request.id} was cancelled by the client; its reply is not sent")
       None
     } else
@@ -306,19 +347,20 @@ class MCPServer(
       }
   }
 
-  private def cancel(channel: String, notification: JsonRpcNotification): Unit =
-    notification.params.flatMap(_.objOpt).flatMap(_.get("requestId")).collect {
-      case s: ujson.Str => idText(s)
-      case n: ujson.Num => idText(n)
-    } match {
-      case Some(id) =>
-        val key = channel -> id
-        Option(runningCalls.get(key)).foreach { thread =>
-          logger.info(s"Cancelling tool call $id at the client's request")
-          cancelledCalls.add(key)
-          thread.interrupt()
+  private def cancel(channel: Option[String], notification: JsonRpcNotification): Unit =
+    (
+      channel,
+      notification.params.flatMap(_.objOpt).flatMap(_.get("requestId")).collect {
+        case s: ujson.Str => s: ujson.Value
+        case n: ujson.Num => n: ujson.Value
+      }
+    ) match {
+      case (Some(c), Some(id)) =>
+        Option(runningCalls.get(c -> id)).foreach { call =>
+          if (call.cancel()) logger.info(s"Cancelled tool call ${idText(id)} at the client's request")
         }
-      case None => logger.debug("notifications/cancelled without a requestId")
+      case (None, _) => logger.debug("notifications/cancelled without a session: calls without one cannot be cancelled")
+      case (_, None) => logger.debug("notifications/cancelled without a requestId")
     }
 
   // ── JSON-RPC 2.0 envelope, shared by both transports (#3071) ──────────────
@@ -460,7 +502,7 @@ class MCPServer(
   }
 
   // Dispatch a JSON-RPC request for the SSE transport (no HTTP session management); `None` for a cancelled call
-  private def processSSERequest(channel: String, request: JsonRpcRequest): Option[JsonRpcResponse] =
+  private def processSSERequest(channel: String, id: ujson.Value, request: JsonRpcRequest): Option[JsonRpcResponse] =
     request.method match {
       case "initialize" =>
         val version = negotiate(request, "2024-11-05")
@@ -468,7 +510,7 @@ class MCPServer(
         Some(JsonRpcResponse(id = request.id, result = Some(initializeResult(version))))
       case "ping"       => Some(JsonRpcResponse(id = request.id, result = Some(ujson.Obj())))
       case "tools/list" => Some(handleToolsList(request))
-      case "tools/call" => cancellable(channel, request)(handleToolsCall(request))
+      case "tools/call" => cancellable(Some(channel), id, request)(handleToolsCall(request))
       case other =>
         Some(
           JsonRpcResponse(
@@ -628,11 +670,11 @@ class MCPServer(
                       // POST returns 202 Accepted at once; the reply is delivered via the SSE stream, so a long tool
                       // call does not hold the POST, and a cancellation can arrive while it runs
                       sendAccepted(exchange)
-                      processSSERequest(s"sse:$sid", request).foreach { reply =>
+                      processSSERequest(s"sse:$sid", id, request).foreach { reply =>
                         conn.queue.put(Some(s"event: message\ndata: ${renderReply(id, reply)}\n\n"))
                       }
                     case Incoming.Notification(notification) =>
-                      handleNotification(s"sse:$sid", notification)
+                      handleNotification(Some(s"sse:$sid"), notification)
                       sendAccepted(exchange)
                     case Incoming.ClientResponse =>
                       // A response to a server request: this server sends none, so there is nothing to match it to.
@@ -734,7 +776,7 @@ class MCPServer(
                   )
                 case "tools/list" => sendJsonRpcResponse(exchange, id, handleToolsList(request), sessionId)
                 case "tools/call" =>
-                  cancellable(channel, request)(handleToolsCall(request)) match {
+                  cancellable(channel, id, request)(handleToolsCall(request)) match {
                     case Some(reply) => sendJsonRpcResponse(exchange, id, reply, sessionId)
                     case None        => sendAccepted(exchange) // cancelled: no JSON-RPC reply
                   }
@@ -745,11 +787,13 @@ class MCPServer(
       }
 
     /**
-     * Runs `serve` with the message's channel (its session, or `-` for a client that uses none) when the session it
+     * Runs `serve` with the message's channel (its session, `None` for a client that uses none) when the session it
      * names is live; a session the server does not know or that has expired is answered 404 (#3081), which tells the
      * client to start a new one.
      */
-    private def withLiveSession(exchange: HttpExchange, id: ujson.Value = ujson.Null)(serve: String => Unit): Unit =
+    private def withLiveSession(exchange: HttpExchange, id: ujson.Value = ujson.Null)(
+      serve: Option[String] => Unit
+    ): Unit =
       Option(exchange.getRequestHeaders.getFirst("mcp-session-id")).map(_.trim) match {
         case Some(session) if SessionStore.touch(session).isEmpty =>
           logger.warn("A request named an unknown or expired session")
@@ -760,11 +804,11 @@ class MCPServer(
             "application/json",
             errorReply(id, MCPErrorCodes.SESSION_EXPIRED, "Session not found")
           )
-        case Some(session) => serve(session)
-        case None          => serve("-")
+        case Some(session) => serve(Some(session))
+        case None          => serve(None)
       }
 
-    private def handleNotification(channel: String, notification: JsonRpcNotification): Unit =
+    private def handleNotification(channel: Option[String], notification: JsonRpcNotification): Unit =
       notification.method match {
         case "notifications/initialized" => logger.info("Client initialized notification received")
         case "notifications/cancelled"   => cancel(channel, notification)

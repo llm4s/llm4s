@@ -841,7 +841,7 @@ approval. Untrusted servers' tools keep `ToolHints.default`.
 | The legacy `endpoint` event was `http://127.0.0.1:<port>/...` | A path, `{path}/messages?sessionId=...`, which the client resolves against the stream's URL |
 | An unknown tool: -32001 | -32602 (invalid params) |
 | Tool annotations were never sent | `new MCPServer(options, tools, annotations = Map("search" -> MCPToolAnnotations(readOnlyHint = Some(true))))` |
-| A cancelled tool call ran to completion and replied | `notifications/cancelled` interrupts it; no reply is sent |
+| A cancelled tool call ran to completion and replied | `notifications/cancelled` on the call's own session (or SSE stream) interrupts it, matched by the id as sent; no reply is sent. A client without a session cannot cancel |
 
 `MCPServerOptions` gains `sessionIdleTimeout` and `maxSessions`, with defaults, so a positional pattern on it takes
 two more arguments.
