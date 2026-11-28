@@ -136,7 +136,8 @@ AgentId.of("assistant").flatMap { agentId =>
   what a guardrail would refuse or rewrite out of the queue as well, admit the query on the submitting instance and
   queue the result: `agent.admit(threadId, text).map(QueuedInput.admitted)`. The entry then holds the query as the
   guardrails left it - or, for a refused one, only the refusing guardrail's name - and the worker does not run them
-  again. See [Admission](middleware#admission).
+  again. Only `QueuedInput.admitted` makes an entry the worker trusts this way: a `QueuedInput.Start` built from a
+  client's JSON is admitted by the worker, whatever `admission` mark its input carries. See [Admission](middleware#admission).
 - **Following a run** is `submitter.follow(tenant, entryId, after, limit, wait)`, a page at a time from a thread
   sequence number: it waits for the next commit on whichever machine makes it, and resuming from the last number seen
   repeats nothing. `submitter.await(tenant, entryId, timeout)` waits for the entry to close.

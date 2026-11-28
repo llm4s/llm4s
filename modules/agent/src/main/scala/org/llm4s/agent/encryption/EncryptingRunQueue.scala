@@ -53,7 +53,8 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   ): Result[QueuedInput] =
     val place = Vector("queue") ++ tenantId.fold(Vector("-", ""))(t => Vector("t", t.value)) :+ agentId.value
     input match
-      case QueuedInput.Start(value) => codec(place :+ "start", value).map(QueuedInput.Start(_))
+      case QueuedInput.Start(value)    => codec(place :+ "start", value).map(QueuedInput.Start(_))
+      case QueuedInput.Admitted(value) => codec(place :+ "admitted", value).map(QueuedInput.Admitted(_))
       case QueuedInput.Resume(answers) =>
         traverse(answers.toVector)((id, answer) => codec(place ++ Vector("resume", id.value), answer).map(id -> _))
           .map(opened => QueuedInput.Resume(opened.toMap))

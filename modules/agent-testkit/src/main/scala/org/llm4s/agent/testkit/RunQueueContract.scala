@@ -208,6 +208,18 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.entry(recover.entryId).input shouldBe QueuedInput.Recover
   }
 
+  // #3258: the admitted kind is the only one the worker takes an admission mark from, so a store keeps it apart
+  it should "keep an admitted input as its own kind, apart from a start with the same JSON" in {
+    val c        = Case()
+    val value    = ujson.Obj("query" -> "hi", "admission" -> ujson.Obj("agents" -> ujson.Arr("assistant")))
+    val admitted = c.submit(input = QueuedInput.Admitted(value)).value
+    val started  = c.submit(input = QueuedInput.Start(value)).value
+    same(c.entry(admitted.entryId).input, QueuedInput.Admitted(value))
+    same(c.entry(started.entryId).input, QueuedInput.Start(value))
+    c.reopened()
+    c.entry(admitted.entryId).input shouldBe a[QueuedInput.Admitted]
+  }
+
   it should "keep the submitter's trace context with the entry, the first submission's under a retried key" in {
     val c       = Case()
     val context = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
