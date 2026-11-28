@@ -1087,6 +1087,30 @@ After a change of embedding model, re-embed what the old one wrote, with the sto
 `ConsolidationConfig` gains a third field, and `MemoryRecall` and `MemoryConsolidation` two and one: positional
 patterns over them gain a `_`.
 
+## SDK-backed providers no longer retry on their own (#3210)
+
+`llm4s-openai` and `llm4s-anthropic` are frozen, and no signature changed. `llm4s-bedrock` and
+`llm4s-azure-identity` change in the same way. The vendor SDK under these clients used to retry a failed call
+by itself, unseen by llm4s; now each client sends **one request per call**, as the openai-compatible, Gemini and
+Ollama clients always have, and retrying is left to `ReliableClient`.
+
+| Before (1.0.0) | After |
+|---|---|
+| `openai`, `azure`, `requesty` (openai-java) and `anthropic` (anthropic-java) made up to 3 attempts: a 408, 409, 429, 5xx or I/O failure, a timeout included, was retried twice, honouring any `Retry-After` uncapped | One attempt. The error comes back at once |
+| `bedrock` (AWS SDK v2, legacy retry mode) made up to 4 attempts on a 500, 502, 503, 504, throttling error or I/O failure | One attempt, on the synchronous and the streaming client |
+| Under a `ReliableClient` with its default 3 attempts, one call could send 9 (12 on Bedrock) requests; each OpenAI or Anthropic attempt got the full `timeouts.request`, and the circuit breaker and `ReliabilityMetrics` saw one failure per 3 or 4 requests | One call sends at most `RetryPolicy`'s attempts; `timeouts.request` bounds each one, and the breaker and metrics see every request |
+
+If you relied on the SDK's retries without a `ReliableClient`, wrap the client to retry:
+
+```scala
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+
+val reliable = ReliableClient(client, "openai-main", ReliabilityConfig.default) // 3 attempts, exponential backoff
+```
+
+See [Reliable LLM calling](../guide/reliability). If you already wrap the client, nothing changes except that a
+failing call now sends as many requests as your `RetryPolicy` says, and fails sooner.
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

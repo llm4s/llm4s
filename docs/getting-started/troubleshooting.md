@@ -267,7 +267,8 @@ the default.
 **Fix.** Check the endpoint is reachable - behind an outbound proxy, configure it ([problem 15](#corporate-network)) -
 and if the model is just slow raise the timeout in the section's
 `timeouts` block (`timeouts { request = 5m, stream = 20m }`). The defaults differ by provider, and the OpenAI,
-Azure, Requesty and Anthropic clients use their SDK's own timeouts, which retry; see [Timeouts](configuration#timeouts).
+Azure, Requesty and Anthropic clients use their SDK's own default timeout; see [Timeouts](configuration#timeouts). No
+client retries a timed-out call on its own: wrap it in [`ReliableClient`](../guide/reliability) to retry.
 
 ## 14. Model not found (404) {#model-not-found}
 

@@ -53,9 +53,8 @@ import scala.util.{ Try, Using }
  * `LLMConnect.getClient`. Each talks to its own local mock server speaking that provider's wire format,
  * so nothing leaves the machine: no network, no API key, no Docker.
  *
- * The mock servers send `x-should-retry: false` on every error, which tells both vendor SDKs not to
- * retry on their own: retrying is `ReliableClient`'s job, and a test that counts requests needs to know
- * who sent them.
+ * No client retries on its own: the SDK-backed ones are built with their SDK's retries off (#3210), so
+ * retrying is `ReliableClient`'s job alone, and a test that counts requests knows who sent them.
  *
  * llm4s has no built-in failover client. The failover tests cover the documented pattern instead
  * (`docs/guide/reliability.md`, "Fallback between providers", and the cookbook's `FallbackRecipe`): each
@@ -299,6 +298,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
             error shouldBe a[ServiceError]
             error.asInstanceOf[ServiceError].status shouldBe 500
             retryable(error) shouldBe true
+            p.server.requests should have size 1 // the client itself does not retry (#3210)
           }
         }
       }
@@ -332,7 +332,9 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           val error = p.client.complete(hello).left.value
           withClue(s"${p.id}: $error") {
             retryable(error) shouldBe true
+            // The OpenAI and Anthropic SDKs report their timeout as an I/O failure, mapped to NetworkError (#3309).
             error should (be(a[TimeoutError]).or(be(a[NetworkError])))
+            p.server.requests should have size 1 // one attempt, bounded by timeouts.request (#3210)
           }
         }
       }
@@ -629,8 +631,6 @@ object ProviderSwitchingFailoverSpec {
     }
 
     private def sendError(exchange: HttpExchange, status: Int): Unit = {
-      // Both vendor SDKs honour this header: retrying is left to ReliableClient.
-      exchange.getResponseHeaders.add("x-should-retry", "false")
       if (status == 429) exchange.getResponseHeaders.add("Retry-After", RetryAfterSeconds.toString)
       LocalProviderTestServer.sendJsonResponse(exchange, status, errorBody(status))
     }

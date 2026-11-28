@@ -35,6 +35,7 @@ import software.amazon.awssdk.auth.credentials.{
   ProfileCredentialsProvider,
   StaticCredentialsProvider
 }
+import software.amazon.awssdk.awscore.retry.AwsRetryStrategy
 import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.document.Document
@@ -151,12 +152,11 @@ final class BedrockClient private[provider] (
       .credentialsProvider(credentialsProvider)
     config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url.asUrl)))
     BedrockNetwork.syncHttpClient(config).foreach(builder.httpClientBuilder)
-    // Without a configured request timeout the SDK keeps its own defaults.
-    requestTimeout.foreach { timeout =>
-      builder.overrideConfiguration(
-        ClientOverrideConfiguration.builder().apiCallTimeout(java.time.Duration.ofNanos(timeout.toNanos)).build()
-      )
-    }
+    // One attempt per call: retrying belongs to ReliableClient, whose policy, deadline, breaker and metrics an SDK
+    // retry underneath would bypass (#3210). Without a configured request timeout the SDK keeps its default.
+    val overrides = ClientOverrideConfiguration.builder().retryStrategy(AwsRetryStrategy.doNotRetry())
+    requestTimeout.foreach(timeout => overrides.apiCallTimeout(java.time.Duration.ofNanos(timeout.toNanos)))
+    builder.overrideConfiguration(overrides.build())
     builder.build()
   }
 
@@ -168,6 +168,9 @@ final class BedrockClient private[provider] (
       .credentialsProvider(credentialsProvider)
     config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url.asUrl)))
     BedrockNetwork.asyncHttpClient(config).foreach(builder.httpClientBuilder)
+    builder.overrideConfiguration(
+      ClientOverrideConfiguration.builder().retryStrategy(AwsRetryStrategy.doNotRetry()).build()
+    )
     builder.build()
   }
 
