@@ -1000,6 +1000,15 @@ what changed is what passes:
 | A guardrail's error of any kind blocked the turn: an LLM judge's rate limit or timeout ended `AgentStatus.Blocked`, an output one retracting the turn for good, with a durable `GuardrailBlocked` event (#3247) | An error that is not a refusal (not a `ValidationError`, `ContentFilteredError` or `GuardrailBlocked`) is the new `GuardrailUnavailable(guardrail, cause)` when no other guardrail refused: the run fails (`agent.run`'s `Left`, inside the failed node's `GraphError`) and keeps the turn, and `recover` runs the output guardrails again. `CompositeGuardrail.all`/`.any` return such an error unchanged when nothing in them refused. A custom guardrail that refuses with another error type should return a `ValidationError` |
 | `GuardrailReviewMiddleware` on `Allow` let the original text through, dropping the rewrites of the guardrails that passed it: a query refused by a filter and allowed by the reviewer went on with its SSN unmasked (#3248) | `Allow` runs the list once more on the text, failures ignored, and lets it through as the passing guardrails rewrote it. An LLM judge in the list is called once more on `Allow` |
 
+## Handoffs admit the target's query, and delegation and memory stay inside the parent's guards (#3245, #3274, #3275, #3276)
+
+The handoff, delegation and memory types involved are experimental, and `llm4s-memory` is Beta. What changed is what
+passes:
+
+| Before (1.0.0) | After |
+|---|---|
+| On the turn that handed off to a specialist, its input guardrails and `admit` stages never saw the query: they first ran on the next turn (#3245) | They run on that turn's query at the handoff, before the specialist's model is called. A refusal ends the turn `AgentStatus.Blocked` and retracts it with its handoff, as an output block does; a rewrite replaces the stored user message. A specialist's `beforeAgent` hooks still first run on its next turn |
+
 ## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
 
 `AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. No public signature changed, and the

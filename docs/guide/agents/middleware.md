@@ -159,7 +159,8 @@ answer from `afterAgent`, blocks the turn too (see [Errors](#errors)).
 In an agent family with [handoffs](handoffs), the root agent's boundary hooks guard the whole family: its
 `admit` and `beforeAgent` run on every turn's query before the active agent's own, and its `afterAgent` on every
 final answer after the answering agent's own. A handoff target's `admit` and boundary hooks apply only while it is
-active.
+active. Its `admit` also runs at the handoff, on the query of the turn that hands off to it (#3245), so its input
+guardrails see that query before its model does; its `beforeAgent` first runs on its next turn.
 
 ### Around a model call
 

@@ -1426,7 +1426,8 @@ object ToolLoop:
         case MiddlewareHook.BeforeAgent   => inputWrites ++ family.writes
         case MiddlewareHook.WrapModelCall =>
           // the model step again: with a response format, it may retract the turn, as the finish does
-          owner.modelWrites ++ (if owner.agent.output.isDefined then family.writes else Set.empty)
+          owner.modelWrites ++
+            (if owner.agent.output.isDefined || owner.agent.handoffs.nonEmpty then family.writes else Set.empty)
         case MiddlewareHook.WrapToolCall => owner.callWrites
         case MiddlewareHook.AfterAgent   => finishWrites ++ family.writes
       b.implement(asked.ref.node, writes = writes) { (resumed, state, context) =>
@@ -1612,7 +1613,7 @@ object ToolLoop:
       state: ThreadState,
       after: ThreadState,
       context: RunContext
-    ): Command =
+    ): NodeResult =
       val assistant = completion.message
       val taskId    = context.position.taskId.value
       val stored    = StoredMessage(s"$taskId/assistant", assistant)
@@ -1632,28 +1633,43 @@ object ToolLoop:
         MessageUpdate.Append(StoredMessage(s"$taskId/tool/${call.id}", ToolMessage(content, call.id)))
       calls.filter(c => handoffs.contains(c.name)) match
         case none if none.isEmpty =>
-          if calls.isEmpty then appended(Set.empty).goto(nodes.finish)
+          if calls.isEmpty then NodeResult.Continue(appended(Set.empty).goto(nodes.finish))
           else
-            // the batch is scheduled once, with the locks its calls have now: they are recorded, so a later
-            // round, a resume or a recover - even under a rebuilt agent whose lock functions changed - keeps
-            // this order; a call whose locks conflict with an earlier call's waits for collect to run it
-            val tasks        = calls.map(issued(stored.id, _, context))
-            val schedule     = pipeline.schedule(tasks)
-            val (now, later) = pipeline.scheduled(tasks, schedule)
-            val batch        = appended(batchWrites(calls))
-            // a batch with no lock records nothing: collect then finds no schedule, and nothing waits
-            nodes.queueKey
-              .filter(_ => schedule.needsRecording)
-              .fold(batch)(key => batch.update(key, schedule.withWaiting(later)))
-              .fanOut(nodes.batch, nodes.callTool, now)
+            NodeResult.Continue {
+              // the batch is scheduled once, with the locks its calls have now: they are recorded, so a later
+              // round, a resume or a recover - even under a rebuilt agent whose lock functions changed - keeps
+              // this order; a call whose locks conflict with an earlier call's waits for collect to run it
+              val tasks        = calls.map(issued(stored.id, _, context))
+              val schedule     = pipeline.schedule(tasks)
+              val (now, later) = pipeline.scheduled(tasks, schedule)
+              val batch        = appended(batchWrites(calls))
+              // a batch with no lock records nothing: collect then finds no schedule, and nothing waits
+              nodes.queueKey
+                .filter(_ => schedule.needsRecording)
+                .fold(batch)(key => batch.update(key, schedule.withWaiting(later)))
+                .fanOut(nodes.batch, nodes.callTool, now)
+            }
         case Vector(transfer) if calls.size == 1 =>
           val target = handoffs(transfer.name)
-          AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
-          appended(Set.empty)
+          val handedOff = appended(Set.empty)
             .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
             .update(LoopKeys.activeAgent, target.agent.id)
             .update(LoopKeys.transfer, Some(Transfer(agent.id, target.agent.id, stored.id)))
             .goto(target.model)
+          // the target's admission stages run on the turn's query before its model sees it (#3245)
+          targetAdmission(target, turn, state, context) match
+            case Left(error) =>
+              state
+                .get(messages)
+                .flatMap(retraction(_, turn, state, context))
+                .fold(NodeResult.Fail(_), boundary(error, _, context, GuardrailPhase.Input))
+            case Right(rewritten) =>
+              AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
+              NodeResult.Continue(
+                rewritten.fold(handedOff) { case (id, text) =>
+                  handedOff.update(messages, MessageUpdate.Replace(id, StoredMessage(id, UserMessage(text))))
+                }
+              )
         case _ =>
           // a handoff with other calls, or several: nothing runs, every call gets the rule as its error
           // cut, for a tool that bounds its errors (the task tools, design 4.44), as every recorded error is
@@ -1662,9 +1678,39 @@ object ToolLoop:
               .Obj("error" -> ToolErrors.recorded(nodes.tools.get(call.name), HandoffTools.MixedBatch, isError = true))
               .render()
           calls.filterNot(c => handoffs.contains(c.name)).foreach(c => pipeline.refusedInBatch(c, error(c), context))
-          calls
-            .foldLeft(appended(Set.empty))((command, c) => command.update(messages, toolMessage(c, error(c))))
-            .goto(nodes.model)
+          NodeResult.Continue(
+            calls
+              .foldLeft(appended(Set.empty))((command, c) => command.update(messages, toolMessage(c, error(c))))
+              .goto(nodes.model)
+          )
+
+    /**
+     * The target's admission stages on the turn's query, at a handoff (#3245): the input step admitted the query for
+     * the root and the agent the turn started with only, so a target's input guardrails would otherwise first see a
+     * query on the next turn. `Right(None)` when they pass it unchanged, or the target already admitted it (the root,
+     * or the agent the turn started with); `Right(Some((id, text)))` when they rewrite it, the stored user message to
+     * replace; a `Left` refuses it, and the handoff then retracts the turn as an output Block does. Only `admit` runs
+     * here: a target's `beforeAgent` hooks, which may ask a question or write state, first run on its next turn.
+     */
+    def targetAdmission(
+      target: AgentNodes,
+      turn: TurnState,
+      state: ThreadState,
+      context: RunContext
+    ): Result[Option[(String, String)]] =
+      if target.agent.id == root || turn.startAgent.contains(target.agent.id) then Right(None)
+      else
+        state.get(messages).flatMap { history =>
+          history.reverseIterator
+            .collectFirst { case StoredMessage(id, user: UserMessage) => id -> user.content }
+            .fold[Result[Option[(String, String)]]](Right(None)) { (id, query) =>
+              val hook = hookContext(target.agent.id, context, Vector.empty, state)
+              target.stack.admit(query, AdmissionContext.within(hook, target.agent.id)).flatMap { text =>
+                if text.trim.isEmpty then Left(ValidationError("query", "admit returned a blank query"))
+                else Right(Option.when(text != query)(id -> text))
+              }
+            }
+        }
 
     /**
      * What a Block that ends the turn commits: every key the turn wrote back to its value before the turn
@@ -1807,7 +1853,7 @@ object ToolLoop:
             val content = ujson.write(json)
             response.completion.withMessage(response.completion.message.withContent(content))
           }
-          NodeResult.fromResult(
+          (
             for
               update <- Right(response.update)
               _      <- completion.message.validate
@@ -1815,7 +1861,7 @@ object ToolLoop:
               // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
               after <- state.applyUpdate(update)
             yield stored(turn, completion, update, state, after, context)
-          )
+          ).fold(NodeResult.Fail(_), identity)
         def answered(result: Result[ModelResponse])(invalid: (ModelResponse, Vector[String]) => NodeResult) =
           result match
             // a call refused at the token budget ends the turn as the step check does, whatever the wrappers
@@ -1852,7 +1898,8 @@ object ToolLoop:
       prepared.left.flatMap(error => if context.usage.refused then Right(limitReached) else Left(error))
 
     // a response format's second invalid answer retracts the turn from here, restoring any key the turn wrote
-    val formatWrites = if agent.output.isDefined then harness.writes else Set.empty
+    // and so does a handoff its target's admission refuses (#3245)
+    val formatWrites = if agent.output.isDefined || agent.handoffs.nonEmpty then harness.writes else Set.empty
     b.implement(nodes.model, writes = nodes.modelWrites ++ formatWrites)((_, state, context) =>
       modelStep(state, context, Vector.empty)
     )

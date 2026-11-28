@@ -259,8 +259,12 @@ val triage = Agent.builder("triage", client)
 // a query to billing two turns later still passes ProfanityFilter; billing's answers still pass PIIMasker
 ```
 
-A specialist's own boundary middleware applies only while it is active, inside the root's. A block
-from either ends the turn `Blocked`; an output block removes the whole turn, a handoff made in it
+A specialist's own boundary middleware applies only while it is active, inside the root's. On the
+turn that hands off to it, its admission stages - its input guardrails, and any middleware's `admit` - run on
+that turn's query at the handoff, before its model sees it (#3245): a refusal ends the turn `Blocked` and
+removes it, the handoff included, and a rewrite (a `PIIMasker`) replaces the stored query. Its `beforeAgent`
+hooks, which may ask a question or write state, first run on its next turn; put a hook that must see every
+query on the root. A block from either ends the turn `Blocked`; an output block removes the whole turn, a handoff made in it
 included, so the next turn starts with the agent that was active before it. Model and tool wrappers (`wrapModelCall`, `wrapToolCall`, such as
 `ContextWindowMiddleware` and `ApprovalMiddleware`) are per agent: give them to each agent that
 needs them. Do not give the root's guardrails to its specialists too: they would run twice.

@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest
 }
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck, ProfanityFilter }
+import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck, PIIMasker, ProfanityFilter }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -347,6 +347,42 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "NoSecrets"
     result.messages shouldBe empty
+  }
+
+  "A handoff target's input guardrail" should "check the query of the turn that hands off to it (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("never sent")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(Handoff.to("specialist", Agent.builder("specialist", specialist).withInputGuardrails(rejectNo)))
+    )
+
+    val result = agent.run("no card for you").value
+
+    result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "RejectNo"
+    result.messages shouldBe empty
+    // the handoff was part of the retracted turn: the thread is with the root again
+    result.activeAgent.value shouldBe "triage"
+    specialist.callCount shouldBe 0
+  }
+
+  it should "give the target's model the query as its admission rewrote it (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("done")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(
+          Handoff.to("specialist", Agent.builder("specialist", specialist).withInputGuardrails(new PIIMasker()))
+        )
+    )
+
+    val result = agent.run("my ssn is 123-45-6789").value
+
+    result.answer shouldBe Some("done")
+    specialist.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("my ssn is [REDACTED_SSN]")
+    result.messages.collect { case u: UserMessage => u.content } shouldBe Seq("my ssn is [REDACTED_SSN]")
   }
 
   "Boundary middleware across a handoff" should "run the root's then the target's beforeAgent, and the target's then the root's afterAgent" in {
