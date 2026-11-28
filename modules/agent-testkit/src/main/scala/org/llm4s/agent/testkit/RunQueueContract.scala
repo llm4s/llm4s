@@ -804,6 +804,40 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     failed.outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(2)))
   }
 
+  // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it
+  it should "not charge an attempt a drain gave back, and still charge one whose lease lapsed" in {
+    val c  = Case()
+    val id = c.submit(maxAttempts = 1).value.entryId
+    // drained twice: each recorded attempt is given back with the lease
+    (1 to 2).foreach { n =>
+      val leased = c.take(s"worker-$n").value
+      c.queue.recordAttempt(leased.lease, RunId(s"drained-$n-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+      c.queue.releaseDrained(leased.lease).value
+    }
+    // a lease that lapses (a crashed worker) is charged
+    val crashed = c.take("worker-3").value
+    c.queue.recordAttempt(crashed.lease, RunId(s"crashed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.advance(31.seconds)
+    val last = c.take("worker-4").value
+    c.queue.recordAttempt(last.lease, RunId(s"last-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
+    // every attempt stays in the history
+    c.entry(id).attempts should have size 3
+    c.entry(id).isOpen shouldBe true
+  }
+
+  it should "give nothing back when an entry released by a drain recorded no attempt" in {
+    val c     = Case()
+    val id    = c.submit(maxAttempts = 1).value.entryId
+    val first = c.take("worker-1").value
+    c.queue.releaseDrained(first.lease).value
+    val second = c.take("worker-2").value
+    c.queue.recordAttempt(second.lease, RunId(s"only-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.advance(31.seconds)
+    val third = c.take("worker-3").value
+    c.queue.recordAttempt(third.lease, RunId(s"over-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
+    c.entry(id).attempts should have size 1
+  }
+
   it should "close an entry Cancelled(ThreadDeleted) when its thread was deleted after the submission" in {
     val c = Case()
     c.commitAs("direct", "c1")

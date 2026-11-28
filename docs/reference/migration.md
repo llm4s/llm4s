@@ -846,6 +846,17 @@ stored format is the same; what changed is what passes:
 | `GroundingGuardrail`, `ContextRelevanceGuardrail`, `SourceAttributionGuardrail` and `TopicBoundaryGuardrail` read a score by stripping every non-digit and clamping, and fell back to a number anywhere in the reply, so `SCORE: 2/10` read as 210 and passed (#3234) | Each score is read as `LLMGuardrail` reads one: a plain number from 0 to 1. A scaled, unreadable or missing score is a `Left` (a missing `ATTRIBUTION_SCORE` or `RELEVANCE_SCORE` no longer defaults to 0.5 or 0.7), and so is a reply without its `SCORE` and `GROUNDED` lines. `GroundingGuardrail` with `onFail = Fix` blocks a context with no chunks, as it blocks a low score |
 | `agent.run(threadId, query, config, history)` admitted only the query: imported messages reached the store and the model unguarded, and a refused query still created the thread with the history in it, so the same import could not be retried (#3235) | Each imported user message's text goes through the input guardrails too, stored as they rewrite it. A refusal of the query or of an imported message ends the turn `AgentStatus.Blocked`, as before, but stores nothing and creates no thread, so the import can be retried on the same thread id. `Agent.admit` with `history` admits it too, and a refused `QueuedInput` imports nothing |
 
+## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
+
+`AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. `RunQueue` gains `releaseDrained`,
+with a default that calls `release`; no signature changed, and the stored schema is the same.
+
+| Before (1.0.0) | After |
+|---|---|
+| Any caller could run or queue work on `llm4s-worker-retention-sweep`, holding the sweep's claim and stalling every worker's retention (#3239) | `GraphRuntime.start`, `recover` and `resume`, and `RunSubmitter.submit`, refuse the worker's two thread ids (`llm4s-worker-retention-sweep`, `llm4s-worker-health`) with a `ValidationError`. A thread already stored under one of them can still be read and forgotten |
+| A fatal throwable (a `StackOverflowError` in a guardrail) on a slot's run thread kept the slot, lost its permit and renewed its lease for good; a take or sweep loop that threw ended for good (#3240) | The slot is given up however its run ends, so its lease lapses and the entry is taken again; each loop logs a throw and goes on, and `health()` reports a sweep thread that is not running |
+| An attempt a drain cut short counted against `maxAttempts`, so a run longer than `drain.grace` was dead-lettered after a few rolling deploys (#3241) | A drained attempt raises the entry's `maxAttempts` by one (it stays in `attempts`). A worker crash still counts: that bound dead-letters an entry whose run crashes its worker every time. A custom `RunQueue` overrides `releaseDrained` to do the same; one that does not charges drained attempts, as before |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

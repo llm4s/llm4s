@@ -209,6 +209,7 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
 
   /** Passed to the store unchanged. */
   def release(lease: Lease): Result[Unit]                                    = inner.release(lease)
+  override def releaseDrained(lease: Lease): Result[Unit]                    = inner.releaseDrained(lease)
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int]       = inner.reclaim(ticketLifetime, limit)
   def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] = inner.openRuns(threads)
 

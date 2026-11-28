@@ -426,7 +426,11 @@ final class AgentWorker private (
             case Right(_) => meter.closed(slot.entry.agentId, outcome)
             case Left(e)  => logger.warn(s"Worker $holder: closing entry ${slot.entryId.value} failed: ${e.message}")
         case Next.Release =>
-          queue.release(slot.lease.get).left.foreach { e =>
+          // an attempt a drain cut short is given back to the entry, so drains never dead-letter it (#3241)
+          val released =
+            if slot.drained.get && slot.attemptRecorded.get then queue.releaseDrained(slot.lease.get)
+            else queue.release(slot.lease.get)
+          released.left.foreach { e =>
             logger.debug(s"Worker $holder: releasing entry ${slot.entryId.value}: ${e.message}")
           }
         case Next.Expire => meter.lapsed(slot.entry.agentId)
@@ -570,7 +574,9 @@ final class AgentWorker private (
         Next.Expire
       case Right(AttemptStart.ThreadDeleted(_)) => Next.Leave
       case Right(AttemptStart.Exhausted(entry)) => exhausted(entry, agent)
-      case Right(AttemptStart.Recorded(entry))  => run(slot, entry, agent, runId)
+      case Right(AttemptStart.Recorded(entry)) =>
+        slot.attemptRecorded.set(true)
+        run(slot, entry, agent, runId)
 
   /**
    * `entry` has made its `maxAttempts` attempts: closed `Failed(AttemptsExhausted)` - after its thread is settled, if
@@ -821,8 +827,11 @@ final class AgentWorker private (
     val renewing: AtomicBoolean       = new AtomicBoolean(true)
     val leaseLost: AtomicBoolean      = new AtomicBoolean(false)
     val drained: AtomicBoolean        = new AtomicBoolean(false)
-    val ended: CountDownLatch         = new CountDownLatch(1)
-    private val run                   = new AtomicReference[Option[AgentRun]](None)
+
+    /** This slot recorded an attempt at its entry: one a drain that cuts it gives back (#3241). */
+    val attemptRecorded: AtomicBoolean = new AtomicBoolean(false)
+    val ended: CountDownLatch          = new CountDownLatch(1)
+    private val run                    = new AtomicReference[Option[AgentRun]](None)
 
     /** The stop asked of the entry (W3), from its take and its renewals: a cancel is never replaced by an interrupt. */
     val stop: AtomicReference[Option[StopRequest]] = new AtomicReference(leased.entry.stopRequest)

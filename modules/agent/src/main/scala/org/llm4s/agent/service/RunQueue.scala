@@ -183,6 +183,17 @@ trait RunQueue:
   def release(lease: Lease): Result[Unit]
 
   /**
+   * As [[release]], for an attempt a drain cut short (#3241): the entry is given back, and the attempt `lease`'s holder
+   * recorded is not charged against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its
+   * `attempts`, as history - so a long run cut by every rolling deploy is never dead-lettered for it. An entry with no
+   * attempt recorded is released as by [[release]]. An attempt that ends any other way still counts, a worker's crash
+   * included (its lease expires with no release): that is the bound that dead-letters an entry whose run crashes its
+   * worker every time. The default is [[release]], so a queue that does not override it charges drained attempts as
+   * before.
+   */
+  def releaseDrained(lease: Lease): Result[Unit] = release(lease)
+
+  /**
    * Records an attempt at `lease`'s entry running as `runId`, durably, before the caller touches the thread (rule 4);
    * see [[AttemptStart]]. Refused unless `lease` is current, and with a `ValidationError` for a `runId` that already
    * names a run on the thread - a checkpoint, or an attempt of any entry - since a reused `RunId` would name two runs

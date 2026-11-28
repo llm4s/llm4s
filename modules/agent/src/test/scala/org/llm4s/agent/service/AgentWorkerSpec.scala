@@ -583,6 +583,26 @@ class AgentWorkerSpec
 
   // ---- drain ----
 
+  // #3241: a run longer than the grace period, cut by every drain, is never dead-lettered for it
+  it should "drain: give a cut attempt back, so an entry with one attempt left survives the drain (#3241)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n <= 2) blocked(entered) else Right(CompletionFixture.simple("done")))
+    val agent   = agentOver(store, client)
+    val id      = submit(store, thread(), maxAttempts = 1)
+    (1 to 2).foreach { _ =>
+      val worker = workerOf(store, Seq(QueuedAgent(agent)), fast.withDrainGrace(100.millis))
+      worker.start()
+      entered.acquire()
+      worker.shutdown().cancelled shouldBe Vector(id)
+      store.runQueue.entry(None, id).value.isOpen shouldBe true
+    }
+    workerOf(store, Seq(QueuedAgent(agent))).start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe a[EntryOutcome.Done]
+    entry.attempts should have size 3
+  }
+
   it should "drain: cancel runs past the grace period and give their entries back once they exited" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)

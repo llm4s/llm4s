@@ -327,17 +327,28 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       }
     }
 
-  def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
+  def release(lease: Lease): Result[Unit] = released(
+    lease,
+    "queue.release",
+    """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
+      |WHERE entry_id = ?""".stripMargin
+  )
+
+  // the drained attempt stays in the history, and the entry is given one more if it made one (#3241)
+  override def releaseDrained(lease: Lease): Result[Unit] = released(
+    lease,
+    "queue.releaseDrained",
+    """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL,
+      |  max_attempts = CASE WHEN attempt_count > 0 THEN max_attempts + 1 ELSE max_attempts END
+      |WHERE entry_id = ?""".stripMargin
+  )
+
+  private def released(lease: Lease, operation: String, sql: String): Result[Unit] = store.writing(operation) { c =>
     leased(c, lease) match
       case Left(_: QueueError.LeaseLost) => Right(())
       case Left(other)                   => Left(other)
       case Right(row) =>
-        update(
-          c,
-          """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
-            |WHERE entry_id = ?""".stripMargin,
-          row.id
-        )
+        update(c, sql, row.id)
         Right(())
   }
 

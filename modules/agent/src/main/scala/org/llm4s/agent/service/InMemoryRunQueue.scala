@@ -318,6 +318,15 @@ final class InMemoryRunQueue private[agent] (
     released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None))))
   }
 
+  override def releaseDrained(lease: Lease): Result[Unit] = withLock(lock) {
+    released(leased(lease)).map(_.foreach { row =>
+      // the drained attempt stays in the history, and the entry is given one more (#3241); an entry with no attempt
+      // recorded has nothing to give back
+      val budget = if row.attempts.isEmpty then row.maxAttempts else row.maxAttempts + 1
+      rows.update(row.id, row.copy(lease = None, maxAttempts = budget))
+    })
+  }
+
   /** What `release` does with `leased`'s answer: a closed entry is reported, a lease that is not current is a no-op. */
   private def released(leased: Result[Row]): Result[Option[Row]] = leased match
     case Right(row)                    => Right(Some(row))
