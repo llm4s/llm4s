@@ -154,13 +154,31 @@ final class AgentRun private[agent] (
     if handle.status != RunStatus.Running then
       drain()
       tracing.foreach(_.detach())
+    // the turn's outcome, decided once (#3251): a later turn on the thread never changes it
+    Option(retained.get).getOrElse {
+      val decided = outcomeOf(ended)
+      // a call interrupted while the turn still runs, or whose store read failed, decides nothing
+      if handle.status != RunStatus.Running && !lookupFailed.getAndSet(false) then retained.compareAndSet(null, decided)
+      Option(retained.get).getOrElse(decided)
+    }
+
+  /** The outcome [[await]] retains once the turn has ended; `null` until then. */
+  private val retained = new java.util.concurrent.atomic.AtomicReference[Result[AgentResult]](null)
+
+  /** Whether the last [[outcomeOf]] failed to read the store, so its answer is not the turn's. */
+  private val lookupFailed = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  private def outcomeOf(ended: Result[RunResult[TurnOutput]]): Result[AgentResult] =
     for
       result <- ended
       // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
       // that failed the run another way (from a model or tool wrapper) leaves it for recover, so it is Left
       isBlock <- result match
-        case RunResult.Failed(_, _: GuardrailBlocked) => runtime.endedBlocked(threadId, runId)
-        case _                                        => Right(false)
+        case RunResult.Failed(_, _: GuardrailBlocked) =>
+          val read = runtime.endedBlocked(threadId, runId)
+          if read.isLeft then lookupFailed.set(true)
+          read
+        case _ => Right(false)
       status <- AgentRun.status(result, isBlock, loop, refused)
       agentResult <- result match
         case RunResult.Completed(state, output, _) => summary(state, Some(output.activeAgent), status)

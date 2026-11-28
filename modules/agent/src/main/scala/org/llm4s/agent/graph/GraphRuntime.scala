@@ -1108,12 +1108,12 @@ final class GraphRuntime(
    * checkpoint of its own, and a run started on the thread since makes this `false`.
    */
   private[agent] def endedBlocked(threadId: ThreadId, runId: RunId): Result[Boolean] =
+    // the run's own newest checkpoint, not the thread's latest: a later turn, an update or a delete since must not
+    // turn a blocked run into a failed one (#3251)
     checkpointer
-      .latest(threadId)
+      .latestOfRuns(threadId, Set(runId))
       .map(
-        _.exists(s =>
-          s.checkpoint.runId == runId.value && s.checkpoint.outcome.exists(_.isInstanceOf[RunOutcome.Blocked])
-        )
+        _.exists(c => c.status == CheckpointStatus.Failed && c.outcome.exists(_.isInstanceOf[RunOutcome.Blocked]))
       )
 
   /**
