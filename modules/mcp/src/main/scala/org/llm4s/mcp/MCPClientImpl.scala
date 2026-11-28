@@ -245,9 +245,8 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_]]] = {
     val result = for {
-      response   <- sendRecovering(transportImpl, () => MCPClientImpl.listRequest.copy(id = generateId()))
-      toolsValue <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
-      tools      <- parseTools(toolsValue)
+      entries <- listAllTools(transportImpl)
+      tools   <- parseTools(ujson.Obj("tools" -> ujson.Arr.from(entries)))
     } yield tools
 
     result.left.foreach {
@@ -257,6 +256,60 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         toolHints = Map.empty
     }
     result
+  }
+
+  /**
+   * Every page of the server's `tools/list` (#3075): the request is sent again with each `nextCursor` until a page
+   * has none. A cursor seen before, or more than [[MCPClientImpl.MaxToolPages]] pages, ends the listing with the
+   * tools read so far and a warning: a server that pages for ever cannot hang discovery.
+   */
+  private def listAllTools(transportImpl: MCPTransportImpl): Result[Seq[Value]] = {
+    def page(cursor: Option[String]): Result[(Seq[Value], Option[String])] =
+      for {
+        response <- sendRecovering(
+          transportImpl,
+          () =>
+            MCPClientImpl.listRequest.copy(
+              id = generateId(),
+              params = cursor.map(c => ujson.Obj("cursor" -> ujson.Str(c)))
+            )
+        )
+        value <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
+        tools <- value.objOpt
+          .flatMap(_.get("tools"))
+          .flatMap(_.arrOpt)
+          .map(_.toSeq)
+          .toRight(SimpleError(s"Failed to parse tools from ${config.name}: no tools array"): LLMError)
+      } yield tools -> value.objOpt.flatMap(_.get("nextCursor")).flatMap(_.strOpt).filter(_.nonEmpty)
+
+    @scala.annotation.tailrec
+    def loop(cursor: Option[String], seen: Set[String], pages: Int, acc: Seq[Value]): Result[Seq[Value]] =
+      page(cursor) match {
+        case Left(error) => Left(error)
+        case Right((tools, next)) =>
+          val all = acc ++ tools
+          next match {
+            case None => Right(all)
+            case Some(c) if seen.contains(c) =>
+              logger.warn(
+                "MCP server {} repeated a tools/list cursor; keeping the {} tools listed",
+                config.name,
+                all.size
+              )
+              Right(all)
+            case Some(_) if pages + 1 >= MCPClientImpl.MaxToolPages =>
+              logger.warn(
+                "MCP server {} listed more than {} pages of tools; keeping the {} tools listed",
+                config.name,
+                MCPClientImpl.MaxToolPages,
+                all.size
+              )
+              Right(all)
+            case Some(c) => loop(Some(c), seen + c, pages + 1, all)
+          }
+      }
+
+    loop(None, Set.empty, 0, Seq.empty)
   }
 
   private def parseTools(value: Value): Result[Seq[ToolFunction[_]]] = {
@@ -311,8 +364,14 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   // Converts an MCP tool definition to llm4s ToolFunction format
   private def convertMCPToolToToolFunction(toolJson: Value): ToolFunction[Value] = {
-    val name        = toolJson("name").str
-    val description = toolJson("description").str
+    val name = toolJson("name").str
+    // `description` is optional in MCP (#3075): a tool without one keeps its title, or an empty description
+    def text(v: Option[Value]) = v.flatMap(_.strOpt).filter(_.nonEmpty)
+    val fields                 = toolJson.obj
+    val description = text(fields.get("description"))
+      .orElse(text(fields.get("title")))
+      .orElse(text(fields.get("annotations").flatMap(_.objOpt).flatMap(_.get("title"))))
+      .getOrElse("")
     val inputSchema = toolJson("inputSchema")
 
     // Convert MCP input schema to our ObjectSchema format
@@ -521,6 +580,9 @@ object MCPClientImpl {
     toolJson("name").str -> MCPToolAnnotations
       .fromJson(toolJson.objOpt.flatMap(_.get("annotations")).getOrElse(ujson.Null))
       .toToolHints
+
+  /** The most `tools/list` pages read from one server, a bound on a server that pages for ever (#3075). */
+  val MaxToolPages: Int = 100
 
   val listRequest: JsonRpcRequest = JsonRpcRequest(
     jsonrpc = "2.0",

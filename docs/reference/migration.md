@@ -795,6 +795,10 @@ block's text was returned before. A non-text block is described rather than fail
 resource's text, `[resource link report https://h/r.pdf application/pdf]`. An `isError` result's message carries
 every block too. `structuredContent`, when the server sends it, is still the result.
 
+**Listings (#3075).** Every page of `tools/list` is read, so a server that pages its tools shows all of them. A
+tool without a `description` is kept (it was skipped as malformed), described by its `title`, its
+`annotations.title`, or nothing.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature
