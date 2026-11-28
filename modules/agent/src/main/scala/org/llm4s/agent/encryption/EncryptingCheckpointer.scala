@@ -177,6 +177,12 @@ final class EncryptingCheckpointer private (
     inner.renew(threadId, token, ttl)
   override def owner(threadId: ThreadId): Result[Option[ThreadOwner]]  = inner.owner(threadId)
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = inner.prune(threadId, policy)
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    inner.pruneKeeping(threadId, policy, keep)
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
     inner.children(parent, after, limit)
   def threads(query: ThreadQuery): Result[ThreadPage] = inner.threads(query)

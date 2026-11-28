@@ -209,6 +209,19 @@ trait Checkpointer:
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]
 
   /**
+   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
+   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
+   * the latest a prune before the commit always kept (#3254). The default prunes without keeping them; every llm4s
+   * store keeps them.
+   */
+  private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    @scala.annotation.unused keep: Set[RunId]
+  ): Result[Unit] =
+    prune(threadId, policy)
+
+  /**
    * Up to `limit` events with `seq > afterSeq`, ascending. `afterSeq` `0` reads from the thread's first
    * event, as does the number just before it; one behind the replay floor is
    * [[org.llm4s.agent.graph.GraphError.ReplayUnavailable GraphError.ReplayUnavailable]], and one inside the log of a deleted thread of the id
@@ -738,6 +751,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = withLock(lock) {
     pruned(threadId, policy, Set.empty)
   }
+
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] = withLock(lock)(pruned(threadId, policy, keep))
 
   /** [[prune]], also keeping the newest checkpoint each of `protectedRuns` committed; under `lock`. */
   private def pruned(threadId: ThreadId, policy: RetentionPolicy, protectedRuns: Set[RunId]): Result[Unit] =

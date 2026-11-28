@@ -413,6 +413,16 @@ final class PostgresCheckpointer private (
     Right(())
   }
 
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    writing("prune") { c =>
+      lockRow(c, threadId).foreach(pruneStep(c, threadId, _, policy, keep, None, Int.MaxValue))
+      Right(())
+    }
+
   /**
    * One step of [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest
    * checkpoint each of `protectedRuns` committed (a sweep's protected thread, design 4.53). Events go first, then

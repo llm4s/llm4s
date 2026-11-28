@@ -406,6 +406,13 @@ final class SqliteCheckpointer private (
     pruneStep(c, threadId, policy, Set.empty, None, Int.MaxValue).map(_ => ())
   }
 
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    writing("prune")(c => pruneStep(c, threadId, policy, keep, None, Int.MaxValue).map(_ => ()))
+
   /**
    * One step of [[prune]] inside the caller's write transaction, also keeping the newest checkpoint each of
    * `protectedRuns` committed. Events go first, then checkpoints, so the floor a prune works towards can always be

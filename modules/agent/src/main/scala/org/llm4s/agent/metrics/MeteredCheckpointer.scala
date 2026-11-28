@@ -156,6 +156,12 @@ final class MeteredCheckpointer private (val inner: Checkpointer, metrics: Metri
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     inner.checkpoint(threadId, checkpointId)
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = inner.prune(threadId, policy)
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    inner.pruneKeeping(threadId, policy, keep)
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     inner.eventsAfter(threadId, afterSeq, limit)
   override def awaitEventsAfter(

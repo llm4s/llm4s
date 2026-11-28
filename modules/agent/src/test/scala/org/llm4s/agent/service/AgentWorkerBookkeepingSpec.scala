@@ -136,6 +136,22 @@ class AgentWorkerBookkeepingSpec
     cut.getCount shouldBe 1
   }
 
+  "The lease watch's margin" should "never let the watch fire before a renewal is due, at either edge of a policy (#3259)" in {
+    def firesAt(policy: LeasePolicy) = policy.ttl - AgentWorker.leaseWatchMargin(policy)
+    // the default: a tenth of the ttl
+    AgentWorker.leaseWatchMargin(LeasePolicy(30.seconds, 10.seconds)) shouldBe 3.seconds
+    // renewals due just before the lease lapses: half the gap, so the watch waits past the first renewal
+    val late = LeasePolicy(ttl = 10.seconds, renewEvery = 9500.millis)
+    AgentWorker.leaseWatchMargin(late) shouldBe 250.millis
+    firesAt(late) should be > late.renewEvery
+    // renewals due as soon as can be: still a tenth
+    AgentWorker.leaseWatchMargin(LeasePolicy(10.seconds, 1.milli)) shouldBe 1.second
+    Seq(LeasePolicy(10.seconds, 9999.millis), LeasePolicy(600.millis, 150.millis), LeasePolicy.default).foreach { p =>
+      firesAt(p) should be > p.renewEvery
+      AgentWorker.leaseWatchMargin(p) should be > Duration.Zero
+    }
+  }
+
   "A slot whose renewals hang" should "stop its run before its lease could lapse, not once a renewal returns (#3259)" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)

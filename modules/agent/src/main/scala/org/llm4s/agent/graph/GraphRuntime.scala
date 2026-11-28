@@ -3163,6 +3163,19 @@ final class GraphRuntime(
                   // remove (design 4.42)
                   val child      = origin.isDefined
                   val committing = System.nanoTime()
+                  // the checkpoint the claim commit will supersede, read under the claim: a prune before the commit
+                  // always kept it as the latest, so the prune after it keeps its run's newest checkpoint (#3254)
+                  val previous =
+                    if child || config.retention.forall(_ == RetentionPolicy.keepAll) then Set.empty[RunId]
+                    else
+                      checkpointer
+                        .latest(threadId)
+                        .toOption
+                        .flatten
+                        .map(_.checkpoint)
+                        .filter(c => parent.contains(c.id))
+                        .map(c => RunId(c.runId))
+                        .toSet
                   if retainChildren then
                     abandonLater = keepChildren(
                       threadId,
@@ -3181,14 +3194,15 @@ final class GraphRuntime(
                     fence,
                     metadata
                   )
-                    .map { run =>
-                      // a top-level thread keeps, besides the claim's own checkpoint and event, what the policy keeps
-                      config.retention.foreach { p =>
-                        // the age cutoff of a prune before the commit, plus a millisecond for the stores' rounding
-                        val since = FiniteDuration(System.nanoTime() - committing + 1000000L, TimeUnit.NANOSECONDS)
-                        retain(if child then p else GraphRuntime.besideClaim(p, since))
-                      }
-                      run
+                    .map {
+                      run =>
+                        // a top-level thread keeps, besides the claim's own checkpoint and event, what the policy keeps
+                        config.retention.foreach { p =>
+                          // the age cutoff of a prune before the commit, plus a millisecond for the stores' rounding
+                          val since = FiniteDuration(System.nanoTime() - committing + 1000000L, TimeUnit.NANOSECONDS)
+                          retain(if child then p else GraphRuntime.besideClaim(p, since), previous)
+                        }
+                        run
                     }
               }
             )
@@ -3291,9 +3305,9 @@ final class GraphRuntime(
      * from the terminal events this removes, so a crash before it removes nothing unfolded; the claim's own checkpoint
      * and event count against its limits, and `maxEvents` is at least 1 ([[GraphRuntime.childConfig]], design 4.42).
      */
-    private def retain(policy: RetentionPolicy): Unit =
+    private def retain(policy: RetentionPolicy, keep: Set[RunId]): Unit =
       if policy != RetentionPolicy.keepAll then
-        Try(checkpointer.prune(threadId, policy)).toResult.flatten.left.foreach(error =>
+        Try(checkpointer.pruneKeeping(threadId, policy, keep)).toResult.flatten.left.foreach(error =>
           GraphRuntime.logger.warn(
             s"Pruning ${threadId.value} to its retention as run ${runId.value} was admitted failed: ${error.message}"
           )

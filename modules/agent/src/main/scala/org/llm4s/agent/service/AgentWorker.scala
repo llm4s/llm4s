@@ -419,12 +419,12 @@ final class AgentWorker private (
 
   /**
    * Stops `slot`'s run once no renewal has landed for nearly a whole `lease.ttl` (#3259): by the worker's clock, from
-   * the sending of the last renewal that landed (or the take), less a margin of a tenth of the ttl, so the run stops
+   * the sending of the last renewal that landed (or the take), less [[AgentWorker.leaseWatchMargin]], so the run stops
    * before its lease can lapse and the entry be taken by another worker - also while a renewal is still waiting on a
-   * slow store, which [[renewLoop]] alone would notice only once it returned.
+   * slow store, which [[renewLoop]] alone would notice only once it returned - but never before a renewal is due.
    */
   private def leaseWatch(slot: Slot): Unit =
-    val margin = lease.ttl.toNanos / 10
+    val margin = AgentWorker.leaseWatchMargin(lease).toNanos
     @tailrec def watch(): Unit =
       val due   = slot.lastRenewed.get + lease.ttl.toNanos - margin
       val wait  = math.max(due - System.nanoTime(), 0L)
@@ -1071,6 +1071,16 @@ object AgentWorker:
         _: InvalidInputError | _: ModelNotFoundError =>
       true
     case _ => false
+
+  /**
+   * How long before a lease's ttl runs out, from the sending of its last renewal that landed, the lease watch stops the
+   * run (#3259): a tenth of the ttl, but at most half the time between a renewal being due (`renewEvery`) and the
+   * lease lapsing, so the watch never fires before the first renewal of a healthy run is sent, whatever the policy -
+   * `LeasePolicy` keeps `renewEvery` below `ttl`, so the margin is always positive.
+   */
+  private[service] def leaseWatchMargin(lease: LeasePolicy): FiniteDuration =
+    val slack = (lease.ttl - lease.renewEvery) / 2
+    (lease.ttl / 10).min(slack)
 
   private[service] def admissionTransient(error: LLMError): Boolean = error match
     case _: ProcessingError | _: CircuitOpenError | _: OptimisticLockFailure                      => true

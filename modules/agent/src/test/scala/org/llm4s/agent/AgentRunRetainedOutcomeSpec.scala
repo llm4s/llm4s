@@ -1,11 +1,13 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ GraphRuntime, InMemoryCheckpointer, RunStatus, ThreadId }
+import org.llm4s.agent.graph.{ ForwardingCheckpointer, GraphRuntime, InMemoryCheckpointer, RunId, RunStatus, ThreadId }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.testutil.TestTimeLimit
 import org.llm4s.types.Result
+
+import scala.jdk.CollectionConverters._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -52,6 +54,42 @@ class AgentRunRetainedOutcomeSpec extends AnyFlatSpec with TestTimeLimit with Ma
       gate.countDown()
       waiter.join()
       run.await().value.answer shouldBe Some("answered")
+    }
+  }
+
+  "Two awaits of a blocked turn, one whose store read fails" should "never retain the failure (#3251)" in {
+    (1 to 20).foreach { round =>
+      val raw     = new InMemoryCheckpointer
+      val failing = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val store = new ForwardingCheckpointer(raw) {
+        override def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]) =
+          if (failing.getAndSet(false)) Left(org.llm4s.error.ProcessingError("latestOfRuns", "the store is down"))
+          else super.latestOfRuns(threadId, runIds)
+      }
+      val agent = built(
+        Agent
+          .builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("not json")))
+          .withOutputGuardrails(org.llm4s.agent.guardrails.builtin.JSONValidator())
+          .withRuntime(new GraphRuntime(store))
+      )
+      // an output block: the kernel closes the thread Failed, and await reads the run's checkpoint to tell
+      val run      = agent.start(ThreadId(s"two-awaits-$round"), "give json").fold(e => fail(e.message), identity)
+      val deadline = System.nanoTime() + 10_000_000_000L
+      while (run.status == RunStatus.Running && System.nanoTime() < deadline) Thread.sleep(2)
+      failing.set(true)
+      val start    = new java.util.concurrent.CyclicBarrier(2)
+      val outcomes = new java.util.concurrent.ConcurrentLinkedQueue[Result[AgentResult]]()
+      val callers = (1 to 2).map(_ =>
+        Thread.ofVirtual().start { () =>
+          start.await(): Unit; outcomes.add(run.await()): Unit
+        }
+      )
+      callers.foreach(_.join())
+      // at most the caller whose read failed got the failure - the other may have read what the first retained - and
+      // it is never retained: every later await is the turn's own result
+      outcomes.asScala.count(_.isLeft) should be <= 1
+      run.await().value.status shouldBe a[AgentStatus.Blocked]
+      run.await().value.status shouldBe a[AgentStatus.Blocked]
     }
   }
 
