@@ -817,7 +817,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       val from =
         current.events.search(first)(using Ordering.by[(Long, ujson.Value, Instant), Long](_._1)).insertionPoint
       Try(
-        current.events.slice(from, from + limit).map((_, json, _) => upickle.default.read[EventRecord](json))
+        current.events.drop(from).take(limit).map((_, json, _) => upickle.default.read[EventRecord](json))
       ).toResult
   }
 
