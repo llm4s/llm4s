@@ -116,7 +116,11 @@ class PromptInjectionDetector(
     val matches = patterns.flatMap { pattern =>
       if (pattern.severity < sensitivity.threshold) None
       else
-        RegexSafetyManager.boundedFind(pattern.regex.pattern, normalizedInput, budget) match {
+        GapSequence.forRegex
+          .get(pattern.regex.regex)
+          .fold(RegexSafetyManager.boundedFind(pattern.regex.pattern, normalizedInput, budget))(gaps =>
+            Right(gaps.matches(normalizedInput))
+          ) match {
           case Right(false) => None
           case Right(true)  => Some(InjectionMatch(pattern.name, pattern.category, pattern.severity))
           case Left(_) =>
@@ -425,15 +429,15 @@ object InjectionPattern {
     ),
     InjectionPattern(
       "creative_writing",
-      ("""(?m)^(?>.*?(?:write|create)\s++(?:a\s++)?(?:story|fiction|essay)\s++(?:about|where))""" +
-        """.*?(?:bomb|weapon|drug|hack)""").r,
+      // matched in linear time by GapSequence, not by this regex (#3233)
+      """(write|create)\s+(a\s+)?(story|fiction|essay)\s+(about|where).*(bomb|weapon|drug|hack)""".r,
       Jailbreak,
       3
     ),
     InjectionPattern(
       "how_to_dangerous",
-      ("""(?m)^(?>.*?(?:write|create|tell))(?>.*?(?:how\s++to|making|creating))""" +
-        """.*?(?:bomb|weapon|explosive|malware)""").r,
+      // matched in linear time by GapSequence, not by this regex (#3233)
+      """(write|create|tell).*(how\s+to|making|creating).*(bomb|weapon|explosive|malware)""".r,
       Jailbreak,
       3
     ),
@@ -517,6 +521,64 @@ object InjectionPattern {
    * Jailbreak patterns only.
    */
   val jailbreak: Seq[InjectionPattern] = jailbreakPatterns ++ roleManipulationPatterns
+}
+
+/**
+ * A regex of the shape `S1.*S2.*...Sk`, where no segment `Si` holds a `.`, matched in time linear in the input (#3233).
+ * The backtracking engine takes polynomial time on such a pattern - each `.*` retried at every split - and an atomic
+ * rewrite loses matches, because a segment may span lines (`\s+` crosses a newline) while a gap may not.
+ *
+ * The match is computed segment by segment: a segment may start at any position of a line once an earlier segment's
+ * match has ended at or before it on that line (a gap is any run without a line terminator, as `.` reads one). For
+ * each line only the earliest such end matters, so each segment tries `lookingAt` at most once per position: k
+ * segments cost k passes. The result is exactly whether the regex finds a match.
+ */
+final private[builtin] class GapSequence(segments: Seq[java.util.regex.Pattern]) {
+
+  def matches(text: String): Boolean = {
+    val n                            = text.length
+    def terminator(c: Char): Boolean = c == '\n' || c == '\r' || c == '\u0085' || c == '\u2028' || c == '\u2029'
+    // the index of the first line terminator at or after each position, `n` for none
+    val lineEnd = Array.fill(n + 1)(n)
+    (n - 1 to 0 by -1).foreach(i => lineEnd(i) = if (terminator(text.charAt(i))) i else lineEnd(i + 1))
+
+    // The positions segment `k` may start at, as ranges [from, until) of one line each - for the first, anywhere - to
+    // the earliest end of its matches on each line, keyed by the line's end.
+    def ends(k: Int, ranges: Iterable[(Int, Int)]): Map[Int, Int] = {
+      val matcher = segments(k).matcher(text).useTransparentBounds(true).useAnchoringBounds(false)
+      ranges.iterator
+        .flatMap { case (from, until) => (from until until).iterator }
+        .flatMap(p => if (matcher.region(p, n).lookingAt()) Some(matcher.end()) else None)
+        .foldLeft(Map.empty[Int, Int]) { (earliest, e) =>
+          val line = lineEnd(e)
+          if (earliest.get(line).forall(e < _)) earliest.updated(line, e) else earliest
+        }
+    }
+
+    @scala.annotation.tailrec
+    def from(k: Int, ranges: Iterable[(Int, Int)]): Boolean =
+      if (ranges.isEmpty) false
+      else {
+        val found = ends(k, ranges)
+        if (k == segments.size - 1) found.nonEmpty
+        else from(k + 1, found.map { case (line, e) => (e, line) })
+      }
+
+    segments.nonEmpty && from(0, Seq((0, n)))
+  }
+}
+
+private[builtin] object GapSequence {
+
+  /** The default patterns matched this way, by their regex source (the 1.0.0 patterns, unchanged). */
+  val forRegex: Map[String, GapSequence] = Map(
+    """(write|create)\s+(a\s+)?(story|fiction|essay)\s+(about|where).*(bomb|weapon|drug|hack)""" ->
+      of("""(?:write|create)\s++(?:a\s++)?(?:story|fiction|essay)\s++(?:about|where)""", "(?:bomb|weapon|drug|hack)"),
+    """(write|create|tell).*(how\s+to|making|creating).*(bomb|weapon|explosive|malware)""" ->
+      of("(?:write|create|tell)", """(?:how\s++to|making|creating)""", "(?:bomb|weapon|explosive|malware)")
+  )
+
+  private def of(segments: String*): GapSequence = new GapSequence(segments.map(java.util.regex.Pattern.compile(_)))
 }
 
 @Experimental
