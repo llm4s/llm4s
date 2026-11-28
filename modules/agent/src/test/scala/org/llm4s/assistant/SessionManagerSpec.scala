@@ -22,7 +22,12 @@ import scala.util.Try
  * Tests session save/load operations using temporary directories
  * to avoid file system side effects.
  */
-class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterEach {
+class SessionManagerSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with BeforeAndAfterEach
+    with org.scalatest.EitherValues {
 
   private var tempDir: Path = _
 
@@ -157,6 +162,32 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     manager.loadSession("日本語").map(_.sessionId.value) shouldBe Right("legacy")
   }
 
+  it should "load every title a save returns or the listing shows, for titles of 1 to 60 characters (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-roundtrip")
+    var n       = 0
+    val manager = new SessionManager(DirectoryPath(dir.toString), uniqueSuffix = () => { n += 1; s"s$n" })
+    val saved   = scala.collection.mutable.Map.empty[String, String] // title -> session id last saved under it
+    for {
+      length <- 1 to 60
+      stem = "t" * (length - 1)
+      title     <- Seq(stem + "/", stem + ":", stem + "é") // three titles that sanitise alike, or nearly
+      overwrite <- Seq(true, false)
+    } {
+      val id       = s"$title|$overwrite"
+      val returned = manager.saveSession(createTestState(id), Some(title), overwrite).map(_.title).value
+      saved(returned) = id
+      withClue(s"'$returned' (length $length, overwrite $overwrite)") {
+        manager.loadSession(returned).map(_.sessionId.value) shouldBe Right(id)
+      }
+    }
+    saved.foreach { case (title, id) =>
+      withClue(title)(manager.loadSession(title).map(_.sessionId.value) shouldBe Right(id))
+    }
+    manager.listRecentSessions(Int.MaxValue).value.foreach { listed =>
+      withClue(listed)(manager.loadSession(listed).isRight shouldBe true)
+    }
+  }
+
   it should "never replace a save of a different title whose file name is the same (#3277)" in {
     val dir     = Files.createTempDirectory("sessions-collide")
     var n       = 0
@@ -175,7 +206,13 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     manager.saveSession(createTestState("two"), Some(prefix + "two"))
     manager.loadSession(prefix + "one").map(_.sessionId.value) shouldBe Right("one")
     manager.loadSession(prefix + "two").map(_.sessionId.value) shouldBe Right("two")
-    manager.listRecentSessions(10).map(_.toSet) shouldBe Right(
+    // a suffixed title the sanitised name cuts differently is still found by the title the save reported
+    val long = "y" * 49
+    manager.saveSession(createTestState("first"), Some(long), overwrite = false)
+    val second = manager.saveSession(createTestState("second"), Some(long), overwrite = false).map(_.title)
+    second.flatMap(manager.loadSession).map(_.sessionId.value) shouldBe Right("second")
+    manager.loadSession(long).map(_.sessionId.value) shouldBe Right("first")
+    manager.listRecentSessions(10).map(_.toSet -- Set(long) -- second.toOption) shouldBe Right(
       Set("project/a", "project:a", prefix + "one", prefix + "two")
     )
   }

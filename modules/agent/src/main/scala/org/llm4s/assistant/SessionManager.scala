@@ -240,15 +240,16 @@ class SessionManager(
     Try(ujson.read(Files.readString(json, StandardCharsets.UTF_8)).obj.get("title").map(_.str)).toOption.flatten
 
   /**
-   * The file name (without `.json`) of the session saved with exactly `title`: the title's own name or one with a
-   * suffix (`name-<suffix>`), whichever stores that title.
+   * The file name (without `.json`) of the session saved with exactly `title`: whichever session file stores that
+   * title, the title's own name first. Every file is looked at, not only those whose name starts with the title's,
+   * since a suffixed or cut name need not (a 49-character title's suffixed name is cut differently).
    */
   private def savedAs(title: String): Option[String] = {
     val base = sanitizeFilename(title)
     Try(Using.resource(Files.list(Paths.get(sessionDir.value)))(_.toArray.map(_.asInstanceOf[Path]).toVector))
       .getOrElse(Vector.empty)
       .map(_.getFileName.toString)
-      .filter(n => n.endsWith(".json") && (n == s"$base.json" || n.startsWith(s"$base-")))
+      .filter(_.endsWith(".json"))
       .sortBy(n => (n != s"$base.json", n))
       .find(n => storedTitle(Paths.get(sessionDir.value, n)).contains(title))
       .map(_.stripSuffix(".json"))
