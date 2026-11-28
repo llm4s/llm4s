@@ -163,8 +163,8 @@ class EntityLinkerTest extends AnyFunSuite with Matchers with MockFactory {
     val result = linker.link(graph)
 
     result should be(a[Right[_, _]])
-    // Nodes without name property use ID as name; "alice" and "ALICE" normalize to the same
-    result.toOption.get.nodes should have size 1
+    // A node without a name is keyed by its exact id, so it merges with nothing, even an id differing only in case (#2967)
+    result.toOption.get.nodes should have size 2
   }
 
   test("EntityLinker should handle empty graph") {
@@ -329,5 +329,163 @@ class EntityLinkerTest extends AnyFunSuite with Matchers with MockFactory {
     // Both nodes still present (disambiguation skipped, deterministic merge didn't merge them
     // since names differ after normalization)
     result.toOption.get.nodes should have size 2
+  }
+
+  // ─── #2967, #2962 ─────────────────────────────────────────────────────────────────────────
+
+  private def person(id: String, name: String, props: (String, ujson.Value)*): Node =
+    Node(id, "Person", Map[String, ujson.Value]("name" -> ujson.Str(name)) ++ props)
+
+  private def llmReplying(reply: String): LLMClient = {
+    val client = mock[LLMClient]
+    (client.complete _).expects(*, *).returning(Right(makeCompletion(reply)))
+    client
+  }
+
+  test("linkTracked moves provenance through a model-driven merge (#2967)") {
+    val linker = new EntityLinker(Some(llmReplying("""{"merges": [{"pair": 1, "merge": true}]}""")))
+    val graph = Graph(
+      Map(
+        "d1__jobs"  -> person("d1__jobs", "Jobs"),
+        "d2__steve" -> person("d2__steve", "Steve Jobs"),
+        "d1__apple" -> Node("d1__apple", "Org", Map("name" -> ujson.Str("Apple")))
+      ),
+      List(Edge("d1__jobs", "d1__apple", "WORKS_FOR"))
+    )
+    val tracked = SourceTrackedGraph(
+      graph,
+      Seq(DocumentSource("d1", "One"), DocumentSource("d2", "Two")),
+      Map("d1__jobs"                             -> Set("d1"), "d2__steve" -> Set("d2"), "d1__apple" -> Set("d1")),
+      Map(("d1__jobs", "d1__apple", "WORKS_FOR") -> Set("d1"))
+    )
+    val linked = linker.linkTracked(tracked).toOption.get
+    linked.graph.nodes.keySet shouldBe Set("d2__steve", "d1__apple")
+    linked.nodeSources shouldBe Map("d2__steve" -> Set("d1", "d2"), "d1__apple" -> Set("d1"))
+    linked.getEdgeSources("d2__steve", "d1__apple", "WORKS_FOR").map(_.id) shouldBe Set("d1")
+    linked.graph.edges shouldBe List(Edge("d2__steve", "d1__apple", "WORKS_FOR"))
+  }
+
+  test("linkTracked unions the sources of edges that merge onto one key (#2962)") {
+    val graph = Graph(
+      Map(
+        "d1__a"    -> person("d1__a", "Alice"),
+        "d2__a"    -> person("d2__a", "Alice"),
+        "d1__acme" -> Node("d1__acme", "Org", Map("name" -> ujson.Str("Acme"))),
+        "d2__acme" -> Node("d2__acme", "Org", Map("name" -> ujson.Str("Acme")))
+      ),
+      List(Edge("d1__a", "d1__acme", "WORKS_AT"), Edge("d2__a", "d2__acme", "WORKS_AT"))
+    )
+    val tracked = SourceTrackedGraph(
+      graph,
+      Seq(DocumentSource("d1", "One"), DocumentSource("d2", "Two")),
+      graph.nodes.keys.map(id => id -> Set(id.take(2))).toMap,
+      Map(("d1__a", "d1__acme", "WORKS_AT") -> Set("d1"), ("d2__a", "d2__acme", "WORKS_AT") -> Set("d2"))
+    )
+    val linked = new EntityLinker().linkTracked(tracked).toOption.get
+    linked.graph.edges shouldBe List(Edge("d1__a", "d1__acme", "WORKS_AT"))
+    linked.edgeSources shouldBe Map(("d1__a", "d1__acme", "WORKS_AT") -> Set("d1", "d2"))
+  }
+
+  test("three names for one entity, all pairs confirmed, merge into one node with every edge (#2967)") {
+    // Pairs, in candidate order: (j, sj), (j, sjr), (sj, sjr)
+    val linker = new EntityLinker(
+      Some(
+        llmReplying(
+          """{"merges": [{"pair": 1, "merge": true}, {"pair": 2, "merge": true}, {"pair": 3, "merge": true}]}"""
+        )
+      )
+    )
+    val graph = Graph(
+      Map(
+        "j"   -> person("j", "Jobs", "a" -> ujson.Num(1)),
+        "sj"  -> person("sj", "Steve Jobs", "b" -> ujson.Num(2)),
+        "sjr" -> person("sjr", "Steve Jobs Sr", "c" -> ujson.Num(3)),
+        "x"   -> Node("x", "Org", Map("name" -> ujson.Str("Apple")))
+      ),
+      List(Edge("j", "x", "E1"), Edge("sj", "x", "E2"), Edge("sjr", "x", "E3"))
+    )
+    linker.findDisambiguationCandidates(graph).map { case (a, b) => (a.id, b.id) } shouldBe
+      List(("j", "sj"), ("j", "sjr"), ("sj", "sjr"))
+    val linked = linker.link(graph).toOption.get
+    linked.nodes.keySet shouldBe Set("sjr", "x")
+    linked.nodes("sjr").properties shouldBe Map(
+      "name" -> ujson.Str("Steve Jobs Sr"),
+      "a"    -> ujson.Num(1),
+      "b"    -> ujson.Num(2),
+      "c"    -> ujson.Num(3)
+    )
+    linked.edges.map(e => (e.source, e.relationship)).toSet shouldBe Set(("sjr", "E1"), ("sjr", "E2"), ("sjr", "E3"))
+  }
+
+  test("a malformed merge element is skipped and the others still apply (#2967)") {
+    val linker = new EntityLinker(
+      Some(llmReplying("""{"merges": [{"pair": "one", "merge": true}, {"pair": 1, "merge": true}]}"""))
+    )
+    val graph = Graph(Map("1" -> person("1", "Steve Jobs"), "2" -> person("2", "Jobs")), Nil)
+    linker.link(graph).toOption.get.nodes.keySet shouldBe Set("1")
+  }
+
+  test("blank names are no name: such nodes neither merge nor pair with every node (#2967)") {
+    val linker = new EntityLinker()
+    val graph = Graph(
+      Map("a" -> person("a", ""), "b" -> person("b", "  "), "c" -> person("c", "Carol")),
+      Nil
+    )
+    linker.link(graph).toOption.get.nodes.keySet shouldBe Set("a", "b", "c")
+    linker.findDisambiguationCandidates(graph) shouldBe empty
+  }
+
+  test("a blank-name node never merges with a node whose name equals its id (#2967)") {
+    val graph = Graph(
+      Map(
+        "alice"    -> person("alice", ""),
+        "other"    -> person("other", "Alice"),
+        "nameless" -> Node("nameless", "Person")
+      ),
+      Nil
+    )
+    new EntityLinker().link(graph).toOption.get.nodes.keySet shouldBe Set("alice", "other", "nameless")
+  }
+
+  test("a self-loop in the graph survives linking; only one the merge creates is dropped (#2967)") {
+    val graph = Graph(
+      Map(
+        "acme" -> Node("acme", "Org", Map("name" -> ujson.Str("Acme"))),
+        "1"    -> person("1", "Alice"),
+        "2"    -> person("2", "Alice")
+      ),
+      List(Edge("acme", "acme", "SUBSIDIARY_OF"), Edge("1", "2", "KNOWS"))
+    )
+    new EntityLinker().link(graph).toOption.get.edges shouldBe List(Edge("acme", "acme", "SUBSIDIARY_OF"))
+  }
+
+  test("edges that differ only in properties become one, its properties merged (#2967)") {
+    val graph = Graph(
+      Map("1" -> person("1", "Alice"), "2" -> person("2", "Alice"), "3" -> person("3", "Bob")),
+      List(
+        Edge("1", "3", "KNOWS", Map("since" -> ujson.Num(2020))),
+        Edge("2", "3", "KNOWS", Map("since" -> ujson.Num(2021), "how" -> ujson.Str("work"))),
+        Edge("3", "1", "LIKES", Map("w" -> ujson.Num(1))),
+        Edge("3", "1", "LIKES", Map("w" -> ujson.Num(2)))
+      )
+    )
+    new EntityLinker().link(graph).toOption.get.edges shouldBe List(
+      Edge("1", "3", "KNOWS", Map("since" -> ujson.Num(2020), "how" -> ujson.Str("work"))),
+      Edge("3", "1", "LIKES", Map("w" -> ujson.Num(1)))
+    )
+  }
+
+  test("a preferred id stays canonical, so an incremental build never renames an existing node (#2967)") {
+    val graph = Graph(Map("z_existing" -> person("z_existing", "Alice"), "a_new" -> person("a_new", "Alice")), Nil)
+    val tracked = SourceTrackedGraph(
+      graph,
+      Seq(DocumentSource("old", "Old"), DocumentSource("new", "New")),
+      Map("z_existing" -> Set("old"), "a_new" -> Set("new")),
+      Map.empty
+    )
+    val linked = new EntityLinker().linkTracked(tracked, preferredIds = Set("z_existing")).toOption.get
+    linked.graph.nodes.keySet shouldBe Set("z_existing")
+    linked.nodeSources shouldBe Map("z_existing" -> Set("old", "new"))
+    new EntityLinker().link(graph).toOption.get.nodes.keySet shouldBe Set("a_new")
   }
 }

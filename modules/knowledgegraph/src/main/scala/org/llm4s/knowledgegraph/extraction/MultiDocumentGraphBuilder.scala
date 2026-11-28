@@ -30,6 +30,20 @@ case class ExtractionConfig(
 )
 
 /**
+ * A multi-document extraction and what schema validation found in each document (#2971).
+ *
+ * @param graph       The merged, linked graph, as [[MultiDocumentGraphBuilder.extractDocuments]] returns it
+ * @param validations Each newly extracted document's [[ValidationResult]], keyed by its source id; empty when no schema
+ *                    is configured. Its node ids are the document's own, before they are namespaced.
+ */
+final case class GraphExtraction(graph: SourceTrackedGraph, validations: Map[String, ValidationResult]) {
+
+  /** Every violation, with the id of the document it came from. */
+  def violations: Seq[(String, SchemaViolation)] =
+    validations.toSeq.sortBy(_._1).flatMap { case (doc, v) => v.violations.map(doc -> _) }
+}
+
+/**
  * Orchestrates multi-document knowledge graph extraction.
  *
  * Composes the extraction pipeline:
@@ -79,12 +93,15 @@ class MultiDocumentGraphBuilder(
    * @return A SourceTrackedGraph containing entities from this document
    */
   def extractDocument(text: String, source: DocumentSource): Result[SourceTrackedGraph] =
+    extractValidated(text, source).map { case (graph, _) => SourceTrackedGraph.fromGraph(graph, source) }
+
+  /** One document's valid graph and, when a schema is configured, its validation result. */
+  private def extractValidated(text: String, source: DocumentSource): Result[(Graph, Option[ValidationResult])] =
     for {
       _            <- DocumentSource.validateIds(Seq(source))
       resolvedText <- resolveCoref(text)
       rawGraph     <- extractGraph(resolvedText)
-      validGraph = validateGraph(rawGraph)
-    } yield SourceTrackedGraph.fromGraph(validGraph, source)
+    } yield validateGraph(rawGraph)
 
   /**
    * Extracts knowledge graphs from multiple documents and merges them into a single graph.
@@ -106,26 +123,44 @@ class MultiDocumentGraphBuilder(
   def extractDocuments(
     documents: Seq[(String, DocumentSource)],
     existingGraph: Option[SourceTrackedGraph] = None
-  ): Result[SourceTrackedGraph] = {
+  ): Result[SourceTrackedGraph] = extractDocumentsWithValidation(documents, existingGraph).map(_.graph)
+
+  /**
+   * [[extractDocuments]], also returning each document's schema validation result, so a caller can see what the
+   * schema dropped or flagged rather than only a log line (#2971).
+   */
+  def extractDocumentsWithValidation(
+    documents: Seq[(String, DocumentSource)],
+    existingGraph: Option[SourceTrackedGraph] = None
+  ): Result[GraphExtraction] = {
     val base = existingGraph.getOrElse(SourceTrackedGraph.empty)
 
     // Extract each document and fold into the accumulator
-    val validated = DocumentSource.validateIds(base.sources ++ documents.map(_._2)).map(_ => base)
-    val merged = documents.foldLeft[Result[SourceTrackedGraph]](validated) { case (accResult, (text, source)) =>
-      accResult.flatMap { acc =>
-        extractDocument(text, source).map(docTracked => acc.addDocument(docTracked.graph, source))
-      }
+    val validated = DocumentSource
+      .validateIds(base.sources ++ documents.map(_._2))
+      .map(_ => (base, Map.empty[String, ValidationResult]))
+    val merged = documents.foldLeft[Result[(SourceTrackedGraph, Map[String, ValidationResult])]](validated) {
+      case (accResult, (text, source)) =>
+        accResult.flatMap { case (acc, validations) =>
+          extractValidated(text, source).map { case (graph, validation) =>
+            (acc.addDocument(graph, source), validations ++ validation.map(source.id -> _))
+          }
+        }
     }
 
     // Apply entity linking on the merged result
-    merged.flatMap { tracked =>
-      if (config.enableEntityLinking) {
-        entityLinkerInstance.linkTracked(tracked)
-      } else {
-        Right(tracked)
-      }
+    merged.flatMap { case (tracked, validations) =>
+      linked(tracked, base).map(GraphExtraction(_, validations))
     }
   }
+
+  private def linked(tracked: SourceTrackedGraph, base: SourceTrackedGraph): Result[SourceTrackedGraph] =
+    if (config.enableEntityLinking) {
+      // The existing graph's ids stay canonical, so adding documents never renames a node already built (#2967)
+      entityLinkerInstance.linkTracked(tracked, preferredIds = base.graph.nodes.keySet)
+    } else {
+      Right(tracked)
+    }
 
   /**
    * Runs coreference resolution if enabled.
@@ -147,11 +182,10 @@ class MultiDocumentGraphBuilder(
     }
 
   /**
-   * Validates the extracted graph against the schema if one is configured.
-   * Returns the valid graph from the validation result. When no schema is
-   * configured, the graph passes through unchanged.
+   * Validates the extracted graph against the schema if one is configured, returning the valid graph and the result.
+   * When no schema is configured, the graph passes through unchanged.
    */
-  private def validateGraph(graph: Graph): Graph =
+  private def validateGraph(graph: Graph): (Graph, Option[ValidationResult]) =
     config.schema match {
       case Some(schema) =>
         val validator = new SchemaValidator(schema)
@@ -168,7 +202,7 @@ class MultiDocumentGraphBuilder(
               s"${if (schema.allowOutOfSchema) "kept" else "dropped"}"
           )
         }
-        result.validGraph
-      case None => graph
+        (result.validGraph, Some(result))
+      case None => (graph, None)
     }
 }

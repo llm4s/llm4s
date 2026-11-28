@@ -48,8 +48,8 @@ case class RelationshipTypeDefinition(
  * and extracted results are validated against the schema. If `allowOutOfSchema`
  * is true, entities and relationships outside the schema are preserved but flagged.
  *
- * @param entityTypes Expected entity type definitions
- * @param relationshipTypes Expected relationship type definitions
+ * @param entityTypes Expected entity type definitions; empty admits any entity type
+ * @param relationshipTypes Expected relationship type definitions; empty admits any relationship type
  * @param allowOutOfSchema If true, out-of-schema entities/relationships are kept; if false, they are dropped
  */
 case class ExtractionSchema(
@@ -99,7 +99,13 @@ object ExtractionSchema {
     allowOutOfSchema: Boolean = true
   ): ExtractionSchema = {
     val entityDefs = entityTypes.map { name =>
-      val propDefs = properties.getOrElse(name, Seq.empty).map(p => PropertyDefinition(p))
+      // The type is looked up ignoring case, as every other schema lookup is (#2971)
+      val propDefs = properties
+        .collect { case (t, ps) if t.equalsIgnoreCase(name) => ps }
+        .flatten
+        .toSeq
+        .distinct
+        .map(p => PropertyDefinition(p))
       EntityTypeDefinition(name, properties = propDefs)
     }
 

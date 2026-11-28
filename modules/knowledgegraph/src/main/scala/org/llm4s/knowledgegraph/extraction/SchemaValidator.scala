@@ -1,6 +1,6 @@
 package org.llm4s.knowledgegraph.extraction
 
-import org.llm4s.knowledgegraph.{ Edge, Graph }
+import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 
 /**
  * Validates an extracted graph against an ExtractionSchema.
@@ -8,6 +8,21 @@ import org.llm4s.knowledgegraph.{ Edge, Graph }
  * Separates nodes and edges into conforming (valid) and non-conforming (out-of-schema)
  * sets, and reports specific constraint violations such as relationship endpoint type
  * mismatches.
+ *
+ * What it enforces (#2971):
+ *  - A node's label matches an entity type, and an edge's relationship a relationship type, ignoring case; in the
+ *    valid graph both are respelled as the schema spells them, so `person` and `Person` become one label. An empty
+ *    `entityTypes` (or `relationshipTypes`) admits any label (relationship), as an empty `sourceTypes` admits any
+ *    source.
+ *  - An in-schema node lacking a `required` property (absent or `null`; the key matched ignoring case) is a
+ *    `missing_required_property` violation.
+ *  - An in-schema edge whose endpoint labels break its `sourceTypes`/`targetTypes` is an `invalid_source_type` or
+ *    `invalid_target_type` violation.
+ *  - An edge whose endpoint is missing, or is dropped, is an `endpoint_missing` violation.
+ *
+ * With `allowOutOfSchema = false` the valid graph holds only what conforms: out-of-schema nodes and edges, nodes
+ * missing a required property, edges that break their endpoint types and edges to a dropped node are all left out.
+ * With `allowOutOfSchema = true` everything is kept (labels respelled) and only reported.
  *
  * @example
  * {{{
@@ -27,103 +42,93 @@ class SchemaValidator(schema: ExtractionSchema) {
   /**
    * Validates the given graph against the schema.
    *
-   * Nodes are checked against `schema.entityTypes` by label. Edges are checked
-   * against `schema.relationshipTypes` by relationship name, and optionally against
-   * source/target type constraints. Out-of-schema items are collected but may be
-   * retained in the final graph depending on `schema.allowOutOfSchema`.
-   *
    * @param graph The graph to validate
    * @return A ValidationResult with valid/invalid items separated
    */
   def validate(graph: Graph): ValidationResult = {
-    val schemaEntityNames = schema.entityTypeNames.map(_.toLowerCase).toSet
-    val schemaRelNames    = schema.relationshipTypeNames.map(_.toLowerCase).toSet
+    val strict = !schema.allowOutOfSchema
 
-    // Partition nodes
-    val (validNodePairs, outOfSchemaNodePairs) = graph.nodes.partition { case (_, node) =>
-      schemaEntityNames.contains(node.label.toLowerCase)
+    def entityType(label: String): Option[EntityTypeDefinition] =
+      if (schema.entityTypes.isEmpty) None else schema.findEntityType(label)
+    def inSchemaNode(node: Node): Boolean = schema.entityTypes.isEmpty || entityType(node.label).isDefined
+    def inSchemaRel(rel: String): Boolean =
+      schema.relationshipTypes.isEmpty || schema.findRelationshipType(rel).isDefined
+
+    // Labels respelled as the schema spells them
+    val nodes: Map[String, Node] = graph.nodes.map { case (id, node) =>
+      id -> entityType(node.label).fold(node)(t => node.copy(label = t.name))
     }
 
-    val outOfSchemaNodes = outOfSchemaNodePairs.values.toList
+    val outOfSchemaNodes = graph.nodes.values.filterNot(inSchemaNode).toList.sortBy(_.id)
 
-    // Partition edges
-    val (validEdges, outOfSchemaEdges, violations) = partitionEdges(graph, schemaRelNames)
+    val missingRequired: List[SchemaViolation] = nodes.values.toList.sortBy(_.id).flatMap { node =>
+      entityType(node.label).toList.flatMap(_.properties.filter(_.required)).flatMap { prop =>
+        val present = node.properties.exists { case (k, v) => k.equalsIgnoreCase(prop.name) && v != ujson.Null }
+        if (present) None
+        else
+          Some(
+            SchemaViolation(
+              s"Entity '${node.id}' of type ${node.label} lacks the required property '${prop.name}'",
+              entityId = Some(node.id),
+              violationType = "missing_required_property"
+            )
+          )
+      }
+    }
+    val lackingRequired = missingRequired.flatMap(_.entityId).toSet
 
-    // Build the valid graph: include out-of-schema items if allowed
-    val finalNodes = if (schema.allowOutOfSchema) graph.nodes else validNodePairs
-    val finalEdges = if (schema.allowOutOfSchema) {
-      // Keep all edges, but still report violations
-      graph.edges
-    } else {
-      validEdges
+    val keptNodes: Map[String, Node] =
+      if (strict) nodes.filter { case (id, node) => inSchemaNode(node) && !lackingRequired.contains(id) }
+      else nodes
+
+    val outOfSchemaEdges = graph.edges.filterNot(e => inSchemaRel(e.relationship))
+
+    val checked: List[(Edge, List[SchemaViolation])] = graph.edges.map { edge =>
+      val respelled =
+        if (schema.relationshipTypes.isEmpty) edge
+        else schema.findRelationshipType(edge.relationship).fold(edge)(r => edge.copy(relationship = r.name))
+      val endpoint = Seq(edge.source, edge.target).distinct.filterNot(keptNodes.contains).map { id =>
+        SchemaViolation(
+          s"Relationship ${edge.relationship} from '${edge.source}' to '${edge.target}' refers to node '$id', " +
+            (if (graph.nodes.contains(id)) "which was dropped" else "which does not exist"),
+          entityId = Some(id),
+          violationType = "endpoint_missing"
+        )
+      }
+      val typed =
+        if (!inSchemaRel(edge.relationship)) Nil
+        else endpointTypeViolations(edge, nodes)
+      respelled -> (endpoint.toList ++ typed)
     }
 
-    // When not allowing out-of-schema, filter edges that reference dropped nodes
-    val filteredEdges = if (schema.allowOutOfSchema) {
-      finalEdges
-    } else {
-      finalEdges.filter(e => finalNodes.contains(e.source) && finalNodes.contains(e.target))
-    }
+    val finalEdges =
+      if (strict) checked.collect { case (e, Nil) if inSchemaRel(e.relationship) => e }
+      else checked.collect { case (e, vs) if vs.forall(_.violationType != "endpoint_missing") => e }
 
     ValidationResult(
-      validGraph = Graph(finalNodes, filteredEdges),
+      validGraph = Graph(keptNodes, finalEdges),
       outOfSchemaNodes = outOfSchemaNodes,
       outOfSchemaEdges = outOfSchemaEdges,
-      violations = violations
+      violations = missingRequired ++ checked.flatMap(_._2)
     )
   }
 
-  private def partitionEdges(
-    graph: Graph,
-    schemaRelNames: Set[String]
-  ): (List[Edge], List[Edge], List[SchemaViolation]) = {
-    case class Acc(valid: List[Edge], outOfSchema: List[Edge], violations: List[SchemaViolation])
-
-    val result = graph.edges.foldLeft(Acc(Nil, Nil, Nil)) { (acc, edge) =>
-      if (!schemaRelNames.contains(edge.relationship.toLowerCase)) {
-        acc.copy(outOfSchema = acc.outOfSchema :+ edge)
-      } else {
-        // Check source/target type constraints for in-schema edges
-        val newViolations = schema.findRelationshipType(edge.relationship).fold(List.empty[SchemaViolation]) { relDef =>
-          val sourceViolation = if (relDef.sourceTypes.nonEmpty) {
-            graph.nodes.get(edge.source).flatMap { node =>
-              if (!relDef.sourceTypes.exists(_.equalsIgnoreCase(node.label)))
-                Some(
-                  SchemaViolation(
-                    s"Relationship ${edge.relationship} expects source types " +
-                      s"[${relDef.sourceTypes.mkString(", ")}] but found '${node.label}' " +
-                      s"on node '${edge.source}'",
-                    entityId = Some(edge.source),
-                    violationType = "invalid_source_type"
-                  )
-                )
-              else None
-            }
-          } else None
-
-          val targetViolation = if (relDef.targetTypes.nonEmpty) {
-            graph.nodes.get(edge.target).flatMap { node =>
-              if (!relDef.targetTypes.exists(_.equalsIgnoreCase(node.label)))
-                Some(
-                  SchemaViolation(
-                    s"Relationship ${edge.relationship} expects target types " +
-                      s"[${relDef.targetTypes.mkString(", ")}] but found '${node.label}' " +
-                      s"on node '${edge.target}'",
-                    entityId = Some(edge.target),
-                    violationType = "invalid_target_type"
-                  )
-                )
-              else None
-            }
-          } else None
-
-          List(sourceViolation, targetViolation).flatten
-        }
-
-        acc.copy(valid = acc.valid :+ edge, violations = acc.violations ++ newViolations)
-      }
+  private def endpointTypeViolations(edge: Edge, nodes: Map[String, Node]): List[SchemaViolation] =
+    schema.findRelationshipType(edge.relationship).toList.flatMap { relDef =>
+      def check(types: Seq[String], id: String, end: String, violationType: String): Option[SchemaViolation] =
+        if (types.isEmpty) None
+        else
+          nodes.get(id).filterNot(n => types.exists(_.equalsIgnoreCase(n.label))).map { node =>
+            SchemaViolation(
+              s"Relationship ${edge.relationship} expects $end types [${types.mkString(", ")}] but found " +
+                s"'${node.label}' on node '$id'",
+              entityId = Some(id),
+              violationType = violationType
+            )
+          }
+      List(
+        check(relDef.sourceTypes, edge.source, "source", "invalid_source_type"),
+        check(relDef.targetTypes, edge.target, "target", "invalid_target_type")
+      ).flatten
     }
-
-    (result.valid, result.outOfSchema, result.violations)
-  }
 }
