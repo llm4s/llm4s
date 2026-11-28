@@ -34,10 +34,19 @@ private[llm4s] object StorableText:
         request.tenantId.map(t => "tenantId" -> t.value)*
     )
 
-  /** [[refusal]] for a commit's ids: the thread, its checkpoint's id and run, and its effects' keys. */
+  /**
+   * [[refusal]] for every text of a commit a store keeps in a column of its own: the thread, its checkpoint's id, run,
+   * tenant, graph and parent thread, its metadata's keys and values, and its effects' keys.
+   */
   def ofCommit(threadId: ThreadId, commit: Commit): Option[ValidationError] =
     refusal(
       Vector("threadId" -> threadId.value) ++
-        commit.checkpoint.toVector.flatMap(c => Vector("checkpointId" -> c.id, "runId" -> c.runId)) ++
+        commit.checkpoint.toVector.flatMap(c =>
+          Vector("checkpointId" -> c.id, "runId" -> c.runId, "graphId" -> c.snapshot.graphId) ++
+            c.tenantId.map("tenantId" -> _) ++ c.origin.map(o => "parentThreadId" -> o.parent.value)
+        ) ++
+        commit.metadata.toVector.flatMap(
+          _.entries.toVector.flatMap((k, v) => Vector("metadataKey" -> k, "metadataValue" -> v))
+        ) ++
         commit.effects.map(e => "effectKey" -> e.key.value)*
     )

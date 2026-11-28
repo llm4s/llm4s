@@ -178,6 +178,32 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
+  it should "hold a write while a migration holds the schema's lock, so it never writes past a migration it raced (#3090)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.withConnection { c =>
+      c.setAutoCommit(false)
+      // what PostgresSchema.migrate takes, exclusively, for the whole migration
+      Using.resource(c.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) { st =>
+        st.setString(1, PostgresSchema.lockName(config.schema))
+        st.executeQuery().close()
+      }
+      val written = new LinkedBlockingQueue[Boolean]()
+      Thread.ofVirtual().start { () =>
+        written.put(
+          store
+            .claim(ThreadId(s"raced-${java.util.UUID.randomUUID()}"), ClaimRequest(RunId("r"), None, 30.seconds))
+            .isRight
+        )
+      }
+      // the write waits on the lock, shared, rather than reading the version under the migration
+      Option(written.poll(500, TimeUnit.MILLISECONDS)) shouldBe None
+      c.commit()
+      Option(written.poll(10, TimeUnit.SECONDS)) shouldBe Some(true)
+    }
+    store.close()
+  }
+
   it should "refuse a running store's writes once a newer build has migrated the schema, reads still answered (#3090)" in {
     val config = fresh()
     val store  = PgCheckpointerDb.store(config)

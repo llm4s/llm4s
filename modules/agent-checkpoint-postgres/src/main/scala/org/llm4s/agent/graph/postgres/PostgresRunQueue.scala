@@ -408,7 +408,12 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       if untaken.isDefined then Sql.closeUntakenQueueEntry(t)
       else if unstarted then Sql.closeUnstartedQueueEntry(t)
       else Sql.closeQueueEntry(t)
-    val params = Vector(outcome.state, ujson.write(EntryOutcome.toJson(outcome), escapeUnicode = true), micros(at), id) ++ untaken.toVector
+    val params = Vector(
+      outcome.state,
+      ujson.write(EntryOutcome.toJson(outcome), escapeUnicode = true),
+      micros(at),
+      id
+    ) ++ untaken.toVector
     val closed = updated(c, sql, params*) > 0
     if closed then
       withdrawing.foreach { thread =>

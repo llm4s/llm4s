@@ -510,6 +510,19 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(token, Some(s.checkpoint("c\u0000", None, on = emoji)), on = emoji).refused shouldBe a[ValidationError]
     s.commit(token, Some(s.checkpoint("c1", None, on = emoji, runId = s"r$high")), on = emoji).refused shouldBe
       a[ValidationError]
+    // every text a store keeps in a column of its own: the checkpoint's tenant, and the thread's metadata
+    s.commit(token, Some(s.checkpoint("c1", None, on = emoji).withTenantId(Some(s"t$high"))), on = emoji)
+      .refused shouldBe
+      a[ValidationError]
+    // metadata that ThreadMetadata itself admits, holding a lone surrogate
+    ThreadMetadata.of(Map("topic" -> s"cut $high")).foreach { metadata =>
+      s.store
+        .commit(
+          emoji,
+          Commit(token, Some(s.checkpoint("c1", None, on = emoji)), Vector.empty, Vector.empty).withMetadata(metadata)
+        )
+        .refused shouldBe a[ValidationError]
+    }
     s.latestId(emoji) shouldBe None
     s.commit(token, Some(s.checkpoint("c1", None, on = emoji)), on = emoji).value
     s.latestId(emoji) shouldBe Some("c1")

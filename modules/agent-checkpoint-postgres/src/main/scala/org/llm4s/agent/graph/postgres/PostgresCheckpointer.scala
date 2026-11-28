@@ -1313,10 +1313,13 @@ object PostgresCheckpointer:
 
   /**
    * A statement that fails with [[NewerSchemaState]], naming the version, when the schema of `t` is newer than this
-   * build's: a single-row read of the version table, run as a write's transaction begins (#3090).
+   * build's: a single-row read of the version table, run as a write's transaction begins (#3090). It first takes the
+   * schema's advisory lock shared, held to the write's end: a migration holds it exclusively, so a write never reads
+   * the version while a migration is in flight and then writes after it commits.
    */
   private[postgres] def schemaGuard(t: PostgresSchema.Tables): String =
     s"""DO $$llm4s$$ DECLARE found integer; BEGIN
+       |  PERFORM pg_advisory_xact_lock_shared(hashtextextended('${PostgresSchema.lockName(t.schema)}', 0));
        |  SELECT COALESCE(MAX(version), 0) INTO found FROM ${t.version};
        |  IF found > ${PostgresSchema.Current} THEN
        |    RAISE EXCEPTION 'llm4s checkpoint schema version %', found USING ERRCODE = '$NewerSchemaState';
