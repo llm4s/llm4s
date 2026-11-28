@@ -186,8 +186,11 @@ asks a reviewer instead of blocking. The question is a `GuardrailReview(phase, g
 text)`; the answer a `GuardrailVerdict`: `Allow` lets the text through, `Edit(text)` replaces it, and
 `Block` blocks the turn as `GuardrailMiddleware` would have (`AgentStatus.Blocked`). A verdict holds for
 the text and phase it was given for, whatever the refusal's wording: once given, the guardrails do not
-run on that text again, so an LLM judge whose reason varies from call to call is asked about once and is
-not called again.
+decide on that text again, so an LLM judge whose reason varies from call to call is asked about once.
+`Allow` overrides only the refusals (#3248): the list runs once more on the text with every failure
+ignored, so the guardrails that passed it still rewrite it - with `Seq(PIIMasker(), filter)`, a query
+the filter refused and the reviewer allowed goes on masked. A judge in the list is called again then,
+and its verdict ignored. `Edit(text)` is used as written.
 
 Because it can suspend the turn, its input guardrails run in `beforeAgent`, not at
 [admission](middleware#admission): the query is in the turn's first checkpoint before they see it, and a
