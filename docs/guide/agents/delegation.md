@@ -168,6 +168,15 @@ fails, gives no report. With `ChildFailure.Report`, the default, the parent mode
 subagent, the child thread and the reason, and can compose without it. With `withFailure(ChildFailure.Fail)` the
 parent run fails instead, and the parent's `recover` continues the child from its own checkpoint.
 
+The reason in that tool error is the refusal's one-line description, and for two refusals it carries the child's
+text: a child that failed gives its error's message (`failed: ...`), and one whose answer failed its schema twice
+lists every schema problem, which can quote the answer. A guardrail block names only the guardrail. The tool error is
+cut to `maxReportBytes` and stored in the parent's history; read the full typed reason from `TaskOutcome`.
+
+A task the parent has no steps or tokens left to start (`TaskOutcome.NotStarted`) is a tool error under both policies
+(#3274): no child exists to continue, so the parent's turn goes on and ends at its own `StepLimitReached` or
+`TokenLimitReached` rather than failing the run for good.
+
 A task call runs again on `recover`. It never starts its child twice: a completed child's report is read back from
 the child thread, and a child that was still running continues from its checkpoint.
 

@@ -28,7 +28,8 @@ enum ChildFailure:
 
   /**
    * The parent run fails with the child's error (`GraphError.ToolFailed`); the parent's `recover` runs the call again,
-   * which continues the child from its own checkpoint rather than starting it again.
+   * which continues the child from its own checkpoint rather than starting it again. A task the parent has no
+   * steps or tokens left to start is still a tool error (#3274): there is no child to continue.
    */
   case Fail
 
@@ -114,7 +115,11 @@ enum TaskRefusal derives ReadWriter:
   /** The child run failed: its error's message. */
   case Failed(message: String)
 
-  /** A one-line description, for the parent model's tool error: stored with the parent's history. */
+  /**
+   * A one-line description, for the parent model's tool error: stored with the parent's history. `Failed` carries
+   * the child's error message and `OutputInvalid` every schema problem, which can quote the child's answer; `Blocked`
+   * names the guardrail only.
+   */
   def describe: String = this match
     // the tool error is stored in the parent's history, and is the same on a replay: the guardrail, never its reason
     case Blocked(guardrail, _) => s"blocked by guardrail '$guardrail'"

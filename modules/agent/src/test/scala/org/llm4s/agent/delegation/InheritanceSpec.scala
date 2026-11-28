@@ -377,6 +377,16 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     agent.children(ThreadId("t1")).value shouldBe empty
   }
 
+  it should "end the parent at its step limit under ChildFailure.Fail too, not fail the run (#3274)" in {
+    val client = RoutingClient(delegatingOnce.orElse(answering))
+    val agent  = lead(client).withMaxSteps(1).withSubagents(researcher.withFailure(ChildFailure.Fail)).build().value
+    val result = agent.run(ThreadId("t1"), "go").value
+
+    result.status shouldBe AgentStatus.StepLimitReached
+    toolResults(result.messages).loneElement should include("subagent 'researcher' was not started")
+    agent.children(ThreadId("t1")).value shouldBe empty
+  }
+
   "a child's tokens" should "be capped by what the parent's run has left" in {
     val client = RoutingClient(delegatingOnce.orElse(looping("child_tool")))
     val result = lead(client)

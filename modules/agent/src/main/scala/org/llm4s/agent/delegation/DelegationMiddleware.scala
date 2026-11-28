@@ -239,8 +239,9 @@ private[agent] object DelegationMiddleware:
 
   /**
    * What the parent model sees for subagent `name`'s `outcome`: its report as JSON, or past `maxReportBytes` a tool
-   * error; a refusal (made with or without a child) as a tool error under `ChildFailure.Report`, or `Fatal` with the
-   * child's error `cause` - else a `ProcessingError` with the same text - under `Fail`.
+   * error; a child's refusal as a tool error under `ChildFailure.Report`, or `Fatal` with the child's error `cause` -
+   * else a `ProcessingError` with the same text - under `Fail`; a task refused before any child existed
+   * (`NotStarted`) as a tool error under both, so the parent's turn ends at its own limit (#3274).
    * Every tool message is at most `maxReportBytes` in UTF-8: a refusal's reason is cut to fit, an `OutputInvalid`
    * keeping its first errors and saying how many it dropped. The full reason stays in the child's `RunOutcome` and in
    * the typed `TaskOutcome`. A suspended child is the call's [[DelegatedQuestion]] (design 4.46): its interrupts.
@@ -269,8 +270,10 @@ private[agent] object DelegationMiddleware:
         else ToolOutcome.success(ToolContent.Json(json))
       case TaskOutcome.Refused(child, reason, _) =>
         refused(s"subagent '$name' (child thread ${child.threadId.value}) ", reason)
+      // a tool error under either policy (#3274): no child exists and the same snapshot refuses again, so a Fatal
+      // would fail the run for good, where the turn should end at its own step or token limit
       case TaskOutcome.NotStarted(_, reason) =>
-        refused(s"subagent '$name' was not started: ", reason)
+        ToolOutcome.Error(within(s"subagent '$name' was not started: ", reason, maxReportBytes))
       case TaskOutcome.Suspended(child, status) =>
         ToolOutcome.Ask(DelegatedQuestion(child, ChildInterrupt.of(status)))
 
