@@ -2773,12 +2773,16 @@ lazy val it = (project in file("modules/it"))
       val dir = (samples / baseDirectory).value / "src" / "main" / "scala" / "org" / "llm4s" / "samples" / "kafka"
       Seq(dir / "Tickets.scala", dir / "TicketPipeline.scala")
     },
-    // The memory contracts the Postgres suites pass (#3217): two files compiled here instead of depending on memory's
-    // tests, which compiled memory's and core's test sources for them and put core's fixture providers and test
-    // application.conf on this classpath. Both files use only main classes and ScalaTest.
+    // The memory contracts the Postgres suites pass (#3217, #3038): files compiled here instead of depending on
+    // memory's tests, which compiled memory's and core's test sources for them and put core's fixture providers and
+    // test application.conf on this classpath. Each file uses only main classes and ScalaTest.
     Test / unmanagedSources ++= {
       val dir = (memory / baseDirectory).value / "src" / "test" / "scala" / "org" / "llm4s" / "agent" / "memory"
-      Seq(dir / "MemoryStoreFilterFixtures.scala", dir / "TransactionalMemoryStoreContract.scala")
+      Seq(
+        dir / "MemoryStoreFilterFixtures.scala",
+        dir / "TransactionalMemoryStoreContract.scala",
+        dir / "MemoryStoreContract.scala"
+      )
     },
     // The GraphStore contract Neo4jGraphStoreContractSpec passes (#2970), compiled here the same way
     Test / unmanagedSources +=

@@ -103,7 +103,32 @@ private[memory] object FilterSupport {
   /** The SQL for a condition that holds for every row, for a leaf that restricts nothing (an unbounded time range). */
   val unrestricted: Sql = Everything
 
-  /** The name of the SQL function that lower-cases text the way `String.toLowerCase` does. */
+  /**
+   * The SQL of a `ByTimeRange` over an epoch-millisecond `timestamp` column, which holds a memory's time truncated to
+   * the millisecond (as it is read back, so `matches` sees the same value). A bound with a sub-millisecond part is
+   * rounded so the SQL means what `matches` means: `after` up to the next millisecond, `before` down.
+   */
+  def timeRange(after: Option[java.time.Instant], before: Option[java.time.Instant]): Sql = {
+    val lower = after.map(a => "timestamp >= ?" -> ceilMillis(a))
+    val upper = before.map(b => "timestamp <= ?" -> b.toEpochMilli)
+    val parts = lower.toSeq ++ upper.toSeq
+    if (parts.isEmpty) Everything else Sql(parts.map(_._1).mkString(" AND "), parts.map(_._2))
+  }
+
+  /** `t` in epoch milliseconds, rounded up: the first millisecond not before `t`. */
+  def ceilMillis(t: java.time.Instant): Long =
+    if (t.getNano % 1000000 == 0) t.toEpochMilli else Math.addExact(t.toEpochMilli, 1L)
+
+  /**
+   * The JSON path of a metadata key, quoted so that a `.` or `[` in the key is part of the name and not a path
+   * step. A key that cannot be quoted this way (empty, or holding a quote, a backslash or a control character)
+   * has no exact path: `None`, and `matches` decides.
+   */
+  def jsonPath(key: String): Option[String] =
+    if (key.nonEmpty && key.forall(c => c != '"' && c != '\\' && c >= ' ')) Some("$.\"" + key + "\"")
+    else scala.None
+
+  /** The name of the SQL function that lower-cases text the way `String.toLowerCase(Locale.ROOT)` does. */
   val JavaLower: String = "java_lower"
 
   /**
@@ -124,7 +149,7 @@ private[memory] object FilterSupport {
       new SqliteFunction {
         override protected def xFunc(): Unit = {
           val text = value_text(0)
-          if (text == null) result() else result(text.toLowerCase)
+          if (text == null) result() else result(text.toLowerCase(java.util.Locale.ROOT))
         }
       },
       1,

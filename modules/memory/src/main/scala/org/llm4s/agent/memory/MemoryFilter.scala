@@ -158,7 +158,7 @@ object MemoryFilter {
       if (caseSensitive) {
         memory.content.contains(substring)
       } else {
-        memory.content.toLowerCase.contains(substring.toLowerCase)
+        memory.content.toLowerCase(java.util.Locale.ROOT).contains(substring.toLowerCase(java.util.Locale.ROOT))
       }
   }
 

@@ -223,15 +223,23 @@ object ScoredMemory {
 /**
  * Configuration for memory store behavior.
  *
- * @param maxMemories Maximum number of memories to retain (None for unlimited)
- * @param defaultEmbeddingDimensions Dimensions for embedding vectors
- * @param enableAutoCleanup Whether to automatically clean old memories
- * @param cleanupThreshold Memory count threshold for triggering cleanup
+ * Only [[InMemoryStore]] (and [[EmbeddingMemoryStore]], over one) reads `maxMemories`: storing past it evicts the
+ * oldest other memories, never the one just stored. The durable stores keep everything they are given; bound them with
+ * `TransactionalMemoryStore.applyAtomically`'s `MemoryBounds`, as `SemanticMemoryMiddleware` does. No store reads the
+ * other three fields, which are deprecated (#3038).
+ *
+ * @param maxMemories Maximum number of memories an `InMemoryStore` retains (None for unlimited)
+ * @param defaultEmbeddingDimensions Not read by any store
+ * @param enableAutoCleanup Not read by any store
+ * @param cleanupThreshold Not read by any store
  */
 final case class MemoryStoreConfig(
   maxMemories: Option[Int] = None,
+  @deprecated("no store reads it; a store's embedding dimension is its embedding model's", since = "1.1.0")
   defaultEmbeddingDimensions: Int = 1536,
+  @deprecated("no store reads it; bound a durable store with MemoryBounds", since = "1.1.0")
   enableAutoCleanup: Boolean = false,
+  @deprecated("no store reads it; bound a durable store with MemoryBounds", since = "1.1.0")
   cleanupThreshold: Int = 10000
 )
 
@@ -245,17 +253,14 @@ object MemoryStoreConfig {
   /**
    * Configuration optimized for testing (small limits).
    */
-  val testing: MemoryStoreConfig = MemoryStoreConfig(
-    maxMemories = Some(1000),
-    enableAutoCleanup = false
-  )
+  val testing: MemoryStoreConfig = MemoryStoreConfig(maxMemories = Some(1000))
 
   /**
-   * Configuration for production use with cleanup.
+   * An `InMemoryStore` bounded at `maxMemories`. It bounds no durable store: those read none of this configuration.
    */
-  def production(maxMemories: Int = 100000): MemoryStoreConfig = MemoryStoreConfig(
-    maxMemories = Some(maxMemories),
-    enableAutoCleanup = true,
-    cleanupThreshold = (maxMemories * 0.9).toInt
+  @deprecated(
+    "only InMemoryStore reads it, as MemoryStoreConfig(maxMemories = Some(n)); bound a durable store with MemoryBounds",
+    since = "1.1.0"
   )
+  def production(maxMemories: Int = 100000): MemoryStoreConfig = MemoryStoreConfig(maxMemories = Some(maxMemories))
 }

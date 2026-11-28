@@ -338,7 +338,7 @@ final case class LLMMemoryManager(
     val name = obj.value.get("entity_name").collect { case Str(v) => v.trim }.filter(_.nonEmpty)
     val entityType = obj.value
       .get("entity_type")
-      .collect { case Str(v) => v.trim.toLowerCase }
+      .collect { case Str(v) => v.trim.toLowerCase(java.util.Locale.ROOT) }
       .filter(_.nonEmpty)
       .getOrElse("unknown")
     val fact = obj.value.get("fact").collect { case Str(v) => v.trim }.filter(_.nonEmpty)
@@ -354,7 +354,7 @@ final case class LLMMemoryManager(
   }
 
   private def deterministicImportance(fact: String, entityType: String): Double = {
-    val normalizedFact = fact.toLowerCase
+    val normalizedFact = fact.toLowerCase(java.util.Locale.ROOT)
 
     val keywordBonus =
       if (
@@ -422,7 +422,7 @@ final case class LLMMemoryManager(
           // Dedupe by normalized (entity_name, fact) to avoid duplicated store entries.
           val unique = extracted
             .groupBy { case (name, _, fact, _) =>
-              (name.toLowerCase.trim, fact.toLowerCase.trim)
+              (name.toLowerCase(java.util.Locale.ROOT).trim, fact.toLowerCase(java.util.Locale.ROOT).trim)
             }
             .values
             .map(_.head)

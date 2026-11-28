@@ -843,3 +843,55 @@ class VectorOpsSpec extends AnyFlatSpec with Matchers {
     VectorOps.cosineSimilarity(v1, v2) shouldBe 0.0
   }
 }
+
+/** `embedAll` and `reembedAll`: every memory visited once, and a short answer from the service an error (#3029). */
+class VectorMemoryStoreEmbedAllSpec extends AnyFlatSpec with Matchers {
+
+  /** Answers `dims`-dimensional vectors, or, when `short`, one vector fewer than it was asked for. */
+  final private class Service(dims: Int, short: Boolean = false) extends EmbeddingService {
+    val batches                      = new java.util.concurrent.atomic.AtomicInteger()
+    override def embed(text: String) = Right(Array.fill(dims)(1f))
+    override def embedBatch(texts: Seq[String]) = {
+      batches.incrementAndGet()
+      Right((if (short) texts.drop(1) else texts).map(_ => Array.fill(dims)(1f)))
+    }
+    override def dimensions: Int = dims
+  }
+
+  private def withStore[A](service: EmbeddingService)(body: VectorMemoryStore => A): A = {
+    val store = VectorMemoryStore.inMemory(service).getOrElse(fail("Failed to create store"))
+    MemoryStoreContract.after(store.close())(body(store))
+  }
+
+  "VectorMemoryStore's re-embedding" should "fail, not loop, when the service answers with fewer vectors than texts" in {
+    val service = new Service(3, short = true)
+    withStore(service) { store =>
+      // stored with an embedding of another model, then cleared, so embedAll has rows to embed
+      store
+        .storeAll((1 to 3).map(i => Memory(MemoryId(s"m$i"), s"text $i", MemoryType.Task).withEmbedding(Array(1f))))
+        .isRight shouldBe true
+      store.reembedAll(3, batchSize = 2).isLeft shouldBe true
+      service.batches.get shouldBe 1
+    }
+  }
+
+  "VectorMemoryStore.reembedAll" should "re-embed every memory of another dimension, once, and leave the rest" in {
+    val service = new Service(3)
+    withStore(service) { store =>
+      store
+        .storeAll(
+          (1 to 5).map(i => Memory(MemoryId(s"old$i"), s"old $i", MemoryType.Task).withEmbedding(Array(1f, 0f)))
+        )
+        .isRight shouldBe true
+      store
+        .store(Memory(MemoryId("new"), "new", MemoryType.Task).withEmbedding(Array(0f, 0f, 1f)))
+        .isRight shouldBe true
+      store.reembedAll(3, batchSize = 2) shouldBe Right(5)
+      store.vectorStats.map(_.embeddingDimensions) shouldBe Right(Set(3))
+      store.get(MemoryId("new")).map(_.flatMap(_.embedding).map(_.toSeq)) shouldBe Right(Some(Seq(0f, 0f, 1f)))
+      store.reembedAll(3) shouldBe Right(0)
+      store.embedAll() shouldBe Right(0)
+      store.reembedAll(0).isLeft shouldBe true
+    }
+  }
+}

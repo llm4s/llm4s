@@ -871,6 +871,51 @@ stored schema is the same.
 | A fatal throwable (a `StackOverflowError` in a guardrail) on a slot's run thread kept the slot, lost its permit and renewed its lease for good; a take or sweep loop that threw ended for good (#3240) | The slot is given up however its run ends, so its lease lapses and the entry is taken again; each loop logs a throw and goes on, and `health()` reports a sweep thread that is not running |
 | An attempt a drain cut short counted against `maxAttempts`, so a run longer than `drain.grace` was dead-lettered after a few rolling deploys (#3241) | A drained attempt raises the entry's `maxAttempts` by one (it stays in `attempts`). A worker crash still counts: that bound dead-letters an entry whose run crashes its worker every time. The in-memory, SQLite and PostgreSQL queues do this for `AgentWorker`; a custom `RunQueue` charges drained attempts, as before |
 
+## Memory stores share one contract and one score rule (#3036, #3037, #3038)
+
+`llm4s-memory` and `llm4s-memory-postgres` are Beta. Every store now passes one `MemoryStoreContract`, so a call gets
+the same answer from `InMemoryStore`, `EmbeddingMemoryStore`, `SQLiteMemoryStore`, `VectorMemoryStore` and
+`PostgresMemoryStore`. `PostgresMemoryStore` gains `embeddingDimensions` (in `Config` and `fromDataSource`) and
+`reembedAll`; `VectorMemoryStore` gains `reembedAll`. No stored schema changes unless you declare a dimension.
+
+| Before (1.0.0) | After |
+|---|---|
+| `SQLiteMemoryStore.search` scored `1 / (1 + abs(bm25))`: the better the match, the lower the score (#3036) | `s / (1 + s)` with `s = -bm25`: the better match scores higher. Results keep their order; a threshold on the score must be re-tuned |
+| `PostgresMemoryStore` vector search scored `cos`, clamped at 0; the other stores `(1 + cos) / 2` | `(1 + cos) / 2` everywhere: an orthogonal pair scores 0.5, cosine 0.6 scores 0.8. Halve-and-shift a Postgres threshold: `t` becomes `(1 + t) / 2` |
+| On Postgres, an embedding of another dimension, or an all-zero one, failed every search that reached it | Only embeddings of the query's dimension that are not all zeros are compared. A store whose candidate embeddings are all of another dimension is a `ConfigurationError` on every semantic store, where `InMemoryStore` and `EmbeddingMemoryStore` fell back to a keyword search; a zero, empty or non-finite vector is left out, never scored |
+| `SQLiteMemoryStore.store` of an existing id kept the old timestamp, so `update(id, _.copy(timestamp = t))` did nothing | Every field is replaced, the timestamp included |
+| `update` changing the id: `ValidationError` in memory, a second row in SQLite, a delete-then-store in `VectorMemoryStore`, ignored in Postgres | A `ValidationError` on every store, and nothing changes |
+| `VectorMemoryStore.update` of a missing id was a `ProcessingError` | A `NotFoundError`, as on every store |
+| `InMemoryStore` and `SQLiteMemoryStore` kept an embedding computed for the old content when `update` changed the content; `VectorMemoryStore` dropped an embedding the update supplied | The stale embedding is dropped (and recomputed by a store with an `EmbeddingService`); a supplied one is kept |
+| `PostgresMemoryStore.store` over an existing id did not bump its version, so a concurrent `update` overwrote it | It bumps the version: the `update` fails with `OptimisticLockFailure` |
+| A `limit` or `topK` below 1: empty in memory, unlimited on SQLite, a `Left` on Postgres | Empty on every store |
+| A blank query called the embedding service on the vector and Postgres stores | Empty, with no call |
+| `VectorMemoryStore.replace`, `delete` and `clear`, and `SQLiteMemoryStore.delete` and `clear`, were several transactions | One transaction each |
+| `InMemoryStore` with `maxMemories` could evict the memory just stored, if its timestamp was the oldest | It evicts the oldest other memories |
+| `ByTimeRange(after = t)` with a sub-millisecond `t` also matched the millisecond before it on the SQLite stores; `VectorMemoryStore`'s `ByMetadata(k, v)` and `HasMetadata(k)` matched a key that ends in `k` after a quote | Both answer as `MemoryFilter.matches` does |
+| `EntityId.fromName`, `MemoryType.fromString` and case-insensitive `ContentContains` lower-cased in the default locale (in Turkish, `I` is `ı`) | `Locale.ROOT` |
+| `LLMEmbeddingService.embed` threw on a response with no embedding; `VectorMemoryStore.embedAll` looped when the service answered with fewer vectors than texts | A `Left` in both |
+
+`PostgresMemoryStore.Config` gains a ninth field, `embeddingDimensions`: a positional pattern over it,
+`case Config(_, _, _, _, _, table, _, _)`, no longer compiles. `Llm4sMigrateFrom_1_0`'s
+`PositionalPatternsGainFields` pads one written against 1.0.0; add a `_` by hand to one written against a later
+snapshot.
+
+`MemoryStoreConfig`'s `defaultEmbeddingDimensions`, `enableAutoCleanup` and `cleanupThreshold`, and
+`MemoryStoreConfig.production`, are deprecated: no store read them. Only `InMemoryStore` reads `maxMemories`; bound a
+durable store with `TransactionalMemoryStore.applyAtomically`'s `MemoryBounds`, as `SemanticMemoryMiddleware` does.
+
+To type and index a Postgres table, open it with the dimension; an older untyped table is converted if every embedding
+in it has that dimension, and otherwise the open fails naming the one it found:
+
+```scala
+PostgresMemoryStore(config.copy(embeddingDimensions = Some(1536)), Some(embeddingService))
+```
+
+After a change of embedding model, re-embed what the old one wrote, with the store opened with the new service:
+`store.reembedAll(newDimension)` (both `VectorMemoryStore` and `PostgresMemoryStore`). See
+[Postgres Memory Store](postgres-memory-store#declaring-the-dimension).
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

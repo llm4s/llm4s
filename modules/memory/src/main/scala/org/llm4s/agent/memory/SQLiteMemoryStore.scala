@@ -1,8 +1,9 @@
 package org.llm4s.agent.memory
 
-import org.llm4s.error.{ ConfigurationError, NotFoundError, ProcessingError }
+import org.llm4s.error.{ ConfigurationError, NotFoundError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.util.PrivateSqliteFile
+import org.llm4s.vectorstore.SearchScores
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet, SQLException }
 import java.time.Instant
@@ -199,6 +200,7 @@ final class SQLiteMemoryStore private (
         |ON CONFLICT(id) DO UPDATE SET
         |  content = excluded.content,
         |  memory_type = excluded.memory_type,
+        |  timestamp = excluded.timestamp,
         |  importance = excluded.importance,
         |  conversation_id = excluded.conversation_id,
         |  entity_id = excluded.entity_id,
@@ -265,6 +267,11 @@ final class SQLiteMemoryStore private (
     filter: MemoryFilter = MemoryFilter.All,
     limit: Int = 100
   ): Result[Seq[Memory]] =
+    if (limit <= 0) Right(Seq.empty)
+    else
+      recallSome(filter, limit)
+
+  private def recallSome(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     Try {
       // SQL narrows, `matches` decides: what SQL cannot express exactly (a Custom predicate is code) is decided on
       // the rows read, newest first, so the limit applies to the memories that match and not to the newest overall.
@@ -284,11 +291,21 @@ final class SQLiteMemoryStore private (
       }
     }.toEither.left.map(e => ProcessingError("sqlite-recall", s"Failed to recall memories: ${e.getMessage}"))
 
+  /**
+   * Full-text search by FTS5: the memories `filter` accepts holding any of the query's phrases, best first. FTS5's
+   * `bm25` is negative, more negative for a better match; it scores `s / (1 + s)` with `s = -bm25`
+   * (`org.llm4s.vectorstore.SearchScores`), so the better match scores higher. A blank query, or a `topK` below 1,
+   * finds nothing.
+   */
   override def search(
     query: String,
     topK: Int = 10,
     filter: MemoryFilter = MemoryFilter.All
   ): Result[Seq[ScoredMemory]] =
+    if (query.trim.isEmpty || topK <= 0) Right(Seq.empty)
+    else searchSome(query, topK, filter)
+
+  private def searchSome(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
     Try {
       // Use FTS5 for full-text search. What SQL cannot narrow exactly is decided by `matches` after the full-text
       // match and before topK, so the limit is applied to the memories the filter accepts.
@@ -325,28 +342,17 @@ final class SQLiteMemoryStore private (
             .takeWhile(_.next())
             .map { row =>
               val memory = rowToMemory(row)
-              val bm25   = row.getDouble("score")
-              // Convert BM25 score (negative, lower is better) to 0-1 range
-              val normScore = Math.max(0.0, Math.min(1.0, 1.0 / (1.0 + Math.abs(bm25))))
-              ScoredMemory(memory, normScore)
+              ScoredMemory(memory, SearchScores.fromBm25(row.getDouble("score")))
             }
           (if (plan.needsMatches) scored.filter(sm => filter.matches(sm.memory)).take(topK) else scored).toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-search", s"Failed to search memories: ${e.getMessage}"))
 
+  /** Delete the memory and its full-text entry, in one transaction. */
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
-      // Delete from FTS first
-      Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-        stmt.setString(1, id.value)
-        stmt.executeUpdate()
-      }
-      // Delete from main table
-      Using.resource(connection.prepareStatement("DELETE FROM memories WHERE id = ?")) { stmt =>
-        stmt.setString(1, id.value)
-        stmt.executeUpdate()
-      }
+      inTransaction(deleteIds(Seq(id.value)))
       this
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
@@ -424,7 +430,12 @@ final class SQLiteMemoryStore private (
       memory <- maybeMemory.toRight(
         NotFoundError(s"Memory not found: ${id.value}", id.value)
       )
-      updated = updateFn(memory)
+      updated = MemoryEmbeddings.afterUpdate(memory, updateFn(memory))
+      _ <- Either.cond(
+        updated.id == id,
+        (),
+        ValidationError("id", s"update function changed Memory ID from $id to ${updated.id}; IDs must remain constant")
+      )
       result <- store(updated)
     } yield result
 
@@ -452,10 +463,10 @@ final class SQLiteMemoryStore private (
 
   override def clear(): Result[MemoryStore] =
     Try {
-      Using.resource(connection.createStatement()) { stmt =>
+      inTransaction(Using.resource(connection.createStatement()) { stmt =>
         stmt.executeUpdate("DELETE FROM memories_fts")
         stmt.executeUpdate("DELETE FROM memories")
-      }
+      })
       this
     }.toEither.left.map(e => ProcessingError("sqlite-clear", s"Failed to clear memories: ${e.getMessage}"))
 
@@ -496,12 +507,7 @@ final class SQLiteMemoryStore private (
       Some(Sql("COALESCE(entity_id = ?, 0)", Seq(entityId.value)))
 
     case MemoryFilter.ByTimeRange(after, before) =>
-      (after, before) match {
-        case (Some(a), Some(b)) => Some(Sql("timestamp >= ? AND timestamp <= ?", Seq(a.toEpochMilli, b.toEpochMilli)))
-        case (Some(a), scala.None)    => Some(Sql("timestamp >= ?", Seq(a.toEpochMilli)))
-        case (scala.None, Some(b))    => Some(Sql("timestamp <= ?", Seq(b.toEpochMilli)))
-        case (scala.None, scala.None) => Some(FilterSupport.unrestricted)
-      }
+      Some(FilterSupport.timeRange(after, before))
 
     case MemoryFilter.MinImportance(threshold) =>
       Some(Sql("COALESCE(importance >= ?, 0)", Seq(threshold)))
@@ -524,14 +530,7 @@ final class SQLiteMemoryStore private (
     case _ => scala.None // And, Or, Not, All, None and Custom are narrowed by FilterSupport, not here
   }
 
-  /**
-   * The JSON path of a metadata key, quoted so that a `.` or `[` in the key is part of the name and not a path
-   * step. A key that cannot be quoted this way (empty, or holding a quote, a backslash or a control character)
-   * has no exact path: `None`, and `matches` decides.
-   */
-  private def jsonPath(key: String): Option[String] =
-    if (key.nonEmpty && key.forall(c => c != '"' && c != '\\' && c >= ' ')) Some("$.\"" + key + "\"")
-    else scala.None
+  private def jsonPath(key: String): Option[String] = FilterSupport.jsonPath(key)
 
   private def setParameter(stmt: PreparedStatement, idx: Int, value: Any): Unit = value match {
     case s: String => stmt.setString(idx, s)
