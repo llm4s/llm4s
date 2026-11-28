@@ -236,6 +236,26 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "offer null beside a branch kept as JSON as its own alternative, not by widening the branch" in {
+    val p = property(
+      withProperty(
+        "v",
+        ujson.Obj("anyOf" -> ujson.Arr(ujson.Obj("type" -> "integer", "const" -> 1), ujson.Obj("type" -> "null")))
+      ),
+      "v"
+    )
+    written(p) shouldBe ujson.Obj(
+      "anyOf" -> ujson.Arr(ujson.Obj("type" -> "integer", "const" -> 1), ujson.Obj("type" -> "null"))
+    )
+  }
+
+  it should "keep properties with no type as written below the top, and read them as an object at the top" in {
+    val untyped = ujson.Obj("properties" -> ujson.Obj("label" -> ujson.Obj("type" -> "string")))
+    written(property(withProperty("p", untyped), "p")) shouldBe untyped
+    rendered(untyped)("type").str shouldBe "object"
+    rendered(untyped)("properties")("label")("type").str shouldBe "string"
+  }
+
   it should "follow a $ref only where a schema goes, never inside enum, const, default or examples" in {
     val literal = ujson.Obj(
       "required"   -> ujson.Arr("$ref"),

@@ -35,7 +35,9 @@ private[mcp] object MCPInputSchema {
   def toSchema(toolName: String, inputSchema: Value): SchemaDefinition[_] = {
     val fields = inputSchema.objOpt.map(_.toMap).getOrElse(Map.empty[String, Value])
     val defs   = definitions(fields)
-    val top    = fields -- Seq("$defs", "definitions")
+    // Tool arguments are always an object: a top level with no `type` is one
+    val top = (fields -- Seq("$defs", "definitions")) ++
+      Option.when(!fields.contains("type"))("type" -> ujson.Str("object"))
     if (!expressible(top)) {
       val written = asWritten(top, defs, Nil)
       written("type") = ujson.Str("object")
@@ -113,8 +115,9 @@ private[mcp] object MCPInputSchema {
       case Some(_) if union.nonEmpty =>
         union.size == 1 && listed(fields(union.head)) && keys.subsetOf(Set(union.head, "type")) &&
         types.forall(_.forall(_ == "null"))
-      case Some(List(single))                         => faithfulAs(single) && requiredDeclared
-      case Some(Nil) if fields.contains("properties") => faithfulAs("object") && requiredDeclared
+      case Some(List(single)) => faithfulAs(single) && requiredDeclared
+      // `properties` with no `type` allows any value that is not an object too: only the JSON says so
+      case Some(Nil) if fields.contains("properties") => false
       case Some(Nil)                                  => keys.subsetOf(Set("type"))
       case Some(_)                                    => keys.subsetOf(Set("type")) // several types: no keyword
     }
@@ -214,7 +217,7 @@ private[mcp] object MCPInputSchema {
     }
     val nonNull = types.filterNot(_ == "null")
     def nullable(schema: SchemaDefinition[_]): SchemaDefinition[_] =
-      if (types.contains("null")) NullableSchema(schema) else schema
+      if (types.contains("null")) orNull(schema, description) else schema
 
     (alternatives, nonNull) match {
       case (Some(alts), _) =>
@@ -225,7 +228,7 @@ private[mcp] object MCPInputSchema {
           case single :: Nil => single
           case first :: rest => AnyOfSchema[Value](description, first, rest: _*)
         }
-        if (nulls.nonEmpty && converted.nonEmpty) NullableSchema(union) else union
+        if (nulls.nonEmpty && converted.nonEmpty) orNull(union, description) else union
       case (None, List(single))                         => nullable(typedOne(single, description, fields, defs, seen))
       case (None, Nil) if fields.contains("properties") => nullable(objectSchema(fields, defs, seen, None))
       // `{"type":"null"}`, or no type and no keyword: as written (a null type), or any value
@@ -234,6 +237,15 @@ private[mcp] object MCPInputSchema {
         val each = (first :: rest).map(t => typedOne(t, "", fields, defs, seen))
         nullable(AnyOfSchema[Value](description, each.head, each.tail: _*))
     }
+  }
+
+  /**
+   * `schema` or null. A typed schema widens safely (`NullableSchema` adds `null` to its type and enum); one kept as
+   * JSON may have a `const` or `enum` the widening cannot cover, so it gets an explicit `{"type":"null"}` alternative.
+   */
+  private def orNull(schema: SchemaDefinition[_], description: String): SchemaDefinition[_] = schema match {
+    case raw: RawJsonSchema => AnyOfSchema[Value](description, raw, RawJsonSchema(ujson.Obj("type" -> "null")))
+    case typed              => NullableSchema(typed)
   }
 
   private def typedOne(
