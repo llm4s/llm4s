@@ -723,6 +723,17 @@ still compiles; what it accepts changes:
 | Both `saveToFile`s truncated an existing file in place, the source image included | A `Left` (`ImageValidationError`, or `InvalidInputError` for `ProcessedImage`) unless `overwrite = true`; the write goes to a temporary file that is then moved into place |
 | `asBytes` threw `IllegalArgumentException` on invalid base64 | Deprecated: use `bytes`, an `Either[ImageGenerationError, Array[Byte]]` |
 
+## File tools refuse name aliases and firmlinked paths, and `VectorMemoryStore` names its file (#3236, #3237, #3238)
+
+`HostFileBackend` and the file tools of `llm4s-agent` are experimental; `llm4s-agent-tools` and `llm4s-memory` are Beta.
+No signature changed and no stored format changed; what is refused is new:
+
+| Before (1.0.0) | After |
+|---|---|
+| `HostFileBackend` accepted a path whose existing components matched the on-disk names after case folding and Unicode NFC, so on APFS or NTFS `/agents.md` reached `/AGENTS.md` and side-stepped a permission rule written for `/AGENTS.md` (#3236) | An existing component must be spelled exactly as the volume spells it: another case or normalisation is refused ("names an entry by a name that is not its own"), as an 8.3 short name already was. Use the name a listing shows |
+| `PathPolicy` compared blocked entries by spelling and real path only, so on macOS every default blocked path was readable through its `/System/Volumes/Data/...` firmlink spelling (#3237) | A path with an existing ancestor whose file key is a blocked entry's is blocked, so the firmlink spelling of a blocked directory is blocked too. Where the platform reports file keys (not Windows), each check reads the attributes of the path's existing ancestors |
+| `VectorMemoryStore.storageIdentity` was `None`, so `SemanticMemoryMiddleware` gave two tenants two instances over one file (#3238) | It names the file's real path, as `SQLiteMemoryStore` does: a resolver that maps two tenants to one file is refused |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

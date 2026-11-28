@@ -968,8 +968,50 @@ class HostFileBackendSpec
     alias(backend.ls(p("/PROGRA~1"), 10, call()))
     alias(backend.glob(Glob("*"), p("/PROGRA~1"), 10, call()))
     Files.exists(dir.resolve("PROGRA~1/b.txt")) shouldBe false
-    // its own name, and a case alias of it, are the file's names
+    // its own name is the file's name
     backend.read(p("/Program Files/a.txt"), 0, 1, call()).value.lines shouldBe Vector("x")
+  }
+
+  // #3236: a permission rule matches a path's spelling, so a case or normalisation alias of a name would reach a file
+  // the rule for its own name denies. On a case-insensitive volume (APFS, NTFS) the alias resolves to the file; on a
+  // case-sensitive one both names are made and the injected lookup maps the alias, as such a volume would.
+  it should "refuse an existing entry named by a case or Unicode-normalisation alias of its own name (#3236)" in {
+    val nfc = "caf\u00e9"
+    val nfd = java.text.Normalizer.normalize(nfc, java.text.Normalizer.Form.NFD)
+    Files.writeString(dir.resolve("AGENTS.md"), "x\n")
+    Files.createDirectories(dir.resolve("secrets"))
+    Files.writeString(dir.resolve("secrets/key.pem"), "k\n")
+    Files.writeString(dir.resolve(nfc), "c\n")
+    // the aliases, made only where the volume keeps them apart
+    if (!Files.exists(dir.resolve("agents.md"))) Files.writeString(dir.resolve("agents.md"), "x\n")
+    if (!Files.exists(dir.resolve("SECRETS"))) {
+      Files.createDirectories(dir.resolve("SECRETS"))
+      Files.writeString(dir.resolve("SECRETS/key.pem"), "k\n")
+    }
+    if (!Files.exists(dir.resolve(nfd))) Files.writeString(dir.resolve(nfd), "c\n")
+    val real = dir.toRealPath()
+    reopen(canonical = q => {
+      val rel = real.relativize(q).toString.replace('\\', '/')
+      if (rel == "agents.md") real.resolve("AGENTS.md")
+      else if (rel == "SECRETS" || rel.startsWith("SECRETS/")) real.resolve("secrets" + rel.drop(7))
+      else if (rel == nfd) real.resolve(nfc)
+      else q.toRealPath()
+    }).value
+    def alias[A](r: Result[A]) = r.left.value.message should include("not its own")
+    alias(backend.read(p("/agents.md"), 0, 1, call()))
+    alias(backend.edit(p("/agents.md"), "x", "y", replaceAll = false, call()))
+    alias(backend.write(p("/agents.md"), "y", call()))
+    alias(backend.delete(p("/agents.md"), call()))
+    alias(backend.read(p("/SECRETS/key.pem"), 0, 1, call()))
+    alias(backend.write(p("/SECRETS/new.pem"), "n", call()))
+    alias(backend.ls(p("/SECRETS"), 10, call()))
+    alias(backend.glob(Glob("*"), p("/SECRETS"), 10, call()))
+    alias(backend.read(p(s"/$nfd"), 0, 1, call()))
+    onDisk("AGENTS.md") shouldBe "x\n"
+    // each name as the volume spells it still reaches its file
+    backend.read(p("/AGENTS.md"), 0, 1, call()).value.lines shouldBe Vector("x")
+    backend.read(p("/secrets/key.pem"), 0, 1, call()).value.lines shouldBe Vector("k")
+    backend.read(p(s"/$nfc"), 0, 1, call()).value.lines shouldBe Vector("c")
   }
 
   it should "refuse a real 8.3 short name of an existing file, where the volume makes them" in {

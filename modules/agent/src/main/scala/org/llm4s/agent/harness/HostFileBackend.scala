@@ -50,7 +50,8 @@ import scala.util.{ Failure, Success, Try, Using }
  * digests.
  *
  * '''One path, one file.''' A path the model sees is the only way to reach its file: symbolic links, files
- * with other hard links, other file systems mounted inside the root, names ending in a dot or a space and the
+ * with other hard links, other file systems mounted inside the root, names ending in a dot or a space, a name that
+ * is not spelled exactly as the volume spells it (another case or Unicode normalisation, an 8.3 short name) and the
  * backend's own temporary names are refused and never listed. `open` refuses a root whose file system makes
  * 8.3 short names, and one it cannot check (no hard-link counts, as on NTFS, or a root it cannot probe)
  * unless `allowUncheckedIdentity`.
@@ -222,10 +223,11 @@ final class HostFileBackend private (
 
   /**
    * `p`, if every component of it that exists is named by the name the file system itself gives it: the
-   * deepest existing prefix's canonical path (one lookup) must spell the same names, compared folded (case
-   * and Unicode normalisation are tolerated, as every mutation takes one lock). A component reached by
-   * another name - an 8.3 short name, whether the volume makes them now or made it before they were turned
-   * off - is refused, so a file has one path whatever names the volume keeps for it.
+   * deepest existing prefix's canonical path (one lookup) must spell exactly the same names. A component reached
+   * by another name - an 8.3 short name, whether the volume makes them now or made it before they were turned
+   * off, or a case or Unicode-normalisation alias on a volume that ignores case or normalisation (APFS, NTFS) -
+   * is refused, so a file has one path whatever names the volume keeps for it, and a permission rule written for
+   * that path is the only one that matches it (#3236).
    */
   private def ownNames(operation: String, path: VPath, p: Path): Result[Path] =
     val depth = Iterator
@@ -239,13 +241,13 @@ final class HostFileBackend private (
       val named   = path.segments.take(depth)
       val onDisk  = root.relativize(canonical(root.resolve(named.mkString("/"))))
       val spelled = (0 until onDisk.getNameCount).map(i => onDisk.getName(i).toString).toVector
-      if spelled.map(HostFileBackend.fold) == named.map(HostFileBackend.fold) then Right(p)
+      if spelled == named then Right(p)
       else
         refused(
           operation,
           path,
-          s"names an entry by a name that is not its own (it is ${spelled.mkString("/", "/", "")}: an 8.3 short " +
-            "name?); use the name a listing shows"
+          s"names an entry by a name that is not its own (it is ${spelled.mkString("/", "/", "")}: another case, " +
+            "Unicode normalisation or an 8.3 short name?); use the name a listing shows"
         )
 
   /** Every existing ancestor of `target` below the root is a directory. */
