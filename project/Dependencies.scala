@@ -179,17 +179,17 @@ object Deps {
   val benchSpringAiOpenAi     = "org.springframework.ai" % "spring-ai-openai"      % Versions.springAiBenchmark
   val benchSpringAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAiBenchmark
 
-  val cats                    = "org.typelevel"           %% "cats-core"       % Versions.cats
-  val upickle                 = "com.lihaoyi"             %% "upickle"         % Versions.upickle
-  val logback                 = "ch.qos.logback"           % "logback-classic" % Versions.logback
-  val log4jToSlf4j            = "org.apache.logging.log4j" % "log4j-to-slf4j"  % Versions.log4j
-  val slf4jApi                = "org.slf4j"                % "slf4j-api"       % Versions.slf4j
-  val termflow                = "org.llm4s"               %% "termflow"        % Versions.termflow
-  val scalatest               = "org.scalatest"           %% "scalatest"       % Versions.scalatest
-  val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
+  val cats         = "org.typelevel"           %% "cats-core"       % Versions.cats
+  val upickle      = "com.lihaoyi"             %% "upickle"         % Versions.upickle
+  val logback      = "ch.qos.logback"           % "logback-classic" % Versions.logback
+  val log4jToSlf4j = "org.apache.logging.log4j" % "log4j-to-slf4j"  % Versions.log4j
+  val slf4jApi     = "org.slf4j"                % "slf4j-api"       % Versions.slf4j
+  val termflow     = "org.llm4s"               %% "termflow"        % Versions.termflow
+  val scalatest    = "org.scalatest"           %% "scalatest"       % Versions.scalatest
+  val scalamock    = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   // Test-only (llm4s-mcp): the official MCP Java SDK, as a reference client for MCPServer (#3200)
-  val mcpJavaSdk = "io.modelcontextprotocol.sdk" % "mcp" % Versions.mcpJavaSdk
-  val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
+  val mcpJavaSdk              = "io.modelcontextprotocol.sdk" % "mcp"             % Versions.mcpJavaSdk
+  val scalatestplusScalacheck = "org.scalatestplus"          %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
   // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
   val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter
   val fansi           = "com.lihaoyi"      %% "fansi"             % Versions.fansi
