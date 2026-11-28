@@ -99,7 +99,7 @@ echo base > "$repo/README.md"
 g add -A && g commit -qm base
 BASE="$(g rev-parse HEAD)"
 
-ORDER='code docs integration workspace windows consumers spring performance other'
+ORDER='code docs integration workspace mcp windows consumers spring performance other'
 # change <command run in the repo to make the change>: a commit on top of BASE
 change() {
   g checkout -q --detach "$BASE"
@@ -171,7 +171,7 @@ expect 'kotlin-api'            'code consumers'                          "touchp
 # Windows
 expect 'a whole Windows module' 'code integration windows'               "touchp modules/memory/src/main/scala/M.scala"
 expect 'a listed source'       "$MOST windows"                           "touchp modules/core/src/main/scala/org/llm4s/config/ApiKeyFile.scala"
-expect 'a listed directory'    'code windows consumers performance other' "touchp modules/mcp/src/main/scala/org/llm4s/mcp/stdio/Stdio.scala"
+expect 'a listed directory'    'code mcp windows consumers performance other' "touchp modules/mcp/src/main/scala/org/llm4s/mcp/stdio/Stdio.scala"
 expect 'a named suite'         'code integration windows performance'    "touchp modules/core/src/test/scala/org/llm4s/config/ApiKeyFileConfigSpec.scala"
 expect 'a suite by glob'       'code windows'                            "touchp modules/mcp/src/test/scala/org/llm4s/mcp/stdio/StdioSpec.scala"
 expect 'another mcp suite'     'code'                                    "touchp modules/mcp/src/test/scala/org/llm4s/mcp/HttpSpec.scala"
@@ -203,6 +203,15 @@ expect 'the ci:full label'     "$ALL_BUT_WS"                             "touchp
 # the workspace tier keeps its own rules, and is never run by a merge group (its PR ran it)
 expect 'the workspace runner'  'code workspace other'                    "touchp modules/workspace/workspaceRunner/src/main/scala/R.scala"
 expect 'a harness file'        'code integration workspace consumers performance other' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala"
+# the MCP reference tier (#3308): what MCPReferenceServerSpec exercises, by path; never a merge group, a full selection
+# or a change the graph alone connects to mcp (core)
+expect 'the MCP client'        'code mcp consumers performance other' "touchp modules/mcp/src/main/scala/org/llm4s/mcp/MCPInputSchema.scala"
+expect 'the agent tool-schema checks' 'code integration mcp consumers performance other' \
+  "touchp modules/agent/src/main/scala/org/llm4s/agent/graph/tool/ToolArgumentValidator.scala"
+expect 'the pinned reference server' 'code integration mcp other'       "touchp modules/it/mcp-reference-server/package.json"
+expect 'the reference suite'   'code integration mcp other'              "touchp modules/it/src/test/scala/org/llm4s/mcp/MCPReferenceServerSpec.scala"
+expect 'an MCP client change in a merge group' 'code consumers performance other' \
+  "touchp modules/mcp/src/main/scala/org/llm4s/mcp/MCPInputSchema.scala" CI_EVENT=merge_group
 expect 'a harness file in a merge group' 'code integration consumers performance other' "touchp modules/agent/src/main/scala/org/llm4s/agent/harness/FileTools.scala" "CI_EVENT=merge_group"
 expect 'a deleted core file'   "$MOST"                                   "touchp modules/core/x.txt; git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -qm add-x && git rm -q modules/core/x.txt"
 expect 'no change'             'none'                                    ":"
@@ -571,7 +580,7 @@ run_changes() {
 }
 change "touchp modules/mcp/src/test/scala/MSpec.scala; touchp modules/agent/src/main/scala/org/llm4s/agent/harness/H.scala"
 run_changes 'changes step: a draft writes every decision false and no leg' pull_request true false \
-  'draft=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false modules= legs=[] full=false'
+  'draft=true code=false docs=false windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=false modules= legs=[] full=false'
 run_changes 'changes step: a pull request runs the script on HEAD^1..HEAD' pull_request false false \
   'draft=false code=true workspace=true full=false'
 run_changes 'changes step: the ci:full label selects everything' pull_request false true 'draft=false code=true windows=true full=true'
@@ -584,7 +593,7 @@ label='changes step: a push writes no decision'
 if ! grep -qE "^(draft|$(echo "$ORDER" | tr ' ' '|'))=" "$WORK/gh-out"; then ok "$label"; else bad "$label" "$(cat "$WORK/gh-out")"; fi
 # a push to main the merge queue tested (#3190): every decision false, no module, so only the main-only tiers run
 run_changes 'changes step: a push the queue tested runs no PR job' push '' '' \
-  'draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false modules= legs=[] full=false' true
+  'draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=false modules= legs=[] full=false' true
 run_changes 'changes step: a push the queue did not test selects every module' push '' '' 'full=true' false
 label='changes step: a push the queue did not test writes no decision and no queued'
 if ! grep -qE "^(queued|draft|$(echo "$ORDER" | tr ' ' '|'))=" "$WORK/gh-out"; then ok "$label"; else bad "$label" "$(cat "$WORK/gh-out")"; fi
@@ -623,6 +632,7 @@ if out="$(ruby -ryaml -e '
   { "coverage-leg" => "code", "coverage" => "code", "test" => "other", "test-windows" => "windows",
     "integration-tests" => "integration", "consumers" => "consumers", "spring-compat" => "spring",
     "performance-tests" => "performance", "workspace-integration" => "workspace", "scaladoc" => "docs",
+    "mcp-reference-integration" => "mcp",
     "docs-tests" => "docs" }.each do |job, n|
     j = jobs[job] or (errs << "no job #{job}"; next)
     errs << "#{job} does not need changes" unless Array(j["needs"]).include?("changes")
@@ -683,12 +693,12 @@ gate 'coverage gate: a push with skipped legs fails'   coverage 0 fail push refs
 atp() { # atp <label> <want> <event> <ref> <"need=result ..." overrides> <"output=value ...">
   local base="changes=success quick-checks=success test=success test-windows=success performance-tests=success
     coverage=success scaladoc=success docs-tests=skipped integration-tests=success consumers=success spring-compat=success
-    workspace-integration=skipped"
+    workspace-integration=skipped mcp-reference-integration=skipped"
   local r="$base" kv
   for kv in $5; do r="$(printf '%s\n' $r | grep -v "^${kv%%=*}=") $kv"; done
   gate "All Tests Pass: $1" all-tests-pass 0 "$2" "$3" "$4" "$(echo $r)" "$6"
 }
-PART='draft=false code=true docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=true full=false'
+PART='draft=false code=true docs=false windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=true full=false'
 SKIPS='test-windows=skipped performance-tests=skipped integration-tests=skipped consumers=skipped spring-compat=skipped'
 atp 'a selective PR with its gated jobs skipped passes'        pass pull_request x "$SKIPS" "$PART legs=$LEGS1"
 atp 'a selective PR with Code Coverage skipped fails'          fail pull_request x "$SKIPS coverage=skipped" "$PART legs=$LEGS1"
@@ -703,14 +713,14 @@ atp 'a PR whose change reaches no leg passes (the gate passed)' pass pull_reques
 atp 'a PR with docs and partial code without Docs tests fails' fail pull_request x "$SKIPS" "${PART/docs=false/docs=true} legs=$LEGS1"
 atp 'a PR with docs and partial code with Docs tests passes'   pass pull_request x "$SKIPS docs-tests=success" "${PART/docs=false/docs=true} legs=$LEGS1"
 atp 'a full PR with docs needs no Docs tests'                  pass pull_request x "" "${PART/docs=false/docs=true} full=true"
-atp 'a docs-only PR with Docs tests passes'                    pass pull_request x "test=skipped coverage=skipped $SKIPS docs-tests=success" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]"
-atp 'a docs-only PR without Docs tests fails'                  fail pull_request x "test=skipped coverage=skipped $SKIPS" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]"
+atp 'a docs-only PR with Docs tests passes'                    pass pull_request x "test=skipped coverage=skipped $SKIPS docs-tests=success" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=false full=false legs=[]"
+atp 'a docs-only PR without Docs tests fails'                  fail pull_request x "test=skipped coverage=skipped $SKIPS" "draft=false code=false docs=true windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=false full=false legs=[]"
 atp 'a failed Docs tests fails'                                fail pull_request x "$SKIPS docs-tests=failure" "$PART legs=$LEGS1"
 atp 'a selective merge group passes'                           pass merge_group x "$SKIPS" "$PART legs=$LEGS1"
 atp 'a merge group with Code Coverage skipped fails'           fail merge_group x "$SKIPS coverage=skipped" "$PART legs=$LEGS1"
 atp 'a push to main with the nightly-only jobs skipped passes' pass push refs/heads/main "test-windows=skipped performance-tests=skipped scaladoc=skipped consumers=skipped spring-compat=skipped workspace-integration=success" "full=true"
 atp 'a push to main with Code Coverage skipped fails'          fail push refs/heads/main "test-windows=skipped coverage=skipped" "full=true"
-QUEUED_PUSH='draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]'
+QUEUED_PUSH='draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false mcp=false performance=false spring=false other=false full=false legs=[]'
 ONLY_TIERS='quick-checks=skipped test=skipped coverage=skipped integration-tests=skipped test-windows=skipped performance-tests=skipped scaladoc=skipped consumers=skipped spring-compat=skipped workspace-integration=success'
 atp 'a push the queue tested, running only the main-only tiers, passes' pass push refs/heads/main "$ONLY_TIERS" "$QUEUED_PUSH"
 atp 'a push the queue tested with a failed main-only tier fails' fail push refs/heads/main "${ONLY_TIERS/workspace-integration=success/workspace-integration=failure}" "$QUEUED_PUSH"
@@ -721,6 +731,10 @@ atp 'the nightly run with everything passed passes'            pass schedule x "
 atp 'a failed Changes job fails'                               fail pull_request x "changes=failure" ""
 atp 'a skipped Changes job fails, on a push too'               fail push refs/heads/main "changes=skipped" ""
 atp 'a workspace change without the tier fails'                fail pull_request x "$SKIPS" "${PART/workspace=false/workspace=true} legs=$LEGS1"
+atp 'an MCP change without the reference tier fails (#3308)'   fail pull_request x "$SKIPS" "${PART/mcp=false/mcp=true} legs=$LEGS1"
+atp 'an MCP change with the reference tier passed passes'      pass pull_request x "$SKIPS mcp-reference-integration=success" "${PART/mcp=false/mcp=true} legs=$LEGS1"
+atp 'a failed reference tier on a pull request fails'          fail pull_request x "$SKIPS mcp-reference-integration=failure" "$PART legs=$LEGS1"
+atp 'a failed reference tier on a push to main is not the gate' pass push refs/heads/main "mcp-reference-integration=failure" "full=true"
 
 # scripts/merge-group-labels.sh: every pull request of a merge group is looked up for ci:full (#3185)
 LABELS="$(cd "$(dirname "$SCRIPT")" && pwd)/merge-group-labels.sh"

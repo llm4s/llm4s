@@ -99,6 +99,7 @@ jobs:
       integration: ${{ steps.diff.outputs.integration }}
       consumers: ${{ steps.diff.outputs.consumers }}
       workspace: ${{ steps.diff.outputs.workspace }}
+      mcp: ${{ steps.diff.outputs.mcp }}
       performance: ${{ steps.diff.outputs.performance }}
       spring: ${{ steps.diff.outputs.spring }}
       other: ${{ steps.diff.outputs.other }}
@@ -162,7 +163,7 @@ jobs:
           if [ "$EVENT" = pull_request ] && [ "$DRAFT" = true ]; then
             echo "A draft pull request: no job runs until it is marked ready for review"
             printf '%s\n' draft=true code=false docs=false windows=false integration=false consumers=false \
-              workspace=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
+              workspace=false mcp=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
           elif [ "$EVENT" = pull_request ]; then
             echo draft=false >> "$GITHUB_OUTPUT"
             scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
@@ -173,7 +174,7 @@ jobs:
           elif [ "$EVENT" = push ] && [ "$QUEUE_TESTED" = true ]; then
             echo "The merge queue tested this commit: only the main-only tiers run (the nightly run tests every module)"
             printf '%s\n' draft=false queued=true code=false docs=false windows=false integration=false consumers=false \
-              workspace=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
+              workspace=false mcp=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
           else
             scripts/ci-changes.sh --all "a $EVENT run tests every module" | tee -a "$GITHUB_OUTPUT"
           fi
@@ -2455,7 +2456,7 @@ jobs:
     if: ${{ always() && needs.changes.outputs.draft != 'true' }}
     # workspace-integration and performance-tests run only where they apply (#1982): skipped is a pass for them, failed
     # is not, so a PR that changes the workspace cannot merge with the live suites red. `changes` runs on every event.
-    needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, docs-tests, integration-tests, consumers, spring-compat, workspace-integration]
+    needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, docs-tests, integration-tests, consumers, spring-compat, workspace-integration, mcp-reference-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -2523,6 +2524,16 @@ jobs:
           # pass for it: a PR that disables its condition fails here.
           if [[ "${{ needs.changes.result }}" != "success" ]]; then
             echo "::error::Deciding what the change needs did not run and pass: ${{ needs.changes.result }}"
+            failed=1
+          fi
+          # MCP reference (#3308): runs on a pull request only when it changes what the suite exercises; on a push to
+          # main its result is its own (an npm or Docker Hub outage must not fail main's gate)
+          if [[ "$MAIN_PUSH" != "true" && "${{ needs.mcp-reference-integration.result }}" != "success" && "${{ needs.mcp-reference-integration.result }}" != "skipped" ]]; then
+            echo "::error::MCP reference-server tests: ${{ needs.mcp-reference-integration.result }}"
+            failed=1
+          fi
+          if [[ "${{ needs.changes.outputs.mcp }}" == "true" && "${{ needs.mcp-reference-integration.result }}" != "success" ]]; then
+            echo "::error::The change touches what MCPReferenceServerSpec exercises but the tier did not run and pass"
             failed=1
           fi
           if [[ "${{ needs.workspace-integration.result }}" != "success" && "${{ needs.workspace-integration.result }}" != "skipped" ]]; then
@@ -2693,14 +2704,19 @@ jobs:
   # downloads the node image from Docker Hub and the server's pinned dependency tree from npm on
   # every run; an outage of either would fail unrelated PRs. So, like the Workspace and Ollama
   # tiers, it runs on pushes to main - and also on manual dispatch (`-f tier=mcp-reference`), to check a branch on
-  # demand. Not in `all-tests-pass` for the same reason.
+  # demand - and on a pull request that changes what the suite exercises (`changes`' `mcp`, #3308: the MCP client, the
+  # agent's tool-schema checks, the suite, the pinned server), so only those PRs depend on npm and Docker Hub. On such a
+  # PR All Tests Pass requires it; on a push to main it is not in All Tests Pass, for the same reason.
   mcp-reference-integration:
     name: MCP Reference Server Integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [changes]
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'mcp-reference'))
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'mcp-reference')) ||
+        (github.event_name == 'pull_request' && needs.changes.outputs.mcp == 'true'))
     permissions:
       contents: read
 
