@@ -58,8 +58,8 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     it("should immediately send an endpoint SSE event") {
       val endpointEvent = readFirstSSEEvent(port, "/mcp/sse")
       endpointEvent should include("event: endpoint")
-      endpointEvent should include("data: http://")
-      endpointEvent should include("/mcp/messages?sessionId=")
+      // a path (#3081): the client resolves it against the stream's URL
+      endpointEvent should include("data: /mcp/messages?sessionId=")
     }
 
     it("should embed a unique sessionId in the endpoint URL") {
@@ -81,12 +81,12 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       conn.getResponseCode shouldBe 400
     }
 
-    it("should return 400 for an unknown sessionId") {
+    it("should return 404 for an unknown sessionId (#3081)") {
       val conn = openConnection(port, "/mcp/messages?sessionId=nonexistent-session", "POST")
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
       conn.getOutputStream.write("{}".getBytes("UTF-8"))
-      conn.getResponseCode shouldBe 400
+      conn.getResponseCode shouldBe 404
     }
   }
 
@@ -256,7 +256,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
             if (line.isEmpty) {
               val event = sb.toString()
               if (event.startsWith("event: endpoint")) {
-                messageUrl.set(extractMessageUrl(event))
+                messageUrl.set(s"http://127.0.0.1:$serverPort${extractMessageUrl(event)}")
                 endpointLatch.countDown()
               } else if (event.startsWith("event: message")) {
                 events.put(event)

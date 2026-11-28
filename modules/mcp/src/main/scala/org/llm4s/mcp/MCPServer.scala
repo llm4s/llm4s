@@ -1,11 +1,11 @@
 package org.llm4s.mcp
 
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
+import org.llm4s.error.CancelledError
 import org.llm4s.security.Secret
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.util.DurationRounding
 import org.slf4j.LoggerFactory
-import upickle.default.read as upickleRead
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
@@ -46,6 +46,10 @@ import scala.util.{ Failure, Success, Try, Using }
  * @param allowedOrigins Origins (`scheme://host[:port]`, ignoring case) besides the loopback ones whose browser
  *                       requests are served. A request without `Origin` (not from a browser) is unaffected; one
  *                       with any other `Origin`, including `null`, is refused with 403.
+ * @param sessionIdleTimeout How long a Streamable HTTP session may go unused before it expires (#3081); a request
+ *                           naming an expired session is answered 404, and the client starts a new one
+ * @param maxSessions        The most Streamable HTTP sessions kept at once; a new one beyond it evicts the one
+ *                           unused for longest
  */
 case class MCPServerOptions(
   port: Int,
@@ -55,7 +59,9 @@ case class MCPServerOptions(
   apiKey: Option[Secret] = None,
   host: String = "127.0.0.1",
   allowedHosts: Set[String] = Set.empty,
-  allowedOrigins: Set[String] = Set.empty
+  allowedOrigins: Set[String] = Set.empty,
+  sessionIdleTimeout: FiniteDuration = 30.minutes,
+  maxSessions: Int = 1000
 )
 
 /**
@@ -93,12 +99,25 @@ case class MCPServerOptions(
  * server.start()
  * }}}
  *
- * @param options Server configuration.
- * @param tools   List of tools to expose.
+ * === Protocol ===
+ * `initialize` accepts the client's version when it is one of [[MCPServer.SupportedVersions]] and answers with the
+ * latest otherwise. A later request without `MCP-Protocol-Version` is taken as 2025-03-26, as the specification
+ * says; one naming an unsupported version is answered 400. `ping` is answered with an empty result. A request naming
+ * a session the server does not know, or one that has expired ([[MCPServerOptions.sessionIdleTimeout]]), is
+ * answered 404. A `notifications/cancelled` for a `tools/call` still running on the same session (or SSE stream)
+ * interrupts it, and its reply is not sent; a client that uses no session cannot cancel, since nothing would tell
+ * its calls from another sessionless client's. The legacy `endpoint` event is a path, so a client reaches the messages endpoint by the name and scheme it
+ * used for the stream.
+ *
+ * @param options     Server configuration.
+ * @param tools       List of tools to expose.
+ * @param annotations The MCP tool annotations to advertise, by tool name (`readOnlyHint`, `destructiveHint`, ...);
+ *                    a tool without an entry is listed without annotations
  */
 class MCPServer(
   options: MCPServerOptions,
-  tools: Seq[ToolFunction[_]]
+  tools: Seq[ToolFunction[_]],
+  annotations: Map[String, MCPToolAnnotations] = Map.empty
 ) {
   private val logger                           = LoggerFactory.getLogger(getClass)
   private var server: Option[HttpServer]       = None
@@ -202,31 +221,179 @@ class MCPServer(
     }
   }
 
-  // HTTP session store for Streamable HTTP transport (2025-06-18)
-  private case class Session(
-    id: String,
-    protocolVersion: String,
-    created: Long = System.currentTimeMillis()
-  )
+  /** The clock sessions expire by; a spec replaces it. */
+  private[mcp] def nowMillis(): Long = System.currentTimeMillis()
+
+  // HTTP session store for the Streamable HTTP transport: a session expires after it has gone unused for
+  // sessionIdleTimeout, and at most maxSessions are kept, the one unused for longest giving way (#3081)
+  private class Session(val id: String, val protocolVersion: String, @volatile var lastUsed: Long)
 
   private object SessionStore {
-    private val sessions = TrieMap[String, Session]()
+    private val sessions   = TrieMap[String, Session]()
+    private val idleMillis = options.sessionIdleTimeout.toMillis
 
-    def createSession(protocolVersion: String): Session = {
-      val session = Session(UUID.randomUUID().toString, protocolVersion)
+    private def expired(session: Session, now: Long): Boolean = now - session.lastUsed > idleMillis
+
+    def createSession(protocolVersion: String): Session = synchronized {
+      val now = nowMillis()
+      sessions.foreach { case (id, session) => if (expired(session, now)) sessions.remove(id) }
+      while (sessions.size >= math.max(1, options.maxSessions))
+        sessions.values.minByOption(_.lastUsed).foreach { oldest =>
+          logger.debug("Evicting the MCP session unused for longest: the session limit is reached")
+          sessions.remove(oldest.id)
+        }
+      val session = new Session(UUID.randomUUID().toString, protocolVersion, now)
       sessions(session.id) = session
-      logger.debug(s"Created session: ${session.id} for protocol $protocolVersion")
+      logger.debug(s"Created a session for protocol $protocolVersion")
       session
     }
 
-    def getSession(id: String): Option[Session] = sessions.get(id)
+    /** The live session `id` names, marked used now; `None` for an unknown or expired one, which is removed. */
+    def touch(id: String): Option[Session] = {
+      val now = nowMillis()
+      sessions.get(id) match {
+        case Some(session) if expired(session, now) =>
+          sessions.remove(id)
+          None
+        case Some(session) =>
+          session.lastUsed = now
+          Some(session)
+        case None => None
+      }
+    }
 
-    def removeSession(id: String): Boolean = {
-      val existed = sessions.remove(id).isDefined
-      if (existed) logger.debug(s"Removed session: $id")
-      existed
+    def removeSession(id: String): Boolean = sessions.remove(id).isDefined
+
+    def size: Int = sessions.size
+  }
+
+  /** How many Streamable HTTP sessions the server holds. */
+  private[mcp] def sessionCount: Int = SessionStore.size
+
+  // ── Cancellation (#3081) ──────────────────────────────────────────────────
+
+  /**
+   * One `tools/call` that may be cancelled: registered (so a cancel for it is never lost), then running on a thread,
+   * then completed, or cancelled at any point before completion. Every change is decided under the call's lock, so
+   * cancelling and completing are mutually exclusive: an interrupt is delivered only by a cancellation that won while
+   * the call ran, never to a completed call's reply or the next request on the pooled thread. A call cancelled
+   * before it starts never runs.
+   */
+  final private class RunningCall {
+    private var state                  = 0 // 0 registered, 1 running, 2 cancelled, 3 completed; guarded by this
+    private var thread: Option[Thread] = None
+
+    /** Marks the call cancelled, interrupting it if it runs; `false` when it had already completed. */
+    def cancel(): Boolean = synchronized {
+      if (state == 0 || state == 1) {
+        if (state == 1) thread.foreach(_.interrupt())
+        state = 2
+        true
+      } else false
+    }
+
+    /** Marks the call running on this thread; `false` when it was cancelled first, and must not run. */
+    def start(): Boolean = synchronized {
+      if (state == 0) {
+        state = 1
+        thread = Some(Thread.currentThread())
+        true
+      } else false
+    }
+
+    /** Marks the call completed; `false` when a cancellation won, whose interrupt has then been delivered. */
+    def complete(): Boolean = synchronized {
+      if (state == 1) { state = 3; true }
+      else false
     }
   }
+
+  // The calls that may be cancelled, by the session or SSE stream they came on and their id as sent (a number and a
+  // string are different ids). A call without a session is never registered: nothing would tell two such clients'
+  // calls apart, so no `notifications/cancelled` can reach one.
+  private val runningCalls = new ConcurrentHashMap[(String, ujson.Value), RunningCall]()
+
+  /** How many calls are registered for cancellation, for a spec. */
+  private[mcp] def registeredCalls: Int = runningCalls.size
+
+  /** Called after a call has run and before it is marked completed; a spec forces an interleaving here. */
+  private[mcp] def beforeCallCompletes(): Unit = ()
+
+  /** Called after an HTTP+SSE request is acknowledged and before it is processed; a spec forces an interleaving here. */
+  private[mcp] def afterAcknowledged(): Unit = ()
+
+  /** A call registered for cancellation, on a channel; `None` for a call on none, which cannot be cancelled. */
+  private type Registration = Option[((String, ujson.Value), RunningCall)]
+
+  private def register(channel: Option[String], id: ujson.Value): Registration =
+    channel.map { c =>
+      val key  = c -> id
+      val call = new RunningCall
+      runningCalls.put(key, call)
+      key -> call
+    }
+
+  private def unregister(registration: Registration): Unit =
+    registration.foreach { case (key, call) => runningCalls.remove(key, call): Unit }
+
+  /** Registers the call, then runs it: see [[runRegistered]]. */
+  private def cancellable(channel: Option[String], id: ujson.Value, request: JsonRpcRequest)(
+    run: => JsonRpcResponse
+  ): Option[JsonRpcResponse] = runRegistered(register(channel, id), request)(run)
+
+  /**
+   * Runs a registered `tools/call` so that a `notifications/cancelled` for it on the same channel can interrupt it.
+   * `Some` of the reply, or `None` when the call was cancelled, before it started or while it ran: the specification
+   * says no reply is sent for a cancelled request.
+   */
+  private def runRegistered(registration: Registration, request: JsonRpcRequest)(
+    run: => JsonRpcResponse
+  ): Option[JsonRpcResponse] =
+    if (!registration.forall(_._2.start())) {
+      unregister(registration)
+      logger.info(s"Tool call ${request.id} was cancelled before it ran")
+      None
+    } else {
+      // A handler that lets the interrupt escape is still a cancelled (or failed) call, never a dead pool thread
+      val reply = CancelledError.catchInterrupt(Try(run))
+      beforeCallCompletes()
+      val completed = registration.forall(_._2.complete())
+      unregister(registration)
+      if (!completed) {
+        // The cancellation's interrupt was delivered under the call's lock, before `complete` returned: clear it
+        // here, so it never reaches the next request on this pooled thread
+        Thread.interrupted(): Unit
+        logger.info(s"Tool call ${request.id} was cancelled by the client; its reply is not sent")
+        None
+      } else
+        reply match {
+          case Right(Success(response)) => Some(response)
+          case Right(Failure(e))        => throw e
+          case Left(_) =>
+            Some(
+              JsonRpcResponse(
+                id = request.id,
+                error = Some(JsonRpcError(MCPErrorCodes.INTERNAL_ERROR, "Tool call interrupted", None))
+              )
+            )
+        }
+    }
+
+  private def cancel(channel: Option[String], notification: JsonRpcNotification): Unit =
+    (
+      channel,
+      notification.params.flatMap(_.objOpt).flatMap(_.get("requestId")).collect {
+        case s: ujson.Str => s: ujson.Value
+        case n: ujson.Num => n: ujson.Value
+      }
+    ) match {
+      case (Some(c), Some(id)) =>
+        Option(runningCalls.get(c -> id)).foreach { call =>
+          if (call.cancel()) logger.info(s"Cancelled tool call ${idText(id)} at the client's request")
+        }
+      case (None, _) => logger.debug("notifications/cancelled without a session: calls without one cannot be cancelled")
+      case (_, None) => logger.debug("notifications/cancelled without a requestId")
+    }
 
   // ── JSON-RPC 2.0 envelope, shared by both transports (#3071) ──────────────
 
@@ -303,7 +470,8 @@ class MCPServer(
       MCPTool(
         name = tool.name,
         description = tool.description,
-        inputSchema = tool.toolDefinition(strict = false)("function")("parameters")
+        inputSchema = tool.toolDefinition(strict = false)("function")("parameters"),
+        annotations = annotations.get(tool.name)
       )
     }
     JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(ToolsListResponse(mcpTools))))
@@ -350,26 +518,37 @@ class MCPServer(
       case None =>
         JsonRpcResponse(
           id = request.id,
-          error = Some(JsonRpcError(MCPErrorCodes.TOOL_NOT_FOUND, s"Tool not found: $toolName", None))
+          // An unknown tool is invalid params (MCP specification, tools/call error handling)
+          error = Some(JsonRpcError(MCPErrorCodes.INVALID_PARAMS, s"Unknown tool: $toolName", None))
         )
     }
   }
 
-  // Dispatch a JSON-RPC request for the SSE transport (no HTTP session management)
-  private def processSSERequest(request: JsonRpcRequest): JsonRpcResponse =
+  /**
+   * The version to answer `initialize` with: the client's when it is supported, otherwise `fallback` (the latest on
+   * Streamable HTTP, 2024-11-05 on the legacy transport, which is that version's).
+   */
+  private def negotiate(request: JsonRpcRequest, fallback: String = MCPServer.LatestVersion): String = {
+    val offered = request.params.flatMap(_.objOpt).flatMap(_.get("protocolVersion")).flatMap(_.strOpt)
+    offered.filter(MCPServer.SupportedVersions.contains).getOrElse(fallback)
+  }
+
+  // Dispatch a JSON-RPC request for the SSE transport (no HTTP session management); `None` for a cancelled call
+  private def processSSERequest(registration: Registration, request: JsonRpcRequest): Option[JsonRpcResponse] =
     request.method match {
       case "initialize" =>
-        val initReq = request.params
-          .flatMap(p => Try(upickleRead[InitializeRequest](p.toString)).toOption)
-          .getOrElse(InitializeRequest("2024-11-05", MCPCapabilities(), ClientInfo("unknown", "1.0")))
-        logger.info(s"SSE initialize: client=${initReq.clientInfo.name}, protocol=${initReq.protocolVersion}")
-        JsonRpcResponse(id = request.id, result = Some(initializeResult("2024-11-05")))
-      case "tools/list" => handleToolsList(request)
-      case "tools/call" => handleToolsCall(request)
+        val version = negotiate(request, "2024-11-05")
+        logger.info(s"SSE initialize: protocol $version")
+        Some(JsonRpcResponse(id = request.id, result = Some(initializeResult(version))))
+      case "ping"       => Some(JsonRpcResponse(id = request.id, result = Some(ujson.Obj())))
+      case "tools/list" => Some(handleToolsList(request))
+      case "tools/call" => runRegistered(registration, request)(handleToolsCall(request))
       case other =>
-        JsonRpcResponse(
-          id = request.id,
-          error = Some(JsonRpcError(MCPErrorCodes.METHOD_NOT_FOUND, s"Method not found: $other", None))
+        Some(
+          JsonRpcResponse(
+            id = request.id,
+            error = Some(JsonRpcError(MCPErrorCodes.METHOD_NOT_FOUND, s"Method not found: $other", None))
+          )
         )
     }
 
@@ -446,10 +625,9 @@ class MCPServer(
       val queue     = new LinkedBlockingQueue[Option[String]]()
       sseConnections.put(sessionId, SSEConnection(sessionId, queue))
 
-      // Build the POST-target URL that the client will use for requests
-      val localPort  = exchange.getLocalAddress.getPort
-      val hostForUrl = if (options.host == "0.0.0.0") "127.0.0.1" else options.host
-      val messageUrl = s"http://$hostForUrl:$localPort${options.path}/messages?sessionId=$sessionId"
+      // Where the client POSTs: a path (#3081), which it resolves against the stream's URL, so it keeps the scheme,
+      // host and port it reached the server by (a server bound to 0.0.0.0, or behind TLS, has no loopback URL to give)
+      val messageUrl = s"${options.path}/messages?sessionId=$sessionId"
 
       exchange.getResponseHeaders.set("Content-Type", "text/event-stream")
       exchange.getResponseHeaders.set("Cache-Control", "no-cache")
@@ -472,7 +650,7 @@ class MCPServer(
           logger.warn(s"SSE($sessionId) client disconnected before endpoint event")
           return
         }
-        logger.info(s"SSE connection opened: sessionId=$sessionId, messageUrl=$messageUrl")
+        logger.info("SSE connection opened")
 
         var running = true
         while (running)
@@ -485,7 +663,7 @@ class MCPServer(
         sseConnections.remove(sessionId)
         Try(os.close())
         exchange.close()
-        logger.info(s"SSE connection closed: sessionId=$sessionId")
+        logger.info("SSE connection closed")
       }
       // scalafix:on
     }
@@ -503,7 +681,8 @@ class MCPServer(
         case Some(sid) =>
           Option(sseConnections.get(sid)) match {
             case None =>
-              sendErrorResponse(exchange, 400, s"Unknown SSE session: $sid")
+              // 404, as for a Streamable HTTP session: the client opens a new stream (#3081)
+              sendErrorResponse(exchange, 404, "Unknown SSE session")
             case Some(conn) =>
               val result = for {
                 bodyStr <- readBodyWithLimit(exchange, MaxPayloadSize)
@@ -519,13 +698,24 @@ class MCPServer(
                 case Success((_, json)) =>
                   classify(json) match {
                     case Incoming.Request(request, id) =>
-                      logger.debug(s"SSE($sid) request: ${request.method} (id=${request.id})")
-                      val sseEvent = s"event: message\ndata: ${renderReply(id, processSSERequest(request))}\n\n"
-                      conn.queue.put(Some(sseEvent))
-                      // POST returns 202 Accepted; the actual response is delivered via SSE stream
-                      sendAccepted(exchange)
+                      logger.debug(s"SSE request: ${request.method} (id=${request.id})")
+                      // POST returns 202 Accepted at once; the reply is delivered via the SSE stream, so a long tool
+                      // call does not hold the POST, and a cancellation can arrive while it runs. A tools/call is
+                      // registered before the 202, so a cancel the client sends once it is acknowledged is never lost.
+                      val registration =
+                        if (request.method == "tools/call") register(Some(s"sse:$sid"), id) else None
+                      Try(sendAccepted(exchange)) match {
+                        case Failure(e) =>
+                          unregister(registration)
+                          throw e
+                        case Success(()) =>
+                          afterAcknowledged()
+                          processSSERequest(registration, request).foreach { reply =>
+                            conn.queue.put(Some(s"event: message\ndata: ${renderReply(id, reply)}\n\n"))
+                          }
+                      }
                     case Incoming.Notification(notification) =>
-                      handleNotification(notification)
+                      handleNotification(Some(s"sse:$sid"), notification)
                       sendAccepted(exchange)
                     case Incoming.ClientResponse =>
                       // A response to a server request: this server sends none, so there is nothing to match it to.
@@ -546,8 +736,6 @@ class MCPServer(
     // ── Streamable HTTP transport (MCP 2025-06-18) ──────────────────────────
 
     private val MaxPayloadSize = 10 * 1024 * 1024
-
-    private val SupportedVersions = Set("2025-06-18")
 
     private def handlePOST(exchange: HttpExchange): Unit = {
       val contentLengthStr = Option(exchange.getRequestHeaders.getFirst("Content-Length"))
@@ -571,12 +759,14 @@ class MCPServer(
               handleRequest(exchange, request, id)
             case Incoming.Notification(notification) =>
               logger.debug(s"Notification: ${notification.method}")
-              handleNotification(notification)
-              // Streamable HTTP: an accepted notification or response is 202 with no body.
-              sendAccepted(exchange)
+              withLiveSession(exchange) { channel =>
+                handleNotification(channel, notification)
+                // Streamable HTTP: an accepted notification or response is 202 with no body.
+                sendAccepted(exchange)
+              }
             case Incoming.ClientResponse =>
               // A response to a server request: this server sends none, so there is nothing to match it to.
-              sendAccepted(exchange)
+              withLiveSession(exchange)(_ => sendAccepted(exchange))
             case Incoming.Invalid(id, message) =>
               logger.warn(s"Invalid JSON-RPC message: $message")
               sendResponse(exchange, 400, "application/json", errorReply(id, MCPErrorCodes.INVALID_REQUEST, message))
@@ -597,69 +787,82 @@ class MCPServer(
       }
     }
 
-    private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest, id: ujson.Value): Unit = {
-      val protocolValid = if (request.method != "initialize") {
-        Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).exists { version =>
-          SupportedVersions.contains(version)
-        }
-      } else true
-
-      if (!protocolValid) {
-        val version = exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")
-        sendJsonRpcError(
-          exchange,
-          id,
-          MCPErrorCodes.INVALID_PROTOCOL_VERSION,
-          s"Unsupported protocol version: $version. Supported: ${SupportedVersions.mkString(", ")}"
-        )
-      } else {
-        val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
-        request.method match {
-          case "initialize" => handleInitialize(exchange, request, id)
-          case "tools/list" => handleWithSession(exchange, request, id, sessionId, handleToolsList)
-          case "tools/call" => handleWithSession(exchange, request, id, sessionId, handleToolsCall)
-          case _            => sendJsonRpcError(exchange, id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
+    private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest, id: ujson.Value): Unit =
+      if (request.method == "initialize") handleInitialize(exchange, request, id)
+      else {
+        // Absent, the version is 2025-03-26 (specification, "Protocol Version Header"); an unsupported one is a 400
+        val version = Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).map(_.trim)
+        version.filterNot(MCPServer.SupportedVersions.contains) match {
+          case Some(unsupported) =>
+            sendResponse(
+              exchange,
+              400,
+              "application/json",
+              errorReply(
+                id,
+                MCPErrorCodes.INVALID_PROTOCOL_VERSION,
+                s"Unsupported protocol version: $unsupported. Supported: ${MCPServer.SupportedVersions.mkString(", ")}"
+              )
+            )
+          case None =>
+            withLiveSession(exchange, id) { channel =>
+              val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
+              request.method match {
+                case "ping" =>
+                  sendJsonRpcResponse(
+                    exchange,
+                    id,
+                    JsonRpcResponse(id = request.id, result = Some(ujson.Obj())),
+                    sessionId
+                  )
+                case "tools/list" => sendJsonRpcResponse(exchange, id, handleToolsList(request), sessionId)
+                case "tools/call" =>
+                  cancellable(channel, id, request)(handleToolsCall(request)) match {
+                    case Some(reply) => sendJsonRpcResponse(exchange, id, reply, sessionId)
+                    case None        => sendAccepted(exchange) // cancelled: no JSON-RPC reply
+                  }
+                case _ => sendJsonRpcError(exchange, id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
+              }
+            }
         }
       }
-    }
 
-    private def handleNotification(notification: JsonRpcNotification): Unit =
+    /**
+     * Runs `serve` with the message's channel (its session, `None` for a client that uses none) when the session it
+     * names is live; a session the server does not know or that has expired is answered 404 (#3081), which tells the
+     * client to start a new one.
+     */
+    private def withLiveSession(exchange: HttpExchange, id: ujson.Value = ujson.Null)(
+      serve: Option[String] => Unit
+    ): Unit =
+      Option(exchange.getRequestHeaders.getFirst("mcp-session-id")).map(_.trim) match {
+        case Some(session) if SessionStore.touch(session).isEmpty =>
+          logger.warn("A request named an unknown or expired session")
+          // 404 with a JSON-RPC error, as the reference SDKs answer it
+          sendResponse(
+            exchange,
+            404,
+            "application/json",
+            errorReply(id, MCPErrorCodes.SESSION_EXPIRED, "Session not found")
+          )
+        case Some(session) => serve(Some(session))
+        case None          => serve(None)
+      }
+
+    private def handleNotification(channel: Option[String], notification: JsonRpcNotification): Unit =
       notification.method match {
         case "notifications/initialized" => logger.info("Client initialized notification received")
+        case "notifications/cancelled"   => cancel(channel, notification)
         case _                           => logger.debug(s"Received notification: ${notification.method}")
       }
 
     private def handleInitialize(exchange: HttpExchange, request: JsonRpcRequest, id: ujson.Value): Unit = {
-      val initRequest = request.params
-        .flatMap(params => Try(upickleRead[InitializeRequest](params.toString)).toOption)
-        .getOrElse(InitializeRequest("2025-06-18", MCPCapabilities(), ClientInfo("unknown", "1.0")))
-
-      val clientVersion   = initRequest.protocolVersion
-      val protocolVersion = if (SupportedVersions.contains(clientVersion)) clientVersion else "2025-06-18"
+      val protocolVersion = negotiate(request)
       logger.info(s"Initializing with protocol: $protocolVersion")
-
-      val sessionOpt = if (protocolVersion == "2025-06-18") {
-        Some(SessionStore.createSession(protocolVersion))
-      } else None
-
+      val session  = SessionStore.createSession(protocolVersion)
       val response = JsonRpcResponse(id = request.id, result = Some(initializeResult(protocolVersion)))
-      sendJsonRpcResponse(exchange, id, response, sessionOpt.map(_.id))
+      sendJsonRpcResponse(exchange, id, response, Some(session.id))
     }
-
-    private def handleWithSession(
-      exchange: HttpExchange,
-      request: JsonRpcRequest,
-      id: ujson.Value,
-      sessionId: Option[String],
-      handler: JsonRpcRequest => JsonRpcResponse
-    ): Unit =
-      sessionId match {
-        case Some(session) if SessionStore.getSession(session).isEmpty =>
-          logger.warn(s"Unknown session: $session")
-          sendJsonRpcError(exchange, id, MCPErrorCodes.INVALID_REQUEST, s"Invalid session: $session")
-        case _ =>
-          sendJsonRpcResponse(exchange, id, handler(request), sessionId)
-      }
 
     private def handleDELETE(exchange: HttpExchange): Unit = {
       val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
@@ -734,6 +937,12 @@ class MCPServer(
 }
 
 object MCPServer {
+
+  /** The protocol versions the server speaks, newest first in [[LatestVersion]]. */
+  val SupportedVersions: Set[String] = Set("2025-06-18", "2025-03-26", "2024-11-05")
+
+  /** The version `initialize` answers with when the client offers one the server does not speak. */
+  val LatestVersion: String = "2025-06-18"
 
   /**
    * Maximum number of threads (and therefore concurrent connections) the server will service.

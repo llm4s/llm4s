@@ -44,7 +44,7 @@
     "llm4sSttp": {"base":"modules/sttp","deps":[["core","compile->compile;test->test"],["openaiCompatible","test"]],"borrowed":[["test","modules/core/src/test/java/org/llm4s/tags/DocsSpec.java"]],"fp":{"compile":"13b6ec597846caea","test":"18383b9cd82786e7"}},
     "llm4sTapir": {"base":"modules/tapir","deps":[["agent","test"],["core","compile->compile"],["testkit","test"]],"borrowed":[],"fp":{"compile":"378aea43a66fe665","test":"b3ad2c857da1fc41"}},
     "llm4sZio": {"base":"modules/llm4s-zio","deps":[["agent","compile->compile"],["agent","test->test"],["core","compile->compile"],["testkit","test"]],"borrowed":[["test","modules/llm4s-effect/src/test/contract/org/llm4s/effect/contract/StreamingBridgeContract.scala"]],"fp":{"compile":"8905b9800429899b","test":"639185ff33ff4970"}},
-    "mcp": {"base":"modules/mcp","deps":[["core","compile->compile;test->test"],["providerTestkit","test"]],"borrowed":[],"fp":{"compile":"74bb30ca8c3c3c9a","test":"9ea71fda00ba85f9"}},
+    "mcp": {"base":"modules/mcp","deps":[["core","compile->compile;test->test"],["providerTestkit","test"]],"borrowed":[],"fp":{"compile":"74bb30ca8c3c3c9a","test":"c453ee0e7c96a087"}},
     "media": {"base":"modules/media","deps":[],"borrowed":[],"fp":{"compile":"616493d6099e45d2","test":"4869f4649b27322c"}},
     "memory": {"base":"modules/memory","deps":[["core","compile->compile;test->test"]],"borrowed":[["test","modules/core/src/test/java/org/llm4s/tags/DocsSpec.java"]],"fp":{"compile":"ffa07a717fde2ab8","test":"85e53375a7894226"}},
     "memoryPostgres": {"base":"modules/memory-postgres","deps":[["memory","compile->compile"]],"borrowed":[],"fp":{"compile":"16c3113911b44264","test":"9fee089dd5c410cd"}},

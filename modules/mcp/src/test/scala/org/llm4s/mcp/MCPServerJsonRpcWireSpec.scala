@@ -111,17 +111,18 @@ class MCPServerJsonRpcWireSpec extends AnyFunSpec with Matchers with BeforeAndAf
 
       val unknownTool = envelope(postInSession(request(ujson.Num(10), "tools/call", ujson.Obj("name" -> "zzz"))).body())
       unknownTool("id") shouldBe ujson.Num(10)
-      unknownTool("error")("code").num shouldBe MCPErrorCodes.TOOL_NOT_FOUND
+      unknownTool("error")("code").num shouldBe MCPErrorCodes.INVALID_PARAMS // #3081
 
-      val badSession = envelope(
+      val badSessionReply =
         post(request(ujson.Num(11), "tools/list"), "mcp-session-id" -> "nope", "MCP-Protocol-Version" -> "2025-06-18")
-          .body()
-      )
-      badSession("id") shouldBe ujson.Num(11)
+      badSessionReply.statusCode() shouldBe 404 // #3081
+      envelope(badSessionReply.body())("id") shouldBe ujson.Num(11)
     }
 
     it("answer an unsupported protocol version with the numeric id") {
-      val reply = envelope(post(request(ujson.Num(12), "tools/list"), "MCP-Protocol-Version" -> "1999-01-01").body())
+      val response = post(request(ujson.Num(12), "tools/list"), "MCP-Protocol-Version" -> "1999-01-01")
+      response.statusCode() shouldBe 400 // #3081
+      val reply = envelope(response.body())
       reply("id") shouldBe ujson.Num(12)
       reply("error")("code").num shouldBe MCPErrorCodes.INVALID_PROTOCOL_VERSION
     }
@@ -184,7 +185,7 @@ class MCPServerJsonRpcWireSpec extends AnyFunSpec with Matchers with BeforeAndAf
         postTo(messageUrl, request(ujson.Num(2), "tools/call", ujson.Obj("name" -> "zzz"))) shouldBe 202
         val unknownTool = envelope(nextEvent(events))
         unknownTool("id") shouldBe ujson.Num(2)
-        unknownTool("error")("code").num shouldBe MCPErrorCodes.TOOL_NOT_FOUND
+        unknownTool("error")("code").num shouldBe MCPErrorCodes.INVALID_PARAMS
 
         postTo(messageUrl, request(ujson.Str("3"), "tools/list")) shouldBe 202
         envelope(nextEvent(events))("id") shouldBe ujson.Str("3")
@@ -228,20 +229,27 @@ class MCPServerJsonRpcWireSpec extends AnyFunSpec with Matchers with BeforeAndAf
         val _ = Try {
           val reader = new BufferedReader(new InputStreamReader(stream.body, "UTF-8"))
           val sb     = new StringBuilder
-          Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
-            if (line.isEmpty) {
-              val event = sb.toString
-              if (event.startsWith("event: endpoint")) {
-                messageUrl
-                  .set(event.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ")).getOrElse(""))
-                endpoint.countDown()
-              } else if (event.startsWith("event: message")) events.put(event)
-              sb.clear()
-            } else {
-              if (sb.nonEmpty) sb.append("\n")
-              sb.append(line)
+          Iterator
+            .continually(reader.readLine())
+            .takeWhile(_ != null)
+            .foreach { line =>
+              if (line.isEmpty) {
+                val event = sb.toString
+                if (event.startsWith("event: endpoint")) {
+                  messageUrl
+                    .set(
+                      // a path (#3081), resolved against the stream's URL
+                      s"http://127.0.0.1:$port" +
+                        event.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ")).getOrElse("")
+                    )
+                  endpoint.countDown()
+                } else if (event.startsWith("event: message")) events.put(event)
+                sb.clear()
+              } else {
+                if (sb.nonEmpty) sb.append("\n")
+                sb.append(line)
+              }
             }
-          }
         }
       }
     })

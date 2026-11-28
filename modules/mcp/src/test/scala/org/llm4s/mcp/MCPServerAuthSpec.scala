@@ -149,7 +149,7 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
 
   describe("MCPServer with host=0.0.0.0") {
 
-    it("should rewrite 0.0.0.0 to 127.0.0.1 in SSE endpoint event") {
+    it("should send the SSE endpoint as a path, naming neither 0.0.0.0 nor a loopback address (#3081)") {
       val wildcardOpts =
         MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(Secret(apiKey)), host = "0.0.0.0")
       val tool = buildPingTool()
@@ -190,7 +190,7 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
           })
 
           endpointLatch.await(5, TimeUnit.SECONDS) shouldBe true
-          endpointUrl.get() should include("127.0.0.1")
+          endpointUrl.get() should startWith("/mcp/messages?sessionId=")
           (endpointUrl.get() should not).include("0.0.0.0")
         } finally stream.close()
       } finally {

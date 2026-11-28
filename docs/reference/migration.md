@@ -828,6 +828,27 @@ lists the tools.
 `AgentTool.fromToolFunction` by hand. A read-only tool then passes `ApprovalMiddleware.unlessReadOnly` without
 approval. Untrusted servers' tools keep `ToolHints.default`.
 
+## `MCPServer` follows the MCP specification (#3081, #3200)
+
+`llm4s-mcp` is Beta. What a client of an `MCPServer` sees:
+
+| Before | After |
+|---|---|
+| An unknown `mcp-session-id`: HTTP 200 with a JSON-RPC error | 404 with a JSON-RPC error; the client starts a new session. An unknown HTTP+SSE `sessionId`: 404 (was 400) |
+| Sessions lived until a `DELETE` | A session expires after `MCPServerOptions.sessionIdleTimeout` unused (30 minutes); at most `maxSessions` (1000) are kept, the one unused for longest giving way |
+| `ping`: method not found | An empty result |
+| Only `2025-06-18`; a request without `MCP-Protocol-Version` was refused (HTTP 200) | `2025-06-18`, `2025-03-26` and `2024-11-05`; no header means 2025-03-26; an unsupported one is a 400 |
+| The legacy `endpoint` event was `http://127.0.0.1:<port>/...` | A path, `{path}/messages?sessionId=...`, which the client resolves against the stream's URL |
+| An unknown tool: -32001 | -32602 (invalid params) |
+| Tool annotations were never sent | `new MCPServer(options, tools, annotations = Map("search" -> MCPToolAnnotations(readOnlyHint = Some(true))))` |
+| A cancelled tool call ran to completion and replied | `notifications/cancelled` on the call's own session (or SSE stream) interrupts it, matched by the id as sent; no reply is sent. A client without a session cannot cancel |
+
+`MCPServerOptions` gains `sessionIdleTimeout` and `maxSessions`, with defaults, so a positional pattern on it takes
+two more arguments.
+
+The `DemonstrationMCPServer` sample (#3200) is now built on `MCPServer`: its two tools are `ToolFunction`s
+(`DemonstrationMCPServer.demoTools`), and it no longer has its own `SessionStore` or handler.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature
