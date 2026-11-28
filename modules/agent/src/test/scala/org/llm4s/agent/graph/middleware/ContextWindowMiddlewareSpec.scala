@@ -140,6 +140,46 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     ContextPruning.keepToolPairs(toolHistory) shouldBe toolHistory
   }
 
+  it should "pair calls and results by position, so a reused tool-call id cannot keep a call without its result (#3249)" in {
+    // a provider that returns call_0 on every turn: MiddleOut keeps [U1, A1] at the head and [U2, A2, T2] at the tail
+    val reused = Seq(
+      UserMessage("u1"),
+      AssistantMessage(None, Seq(call("call_0"))),
+      ToolMessage("r1", ToolCallId("call_0")),
+      UserMessage("u2"),
+      AssistantMessage(None, Seq(call("call_0"))),
+      ToolMessage("r2", ToolCallId("call_0"))
+    )
+    val headAndTail = reused.patch(2, Nil, 1)
+    val kept        = ContextPruning.keepToolPairs(headAndTail)
+    org.llm4s.agent.graph.toolloop.ToolResultRule.check(kept) shouldBe Right(())
+    kept shouldBe Seq(reused(0), reused(3), reused(4), reused(5))
+    ContextPruning.keepToolPairs(reused) shouldBe reused
+    // a result not straight after its call is dropped, though an earlier call has its id
+    ContextPruning.keepToolPairs(Seq(reused(1), reused(2), UserMessage("x"), reused(5))) shouldBe
+      Seq(reused(1), reused(2), UserMessage("x"))
+  }
+
+  it should "give MiddleOut a request ToolResultRule accepts with reused tool-call ids, at every limit (#3249)" in {
+    val turns = (1 to 6).flatMap { n =>
+      Seq(
+        UserMessage(s"u$n"),
+        AssistantMessage(None, Seq(call("call_0"))),
+        ToolMessage(s"r$n", ToolCallId("call_0")),
+        AssistantMessage(s"a$n")
+      )
+    } :+ UserMessage("now")
+    (1 to turns.length).foreach { n =>
+      Seq(PruningStrategy.MiddleOut, PruningStrategy.OldestFirst).foreach { strategy =>
+        val pruned =
+          ContextPruning.prune(turns, ContextWindowConfig(maxMessages = Some(n), pruningStrategy = strategy), sized)
+        withClue(s"$strategy, $n: ") {
+          org.llm4s.agent.graph.toolloop.ToolResultRule.check(pruned) shouldBe Right(())
+        }
+      }
+    }
+  }
+
   it should "give a ContextWindowMiddleware request that passes validateConversation" in {
     val mw   = new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(4)))
     var sent = Vector.empty[Message]

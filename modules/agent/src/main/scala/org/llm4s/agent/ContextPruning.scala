@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.graph.toolloop.ToolResultRule
 import org.llm4s.llmconnect.model._
 
 /**
@@ -72,20 +73,31 @@ private[agent] object ContextPruning {
   }
 
   /**
-   * Drops what pruning orphaned: a `ToolMessage` whose assistant call is gone, and an assistant
-   * message with tool calls unless every one of its calls still has a result.
+   * Drops what pruning orphaned, positionally, as [[org.llm4s.agent.graph.toolloop.ToolResultRule ToolResultRule]]
+   * pairs (#3249): an assistant message with tool calls is kept, with the run of tool messages straight after it,
+   * only when that run gives each of its calls exactly one result and answers nothing else; a tool message anywhere
+   * else is dropped. Pairing by id across the whole list kept a call whose result was pruned when another turn's
+   * result reused its id (`call_0` on every turn), and the model step then refused every request.
    */
   private[agent] def keepToolPairs(pruned: Seq[Message]): Seq[Message] = {
-    val resultIds = pruned.collect { case t: ToolMessage => t.toolCallId }.toSet
-    val kept = pruned.filter {
-      case a: AssistantMessage if a.toolCalls.nonEmpty => a.toolCalls.forall(c => resultIds.contains(c.id))
-      case _                                           => true
-    }
-    val callIds = kept.collect { case a: AssistantMessage => a.toolCalls.map(_.id) }.flatten.toSet
-    kept.filter {
-      case t: ToolMessage => callIds.contains(t.toolCallId)
-      case _              => true
-    }
+    val messages = pruned.toVector
+    val out      = Vector.newBuilder[Message]
+    var i        = 0
+    while (i < messages.length)
+      messages(i) match {
+        case a: AssistantMessage if a.toolCalls.nonEmpty =>
+          val run = messages.drop(i + 1).takeWhile(_.isInstanceOf[ToolMessage])
+          if (ToolResultRule.violations(a +: run).isEmpty) {
+            out += a
+            out ++= run
+          }
+          i += 1 + run.length
+        case _: ToolMessage => i += 1
+        case other =>
+          out += other
+          i += 1
+      }
+    out.result()
   }
 
   /** The `cl100k_base` counter from core, made once; `None` only if jtokkit cannot load it. */
