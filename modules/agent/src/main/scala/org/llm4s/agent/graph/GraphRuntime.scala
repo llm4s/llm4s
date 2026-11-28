@@ -64,6 +64,15 @@ object GraphRuntime:
     })
 
   /**
+   * `policy` raised by what a run's claim commit adds - one checkpoint and one event - for a top-level thread pruned
+   * after that commit (#3254): it keeps what the policy kept when it pruned before the commit, and the claim's own.
+   * `maxAge` is unchanged: the claim's checkpoint is new.
+   */
+  private[graph] def besideClaim(policy: RetentionPolicy): RetentionPolicy =
+    def plusOne(n: Int) = if n == Int.MaxValue then n else n + 1
+    policy.withMaxCheckpoints(policy.maxCheckpoints.map(plusOne)).withMaxEvents(policy.maxEvents.map(plusOne))
+
+  /**
    * The id of a new checkpoint that run `runId` writes over `parent`: `<runId>/<n>`, where `n` is one
    * more than the parent's - so `n` counts along the thread's history, and an id is never repeated on
    * a thread even when one `RunId` serves several runs. A parent id of another form counts as 0.
@@ -3135,11 +3144,10 @@ final class GraphRuntime(
               // the tasks created for the run before its claim get the claim's root lineage (design §4.24)
               carry().flatMap((carried, reused) => amend(execution).map((carried, reused, _))).flatMap {
                 (carried, reused, execution) =>
-                  // a top-level thread is pruned under the store claim, before the run's first event: nothing of the
-                  // run exists to be pruned. A child thread only after the claim commit, which stores what `amend`
-                  // folded from the events retention would remove (design 4.42): a commit that fails prunes nothing
+                  // every thread is pruned only after the claim commit, so a commit that fails prunes nothing
+                  // (#3254); a child's claim commit also stores what `amend` folded from the events retention would
+                  // remove (design 4.42)
                   val child = origin.isDefined
-                  if !child then config.retention.foreach(retain)
                   if retainChildren then
                     abandonLater = keepChildren(
                       threadId,
@@ -3159,7 +3167,8 @@ final class GraphRuntime(
                     metadata
                   )
                     .map { run =>
-                      if child then config.retention.foreach(retain)
+                      // a top-level thread keeps, besides the claim's own checkpoint and event, what the policy keeps
+                      config.retention.foreach(p => retain(if child then p else GraphRuntime.besideClaim(p)))
                       run
                     }
               }
@@ -3256,11 +3265,12 @@ final class GraphRuntime(
 
     /**
      * Prunes the thread to `policy` as the run is admitted, under the store claim, so no other run writes meanwhile; a
-     * failure is logged, never the run's. `keepAll` removes nothing, so it is skipped. A top-level thread is pruned
-     * before the run's claim commit, so nothing of this run exists yet to be pruned, by any limit. A child thread is
-     * pruned only after it, before the run is launched (design 4.42): the claim checkpoint stores the usage the child
-     * runner folded from the terminal events this removes, so a crash before it removes nothing unfolded; the claim's
-     * own checkpoint and event count against the limits, and `maxEvents` is at least 1 ([[GraphRuntime.childConfig]]).
+     * failure is logged, never the run's. `keepAll` removes nothing, so it is skipped. Every thread is pruned only after
+     * the run's claim commit, before the run is launched, so a start refused at its commit has pruned nothing (#3254).
+     * A top-level thread's limits are raised by the claim's own checkpoint and event ([[GraphRuntime.besideClaim]]), so
+     * it keeps what pruning before the commit kept. A child's claim checkpoint stores the usage the child runner folded
+     * from the terminal events this removes, so a crash before it removes nothing unfolded; the claim's own checkpoint
+     * and event count against its limits, and `maxEvents` is at least 1 ([[GraphRuntime.childConfig]], design 4.42).
      */
     private def retain(policy: RetentionPolicy): Unit =
       if policy != RetentionPolicy.keepAll then
