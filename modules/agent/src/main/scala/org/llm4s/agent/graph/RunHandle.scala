@@ -145,6 +145,20 @@ final private[graph] class StopSignal:
    */
   val inFlight: AtomicReference[Vector[NodeId]] = AtomicReference(Vector.empty)
 
+  /**
+   * Makes recording a stop's cause and its settlement one step ([[RunHandle.stopSettling]], `cancel`, `stop`), and
+   * reading them one ([[recorded]]). The run's own compare-and-sets on [[cause]] (`Finishing`, an expiry, a lost
+   * claim) are outside it: they never write a settlement.
+   */
+  private[graph] val stopping = new ReentrantLock()
+
+  /**
+   * The stop's cause and settlement, read together under [[stopping]] (#3243): a writer changes both in one step, so
+   * the run never sees a plain cancel's cause with a settlement a settling stop installed and withdrew, nor reads a
+   * settlement that is withdrawn between two reads of it.
+   */
+  def recorded(): (Option[StopCause], Option[StopSettlement]) = withLock(stopping)((cause.get, settlement.get))
+
   /** Called by the run before it clears its interrupt flag to close; no interrupt follows it. */
   def acknowledge(): Unit = withLock(lock) { acknowledged = true }
 
@@ -222,18 +236,18 @@ final private[graph] class DefaultRunHandle[O](
     if won then interrupt()
 
   /** Makes recording a stop's cause and its settlement one step, for [[cancel]] and [[stopSettling]]. */
-  private val stopping = new ReentrantLock()
+  private val stopping = signal.stopping
 
   override private[agent] def stopSettling(settlement: StopSettlement, atBoundary: Option[NodeId => Boolean]): Unit =
     atBoundary match
       case None =>
         // the settlement and the cause together, or neither: a stop that lost to another cause - a cancel, or the run's
         // own Finishing, expiry or lost claim, which it records by compare-and-set outside this lock - settles nothing
-        // and overwrites nothing. The settlement is in place before the cause, which is what the run reads first.
+        // and overwrites nothing. The run reads both under this lock (StopSignal.recorded), so the settlement is
+        // installed only once the cause is won, and never seen beside a cause it did not win (#3243).
         val won = withLock(stopping) {
-          val before = signal.settlement.getAndSet(Some(settlement))
-          val first  = signal.cause.compareAndSet(None, Some(StopCause.Cancelled))
-          if !first then signal.settlement.set(before)
+          val first = signal.cause.compareAndSet(None, Some(StopCause.Cancelled))
+          if first then signal.settlement.set(Some(settlement))
           first
         }
         if won then interrupt()

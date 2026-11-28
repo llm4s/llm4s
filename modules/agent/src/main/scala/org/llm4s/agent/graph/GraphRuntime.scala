@@ -3825,18 +3825,20 @@ final class GraphRuntime(
       // Recording it makes a later cancel or expiry fail its compare-and-set and send no interrupt,
       // which would otherwise land on the closing commits below.
       cause.compareAndSet(None, Some(StopCause.Cancelled)): Unit
-      val result = cause.get.getOrElse(StopCause.Cancelled) match
-        case StopCause.ClaimLost => lostClaim(execution, None)
+      // the cause and the settlement as one pair, read once (#3243): a settling stop that lost to a plain cancel is
+      // never seen with its settlement, and the settlement cannot be withdrawn between a check and its use
+      val (stopCause, settled) = signal.recorded()
+      val result = (stopCause.getOrElse(StopCause.Cancelled), settled) match
+        case (StopCause.ClaimLost, _) => lostClaim(execution, None)
         // `Finishing` here means an interrupt from inside the run reached the outcome's commit
-        case StopCause.Cancelled if signal.settlement.get.isDefined =>
-          closeSettled(execution, checkpointId, signal.settlement.get.get)
-        case StopCause.Cancelled | StopCause.Finishing =>
+        case (StopCause.Cancelled, Some(settlement)) => closeSettled(execution, checkpointId, settlement)
+        case (StopCause.Cancelled | StopCause.Finishing, _) =>
           closeStopped(
             execution,
             RunEvent.RunCancelled(RunStoppedDetails(lostUsage, failedSteps.get)),
             GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
           )
-        case StopCause.Expired =>
+        case (StopCause.Expired, _) =>
           closeStopped(
             execution,
             RunEvent.RunTimedOut(RunStoppedDetails(lostUsage, failedSteps.get)),
