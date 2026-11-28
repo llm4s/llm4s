@@ -90,7 +90,11 @@ class DefaultBlockedPathsSpec extends AnyFlatSpec with Matchers {
   }
 
   "FileConfig.DefaultBlockedPaths" should "be the list for the platform the JVM runs on" in {
-    FileConfig.DefaultBlockedPaths shouldBe FileConfig.defaultBlockedPaths(platform, Some(home))
+    FileConfig.DefaultBlockedPaths shouldBe FileConfig.defaultBlockedPaths(
+      platform,
+      Some(home),
+      FileConfig.otherHomes(home)
+    )
     FileConfig().blockedPaths shouldBe FileConfig.DefaultBlockedPaths
   }
 

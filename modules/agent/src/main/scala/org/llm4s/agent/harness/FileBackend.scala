@@ -503,25 +503,57 @@ private[llm4s] object Text:
   ): Result[(String, Int)] =
     if old.isEmpty then Left(BackendRefused.at("edit", path, "`old` is empty"))
     else
-      occurrences(content, old) match
-        case 0 => Left(BackendRefused.at("edit", path, "`old` was not found"))
-        case n if n > 1 && !replaceAll =>
-          Left(BackendRefused.at("edit", path, s"`old` occurs $n times; make it unique or set replaceAll"))
-        case n =>
-          val replaced  = if replaceAll then n else 1
-          val projected = content.length.toLong + replaced.toLong * (replacement.length.toLong - old.length.toLong)
-          val bound     = math.min(maxBytes, MaxLength.toLong)
-          if projected > bound then
-            Left(
-              BackendRefused.at(
-                "edit",
-                path,
-                s"the result would be at least $projected bytes, larger than the limit of $maxBytes bytes"
-              )
+      // a file whose lines end `\r\n` reads without the `\r` (`lines`), so the model writes `\n`: in such a
+      // file an `old` not found as written is matched with `\r\n` for each `\n`, and the replacement is
+      // written with the file's ending, so an edit never mixes endings (#3266)
+      val (o, r) =
+        if !dominantlyCrlf(content) then (old, replacement)
+        else if old.indexOf('\n') < 0 && old.indexOf('\r') < 0 then (old, withCrlf(replacement))
+        else
+          // `old` with its breaks as `\r\n` is matched first: it takes whole CRLF pairs, so an `old` that starts
+          // with `\n` (the LF half of a pair) or ends with `\r` cannot split one and leave `\r\r\n` behind (#3266).
+          // Only when that is not there is `old` matched as written, and then the replacement is not rewritten
+          // either: the match is somewhere the file does not end its lines in CRLF
+          val asCrlf = withCrlf(old)
+          if content.indexOf(asCrlf) >= 0 then (asCrlf, withCrlf(replacement)) else (old, replacement)
+      replaced(path, content, o, r, replaceAll, maxBytes)
+
+  /** Whether most of `content`'s line endings are `\r\n`. */
+  private def dominantlyCrlf(content: String): Boolean =
+    val crlf = occurrences(content, "\r\n")
+    crlf > 0 && crlf * 2 > occurrences(content, "\n")
+
+  /** `s` with every line ending `\r\n`. */
+  private def withCrlf(s: String): String =
+    if s.indexOf('\n') < 0 then s else s.replace("\r\n", "\n").replace("\n", "\r\n")
+
+  private def replaced(
+    path: VPath,
+    content: String,
+    old: String,
+    replacement: String,
+    replaceAll: Boolean,
+    maxBytes: Long
+  ): Result[(String, Int)] =
+    occurrences(content, old) match
+      case 0 => Left(BackendRefused.at("edit", path, "`old` was not found"))
+      case n if n > 1 && !replaceAll =>
+        Left(BackendRefused.at("edit", path, s"`old` occurs $n times; make it unique or set replaceAll"))
+      case n =>
+        val replaced  = if replaceAll then n else 1
+        val projected = content.length.toLong + replaced.toLong * (replacement.length.toLong - old.length.toLong)
+        val bound     = math.min(maxBytes, MaxLength.toLong)
+        if projected > bound then
+          Left(
+            BackendRefused.at(
+              "edit",
+              path,
+              s"the result would be at least $projected bytes, larger than the limit of $maxBytes bytes"
             )
-          else
-            val next = replacing(content, old, replacement, replaced, projected.toInt)
-            binaryReason(next).map(r => BackendRefused.at("edit", path, r)).toLeft((next, n))
+          )
+        else
+          val next = replacing(content, old, replacement, replaced, projected.toInt)
+          binaryReason(next).map(r => BackendRefused.at("edit", path, r)).toLeft((next, n))
 
   /** `content` with its first `count` occurrences of `old` replaced, built in a builder of `size`. */
   private def replacing(content: String, old: String, replacement: String, count: Int, size: Int): String =

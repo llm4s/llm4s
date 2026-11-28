@@ -400,7 +400,11 @@ final class HostFileBackend private (
           if attempt != Success(None) then
             val _ = Try(Files.deleteIfExists(temp))
           attempt match
-            case Success(None)         => Right(())
+            case Success(None) =>
+              // the rename is durable only once its directory is (POSIX): best effort, since the content is
+              // already flushed and some file systems refuse to sync a directory (#3267)
+              if !contendedReplace then HostFileBackend.syncDirectory(target.getParent)
+              Right(())
             case Success(Some(reason)) => refused(operation, path, reason)
             case Failure(e: HostFileBackend.ChangedWhileReplacing) =>
               Left(
@@ -542,7 +546,17 @@ final class HostFileBackend private (
       else if !exists(target) then Left(BackendRefused.notFound("delete", path))
       else if isDir(target) then
         if Using.resource(Files.list(target))(_.findAny().isPresent) then
-          refused("delete", path, "is a directory that is not empty; delete the files in it")
+          // an entry no listing shows (a link, a hard-linked file, a reserved or aliased name) keeps the
+          // directory from being deleted too: say so, or `ls` showing it empty contradicts the refusal (#3267)
+          children(target, maxScanEntries) match
+            case (Some(shown), _) if shown.isEmpty =>
+              refused(
+                "delete",
+                path,
+                "is a directory that is not empty: every entry in it is one the backend does not show (a symbolic " +
+                  "link, a file with other hard links, a reserved or aliased name); remove them outside the backend"
+              )
+            case _ => refused("delete", path, "is a directory that is not empty; delete the files in it")
         else
           Right(
             casPlan("delete", path)(directoryCheck, StateCheck.absent, FileDeleted(wasDirectory = true))(t =>
@@ -790,6 +804,10 @@ object HostFileBackend:
    *    that reports no hard-link counts (NTFS), or on Linux one whose mount table cannot be read - unless
    *    `allowUncheckedIdentity`, the caller vouching that the root has no hard links and no 8.3 names;
    *  - a root with another file system mounted beneath it (a bind mount included): never waived.
+   *
+   * '''Swept at open.''' Once the lock is held, the temporary files a write killed mid-way left under the root
+   * (`.llm4s-<uuid>.tmp`, never listed and refused as paths) are deleted, visiting at most `maxScanEntries`
+   * entries.
    */
   def open(
     root: Path,
@@ -864,6 +882,8 @@ object HostFileBackend:
               checked(real, stamp, allowUncheckedIdentity, probe, countsLinks, fileSystemId, mountsBeneath)
             )
             .map { (stamp, mounts, links) =>
+              // 6. the root is this backend's alone: a temporary file here is one a crash left (#3267)
+              sweepTemporaries(real, maxScanEntries)
               new HostFileBackend(
                 real,
                 maxFileBytes,
@@ -886,6 +906,38 @@ object HostFileBackend:
             case right => right
         }
       yield backend
+
+  /**
+   * Deletes the regular files under `root` named as the backend's temporary files (`.llm4s-<uuid>.tmp`), which
+   * only a write killed between creating one and moving it over its target leaves: `open` holds the root's
+   * exclusive lock, so no other writer's is in flight (#3267). Links are not followed, and at most
+   * `maxEntries` entries are visited, so a huge root costs no more than one walk; a file that cannot be deleted
+   * is left, still hidden and refused as before.
+   */
+  private def sweepTemporaries(root: Path, maxEntries: Int): Unit =
+    var visited = 0
+    val _ = Try(
+      Files.walkFileTree(
+        root,
+        new java.nio.file.SimpleFileVisitor[Path]:
+          private def counted(): java.nio.file.FileVisitResult =
+            visited += 1
+            if visited > maxEntries then java.nio.file.FileVisitResult.TERMINATE
+            else java.nio.file.FileVisitResult.CONTINUE
+          override def preVisitDirectory(d: Path, a: BasicFileAttributes): java.nio.file.FileVisitResult =
+            counted()
+          override def visitFile(f: Path, a: BasicFileAttributes): java.nio.file.FileVisitResult =
+            if a.isRegularFile && Option(f.getFileName).exists(n => Temporary.matches(n.toString)) then
+              val _ = Try(Files.deleteIfExists(f))
+            counted()
+          override def visitFileFailed(f: Path, e: java.io.IOException): java.nio.file.FileVisitResult =
+            counted()
+      )
+    )
+
+  /** Forces `dir`'s entries to storage, where the platform can open a directory; a failure is ignored. */
+  private[harness] def syncDirectory(dir: Path): Unit =
+    val _ = Try(Using.resource(FileChannel.open(dir, StandardOpenOption.READ))(_.force(true)))
 
   /** That `dir` (resolved as `resolved`, with its identity chain) is outside the root, by path and identity. */
   private def outsideRoot(

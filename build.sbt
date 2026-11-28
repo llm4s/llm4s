@@ -3495,7 +3495,8 @@ lazy val scalafixInput10 = (project in file("modules/scalafix-rules/input-1.0"))
       "rag",
       "agent",
       "memory",
-      "memory-postgres"
+      "memory-postgres",
+      "agent-tools"
     ).map(m => "org.llm4s" %% s"llm4s-$m" % scalafix10Llm4s)
   )
 

@@ -71,7 +71,7 @@
     "scalafixInput05": {"base":"modules/scalafix-rules/input-0.5","deps":[],"borrowed":[],"fp":{"compile":"7504a3f51df61e14","test":"cee36fc1ad681834"}},
     "scalafixInput06": {"base":"modules/scalafix-rules/input-0.6","deps":[],"borrowed":[],"fp":{"compile":"c85b35c1f1e450f1","test":"5d80acd114acd394"}},
     "scalafixInput07": {"base":"modules/scalafix-rules/input-0.7","deps":[],"borrowed":[],"fp":{"compile":"c904e269230c2451","test":"98529a8943aac090"}},
-    "scalafixInput10": {"base":"modules/scalafix-rules/input-1.0","deps":[],"borrowed":[],"fp":{"compile":"2ca0d7b3a83be13c","test":"a28fd102e8a34b0a"}},
+    "scalafixInput10": {"base":"modules/scalafix-rules/input-1.0","deps":[],"borrowed":[],"fp":{"compile":"ae23cf41a1e3f0ff","test":"a28fd102e8a34b0a"}},
     "scalafixOutput": {"base":"modules/scalafix-rules/output","deps":[["agent","compile->compile"],["agentTools","compile->compile"],["anthropic","compile->compile"],["core","compile->compile"],["gemini","compile->compile"],["memory","compile->compile"],["memoryPostgres","compile->compile"],["observabilityPrometheus","compile->compile"],["ollama","compile->compile"],["openai","compile->compile"],["openaiCompatible","compile->compile"],["rag","compile->compile"]],"borrowed":[],"fp":{"compile":"3cafe42eead4f113","test":"7793809fff182273"}},
     "scalafixRules": {"base":"modules/scalafix-rules/rules","deps":[],"borrowed":[],"fp":{"compile":"b7f8ed741ae79fec","test":"4793369ee4bb9f88"}},
     "scalafixTests": {"base":"modules/scalafix-rules/tests","deps":[["scalafixRules","compile->compile"]],"borrowed":[],"fp":{"compile":"9e11bfca63dc1b75","test":"019a53f2091377f0"}},

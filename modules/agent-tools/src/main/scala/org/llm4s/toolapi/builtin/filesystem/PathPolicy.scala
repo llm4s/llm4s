@@ -42,11 +42,15 @@ import scala.util.Try
  *
  * A symbolic link that cannot be resolved (a dangling link) is refused, since where it would lead is unknown.
  *
+ * A blocked name ([[FileConfig.blockedNames]]) blocks a path with a component equal to it, or to it followed by `.`
+ * and a suffix, whatever its case, in any of the three locations.
+ *
  * '''What this narrows and what it does not.''' The tools open the resolved path, not the one that was checked,
  * so a link swapped in after the check no longer redirects the open. A directory swapped for a link between the
  * resolution and the open is a race this does not close. A hard link is not a symbolic link: a hard link inside
- * an allowed directory to a file elsewhere is the file itself as far as any path check can tell, so it is not
- * contained.
+ * an allowed directory to a file elsewhere is the file itself as far as any path check can tell, so the tools that
+ * open a file's content refuse one with other hard links where the file system reports a count
+ * ([[hasOtherHardLinks]], #3272).
  */
 private[builtin] object PathPolicy {
 
@@ -97,7 +101,70 @@ private[builtin] object PathPolicy {
    * [[prepare]], for a caller that checks many paths in a row (the arguments of one shell command).
    */
   def resolve(path: Path, entries: Entries): Option[Path] =
-    readings(path).filter(permits(_, entries)).map(_.physical)
+    allowedReadings(path, entries).map(_.physical)
+
+  /**
+   * The readings of `path` when the policy allows it, otherwise `None`. The path's spelling is checked first, with no
+   * file-system access ([[lexicallyRefused]]), so a path the policy refuses by its text alone is never looked up:
+   * looking up a Windows UNC path (`\\host\share\x`) opens an SMB session to that host (#3270).
+   */
+  def allowedReadings(path: Path, entries: Entries): Option[Readings] =
+    if (lexicallyRefused(path, entries)) None else readings(path).filter(permits(_, entries))
+
+  /**
+   * Whether the policy refuses `path` by its absolute, normalised spelling alone, without touching the file system
+   * (#3270):
+   *
+   *   - its root is remote or a device namespace (a Windows UNC root `\\host\share\`, or `\\?\` and
+   *     `\\.\`), and no allowed entry has that root - with no allowed entries, such a path is always refused;
+   *   - allowed entries are configured and the spelling is inside none of them, neither as configured nor as
+   *     resolved. A path spelled outside every allowed entry that a symbolic link would lead back inside is refused:
+   *     spell it by where it is;
+   *   - the spelling is inside a blocked entry.
+   *
+   * Every check here is one the full rule ([[permits]]) also makes, or narrower, so this only refuses earlier.
+   */
+  def lexicallyRefused(path: Path, entries: Entries): Boolean =
+    Try(path.toAbsolutePath.normalize()).toOption match {
+      case None => true
+      case Some(spelled) =>
+        def inside(e: (Path, Path)): Boolean = within(spelled, e._1) || within(spelled, e._2)
+        (isRemoteRoot(spelled) && !entries.allowed.exists(_.exists { case (lexical, real) =>
+          (isRemoteRoot(lexical) && sameRoot(lexical, spelled)) || (isRemoteRoot(real) && sameRoot(real, spelled))
+        })) ||
+        entries.allowed.exists(roots => !roots.exists(inside)) ||
+        entries.blocked.exists(inside) ||
+        hasBlockedName(spelled, entries)
+    }
+
+  /** Whether a component of `path` is a blocked name, or a blocked name followed by `.` and a suffix. */
+  private def hasBlockedName(path: Path, entries: Entries): Boolean =
+    entries.blockedNames.nonEmpty && path.iterator().asScala.exists { component =>
+      val name = fold(component.toString)
+      entries.blockedNames.exists(blocked => name == blocked || name.startsWith(blocked + "."))
+    }
+
+  /**
+   * Whether `path`'s root names another host or a device namespace rather than a local drive or `/`: on Windows a
+   * UNC root (`\\host\share\`) and the `\\?\` and `\\.\` prefixes, all of which begin with two separators. A
+   * POSIX path never has one (`//x` is `/x`).
+   */
+  private[filesystem] def isRemoteRoot(path: Path): Boolean =
+    Option(path.getRoot).map(_.toString).exists { root =>
+      root.length >= 2 && isSeparator(root.charAt(0)) && isSeparator(root.charAt(1))
+    }
+
+  private def isSeparator(c: Char): Boolean = c == '\\' || c == '/'
+
+  private def sameRoot(a: Path, b: Path): Boolean =
+    (Option(a.getRoot), Option(b.getRoot)) match {
+      case (Some(x), Some(y)) => fold(x.toString) == fold(y.toString)
+      case (None, None)       => true
+      case _                  => false
+    }
+
+  private def fold(name: String): String =
+    Normalizer.normalize(name, Normalizer.Form.NFC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
 
   /**
    * The three locations the rule compares for a path: its absolute, normalised spelling, its physical reading
@@ -197,12 +264,32 @@ private[builtin] object PathPolicy {
     private[PathPolicy] val allowed: Option[Seq[(Path, Path)]],
     private[PathPolicy] val blocked: Seq[(Path, Path)],
     private[PathPolicy] val blockedKeys: Set[AnyRef],
-    private[PathPolicy] val keyOf: Path => Option[AnyRef]
+    private[PathPolicy] val keyOf: Path => Option[AnyRef],
+    private[PathPolicy] val blockedNames: Seq[String] = Seq.empty
   )
 
   /** The entries of a policy, resolved now (see [[Entries]]). */
   def prepare(allowed: Option[Seq[String]], blocked: Seq[String]): Entries =
     prepare(allowed, blocked, fileKey)
+
+  /** As the `prepare` above, with names blocked wherever they are ([[FileConfig.blockedNames]]). */
+  def prepare(allowed: Option[Seq[String]], blocked: Seq[String], blockedNames: Seq[String]): Entries = {
+    val e = prepare(allowed, blocked, fileKey)
+    new Entries(e.allowed, e.blocked, e.blockedKeys, e.keyOf, blockedNames.map(fold).filter(_.nonEmpty))
+  }
+
+  /**
+   * Whether the regular file at `real` has other hard links, where the file system reports a link count (the POSIX
+   * `unix:nlink` attribute); `false` for anything else, and where no count is reported (Windows) (#3272).
+   */
+  def hasOtherHardLinks(real: Path): Boolean =
+    Try {
+      Files.isRegularFile(real, LinkOption.NOFOLLOW_LINKS) &&
+      (Files.getAttribute(real, "unix:nlink", LinkOption.NOFOLLOW_LINKS) match {
+        case n: Integer => n.intValue > 1
+        case _          => false
+      })
+    }.getOrElse(false)
 
   /**
    * As the `prepare` above, with the file identity it compares blocked entries by given, for tests (#3237): the
@@ -226,6 +313,7 @@ private[builtin] object PathPolicy {
 
   private def permitted(spelled: Path, physical: Path, lexical: Path, entries: Entries): Boolean = {
     val locations = Seq(physical, lexical)
+    !(spelled +: locations).exists(hasBlockedName(_, entries)) &&
     !entries.blocked.exists { case (blockedLexical, blockedReal) =>
       (spelled +: locations).exists(location => within(location, blockedLexical) || within(location, blockedReal))
     } &&
@@ -258,14 +346,7 @@ private[builtin] object PathPolicy {
    */
   private[filesystem] def within(path: Path, entry: Path): Boolean =
     path.startsWith(entry) || {
-      def fold(name: String): String =
-        Normalizer.normalize(name, Normalizer.Form.NFC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
-      val sameRoot = (Option(path.getRoot), Option(entry.getRoot)) match {
-        case (Some(a), Some(b)) => fold(a.toString) == fold(b.toString)
-        case (None, None)       => true
-        case _                  => false
-      }
-      sameRoot && entry.getNameCount <= path.getNameCount &&
+      sameRoot(path, entry) && entry.getNameCount <= path.getNameCount &&
       (0 until entry.getNameCount).forall(i => fold(path.getName(i).toString) == fold(entry.getName(i).toString))
     }
 

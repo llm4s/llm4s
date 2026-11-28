@@ -76,7 +76,7 @@ object FileInfoTool {
       description = "Get detailed information about a file or directory including size, " +
         "timestamps, type, and permissions. " +
         s"Blocked paths: ${config.describedBlockedPaths}. " +
-        config.allowedPaths.map(p => s"Allowed paths: ${p.mkString(", ")}").getOrElse(""),
+        config.describedAllowedPaths.map(p => s"Allowed paths: $p").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
       for {

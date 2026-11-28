@@ -10,6 +10,7 @@ import java.nio.charset.{ CharacterCodingException, Charset, CodingErrorAction }
 import java.nio.file.attribute.{
   AclFileAttributeView,
   BasicFileAttributes,
+  DosFileAttributeView,
   PosixFileAttributeView,
   PosixFileAttributes,
   PosixFilePermissions
@@ -106,7 +107,7 @@ object WriteFileTool {
     ToolBuilder[WriteFileResult](
       name = "write_file",
       description = s"Write content to a file. " +
-        s"Allowed paths: ${config.allowedPaths.mkString(", ")}. " +
+        s"Allowed paths: ${config.describedAllowedPaths}. " +
         s"Maximum file size: ${config.maxFileSize / 1024}KB. " +
         s"Overwrite allowed: ${config.allowOverwrite}.",
       schema = createSchema
@@ -136,7 +137,7 @@ object WriteFileTool {
       config.resolve(path) match {
         case None =>
           Left(
-            s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}"
+            s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.describedAllowedPaths}"
           )
         case Some(real) =>
           Try(Charset.forName(encodingStr)).toEither.left
@@ -156,6 +157,9 @@ object WriteFileTool {
               } else {
                 if (fileExists && !append && !config.allowOverwrite) {
                   Left(s"File already exists and overwrite is not allowed: $pathStr")
+                } else if (append && fileExists && !config.allowHardLinks && PathPolicy.hasOtherHardLinks(real)) {
+                  // an append writes in place, so through a planted hard link it changes a file elsewhere (#3272)
+                  Left(s"Access denied: '$pathStr' has other hard links, which are refused")
                 } else {
                   Try {
                     // Create parent directories if needed
@@ -271,7 +275,15 @@ object WriteFileTool {
 
   /** A staging name in `real`'s directory whose length does not depend on `real`'s (a name may be up to 255 bytes). */
   private[builtin] def stagingPath(real: Path): Path =
-    real.resolveSibling(s".llm4s-write-${UUID.randomUUID()}.tmp")
+    real.resolveSibling(s"$StagingPrefix${UUID.randomUUID()}$StagingSuffix")
+
+  private val StagingPrefix = ".llm4s-write-"
+  private val StagingSuffix = ".tmp"
+
+  /** Whether `name` is a staging name [[stagingPath]] makes, which `list_directory` does not show. */
+  private[builtin] def isStagingName(name: String): Boolean =
+    name.startsWith(StagingPrefix) && name.endsWith(StagingSuffix) &&
+      Try(UUID.fromString(name.drop(StagingPrefix.length).dropRight(StagingSuffix.length))).isSuccess
 
   private val OwnerOnly = PosixFilePermissions.fromString("rw-------")
 
@@ -300,12 +312,22 @@ object WriteFileTool {
    *    the replace.
    *  - Windows (ACLs, no POSIX permissions): the owner, then the ACL.
    *
-   * NIO does not show the setuid, setgid and sticky bits, POSIX or macOS extended ACLs, extended attributes or security
+   *  - Everywhere: the DOS hidden and system flags (Windows, and Linux file systems that keep them in extended
+   *    attributes), where the original has them (#3272).
+   *
+   * A file with a setuid, setgid or sticky bit is refused, since no portable API sets them and a replacement would
+   * silently drop them (#3272). NIO does not show POSIX or macOS extended ACLs, extended attributes or security
    * labels (SELinux), so these are not carried over: the replacement has none of them. A hard link to the original
    * keeps the old content, since the replacement is a new file.
    */
-  private def copyAccessRights(original: Path, temp: Path): Unit =
+  private def copyAccessRights(original: Path, temp: Path): Unit = {
     if (supportsPosix(original)) {
+      if (hasSpecialBits(original))
+        throw new FileSystemException(
+          original.toString,
+          null,
+          "has a setuid, setgid or sticky bit, which a replacement cannot keep"
+        )
       val from = Files.readAttributes(original, classOf[PosixFileAttributes], LinkOption.NOFOLLOW_LINKS)
       copyPosix(from, Files.getFileAttributeView(temp, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS))
     } else {
@@ -317,6 +339,31 @@ object WriteFileTool {
           to.setAcl(from.getAcl)
         }
     }
+    copyDosFlags(original, temp)
+  }
+
+  /** Whether `path`'s mode has a setuid, setgid or sticky bit, where the file system reports a mode. */
+  private[builtin] def hasSpecialBits(path: Path): Boolean =
+    Try(Files.getAttribute(path, "unix:mode", LinkOption.NOFOLLOW_LINKS)).toOption.exists {
+      case mode: Integer => (mode.intValue & 0xe00) != 0
+      case _             => false
+    }
+
+  /**
+   * Sets on `temp` the DOS hidden and system flags `original` has. Only a flag that is set is written: a new file has
+   * neither, and a file store with no DOS flags (no extended attributes) has none to lose.
+   */
+  private[builtin] def copyDosFlags(original: Path, temp: Path): Unit =
+    Option(Files.getFileAttributeView(original, classOf[DosFileAttributeView], LinkOption.NOFOLLOW_LINKS))
+      .flatMap(view => Try(view.readAttributes()).toOption)
+      .filter(a => a.isHidden || a.isSystem)
+      .foreach { flags =>
+        val to = Files.getFileAttributeView(temp, classOf[DosFileAttributeView], LinkOption.NOFOLLOW_LINKS)
+        if (to == null)
+          throw new FileSystemException(temp.toString, null, "its hidden or system flag cannot be kept")
+        if (flags.isHidden) to.setHidden(true)
+        if (flags.isSystem) to.setSystem(true)
+      }
 
   /** Sets `to`'s owner and group, where they differ, and then its permissions, to `from`'s. */
   private[builtin] def copyPosix(from: PosixFileAttributes, to: PosixFileAttributeView): Unit = {

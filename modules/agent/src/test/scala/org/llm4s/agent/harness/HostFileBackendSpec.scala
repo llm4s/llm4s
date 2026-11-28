@@ -537,6 +537,37 @@ class HostFileBackendSpec
     backend.glob(Glob("**"), VPath.root, 10, call()).value.items shouldBe Vector(p("/a.txt"))
   }
 
+  it should "sweep at open the temporary files a killed write left, and nothing else" in {
+    val tmp = s".llm4s-${UUID.randomUUID()}.tmp"
+    Files.createDirectories(dir.resolve("sub/deeper"))
+    Files.writeString(dir.resolve(tmp), "torn")
+    Files.writeString(dir.resolve(s"sub/deeper/$tmp"), "torn")
+    Files.writeString(dir.resolve(".llm4s-notes.tmp"), "a user's file")
+    Files.writeString(dir.resolve("sub/deeper/keep.txt"), "kept")
+    reopen().left.foreach(e => fail(e.message))
+    Files.exists(dir.resolve(tmp)) shouldBe false
+    Files.exists(dir.resolve(s"sub/deeper/$tmp")) shouldBe false
+    Files.exists(dir.resolve(".llm4s-notes.tmp")) shouldBe true
+    onDisk("sub/deeper/keep.txt") shouldBe "kept"
+    // the directory a crash left holding only a temporary file can be deleted once it is swept
+    Files.createDirectories(dir.resolve("only"))
+    Files.writeString(dir.resolve(s"only/$tmp"), "torn")
+    reopen().left.foreach(e => fail(e.message))
+    backend.ls(p("/only"), 10, call()).value.items shouldBe empty
+    backend.delete(p("/only"), call()).isRight shouldBe true
+    Files.exists(dir.resolve("only")) shouldBe false
+  }
+
+  it should "say a directory holds entries it does not show, when they are what keeps it from being deleted" in {
+    assume(posix)
+    Files.createDirectories(dir.resolve("d"))
+    Files.createSymbolicLink(dir.resolve("d/link"), dir.resolve("d"))
+    backend.ls(p("/d"), 10, call()).value.items shouldBe empty
+    val message = backend.delete(p("/d"), call()).left.value.message
+    message should include("not empty")
+    message should include("does not show")
+  }
+
   it should "refuse every symbolic link, inside the root or out, at any component" in {
     assume(posix)
     val outside = Files.createTempDirectory("llm4s-outside")
@@ -627,9 +658,9 @@ class HostFileBackendSpec
   it should "count every entry it reads against the scan bound, listed or not" in {
     assume(posix)
     Seq("c", "b").foreach(n => Files.writeString(dir.resolve(n), n))
-    Seq("a1", "a2").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
-    Files.writeString(dir.resolve(s".llm4s-${UUID.randomUUID()}.tmp"), "torn")
-    // five entries, two listable: a link or a temporary file costs a read like any other entry
+    // a temporary file would be swept at open (#3267): a third link stands in for it
+    Seq("a1", "a2", "a3").foreach(n => Files.createSymbolicLink(dir.resolve(n), dir.resolve("b")))
+    // five entries, two listable: a link costs a read like any other entry
     reopen(maxScanEntries = 4).value.ls(VPath.root, 10, call()).value.truncated shouldBe true
     reopen(maxScanEntries = 5).value.ls(VPath.root, 10, call()).value shouldBe Listing(
       backend.ls(VPath.root, 10, call()).value.items,

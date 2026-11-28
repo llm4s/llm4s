@@ -126,7 +126,9 @@ object ShellTool {
       description = s"Execute shell commands. " +
         s"Allowed commands: ${config.allowedCommands.mkString(", ")}. " +
         s"Timeout: ${config.timeout.toMillis}ms. " +
-        config.workingDirectory.map(d => s"Working directory: $d").getOrElse(""),
+        config.workingDirectory
+          .map(d => s"Working directory: ${FileConfig.describe(Seq(d), FileConfig.userHome)}")
+          .getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
       for {
@@ -448,7 +450,7 @@ object ShellTool {
       if (!charge(fullCost(base))) Unchecked
       else {
         resolutions += 1
-        baseReadings = PathPolicy.readings(base).filter(PathPolicy.permits(_, entries))
+        baseReadings = PathPolicy.allowedReadings(base, entries)
         if (baseReadings.isDefined) Allowed else Refused
       }
 

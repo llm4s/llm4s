@@ -71,16 +71,18 @@ final class ToolOutputOffload(
       case unchanged @ ToolOutcome.Success(success) =>
         val text = resultText(success.content, thresholdChars)
         text.filter(_.length.toLong > thresholdChars) match
-          case None => unchanged
-          case Some(large) =>
-            val segment = segmentOf(context.idempotencyKey.asString)
-            val tool    = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
+          case None       => unchanged
+          case Some(sent) =>
+            // stored in pages a file tool can read whole: JSON indented, every line at most StoredLineChars (#3265)
+            val (large, wrapped) = ToolOutputOffload.pageable(success.content, sent)
+            val segment          = segmentOf(context.idempotencyKey.asString)
+            val tool             = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
             // the key and the tool name take at most MetadataBytes, so the entry always fits the bound on its own
             val (stored, isCut) = Text.cutEncoded(large, maxResultBytes)
-            val result          = OffloadedResult(segment, tool, stored, Text.utf8Bytes(large), isCut)
+            val result          = OffloadedResult(segment, tool, stored, Text.utf8Bytes(sent), isCut)
             ToolOutcome.Success(
               success
-                .withContent(shown(success.content, preview(result, large)))
+                .withContent(shown(success.content, preview(result, large, wrapped)))
                 .addUpdate(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
             )
       // an error over the threshold is cut before it is stored: it is the model's to read, not to page through
@@ -117,17 +119,22 @@ final class ToolOutputOffload(
     SummarizationMiddleware.cut(text, thresholdChars - note.length) + note
 
   /** What the model is shown in place of `full`: where it is stored, and its first lines. */
-  private def preview(result: OffloadedResult, full: String): String =
+  private def preview(result: OffloadedResult, full: String, wrapped: Boolean): String =
     val (head, total) = firstLines(full, PreviewLines)
     val shown         = head.map(l => if l.length > PreviewLineChars then s"${cutChars(l)}..." else l)
     val cut =
       if result.truncated then s" Only its first ${result.content.length} characters are stored: the rest is lost."
       else ""
+    val wrap =
+      if wrapped then
+        s" Lines longer than ${ToolOutputOffload.StoredLineChars} characters are stored wrapped at that length, " +
+          "with no marker."
+      else ""
     val more = Option.when(total > shown.size)(s"[... ${total - shown.size} more lines]")
     (Vector(
       s"[The result of ${result.tool} is ${full.length} characters (about ${(full.length + 3) / 4} tokens), over " +
         s"this agent's limit of $thresholdTokens tokens, so it is not shown here. It is stored, read-only, at " +
-        s"${pathOf(result.key)}: read it in pages with a file tool.$cut Its first lines:]"
+        s"${pathOf(result.key)}: read it in pages with a file tool.$cut$wrap Its first lines:]"
     ) ++ shown ++ more).mkString("\n")
 
   /** The stored results the thread's summary covers: their path appears in a tool result at or before it. */
@@ -166,6 +173,45 @@ object ToolOutputOffload:
 
   /** The most evicted keys [[Offloads]] remembers, so reading one says it was evicted. */
   val MaxEvicted: Int = 1024
+
+  /**
+   * The longest line of a stored result: a longer one is stored wrapped at this length, so `read_file`, which shows
+   * at most `maxLineChars` (2,000 by default) characters of a line, can show every part of it (#3265).
+   */
+  val StoredLineChars: Int = 1000
+
+  /**
+   * The text to store for a result whose sent text is `sent`, and whether a line of it was wrapped: a JSON value
+   * that is not a string is indented (compact JSON is one line), and every line longer than [[StoredLineChars]] is
+   * split into lines of that length (never inside a surrogate pair).
+   */
+  private[harness] def pageable(content: ToolContent, sent: String): (String, Boolean) =
+    val text = content match
+      case ToolContent.Json(ujson.Str(_)) => sent
+      case ToolContent.Json(other)        => scala.util.Try(other.render(indent = 2)).getOrElse(sent)
+      case ToolContent.Parts(_)           => sent
+    wrapped(text, StoredLineChars)
+
+  /** `text` with each line longer than `width` split into lines of at most `width`, and whether one was. */
+  private[harness] def wrapped(text: String, width: Int): (String, Boolean) =
+    if !text.linesIterator.exists(_.length > width) then (text, false)
+    else
+      val out   = new java.lang.StringBuilder(text.length + text.length / width + 1)
+      var start = 0
+      while start < text.length do
+        val nl  = text.indexOf('\n', start)
+        val end = if nl < 0 then text.length else nl
+        var at  = start
+        while end - at > width do
+          // a cut between the halves of a surrogate pair moves back one, so neither half is alone
+          val cut =
+            if width > 1 && Character.isHighSurrogate(text.charAt(at + width - 1)) then at + width - 1 else at + width
+          out.append(text, at, cut).append('\n')
+          at = cut
+        out.append(text, at, end)
+        if nl >= 0 then out.append('\n')
+        start = if nl < 0 then text.length else nl + 1
+      (out.toString, true)
 
   /** How many lines of an offloaded result the model is shown, each cut to [[PreviewLineChars]] characters. */
   val PreviewLines: Int     = 10

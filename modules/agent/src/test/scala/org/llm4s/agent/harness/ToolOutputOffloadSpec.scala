@@ -112,7 +112,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     toolResults(state).head should include(s"Only its first ${stored.content.length} characters are stored")
   }
 
-  it should "render a JSON result as the loop sends it" in {
+  it should "store a JSON result indented, so a file tool can page through it (#3265)" in {
     val json = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
     )((a, _) =>
@@ -126,7 +126,37 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
         loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), json).graph,
         AgentInput("go")
       ).answered
-    offloadsOf(state).results.head.content should startWith("""[{"i":1,"pad":"yyy""")
+    val stored = offloadsOf(state).results.head.content
+    ujson.read(stored) shouldBe ujson.Arr((1 to 500).map(i => ujson.Obj("i" -> i, "pad" -> "y" * 30))*)
+    stored.linesIterator.size should be > 500
+    stored.linesIterator.map(_.length).max should be <= ToolOutputOffload.StoredLineChars
+  }
+
+  it should "store every line at most StoredLineChars long, so read_file can show all of a one-line result (#3265)" in {
+    val oneLine = AgentTool(
+      AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
+    )((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("z" * a.text.toInt + "END"))))
+    val model = ScriptedModel(calling("c1" -> 200000), answer("done"))
+    val (state, _) =
+      runInMemory(
+        loopOf(model, Seq(new ToolOutputOffload(thresholdTokens = 1000)), oneLine).graph,
+        AgentInput("go")
+      ).answered
+    val stored = offloadsOf(state).results.head
+    stored.content.linesIterator.map(_.length).max shouldBe ToolOutputOffload.StoredLineChars
+    stored.content.replace("\n", "") shouldBe "z" * 200000 + "END"
+    stored.originalBytes shouldBe 200003L
+    toolResults(state).head should include("stored wrapped")
+  }
+
+  "ToolOutputOffload.wrapped" should "split only long lines, and never inside a surrogate pair" in {
+    ToolOutputOffload.wrapped("ab\ncd", 2) shouldBe (("ab\ncd", false))
+    ToolOutputOffload.wrapped("abcde\nf\n", 2) shouldBe (("ab\ncd\ne\nf\n", true))
+    val pair        = "\ud83d\ude00"
+    val (text, cut) = ToolOutputOffload.wrapped("a" + pair + "b", 2)
+    cut shouldBe true
+    text.split("\n").foreach(line => (line.length == 0 || !Character.isHighSurrogate(line.last)) shouldBe true)
+    text.replace("\n", "") shouldBe "a" + pair + "b"
   }
 
   "Every tool result" should "be sent within the threshold, an error or an outer wrapper's denial included (rule 12)" in {
@@ -182,7 +212,8 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
         AgentInput("go")
       ).answered
     // 3000 characters raw, but 6002 as the JSON string the loop would send: over the 4000-character threshold
-    offloadsOf(state).results.head.content shouldBe ujson.Str("\n" * 3000).render()
+    // stored wrapped at StoredLineChars (#3265): the rendered string holds no raw line break of its own
+    offloadsOf(state).results.head.content.replace("\n", "") shouldBe ujson.Str("\n" * 3000).render()
   }
 
   "The preview" should "take the first lines in one scan, counting the rest" in {
