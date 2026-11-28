@@ -42,6 +42,20 @@ class SqliteCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eithe
     sqlite.isClosed shouldBe true
   }
 
+  it should "refuse a key the block does not have, naming the nearest it does, and open nothing (#3099)" in {
+    val file  = freshFile()
+    val quote = file.toString.replace("\\", "\\\\")
+    val error =
+      open(
+        s"""llm4s.agent.checkpointer { kind = sqlite, sqlite { path = "$quote", busytimeout = 2 seconds } }"""
+      ).left.value
+    error shouldBe a[ConfigurationError]
+    error.message should include("llm4s.agent.checkpointer.sqlite.busytimeout is not a setting")
+    error.message should include("did you mean llm4s.agent.checkpointer.sqlite.busyTimeout?")
+    (error.message should not).include("2 seconds")
+    Files.exists(file) shouldBe false
+  }
+
   it should "take the path and busy timeout from application.conf" in {
     val file  = freshFile()
     val quote = file.toString.replace("\\", "\\\\")

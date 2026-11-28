@@ -43,6 +43,8 @@ import scala.util.{ Try, Using }
  *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
  *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`); from version 11 an entry's stop request
  *    (`stop_json`, design 4.57).
+ *  - from version 12, the meta table's `last_child`: the highest place a child thread has taken, so a new child's
+ *    place is drawn from it rather than from a scan of every thread (#3101).
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -52,7 +54,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 11
+  val Current: Int = 12
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -69,7 +71,9 @@ private[sqlite] object SqliteSchema:
     7  -> addThreadRegistry,
     8  -> addReclamation,
     9  -> addRunQueue,
-    10 -> addStopRequests
+    10 -> addStopRequests,
+    // the newest step, keyed off Current so it renumbers with it; it reads only what version 6 added (#3101)
+    (Current - 1) -> addChildCounter
   )
 
   /**
@@ -129,6 +133,18 @@ private[sqlite] object SqliteSchema:
    * interrupt asked of its running attempt, as `StopRequest.toJson` writes it; `NULL` for none, so every entry of a
    * version-10 file has none.
    */
+  /**
+   * Version 12: the child-place counter (#3101). The meta table's `last_child` starts at the file's highest
+   * `child_order` - a tombstone's included - so places keep growing from where an older build left them. Needs only
+   * version 6's `child_order`, and is idempotent (`INSERT OR IGNORE`), so it may move to a later version unchanged.
+   */
+  private def addChildCounter(connection: Connection): Unit =
+    statements(
+      connection,
+      """INSERT OR IGNORE INTO llm4s_checkpoint_meta (key, value)
+        |SELECT 'last_child', COALESCE(MAX(child_order), 0) FROM llm4s_checkpoint_threads""".stripMargin
+    )
+
   private def addStopRequests(connection: Connection): Unit =
     statements(connection, "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN stop_json TEXT")
 

@@ -44,8 +44,9 @@ import scala.util.{ Try, Using }
  *    store keeps `Checkpointer.awaitEventsAfter`'s default: a subscription watching it reads the event log once per
  *    `WatchPolicy.pollInterval`, and sees commits made through other stores on the file that long after they land.
  *
- * The database runs in WAL mode with `synchronous = FULL`: readers never block the writer, and a commit that
- * returned survives a crash or a power loss. SQLite admits one writer at a time per file; a write that finds
+ * The database runs in WAL mode with `synchronous = FULL` and `fullfsync` (which macOS needs to flush its disk's
+ * cache, and other systems ignore): readers never block the writer, and a commit that returned survives a crash or a
+ * power loss. SQLite admits one writer at a time per file; a write that finds
  * another connection writing waits up to [[SqliteCheckpointerConfig.busyTimeout]], then fails with a
  * `ProcessingError`, changing nothing. WAL needs shared memory between the processes that open the file, so keep
  * the file on a local disk - not on a network file system.
@@ -945,7 +946,12 @@ object SqliteCheckpointer:
                 .holding(math.max(deadline - System.nanoTime(), 0L).nanos) {
                   retryingBusy(deadline, onBusy) {
                     transaction(connection, "BEGIN IMMEDIATE") { guard =>
-                      val migrated = SqliteSchema.migrate(connection)
+                      // a file a newer build migrated is refused as the PostgreSQL store refuses its schema (#3101)
+                      val found = SqliteSchema.version(connection)
+                      val migrated: Either[LLMError, Int] =
+                        if found > SqliteSchema.Current then
+                          Left(GraphError.UnsupportedStoreSchema(s"SQLite file $path", found, SqliteSchema.Current))
+                        else SqliteSchema.migrate(connection).left.map(problem => failure("open", problem, None))
                       if migrated.isRight then
                         execute(connection, "COMMIT")
                         guard.committed = true
@@ -953,10 +959,10 @@ object SqliteCheckpointer:
                     }
                   }
                 }
-                .getOrElse(Left(gateTimedOut(config.busyTimeout)))
+                .getOrElse(Left(failure("open", gateTimedOut(config.busyTimeout), None)))
             }.toEither.left
               .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-              .flatMap(_.left.map(problem => failure("open", problem, None)))
+              .flatMap(identity)
           }
           .map(_ => new SqliteCheckpointer(path, clock, connection, config.busyTimeout, gate))
         // a connection that is not handed out must not leak: an open handle keeps the file locked
@@ -997,6 +1003,10 @@ object SqliteCheckpointer:
     }
     require(mode.equalsIgnoreCase("wal"), s"the database's journal could not be switched to WAL (it is '$mode')")
     execute(connection, "PRAGMA synchronous = FULL")
+    // on macOS fsync leaves the commit in the disk's cache, so a power loss can still lose it; F_FULLFSYNC flushes it.
+    // SQLite ignores both elsewhere (#3101)
+    execute(connection, "PRAGMA fullfsync = ON")
+    execute(connection, "PRAGMA checkpoint_fullfsync = ON")
 
   private def storeBusy(busyTimeout: FiniteDuration): String =
     s"the store was busy: its earlier calls held its connection for the whole busy timeout ($busyTimeout)"
@@ -1369,7 +1379,9 @@ object SqliteCheckpointer:
     if current != parent || fresh then
       // one past the file's highest place: a tombstone keeps its place, so places only grow while children are kept
       val order = parent.map { _ =>
-        query(c, "SELECT COALESCE(MAX(child_order), 0) + 1 FROM llm4s_checkpoint_threads")(_.getLong(1)).head
+        // from the file's counter (schema 12), never a scan of every thread (#3101)
+        update(c, "UPDATE llm4s_checkpoint_meta SET value = value + 1 WHERE key = 'last_child'")
+        query(c, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'last_child'")(_.getLong(1)).head
       }
       update(
         c,

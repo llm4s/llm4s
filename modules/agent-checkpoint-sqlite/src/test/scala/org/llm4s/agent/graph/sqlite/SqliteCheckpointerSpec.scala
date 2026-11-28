@@ -180,9 +180,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           _ == 1,
           s"round $round: not exactly one schema version row"
         ),
-        // one row each: the last token, the reclamation mark, and the last entry and lease issued
+        // one row each: the last token, the reclamation mark, the last entry and lease issued, and the last child place
         read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
-          _ == 4,
+          _ == 5,
           s"round $round: not exactly one row per meta key"
         ),
         read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
@@ -199,9 +199,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val db = SqliteFiles.fresh()
     SqliteCheckpointer.open(db).value.close()
     exec(db, "UPDATE llm4s_checkpoint_schema SET version = 99")
+    // as the PostgreSQL store refuses its schema (#3101)
     val refused = SqliteCheckpointer.open(db).left.value
-    refused shouldBe a[ProcessingError]
-    refused.message should (include("version 99").and(include(db.toString)))
+    refused shouldBe GraphError.UnsupportedStoreSchema(s"SQLite file $db", 99, SqliteSchema.Current)
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 99
   }
 
@@ -240,6 +240,21 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       GraphError.UnsupportedStoreSchema(s"SQLite file $db", 99, SqliteSchema.Current)
     store.latest(ThreadId("t1")).isRight shouldBe true
     store.close()
+  }
+
+  it should "place new children from the file's counter, carrying the previous version's places on (#3101)" in {
+    val db = SqliteFiles.fresh()
+    SqliteCheckpointer.open(db).value.close()
+    // a file at the version before the counter's, whose children took places up to 41
+    exec(
+      db,
+      "DELETE FROM llm4s_checkpoint_meta WHERE key = 'last_child'",
+      "INSERT INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq, child_order) VALUES ('old', 1, 1, 41)",
+      s"UPDATE llm4s_checkpoint_schema SET version = ${SqliteSchema.Current - 1}"
+    )
+    SqliteCheckpointer.open(db).value.close()
+    scalar(db, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'last_child'")(_.getLong(1)) shouldBe 41L
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
   }
 
   it should "refuse a file that is not a database, and close the connection it opened" in {
@@ -1165,7 +1180,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     WriteGate.of(db) shouldBe None
     // a refused open gives its gate back too
     exec(db, "UPDATE llm4s_checkpoint_schema SET version = 99")
-    SqliteCheckpointer.open(db).left.value shouldBe a[ProcessingError]
+    SqliteCheckpointer.open(db).left.value shouldBe a[GraphError.UnsupportedStoreSchema]
     WriteGate.of(db) shouldBe None
   }
 

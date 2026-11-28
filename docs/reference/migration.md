@@ -784,6 +784,20 @@ fields with defaults: `apply`, `of` and the setters keep compiling.
 
 A custom `Checkpointer` should refuse such ids too: the new `CheckpointerContract` cases check it.
 
+## Checkpointer config refuses unknown keys, and the stores agree on schema errors and key order (#3099, #3101)
+
+`llm4s-agent`'s checkpointer SPI and long-term store, and the SQLite and PostgreSQL stores, are experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| A misspelt key in `llm4s.agent.checkpointer.sqlite` or `.postgres` (`calltimeout`) was ignored and the default used | `CheckpointerConfigLoader.open` refuses it, naming the key and the nearest one the store reads. A backend of your own may declare its keys with `CheckpointerBackend.keys` (default `None`: unchecked) |
+| `maxPoolSize` had no upper bound | At most 1000 |
+| A SQLite file a newer build migrated was refused with a `ProcessingError` | With `GraphError.UnsupportedStoreSchema`, as PostgreSQL's schema is |
+| SQLite placed a new child thread by scanning every thread | From a counter: the file moves to schema version 12 on open, and builds before this one then refuse it - stop them first |
+| `InMemoryLongTermStore` listed keys by UTF-16 code unit; a `modify` whose change threw raised its fence and threw | Keys are listed by code point (`LongTermStore.KeyOrder`, PostgreSQL's order); a throwing change is a `Left` and changes nothing, its token included |
+| A PostgreSQL `release` that dropped an empty thread's row kept its long-term store fence | The fence and applied keys go with the row, as on `deleteThread` |
+| SQLite on macOS did not flush the disk's cache on commit | `fullfsync` is on (ignored elsewhere) |
+
 ## The Whisper engine writes into a temporary directory, and refuses subtitle formats (#3138)
 
 `llm4s-speech` is Beta. No signature changed; `WhisperSpeechToText` behaves differently:

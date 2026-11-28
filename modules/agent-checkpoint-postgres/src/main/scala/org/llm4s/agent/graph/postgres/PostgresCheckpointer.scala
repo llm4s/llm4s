@@ -154,7 +154,8 @@ final class PostgresCheckpointer private (
   def release(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("release") { c =>
     if lockRow(c, threadId).flatMap(_.claim).exists(_.token == token.value) then
       setClaim(c, threadId, None)
-      dropIfEmpty(c, threadId)
+      // a row dropped takes the long-term store's fence and applied keys with it, as a delete and the sweep do (#3101)
+      if updated(c, Sql.dropIfEmpty(t), threadId.value) > 0 then forgetStoreScope(c, threadId)
     Right(())
   }
 
@@ -953,9 +954,6 @@ final class PostgresCheckpointer private (
       claim.flatMap(_.tenant),
       threadId.value
     )
-
-  /** Removes the thread's row once it holds nothing a new thread of its id would not: as `InMemoryCheckpointer`. */
-  private def dropIfEmpty(c: Connection, threadId: ThreadId): Unit = update(c, Sql.dropIfEmpty(t), threadId.value)
 
   private def positionOf(c: Connection, threadId: ThreadId, id: String): Option[Long] =
     query(c, Sql.positionById(t), threadId.value, id)(_.getLong(1)).headOption

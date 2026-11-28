@@ -21,7 +21,8 @@ import scala.concurrent.duration.*
  *  - `connectionTimeout`: how long a call waits for a connection from the store's own pool (see
  *    [[PostgresCheckpointer.open]]); at least 250 milliseconds, HikariCP's minimum. A caller-supplied pool
  *    ([[PostgresCheckpointer.create]]) keeps its own setting, which then takes this one's place in the bound.
- *  - `maxPoolSize`: the size of the store's own pool; ignored for a caller-supplied one.
+ *  - `maxPoolSize`: the size of the store's own pool, 1 to [[PostgresCheckpointerConfig.MaxPoolSize]]; ignored for a
+ *    caller-supplied one.
  *  - `migrationTimeout`: how long opening the store may take to bring the schema to this build's version, the wait
  *    for another instance's migration included (#3089): its transaction is bounded by this rather than
  *    `callTimeout`, on the server and the client, so a step that rewrites a large table is not cut off. Ten minutes
@@ -70,6 +71,12 @@ object PostgresCheckpointerConfig:
   /** How long an open may take to migrate the schema unless told otherwise (#3089). */
   val DefaultMigrationTimeout: FiniteDuration = 10.minutes
 
+  /**
+   * The largest pool a store opens (#3099): PostgreSQL's default `max_connections` is 100, and every instance holds
+   * its pool, so a pool past this is a typo rather than a plan.
+   */
+  val MaxPoolSize: Int = 1000
+
   private def problems(
     schema: String,
     callTimeout: FiniteDuration,
@@ -95,7 +102,8 @@ object PostgresCheckpointerConfig:
       Option.when(migrationTimeout.length <= 0)(s"migrationTimeout must be positive, was $migrationTimeout"),
       Option.when(migrationTimeout > Int.MaxValue.toLong.millis)(
         s"migrationTimeout must be at most ${Int.MaxValue} milliseconds, was $migrationTimeout"
-      )
+      ),
+      Option.when(maxPoolSize > MaxPoolSize)(s"maxPoolSize must be at most $MaxPoolSize, was $maxPoolSize")
     ).flatten
 
   /** Throws `IllegalArgumentException` for an invalid setting; use [[of]] for untrusted input. */
