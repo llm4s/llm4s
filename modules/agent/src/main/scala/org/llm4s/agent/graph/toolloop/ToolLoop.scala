@@ -1658,6 +1658,15 @@ object ToolLoop:
             .goto(target.model)
           // the target's admission stages run on the turn's query before its model sees it (#3245)
           targetAdmission(target, turn, state, context) match
+            // a judge's call refused at the token budget: the guardrail never ran, so the turn ends at its limit,
+            // as a model call refused there does, not Blocked (#3245)
+            case Left(_) if context.usage.refused =>
+              NodeResult.Continue(
+                Command(usageOf(context), Nil).update(
+                  LoopKeys.turn,
+                  turn.withOutcome(Some(TurnOutcome.TokenLimitReached)).withPriorValues(Map.empty)
+                )
+              )
             case Left(error) =>
               state
                 .get(messages)

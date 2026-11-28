@@ -367,6 +367,41 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     specialist.callCount shouldBe 0
   }
 
+  it should "end the turn TokenLimitReached, not Blocked, when the handoff call used the budget its judge needed (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("never sent")
+    val judge      = answers("0.95")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(
+          Handoff.to(
+            "specialist",
+            Agent
+              .builder("specialist", specialist)
+              .withInputGuardrails(
+                InputGuardrail.from(org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail(judge))
+              )
+          )
+        )
+    )
+
+    val result = agent
+      .run(
+        org.llm4s.agent.graph.ThreadId("budget-at-handoff"),
+        "hello",
+        org.llm4s.agent.graph
+          .RunConfig()
+          .withBudgets(org.llm4s.agent.graph.RunBudgets.default.withMaxTokens(1L))
+      )
+      .value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    judge.callCount shouldBe 0
+    specialist.callCount shouldBe 0
+    result.activeAgent.value shouldBe "triage"
+  }
+
   it should "give the target's model the query as its admission rewrote it (#3245)" in {
     val root       = ScriptedLLMClient.of(handoffTo("specialist"))
     val specialist = answers("done")

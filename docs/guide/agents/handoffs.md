@@ -262,7 +262,9 @@ val triage = Agent.builder("triage", client)
 A specialist's own boundary middleware applies only while it is active, inside the root's. On the
 turn that hands off to it, its admission stages - its input guardrails, and any middleware's `admit` - run on
 that turn's query at the handoff, before its model sees it (#3245): a refusal ends the turn `Blocked` and
-removes it, the handoff included, and a rewrite (a `PIIMasker`) replaces the stored query. Its `beforeAgent`
+removes it, the handoff included, and a rewrite (a `PIIMasker`) replaces the stored query. When the handoff's model
+call used up the run's `maxTokens`, an LLM-judge guardrail that needs a call of its own cannot run, and the turn ends
+`TokenLimitReached`, not `Blocked`. Its `beforeAgent`
 hooks, which may ask a question or write state, first run on its next turn; put a hook that must see every
 query on the root. A block from either ends the turn `Blocked`; an output block removes the whole turn, a handoff made in it
 included, so the next turn starts with the agent that was active before it. Model and tool wrappers (`wrapModelCall`, `wrapToolCall`, such as
