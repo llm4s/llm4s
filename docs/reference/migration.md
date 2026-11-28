@@ -769,6 +769,21 @@ implementations' fourth parameter is an `MCPHttpOptions`; the overload taking an
 transport closes the HTTP client it created when it is closed, and never one it was given. The session id is no
 longer logged.
 
+**HTTP+SSE (#3073).** `SSETransportImpl` used to POST each request to the configured URL and read the reply from
+the POST's body, which is not the 2024-11-05 protocol: it could not talk to a legacy server, llm4s's own `MCPServer`
+included. It now `GET`s the URL, which opens the event stream; POSTs each message to the URL the server's `endpoint`
+event names (a path, or an absolute URL on the same origin; another origin is refused, since the headers and key go
+there); and reads each reply from the stream, matched by id. So an `SSETransport` (or `MCPServerConfig.sse`) URL must
+be the server's SSE endpoint, `{path}/sse` for an `MCPServer`:
+
+```scala
+MCPServerConfig.sse("legacy", "http://127.0.0.1:8080/mcp/sse")
+```
+
+A stream that ends fails the calls waiting on it; the next message opens a new stream, a new session, and the client
+runs the handshake again. There is no session `DELETE` on this transport: closing it closes the stream. Both HTTP
+transports now read SSE the same way: `data:` with or without a space after the colon, several `data` lines joined.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

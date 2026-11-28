@@ -241,6 +241,8 @@ private[mcp] object MCPSessionLost {
   val Expired: MCPSessionLost = MCPSessionLost("Transport error: MCP session expired, client should reinitialize")
   val Restarted: MCPSessionLost =
     MCPSessionLost("Transport error: MCP server process restarted, client should reinitialize")
+  val StreamLost: MCPSessionLost =
+    MCPSessionLost("Transport error: MCP event stream was lost and reopened, client should reinitialize")
 }
 
 // Session management for Streamable HTTP

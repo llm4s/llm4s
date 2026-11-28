@@ -23,7 +23,13 @@ version and how to add it.
 | `MCPServerConfig.sse(name, url)` | `SSETransport` | the SSE endpoint of a server using the 2024-11-05 specification |
 | `MCPServerConfig.streamableHTTP(name, url)` | `StreamableHTTPTransport` | the single endpoint of a server using the 2025-03-26 specification |
 
-The client tries the Streamable HTTP transport first and falls back to SSE when the server does not support it.
+The client tries the Streamable HTTP transport first and falls back to SSE when the server refuses it with a 4xx
+(other than 401 or 403). The `timeout` bounds each request, reply included, on every transport. Both HTTP factories
+take `http = MCPHttpOptions(...)`: headers sent with every request, an `ApiKeyProvider` sent as
+`Authorization: Bearer`, and the `Llm4sHttpClient` to send with (the application's proxy and TLS settings).
+
+The client declares no client capabilities, answers a server's `ping`, and refuses its other requests
+(method-not-found). Closing a stdio transport stops the server and every process it started.
 
 A stdio server does not inherit the JVM's environment: it starts with an allowlist (`PATH`, `HOME`, `USER`, `LANG`,
 `TMPDIR` and their Windows counterparts) plus the `env` you pass to `MCPServerConfig.stdio`, which also takes

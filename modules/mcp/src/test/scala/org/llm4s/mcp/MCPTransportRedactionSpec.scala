@@ -74,9 +74,46 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
   private val transports: Seq[(String, StubbedHttpCalls => MCPTransportImpl)] = Seq(
     "streamable-http" -> (http =>
       new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, WholeBodyReplies(http))
-    ),
-    "sse" -> (http => new SSETransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http))
+    )
   )
+
+  /** An HTTP+SSE transport whose server answers each POST as `onPost` says (see [[LegacySseServer]]). */
+  private def overSse[A](onPost: ujson.Value => (Int, String))(call: MCPTransportImpl => A): A = {
+    val server    = new LegacySseServer(onPost = onPost)
+    val transport = new SSETransportImpl(server.url, "t", 5.seconds)
+    try call(transport)
+    finally {
+      transport.close()
+      server.close()
+    }
+  }
+
+  // The stream is opened by the first message; a notification needs one open, so `initialize` goes first.
+  private val opening: ujson.Value => (Int, String) = LegacySseServer.echoResult
+
+  "the HTTP+SSE transport" should {
+
+    "redact credentials echoed in an HTTP error body of a request" in {
+      assertRedacted(logged(overSse(_ => 500 -> EchoedText)(_.sendRequest(request))))
+    }
+
+    "redact credentials echoed in an HTTP error body of a notification" in {
+      @volatile var first = true
+      val onPost: ujson.Value => (Int, String) = body =>
+        if (first) { first = false; opening(body) }
+        else 500 -> EchoedText
+      assertRedacted(logged(overSse(onPost) { t =>
+        t.sendRequest(request).isRight shouldBe true
+        t.sendNotification(notification)
+      }))
+    }
+
+    "redact credentials echoed in the message of a JSON-RPC error" in {
+      val onPost: ujson.Value => (Int, String) =
+        body => 202 -> LegacySseServer.message(rpcError.replace("\"id\":\"1\"", s"\"id\":${body("id").render()}"))
+      assertRedacted(logged(overSse(onPost)(_.sendRequest(request))))
+    }
+  }
 
   "every HTTP transport" should {
 

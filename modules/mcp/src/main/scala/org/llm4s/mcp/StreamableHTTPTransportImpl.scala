@@ -194,60 +194,14 @@ class StreamableHTTPTransportImpl(
   }
 
   /**
-   * Reads an SSE reply event by event (W3C Server-Sent Events: `event:`, `data:`, `id:` and `retry:` lines,
-   * an empty line ending an event, `:` starting a comment) and returns the first event whose data is the
-   * JSON-RPC response to `request`, as soon as it has arrived. Other events - progress notifications,
-   * server-to-client requests, a response to another id, `[DONE]` - are skipped
-   * ([[https://github.com/llm4s/llm4s/issues/1846 #1846]]). A stream that ends without the response is an
-   * error; one that outlasts the deadline is a timed-out transport error, and an event larger than the body's
-   * size bound an error, both from [[BoundedResponseBody]].
+   * Reads an SSE reply event by event ([[SseEvents]], shared with HTTP+SSE) and returns the first event whose data is
+   * the JSON-RPC response to `request`, as soon as it has arrived. Other events - progress notifications, a response
+   * to another id, `[DONE]` - are skipped ([[https://github.com/llm4s/llm4s/issues/1846 #1846]]), and a request the
+   * server sends is answered (#3079). A stream that ends without the response is an error; one that outlasts the
+   * deadline is a timed-out transport error, and an event larger than the body's size bound an error, both from
+   * [[BoundedResponseBody]].
    */
   private def readSSEResponse(request: JsonRpcRequest, body: BoundedResponseBody): Result[JsonRpcResponse] = {
-    final case class SSEEvent(
-      eventType: Option[String] = None,
-      data: StringBuilder = new StringBuilder(),
-      id: Option[String] = None
-    ) {
-      def nonEmpty: Boolean = data.nonEmpty || eventType.isDefined || id.isDefined
-    }
-
-    def jsonRpcResponse(event: SSEEvent): Option[JsonRpcResponse] = {
-      val dataContent = event.data.toString
-      if (dataContent.nonEmpty && dataContent != "[DONE]") {
-        val parsed = Try(ujson.read(dataContent)).toOption
-        // A request the server sends while it works on this one is answered at once (#3079); it is not the reply
-        parsed.flatMap(JsonRpcReplies.serverRequest).foreach { case (id, method) => answerServer(id, method) }
-        parsed.filter(JsonRpcReplies.isResponseTo(request.id, _)) match {
-          case None =>
-            logger.debugPayload(
-              s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data, or a message other than the response to id ${request.id}: ",
-              dataContent
-            )
-            None
-          case Some(json) =>
-            jsonRpcResponseFrom(json, event)
-        }
-      } else {
-        None
-      }
-    }
-
-    def jsonRpcResponseFrom(json: ujson.Value, event: SSEEvent): Option[JsonRpcResponse] =
-      Try(read[JsonRpcResponse](json)) match {
-        case Success(response) =>
-          logger.debug(
-            s"StreamableHTTPTransport($name) found JSON-RPC response in SSE event: ${event.eventType.getOrElse("unnamed")}"
-          )
-          Some(response)
-        case Failure(e) =>
-          // Shaped like the response but not readable as one, e.g. a malformed error object
-          logger.debugPayload(
-            s"StreamableHTTPTransport($name) skipping unreadable JSON-RPC response (${e.getMessage}): ",
-            event.data.toString
-          )
-          None
-      }
-
     def noResponse(events: Int): Result[JsonRpcResponse] =
       Left(
         SimpleError(
@@ -256,52 +210,50 @@ class StreamableHTTPTransportImpl(
       )
 
     @scala.annotation.tailrec
-    def loop(current: SSEEvent, events: Int): Result[JsonRpcResponse] =
-      body.readLine() match {
+    def loop(events: Int): Result[JsonRpcResponse] =
+      SseEvents.next(
+        body,
+        line => logger.debugPayload(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ", line)
+      ) match {
         case Left(error) => Left(transportFailure(error))
-        case Right(None) =>
-          // The stream ended; an event without a trailing empty line still counts
-          if (current.nonEmpty) jsonRpcResponse(current).fold(noResponse(events + 1))(Right(_))
-          else noResponse(events)
-        case Right(Some(line)) =>
-          val trimmedLine = line.trim
-          if (trimmedLine.isEmpty) {
-            // Empty line signals end of event
-            if (current.nonEmpty) {
-              jsonRpcResponse(current) match {
-                case Some(response) => Right(response)
-                case None           => loop(SSEEvent(), events + 1)
-              }
-            } else loop(current, events)
-          } else if (trimmedLine.startsWith("data:")) {
-            val data = if (trimmedLine.length > 5) trimmedLine.substring(5).trim else ""
-            if (current.data.length + data.length + 1 > BoundedResponseBody.MaxReplyChars)
-              Left(transportFailure(body.tooLarge()))
-            else {
-              if (current.data.nonEmpty) current.data.append("\n")
-              current.data.append(data)
-              loop(current, events)
-            }
-          } else if (trimmedLine.startsWith("event:")) {
-            val eventType = if (trimmedLine.length > 6) trimmedLine.substring(6).trim else ""
-            loop(current.copy(eventType = Some(eventType)), events)
-          } else if (trimmedLine.startsWith("id:")) {
-            val id = if (trimmedLine.length > 3) trimmedLine.substring(3).trim else ""
-            loop(current.copy(id = Some(id)), events)
-          } else if (trimmedLine.startsWith("retry:")) {
-            // Retry line - we ignore this for now
-            logger.debug(s"StreamableHTTPTransport($name) ignoring SSE retry directive: $trimmedLine")
-            loop(current, events)
-          } else {
-            // Lines starting with : are comments; others that don't match the format are ignored
-            if (!trimmedLine.startsWith(":"))
-              logger.debugPayload(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ", trimmedLine)
-            loop(current, events)
+        case Right(None) => noResponse(events)
+        case Right(Some(event)) =>
+          replyIn(request, event) match {
+            case Some(response) => Right(response)
+            case None           => loop(events + 1)
           }
       }
 
-    loop(SSEEvent(), 0)
+    loop(0)
   }
+
+  /** The response to `request` if `event` carries it; answers a server request it carries instead. */
+  private def replyIn(request: JsonRpcRequest, event: SseEvents.Event): Option[JsonRpcResponse] =
+    if (event.data.isEmpty || event.data == "[DONE]") None
+    else {
+      val parsed = Try(ujson.read(event.data)).toOption
+      // A request the server sends while it works on this one is answered at once (#3079); it is not the reply
+      parsed.flatMap(JsonRpcReplies.serverRequest).foreach { case (id, method) => answerServer(id, method) }
+      parsed.filter(JsonRpcReplies.isResponseTo(request.id, _)) match {
+        case None =>
+          logger.debugPayload(
+            s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data, or a message other than the response to id ${request.id}: ",
+            event.data
+          )
+          None
+        case Some(json) =>
+          Try(read[JsonRpcResponse](json)) match {
+            case Success(response) => Some(response)
+            case Failure(e)        =>
+              // Shaped like the response but not readable as one, e.g. a malformed error object
+              logger.debugPayload(
+                s"StreamableHTTPTransport($name) skipping unreadable JSON-RPC response (${e.getMessage}): ",
+                event.data
+              )
+              None
+          }
+      }
+    }
 
   /**
    * Answers a request the server sent in a reply stream (#3079): `ping` with an empty result, anything else with

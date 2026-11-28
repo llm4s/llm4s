@@ -1,774 +1,226 @@
 package org.llm4s.mcp
 
-import ch.qos.logback.classic.{ Level, Logger => LBLogger }
-import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
-import org.scalamock.scalatest.MockFactory
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.toolapi.{ Schema, ToolBuilder }
+import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.scalatest.EitherValues
+import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.Outcome
-import org.scalatest.wordspec.AnyWordSpec
-import org.slf4j.LoggerFactory
-import upickle.default._
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 /**
- * Comprehensive unit tests for SSETransportImpl.
- *
- * Tests the MCP 2024-11-05 SSE transport protocol implementation including:
- * - Request/response handling
- * - SSE stream parsing
- * - Session management
- * - Error handling
- * - Notification sending
+ * The HTTP+SSE transport speaks MCP 2024-11-05 (#3073): it `GET`s the SSE URL, POSTs to the endpoint the `endpoint`
+ * event names, and reads each reply from the stream, matched by id. Against llm4s's own `MCPServer` legacy endpoints
+ * and a scripted server ([[LegacySseServer]]).
  */
-class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
+class SSETransportImplSpec extends AnyFlatSpec with Matchers with EitherValues {
 
-  override def withFixture(test: NoArgTest): Outcome = {
-    val logger   = LoggerFactory.getLogger("org.llm4s.mcp.SSETransportImpl").asInstanceOf[LBLogger]
-    val previous = logger.getLevel
-    logger.setLevel(Level.OFF)
-    try super.withFixture(test)
-    finally logger.setLevel(previous)
+  private def request(method: String, id: String = "1") = JsonRpcRequest("2.0", id, method, None)
+  private val notification = JsonRpcNotification("2.0", "notifications/initialized", Some(ujson.Obj()))
+
+  private def withServer[A](server: LegacySseServer)(test: LegacySseServer => A): A =
+    try test(server)
+    finally server.close()
+
+  private def transportFor(
+    server: LegacySseServer,
+    timeout: FiniteDuration = 5.seconds,
+    http: MCPHttpOptions = MCPHttpOptions.default
+  ) =
+    new SSETransportImpl(server.url, "legacy", timeout, http)
+
+  private def using[A](transport: SSETransportImpl)(test: SSETransportImpl => A): A =
+    try test(transport)
+    finally transport.close()
+
+  "SSETransportImpl" should "complete the handshake and list tools with llm4s's own MCPServer at {path}/sse" in {
+    val tool = ToolBuilder[String]("ping_tool", "Answers", Schema.`object`[Map[String, Any]]("No parameters"))
+      .withHandler(_ => Right("pong"))
+      .build()
+      .fold(e => fail(e.formatted), identity)
+    val server = new MCPServer(MCPServerOptions(0, "/mcp", "LegacyServer", "1.0"), Seq(tool))
+    server.start().fold(e => throw e, _ => ())
+    try
+      using(new SSETransportImpl(s"http://127.0.0.1:${server.boundPort}/mcp/sse", "own", 5.seconds)) { transport =>
+        transport.sendRequest(request("initialize")).value.result.map(_("protocolVersion").str) should not be empty
+        transport.sendNotification(notification) shouldBe Right(())
+        val tools = transport.sendRequest(request("tools/list", "2")).value
+        tools.result.map(_("tools").arr.map(_("name").str).toList) shouldBe Some(List("ping_tool"))
+      }
+    finally server.stop()
   }
 
-  // Test data
-  val testUrl     = "http://localhost:8080/mcp"
-  val testName    = "test-transport"
-  val testTimeout = 5.seconds
+  it should "POST to an absolute endpoint on the same origin" in withServer(
+    new LegacySseServer(endpoint = base => s"$base/messages?sessionId=abs")
+  ) { server =>
+    using(transportFor(server))(_.sendRequest(request("tools/list")).value.result.map(_("echo").str)) shouldBe
+      Some("tools/list")
+  }
 
-  // Helper to create HTTP responses
-  def httpResponse(
-    statusCode: Int,
-    body: String,
-    headers: Map[String, Seq[String]] = Map.empty
-  ): HttpResponse =
-    HttpResponse(statusCode = statusCode, body = body, headers = headers)
-
-  // Helper to create JSON-RPC request
-  def createRequest(method: String, id: String): JsonRpcRequest =
-    JsonRpcRequest(
-      jsonrpc = "2.0",
-      method = method,
-      id = id,
-      params = None
+  it should "refuse an endpoint on another origin, posting nothing there" in withServer(
+    new LegacySseServer(endpoint = _ => "http://evil.example.com/messages")
+  ) { server =>
+    using(transportFor(server))(_.sendRequest(request("initialize")).left.value.message) should include(
+      "another origin"
     )
+    server.posted.asScala shouldBe empty
+  }
 
-  // Helper to create JSON-RPC response
-  def createResponse(id: String, result: Option[ujson.Value] = None): String =
-    write(
-      JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = id,
-        result = result,
-        error = None
-      )
+  it should "match the reply by id, answer the server's own requests, and skip other messages" in withServer(
+    new LegacySseServer(onPost =
+      body =>
+        if (body.obj.contains("method"))
+          202 -> Seq(
+            """{"jsonrpc":"2.0","id":"0","result":{"wrong":true}}""",
+            """{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}""",
+            """{"jsonrpc":"2.0","id":"1","method":"ping"}""",
+            """{"jsonrpc":"2.0","id":9,"method":"sampling/createMessage"}""",
+            """{"jsonrpc":"2.0","id":"1","result":{"right":true}}"""
+          ).map(LegacySseServer.message).mkString
+        else 202 -> ""
     )
+  ) { server =>
+    using(transportFor(server)) { transport =>
+      transport.sendRequest(request("tools/list")).value.result shouldBe Some(ujson.Obj("right" -> true))
+      val deadline = Deadline.now + 5.seconds
+      def answers  = server.posted.asScala.toList.filterNot(_.obj.contains("method"))
+      while (answers.size < 2 && deadline.hasTimeLeft()) Thread.sleep(10)
+      answers.find(_("id") == ujson.Str("1")).map(_("result")) shouldBe Some(ujson.Obj())
+      answers.find(_("id") == ujson.Num(9)).map(_("error")("code").num.toInt) shouldBe Some(-32601)
+    }
+  }
 
-  // Helper to create JSON-RPC error response
-  def createErrorResponse(id: String, code: Int, message: String): String =
-    write(
-      JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = id,
-        result = None,
-        error = Some(JsonRpcError(code = code, message = message, data = None))
-      )
+  it should "read data with no space after the colon, and join data split over several lines" in withServer(
+    new LegacySseServer(onPost =
+      body =>
+        202 -> s"event: message\ndata:{\"jsonrpc\":\"2.0\",\ndata:\"id\":${body("id").render()},\"result\":{\"split\":true}}\n\n"
     )
-
-  // Helper to create SSE formatted response
-  def createSSEResponse(data: String, eventType: Option[String] = None, id: Option[String] = None): String = {
-    val lines = scala.collection.mutable.ListBuffer[String]()
-    eventType.foreach(e => lines += s"event: $e")
-    id.foreach(i => lines += s"id: $i")
-    lines += s"data: $data"
-    lines += "" // Empty line terminates event
-    lines.mkString("\n")
+  ) { server =>
+    using(transportFor(server))(_.sendRequest(request("tools/list")).value.result) shouldBe
+      Some(ujson.Obj("split" -> true))
   }
 
-  "SSETransportImpl initialization" should {
-
-    "create transport with correct configuration" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      transport.name shouldBe testName
-    }
+  it should "give up on a reply that does not arrive within the timeout" in withServer(
+    new LegacySseServer(onPost = _ => 202 -> "")
+  ) { server =>
+    val started = System.nanoTime()
+    val message = using(transportFor(server, 1.second))(_.sendRequest(request("tools/list")).left.value.message)
+    message should include("no reply to request 1")
+    message should include("1 second")
+    (System.nanoTime() - started).nanos should be < 10.seconds
   }
 
-  "SSETransportImpl.sendRequest" should {
+  it should "refuse an event larger than the reply bound, rather than buffer it" in withServer(
+    new LegacySseServer(onPost =
+      _ => 202 -> ("event: message\n" + Seq.fill(11)(s"data: ${"x" * (1024 * 1024)}\n").mkString + "\n")
+    )
+  ) { server =>
+    using(transportFor(server, 30.seconds))(_.sendRequest(request("tools/list")).left.value.message) should include(
+      "reply exceeds"
+    )
+  }
 
-    "send POST request with correct base headers for initialize" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1", Some(ujson.Obj("protocolVersion" -> "2024-11-05")))
-
-      (mockHttp.onPost _)
-        .when(
-          testUrl,
-          Map(
-            "Content-Type" -> "application/json",
-            "Accept"       -> "application/json, text/event-stream"
-          ),
-          *,
-          testTimeout
-        )
-        .returns(Right(httpResponse(200, responseJson)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
+  it should "send the configured headers and bearer key on the GET and every POST, and Accept on a notification" in
+    withServer(new LegacySseServer()) { server =>
+      val http = MCPHttpOptions().withHeader("X-Tenant", "acme").withApiKey(ApiKeyProvider.static(ApiKey("k-3078")))
+      using(transportFor(server, http = http)) { transport =>
+        transport.sendRequest(request("initialize")).isRight shouldBe true
+        transport.sendNotification(notification) shouldBe Right(())
+      }
+      val gets  = server.headersOf("GET")
+      val posts = server.headersOf("POST")
+      gets should have size 1
+      posts should have size 2
+      (gets ++ posts).foreach { headers =>
+        headers.get("x-tenant") shouldBe Some("acme")
+        headers.get("authorization") shouldBe Some("Bearer k-3078")
+      }
+      gets.head.get("accept") shouldBe Some("text/event-stream")
+      posts.foreach(_.get("accept") shouldBe Some("application/json, text/event-stream"))
     }
 
-    "NOT include MCP-Protocol-Version header on initialize request" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-
-      // Stub to capture headers
-      var capturedHeaders: Map[String, String] = Map.empty
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, responseJson)
-          }
+  it should "report a POST the server answers 404 as a lost session, then open a new stream" in {
+    @volatile var refuse = true
+    withServer(new LegacySseServer(onPost = body => if (refuse) 404 -> "gone" else LegacySseServer.echoResult(body))) {
+      server =>
+        using(transportFor(server)) { transport =>
+          transport.sendRequest(request("tools/list")).left.value shouldBe MCPSessionLost.Expired
+          refuse = false
+          transport.sendRequest(request("tools/list", "2")).left.value shouldBe MCPSessionLost.StreamLost
+          transport.sendRequest(request("initialize", "3")).isRight shouldBe true
+          transport.sendRequest(request("tools/list", "4")).isRight shouldBe true
+          server.streamsOpened shouldBe 2
         }
-
-      transport.sendRequest(request)
-
-      // Verify no protocol version header on initialize
-      capturedHeaders should not contain key("MCP-Protocol-Version")
-    }
-
-    "include MCP-Protocol-Version header on non-initialize requests" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      // Capture headers from both calls
-      var callCount                              = 0
-      var secondCallHeaders: Map[String, String] = Map.empty
-      val initRequest                            = createRequest("initialize", "1")
-      val initResponseJson                       = createResponse("1")
-      val request                                = createRequest("tools/list", "2")
-      val responseJson                           = createResponse("2")
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            callCount += 1
-            if (callCount == 1) {
-              // First call: initialize
-              httpResponse(200, initResponseJson)
-            } else {
-              // Second call: capture headers
-              secondCallHeaders = headers
-              httpResponse(200, responseJson)
-            }
-          }
-        }
-
-      // First initialize
-      transport.sendRequest(initRequest)
-
-      // Then send regular request
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-
-      // Verify protocol version header is present in second call
-      (secondCallHeaders should contain).key("MCP-Protocol-Version")
-      secondCallHeaders("MCP-Protocol-Version") shouldBe "2024-11-05"
-    }
-
-    "handle successful JSON response" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-      result.map(_.id) shouldBe Right("1")
-    }
-
-    "handle successful SSE stream response" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request        = createRequest("initialize", "1")
-      val responseJson   = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
-      val sseResponse    = createSSEResponse(responseJson)
-      val contentTypeSSE = Map("content-type" -> Seq("text/event-stream; charset=utf-8"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentTypeSSE)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-      result.map(_.id) shouldBe Right("1")
-    }
-
-    "parse SSE events with event type and id fields" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-      val sseResponse  = createSSEResponse(responseJson, eventType = Some("message"), id = Some("event-1"))
-      val contentType  = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-    }
-
-    "extract session ID from initialize response headers" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request       = createRequest("initialize", "1")
-      val responseJson  = createResponse("1")
-      val request2      = createRequest("tools/list", "2")
-      val responseJson2 = createResponse("2")
-
-      // Capture headers from both calls
-      var callCount                              = 0
-      var secondCallHeaders: Map[String, String] = Map.empty
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            callCount += 1
-            if (callCount == 1) {
-              // First call: initialize with session
-              httpResponse(200, responseJson, Map("mcp-session-id" -> Seq("session-123")))
-            } else {
-              // Second call: capture headers
-              secondCallHeaders = headers
-              httpResponse(200, responseJson2)
-            }
-          }
-        }
-
-      transport.sendRequest(request)
-
-      val result = transport.sendRequest(request2)
-      result.isRight shouldBe true
-
-      // Verify session header is present in second request
-      (secondCallHeaders should contain).key("mcp-session-id")
-      secondCallHeaders("mcp-session-id") shouldBe "session-123"
-    }
-
-    "handle server without session management" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-      val headers      = Map.empty[String, Seq[String]] // No session header
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson, headers)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-
-      // Next request should not include session header
-      var capturedHeaders: Map[String, String] = Map.empty
-      val request2                             = createRequest("tools/list", "2")
-      val responseJson2                        = createResponse("2")
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, responseJson2)
-          }
-        }
-
-      transport.sendRequest(request2)
-
-      // Verify no session header
-      capturedHeaders should not contain key("mcp-session-id")
-    }
-
-    "handle multiple SSE events and extract JSON-RPC response" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-
-      // Multiple SSE events, second one has the JSON-RPC response
-      val sseResponse = Seq(
-        "event: info",
-        "data: Server starting",
-        "",
-        "event: message",
-        s"data: $responseJson",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-      result.map(_.id) shouldBe Right("1")
     }
   }
 
-  "SSETransportImpl error handling" should {
-
-    "handle HTTP 404 with active session as session expiration" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val initRequest      = createRequest("initialize", "1")
-      val initResponseJson = createResponse("1")
-      val request          = createRequest("tools/list", "2")
-
-      // Handle both calls
-      var callCount = 0
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            callCount += 1
-            if (callCount == 1) {
-              // First call: initialize with session
-              httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
-            } else {
-              // Second call: 404
-              httpResponse(404, "Not Found")
-            }
-          }
-        }
-
-      transport.sendRequest(initRequest)
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("session expired"))
-    }
-
-    "handle HTTP 400+ errors with body in error message" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request = createRequest("initialize", "1")
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(500, "Internal Server Error: Database down")))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("500"))
-    }
-
-    "handle JSON-RPC error responses" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request       = createRequest("initialize", "1")
-      val errorResponse = createErrorResponse("1", -32600, "Invalid Request")
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, errorResponse)))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("-32600"))
-      result.left.map(_.message should include("Invalid Request"))
-    }
-
-    "handle malformed JSON in response" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request = createRequest("initialize", "1")
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, "{invalid-json")))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("Transport error"))
-    }
-
-    "handle network exceptions" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request = createRequest("initialize", "1")
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .returns(Left(org.llm4s.error.TimeoutError("Connection timed out", testTimeout, "http.POST")))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("Transport error"))
-    }
-
-    "handle connection failures" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request = createRequest("initialize", "1")
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .returns(Left(org.llm4s.error.NetworkError("Connection refused", None, testUrl)))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("Transport error"))
-    }
-
-    "handle empty SSE stream with no valid JSON-RPC response" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request = createRequest("initialize", "1")
-
-      // SSE stream with only comments and no JSON-RPC data
-      val sseResponse = Seq(
-        ": This is a comment",
-        "event: info",
-        "data: Server ready",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("No valid JSON-RPC response"))
-    }
-  }
-
-  "SSETransportImpl SSE parsing" should {
-
-    "handle SSE with valid JSON-RPC response on single data line" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1", Some(ujson.Obj("result" -> "ok")))
-
-      // SSE response with complete JSON on single data line
-      val sseResponse = Seq(
-        s"data: $responseJson",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-    }
-
-    "handle SSE comments (lines starting with colon)" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-
-      val sseResponse = Seq(
-        ": This is a comment",
-        ": Another comment",
-        s"data: $responseJson",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-    }
-
-    "handle [DONE] sentinel in SSE data" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-
-      val sseResponse = Seq(
-        s"data: $responseJson",
-        "",
-        "data: [DONE]",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-    }
-
-    "skip non-JSON-RPC data in SSE stream" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val request      = createRequest("initialize", "1")
-      val responseJson = createResponse("1")
-
-      val sseResponse = Seq(
-        "data: Plain text message",
-        "",
-        "data: {\"not\": \"json-rpc\"}",
-        "",
-        s"data: $responseJson",
-        ""
-      ).mkString("\n")
-
-      val contentType = Map("content-type" -> Seq("text/event-stream"))
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
-
-      val result = transport.sendRequest(request)
-      result.isRight shouldBe true
-      result.map(_.id) shouldBe Right("1")
-    }
-  }
-
-  "SSETransportImpl.sendNotification" should {
-
-    "send notification with Content-Type header" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      var capturedHeaders: Map[String, String] = Map.empty
-      val notification = JsonRpcNotification(
-        jsonrpc = "2.0",
-        method = "notifications/initialized",
-        params = None
+  it should "fail the calls waiting on a stream that ends, and refuse all but initialize on the next one" in withServer(
+    new LegacySseServer(onPost = _ => 202 -> "")
+  ) { server =>
+    using(transportFor(server, 30.seconds)) { transport =>
+      @volatile var outcome: Option[Either[String, JsonRpcResponse]] = None
+      val waiting =
+        Thread.ofVirtual().start(() => outcome = Some(transport.sendRequest(request("tools/list")).left.map(_.message)))
+      val deadline = Deadline.now + 5.seconds
+      while (server.posted.isEmpty && deadline.hasTimeLeft()) Thread.sleep(10)
+      server.dropStreams()
+      waiting.join(10_000)
+      outcome.flatMap(_.left.toOption).getOrElse(fail(s"expected a failure, got $outcome")) should include(
+        "the server closed the event stream"
       )
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, "")
-          }
-        }
-
-      val result = transport.sendNotification(notification)
-      result.isRight shouldBe true
-
-      // Verify Content-Type header
-      (capturedHeaders should contain).key("Content-Type")
-      capturedHeaders("Content-Type") shouldBe "application/json"
-    }
-
-    "include MCP-Protocol-Version in notification headers" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      var capturedHeaders: Map[String, String] = Map.empty
-      val notification = JsonRpcNotification(
-        jsonrpc = "2.0",
-        method = "notifications/initialized",
-        params = None
-      )
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, "")
-          }
-        }
-
-      val result = transport.sendNotification(notification)
-      result.isRight shouldBe true
-
-      // Verify protocol version header
-      (capturedHeaders should contain).key("MCP-Protocol-Version")
-      capturedHeaders("MCP-Protocol-Version") shouldBe "2024-11-05"
-    }
-
-    "include session ID in notification if present" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val initRequest      = createRequest("initialize", "1")
-      val initResponseJson = createResponse("1")
-      val notification = JsonRpcNotification(
-        jsonrpc = "2.0",
-        method = "notifications/initialized",
-        params = None
-      )
-
-      // Handle both request and notification calls
-      var callCount                                = 0
-      var notificationHeaders: Map[String, String] = Map.empty
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            callCount += 1
-            if (callCount == 1) {
-              // First call: initialize with session
-              httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
-            } else {
-              // Second call: notification - capture headers
-              notificationHeaders = headers
-              httpResponse(200, "")
-            }
-          }
-        }
-
-      transport.sendRequest(initRequest)
-
-      val result = transport.sendNotification(notification)
-      result.isRight shouldBe true
-
-      // Verify session header in notification
-      (notificationHeaders should contain).key("mcp-session-id")
-      notificationHeaders("mcp-session-id") shouldBe "session-123"
-    }
-
-    "handle notification errors" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val notification = JsonRpcNotification(
-        jsonrpc = "2.0",
-        method = "notifications/initialized",
-        params = None
-      )
-
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(500, "Server Error")))
-
-      val result = transport.sendNotification(notification)
-      result.isLeft shouldBe true
-      result.left.map(_.message should include("500"))
+      transport.sendRequest(request("tools/list", "2")).left.value shouldBe MCPSessionLost.StreamLost
     }
   }
 
-  "SSETransportImpl.close" should {
-
-    "send DELETE request if session exists" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      // Initialize with session
-      val initRequest      = createRequest("initialize", "1")
-      val initResponseJson = createResponse("1")
-      val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
-      transport.sendRequest(initRequest)
-
-      // Expect DELETE on close - capture headers
-      var capturedHeaders: Map[String, String] = Map.empty
-      (mockHttp.onDelete _)
-        .when(*, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, "")
+  "MCPClientImpl" should "fall back to HTTP+SSE when Streamable HTTP is refused, and recover a dropped stream" in
+    withServer(
+      new LegacySseServer(onPost =
+        body =>
+          body("method").strOpt match {
+            case Some("tools/list") =>
+              202 -> LegacySseServer.message(
+                ujson
+                  .Obj(
+                    "jsonrpc" -> "2.0",
+                    "id"      -> body("id"),
+                    "result" -> ujson.Obj(
+                      "tools" -> ujson.Arr(
+                        ujson.Obj("name" -> "t", "description" -> "d", "inputSchema" -> ujson.Obj("type" -> "object"))
+                      )
+                    )
+                  )
+                  .render()
+              )
+            case _ => LegacySseServer.echoResult(body)
           }
-        }
-
-      transport.close()
-
-      // Verify session header in DELETE request
-      (capturedHeaders should contain).key("mcp-session-id")
-      capturedHeaders("mcp-session-id") shouldBe "session-123"
+      )
+    ) { server =>
+      val client = new MCPClientImpl(MCPServerConfig.sse("legacy", server.url, 5.seconds))
+      try {
+        client.getTools().map(_.map(_.name)) shouldBe Right(Seq("t"))
+        client.protocolVersion shouldBe Some("2024-11-05")
+        server.dropStreams()
+        val deadline = Deadline.now + 5.seconds
+        def open     = client.transport.collect { case t: SSETransportImpl => t.streamOpen }.getOrElse(false)
+        while (open && deadline.hasTimeLeft()) Thread.sleep(10)
+        open shouldBe false
+        client.getTools().map(_.map(_.name)) shouldBe Right(Seq("t"))
+        server.streamsOpened shouldBe 2
+      } finally client.close()
     }
 
-    "clear session after close" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      // Initialize with session
-      val initRequest      = createRequest("initialize", "1")
-      val initResponseJson = createResponse("1")
-      val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
-      transport.sendRequest(initRequest)
-
-      (mockHttp.onDelete _).when(*, *, *).returns(Right(httpResponse(200, "")))
-
-      transport.close()
-
-      // After close, new requests should not include session
-      var capturedHeaders: Map[String, String] = Map.empty
-      val request2                             = createRequest("initialize", "2")
-      val responseJson2                        = createResponse("2")
-
-      (mockHttp.onPost _)
-        .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
-          Right {
-            capturedHeaders = headers
-            httpResponse(200, responseJson2)
-          }
-        }
-
-      transport.sendRequest(request2)
-
-      // Verify no session header after close
-      capturedHeaders should not contain key("mcp-session-id")
-    }
-
-    "handle 405 error during session termination gracefully" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      // Initialize with session
-      val initRequest      = createRequest("initialize", "1")
-      val initResponseJson = createResponse("1")
-      val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
-      transport.sendRequest(initRequest)
-
-      // DELETE fails with 405
-      (mockHttp.onDelete _).when(*, *, *).returns(Right(httpResponse(405, "Method Not Allowed")))
-
-      // Should not throw
-      noException should be thrownBy transport.close()
-    }
-
-    "allow close without session" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      // Should not throw
-      noException should be thrownBy transport.close()
-    }
-  }
-
-  "SSETransportImpl.generateId" should {
-
-    "generate unique sequential IDs" in {
-      val mockHttp  = stub[StubbedHttpCalls]
-      val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
-
-      val id1 = transport.generateId()
-      val id2 = transport.generateId()
-      val id3 = transport.generateId()
-
-      id1 shouldBe "1"
-      id2 shouldBe "2"
-      id3 shouldBe "3"
-    }
+  "SSETransportImpl.resolveEndpoint" should "resolve a path or an absolute URL on the same origin, and refuse another" in {
+    val url = "http://127.0.0.1:8080/mcp/sse"
+    SSETransportImpl.resolveEndpoint(url, "/mcp/messages?sessionId=a") shouldBe
+      Right("http://127.0.0.1:8080/mcp/messages?sessionId=a")
+    SSETransportImpl.resolveEndpoint(url, "messages?sessionId=a") shouldBe
+      Right("http://127.0.0.1:8080/mcp/messages?sessionId=a")
+    SSETransportImpl.resolveEndpoint(url, "http://127.0.0.1:8080/x") shouldBe Right("http://127.0.0.1:8080/x")
+    SSETransportImpl.resolveEndpoint(url, "http://127.0.0.1:9090/x").isLeft shouldBe true
+    SSETransportImpl.resolveEndpoint(url, "https://127.0.0.1:8080/x").isLeft shouldBe true
+    SSETransportImpl.resolveEndpoint("https://h.example/sse", "https://h.example:443/m") shouldBe
+      Right("https://h.example:443/m")
   }
 }
