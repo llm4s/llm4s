@@ -432,11 +432,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                   // that returned the string "24" is not handed back as the number 24.
                   val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
                   // `content` is read only when it is needed: a result that is only `structuredContent` has none.
-                  def content = result("content").arr
+                  // A result with neither is malformed: `content` is required, so its absence is a parse failure.
+                  def content = result("content").arr.toSeq
                   if (structured.exists(_ != ujson.Null)) {
                     structured.getOrElse(ujson.Null)
                   } else if (content.nonEmpty) {
-                    ujson.Str(content(0)("text").str)
+                    // Every block, in order (#3074): text as it is, any other kind described, never a failure
+                    ujson.Str(MCPClientImpl.contentText(content))
                   } else if (isToolError) {
                     ujson.Str("server reported an error")
                   } else {
@@ -478,6 +480,41 @@ object MCPClientImpl {
    */
   private[mcp] def fallsBackToLegacy(status: Int): Boolean =
     status >= 400 && status < 500 && status != 401 && status != 403
+
+  /**
+   * A tool result's `content` as one text (#3074): every block in order, separated by a blank line. A `text` block is
+   * its text; an embedded `resource` its text when it has one; any other block (`image`, `audio`, `resource_link`,
+   * a `resource` of binary data, a kind this client does not know) is described by its type, MIME type and URI, so a
+   * call that succeeded is never reported as failed because its first block was not text. Binary data is never
+   * copied into the text: it would cost the model tokens it cannot read.
+   */
+  private[mcp] def contentText(blocks: Seq[Value]): String =
+    blocks.map(contentBlockText).mkString("\n\n")
+
+  private def contentBlockText(block: Value): String = {
+    val fields                = block.objOpt.getOrElse(scala.collection.mutable.LinkedHashMap.empty[String, Value])
+    def str(v: Option[Value]) = v.flatMap(_.strOpt)
+    def field(name: String)   = str(fields.get(name))
+    def described(kind: String, parts: Option[String]*) =
+      s"[$kind${parts.flatten.filter(_.nonEmpty).map(p => s" $p").mkString}]"
+    field("type") match {
+      case Some("text") => field("text").getOrElse("")
+      case Some("image") | Some("audio") =>
+        val kind = field("type").getOrElse("")
+        described(kind, field("mimeType"), field("data").map(d => s"(${d.length} base64 characters)"))
+      case Some("resource") =>
+        val resource = fields.get("resource").flatMap(_.objOpt)
+        val uri      = resource.flatMap(r => str(r.get("uri")))
+        val mime     = resource.flatMap(r => str(r.get("mimeType")))
+        resource.flatMap(r => str(r.get("text"))) match {
+          case Some(text) => s"${described("resource", uri, mime)}\n$text"
+          case None       => described("resource", uri, mime, Some("(binary)"))
+        }
+      case Some("resource_link") =>
+        described("resource link", field("name"), field("uri"), field("mimeType"))
+      case other => described(other.getOrElse("content"), field("mimeType"), field("uri"))
+    }
+  }
 
   /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
   private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =

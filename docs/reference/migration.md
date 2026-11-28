@@ -784,6 +784,17 @@ A stream that ends fails the calls waiting on it; the next message opens a new s
 runs the handshake again. There is no session `DELETE` on this transport: closing it closes the stream. Both HTTP
 transports now read SSE the same way: `data:` with or without a space after the colon, several `data` lines joined.
 
+## MCP tools: results, listings, schemas and the registry (#3074, #3075, #3076, #3080)
+
+`llm4s-mcp` is Beta. What an MCP tool returns, which tools a server lists and how their schemas reach the model
+changed:
+
+**Results (#3074).** A tool result's `content` is every block, in order, separated by a blank line; only the first
+block's text was returned before. A non-text block is described rather than failing the call:
+`[image image/png (4096 base64 characters)]`, `[resource file:///notes.md text/markdown]` followed by an embedded
+resource's text, `[resource link report https://h/r.pdf application/pdf]`. An `isError` result's message carries
+every block too. `structuredContent`, when the server sends it, is still the result.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature
