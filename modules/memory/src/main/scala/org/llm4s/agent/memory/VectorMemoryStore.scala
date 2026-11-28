@@ -139,7 +139,7 @@ final class VectorMemoryStore private (
       Try {
         inTransaction {
           writeAll(adds)
-          deleteIds(remove.map(_.value).filterNot(adds.map(_.id.value).toSet))
+          deleteIds(remove.map(_.value)) // store, then delete, as `MemoryStore.replace` says: an id in both goes
         }
         this: MemoryStore
       }.toEither.left.map(e =>

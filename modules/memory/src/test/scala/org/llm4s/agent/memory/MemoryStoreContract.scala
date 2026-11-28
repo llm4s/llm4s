@@ -111,6 +111,13 @@ trait MemoryStoreContract extends AnyFlatSpecLike with Matchers with EitherValue
       s2.recall(MemoryFilter.All, 10).value.map(_.id.value).sorted shouldBe Seq("b", "c")
   }
 
+  // Codex on #3289: store, then delete, on every store
+  it should "replace: delete a memory whose id is both added and removed" in run { (s0, _) =>
+    val s1 = put(s0, memory("a", "alpha"), memory("b", "beta"))
+    val s2 = s1.replace(Seq(memory("a", "alpha again"), memory("c", "gamma")), Seq(MemoryId("a"))).value
+    s2.recall(MemoryFilter.All, 10).value.map(_.id.value).sorted shouldBe Seq("b", "c")
+  }
+
   it should "delete one memory, and treat deleting a missing one as done" in run { (s0, _) =>
     val s1 = put(s0, memory("a", "alpha"), memory("b", "beta"))
     val s2 = s1.delete(MemoryId("a")).value.delete(MemoryId("absent")).value
