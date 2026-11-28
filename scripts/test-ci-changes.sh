@@ -557,14 +557,14 @@ if out="$(cd "$REPO_ROOT" && ruby -rjson -e '
 # ci.yml's `changes` job: run its steps' bash as the runner would, for each event, in the scratch repo.
 # run_changes <label> <event> <draft> <full_label> <want: "name=value ..." the outputs that must be written>
 run_changes() {
-  local label="$1" event="$2" draft="$3" lbl="$4" want="$5"
+  local label="$1" event="$2" draft="$3" lbl="$4" want="$5" queue="${6:-}"
   ruby -ryaml -e '
     step = YAML.load_file(ARGV[0])["jobs"]["changes"]["steps"].find { |s| s["id"] == "diff" } or abort "no step diff"
     File.write(ARGV[1], step["run"])
   ' "$repo/.github/workflows/ci.yml" "$WORK/diff-step.sh" || { bad "$label" "cannot read the diff step"; return; }
   : > "$WORK/gh-out"
   (cd "$repo" && EVENT="$event" DRAFT="$draft" FULL_LABEL="$lbl" GROUP_BASE="$BASE" GROUP_HEAD="$(g rev-parse HEAD)" \
-    GITHUB_OUTPUT="$WORK/gh-out" bash -e "$WORK/diff-step.sh" > /dev/null 2>&1) || { bad "$label" "the step failed"; return; }
+    QUEUE_TESTED="$queue" GITHUB_OUTPUT="$WORK/gh-out" bash -e "$WORK/diff-step.sh" > /dev/null 2>&1) || { bad "$label" "the step failed"; return; }
   local w missing=""
   for w in $want; do grep -qxF -- "$w" "$WORK/gh-out" || missing+=" $w"; done
   if [ -z "$missing" ]; then ok "$label"; else bad "$label" "missing:$missing; wrote: $(tr '\n' ' ' < "$WORK/gh-out")"; fi
@@ -582,6 +582,12 @@ run_changes 'changes step: a push selects every module and leaves the decisions 
 run_changes 'changes step: the nightly run selects every module' schedule '' '' 'full=true'
 label='changes step: a push writes no decision'
 if ! grep -qE "^(draft|$(echo "$ORDER" | tr ' ' '|'))=" "$WORK/gh-out"; then ok "$label"; else bad "$label" "$(cat "$WORK/gh-out")"; fi
+# a push to main the merge queue tested (#3190): every decision false, no module, so only the main-only tiers run
+run_changes 'changes step: a push the queue tested runs no PR job' push '' '' \
+  'draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false modules= legs=[] full=false' true
+run_changes 'changes step: a push the queue did not test selects every module' push '' '' 'full=true' false
+label='changes step: a push the queue did not test writes no decision and no queued'
+if ! grep -qE "^(queued|draft|$(echo "$ORDER" | tr ' ' '|'))=" "$WORK/gh-out"; then ok "$label"; else bad "$label" "$(cat "$WORK/gh-out")"; fi
 
 # ci.yml wires the outputs: the `changes` job runs on every event, publishes every output, and each gated job reads
 # its own decision; the coverage legs' matrix is the `legs` output.
@@ -604,7 +610,13 @@ if out="$(ruby -ryaml -e '
   pr = steps.find { |s| s["id"] == "pr" }
   errs << "no pull-request step reading the ci:full label" unless pr && pr["if"] == "github.event_name == '"'"'pull_request'"'"'" &&
     pr.dig("env", "FULL_LABEL") == "${{ contains(github.event.pull_request.labels.*.name, '"'"'ci:full'"'"') }}"
-  names = %w[draft] + ARGV[1].split + %w[windows_modules performance_modules test_modules modules legs full]
+  names = %w[draft queued] + ARGV[1].split + %w[windows_modules performance_modules test_modules modules legs full]
+  q = steps.find { |s| s["id"] == "queue" }
+  errs << "no push-to-main step asking whether the merge queue tested the commit" unless q &&
+    q["if"] == "github.event_name == '"'"'push'"'"' && github.ref == '"'"'refs/heads/main'"'"'" &&
+    q["run"].to_s.include?("scripts/merge-queue-tested.sh") && step.dig("env", "QUEUE_TESTED") == "${{ steps.queue.outputs.tested }}"
+  errs << "the changes job cannot read the queue runs (actions: read)" unless ch.dig("permissions", "actions") == "read"
+  errs << "Quick Checks does not skip a push the queue tested" unless jobs["quick-checks"]["if"].to_s.include?("needs.changes.outputs.queued != '"'"'true'"'"'")
   names.each do |n|
     errs << "changes has no output #{n}" unless ch.dig("outputs", n) == "${{ steps.diff.outputs.#{n} }}"
   end
@@ -698,6 +710,12 @@ atp 'a selective merge group passes'                           pass merge_group 
 atp 'a merge group with Code Coverage skipped fails'           fail merge_group x "$SKIPS coverage=skipped" "$PART legs=$LEGS1"
 atp 'a push to main with the nightly-only jobs skipped passes' pass push refs/heads/main "test-windows=skipped performance-tests=skipped scaladoc=skipped consumers=skipped spring-compat=skipped workspace-integration=success" "full=true"
 atp 'a push to main with Code Coverage skipped fails'          fail push refs/heads/main "test-windows=skipped coverage=skipped" "full=true"
+QUEUED_PUSH='draft=false queued=true code=false docs=false windows=false integration=false consumers=false workspace=false performance=false spring=false other=false full=false legs=[]'
+ONLY_TIERS='quick-checks=skipped test=skipped coverage=skipped integration-tests=skipped test-windows=skipped performance-tests=skipped scaladoc=skipped consumers=skipped spring-compat=skipped workspace-integration=success'
+atp 'a push the queue tested, running only the main-only tiers, passes' pass push refs/heads/main "$ONLY_TIERS" "$QUEUED_PUSH"
+atp 'a push the queue tested with a failed main-only tier fails' fail push refs/heads/main "${ONLY_TIERS/workspace-integration=success/workspace-integration=failure}" "$QUEUED_PUSH"
+atp 'a push the queue did not test with Quick Checks skipped fails' fail push refs/heads/main "quick-checks=skipped" "full=true"
+atp 'Quick Checks skipped on a pull request fails, whatever queued says' fail pull_request x "quick-checks=skipped" "$PART queued=true legs=$LEGS1"
 atp 'the nightly run with Windows skipped fails'               fail schedule x "test-windows=skipped" "full=true"
 atp 'the nightly run with everything passed passes'            pass schedule x "" "full=true"
 atp 'a failed Changes job fails'                               fail pull_request x "changes=failure" ""
@@ -737,6 +755,37 @@ printf '\n' > "$mg/labels-101"
 mgc "a commit with no pull request number"; MG_HEAD="$(git -C "$mg/repo" rev-parse HEAD)"
 labels_case 'merge-group labels: a commit naming no pull request is unknown' unknown
 MG_BASE=0000000000000000000000000000000000000000 labels_case 'merge-group labels: an unreachable base is unknown' unknown
+
+# scripts/merge-queue-tested.sh: a push to main skips what the queue's run already ran on that commit (#3190)
+QT="$(cd "$(dirname "$SCRIPT")" && pwd)/merge-queue-tested.sh"
+qt="$WORK/qt"; rm -rf "$qt"; mkdir -p "$qt/bin"
+# a stub gh: the runs listing prints $qt/runs (fails when it is missing), a run's jobs print $qt/gate-<id>
+cat > "$qt/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$2" in
+  */actions/workflows/*/runs\?*) [ -f "$QT_DIR/runs" ] && cat "$QT_DIR/runs" || exit 1 ;;
+  */actions/runs/*/jobs\?*) id="${2#*/actions/runs/}"; id="${id%%/*}"; f="$QT_DIR/gate-$id"; [ -f "$f" ] && cat "$f" || exit 1 ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$qt/bin/gh"
+tested_case() { # tested_case <label> <want true|false>
+  local got
+  got="$(PATH="$qt/bin:$PATH" QT_DIR="$qt" GITHUB_REPOSITORY=o/r "$QT" abc123 2>/dev/null)"
+  if [ "$got" = "tested=$2" ]; then ok "$1"; else bad "$1" "got '$got', want tested=$2"; fi
+}
+printf '11\n' > "$qt/runs"; printf 'success\n' > "$qt/gate-11"
+tested_case 'queue tested: a merge-group run of the commit whose All Tests Pass succeeded' true
+printf 'failure\n' > "$qt/gate-11"
+tested_case 'queue tested: a run whose All Tests Pass failed is not' false
+printf '11\n12\n' > "$qt/runs"; printf 'success\n' > "$qt/gate-12"
+tested_case 'queue tested: a later successful run of the same commit counts' true
+rm -f "$qt/gate-11" "$qt/gate-12"
+tested_case 'queue tested: jobs that cannot be read are not' false
+: > "$qt/runs"
+tested_case 'queue tested: no merge-group run (a push that bypassed the queue) is not' false
+rm -f "$qt/runs"
+tested_case 'queue tested: a listing that fails is not' false
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -7,10 +7,13 @@ name: CI
 #     out; a build-file change or the `ci:full` label selects every module.
 #   - a merge group: as a pull request, selected by the group's diff against main (base_sha..head_sha): what that
 #     cannot reach already passed on main, which lands on exactly the commit the group tested (#3183).
-#   - a push to main: the checks whose results main itself needs - Quick Checks, the coverage legs (Codecov compares
-#     a PR with main's coverage), the other modules' tests, Integration Tests - and the main-only tiers (Workspace,
-#     Ollama, MCP reference), every module. The Windows, performance, ScalaDoc, consumer and Spring jobs, which every
-#     PR has already run on its own tree, wait for the nightly run.
+#   - a push to main the merge queue tested (a `merge_group` run with this commit as its head and a successful All
+#     Tests Pass, scripts/merge-queue-tested.sh, #3190): only the main-only tiers (Workspace, Ollama, MCP reference).
+#     The queue's run already gave main's commit its results and its Codecov uploads (carried forward for the flags it
+#     did not upload); what its selection left out runs in the nightly run.
+#   - a push to main the queue did not test (a bypass, or a failed lookup): the checks whose results main itself
+#     needs - Quick Checks, the coverage legs, the other modules' tests, Integration Tests - and the main-only tiers,
+#     every module. The Windows, performance, ScalaDoc, consumer and Spring jobs wait for the nightly run.
 #   - the nightly run (`schedule`): every PR job, every module, on main as it stands, so what a push to main or a
 #     selective run leaves out still runs on main once a day. GitHub mails a scheduled run's failure to whoever last
 #     changed its cron line, as it does for the other nightly workflows.
@@ -86,8 +89,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: read  # a merge group's queued pull request's labels (`ci:full`)
+      actions: read        # on a push to main, whether the merge queue's run tested the commit (#3190)
     outputs:
       draft: ${{ steps.diff.outputs.draft }}
+      queued: ${{ steps.diff.outputs.queued }}
       code: ${{ steps.diff.outputs.code }}
       docs: ${{ steps.diff.outputs.docs }}
       windows: ${{ steps.diff.outputs.windows }}
@@ -129,10 +134,21 @@ jobs:
           HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: scripts/merge-group-labels.sh "$GROUP_BASE" "$GROUP_HEAD" "$HEAD_REF" >> "$GITHUB_OUTPUT"
 
+      # `main` lands on exactly the commit a merge group tested (#3183): when that run's All Tests Pass succeeded, the
+      # push run keeps only the main-only tiers. A push that bypassed the queue, or a failed lookup, tests everything.
+      - name: Did the merge queue test this commit?
+        id: queue
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: scripts/merge-queue-tested.sh "$SHA" >> "$GITHUB_OUTPUT"
+
       - name: Decide what the change needs
         id: diff
         env:
           EVENT: ${{ github.event_name }}
+          QUEUE_TESTED: ${{ steps.queue.outputs.tested }}
           DRAFT: ${{ steps.pr.outputs.draft }}
           FULL_LABEL: ${{ steps.pr.outputs.full_label || steps.group.outputs.full_label }}
           GROUP_BASE: ${{ github.event.merge_group.base_sha }}
@@ -154,6 +170,10 @@ jobs:
             echo draft=false >> "$GITHUB_OUTPUT"
             git cat-file -e "$GROUP_BASE^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$GROUP_BASE"
             CI_EVENT=merge_group scripts/ci-changes.sh "$GROUP_BASE" "$GROUP_HEAD" | tee -a "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = push ] && [ "$QUEUE_TESTED" = true ]; then
+            echo "The merge queue tested this commit: only the main-only tiers run (the nightly run tests every module)"
+            printf '%s\n' draft=false queued=true code=false docs=false windows=false integration=false consumers=false \
+              workspace=false performance=false spring=false other=false modules= 'legs=[]' full=false >> "$GITHUB_OUTPUT"
           else
             scripts/ci-changes.sh --all "a $EVENT run tests every module" | tee -a "$GITHUB_OUTPUT"
           fi
@@ -167,8 +187,8 @@ jobs:
   quick-checks:
     name: Quick Checks
     needs: [changes]
-    # Not on a draft pull request (the `changes` job).
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Not on a draft pull request (the `changes` job), nor on a push to main the merge queue already tested (`queued`).
+    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && needs.changes.outputs.queued != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -2454,6 +2474,7 @@ jobs:
           PERFORMANCE: ${{ needs.changes.outputs.performance }}
           OTHER: ${{ needs.changes.outputs.other }}
           FULL: ${{ needs.changes.outputs.full }}
+          QUEUED: ${{ needs.changes.outputs.queued }}
         run: |
           failed=0
           # require LABEL RESULT [SKIP_OK]: RESULT must be success, or skipped when SKIP_OK is true
@@ -2474,7 +2495,10 @@ jobs:
             echo false
           }
           not_pr_skip() { local d; for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done; echo false; }
-          require "Quick Checks" "${{ needs.quick-checks.result }}"
+          # Quick Checks may be skipped only on a push to main the merge queue's run already checked (#3190)
+          queued_skip=false
+          if [[ "$MAIN_PUSH" == "true" && "$QUEUED" == "true" ]]; then queued_skip=true; fi
+          require "Quick Checks" "${{ needs.quick-checks.result }}" "$queued_skip"
           require "Test (other modules)" "${{ needs.test.result }}" "$(not_pr_skip "$OTHER")"
           require "Code Coverage" "${{ needs.coverage.result }}" "$(not_pr_skip "$CODE")"
           require "Integration Tests" "${{ needs.integration-tests.result }}" "$(not_pr_skip "$INTEGRATION")"
