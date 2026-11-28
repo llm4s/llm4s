@@ -156,6 +156,8 @@ class SessionManager(
       Some(Paths.get(sessionDir.value, s"$name.json")).filter(p => Files.exists(p) && storedTitle(p).isEmpty)
     val jsonPath = savedAs(sessionTitle)
       .map(name => Paths.get(sessionDir.value, s"$name.json"))
+      // a listed untitled file's own name, which may be longer than a sanitised title (`<50 chars>-<suffix>`)
+      .orElse(Option.when(isOwnName(sessionTitle))(sessionTitle).flatMap(untitled))
       .orElse(untitled(sanitizeFilename(sessionTitle)))
       .orElse(untitled(legacyFilename(sessionTitle)))
       .getOrElse(Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.missing"))
@@ -229,6 +231,11 @@ class SessionManager(
   /** A suffix for `baseFilename` when a session is already saved under it, else `None`. */
   private def findUniqueSuffix(baseFilename: String): Option[String] =
     Option.when(taken(baseFilename))(uniqueSuffix())
+
+  /** Whether `name` is a file name a save could have made: letters, digits, `.`, `-` and `_`, not dots alone. */
+  private def isOwnName(name: String): Boolean =
+    name.nonEmpty && !name.forall(_ == '.') &&
+      name.codePoints().toArray.forall(cp => Character.isLetterOrDigit(cp) || cp == '.' || cp == '-' || cp == '_')
 
   /** Whether a session file is saved under `filename`. */
   private def taken(filename: String): Boolean =

@@ -188,6 +188,25 @@ class SessionManagerSpec
     }
   }
 
+  it should "load every session the listing shows that a release before #3277 saved, however long its name" in {
+    val dir     = Files.createTempDirectory("sessions-legacy-list")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    // the format before #3277: no stored title, and a collision suffix after the 50-character name
+    Seq("y" * 50 + "-1234567890", "Untitled_Session").foreach { name =>
+      manager.saveSession(createTestState(name), Some("tmp-" + name.length))
+      val json = dir.resolve("tmp-" + name.length + ".json")
+      Files.writeString(
+        dir.resolve(s"$name.json"),
+        ujson.write(ujson.read(Files.readString(json)).obj.tap(_.remove("title")))
+      )
+      Files.delete(json)
+      Files.delete(dir.resolve("tmp-" + name.length + ".md"))
+    }
+    manager.listRecentSessions(10).value.foreach { listed =>
+      withClue(listed)(manager.loadSession(listed).map(_.sessionId.value) shouldBe Right(listed))
+    }
+  }
+
   it should "never replace a save of a different title whose file name is the same (#3277)" in {
     val dir     = Files.createTempDirectory("sessions-collide")
     var n       = 0
