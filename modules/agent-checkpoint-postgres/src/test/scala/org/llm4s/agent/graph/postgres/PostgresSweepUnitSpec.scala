@@ -125,6 +125,49 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     page.next shouldBe Some(ThreadId("t050"))
   }
 
+  // Codex on #3264: a sweep whose prune an interrupt ends stops, rather than going on through the page
+  it should "stop, with CancelledError, when an interrupt ends one of its thread's prunes" in {
+    val script = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+          Vector(Vector("b"), Vector("c"))
+        case (sql, Vector(id)) if sql == Sql.lockedRow(t) => Vector(rowOf(id))
+      }
+    )
+    val store = script.store()
+    script.interruptOn = Some(Sql.lockedRow(t))
+    val outcome = new java.util.concurrent.LinkedBlockingQueue[Either[org.llm4s.error.LLMError, SweepPage]]()
+    Thread.ofVirtual().start { () =>
+      outcome.add(store.sweep(SweepPolicy(RetentionPolicy(maxEvents = Some(1))), None, SweepGuard.none)): Unit
+    }
+    outcome.poll(10, java.util.concurrent.TimeUnit.SECONDS).left.value shouldBe a[org.llm4s.error.CancelledError]
+    // the first thread's prune was the only one tried
+    script.madeWith(Sql.lockedRow(t)) shouldBe Vector(Vector("b"))
+  }
+
+  // Codex on #3261: the page cut short is the database's order's prefix - never a Scala comparison of ids, whose
+  // UTF-16 order puts U+1F600 before U+E000 where a C collation puts it after
+  it should "cut a page short by the database's order, ids whose UTF-16 and code-point orders differ included" in {
+    val bmp    = (1 to 50).map(i => f"\uE000$i%02d").toVector
+    val astral = "\uD83D\uDE00"
+    // the database's order: code point, U+E000 before U+1F600
+    val ids = bmp :+ astral
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.lockedRowIfFree(t)                                  => Vector(rowOf("a"))
+      case (sql, _) if sql == Sql.reclaim(t)                                          => Vector(Vector(7L))
+    }
+    val store = script.store()
+    store.sweepBudget = Duration.Zero
+    // keep-all: nothing to prune, so the cursor is the page cut short at the 51st, the astral id
+    val page = store.sweep(SweepPolicy(tombstoneAge = Some(1.day), batchSize = 100), None, SweepGuard.none).value
+    page.reclaimed shouldBe 50
+    page.examined shouldBe 50
+    page.next shouldBe Some(ThreadId(bmp.last))
+  }
+
   it should "skip, not wait for, a tombstone whose row another call holds" in {
     val script = Script {
       case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("a"))

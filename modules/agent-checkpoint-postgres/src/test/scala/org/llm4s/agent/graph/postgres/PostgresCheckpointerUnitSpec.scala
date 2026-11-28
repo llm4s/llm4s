@@ -217,6 +217,22 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     store.latest(ThreadId("t")).left.value shouldBe a[org.llm4s.agent.graph.GraphError.StoreClosed]
   }
 
+  // Codex on #3264: a call an interrupt ended is the caller's cancel, whatever the broken socket's error looks like
+  "A read an interrupt ends mid-query" should "be CancelledError with the flag set, never a retryable store error" in {
+    val script = ScriptedPostgres(java.time.OffsetDateTime.now(), PartialFunction.empty)
+    val store  = script.store()
+    script.interruptOn = Some("SELECT")
+    val outcome = new java.util.concurrent.LinkedBlockingQueue[(Either[org.llm4s.error.LLMError, ?], Boolean)]()
+    Thread.ofVirtual().start { () =>
+      val r = store.latest(ThreadId("t"))
+      outcome.add(r -> Thread.currentThread().isInterrupted): Unit
+    }
+    val (read, flagged) = outcome.poll(10, java.util.concurrent.TimeUnit.SECONDS)
+    read.left.value shouldBe a[org.llm4s.error.CancelledError]
+    flagged shouldBe true
+    store.close()
+  }
+
   it should "roll back, and discard rather than pool, a connection whose call threw" in {
     val calls = new CopyOnWriteArrayList[String]()
     val pool  = FakePool(_ => FakeConnection(calls, failOn = "pg_advisory_xact_lock"))

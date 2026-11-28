@@ -1279,6 +1279,31 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     store.close()
   }
 
+  // Codex on #3264: a write an interrupt ends while it waits out another process's lock is the caller's cancel, never
+  // a store failure, nor a busy store to retry
+  it should "return CancelledError, with the flag set, when interrupted waiting out another connection's write" in {
+    val db     = SqliteFiles.fresh()
+    val store  = SqliteFiles.opened(db, ManualClock(start))
+    val thread = ThreadId("interrupted-busy")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    Using.resource(jdbc(db)) { other =>
+      Using.resource(other.createStatement())(_.execute("BEGIN IMMEDIATE"): Unit)
+      val outcome = new LinkedBlockingQueue[(Either[LLMError, Vector[EventRecord]], Boolean)]()
+      val t = Thread.ofPlatform().start { () =>
+        val r = store.commit(thread, Commit(token, events = Vector(event("blocked"))))
+        outcome.add(r -> Thread.currentThread().isInterrupted): Unit
+      }
+      Thread.sleep(50)
+      t.interrupt()
+      val (committed, flagged) = Option(outcome.poll(30, TimeUnit.SECONDS)).value
+      committed.left.value shouldBe a[CancelledError]
+      flagged shouldBe true
+      Using.resource(other.createStatement())(_.execute("ROLLBACK"): Unit)
+    }
+    store.eventsAfter(thread, 0L, 10).value shouldBe empty
+    store.close()
+  }
+
   "SqliteCheckpointerConfig" should "default to a 5 second busy timeout and refuse a non-positive or oversized one" in {
     SqliteCheckpointerConfig.default.busyTimeout shouldBe 5.seconds
     SqliteCheckpointerConfig().withBusyTimeout(1.second).busyTimeout shouldBe 1.second

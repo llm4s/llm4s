@@ -554,7 +554,8 @@ final class PostgresCheckpointer private (
             }
           }
         }
-        val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
+        // in the page's own order, the database's: no id is compared in Scala, whose UTF-16 order is not the collation's
+        val candidates = visited.filterNot(protectedRuns.contains)
         // one budget for the whole page, reclamation and pruning together (Codex, #3261): a chunk past it is left to
         // the next call, which starts from the cursor this one returns
         val deadline = System.nanoTime() + sweepBudget.toNanos
@@ -602,7 +603,9 @@ final class PostgresCheckpointer private (
           case _ => Right(Set.empty -> None)
         reclaimed.flatMap { (gone, cut) =>
           // a page the budget cut short in its reclamation ends before its first tombstone left: pruned up to it
-          val visitedNow = cut.fold(visited)(first => visited.filter(_.value < first.value))
+          // the page's prefix before that tombstone, in the database's order the page was read in: never a Scala
+          // comparison of ids, whose UTF-16 order differs from the collation's (Codex)
+          val visitedNow = cut.fold(visited)(first => visited.takeWhile(_ != first))
           // one row locked per transaction, so in the page's own order: its cursor is the last thread finished
           val pruned =
             if policy.retention == RetentionPolicy.keepAll then
@@ -628,8 +631,8 @@ final class PostgresCheckpointer private (
               }
           pruned.map { v =>
             val next =
-              if v.cutShort then v.cursor(visitedNow, policy.batchSize)
-              else if cut.isDefined then visitedNow.lastOption
+              if v.cutShort then v.cursor(visitedNow, policy.batchSize, after)
+              else if cut.isDefined then visitedNow.lastOption.orElse(after)
               else v.cursor(page, policy.batchSize)
             SweepPage(v.examined, gone.size, next)
           }
@@ -984,12 +987,16 @@ final class PostgresCheckpointer private (
         }
       val interrupted = Thread.currentThread().isInterrupted
       if flagged || interrupted then Thread.currentThread().interrupt()
-      // an interrupt that landed during the call is why it failed
+      // an interrupt that landed during the call is why it failed: a failure of the call itself - however it was
+      // classified, a broken socket's StoreUnavailable included - is the caller's cancel (Codex, #3264), but a write
+      // whose commit was in flight may still have landed, and a refusal the store decided (a stale claim, say) stands
       if interrupted && !flagged then
         result.left.map {
-          case cancelled: CancelledError => cancelled
-          case failed: ProcessingError   => CancelledError(s"postgres-checkpointer.$operation", failed.cause)
-          case other                     => other
+          case cancelled: CancelledError                => cancelled
+          case unknown: GraphError.CommitOutcomeUnknown => unknown
+          case failed: ProcessingError        => CancelledError(s"postgres-checkpointer.$operation", failed.cause)
+          case _: GraphError.StoreUnavailable => CancelledError(s"postgres-checkpointer.$operation", None)
+          case other                          => other
         }
       else result
 

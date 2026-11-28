@@ -845,17 +845,34 @@ final class SqliteCheckpointer private (
    * busy file, or a disk that stalls - must not hold every later call of the store with it.
    */
   private def guarded[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
+    // a flag set before the call decides nothing (#3264): cleared for the call, set again on return
+    val flagged = Thread.interrupted()
+    val result  = guardedUnflagged(operation, deadline)(body)
+    if flagged then Thread.currentThread().interrupt()
+    result
+
+  private def guardedUnflagged[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
     if !lockBy(deadline) then Left(unavailable(operation, storeBusy(busyTimeout)))
     else
       Using.resource(Unlock(lock)) { _ =>
         if shut then Left(GraphError.StoreClosed(s"SQLite file $path", s"sqlite-checkpointer.$operation"))
         else
           Try(body(connection)).toEither.left.map { e =>
-            // a file another process held for the whole busy timeout: retry later (#3264)
             val message = Option(e.getMessage).getOrElse(e.getClass.getName)
-            if isBusy(e) then unavailable(operation, message) else failure(operation, message, Some(e))
+            // an interrupt that ended the call - a wait between busy retries, say - is the caller's cancel, with the
+            // flag set again, never a store failure to retry (Codex, #3264); a transaction ended so is rolled back
+            if interruptedBy(e) || Thread.currentThread().isInterrupted then
+              Thread.currentThread().interrupt()
+              CancelledError(s"sqlite-checkpointer.$operation", Some(e))
+            // a file another process held for the whole busy timeout: retry later (#3264)
+            else if isBusy(e) then unavailable(operation, message)
+            else failure(operation, message, Some(e))
           }.flatten
       }
+
+  /** Whether `e`, or a cause of it, is an interrupt's. */
+  private def interruptedBy(e: Throwable): Boolean =
+    Iterator.iterate(e)(_.getCause).takeWhile(_ != null).take(8).exists(_.isInstanceOf[InterruptedException])
 
   /** A call that could not be answered now, changing nothing (#3264). */
   private def unavailable(operation: String, detail: String): LLMError =

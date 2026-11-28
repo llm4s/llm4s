@@ -27,6 +27,9 @@ final private[postgres] case class ScriptedPostgres(
   /** When set, every commit fails as a connection reset mid-commit does: its outcome is unknown (#3262). */
   @volatile var failCommits: Boolean = false
 
+  /** When set, a query whose SQL contains it interrupts its thread and fails as a closed socket does (#3264). */
+  @volatile var interruptOn: Option[String] = None
+
   /** Every statement made since the store opened, with its bound parameters. */
   def made: Vector[(String, Vector[Any])] = log.asScala.toVector
 
@@ -126,6 +129,10 @@ final private[postgres] case class ScriptedPostgres(
         case "executeQuery" =>
           val sql = Option(args).map(_.head.toString).getOrElse(prepared)
           log.add(sql -> bound)
+          // an interrupt landing mid-query on a virtual thread: the driver's socket is closed under it (#3264)
+          if interruptOn.exists(sql.contains) then
+            Thread.currentThread().interrupt()
+            throw new SQLException("An I/O error occurred while sending to the backend.", "08006")
           results(rowsFor(sql, bound))
         case "close" => null
         case other   => throw new SQLException(s"$other is not scripted")
