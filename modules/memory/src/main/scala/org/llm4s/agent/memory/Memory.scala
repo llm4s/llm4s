@@ -41,7 +41,7 @@ object EntityId {
    * Create an entity ID from a name (normalized).
    */
   def fromName(name: String): EntityId =
-    EntityId(name.toLowerCase.replaceAll("\\s+", "_"))
+    EntityId(name.toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", "_"))
 }
 
 /**
@@ -109,7 +109,7 @@ object MemoryType {
   /**
    * Parse a memory type from string.
    */
-  def fromString(s: String): MemoryType = s.toLowerCase match {
+  def fromString(s: String): MemoryType = s.toLowerCase(java.util.Locale.ROOT) match {
     case "conversation" => Conversation
     case "entity"       => Entity
     case "knowledge"    => Knowledge

@@ -169,7 +169,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     scored(2).score shouldBe 0.0 +- 1e-6
   }
 
-  it should "fallback to keyword search on dimension mismatch in direct search" in {
+  it should "refuse a direct search when no embedded memory has the query's dimension (#3037)" in {
     val mem = createMemory("Scala language").withEmbedding(Array[Float](1f, 0f))
 
     val result = for {
@@ -178,12 +178,10 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("Scala", Array[Float](1f, 1f, 1f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    val scored = result.getOrElse(fail("Expected Right"))
-    scored.size shouldBe 1
-    scored(0).memory.content should include("Scala")
+    result.left.toOption.get shouldBe a[org.llm4s.error.ConfigurationError]
   }
 
-  it should "fallback to keyword search if vectors contain non-finite values in direct search" in {
+  it should "leave out what cannot be compared in a direct search: a non-finite query or memory (#3037)" in {
     val normalMem = createMemory("Normal keyword").withEmbedding(Array[Float](1f, 0f))
     val nanMem    = createMemory("NaN text").withEmbedding(Array[Float](Float.NaN, 0f))
 
@@ -192,14 +190,14 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("keyword", Array[Float](Float.NaN, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result1.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("Normal keyword")
+    result1 shouldBe Right(Seq.empty)
 
     val result2 = for {
-      store  <- InMemoryStore.withMemories(Seq(nanMem))
+      store  <- InMemoryStore.withMemories(Seq(normalMem, nanMem))
       scored <- store.search("text", Array[Float](1f, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result2.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("NaN text")
+    result2.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("Normal keyword")
   }
 
   it should "return empty results when direct search called with empty embedding array" in {
@@ -343,6 +341,23 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     } yield (exists, notExists)
 
     result shouldBe Right((true, false))
+  }
+
+  it should "never evict the memory just stored, whatever its timestamp (#3038)" in {
+    val store = InMemoryStore(MemoryStoreConfig(maxMemories = Some(2)))
+    val newer = (1 to 2).map(i => Memory(MemoryId(s"n$i"), s"newer $i", MemoryType.Task, Map.empty, now.plusSeconds(i)))
+    val oldest = Memory(MemoryId("old"), "oldest", MemoryType.Task, Map.empty, now.minusSeconds(60))
+    val result = (newer :+ oldest).foldLeft[Either[_, MemoryStore]](Right(store))((acc, m) => acc.flatMap(_.store(m)))
+    result.map(_.asInstanceOf[InMemoryStore].all.map(_.id.value).sorted) shouldBe Right(Seq("n2", "old"))
+  }
+
+  "EntityId.fromName" should "lower-case the same in every default locale" in {
+    val saved = java.util.Locale.getDefault
+    try {
+      java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"))
+      EntityId.fromName("TITLE Case").value shouldBe "title_case"
+      MemoryType.fromString("TASK") shouldBe MemoryType.Task
+    } finally java.util.Locale.setDefault(saved)
   }
 
   it should "enforce max memories limit" in {

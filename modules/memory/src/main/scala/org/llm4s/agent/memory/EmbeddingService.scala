@@ -3,6 +3,7 @@ package org.llm4s.agent.memory
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
 
 /**
@@ -60,11 +61,17 @@ final class LLMEmbeddingService private (
 ) extends EmbeddingService {
 
   override def embed(text: String): Result[Array[Float]] =
-    embedBatch(Seq(text)).map(_.head)
+    embedBatch(Seq(text)).flatMap(only)
 
   /** Embeds the query with [[org.llm4s.llmconnect.model.InputPurpose.Query]], which the providers that embed queries differently honour. */
   override def embedQuery(text: String): Result[Array[Float]] =
-    embedAs(Seq(text), InputPurpose.Query).map(_.head)
+    embedAs(Seq(text), InputPurpose.Query).flatMap(only)
+
+  /** The one embedding of a one-text request; a response without one is an error, not an exception. */
+  private def only(embeddings: Seq[Array[Float]]): Result[Array[Float]] =
+    embeddings.headOption.toRight(
+      ProcessingError("llm-embedding-service", "The embedding provider returned no embedding for the text")
+    )
 
   override def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] =
     embedAs(texts, InputPurpose.Document)
@@ -123,7 +130,7 @@ final class MockEmbeddingService(override val dimensions: Int = 1536) extends Em
    * Similar texts will have similar embeddings (useful for testing).
    */
   private def generateMockEmbedding(text: String): Array[Float] = {
-    val normalized = text.toLowerCase.trim
+    val normalized = text.toLowerCase(java.util.Locale.ROOT).trim
     val hash       = normalized.hashCode
     val rng        = new scala.util.Random(hash)
 

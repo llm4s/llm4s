@@ -68,6 +68,15 @@ class MemoryEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
     provider.requests shouldBe empty
   }
 
+  it should "answer a response without an embedding with an error, not an exception" in {
+    val empty = new EmbeddingProvider {
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = Right(EmbeddingResponse(Seq.empty))
+    }
+    val service = LLMEmbeddingService(EmbeddingClient(empty), modelConfig)
+    service.embed("text").isLeft shouldBe true
+    service.embedQuery("text").isLeft shouldBe true
+  }
+
   "EmbeddingService.embedQuery" should "delegate to embed unless a service overrides it" in {
     val seen = ListBuffer.empty[String]
     val service = new EmbeddingService {

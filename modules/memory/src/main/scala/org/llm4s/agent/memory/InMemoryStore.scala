@@ -81,17 +81,20 @@ final case class InMemoryStore private (
       case _                              => Right(copy(fences = fences + (key.scope -> token)))
     }
 
+  /**
+   * Store `memory`, replacing any memory with its id. With `config.maxMemories`, the oldest other memories are evicted
+   * to stay within it: never the memory just stored, whatever its timestamp. `InMemoryStore` is the only store that
+   * reads `maxMemories`; the durable stores are bounded by `TransactionalMemoryStore`'s `MemoryBounds` instead.
+   */
   override def store(memory: Memory): Result[MemoryStore] = {
     val updated = memories + (memory.id -> memory)
 
-    // Check if we need cleanup
     config.maxMemories match {
       case Some(max) if updated.size > max =>
-        // Remove oldest memories to stay under limit
-        val toRemove    = updated.size - max
-        val sorted      = updated.values.toSeq.sortBy(_.timestamp)
+        val toRemove    = updated.size - math.max(max, 1)
+        val sorted      = (updated - memory.id).values.toSeq.sortBy(_.timestamp)
         val idsToRemove = sorted.take(toRemove).map(_.id).toSet
-        Right(copy(memories = updated.filterNot { case (id, _) => idsToRemove.contains(id) }))
+        Right(copy(memories = updated -- idsToRemove))
 
       case _ =>
         Right(copy(memories = updated))
@@ -123,10 +126,13 @@ final case class InMemoryStore private (
   }
 
   /**
-   * Semantic search for memories similar to an embedded query vector.
+   * Semantic search for memories similar to an embedded query vector, scored by the shared rule
+   * (`org.llm4s.vectorstore.SearchScores`): `(1 + cos) / 2`, and a memory whose embedding cannot be compared with the
+   * query (another dimension, all zeros, a non-finite component) is left out.
    *
-   * Computes cosine similarity between the query embedding and the stored
-   * memory embeddings, returning the top-K results.
+   * Without an embedded memory among those `filter` accepts, a keyword search. When there are embedded memories but
+   * none has the query's dimension, a `ConfigurationError`: the store was written with another embedding model, and a
+   * keyword fallback would hide that.
    */
   def search(
     query: String,
@@ -134,47 +140,14 @@ final case class InMemoryStore private (
     topK: Int,
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] = {
-    if (queryEmbedding.isEmpty) {
-      return Right(Seq.empty)
-    }
+    val filtered = memories.values.filter(filter.matches).toSeq
+    val embedded = filtered.flatMap(m => m.embedding.filter(_.nonEmpty).map(m -> _))
 
-    val filtered         = memories.values.filter(filter.matches).toSeq
-    val embeddedMemories = filtered.filter(_.isEmbedded)
-
-    if (embeddedMemories.nonEmpty) {
-      val queryNonFinite = containsNonFinite(queryEmbedding)
-      val candidates = embeddedMemories.flatMap { memory =>
-        memory.embedding.flatMap { vector =>
-          if (vector.length != queryEmbedding.length) {
-            None
-          } else if (queryNonFinite || containsNonFinite(vector)) {
-            None
-          } else {
-            val similarity           = VectorOps.cosineSimilarity(queryEmbedding, vector)
-            val normalizedSimilarity = (similarity + 1.0) / 2.0
-            val score                = math.max(0.0, math.min(1.0, normalizedSimilarity))
-            Some(ScoredMemory(memory, score))
-          }
-        }
-      }
-
-      if (candidates.isEmpty) keywordSearch(query, filtered, topK)
-      else Right(candidates.sorted(ScoredMemory.byScoreDescending).take(topK))
-    } else {
-      keywordSearch(query, filtered, topK)
-    }
-  }
-
-  /**
-   * Check if an array contains any non-finite values (NaN, Inf, -Inf).
-   */
-  private def containsNonFinite(arr: Array[Float]): Boolean = {
-    var i = 0
-    while (i < arr.length) {
-      if (!java.lang.Float.isFinite(arr(i))) return true
-      i += 1
-    }
-    false
+    if (embedded.isEmpty) keywordSearch(query, filtered, topK)
+    else
+      MemoryEmbeddings
+        .rank(queryEmbedding, embedded)
+        .map(_.sorted(ScoredMemory.byScoreDescending).take(math.max(topK, 0)))
   }
 
   /**
@@ -217,7 +190,7 @@ final case class InMemoryStore private (
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     memories.get(id) match {
       case Some(memory) =>
-        val updated = updateFn(memory)
+        val updated = MemoryEmbeddings.afterUpdate(memory, updateFn(memory))
         if (updated.id != id) {
           Left(
             ValidationError(

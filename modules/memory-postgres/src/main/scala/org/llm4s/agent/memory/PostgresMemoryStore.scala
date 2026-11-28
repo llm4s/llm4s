@@ -2,9 +2,9 @@ package org.llm4s.agent.memory
 
 import org.llm4s.util.Redaction
 import org.llm4s.types.Result
-import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError }
+import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
-import org.llm4s.vectorstore.PostgresVectorHelpers
+import org.llm4s.vectorstore.{ PostgresVectorHelpers, SearchScores }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
@@ -27,13 +27,18 @@ import scala.util.{ Try, Using }
  * rows of the table - recall, search, count, delete, `clear()`, bounds eviction and the applied writes - so many
  * tenants share one table without seeing each other. `None` is the rows of no tenant, among them every row written
  * before the column existed; opening the store adds the column to an older table.
+ *
+ * Vector search scores `(1 + cos) / 2`, as every memory store does (`org.llm4s.vectorstore.SearchScores`), and compares
+ * the query only with embeddings of its dimension that are not all zeros. With `embeddingDimensions`, the column is
+ * typed `vector(n)` and, up to 2000 dimensions, carries an HNSW index for cosine distance.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: DataSource,
   val tableName: String,
   private val embeddingService: Option[EmbeddingService],
   private[memory] val ownsDataSource: Boolean = true,
-  val tenant: Option[String] = None
+  val tenant: Option[String] = None,
+  val embeddingDimensions: Option[Int] = None
 ) extends TransactionalMemoryStore
     with AutoCloseable {
 
@@ -122,7 +127,7 @@ final class PostgresMemoryStore private[memory] (
             metadata JSONB DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             importance DOUBLE PRECISION,
-            embedding vector,
+            embedding ${embeddingDimensions.fold("vector")(n => s"vector($n)")},
             version BIGINT NOT NULL DEFAULT 0,
             PRIMARY KEY (tenant, id)
           )
@@ -150,6 +155,17 @@ final class PostgresMemoryStore private[memory] (
         //    an up-to-date table is only checked, in the catalog, and never locked
         Seq(tableName -> "id", appliedTable -> "key", fencesTable -> "scope").foreach { case (table, key) =>
           stmt.execute(PostgresMemoryStore.tenantKeyMigration(table, key))
+        }
+
+        // 6. A declared dimension types the column - an older, untyped one too, if every embedding has it - and
+        //    indexes it for cosine distance (#3037)
+        embeddingDimensions.foreach { n =>
+          stmt.execute(PostgresMemoryStore.declareDimension(tableName, n))
+          if (n <= PostgresMemoryStore.MaxIndexedDimensions)
+            stmt.execute(
+              s"CREATE INDEX IF NOT EXISTS idx_${tableName}_embedding ON $tableName " +
+                "USING hnsw (embedding vector_cosine_ops)"
+            )
         }
       }
       ()
@@ -436,7 +452,8 @@ final class PostgresMemoryStore private[memory] (
         metadata = EXCLUDED.metadata,
         created_at = EXCLUDED.created_at,
         importance = EXCLUDED.importance,
-        embedding = EXCLUDED.embedding
+        embedding = EXCLUDED.embedding,
+        version = $tableName.version + 1
     """
 
     Using.resource(conn.prepareStatement(sql)) { stmt =>
@@ -546,6 +563,11 @@ final class PostgresMemoryStore private[memory] (
    * applies to those `matches` accepts.
    */
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
+    if (limit <= 0) Right(Seq.empty)
+    else
+      recallSome(filter, limit)
+
+  private def recallSome(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     attempt("Failed to recall memories") {
       val plan = scoped(filter)
       withConnection { conn =>
@@ -567,26 +589,38 @@ final class PostgresMemoryStore private[memory] (
     }
 
   /**
-   * With an embedding service, the `topK` memories `filter` accepts nearest to `query`'s embedding (memories without an
-   * embedding are not candidates). Without one, a keyword search, scored as `InMemoryStore` scores it.
+   * With an embedding service, the `topK` memories `filter` accepts nearest to `query`'s embedding, scored
+   * `(1 + cos) / 2`. Only embeddings of the query's dimension that are not all zeros are compared (pgvector's cosine
+   * distance is undefined for a zero vector and an error between two dimensions); when the filter admits embedded
+   * memories but none of the query's dimension, a `ConfigurationError`. Without a service, a keyword search, scored as
+   * `InMemoryStore` scores it. A blank query, or a `topK` below 1, finds nothing without calling the service.
    */
   override def search(
     query: String,
     topK: Int,
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
-    embeddingService match {
-      case Some(service) =>
-        service.embedQuery(query).flatMap { queryVector =>
-          if (queryVector.isEmpty) {
-            Left(ProcessingError("postgres-memory-store", "Generated embedding vector is empty"))
-          } else {
-            performVectorSearch(queryVector, topK, filter)
+    if (query.trim.isEmpty || topK <= 0) Right(Seq.empty)
+    else
+      embeddingService match {
+        case Some(service) =>
+          service.embedQuery(query).flatMap { queryVector =>
+            if (queryVector.isEmpty)
+              Left(ProcessingError("postgres-memory-store", "Generated embedding vector is empty"))
+            else if (embeddingDimensions.exists(_ != queryVector.length))
+              Left(
+                org.llm4s.error.ConfigurationError(
+                  s"Embedding dimension mismatch: the query embedding has ${queryVector.length} dimensions but the " +
+                    s"store's column is vector(${embeddingDimensions.getOrElse(0)}). Use the store's embedding model, " +
+                    "or re-embed the store."
+                )
+              )
+            else if (!SearchScores.comparable(queryVector)) Right(Seq.empty)
+            else performVectorSearch(queryVector, topK, filter)
           }
-        }
-      case None =>
-        keywordSearch(query, topK, filter)
-    }
+        case None =>
+          keywordSearch(query, topK, filter)
+      }
 
   private def performVectorSearch(
     queryVector: Array[Float],
@@ -594,37 +628,79 @@ final class PostgresMemoryStore private[memory] (
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
     attempt("Vector search failed") {
-      val plan       = scoped(filter)
-      val conditions = (plan.sql.map(s => s"(${s.clause})").toSeq :+ "embedding IS NOT NULL").mkString(" AND ")
-      val vectorStr  = PostgresVectorHelpers.embeddingToString(queryVector)
+      val plan = scoped(filter)
+      // Only rows pgvector can compare with the query: of its dimension, and not all zeros (whose distance is NaN)
+      val conditions =
+        (plan.sql.map(s => s"(${s.clause})").toSeq ++
+          Seq("embedding IS NOT NULL", "vector_dims(embedding) = ?", "vector_norm(embedding) > 0")).mkString(" AND ")
+      val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
       val sql =
         s"""
            |SELECT ${PostgresMemoryStore.AllColumns},
-           |       1 - (embedding <=> ?::vector) AS similarity
+           |       embedding <=> ?::vector AS distance
            |FROM $tableName
            |WHERE $conditions
            |ORDER BY embedding <=> ?::vector""".stripMargin
-      val params = (SqlParam.PString(vectorStr) +: plan.params) :+ SqlParam.PString(vectorStr)
+      val params =
+        (SqlParam.PString(vectorStr) +: plan.params) ++ Seq(
+          SqlParam.PInt(queryVector.length),
+          SqlParam.PString(vectorStr)
+        )
 
       def scored(rows: Iterator[ResultSet]): Iterator[Result[ScoredMemory]] =
-        rows.map(rs =>
-          rowToMemory(rs).map(memory => ScoredMemory(memory, math.max(0.0, math.min(1.0, rs.getDouble("similarity")))))
+        rows.flatMap(rs =>
+          SearchScores
+            .fromCosineDistance(rs.getDouble("distance"))
+            .map(score => rowToMemory(rs).map(ScoredMemory(_, score)))
         )
 
       withConnection { conn =>
-        if (plan.needsMatches)
-          // `matches` decides, so topK applies after it: stream the nearest first and keep the first topK it accepts
-          inTransaction(conn) {
-            runQuery(conn, sql, params, stream = true) { rows =>
-              PostgresMemoryStore.firstN(scored(rows).filter(_.forall(sm => filter.matches(sm.memory))), topK)
+        val found =
+          if (plan.needsMatches)
+            // `matches` decides, so topK applies after it: stream the nearest first and keep the first topK it accepts
+            inTransaction(conn) {
+              runQuery(conn, sql, params, stream = true) { rows =>
+                PostgresMemoryStore.firstN(scored(rows).filter(_.forall(sm => filter.matches(sm.memory))), topK)
+              }
             }
-          }
-        else
-          runQuery(conn, s"$sql\nLIMIT ?", params :+ SqlParam.PInt(topK), stream = false) { rows =>
-            PostgresMemoryStore.firstN(scored(rows), Int.MaxValue)
-          }
+          else
+            runQuery(conn, s"$sql\nLIMIT ?", params :+ SqlParam.PInt(topK), stream = false) { rows =>
+              PostgresMemoryStore.firstN(scored(rows), Int.MaxValue)
+            }
+        found.flatMap(hits => if (hits.nonEmpty) Right(hits) else mismatch(conn, plan, filter, queryVector.length))
       }
     }
+
+  /**
+   * Nothing was found: a `ConfigurationError` if the memories `filter` accepts have embeddings but none of the query's
+   * dimension (the store was written with another embedding model), otherwise no results. Rows of the query's
+   * dimension are read first, so the first accepted row answers.
+   */
+  private def mismatch(
+    conn: Connection,
+    plan: FilterSupport.Narrowing,
+    filter: MemoryFilter,
+    dimension: Int
+  ): Result[Seq[ScoredMemory]] = {
+    val conditions = (plan.sql.map(s => s"(${s.clause})").toSeq :+ "embedding IS NOT NULL").mkString(" AND ")
+    val sql =
+      s"SELECT ${columnsFor(filter)}, vector_dims(embedding) AS dims FROM $tableName WHERE $conditions " +
+        "ORDER BY (vector_dims(embedding) = ?) DESC"
+    inTransaction(conn) {
+      runQuery(conn, sql, plan.params :+ SqlParam.PInt(dimension), stream = true) { rows =>
+        val accepted = rows
+          .map(rs => rowToMemory(rs, withEmbedding = FilterSupport.readsEmbedding(filter)).map(_ -> rs.getInt("dims")))
+          .filter(_.forall { case (m, _) => !plan.needsMatches || filter.matches(m) })
+        PostgresMemoryStore
+          .firstN(accepted, 1)
+          .flatMap(_.headOption match {
+            case Some((memory, dims)) if dims != dimension =>
+              Left(MemoryEmbeddings.dimensionMismatch(dimension, memory.id, dims))
+            case _ => Right(Seq.empty)
+          })
+      }
+    }
+  }
 
   /**
    * Keyword search, for a store without an embedding service. A memory's score is the share of the query's phrases
@@ -715,10 +791,19 @@ final class PostgresMemoryStore private[memory] (
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     getVersioned(id).flatMap {
       case Some(VersionedMemory(existing, version)) =>
-        embedMissing(Seq(MemoryEmbeddings.afterUpdate(existing, updateFn(existing)))).map(_.head).flatMap { updated =>
-          Try {
-            withConnection { conn =>
-              val sql = s"""
+        val changed = updateFn(existing)
+        if (changed.id != id)
+          Left(
+            ValidationError(
+              "id",
+              s"update function changed Memory ID from $id to ${changed.id}; IDs must remain constant"
+            )
+          )
+        else
+          embedMissing(Seq(MemoryEmbeddings.afterUpdate(existing, changed))).map(_.head).flatMap { updated =>
+            Try {
+              withConnection { conn =>
+                val sql = s"""
               UPDATE $tableName SET
                 content = ?,
                 memory_type = ?,
@@ -729,50 +814,50 @@ final class PostgresMemoryStore private[memory] (
                 version = ?
               WHERE id = ? AND version = ? AND tenant = ?
             """
-              Using.resource(conn.prepareStatement(sql)) { stmt =>
-                stmt.setString(1, updated.content)
-                stmt.setString(2, MemoryTypeCodec.encode(updated.memoryType))
-                stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
-                stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
+                Using.resource(conn.prepareStatement(sql)) { stmt =>
+                  stmt.setString(1, updated.content)
+                  stmt.setString(2, MemoryTypeCodec.encode(updated.memoryType))
+                  stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
+                  stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
 
-                updated.importance match {
-                  case Some(v) => stmt.setDouble(5, v)
-                  case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+                  updated.importance match {
+                    case Some(v) => stmt.setDouble(5, v)
+                    case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+                  }
+
+                  updated.embedding match {
+                    case Some(vec) => stmt.setString(6, PostgresVectorHelpers.embeddingToString(vec))
+                    case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
+                  }
+
+                  stmt.setLong(7, version + 1)
+                  stmt.setString(8, id.value)
+                  stmt.setLong(9, version)
+                  stmt.setString(10, tenantKey)
+                  stmt.executeUpdate()
                 }
-
-                updated.embedding match {
-                  case Some(vec) => stmt.setString(6, PostgresVectorHelpers.embeddingToString(vec))
-                  case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
-                }
-
-                stmt.setLong(7, version + 1)
-                stmt.setString(8, id.value)
-                stmt.setLong(9, version)
-                stmt.setString(10, tenantKey)
-                stmt.executeUpdate()
               }
-            }
-          }.toEither.left
-            .map(e =>
-              ProcessingError(
-                "postgres-memory-store",
-                s"Failed to update memory: ${Redaction.scrubKnown(e.getMessage)}",
-                cause = Some(e)
-              )
-            )
-            .flatMap { rowsAffected =>
-              if (rowsAffected == 0)
-                Left(
-                  OptimisticLockFailure(
-                    s"Concurrent modification detected for memory: ${id.value}",
-                    id.value,
-                    version
-                  )
+            }.toEither.left
+              .map(e =>
+                ProcessingError(
+                  "postgres-memory-store",
+                  s"Failed to update memory: ${Redaction.scrubKnown(e.getMessage)}",
+                  cause = Some(e)
                 )
-              else
-                Right(this)
-            }
-        }
+              )
+              .flatMap { rowsAffected =>
+                if (rowsAffected == 0)
+                  Left(
+                    OptimisticLockFailure(
+                      s"Concurrent modification detected for memory: ${id.value}",
+                      id.value,
+                      version
+                    )
+                  )
+                else
+                  Right(this)
+              }
+          }
       case None => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
     }
 
@@ -801,19 +886,37 @@ final class PostgresMemoryStore private[memory] (
    * written before this store embedded what it stores, or by another writer, are otherwise never found by vector
    * search. Needs an embedding service. A memory whose content changes meanwhile is left for its own write to embed.
    */
-  def embedAll(batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] =
+  def embedAll(batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] = embedWhere(batchSize, None)
+
+  /**
+   * Embed every stored memory that has no embedding or one whose dimension is not `dimension`, `batchSize` at a time,
+   * and return how many were embedded: after a change of embedding model, the memories written with the old one are
+   * otherwise never compared with a query of the new one. A column typed `vector(n)` (`embeddingDimensions`) accepts
+   * only `n`: to move such a table to another model, make the column untyped first (see the migration guide).
+   */
+  def reembedAll(dimension: Int, batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] =
+    if (dimension <= 0)
+      Left(ProcessingError("postgres-memory-store", s"reembedAll needs a positive dimension, got $dimension"))
+    else embedWhere(batchSize, Some(dimension))
+
+  private def embedWhere(batchSize: Int, dimension: Option[Int]): Result[Int] =
     embeddingService match {
       case None =>
         Left(ProcessingError("postgres-memory-store", "embedAll needs a store with an embedding service"))
       case Some(_) if batchSize <= 0 =>
         Left(ProcessingError("postgres-memory-store", s"embedAll needs a positive batch size, got $batchSize"))
       case Some(service) =>
+        // The rows to embed: those without an embedding, or (re-embedding) without one of `dimension`
+        val wanted = dimension.fold("embedding IS NULL")(_ => "(embedding IS NULL OR vector_dims(embedding) <> ?)")
+        val wantedParams = dimension.map(SqlParam.PInt(_)).toSeq
+
         def unembedded(after: Option[String]): Result[Vector[(String, String)]] =
           attempt("Failed to read memories to embed") {
-            val sql = s"SELECT id, content FROM $tableName WHERE tenant = ? AND embedding IS NULL" +
+            val sql = s"SELECT id, content FROM $tableName WHERE tenant = ? AND $wanted" +
               after.fold("")(_ => " AND id > ?") + " ORDER BY id LIMIT ?"
             val params =
-              (SqlParam.PString(tenantKey) +: after.map(SqlParam.PString(_)).toSeq) :+ SqlParam.PInt(batchSize)
+              (SqlParam.PString(tenantKey) +: (wantedParams ++ after.map(SqlParam.PString(_)).toSeq)) :+
+                SqlParam.PInt(batchSize)
             withConnection { conn =>
               runQuery(conn, sql, params, stream = false) { rows =>
                 Right(rows.map(rs => rs.getString(1) -> rs.getString(2)).toVector)
@@ -826,14 +929,15 @@ final class PostgresMemoryStore private[memory] (
             withConnection { conn =>
               inTransaction(conn) {
                 val sql =
-                  s"UPDATE $tableName SET embedding = ?::vector " +
-                    "WHERE id = ? AND content = ? AND embedding IS NULL AND tenant = ?"
+                  s"UPDATE $tableName SET embedding = ?::vector, version = version + 1 " +
+                    s"WHERE id = ? AND content = ? AND $wanted AND tenant = ?"
                 Using.resource(conn.prepareStatement(sql)) { stmt =>
                   rows.zip(embeddings).foreach { case ((id, content), embedding) =>
                     stmt.setString(1, PostgresVectorHelpers.embeddingToString(embedding))
                     stmt.setString(2, id)
                     stmt.setString(3, content)
-                    stmt.setString(4, tenantKey)
+                    dimension.foreach(stmt.setInt(4, _))
+                    stmt.setString(if (dimension.isDefined) 5 else 4, tenantKey)
                     stmt.addBatch()
                   }
                   Right(stmt.executeBatch().count(_ != 0))
@@ -1008,13 +1112,15 @@ object PostgresMemoryStore {
     password: Secret = Secret(""),
     tableName: String = "agent_memories",
     maxPoolSize: Int = 10,
-    tenant: Option[String] = None
+    tenant: Option[String] = None,
+    embeddingDimensions: Option[Int] = None
   ) {
     require(
       ValidIdentifierPattern.matches(tableName),
       s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,54}"
     )
     require(!tenant.exists(_.isEmpty), TenantMessage)
+    require(embeddingDimensions.forall(_ > 0), DimensionsMessage)
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
@@ -1045,7 +1151,14 @@ object PostgresMemoryStore {
       .map(initFailure)
       .flatMap { dataSource =>
         val store =
-          new PostgresMemoryStore(dataSource, config.tableName, embeddingService, ownsDataSource = true, config.tenant)
+          new PostgresMemoryStore(
+            dataSource,
+            config.tableName,
+            embeddingService,
+            ownsDataSource = true,
+            config.tenant,
+            config.embeddingDimensions
+          )
         initialized(store).left.map { e =>
           store.close()
           e
@@ -1074,15 +1187,21 @@ object PostgresMemoryStore {
    * @param tenant the tenant whose memories this store reads and writes: many tenants share one table, each seeing,
    *               counting, evicting and clearing only its own rows. `None` is the rows of no tenant, which is every
    *               row a store wrote before tenants existed; a tenant is never empty.
+   * @param embeddingDimensions the dimension of every embedding, if declared: the column is typed `vector(n)` (an
+   *               older untyped one is converted, if every stored embedding has `n` dimensions) and, up to 2000
+   *               dimensions, indexed with HNSW for cosine distance, so a search need not read every row
    */
   def fromDataSource(
     dataSource: DataSource,
     tableName: String = "agent_memories",
     embeddingService: Option[EmbeddingService] = None,
-    tenant: Option[String] = None
+    tenant: Option[String] = None,
+    embeddingDimensions: Option[Int] = None
   ): Result[PostgresMemoryStore] =
     if (dataSource == null)
       Left(ProcessingError("postgres-memory-store", "dataSource must not be null"))
+    else if (embeddingDimensions.exists(_ <= 0))
+      Left(ProcessingError("postgres-memory-store", DimensionsMessage))
     else if (tenant.exists(t => t == null || t.isEmpty))
       Left(ProcessingError("postgres-memory-store", TenantMessage))
     else if (tableName == null || !ValidIdentifierPattern.matches(tableName))
@@ -1093,7 +1212,16 @@ object PostgresMemoryStore {
         )
       )
     else
-      initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false, tenant))
+      initialized(
+        new PostgresMemoryStore(
+          dataSource,
+          tableName,
+          embeddingService,
+          ownsDataSource = false,
+          tenant,
+          embeddingDimensions
+        )
+      )
 
   /**
    * One statement making `(tenant, key)` the primary key of `table`, adding the `tenant` column first, if it is not
@@ -1124,6 +1252,40 @@ object PostgresMemoryStore {
   }
 
   private val TenantMessage = "a tenant must not be empty: the rows of no tenant are tenant = None"
+
+  private val DimensionsMessage = "embeddingDimensions must be positive"
+
+  /** The most dimensions pgvector's HNSW index takes for `vector`; a wider declared column is typed but not indexed. */
+  private[memory] val MaxIndexedDimensions: Int = 2000
+
+  /**
+   * One statement typing `table`'s embedding column `vector(n)`, if it is not yet. An untyped column (every table
+   * created before #3037) is converted under a lock, after checking again, only if every embedding has `n` dimensions;
+   * otherwise, and for a column typed with another dimension, it fails naming what it found. The check reads only the
+   * catalog, so an up-to-date table is never locked. `table` is a validated identifier.
+   */
+  private[memory] def declareDimension(table: String, n: Int): String = {
+    val typmod =
+      s"(SELECT a.atttypmod FROM pg_attribute a WHERE a.attrelid = '$table'::regclass AND a.attname = 'embedding')"
+    s"""DO $$$$
+       |DECLARE other integer;
+       |BEGIN
+       |  IF $typmod <> $n THEN
+       |    LOCK TABLE $table IN ACCESS EXCLUSIVE MODE;
+       |    IF $typmod > 0 AND $typmod <> $n THEN
+       |      RAISE EXCEPTION 'the column $table.embedding is vector(%), not vector($n)', $typmod;
+       |    END IF;
+       |    IF $typmod <> $n THEN
+       |      SELECT vector_dims(embedding) INTO other FROM $table
+       |        WHERE embedding IS NOT NULL AND vector_dims(embedding) <> $n LIMIT 1;
+       |      IF other IS NOT NULL THEN
+       |        RAISE EXCEPTION '$table holds embeddings of % dimensions, not $n: re-embed them (reembedAll) first', other;
+       |      END IF;
+       |      ALTER TABLE $table ALTER COLUMN embedding TYPE vector($n);
+       |    END IF;
+       |  END IF;
+       |END $$$$""".stripMargin
+  }
 
   /** How many rows a streamed read fetches per round trip, so reading a large table to decide a filter never holds it. */
   private[memory] val FetchSize: Int = 500

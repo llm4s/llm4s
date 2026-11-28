@@ -303,7 +303,7 @@ class EmbeddingMemoryStoreSpec extends AnyFlatSpec with Matchers {
     scored.head.memory.content shouldBe "Scala programming"
   }
 
-  it should "fall back to keyword search when no embedding candidates after filtering" in {
+  it should "refuse a search when no embedded memory has the query's dimension (#3037)" in {
     val service = createMockService(Array(1f, 0f, 0f))
     // Memory with embedding of different dimension
     val memory = createMemory("Scala programming").withEmbedding(Array(1f, 0f))
@@ -313,10 +313,7 @@ class EmbeddingMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- s1.search("Scala", topK = 10)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
-    scored.size shouldBe 1
-    scored.head.memory.content shouldBe "Scala programming"
+    result.left.toOption.get shouldBe a[org.llm4s.error.ConfigurationError]
   }
 
   it should "skip memories with NaN in embeddings" in {

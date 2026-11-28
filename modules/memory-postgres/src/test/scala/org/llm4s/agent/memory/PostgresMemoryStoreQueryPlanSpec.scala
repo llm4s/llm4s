@@ -61,6 +61,7 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
         case ("getString", a)    => value(a(0)).asInstanceOf[String]
         case ("getDouble", a)    => java.lang.Double.valueOf(Option(value(a(0))).fold(0.0)(_.asInstanceOf[Double]))
         case ("getLong", a)      => java.lang.Long.valueOf(Option(value(a(0))).fold(0L)(_.asInstanceOf[Long]))
+        case ("getInt", a)       => Integer.valueOf(Option(value(a(0))).fold(0)(_.asInstanceOf[Int]))
         case ("getTimestamp", a) => value(a(0)).asInstanceOf[Timestamp]
         case ("wasNull", _)      => java.lang.Boolean.valueOf(lastWasNull)
         case _                   => null
@@ -100,6 +101,7 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
         case ("createStatement", _) =>
           proxy(classOf[java.sql.Statement]) {
             case ("executeQuery", a) => resultSet(a(0).toString)
+            case ("execute", a)      => sent += Sent(a(0).toString, mutable.Map.empty); java.lang.Boolean.FALSE
             case _                   => null
           }
         case _ => null
@@ -288,5 +290,93 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     embedder.asked.head shouldBe Seq("alpha")
     ds.sent.exists(_.sql.startsWith("UPDATE t SET embedding")) shouldBe true
     ds.sent.exists(_.sql.contains("AND id > ?")) shouldBe true
+  }
+
+  // ===== #3037, #3038 =====
+
+  it should "type the column, index it with HNSW, and skip the index past pgvector's limit, for a declared dimension" in {
+    val ds = new RecordingDataSource()()
+    new PostgresMemoryStore(ds, "t", None, ownsDataSource = false, None, Some(3)).initializeSchema()
+    val ddl = ds.sent.map(_.sql)
+    ddl.exists(_.contains("embedding vector(3)")) shouldBe true
+    ddl.exists(sql => sql.contains("ALTER COLUMN embedding TYPE vector(3)") && sql.contains("reembedAll")) shouldBe true
+    ddl.exists(_.contains("USING hnsw (embedding vector_cosine_ops)")) shouldBe true
+
+    val wide = new RecordingDataSource()()
+    new PostgresMemoryStore(wide, "t", None, ownsDataSource = false, None, Some(3072)).initializeSchema()
+    wide.sent.exists(_.sql.contains("hnsw")) shouldBe false
+    wide.sent.exists(_.sql.contains("vector(3072)")) shouldBe true
+
+    val untyped = new RecordingDataSource()()
+    store(untyped).initializeSchema()
+    untyped.sent.exists(_.sql.contains("vector(")) shouldBe false
+    PostgresMemoryStore.fromDataSource(untyped, "t", embeddingDimensions = Some(0)).isLeft shouldBe true
+  }
+
+  it should "refuse a query of another dimension than the declared one, and find nothing for a zero query" in {
+    val ds  = new RecordingDataSource()()
+    val dim = new PostgresMemoryStore(ds, "t", Some(new RecordingEmbeddings), ownsDataSource = false, None, Some(3))
+    dim.search("q", 5, MemoryFilter.All).left.toOption.get shouldBe a[org.llm4s.error.ConfigurationError]
+    val zero = new RecordingEmbeddings {
+      override def embed(text: String): Result[Array[Float]] = Right(Array(0f, 0f))
+    }
+    store(ds, Some(zero)).search("q", 5, MemoryFilter.All) shouldBe Right(Seq.empty)
+    ds.sent shouldBe empty
+  }
+
+  it should "compare only the query's dimension, leave out zero vectors, and score (1 + cos) / 2" in {
+    val ds = new RecordingDataSource(Seq(row("a", "alpha") + ("distance" -> 1.0)))()
+    store(ds, Some(new RecordingEmbeddings)).search("q", 5, MemoryFilter.All) match {
+      case Right(Seq(hit)) => hit.score shouldBe 0.5
+      case other           => fail(s"unexpected: $other")
+    }
+    ds.sent.head.sql should include("vector_dims(embedding) = ?")
+    ds.sent.head.sql should include("vector_norm(embedding) > 0")
+  }
+
+  it should "report a store of another dimension when nothing of the query's was found" in {
+    def answering(dims: Int): String => Seq[Map[String, Any]] =
+      sql => if (sql.contains("AS dims")) Seq(row("old", "old row") + ("dims" -> dims)) else Seq.empty
+    val other = new RecordingDataSource()(Some(answering(3)))
+    store(other, Some(new RecordingEmbeddings)).search("q", 5, MemoryFilter.All).left.toOption.get shouldBe
+      a[org.llm4s.error.ConfigurationError]
+    val same = new RecordingDataSource()(Some(answering(2)))
+    store(same, Some(new RecordingEmbeddings)).search("q", 5, MemoryFilter.Custom(_ => true)) shouldBe Right(Seq.empty)
+  }
+
+  it should "send nothing for a limit or topK below one, or a blank query" in {
+    val ds       = new RecordingDataSource()()
+    val embedder = new RecordingEmbeddings
+    val s        = store(ds, Some(embedder))
+    s.recall(MemoryFilter.All, 0) shouldBe Right(Seq.empty)
+    s.recent(-1, MemoryFilter.All) shouldBe Right(Seq.empty)
+    s.search("q", 0, MemoryFilter.All) shouldBe Right(Seq.empty)
+    s.search(" ", 5, MemoryFilter.All) shouldBe Right(Seq.empty)
+    ds.sent shouldBe empty
+    embedder.asked shouldBe empty
+  }
+
+  it should "bump the version on an upsert, and refuse an update that changes the id" in {
+    val ds = new RecordingDataSource(Seq(row("m", "text") + ("version" -> 4L)))()
+    val s  = store(ds)
+    s.store(memory).isRight shouldBe true
+    ds.sent.head.sql should include("version = t.version + 1")
+    s.update(MemoryId("m"), _.copy(id = MemoryId("n"))).left.toOption.get shouldBe a[org.llm4s.error.ValidationError]
+    ds.sent.exists(_.sql.contains("UPDATE t SET")) shouldBe false
+  }
+
+  it should "re-embed the rows of another dimension with reembedAll, and refuse a dimension below one" in {
+    val ds =
+      new RecordingDataSource()(
+        Some(sql => if (sql.contains("id > ?")) Seq.empty else Seq(Map("id" -> "a", "content" -> "alpha")))
+      )
+    val s = store(ds, Some(new RecordingEmbeddings))
+    s.reembedAll(2, batchSize = 1).isRight shouldBe true
+    ds.sent.head.sql should include("vector_dims(embedding) <> ?")
+    ds.sent.head.params(2) shouldBe 2
+    ds.sent.exists(
+      _.sql.contains("AND (embedding IS NULL OR vector_dims(embedding) <> ?) AND tenant = ?")
+    ) shouldBe true
+    s.reembedAll(0).isLeft shouldBe true
   }
 }

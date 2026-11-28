@@ -93,6 +93,7 @@ val storeResult = PostgresMemoryStore(config)
 | `tableName`   | `"agent_memories"` | Table used for memory storage |
 | `maxPoolSize` | `10`               | Maximum HikariCP pool size    |
 | `tenant`      | `None`             | The tenant whose rows the store reads and writes ([Tenants](#tenants)) |
+| `embeddingDimensions` | `None`     | Every embedding's dimension, if declared: the column is typed `vector(n)` and indexed ([Search](#search)) |
 
 ### Sharing your application's connection pool
 
@@ -173,7 +174,7 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL,
     importance DOUBLE PRECISION,
-    embedding vector,
+    embedding vector,            -- vector(n) with embeddingDimensions = Some(n)
     version BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant, id)
 );
@@ -275,11 +276,32 @@ filter accepts; a memory with no embedding is not a candidate. The store embeds 
 transaction; `update` embeds again when it changes the content and leaves the embedding as it was. If embedding
 fails, nothing is written.
 
-Rows written before the store embedded what it stores have no embedding. Embed them once with `embedAll`:
+A memory scores `(1 + cos) / 2` - 1.0 for the query's own direction, 0.5 orthogonal, 0.0 opposite - as in every
+memory store. Only embeddings of the query's dimension that are
+not all zeros are compared: pgvector cannot compare two dimensions, and a zero vector has no direction. When the
+filter admits embedded memories but none of the query's dimension, `search` is a `ConfigurationError`.
+
+Rows written before the store embedded what it stores have no embedding. Embed them once with `embedAll`; after a
+change of embedding model, `reembedAll` embeds again every memory whose embedding is not of the new dimension:
 
 ```scala
-store.embedAll() // Result[Int]: how many memories were embedded
+store.embedAll()      // Result[Int]: how many memories were embedded
+store.reembedAll(1024) // the same, for every memory without a 1024-dimensional embedding
 ```
+
+### Declaring the dimension
+
+An untyped `vector` column holds embeddings of any dimension and cannot be indexed, so every search reads every
+candidate row. With `embeddingDimensions = Some(n)` (in `Config`, or `fromDataSource(..., embeddingDimensions =
+Some(n))`), the column is typed `vector(n)` and, up to 2000 dimensions, carries an HNSW index for cosine distance
+(`idx_<table>_embedding`). An older untyped column is converted when the store opens, if every embedding in it has
+`n` dimensions; otherwise opening fails and names what it found. A write of another dimension then fails, and a query
+of another dimension is a `ConfigurationError`.
+
+To move a typed table to another model, make the column untyped again
+(`DROP INDEX idx_<table>_embedding; ALTER TABLE <table> ALTER COLUMN embedding TYPE vector;`), open the store without
+`embeddingDimensions` and the new model's service, run `reembedAll(newDimension)`, then reopen it with the new
+dimension.
 
 Without an `EmbeddingService`, `search` is a keyword search, scored as `InMemoryStore` scores it: the share of the
 query's words and phrases that occur in a memory as whole words. It reads every row the filter narrows to, so on a
@@ -359,6 +381,6 @@ batch into multi-row inserts.
 |--------|------|-----|
 | `extension "vector" does not exist` | pgvector not installed or enabled | Run `CREATE EXTENSION vector;` in your database |
 | Connection timeout or pool exhaustion | Incorrect DB URL or pool size too small | Check host/port/credentials and `maxPoolSize` config |
-| Embedding dimension mismatch | Stored embeddings use a different model size | Use the same embedding model for both storage and queries |
+| Embedding dimension mismatch | Stored embeddings use a different model size | Use the same embedding model for both storage and queries, or `reembedAll` with the new one |
 | Table name validation error | Table name does not match allowed pattern | Use only letters, numbers, and underscores, starting with a letter or underscore |
 | Metadata key validation errors | Invalid metadata keys in filters | Ensure keys match `^[a-zA-Z_][a-zA-Z0-9_]*$` |

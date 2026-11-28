@@ -2,10 +2,9 @@ package org.llm4s.agent.memory
 
 import org.llm4s.util.{ PrivateSqliteFile, Redaction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ ConfigurationError, ProcessingError }
+import org.llm4s.error.{ NotFoundError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.slf4j.LoggerFactory
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
 import java.time.Instant
@@ -132,6 +131,23 @@ final class VectorMemoryStore private (
   }
 
   /**
+   * Store `add`, then delete `remove`, in one transaction, after embedding what `add` is missing: a failure leaves the
+   * store as it was.
+   */
+  override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
+    embedMissing(add).flatMap { adds =>
+      Try {
+        inTransaction {
+          writeAll(adds)
+          deleteIds(remove.map(_.value).filterNot(adds.map(_.id.value).toSet))
+        }
+        this: MemoryStore
+      }.toEither.left.map(e =>
+        ProcessingError("vector-store", s"Failed to replace memories: ${Redaction.scrubKnown(e.getMessage)}")
+      )
+    }
+
+  /**
    * `memories` with every missing embedding filled in, asking the service for at most `EmbeddingBatchSize` texts at a
    * time - one request for a whole large batch could exceed a provider's input limit. Fails if any call fails,
    * throws, or answers with the wrong number of embeddings.
@@ -207,7 +223,11 @@ final class VectorMemoryStore private (
     )
 
   /** Memories matching `filter`, newest first; `limit` applies to the matches, after any in-memory filtering. */
-  private def queryMemories(filter: MemoryFilter, limit: Option[Int]): Seq[Memory] = {
+  private def queryMemories(filter: MemoryFilter, limit: Option[Int]): Seq[Memory] =
+    if (limit.exists(_ <= 0)) Seq.empty
+    else queryNarrowed(filter, limit)
+
+  private def queryNarrowed(filter: MemoryFilter, limit: Option[Int]): Seq[Memory] = {
     val plan = narrowing(filter)
     val sql =
       if (plan.needsMatches || limit.isEmpty) s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC"
@@ -227,63 +247,30 @@ final class VectorMemoryStore private (
     }
   }
 
+  /**
+   * The `topK` memories `filter` accepts nearest to `query`'s embedding, scored `(1 + cos) / 2`
+   * (`org.llm4s.vectorstore.SearchScores`); a memory whose embedding cannot be compared with the query is left out,
+   * and a store none of whose embedded memories has the query's dimension is a `ConfigurationError`. A blank query, or
+   * a `topK` below 1, finds nothing without calling the embedding service.
+   */
   override def search(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
-    // Generate query embedding: as a query, which some models embed differently from a document
-    embeddingService.embedQuery(query).flatMap { queryEmbedding =>
-      Try {
-        // Memories matching the filter that have embeddings; topK applies to those the filter accepts
-        val candidates = queryMemories(filter, None).flatMap(m => m.embedding.filter(_.nonEmpty).map(e => (m, e)))
-        val (comparable, mismatched) = candidates.partition(_._2.length == queryEmbedding.length)
+    if (query.trim.isEmpty || topK <= 0) Right(Seq.empty)
+    else
+      // Generate query embedding: as a query, which some models embed differently from a document
+      embeddingService.embedQuery(query).flatMap { queryEmbedding =>
+        Try {
+          // Memories matching the filter that have embeddings; topK applies to those the filter accepts
+          queryMemories(filter, None).flatMap(m => m.embedding.filter(_.nonEmpty).map(e => (m, e)))
+        }.toEither.left
+          .map(e => ProcessingError("vector-store", s"Vector search failed: ${Redaction.scrubKnown(e.getMessage)}"))
+          .flatMap(candidates => MemoryEmbeddings.rank(queryEmbedding, candidates))
+          .map(_.sorted(ScoredMemory.byScoreDescending).take(topK))
+      }
 
-        mismatched.headOption match {
-          case Some((memory, stored)) if comparable.isEmpty =>
-            // Nothing stored can be compared with the query: the store was written with a different embedding
-            // model, and hiding that behind a keyword fallback or an empty result would hide the misconfiguration.
-            Left(
-              ConfigurationError(
-                s"Embedding dimension mismatch: the query embedding has ${queryEmbedding.length} dimensions but " +
-                  s"memory ${memory.id.value} was stored with ${stored.length}. The store was written with a " +
-                  "different embedding model; use that model, or re-embed the store."
-              )
-            )
-          case _ =>
-            // A store that holds vectors of more than one dimension (the embedding model was changed part way)
-            // stays searchable: the memories that cannot be compared are left out, and counted in the log.
-            if (mismatched.nonEmpty)
-              logger.warn(
-                s"Vector search skipped ${mismatched.size} memories whose embedding has a different dimension than " +
-                  s"the query's ${queryEmbedding.length}; re-embed the store to include them"
-              )
-            Right(
-              comparable
-                .map { case (memory, embedding) =>
-                  val similarity = VectorOps.cosineSimilarity(queryEmbedding, embedding)
-                  // Normalize to 0-1 range (cosine similarity is -1 to 1)
-                  ScoredMemory(memory, (similarity + 1) / 2)
-                }
-                .sortBy(-_.score)
-                .take(topK)
-            )
-        }
-      }.toEither.left
-        .map(e => ProcessingError("vector-store", s"Vector search failed: ${Redaction.scrubKnown(e.getMessage)}"))
-        .flatMap(identity)
-    }
-
+  /** Delete the memory and its full-text entry, in one transaction. */
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
-      // Delete from FTS
-      Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-        stmt.setString(1, id.value)
-        stmt.executeUpdate()
-      }
-
-      // Delete from main table
-      Using.resource(connection.prepareStatement("DELETE FROM memories WHERE id = ?")) { stmt =>
-        stmt.setString(1, id.value)
-        stmt.executeUpdate()
-      }
-
+      inTransaction(deleteIds(Seq(id.value)))
       this: MemoryStore
     }.toEither.left.map(e =>
       ProcessingError("vector-store", s"Failed to delete memory: ${Redaction.scrubKnown(e.getMessage)}")
@@ -358,21 +345,25 @@ final class VectorMemoryStore private (
   /** Run `body` as one write transaction: committed if it returns, rolled back otherwise. */
   private def inTransaction[A](body: => A): A = SqliteTransaction.immediate(connection)(body)
 
+  /**
+   * Update a memory in one transaction, after any re-embedding: a failure leaves it as it was. A memory whose content
+   * changes is embedded again, unless `updateFn` gave it a new embedding. Changing the id is a `ValidationError`, and a
+   * missing memory a `NotFoundError`.
+   */
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     get(id).flatMap {
       case Some(memory) =>
-        val updated = updateFn(memory)
-        // Re-embed if content changed
-        val memoryToStore =
-          if (updated.content != memory.content)
-            updated.copy(embedding = None) // Will be re-embedded on store
-          else
-            updated
-        // The same id is replaced in one transaction, after any re-embedding: a failure leaves the memory as it was.
-        if (memoryToStore.id == id) store(memoryToStore)
-        else delete(id).flatMap(_ => store(memoryToStore))
+        val updated = MemoryEmbeddings.afterUpdate(memory, updateFn(memory))
+        if (updated.id != id)
+          Left(
+            ValidationError(
+              "id",
+              s"update function changed Memory ID from $id to ${updated.id}; IDs must remain constant"
+            )
+          )
+        else store(updated)
       case None =>
-        Left(ProcessingError("vector-store", s"Memory not found: ${id.value}"))
+        Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
     }
 
   override def count(filter: MemoryFilter): Result[Long] =
@@ -398,12 +389,13 @@ final class VectorMemoryStore private (
       ProcessingError("vector-store", s"Failed to count memories: ${Redaction.scrubKnown(e.getMessage)}")
     )
 
+  /** Delete every memory and full-text entry, in one transaction. */
   override def clear(): Result[MemoryStore] =
     Try {
-      Using.resource(connection.createStatement()) { stmt =>
+      inTransaction(Using.resource(connection.createStatement()) { stmt =>
         stmt.execute("DELETE FROM memories")
         stmt.execute("DELETE FROM memories_fts")
-      }
+      })
       this: MemoryStore
     }.toEither.left.map(e =>
       ProcessingError("vector-store", s"Failed to clear memories: ${Redaction.scrubKnown(e.getMessage)}")
@@ -417,69 +409,88 @@ final class VectorMemoryStore private (
     )
 
   /**
-   * Embed all memories that don't have embeddings.
-   *
-   * This is useful for adding embeddings to memories imported without them.
-   *
-   * @param batchSize Number of memories to embed per batch
-   * @return Number of memories embedded
+   * Embed every memory that has no embedding, `batchSize` at a time, and return how many were embedded. This is useful
+   * for adding embeddings to memories imported without them.
    */
-  def embedAll(batchSize: Int = 100): Result[Int] = {
-    def fetchBatch(): Result[Seq[Memory]] =
+  def embedAll(batchSize: Int = 100): Result[Int] = embedWhere(batchSize, None)
+
+  /**
+   * Embed every memory that has no embedding or one whose dimension is not `dimension`, `batchSize` at a time, and
+   * return how many were embedded: after a change of embedding model, the memories written with the old one are
+   * otherwise never compared with a query of the new one.
+   */
+  def reembedAll(dimension: Int, batchSize: Int = 100): Result[Int] =
+    if (dimension <= 0) Left(ProcessingError("vector-store", s"reembedAll needs a positive dimension, got $dimension"))
+    else embedWhere(batchSize, Some(dimension))
+
+  /**
+   * Every memory without an embedding (or, with `dimension`, without one of that dimension) is visited once, by id:
+   * keyset pagination, so a service that answers with fewer vectors than texts is an error, never a loop. A memory
+   * whose content changes meanwhile is left for its own write to embed.
+   */
+  private def embedWhere(batchSize: Int, dimension: Option[Int]): Result[Int] = {
+    val wanted = dimension.fold("embedding IS NULL")(_ => "(embedding IS NULL OR embedding_dim IS NOT ?)")
+
+    def fetchBatch(after: Option[String]): Result[Vector[(String, String)]] =
       Try {
-        val sql = "SELECT * FROM memories WHERE embedding IS NULL LIMIT ?"
+        val sql = s"SELECT id, content FROM memories WHERE $wanted" + after.fold("")(_ => " AND id > ?") +
+          " ORDER BY id LIMIT ?"
         Using.resource(connection.prepareStatement(sql)) { stmt =>
-          stmt.setInt(1, batchSize)
+          val params: Seq[Any] = dimension.toSeq ++ after.toSeq :+ batchSize
+          params.zipWithIndex.foreach { case (p, i) => setParameter(stmt, i + 1, p) }
           Using.resource(stmt.executeQuery()) { rs =>
-            val memories = ArrayBuffer.empty[Memory]
-            while (rs.next())
-              memories += rowToMemory(rs)
-            memories.toSeq
+            val rows = Vector.newBuilder[(String, String)]
+            while (rs.next()) rows += rs.getString(1) -> rs.getString(2)
+            rows.result()
           }
         }
       }.toEither.left.map(e =>
         ProcessingError("vector-store", s"Failed to fetch memories: ${Redaction.scrubKnown(e.getMessage)}")
       )
 
-    def updateEmbedding(memory: Memory, embedding: Array[Float]): Unit = {
-      val updateSql = "UPDATE memories SET embedding = ?, embedding_dim = ? WHERE id = ?"
-      Using.resource(connection.prepareStatement(updateSql)) { stmt =>
-        stmt.setBytes(1, serializeEmbedding(embedding))
-        stmt.setInt(2, embedding.length)
-        stmt.setString(3, memory.id.value)
-        stmt.executeUpdate()
-      }
-    }
-
-    def processBatch(): Result[Int] =
-      fetchBatch().flatMap { memories =>
-        if (memories.isEmpty) {
-          Right(0)
-        } else {
-          val texts = memories.map(_.content)
-          embeddingService.embedBatch(texts).flatMap { embs =>
-            Try {
-              memories.zip(embs).foreach { case (memory, embedding) =>
-                updateEmbedding(memory, embedding)
+    def write(rows: Vector[(String, String)], embeddings: Seq[Array[Float]]): Result[Int] =
+      Try {
+        inTransaction {
+          val sql = "UPDATE memories SET embedding = ?, embedding_dim = ? WHERE id = ? AND content = ?"
+          Using.resource(connection.prepareStatement(sql)) { stmt =>
+            rows
+              .zip(embeddings)
+              .map { case ((id, content), embedding) =>
+                stmt.setBytes(1, serializeEmbedding(embedding))
+                stmt.setInt(2, embedding.length)
+                stmt.setString(3, id)
+                stmt.setString(4, content)
+                stmt.executeUpdate()
               }
-              memories.size
-            }.toEither.left.map(e =>
-              ProcessingError("vector-store", s"Failed to update embeddings: ${Redaction.scrubKnown(e.getMessage)}")
-            )
+              .sum
           }
         }
-      }
+      }.toEither.left.map(e =>
+        ProcessingError("vector-store", s"Failed to update embeddings: ${Redaction.scrubKnown(e.getMessage)}")
+      )
 
-    // Process batches until no more memories without embeddings
     @scala.annotation.tailrec
-    def loop(totalEmbedded: Int): Result[Int] =
-      processBatch() match {
-        case Right(0)     => Right(totalEmbedded)
-        case Right(count) => loop(totalEmbedded + count)
-        case Left(error)  => Left(error)
+    def loop(after: Option[String], total: Int): Result[Int] =
+      fetchBatch(after).flatMap { rows =>
+        if (rows.isEmpty) Right(rows -> 0)
+        else
+          MemoryEmbeddings
+            .embedMissing(
+              embeddingService,
+              rows.map { case (id, content) => Memory(MemoryId(id), content, MemoryType.Task) },
+              "vector-store",
+              batchSize
+            )
+            .flatMap(embedded => write(rows, embedded.flatMap(_.embedding)))
+            .map(rows -> _)
+      } match {
+        case Left(e)                          => Left(e)
+        case Right((rows, _)) if rows.isEmpty => Right(total)
+        case Right((rows, n))                 => loop(Some(rows.last._1), total + n)
       }
 
-    loop(0)
+    if (batchSize <= 0) Left(ProcessingError("vector-store", s"embedAll needs a positive batch size, got $batchSize"))
+    else loop(None, 0)
   }
 
   /**
@@ -571,12 +582,28 @@ final class VectorMemoryStore private (
       else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
     case MemoryFilter.ByMetadata(key, value) =>
-      // Metadata is stored as JSON text, so look for the JSON form of the pair. instr is a literal, case-sensitive
-      // search: LIKE would read % and _ as wildcards and ignore the case of ASCII letters.
-      Some(Sql("COALESCE(instr(metadata, ?) > 0, 0)", Seq(s"${jsonString(key)}:${jsonString(value)}")))
+      // The key's own value, by JSON path: a substring test on the JSON text matched a key that ends in this one after
+      // an escaped quote. A row written before metadata was valid JSON keeps the old literal test.
+      FilterSupport
+        .jsonPath(key)
+        .map(path =>
+          Sql(
+            "(CASE WHEN json_valid(metadata) THEN COALESCE(json_extract(metadata, ?) = ?, 0) " +
+              "ELSE COALESCE(instr(metadata, ?) > 0, 0) END)",
+            Seq(path, value, s"${jsonString(key)}:${jsonString(value)}")
+          )
+        )
 
     case MemoryFilter.HasMetadata(key) =>
-      Some(Sql("COALESCE(instr(metadata, ?) > 0, 0)", Seq(s"${jsonString(key)}:")))
+      FilterSupport
+        .jsonPath(key)
+        .map(path =>
+          Sql(
+            "(CASE WHEN json_valid(metadata) THEN json_type(metadata, ?) IS NOT NULL " +
+              "ELSE COALESCE(instr(metadata, ?) > 0, 0) END)",
+            Seq(path, s"${jsonString(key)}:")
+          )
+        )
 
     case MemoryFilter.ByEntity(entityId) =>
       Some(Sql("COALESCE(entity_id = ?, 0)", Seq(entityId.value)))
@@ -585,13 +612,7 @@ final class VectorMemoryStore private (
       Some(Sql("COALESCE(conversation_id = ?, 0)", Seq(conversationId)))
 
     case MemoryFilter.ByTimeRange(afterOpt, beforeOpt) =>
-      (afterOpt, beforeOpt) match {
-        case (Some(after), Some(before)) =>
-          Some(Sql("timestamp >= ? AND timestamp <= ?", Seq(after.toEpochMilli, before.toEpochMilli)))
-        case (Some(after), None)  => Some(Sql("timestamp >= ?", Seq(after.toEpochMilli)))
-        case (None, Some(before)) => Some(Sql("timestamp <= ?", Seq(before.toEpochMilli)))
-        case (None, None)         => Some(FilterSupport.unrestricted)
-      }
+      Some(FilterSupport.timeRange(afterOpt, beforeOpt))
 
     case MemoryFilter.MinImportance(threshold) =>
       Some(Sql("COALESCE(importance >= ?, 0)", Seq(threshold)))
@@ -616,8 +637,6 @@ final class VectorMemoryStore private (
 }
 
 object VectorMemoryStore {
-
-  private val logger = LoggerFactory.getLogger(getClass)
 
   private val BusyTimeoutMillis = 30000
 
