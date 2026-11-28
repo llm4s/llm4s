@@ -629,10 +629,13 @@ final class PostgresMemoryStore private[memory] (
   ): Result[Seq[ScoredMemory]] =
     attempt("Vector search failed") {
       val plan = scoped(filter)
-      // Only rows pgvector can compare with the query: of its dimension, and not all zeros (whose distance is NaN)
+      // Only rows pgvector can compare with the query: of its dimension, and not all zeros (whose distance is NaN). A
+      // typed column holds only the query's dimension (checked above), and a `vector_dims` condition there would make
+      // the planner misjudge its selectivity and never use the index.
+      val sameDimension = if (embeddingDimensions.isDefined) Seq.empty else Seq("vector_dims(embedding) = ?")
       val conditions =
         (plan.sql.map(s => s"(${s.clause})").toSeq ++
-          Seq("embedding IS NOT NULL", "vector_dims(embedding) = ?", "vector_norm(embedding) > 0")).mkString(" AND ")
+          (("embedding IS NOT NULL" +: sameDimension) :+ "vector_norm(embedding) > 0")).mkString(" AND ")
       val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
       val sql =
         s"""
@@ -641,11 +644,8 @@ final class PostgresMemoryStore private[memory] (
            |FROM $tableName
            |WHERE $conditions
            |ORDER BY embedding <=> ?::vector""".stripMargin
-      val params =
-        (SqlParam.PString(vectorStr) +: plan.params) ++ Seq(
-          SqlParam.PInt(queryVector.length),
-          SqlParam.PString(vectorStr)
-        )
+      val dimensionParam = if (embeddingDimensions.isDefined) Seq.empty else Seq(SqlParam.PInt(queryVector.length))
+      val params = ((SqlParam.PString(vectorStr) +: plan.params) ++ dimensionParam) :+ SqlParam.PString(vectorStr)
 
       def scored(rows: Iterator[ResultSet]): Iterator[Result[ScoredMemory]] =
         rows.flatMap(rs =>
@@ -654,19 +654,35 @@ final class PostgresMemoryStore private[memory] (
             .map(score => rowToMemory(rs).map(ScoredMemory(_, score)))
         )
 
-      withConnection { conn =>
-        val found =
-          if (plan.needsMatches)
-            // `matches` decides, so topK applies after it: stream the nearest first and keep the first topK it accepts
-            inTransaction(conn) {
+      // An approximate (HNSW) index scan applies the tenant's and the filter's conditions after it picks candidates
+      // (`hnsw.ef_search`, 40 by default), so a selective filter could return fewer than topK although enough rows
+      // match. Iterative scan (pgvector 0.8+; an unknown setting is a harmless placeholder before) keeps scanning until
+      // the filter is satisfied; a search that still comes back short of topK is run again exactly, without the index.
+      def run(conn: Connection, exact: Boolean): Result[Vector[ScoredMemory]] =
+        inTransaction(conn) {
+          if (embeddingDimensions.isDefined)
+            Using.resource(conn.createStatement()) { st =>
+              if (exact) st.execute("SET LOCAL enable_indexscan = off")
+              else st.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+            }: Unit
+          val found =
+            if (plan.needsMatches)
+              // `matches` decides, so topK applies after it: stream the nearest first and keep the first topK it accepts
               runQuery(conn, sql, params, stream = true) { rows =>
                 PostgresMemoryStore.firstN(scored(rows).filter(_.forall(sm => filter.matches(sm.memory))), topK)
               }
-            }
-          else
-            runQuery(conn, s"$sql\nLIMIT ?", params :+ SqlParam.PInt(topK), stream = false) { rows =>
-              PostgresMemoryStore.firstN(scored(rows), Int.MaxValue)
-            }
+            else
+              runQuery(conn, s"$sql\nLIMIT ?", params :+ SqlParam.PInt(topK), stream = false) { rows =>
+                PostgresMemoryStore.firstN(scored(rows), Int.MaxValue)
+              }
+          // relaxed order may return the nearest slightly out of order
+          found.map(_.sorted(ScoredMemory.byScoreDescending))
+        }
+
+      withConnection { conn =>
+        val found = run(conn, exact = false).flatMap { hits =>
+          if (hits.size < topK && embeddingDimensions.isDefined) run(conn, exact = true) else Right(hits)
+        }
         found.flatMap(hits => if (hits.nonEmpty) Right(hits) else mismatch(conn, plan, filter, queryVector.length))
       }
     }

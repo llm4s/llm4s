@@ -167,6 +167,23 @@ class PostgresMemoryStoreVectorSpec extends AnyFlatSpec with Matchers with Eithe
       open(table, dims = Some(4)).left.value.message should include("vector(3)")
   }
 
+  // Codex on #3289: the HNSW scan picks its candidates before the filter's condition applies (ef_search, 40)
+  it should "return every match of a selective filter, though the index's nearest candidates are others" in
+    withTable { table =>
+      val service = new MemoryStoreContract.ContractEmbeddings
+      service.define("query", Array(1f, 0f, 0f))
+      withStore(table, dims = Some(3), service = Some(service)) { store =>
+        store
+          .storeAll((1 to 5000).map(i => mem(s"c$i", Array(1f, i / 100000f, 0f)).copy(content = s"crowd $i")))
+          .value
+        store.storeAll((1 to 5).map(i => mem(s"t$i", Array(0f, 1f, i.toFloat)).copy(content = s"target $i"))).value
+        PostgresContractDb.execute(table, s"ANALYZE $table")
+        val wanted = MemoryFilter.ContentContains("target", caseSensitive = true)
+        store.search("query", 10, wanted).value.map(_.memory.id.value).sorted shouldBe (1 to 5).map(i => s"t$i")
+        store.search("query", 3, wanted).value.size shouldBe 3
+      }
+    }
+
   it should "refuse a query of another dimension before it reaches the index" in withTable { table =>
     val service = new MemoryStoreContract.ContractEmbeddings
     service.define("query", Array(1f, 0f))

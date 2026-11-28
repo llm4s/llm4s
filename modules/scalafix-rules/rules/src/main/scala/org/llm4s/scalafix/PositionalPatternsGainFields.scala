@@ -25,7 +25,8 @@ import scalafix.v1._
  *
  * [[Llm4sMigrateFrom_1_0]] runs it with [[PositionalPatternsGainFields.arity10]]: since 1.0.0, `OpenAIConfig` gained
  * `api`, `reasoningSummary` and `keepReasoning` and `ModelMetadata` `supportedEndpoints` (#2900), `MemoryBounds`
- * `owner`, `PostgresMemoryStore.Config` `tenant` (#3032, #3034) and `RAGConfig` `legFailurePolicy` (#2995).
+ * `owner`, `PostgresMemoryStore.Config` `tenant` and `embeddingDimensions` (#3032, #3034, #3037) and `RAGConfig`
+ * `legFailurePolicy` (#2995).
  */
 class PositionalPatternsGainFields(maps: List[Map[String, (Int, Int)]])
     extends SemanticRule("PositionalPatternsGainFields") {
@@ -63,7 +64,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/config/OpenAIConfig"          -> 14,
     "org/llm4s/model/ModelMetadata"                     -> 9,
     "org/llm4s/agent/memory/MemoryBounds"               -> 3,
-    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 8,
+    "org/llm4s/agent/memory/PostgresMemoryStore.Config" -> 9,
     "org/llm4s/rag/RAGConfig"                           -> 29
   )
 

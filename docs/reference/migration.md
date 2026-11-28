@@ -896,6 +896,11 @@ the same answer from `InMemoryStore`, `EmbeddingMemoryStore`, `SQLiteMemoryStore
 | `EntityId.fromName`, `MemoryType.fromString` and case-insensitive `ContentContains` lower-cased in the default locale (in Turkish, `I` is `ı`) | `Locale.ROOT` |
 | `LLMEmbeddingService.embed` threw on a response with no embedding; `VectorMemoryStore.embedAll` looped when the service answered with fewer vectors than texts | A `Left` in both |
 
+`PostgresMemoryStore.Config` gains a ninth field, `embeddingDimensions`: a positional pattern over it,
+`case Config(_, _, _, _, _, table, _, _)`, no longer compiles. `Llm4sMigrateFrom_1_0`'s
+`PositionalPatternsGainFields` pads one written against 1.0.0; add a `_` by hand to one written against a later
+snapshot.
+
 `MemoryStoreConfig`'s `defaultEmbeddingDimensions`, `enableAutoCleanup` and `cleanupThreshold`, and
 `MemoryStoreConfig.production`, are deprecated: no store read them. Only `InMemoryStore` reads `maxMemories`; bound a
 durable store with `TransactionalMemoryStore.applyAtomically`'s `MemoryBounds`, as `SemanticMemoryMiddleware` does.

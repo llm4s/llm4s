@@ -334,6 +334,17 @@ class PostgresMemoryStoreQueryPlanSpec extends AnyFlatSpec with Matchers {
     ds.sent.head.sql should include("vector_norm(embedding) > 0")
   }
 
+  // Codex on #3289: an HNSW scan applies the filter after picking candidates
+  it should "search an indexed column with iterative scan, and again exactly when the result is short of topK" in {
+    val ds = new RecordingDataSource(Seq(row("a", "alpha")))()
+    val s  = new PostgresMemoryStore(ds, "t", Some(new RecordingEmbeddings), ownsDataSource = false, None, Some(2))
+    s.search("q", 5, MemoryFilter.All).map(_.size) shouldBe Right(1)
+    val sql = ds.sent.map(_.sql)
+    sql.count(_.contains("SET LOCAL hnsw.iterative_scan = relaxed_order")) shouldBe 1
+    sql.count(_.contains("SET LOCAL enable_indexscan = off")) shouldBe 1
+    sql.filter(_.contains("<=>")).foreach(q => (q should not).include("vector_dims"))
+  }
+
   it should "report a store of another dimension when nothing of the query's was found" in {
     def answering(dims: Int): String => Seq[Map[String, Any]] =
       sql => if (sql.contains("AS dims")) Seq(row("old", "old row") + ("dims" -> dims)) else Seq.empty
