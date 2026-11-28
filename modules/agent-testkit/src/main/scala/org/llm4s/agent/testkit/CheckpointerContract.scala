@@ -563,6 +563,19 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(newThread(), 0L, 2).value shouldBe empty
   }
 
+  // #3263: a limit near Int.MaxValue once overflowed the in-memory store's slice and answered nothing
+  it should "page events after a sequence with any limit, Int.MaxValue included, and answer none for a limit below 1" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    s.store.eventsAfter(s.thread, 0L, Int.MaxValue).value.map(_.seq) shouldBe Vector(1L, 2L, 3L, 4L, 5L)
+    s.store.eventsAfter(s.thread, 3L, Int.MaxValue).value.map(_.seq) shouldBe Vector(4L, 5L)
+    s.store.eventsAfter(s.thread, 3L, Int.MaxValue - 1).value.map(_.seq) shouldBe Vector(4L, 5L)
+    s.store.eventsAfter(s.thread, 2L, 0).value shouldBe empty
+    s.store.eventsAfter(s.thread, 2L, -1).value shouldBe empty
+    s.store.eventsAfter(s.thread, 2L, Int.MinValue).value shouldBe empty
+  }
+
   it should "compact behind a floor that never moves back, reporting it to replay from before it" in {
     val s     = Store()
     val token = s.claim("run").value.token
