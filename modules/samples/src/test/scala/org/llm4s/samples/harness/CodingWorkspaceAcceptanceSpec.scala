@@ -89,15 +89,23 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
         .fold(e => throw new IllegalStateException(e.message), identity)
   }
 
-  /** The events a listener saw: the plan's statuses, the tools run and the answer's text, as they streamed. */
+  /**
+   * The events a listener saw: the plan's statuses, the tools run and the answer's text, as they streamed, and the
+   * `Disconnected` that ended the stream, if one did.
+   */
   final private class Seen {
-    val plans = new CopyOnWriteArrayList[Vector[TodoStatus]]()
-    val tools = new CopyOnWriteArrayList[String]()
-    val text  = new StringBuilder
-    val handlers: EventHandlers[Unit] = EventHandlers
+    val plans        = new CopyOnWriteArrayList[Vector[TodoStatus]]()
+    val tools        = new CopyOnWriteArrayList[String]()
+    val text         = new StringBuilder
+    val disconnected = new java.util.concurrent.atomic.AtomicReference[Option[DisconnectReason]](None)
+    private val typed: EventHandlers[Unit] = EventHandlers
       .on(HarnessEvents.TodosUpdated)(t => plans.add(t.todos.map(_.status)): Unit)
       .on(AgentEvents.ToolExecuted)(t => tools.add(t.tool): Unit)
       .on(AgentEvents.TextDelta)(d => text.synchronized(text.append(d.text)): Unit)
+    val handlers: StreamEvent => Unit = {
+      case StreamEvent.Disconnected(_, reason) => disconnected.set(Some(reason))
+      case event                               => typed(event)
+    }
     def statuses: Vector[Vector[TodoStatus]] = plans.asScala.toVector
   }
 
@@ -149,14 +157,24 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
     world.runs(CodingModel.CheckCommand) shouldBe 1
     world.memories(Some(tenant)) should have size 2
     seen2.tools.asScala should contain("execute")
-    seen2.text.toString shouldBe CodingModel.Answer
+    // the answer is held for the output guardrail and sent by the finish task after memory.record (#3231): by then the
+    // store is dead, and the subscription's own store watch may already have found it so and ended the stream with
+    // `ReplayFailed`, as a killed process's would end (#3297). Never a partial answer, either way
+    seen2.text.toString match {
+      case ""   => seen2.disconnected.get.value shouldBe a[DisconnectReason.ReplayFailed]
+      case text => text shouldBe CodingModel.Answer
+    }
     second.close()
 
-    // process 3: once the dead process's claim has expired, recover runs the finish task again
+    // process 3: once the dead process's claim has expired, recover runs the finish task again, streaming its answer
+    // over a live store
     world.clock.advance(3.hours)
     val third  = world.process()
-    val result = third.coder.agent.recover(thread, config).value
+    val seen3  = new Seen
+    val result = third.coder.agent.streamRecover(thread, config)(seen3.handlers).flatMap(_.await()).value
     result.answer.value shouldBe CodingModel.Answer
+    seen3.text.toString shouldBe CodingModel.Answer
+    seen3.disconnected.get shouldBe None
 
     // the command ran exactly once, through the suspension, the resume and the crash
     world.runs(CodingModel.CheckCommand) shouldBe 1
