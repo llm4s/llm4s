@@ -743,6 +743,15 @@ kills any still running 2 s later; only the direct child was stopped before. A c
 interrupted while waiting for its reply to `initialize` stops the process, so the next attempt starts afresh. The
 error for a server that exits names its exit code (`the MCP server process exited with code 3`).
 
+**Handshake (#3079).** The `initialize` request declares no client capabilities (`"capabilities": {}`): it used
+to declare `roots` and `sampling`, which the client does not implement. It offers `2025-06-18` on every transport
+(stdio offered `2024-11-05`) and accepts `2025-06-18`, `2025-03-26` or `2024-11-05` in reply; any other version ends
+the handshake and closes the transport. The agreed version, not a fixed `2025-06-18`, is sent as
+`MCP-Protocol-Version`. A Streamable HTTP server that refuses `initialize` with any 4xx is tried over HTTP+SSE (only
+404 and 405 were before), except 401 and 403, which are reported as they are. A JSON-RPC error's message now ends
+with its `data` when it has one: `JSON-RPC Error -32602: Invalid params (data: path must be absolute)`. A custom
+`MCPTransportImpl` may override the new `useProtocolVersion(version)`, a no-op by default.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

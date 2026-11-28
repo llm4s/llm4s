@@ -22,6 +22,10 @@ class StreamableHTTPTransportImpl(
   private val logger                       = LoggerFactory.getLogger(getClass)
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
+  // The version the handshake agreed (#3079), sent as MCP-Protocol-Version on every request after initialize
+  @volatile private var protocolVersion: Option[String] = None
+
+  override def useProtocolVersion(version: String): Unit = protocolVersion = Some(version)
 
   logger.info(s"StreamableHTTPTransport($name) initialized for URL: $url with timeout: $timeout")
 
@@ -107,14 +111,22 @@ class StreamableHTTPTransportImpl(
     } else if (response.statusCode == 405) {
       // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
       Left(
-        SimpleError("Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)")
+        MCPHttpStatus(
+          405,
+          "Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)"
+        )
       )
     } else if (response.statusCode >= 400) {
       // Handle other HTTP errors
       body.readAll() match {
         case Left(error) => Left(transportFailure(error))
         case Right(text) =>
-          Left(SimpleError(s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"))
+          Left(
+            MCPHttpStatus(
+              response.statusCode,
+              s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"
+            )
+          )
       }
     } else {
       // Determine response type based on content-type header
@@ -142,11 +154,9 @@ class StreamableHTTPTransportImpl(
         logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
         jsonResponse.error match {
           case Some(error) =>
-            val message = Redaction.safeBody(error.message)
-            logger.error(
-              s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=$message"
-            )
-            Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
+            val message = JsonRpcReplies.errorMessage(error)
+            logger.error(s"StreamableHTTPTransport($name) error from $url: $message")
+            Left(SimpleError(message))
           case None =>
             logger.debug(s"StreamableHTTPTransport($name) request successful: id=${jsonResponse.id}")
             Right(jsonResponse)
@@ -165,12 +175,10 @@ class StreamableHTTPTransportImpl(
       "Accept"       -> "application/json, text/event-stream"
     )
 
-    // Add MCP-Protocol-Version header for all requests except initialize
-    val headersWithProtocol = if (request.method == "initialize") {
-      baseHeaders // No protocol version header on initialize
-    } else {
-      baseHeaders + ("MCP-Protocol-Version" -> "2025-06-18")
-    }
+    // The agreed version on every request except initialize, which is where it is agreed (#3079)
+    val headersWithProtocol =
+      if (request.method == "initialize") baseHeaders
+      else protocolVersion.fold(baseHeaders)(v => baseHeaders + ("MCP-Protocol-Version" -> v))
 
     // Add session header if we have one (lowercase per spec)
     mcpSessionId.fold(headersWithProtocol)(sessionId => headersWithProtocol + ("mcp-session-id" -> sessionId))
@@ -197,7 +205,10 @@ class StreamableHTTPTransportImpl(
     def jsonRpcResponse(event: SSEEvent): Option[JsonRpcResponse] = {
       val dataContent = event.data.toString
       if (dataContent.nonEmpty && dataContent != "[DONE]") {
-        Try(ujson.read(dataContent)).toOption.filter(JsonRpcReplies.isResponseTo(request.id, _)) match {
+        val parsed = Try(ujson.read(dataContent)).toOption
+        // A request the server sends while it works on this one is answered at once (#3079); it is not the reply
+        parsed.flatMap(JsonRpcReplies.serverRequest).foreach { case (id, method) => answerServer(id, method) }
+        parsed.filter(JsonRpcReplies.isResponseTo(request.id, _)) match {
           case None =>
             logger.debugPayload(
               s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data, or a message other than the response to id ${request.id}: ",
@@ -283,12 +294,27 @@ class StreamableHTTPTransportImpl(
     loop(SSEEvent(), 0)
   }
 
+  /**
+   * Answers a request the server sent in a reply stream (#3079): `ping` with an empty result, anything else with
+   * method-not-found. Posted like a notification; a failure is logged, since the reply being read is unaffected.
+   */
+  private def answerServer(id: ujson.Value, method: String): Unit = {
+    logger.debug(s"StreamableHTTPTransport($name) answering the server's request $method")
+    postMessage(JsonRpcReplies.answerToServerRequest(id, method).render(), "answer").left.foreach { error =>
+      logger.warn(s"StreamableHTTPTransport($name) could not answer the server's $method: ${error.message}")
+    }
+  }
+
   override def sendNotification(notification: JsonRpcNotification): Result[Unit] = {
     logger.debug(s"StreamableHTTPTransport($name) sending notification to $url: method=${notification.method}")
+    postMessage(write(notification), "notification")
+  }
 
+  /** POSTs a message that gets no JSON-RPC reply: a notification, or an answer to a server's request. */
+  private def postMessage(json: String, kind: String): Result[Unit] =
     Try {
-      val notificationJson = write(notification)
-      logger.debugPayload(s"StreamableHTTPTransport($name) notification JSON: ", notificationJson)
+      val notificationJson = json
+      logger.debugPayload(s"StreamableHTTPTransport($name) $kind JSON: ", notificationJson)
 
       // Build headers for notification (same as requests)
       val headers = buildNotificationHeaders()
@@ -327,7 +353,6 @@ class StreamableHTTPTransportImpl(
           Right(())
         }
     }
-  }
 
   /**
    * Build headers for notifications. A notification gets no JSON-RPC response, but the Streamable HTTP
@@ -340,8 +365,8 @@ class StreamableHTTPTransportImpl(
       "Accept"       -> "application/json, text/event-stream"
     )
 
-    // Add MCP-Protocol-Version header (notifications still need protocol version)
-    val headersWithProtocol = baseHeaders + ("MCP-Protocol-Version" -> "2025-06-18")
+    // The agreed version (#3079); notifications/initialized is sent once it is known
+    val headersWithProtocol = protocolVersion.fold(baseHeaders)(v => baseHeaders + ("MCP-Protocol-Version" -> v))
 
     // Add session header if we have one
     mcpSessionId.fold(headersWithProtocol)(sessionId => headersWithProtocol + ("mcp-session-id" -> sessionId))

@@ -131,7 +131,19 @@ trait MCPTransportImpl {
   def sendNotification(notification: JsonRpcNotification): Result[Unit]
   // Closes the transport connection
   def close(): Unit
+
+  /**
+   * Records the protocol version the handshake agreed (#3079), which an HTTP transport sends as
+   * `MCP-Protocol-Version` on every request after `initialize`. A no-op for a transport with no such header.
+   */
+  def useProtocolVersion(version: String): Unit = ()
 }
+
+/**
+ * An HTTP status that refused a request (#3079): `MCPClientImpl` falls back to HTTP+SSE when a Streamable HTTP
+ * server refuses `initialize` with a 4xx. `message` is what the transports always reported.
+ */
+final private[mcp] case class MCPHttpStatus(status: Int, message: String) extends LLMError
 
 /**
  * A request the server provably did not run, because the session it belonged to is gone (#3072): an HTTP server

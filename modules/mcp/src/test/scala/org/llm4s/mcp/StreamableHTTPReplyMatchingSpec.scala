@@ -73,6 +73,57 @@ class StreamableHTTPReplyMatchingSpec extends AnyFlatSpec with Matchers with Eit
     error should include("reply exceeds")
   }
 
+  it should "answer a ping and refuse another request the server sends in the reply stream (#3079)" in {
+    val posted                                          = new java.util.concurrent.ConcurrentLinkedQueue[ujson.Value]()
+    val ping                                            = event("""{"jsonrpc":"2.0","id":"7","method":"ping"}""")
+    val roots                                           = event("""{"jsonrpc":"2.0","id":41,"method":"roots/list"}""")
+    var result: Option[Either[String, JsonRpcResponse]] = None
+    LocalProviderTestServer.withServer("/mcp") { exchange =>
+      val body = ujson.read(new String(exchange.getRequestBody.readAllBytes(), UTF_8))
+      if (body.obj.contains("method")) sendSse(ping + roots + realReply)(exchange)
+      else {
+        posted.add(body): Unit
+        LocalProviderTestServer.sendJsonResponse(exchange, 202, "")
+      }
+    } { url =>
+      result = Some(
+        new StreamableHTTPTransportImpl(s"$url/mcp", "answering", 5.seconds).sendRequest(request).left.map(_.message)
+      )
+    }
+
+    result.flatMap(_.toOption).map(_.id) shouldBe Some("7")
+    val answers = posted.toArray.toSeq.collect { case v: ujson.Value => v }
+    answers.map(_("id")) should contain theSameElementsAs Seq(ujson.Str("7"), ujson.Num(41))
+    answers.find(_("id") == ujson.Str("7")).map(_("result")) shouldBe Some(ujson.Obj())
+    answers.find(_("id") == ujson.Num(41)).map(_("error")("code").num.toInt) shouldBe Some(-32601)
+  }
+
+  it should "include a JSON-RPC error's data in the error (#3079)" in {
+    val error = call(
+      event(
+        """{"jsonrpc":"2.0","id":"7","error":{"code":-32602,"message":"Invalid params","data":"path must be absolute"}}"""
+      )
+    ).left.value
+
+    error shouldBe "JSON-RPC Error -32602: Invalid params (data: path must be absolute)"
+  }
+
+  "JsonRpcReplies.serverRequest" should "take only an object with a method and an id for a server's request" in {
+    def req(json: String) = JsonRpcReplies.serverRequest(ujson.read(json))
+
+    req("""{"jsonrpc":"2.0","id":"a","method":"ping"}""") shouldBe Some(ujson.Str("a") -> "ping")
+    req("""{"jsonrpc":"2.0","id":3,"method":"roots/list"}""") shouldBe Some(ujson.Num(3) -> "roots/list")
+    req("""{"jsonrpc":"2.0","method":"notifications/progress"}""") shouldBe None // a notification
+    req("""{"jsonrpc":"2.0","id":"a","result":{}}""") shouldBe None              // a response
+  }
+
+  "JsonRpcReplies.errorMessage" should "show an object's data as JSON, and nothing for null data" in {
+    JsonRpcReplies.errorMessage(JsonRpcError(1, "m", Some(ujson.Obj("field" -> "x")))) shouldBe
+      """JSON-RPC Error 1: m (data: {"field":"x"})"""
+    JsonRpcReplies.errorMessage(JsonRpcError(1, "m", Some(ujson.Null))) shouldBe "JSON-RPC Error 1: m"
+    JsonRpcReplies.errorMessage(JsonRpcError(1, "m", None)) shouldBe "JSON-RPC Error 1: m"
+  }
+
   "JsonRpcReplies.isResponseTo" should "accept only a response object with the request's id" in {
     def isReply(json: String) = JsonRpcReplies.isResponseTo("7", ujson.read(json))
 

@@ -75,6 +75,33 @@ class MCPClientHandshakePathsSpec extends AnyFlatSpec with Matchers {
     client.initialize().left.map(_.message) shouldBe Left("Unsupported protocol version: 1999-01-01")
   }
 
+  it should "offer the latest version and declare no client capability (#3079)" in {
+    var offered: Option[ujson.Value] = None
+    val client = clientOver(new Scripted(request => {
+      offered = request.params
+      answer(request, handshake)
+    }))
+
+    client.initialize() shouldBe Right(())
+    offered.map(_("protocolVersion").str) shouldBe Some(MCPClientImpl.LatestProtocolVersion)
+    offered.map(_("capabilities")) shouldBe Some(ujson.Obj())
+  }
+
+  it should "keep the version and capabilities the server answered, and give the version to the transport (#3079)" in {
+    val agreed = new java.util.concurrent.atomic.AtomicReference[String]()
+    val transport = new Scripted(
+      answer(_, ujson.Obj("protocolVersion" -> "2024-11-05", "capabilities" -> ujson.Obj("tools" -> ujson.Obj())))
+    ) {
+      override def useProtocolVersion(version: String): Unit = agreed.set(version)
+    }
+    val client = clientOver(transport)
+
+    client.initialize() shouldBe Right(())
+    agreed.get shouldBe "2024-11-05"
+    client.protocolVersion shouldBe Some("2024-11-05")
+    client.serverCapabilities shouldBe Some(ujson.Obj("tools" -> ujson.Obj()))
+  }
+
   "getTools" should "return CancelledError when listing the tools is cancelled" in {
     val client = clientOver(
       new Scripted(request =>

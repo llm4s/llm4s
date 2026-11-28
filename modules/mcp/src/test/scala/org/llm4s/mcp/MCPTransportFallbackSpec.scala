@@ -81,25 +81,27 @@ class MCPTransportFallbackSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "MCPClientImpl.isUnsupportedTransport" should "accept what the transport says for a 404 and for a 405" in {
-    MCPClientImpl.isUnsupportedTransport("Transport error: HTTP error 404: not found") shouldBe true
-    MCPClientImpl.isUnsupportedTransport("Transport error: HTTP error 405: nope") shouldBe true
-    MCPClientImpl.isUnsupportedTransport(
-      "Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)"
-    ) shouldBe true
+  it should "fall back when the server refuses initialize with any other 4xx, such as 400" in {
+    LocalProviderTestServer.withServer("/")(ex => LocalProviderTestServer.sendJsonResponse(ex, 400, "{}")) { url =>
+      val client = new MCPClientImpl(MCPServerConfig.streamableHTTP("old", url + "/mcp", 5.seconds))
+      try failure(client.initialize()) should startWith("Failed to connect with both transports")
+      finally client.close()
+    }
   }
 
-  it should "refuse a message that only contains the digits" in {
-    Seq(
-      "Transport error: POST http://127.0.0.1:40413/mcp: connection failed: ConnectException",
-      "Transport error: POST http://127.0.0.1:40585/mcp: connection failed: ConnectException",
-      "Transport error: POST http://127.0.0.1:8080/mcp: request timed out after 2 seconds",
-      "Transport error: HTTP error 500: upstream returned 404",
-      "Transport error: HTTP error 4040: not a status",
-      "Transport error: HTTP error 401: unauthorized",
-      "Transport error: MCP session expired, client should reinitialize",
-      "JSON-RPC Error -32601: Method not found",
-      ""
-    ).foreach(message => withClue(message)(MCPClientImpl.isUnsupportedTransport(message) shouldBe false))
+  it should "report a 401 as it is, without trying HTTP+SSE" in {
+    LocalProviderTestServer.withServer("/")(ex => LocalProviderTestServer.sendJsonResponse(ex, 401, "{}")) { url =>
+      val client = new MCPClientImpl(MCPServerConfig.streamableHTTP("locked", url + "/mcp", 5.seconds))
+      try {
+        val message = failure(client.initialize())
+        message should include("HTTP error 401")
+        (message should not).include("both transports")
+      } finally client.close()
+    }
+  }
+
+  "MCPClientImpl.fallsBackToLegacy" should "hold for every 4xx except 401 and 403, and for nothing else" in {
+    Seq(400, 404, 405, 406, 415, 422, 499).foreach(s => withClue(s)(MCPClientImpl.fallsBackToLegacy(s) shouldBe true))
+    Seq(200, 202, 301, 401, 403, 500, 503).foreach(s => withClue(s)(MCPClientImpl.fallsBackToLegacy(s) shouldBe false))
   }
 }

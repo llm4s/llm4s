@@ -41,6 +41,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     // Arrange
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
+    (mockTransport.useProtocolVersion _).expects("2025-06-18").anyNumberOfTimes()
 
     // Initialize response
     val initResponse = JsonRpcResponse(
@@ -95,6 +96,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     // Arrange
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
+    (mockTransport.useProtocolVersion _).expects("2025-06-18").anyNumberOfTimes()
 
     (mockTransport.sendRequest _)
       .expects(*)
@@ -125,13 +127,14 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     // Arrange
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
+    (mockTransport.useProtocolVersion _).expects("2025-06-18").anyNumberOfTimes()
 
     val p = JsonRpcRequest(
       "2.0",
       "1",
       "initialize",
       Some(ujson.Value("""
-          |{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"roots":{"listChanged":false},"sampling":{}},"clientInfo":{"name":"llm4s-mcp","version":"1.0.0"}}
+          |{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"llm4s-mcp","version":"1.0.0"}}
           |""".stripMargin))
     )
 
@@ -148,6 +151,12 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
         )
       )
 
+    (mockTransport.sendNotification _).expects(*).returning(Right(()))
+    // The listing's `tools` is not an array
+    (mockTransport.sendRequest _)
+      .expects(JsonRpcRequest("2.0", "2", "tools/list", None))
+      .returning(Right(JsonRpcResponse("2.0", "2", Some(ujson.Obj("tools" -> "not-a-list")))))
+
     client.transport = Some(mockTransport)
     // Act
     val result = client.getTools()
@@ -161,7 +170,8 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
   private def toolWithProperties(properties: ujson.Obj, required: Seq[String]): ToolFunction[?] = {
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
-    val initResponse  = JsonRpcResponse("2.0", "1", Some(ujson.Obj("protocolVersion" -> "2025-06-18")))
+    (mockTransport.useProtocolVersion _).expects("2025-06-18").anyNumberOfTimes()
+    val initResponse = JsonRpcResponse("2.0", "1", Some(ujson.Obj("protocolVersion" -> "2025-06-18")))
     val toolsResponse = JsonRpcResponse(
       "2.0",
       "2",
