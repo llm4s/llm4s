@@ -11,8 +11,6 @@ import org.slf4j.LoggerFactory
 
 import java.util.Locale
 
-import scala.util.Try
-
 /**
  * Result of source attribution evaluation.
  *
@@ -103,7 +101,7 @@ class SourceAttributionGuardrail(
       Right(output)
     } else {
       evaluateAttribution(output, context, client).flatMap { result =>
-        if (result.attributionScore >= minAttributionScore) {
+        if (JudgeScores.reaches(result.attributionScore, minAttributionScore)) {
           Right(output)
         } else {
           handleFailure(output, result)
@@ -251,19 +249,15 @@ class SourceAttributionGuardrail(
    * Parse the structured attribution result from LLM response.
    */
   private def parseAttributionResult(response: String): Result[SourceAttributionResult] = {
-    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
+    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty).toSeq
 
     val hasAttributions = lines.find(_.startsWith("HAS_ATTRIBUTIONS:")).exists { line =>
       line.stripPrefix("HAS_ATTRIBUTIONS:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
-    val attributionScore = lines
-      .find(_.startsWith("ATTRIBUTION_SCORE:"))
-      .flatMap { line =>
-        val value = line.stripPrefix("ATTRIBUTION_SCORE:").trim.replaceAll("[^0-9.]", "")
-        Try(value.toDouble).toOption.map(s => Math.max(0.0, Math.min(1.0, s)))
-      }
-      .getOrElse(if (hasAttributions) 0.5 else 0.0)
+    // Read as LLMGuardrail reads a score (#3234): a number from 0 to 1, never clamped; a missing or unreadable
+    // ATTRIBUTION_SCORE is a Left, never a default score.
+    val attributionScoreRead = JudgeScores.required(lines, "ATTRIBUTION_SCORE:", "source_attribution_parse", response)
 
     val citedSources = lines
       .find(_.startsWith("CITED_SOURCES:"))
@@ -288,7 +282,7 @@ class SourceAttributionGuardrail(
       .map(_.stripPrefix("EXPLANATION:").trim)
       .getOrElse("No explanation provided")
 
-    Right(
+    attributionScoreRead.map { attributionScore =>
       SourceAttributionResult(
         hasAttributions = hasAttributions,
         attributionScore = attributionScore,
@@ -296,7 +290,7 @@ class SourceAttributionGuardrail(
         uncitedClaims = uncitedClaims,
         explanation = explanation
       )
-    )
+    }
   }
 }
 

@@ -9,7 +9,6 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import scala.util.Try
 import org.llm4s.util.Redaction
 
 /**
@@ -241,88 +240,42 @@ class ContextRelevanceGuardrail(
     response: String,
     chunkCount: Int
   ): Result[ContextRelevanceResult] = {
-    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
+    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty).toSeq
 
-    val overallScoreOpt = lines.find(_.startsWith("OVERALL_SCORE:")).flatMap { line =>
-      val value = line.stripPrefix("OVERALL_SCORE:").trim.replaceAll("[^0-9.]", "")
-      Try(value.toDouble).toOption.map(s => Math.max(0.0, Math.min(1.0, s)))
+    // Every score is read as LLMGuardrail reads one (#3234): a number from 0 to 1, never clamped. An unreadable
+    // score is a Left; a chunk the judge gave no score scores 0.
+    val chunkScoresRead: Result[Seq[Double]] = lines.find(_.startsWith("CHUNK_SCORES:")) match {
+      case Some(line) =>
+        JudgeScores.list(line.stripPrefix("CHUNK_SCORES:"), "CHUNK_SCORES:", "context_relevance_parse", response)
+      case None => Right(Seq.empty)
     }
-
-    val chunkScores = lines
-      .find(_.startsWith("CHUNK_SCORES:"))
-      .map { line =>
-        val scoresStr = line.stripPrefix("CHUNK_SCORES:").trim
-        scoresStr
-          .split(",")
-          .map(_.trim.replaceAll("[^0-9.]", ""))
-          .flatMap(s => Try(s.toDouble).toOption)
-          .map(s => Math.max(0.0, Math.min(1.0, s)))
-          .toSeq
-      }
-      .getOrElse(Seq.empty)
+    val hasOverall = lines.exists(_.startsWith("OVERALL_SCORE:"))
 
     val explanation = lines
       .find(_.startsWith("EXPLANATION:"))
       .map(_.stripPrefix("EXPLANATION:").trim)
       .getOrElse("No explanation provided")
 
-    // Ensure we have scores for all chunks (pad or truncate)
-    val normalizedScores = if (chunkScores.size >= chunkCount) {
-      chunkScores.take(chunkCount)
-    } else {
-      // Pad with zeros for missing chunks
-      chunkScores ++ Seq.fill(chunkCount - chunkScores.size)(0.0)
-    }
-
-    val relevantCount = normalizedScores.count(_ >= threshold)
-
-    overallScoreOpt match {
-      case Some(overallScore) =>
-        Right(
-          ContextRelevanceResult(
-            overallScore = overallScore,
-            chunkScores = normalizedScores,
-            relevantChunkCount = relevantCount,
-            explanation = explanation
-          )
-        )
-
-      case None =>
-        // Fallback: compute overall from chunk scores
-        if (normalizedScores.nonEmpty) {
-          val computedOverall = normalizedScores.sum / normalizedScores.size
-          Right(
-            ContextRelevanceResult(
-              overallScore = computedOverall,
-              chunkScores = normalizedScores,
-              relevantChunkCount = relevantCount,
-              explanation = explanation
+    for {
+      chunkScores <- chunkScoresRead
+      // Ensure we have scores for all chunks (pad with zeros, or truncate)
+      normalizedScores = chunkScores.take(chunkCount) ++ Seq.fill(math.max(0, chunkCount - chunkScores.size))(0.0)
+      overallScore <-
+        if (hasOverall) JudgeScores.required(lines, "OVERALL_SCORE:", "context_relevance_parse", response)
+        else if (chunkScores.nonEmpty) Right(normalizedScores.sum / normalizedScores.size)
+        else
+          Left(
+            ValidationError.invalid(
+              "context_relevance_parse",
+              s"Could not parse context relevance from LLM response: ${Redaction.safeBody(response, 200)}"
             )
           )
-        } else {
-          // Last fallback: try to extract a single score
-          val fallbackScore = response.trim.replaceAll("[^0-9.]", "")
-          Try(fallbackScore.toDouble).toOption match {
-            case Some(score) if score >= 0.0 && score <= 1.0 =>
-              val scores = Seq.fill(chunkCount)(score)
-              Right(
-                ContextRelevanceResult(
-                  overallScore = score,
-                  chunkScores = scores,
-                  relevantChunkCount = scores.count(_ >= threshold),
-                  explanation = "Score-only response"
-                )
-              )
-            case _ =>
-              Left(
-                ValidationError.invalid(
-                  "context_relevance_parse",
-                  s"Could not parse context relevance from LLM response: ${Redaction.safeBody(response, 200)}"
-                )
-              )
-          }
-        }
-    }
+    } yield ContextRelevanceResult(
+      overallScore = overallScore,
+      chunkScores = normalizedScores,
+      relevantChunkCount = normalizedScores.count(JudgeScores.reaches(_, threshold)),
+      explanation = explanation
+    )
   }
 }
 

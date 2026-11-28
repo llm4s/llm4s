@@ -313,12 +313,30 @@ final private[agent] case class ToolResult(
   isError: Boolean
 ) derives ReadWriter
 
-/** One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this attempt's number (from 1). */
+/**
+ * One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this
+ * attempt's number (from 1).
+ *
+ * When a middleware's `afterAgent` guards the answer ([[org.llm4s.agent.graph.middleware.AgentMiddleware.guardsAnswer]]),
+ * `textDelta` holds the text instead of sending it (#3231): the loop sends it once the call returns with tool calls,
+ * and otherwise - the text is the turn's answer - drops it, sending the answer as stored only once every `afterAgent`
+ * has passed it. A blocked or rewritten answer is so never seen by a listener as the model wrote it.
+ */
 @Experimental
-final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
-  def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
+final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int, hold: Boolean):
+  private val held = java.util.concurrent.ConcurrentLinkedQueue[String]()
+
+  def textDelta(text: String): Unit =
+    if hold then held.add(text)
+    else AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
   def thinkingDelta(text: String): Unit =
     AgentEvents.ThinkingDelta.progress(context, events.ThinkingDelta(attempt, text))
+
+  /** Sends the text `textDelta` held, in order: the call returned tool calls, so it is not the turn's answer. */
+  private[toolloop] def release(): Unit =
+    Iterator.continually(held.poll()).takeWhile(_ != null).foreach { text =>
+      AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
+    }
 
 /** The model call: the conversation so far, and the tools on offer, to the model's completion. */
 @Experimental
@@ -336,6 +354,13 @@ trait ModelStep:
    * tracing's `gen_ai.provider.name` (#2275). `None` by default; [[ModelStep.fromClient]] gives its client's.
    */
   def providerId: Option[ProviderId] = None
+
+  /**
+   * Whether this step streams its answer through [[ModelCall.textDelta]]. When a middleware guards the answer (#3231),
+   * the loop then sends the final answer, as stored, as one `TextDelta` once every `afterAgent` has passed it, in
+   * place of the deltas it held. `false` by default; [[ModelStep.fromClient]] gives its `streaming`.
+   */
+  def streams: Boolean = false
 
 @Experimental
 object ModelStep:
@@ -359,6 +384,7 @@ object ModelStep:
     output: Option[ResponseFormat] = None
   ): ModelStep = new ModelStep:
     override def providerId: Option[ProviderId] = client.providerId
+    override def streams: Boolean               = streaming
 
     override def responseFormat(tools: ToolSet): Option[ResponseFormat] =
       if output.isEmpty then options.responseFormat else output.filter(_ => tools.toolFunctions.isEmpty)
@@ -519,21 +545,28 @@ final class ToolLoop private (
     if input.refusedBy.isDefined || owners.isEmpty then Right(ToolLoop.Admitted(input, None))
     else
       val ledger = new AdmissionContext.Collected
-      val passed = owners.foldLeft[Result[String]](Right(input.query)) { (query, owner) =>
-        query.flatMap { text =>
-          stacks(owner).admit(text, AdmissionContext.before(threadId, owner, config.tenantId, config.principal, ledger))
-        }
+      // the query, then every imported user message's text, through each stack in turn (#3235): history a new thread
+      // imports is admitted as the query is, rewritten as the stages rewrite it, and refused as they refuse it
+      val passed = owners.foldLeft[Result[(String, Vector[Message])]](Right(input.query -> input.history)) {
+        (acc, owner) =>
+          acc.flatMap { (text, history) =>
+            val context = AdmissionContext.before(threadId, owner, config.tenantId, config.principal, ledger)
+            val stack   = stacks(owner)
+            stack.admit(text, context).flatMap(query => ToolLoop.admitHistory(stack, history, context).map(query -> _))
+          }
       }
       val prior = input.admission.getOrElse(Admission(Vector.empty))
       def record(refusedBy: Option[String]) =
         Admission(prior.agents ++ owners, prior.usage.merge(ledger.usage), prior.calls ++ ledger.calls, refusedBy)
       passed match
-        case Right(query) if query.trim.isEmpty =>
+        case Right((query, _)) if query.trim.isEmpty =>
           Left(ValidationError("query", "admit returned a blank query"))
-        case Right(query) => Right(ToolLoop.Admitted(input.withQuery(query).withAdmission(record(None)), None))
+        case Right((query, history)) =>
+          Right(ToolLoop.Admitted(input.withQuery(query).withHistory(history).withAdmission(record(None)), None))
         case Left(blocked: GuardrailBlocked) =>
-          // nothing of the query goes on: the turn it starts holds who refused it, and what the stages counted
-          val refused = input.withQuery("").withAdmission(record(Some(blocked.guardrail)))
+          // nothing of the query or the history goes on: the turn it starts holds who refused it, and what the
+          // stages counted
+          val refused = input.withQuery("").withHistory(Vector.empty).withAdmission(record(Some(blocked.guardrail)))
           Right(ToolLoop.Admitted(refused, Some(blocked)))
         case Left(error) => Left(error)
 
@@ -654,6 +687,38 @@ object ToolLoop:
    * reason, which the input does not hold.
    */
   final private[agent] case class Admitted(input: AgentInput, refused: Option[GuardrailBlocked])
+
+  /**
+   * `history` through `stack`'s `admit` stages (#3235): each imported user message's text parts, each on its own, as
+   * a query is; a part the stages rewrite is stored as rewritten. Assistant messages and tool results are kept as
+   * they are - they are the earlier turns' model and tool output, not caller input. A stage's `Left` refuses the
+   * whole import, and a text part the stages return blank is a `ValidationError`.
+   */
+  private[agent] def admitHistory(
+    stack: MiddlewareStack,
+    history: Vector[Message],
+    context: AdmissionContext
+  ): Result[Vector[Message]] =
+    history.foldLeft[Result[Vector[Message]]](Right(Vector.empty)) { (acc, message) =>
+      acc.flatMap { admitted =>
+        message match
+          case user: UserMessage =>
+            user.parts.toVector
+              .foldLeft[Result[Vector[ContentPart]]](Right(Vector.empty)) { (parts, part) =>
+                parts.flatMap { done =>
+                  part match
+                    case ContentPart.Text(text) if text.trim.nonEmpty =>
+                      stack.admit(text, context).flatMap { next =>
+                        if next.trim.isEmpty then Left(ValidationError("history", "admit returned a blank message"))
+                        else Right(done :+ ContentPart.Text(next))
+                      }
+                    case other => Right(done :+ other)
+                }
+              }
+              .map(parts => admitted :+ user.withParts(parts))
+          case other => Right(admitted :+ other)
+      }
+    }
 
   /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */
   private[agent] def settled(output: TurnOutput): RunOutcome = output.outcome match
@@ -1467,6 +1532,10 @@ object ToolLoop:
     val agent    = nodes.agent
     val tools    = nodes.tools
     val stack    = nodes.stack
+    // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
+    val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
+    // a streamed answer is held until finish has run every afterAgent on it when one of them guards it (#3231)
+    val holdAnswer = boundaryOwners.exists(_.stack.ordered.exists(_.guardsAnswer))
     // the batch's lock schedule, as the model step recorded it: none for an agent without locks
     def scheduledWith(state: ThreadState): LockSchedule =
       nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
@@ -1685,7 +1754,8 @@ object ToolLoop:
           val result = stack.wrapModelCall(req, hooks, check) { r =>
             // every call is checked against the token budget, also a wrapper's second one (#2084)
             hooks.admitted {
-              val (called, took) = ModelContext.timed(callModel(agent.model, agent.id, context, attempts)(r))
+              val (called, took) =
+                ModelContext.timed(callModel(agent.model, agent.id, context, attempts, holdAnswer)(r))
               called.map { (completion, attempt) =>
                 hooks.recordCall(
                   completion,
@@ -1785,15 +1855,16 @@ object ToolLoop:
       modelStep(state, context, Vector.empty)
     )
 
-    // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
-    val boundaryOwners = if agent.id == root then Vector(nodes) else Vector(nodes, family(root))
-
     // the final answer, through every afterAgent; a changed answer replaces the stored message's content, and the
     // hooks' updates commit with it. An output Block (an afterAgent `Left`, or a blank answer) ends the run as a
     // finished failure and retracts the blocked turn: every key the turn wrote returns to its value before the
     // turn (design §4.22), the turn's messages are removed, and the agent and transfer the turn started with are
     // restored - only the usage of its model calls is kept. A middleware question stores nothing but that usage,
     // and the answer is guarded again, with the answers, once it is answered.
+    // the answer the model call held (#3231), as every afterAgent passed it: one TextDelta of the finish task
+    def sendHeld(answer: String, context: RunContext): Unit =
+      if holdAnswer && agent.model.streams then AgentEvents.TextDelta.progress(context, events.TextDelta(1, answer))
+
     def finishStep(state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
       val outcome = for
         history <- state.get(messages)
@@ -1819,8 +1890,10 @@ object ToolLoop:
           case Right(Right((changed, _))) if changed.trim.isEmpty =>
             blocked(ValidationError("tool loop", "afterAgent returned a blank answer"))
           case Right(Right((changed, update))) if changed == assistant.content =>
+            sendHeld(changed, context)
             NodeResult.Continue(completed(update))
           case Right(Right((changed, update))) =>
+            sendHeld(changed, context)
             val replaced = StoredMessage(answerId, assistant.withContent(changed))
             NodeResult.Continue(completed(update).update(messages, MessageUpdate.Replace(answerId, replaced)))
       outcome.fold(NodeResult.Fail(_), identity)
@@ -1948,7 +2021,13 @@ object ToolLoop:
    * bare `InterruptedException` too - restores the interrupt flag and is `Left(CancelledError)`.
    * Either way it is the model's failure, not a wrapper's.
    */
-  private def callModel(model: ModelStep, agent: AgentId, context: RunContext, attempts: AtomicInteger)(
+  private def callModel(
+    model: ModelStep,
+    agent: AgentId,
+    context: RunContext,
+    attempts: AtomicInteger,
+    holdAnswer: Boolean
+  )(
     request: ModelRequest
   ): Result[(Completion, Int)] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
@@ -1956,7 +2035,8 @@ object ToolLoop:
       ToolResultRule.check(request.messages).flatMap { _ =>
         val n = attempts.incrementAndGet()
         AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
-        val result = attempt(model.next(request.sentMessages, request.tools, ModelCall(context, agent, n))) match
+        val call = ModelCall(context, agent, n, holdAnswer)
+        val result = attempt(model.next(request.sentMessages, request.tools, call)) match
           case Right(result) => result
           case Left(thrown) =>
             CancelledError.fromThrowable(thrown, "model") match
@@ -1964,6 +2044,8 @@ object ToolLoop:
                 Thread.currentThread().interrupt()
                 Left(cancellation)
               case None => Failure[Completion](thrown).toResult
+        // a held answer is sent by finish once afterAgent passes it (#3231); text beside tool calls is not the answer
+        result.foreach(completion => if completion.message.toolCalls.nonEmpty then call.release())
         result.map(_ -> n)
       }
 

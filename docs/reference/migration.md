@@ -832,6 +832,20 @@ No signature changed and no stored format changed; what is refused is new:
 | `PathPolicy` compared blocked entries by spelling and real path only, so on macOS every default blocked path was readable through its `/System/Volumes/Data/...` firmlink spelling (#3237) | A path with an existing ancestor whose file key is a blocked entry's is blocked, so the firmlink spelling of a blocked directory is blocked too. Where the platform reports file keys (not Windows), each check reads the attributes of the path's existing ancestors |
 | `VectorMemoryStore.storageIdentity` was `None`, so `SemanticMemoryMiddleware` gave two tenants two instances over one file (#3238) | It names the file's real path, as `SQLiteMemoryStore` does: a resolver that maps two tenants to one file is refused |
 
+## Guardrails see and keep every rewrite, and fail closed (#3231, #3232, #3233, #3234, #3235)
+
+The guardrails and the streaming path are experimental, and `Agent.run`'s history import keeps its `@Stable`
+signature. No signature changed (`AgentMiddleware.guardsAnswer` and `ModelStep.streams` are new, with defaults) and the
+stored format is the same; what changed is what passes:
+
+| Before (1.0.0) | After |
+|---|---|
+| With `withStreaming()`, the final answer reached listeners as `TextDelta`s before output guardrails ran, so a blocked or masked answer had already been shown raw (#3231) | An agent with output guardrails holds the answer's text and sends it as one `TextDelta`, as stored, once they pass it; a blocked answer sends none. Text beside a tool call still streams live. A custom middleware whose `afterAgent` blocks or rewrites overrides the new `AgentMiddleware.guardsAnswer` to `true`; a custom `ModelStep` that streams overrides the new `ModelStep.streams` |
+| `CompositeGuardrail.all` ran every guardrail on the original value and returned it, so a masking guardrail inside it masked nothing (#3232) | Each guardrail sees the value as the one before it rewrote it, and `all` returns the last rewrite. A failing guardrail leaves the value unchanged for the next, and every failure is still reported |
+| `PromptInjectionDetector`'s `how_to_dangerous`, `creative_writing`, `ignore_instructions`, `forget_instructions`, `disregard`, `sql_injection` and `script_tags` patterns could take cubic or quadratic time on crafted input, at admission (#3233) | They match in linear time, and every pattern's match is step-bounded: one that exhausts its budget (ten million reads plus 100 per character) counts as a match, under the detector's `onFail`. `script_tags` matches an event-handler attribute only at the start of a word (`onclick=`, not `money=`) |
+| `GroundingGuardrail`, `ContextRelevanceGuardrail`, `SourceAttributionGuardrail` and `TopicBoundaryGuardrail` read a score by stripping every non-digit and clamping, and fell back to a number anywhere in the reply, so `SCORE: 2/10` read as 210 and passed (#3234) | Each score is read as `LLMGuardrail` reads one: a plain number from 0 to 1. A scaled, unreadable or missing score is a `Left` (a missing `ATTRIBUTION_SCORE` or `RELEVANCE_SCORE` no longer defaults to 0.5 or 0.7), and so is a reply without its `SCORE` and `GROUNDED` lines. `GroundingGuardrail` with `onFail = Fix` blocks a context with no chunks, as it blocks a low score |
+| `agent.run(threadId, query, config, history)` admitted only the query: imported messages reached the store and the model unguarded, and a refused query still created the thread with the history in it, so the same import could not be retried (#3235) | Each imported user message's text goes through the input guardrails too, stored as they rewrite it. A refusal of the query or of an imported message ends the turn `AgentStatus.Blocked`, as before, but stores nothing and creates no thread, so the import can be retried on the same thread id. `Agent.admit` with `history` admits it too, and a refused `QueuedInput` imports nothing |
+
 ## An error's `provider` is a `ProviderId` (#2936)
 
 The provider an error names was the last provider id of the Stable API still a raw `String`. It is a `ProviderId` on

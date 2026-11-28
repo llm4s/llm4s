@@ -120,7 +120,7 @@ agent
 | Event | Fields | Sent |
 |---|---|---|
 | `ModelCallStarted` | `agent`, `attempt` | before each attempt of a model call |
-| `TextDelta` | `attempt`, `text` | per chunk of the answer as the model writes it (needs `withStreaming()`); with `withOutput` that is the raw JSON, including the `{"answer": ...}` envelope of a [union answer](index#a-union-as-the-answer) |
+| `TextDelta` | `attempt`, `text` | per chunk of the answer as the model writes it (needs `withStreaming()`); with `withOutput` that is the raw JSON, including the `{"answer": ...}` envelope of a [union answer](index#a-union-as-the-answer). With output guardrails, the answer once, after they pass it ([Guarded answers](#guarded-answers)) |
 | `ThinkingDelta` | `attempt`, `text` | per chunk of the model's reasoning (needs `withStreaming()`) |
 | `ToolCallStarted` | `toolCallId`, `tool`, `arguments` | after the arguments validate, before middleware runs |
 | `ToolCallResult` | `toolCallId`, `content`, `isError` | when the call's result is recorded |
@@ -155,6 +155,20 @@ nothing else - the failure message is `Guardrail '<name>' blocked` - and so does
 The reason is on the `AgentStatus.Blocked` of the run that was blocked, for the caller, and in no store: the
 run's closing checkpoint names the guardrail too, and nothing else. For everything else the rule is about events,
 not checkpoints: see [Limits](#limits) for what the checkpoint store holds.
+
+## Guarded answers
+
+A middleware whose `afterAgent` can block or rewrite the final answer - an agent's output guardrails
+(`withOutputGuardrails`, `GuardrailMiddleware` or `GuardrailReviewMiddleware` with output guardrails), or one of your
+own that overrides `AgentMiddleware.guardsAnswer` to `true` - holds the answer back from listeners (#3231). The
+text of a model call is held while the model writes it. If the call makes a tool call, the held text is sent when the
+call returns. If it is the turn's answer, it is dropped, and once every `afterAgent` has passed the answer it is sent
+as one `TextDelta`, as the thread stores it, on the finish task. A blocked answer sends no `TextDelta` at all, and a
+masked one is sent only masked. Thinking (`ThinkingDelta`) is not held. An agent without such a middleware streams
+its answer live, as before.
+
+A custom `ModelStep` that sends text through `ModelCall.textDelta` overrides `streams` to `true`, so the held answer
+is sent at the end; `ModelStep.fromClient` does it for `withStreaming()`.
 
 ## Attempts
 

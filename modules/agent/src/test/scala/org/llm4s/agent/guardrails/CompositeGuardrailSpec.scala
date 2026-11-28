@@ -431,5 +431,39 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
     // Too long for length check even though regex would pass
     outer.validate("a" * 21).isLeft shouldBe true
   }
+
+  // ==========================================================================
+  // #3232: all keeps every guardrail's rewrite
+  // ==========================================================================
+
+  private def rewriting(from: String, to: String): Guardrail[String] = new Guardrail[String] {
+    def validate(value: String): Result[String] = Right(value.replace(from, to))
+    val name: String                            = s"Rewrite($from)"
+  }
+
+  "CompositeGuardrail.all" should "return the value as every guardrail rewrote it, in order (#3232)" in {
+    val composite =
+      CompositeGuardrail.all(Seq(LengthCheck(1, 5000), rewriting("secret", "[A]"), rewriting("[A]", "[B]")))
+    composite.validate("my secret here") shouldBe Right("my [B] here")
+  }
+
+  it should "still report every failure when one guardrail rewrites and others fail (#3232)" in {
+    val log       = ListBuffer.empty[String]
+    val composite = CompositeGuardrail.all(Seq(rewriting("x", "y"), failing("one"), tracking("t", log, pass = false)))
+    val result    = composite.validate("x")
+    result.isLeft shouldBe true
+    result.left.toOption.get.formatted should (include("one").and(include("t failed")))
+    log.toList shouldBe List("t")
+  }
+
+  it should "pass a rewrite on to the guardrail after it (#3232)" in {
+    val seen = ListBuffer.empty[String]
+    val recorder = new Guardrail[String] {
+      def validate(value: String): Result[String] = { seen += value; Right(value) }
+      val name: String                            = "Recorder"
+    }
+    CompositeGuardrail.all(Seq(rewriting("a", "b"), recorder)).validate("aaa") shouldBe Right("bbb")
+    seen.toList shouldBe List("bbb")
+  }
 }
 // scalastyle:on line.size.limit

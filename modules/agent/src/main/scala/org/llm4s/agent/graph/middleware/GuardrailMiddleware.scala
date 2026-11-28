@@ -32,6 +32,9 @@ final class GuardrailMiddleware(
   override def admit(query: String, context: AdmissionContext): Result[String] =
     GuardrailMiddleware.run(input, query, context)
 
+  /** `true` when there are output guardrails: a streamed answer is held until they pass it (#3231). */
+  override def guardsAnswer: Boolean = output.nonEmpty
+
   override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
     GuardrailMiddleware.run(output, answer, context).map(BoundaryResult(_))
 

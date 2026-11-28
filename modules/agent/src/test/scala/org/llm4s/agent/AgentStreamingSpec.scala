@@ -198,3 +198,41 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       case _                      => false
     } shouldBe true
   }
+
+  // #3231: an output guardrail runs on the answer before a listener sees it
+  private def outputGuardrail(name0: String)(check: String => Result[String]) =
+    new org.llm4s.agent.guardrails.OutputGuardrail:
+      def validate(value: String): Result[String] = check(value)
+      val name: String                            = name0
+
+  it should "send no delta of an answer an output guardrail blocks (#3231)" in {
+    val deny = outputGuardrail("deny")(_ => Left(org.llm4s.error.ValidationError("output", "no")))
+    val (result, c) = streamed(
+      Agent.builder("assistant", Streaming(Seq("my ", "secret"))).withStreaming().withOutputGuardrails(deny),
+      "hi"
+    )
+    result.map(_.status) should matchPattern { case Right(AgentStatus.Blocked("deny", _)) => }
+    c.all.collect { case AgentEvents.TextDelta(d) => d.text } shouldBe empty
+  }
+
+  it should "send an answer an output guardrail rewrites only as rewritten, once it has passed (#3231)" in {
+    val mask = outputGuardrail("mask")(v => Right(v.replace("secret", "[MASKED]")))
+    val (result, c) = streamed(
+      Agent.builder("assistant", Streaming(Seq("my ", "secret"))).withStreaming().withOutputGuardrails(mask),
+      "hi"
+    )
+    result.map(_.answer) shouldBe Right(Some("my [MASKED]"))
+    c.all.collect { case AgentEvents.TextDelta(d) => d.text } shouldBe Vector("my [MASKED]")
+  }
+
+  it should "keep the answer's deltas live with input guardrails only (#3231)" in {
+    val (result, c) = streamed(
+      Agent
+        .builder("assistant", Streaming(Seq("Hel", "lo")))
+        .withStreaming()
+        .withInputGuardrails(org.llm4s.agent.guardrails.builtin.LengthCheck(1, 100)),
+      "hi"
+    )
+    result.map(_.answer) shouldBe Right(Some("Hello"))
+    c.all.collect { case AgentEvents.TextDelta(d) => d.text } shouldBe Vector("Hel", "lo")
+  }

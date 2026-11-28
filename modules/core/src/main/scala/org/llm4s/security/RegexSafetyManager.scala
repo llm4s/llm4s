@@ -114,6 +114,15 @@ object RegexSafetyManager {
     withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).find()))
 
   /**
+   * As [[safeFind]] with a step budget of the caller's, and no bound on the input's length: for a caller that sizes
+   * the budget to the input itself, such as a guardrail whose own patterns are linear and which must scan a long
+   * input rather than refuse it (#3233). A `null` input is refused; an exhausted budget is a `Left` for `pattern`.
+   */
+  private[llm4s] def boundedFind(pattern: Pattern, input: String, maxSteps: Long): Result[Boolean] =
+    if (input == null) refusedInput("Input cannot be null")
+    else guardMatch(boundedMatcher(pattern, input, maxSteps).find())
+
+  /**
    * Compiles text as a literal pattern: it is quoted with `Pattern.quote`, so regex metacharacters in it match
    * themselves.
    *

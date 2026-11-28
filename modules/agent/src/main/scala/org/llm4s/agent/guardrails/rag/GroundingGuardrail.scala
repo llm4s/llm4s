@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory
 
 import java.util.Locale
 
-import scala.util.Try
 import org.llm4s.util.Redaction
 
 /**
@@ -101,8 +100,8 @@ class GroundingGuardrail(
         case GuardrailAction.Warn =>
           logger.warn(s"$name: no retrieved chunks to ground against - passing through in warn mode")
           Right(output)
-        case GuardrailAction.Fix => Right(output) // Can't fix without context
-        case GuardrailAction.Block =>
+        // Fix cannot ground an answer, so it blocks, as it does on a low score (#3234)
+        case GuardrailAction.Block | GuardrailAction.Fix =>
           Left(
             ValidationError.invalid(
               "grounding",
@@ -235,12 +234,7 @@ class GroundingGuardrail(
    * Parse the structured grounding result from LLM response.
    */
   private def parseGroundingResult(response: String): Result[GroundingResult] = {
-    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
-
-    val scoreOpt = lines.find(_.startsWith("SCORE:")).flatMap { line =>
-      val value = line.stripPrefix("SCORE:").trim.replaceAll("[^0-9.]", "")
-      Try(value.toDouble).toOption
-    }
+    val lines = response.split("\n").map(_.trim).filter(_.nonEmpty).toSeq
 
     val groundedOpt = lines.find(_.startsWith("GROUNDED:")).map { line =>
       line.stripPrefix("GROUNDED:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
@@ -260,47 +254,34 @@ class GroundingGuardrail(
       .map(line => line.stripPrefix("EXPLANATION:").trim)
       .getOrElse("No explanation provided")
 
-    (scoreOpt, groundedOpt) match {
-      case (Some(score), Some(grounded)) =>
-        // In strict mode, ANY ungrounded claim means failure
-        val finalGrounded = if (strictMode) {
-          grounded && ungroundedClaims.isEmpty
-        } else {
-          score >= threshold
-        }
-
-        Right(
-          GroundingResult(
-            score = Math.max(0.0, Math.min(1.0, score)),
-            isGrounded = finalGrounded,
-            ungroundedClaims = ungroundedClaims,
-            explanation = explanation
+    // The score is read as LLMGuardrail reads one (#3234): a number from 0 to 1, never clamped, and a reply without a
+    // readable SCORE and GROUNDED line is a Left, never a pass.
+    JudgeScores.required(lines, "SCORE:", "grounding_parse", response).flatMap { score =>
+      groundedOpt match {
+        case Some(grounded) =>
+          // In strict mode, ANY ungrounded claim means failure
+          val finalGrounded =
+            if (strictMode) grounded && ungroundedClaims.isEmpty
+            else JudgeScores.reaches(score, threshold)
+          Right(
+            GroundingResult(
+              score = score,
+              isGrounded = finalGrounded,
+              ungroundedClaims = ungroundedClaims,
+              explanation = explanation
+            )
           )
-        )
-
-      case _ =>
-        // Fallback: try to extract just a score
-        val fallbackScore = response.trim.replaceAll("[^0-9.]", "")
-        Try(fallbackScore.toDouble).toOption match {
-          case Some(score) if score >= 0.0 && score <= 1.0 =>
-            Right(
-              GroundingResult(
-                score = score,
-                isGrounded = score >= threshold,
-                ungroundedClaims = Seq.empty,
-                explanation = "Score-only response"
-              )
+        case None =>
+          Left(
+            ValidationError.invalid(
+              "grounding_parse",
+              s"Could not parse grounding evaluation from LLM response (no GROUNDED line): ${Redaction.safeBody(response, 200)}"
             )
-          case _ =>
-            Left(
-              ValidationError.invalid(
-                "grounding_parse",
-                s"Could not parse grounding evaluation from LLM response: ${Redaction.safeBody(response, 200)}"
-              )
-            )
-        }
+          )
+      }
     }
   }
+
 }
 
 @Experimental

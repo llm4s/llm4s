@@ -58,6 +58,14 @@ trace and - when you admit before you queue - no queue entry; a query one of the
 query as it was submitted, before any middleware's `beforeAgent` hook, so text such a hook adds to the query is not
 checked by them.
 
+**Imported history is admitted with the query** (#3235). `agent.run(threadId, query, config, history)` runs every
+imported user message's text through the same input guardrails: a message they rewrite is stored and sent only as
+rewritten, and when they refuse the query or any imported message the turn ends `AgentStatus.Blocked(guardrail,
+reason)`, as any refused query does, with nothing stored: no thread is created, and the import can be tried again on
+the same thread id. Imported assistant messages and tool results are not checked: they are earlier turns' model
+and tool output. A `resume` answer (a tool question's reply, an approval's rejection reason, a reviewer's
+`GuardrailVerdict.Edit`) is not checked by the input guardrails either.
+
 ### `GuardrailMiddleware`: choosing the position
 
 `withInputGuardrails` and `withOutputGuardrails` are `@Stable`. Underneath they install a `GuardrailMiddleware`
@@ -89,6 +97,12 @@ the whole turn - the query, any tool calls and results, and the answer - so `res
 conversation as it was before the turn and the model never sees the blocked answer again. `usage`
 still counts the blocked turn's model calls. A guardrail that transforms (`PIIMasker`) changes the
 stored query or answer instead.
+
+With streaming (`withStreaming()`), an agent with output guardrails does not stream its answer as the model writes
+it: the answer's text is held until the output guardrails have passed it, and is then sent as one `TextDelta`, as
+stored - masked if a guardrail masked it. A blocked answer is never sent to a listener. Text the model writes beside a
+tool call is not the answer and still streams live. A middleware of your own whose `afterAgent` blocks or rewrites the
+answer gets the same by overriding `guardsAnswer` to `true` ([Streaming](streaming#guarded-answers)).
 
 Underneath, a block is the graph runtime's *Block*: the run ends as a finished failure
 (`RunResult.Failed` with a `GuardrailBlocked` error, the thread's checkpoint `Failed`), which
@@ -358,7 +372,10 @@ composite has its model calls counted in the thread's usage (a hand-written wrap
 `validate(value)` loses that). An `InputGuardrail` passed to `InputGuardrail.from` comes back unchanged.
 
 `all` runs every guardrail and reports every failure; `any` stops at the first guardrail that passes, so
-those after it do not run; `sequential` stops at the first failure.
+those after it do not run; `sequential` stops at the first failure. `all` and `sequential` thread the value
+through their guardrails as a guardrail list does: each sees the value as the one before it rewrote it, and a
+masking guardrail's rewrite (`PIIMasker`, `PIIDetector.masking`) is what the composite returns. `any` returns
+the passing guardrail's value.
 
 ---
 
@@ -582,8 +599,12 @@ Each has the factories `strict`, `balanced`, `lenient` and `monitoring` (`Ground
 - `SourceAttributionGuardrail` passes without a judge call when the context has no chunks or `requireAttributions` is
   `false`. Give it a context with `sources`, or the judge has no source names to look for.
 - `GuardrailAction.Warn` logs and passes. None of them can repair an answer, so `GuardrailAction.Fix` does not fix:
-  `GroundingGuardrail` and `TopicBoundaryGuardrail` block as `Block` does, and the other two log and pass as `Warn`
-  does.
+  `GroundingGuardrail` and `TopicBoundaryGuardrail` block as `Block` does (`GroundingGuardrail` also on a context
+  with no chunks), and the other two log and pass as `Warn` does.
+- The judge's reply is read line by line (`SCORE:`, `OVERALL_SCORE:` and `CHUNK_SCORES:`, `ATTRIBUTION_SCORE:`,
+  `RELEVANCE_SCORE:`), each score with the grammar an `LLMGuardrail` reads: one plain number from 0 to 1, never
+  clamped. A score on another scale (`2/10`, `30%`, `85`), a missing score line or a reply without the structure asked
+  for is a `Left`, never a pass.
 - `TopicBoundaryGuardrail` is an ordinary `InputGuardrail` on the query: pass it in `input`, with no wrapping.
 
 ---
@@ -695,6 +716,11 @@ val forStories: Result[PromptInjectionDetector] =
     .without("creative_writing", "how_to_dangerous", "extract_data")
     .map(_.withSensitivity(InjectionSensitivity.Medium))
 ```
+
+The detector runs at admission, on the caller's thread and before any run budget applies, so every default pattern
+matches in time linear in the input, and every match - a custom pattern's too - is bounded: a pattern that needs more
+than ten million character reads plus 100 per input character counts as a match, so an input is never let through
+unscanned (#3233). A custom `InjectionPattern` should avoid unbounded gaps (`a.*b.*c`) for the same reason.
 
 ---
 

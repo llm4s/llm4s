@@ -25,31 +25,38 @@ class CompositeGuardrail[A](
   mode: ValidationMode = ValidationMode.All
 ) extends Guardrail[A] {
 
-  def validate(value: A): Result[A] = run(value)(_.validate(value))
+  def validate(value: A): Result[A] = run(value)(_.validate(_))
 
   /** As `validate(value)`, each guardrail validating with `context`, so a judge's calls are accounted. */
-  override def validateIn(value: A, context: UsageAccounting): Result[A] = run(value)(_.validateIn(value, context))
+  override def validateIn(value: A, context: UsageAccounting): Result[A] = run(value)(_.validateIn(_, context))
 
-  private def run(value: A)(check: Guardrail[A] => Result[A]): Result[A] = mode match {
+  private def run(value: A)(check: (Guardrail[A], A) => Result[A]): Result[A] = mode match {
     case ValidationMode.All =>
       validateAll(value, check)
 
     case ValidationMode.Any =>
-      validateAny(check)
+      validateAny(check(_, value))
 
     case ValidationMode.First =>
-      validateFirst(value, check)
+      validateFirst(value, check(_, value))
   }
 
   /**
    * All guardrails must pass.
-   * Runs all guardrails and aggregates all errors.
+   * Runs all guardrails and aggregates all errors. The value is threaded through them as a guardrail
+   * list threads it: each sees the value as the one before it rewrote it, `all` returns the last rewrite
+   * (so a masking guardrail inside it masks), and a failing guardrail leaves the value unchanged for the
+   * next (#3232).
    */
-  private def validateAll(value: A, check: Guardrail[A] => Result[A]): Result[A] = {
-    val results = guardrails.map(check)
-    val errors  = results.collect { case Left(err) => err }
+  private def validateAll(value: A, check: (Guardrail[A], A) => Result[A]): Result[A] = {
+    val (last, errors) = guardrails.foldLeft((value, Vector.empty[LLMError])) { case ((current, failed), guardrail) =>
+      check(guardrail, current) match {
+        case Right(next) => (next, failed)
+        case Left(err)   => (current, failed :+ err)
+      }
+    }
 
-    if (errors.isEmpty) Right(value) else Left(CompositeGuardrail.multipleFailures(errors))
+    if (errors.isEmpty) Right(last) else Left(CompositeGuardrail.multipleFailures(errors))
   }
 
   /**
