@@ -218,20 +218,27 @@ trait Checkpointer:
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]
 
   /**
-   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
-   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
-   * the latest a prune before the commit always kept (#3254). The default prunes without keeping them; every llm4s
-   * store keeps them.
-   */
-  /**
    * [[deleteThread]] for the sweep's idle-thread removal (#3260), fenced by `token` alone, done only if no open entry
    * of the store's run queue names the thread - checked atomically with the delete, under the lock or in the
    * transaction a submission to that queue also takes, so an entry enqueued after the sweep's guard ran keeps the
-   * thread. Whether it deleted. The default deletes as [[deleteThread]] does; every llm4s store checks.
+   * thread. Whether it deleted.
+   *
+   * Only llm4s's own stores (in-memory, SQLite, PostgreSQL) and wrappers (`EncryptingCheckpointer`,
+   * `MeteredCheckpointer`) make that check atomic. Being `private[agent]`, this cannot be overridden by a checkpointer
+   * written outside llm4s, or by a wrapper of your own that delegates to one of the llm4s stores: such a store gets
+   * this default, an unchecked [[deleteThread]], and the sweep relies on its own earlier snapshot of the queue (the
+   * guard's `openRuns`), so an entry enqueued between that read and the delete can find its thread deleted.
    */
   private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
     deleteThread(threadId, token, None).map(_ => true)
 
+  /**
+   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
+   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
+   * the latest a prune before the commit always kept (#3254). Every llm4s store and wrapper keeps them; a checkpointer
+   * or delegating wrapper written outside llm4s cannot override this `private[agent]` member, so it gets this
+   * default, a plain [[prune]], and a `maxAge` retention may then remove the previous run's latest checkpoint.
+   */
   private[agent] def pruneKeeping(
     threadId: ThreadId,
     policy: RetentionPolicy,
