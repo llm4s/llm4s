@@ -41,6 +41,8 @@ final class VectorMemoryStore private (
   /** The SQLite file this store reads and writes, by its real path, as `SQLiteMemoryStore` names it (#3238). */
   override def storageIdentity: Result[Option[String]] = inner.storageIdentity
 
+  override def durable: Boolean = inner.durable
+
   override def store(memory: Memory): Result[MemoryStore]           = inner.store(memory).map(_ => this)
   override def storeAll(memories: Seq[Memory]): Result[MemoryStore] = inner.storeAll(memories).map(_ => this)
   override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =

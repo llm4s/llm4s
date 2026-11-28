@@ -35,8 +35,9 @@ class SqliteMemoryStoreContractSpec extends MemoryStoreContract {
  * would show. `memory` is a whole module of `project/PlatformTests.scala`, so it runs on Windows.
  */
 class SqliteFileMemoryStoreContractSpec extends MemoryStoreContract {
-  protected def storeName: String = "SQLiteMemoryStore (file)"
-  protected def semantic: Boolean = false
+  override protected def expectDurable: Boolean = true
+  protected def storeName: String               = "SQLiteMemoryStore (file)"
+  protected def semantic: Boolean               = false
   protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A = {
     val dir   = Files.createTempDirectory("llm4s-contract-sqlite")
     val file  = dir.resolve("memories.db")
@@ -59,8 +60,9 @@ class VectorMemoryStoreContractSpec extends MemoryStoreContract {
 
 /** The contract over [[VectorMemoryStore]] on a file; it runs on Windows, as every suite of `memory` does. */
 class VectorFileMemoryStoreContractSpec extends MemoryStoreContract {
-  protected def storeName: String = "VectorMemoryStore (file)"
-  protected def semantic: Boolean = true
+  override protected def expectDurable: Boolean = true
+  protected def storeName: String               = "VectorMemoryStore (file)"
+  protected def semantic: Boolean               = true
   protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A = {
     val dir   = Files.createTempDirectory("llm4s-contract-vector")
     val file  = dir.resolve("memories.db")

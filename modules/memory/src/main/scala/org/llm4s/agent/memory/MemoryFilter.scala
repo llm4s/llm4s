@@ -143,6 +143,33 @@ object MemoryFilter {
   }
 
   /**
+   * The memories that come after `(timestamp, id)` in recall order - newest first, then by id, descending: older than
+   * `timestamp`, or as old with a smaller id. A keyset cursor (#3040): a page read with `recall` ends at its last
+   * memory, and this filter gives the next page, skipping no memory that shares the last one's time. Ids compare by
+   * their UTF-8 bytes, as the SQL stores order them.
+   */
+  final case class Preceding(timestamp: Instant, id: MemoryId) extends MemoryFilter {
+    def matches(memory: Memory): Boolean =
+      memory.timestamp.isBefore(timestamp) ||
+        (memory.timestamp.equals(timestamp) && MemoryFilter.compareIds(memory.id, id) < 0)
+  }
+
+  /** Ids in recall's tie order: by their UTF-8 bytes, as SQLite (`BINARY`) and PostgreSQL (`COLLATE "C"`) sort them. */
+  private[memory] def compareIds(a: MemoryId, b: MemoryId): Int =
+    java.util.Arrays.compareUnsigned(
+      a.value.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+      b.value.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    )
+
+  /** Recall order: newest first, then by id, descending. */
+  private[memory] val RecallOrder: Ordering[Memory] = new Ordering[Memory] {
+    def compare(x: Memory, y: Memory): Int = {
+      val byTime = y.timestamp.compareTo(x.timestamp)
+      if (byTime != 0) byTime else compareIds(y.id, x.id)
+    }
+  }
+
+  /**
    * Filter by minimum importance score.
    */
   final case class MinImportance(threshold: Double) extends MemoryFilter {

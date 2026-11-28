@@ -55,6 +55,9 @@ final class SQLiteMemoryStore private (
 
   private lazy val fileIdentity: Result[Option[String]] = SQLiteMemoryStore.fileIdentity(dbPath)
 
+  /** True for a database in a file; false in memory, private or shared by name, which dies with its last connection. */
+  override def durable: Boolean = fileIdentity.exists(_.exists(_.startsWith("sqlite:")))
+
   /** Stores `add`, then deletes `remove`, in one transaction, after embedding what `add` is missing. */
   override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
     embedMissing(add).flatMap { adds =>
@@ -327,8 +330,8 @@ final class SQLiteMemoryStore private (
       // the rows read, newest first, so the limit applies to the memories that match and not to the newest overall.
       val plan = narrowing(filter)
       val sql =
-        if (plan.needsMatches) s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC"
-        else s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC LIMIT ?"
+        if (plan.needsMatches) s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC, id DESC"
+        else s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC, id DESC LIMIT ?"
       Using.resource(connection.prepareStatement(sql)) { stmt =>
         plan.params.zipWithIndex.foreach { case (param, idx) =>
           setParameter(stmt, idx + 1, param)
@@ -791,6 +794,10 @@ final class SQLiteMemoryStore private (
 
     case MemoryFilter.ByTimeRange(after, before) =>
       Some(FilterSupport.timeRange(after, before))
+
+    case MemoryFilter.Preceding(timestamp, id) =>
+      // the stored time is the memory's truncated to the millisecond, as `matches` reads it back
+      FilterSupport.preceding(timestamp).map { case (clause, params) => Sql(clause, params :+ id.value) }
 
     case MemoryFilter.MinImportance(threshold) =>
       Some(Sql("COALESCE(importance >= ?, 0)", Seq(threshold)))

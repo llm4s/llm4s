@@ -115,6 +115,14 @@ private[memory] object FilterSupport {
     if (parts.isEmpty) Everything else Sql(parts.map(_._1).mkString(" AND "), parts.map(_._2))
   }
 
+  /**
+   * The SQL of a `Preceding(t, id)` over an epoch-millisecond `timestamp` and a `BINARY`-ordered `id`, its last `?` the
+   * id, or `None` for a `t` with a sub-millisecond part, which no stored row has: then `matches` decides.
+   */
+  def preceding(t: java.time.Instant): Option[(String, Seq[Any])] =
+    if (t.getNano % 1000000 != 0) None
+    else Some(("(timestamp < ? OR (timestamp = ? AND id < ?))", Seq(t.toEpochMilli, t.toEpochMilli)))
+
   /** `t` in epoch milliseconds, rounded up: the first millisecond not before `t`. */
   def ceilMillis(t: java.time.Instant): Long =
     if (t.getNano % 1000000 == 0) t.toEpochMilli else Math.addExact(t.toEpochMilli, 1L)

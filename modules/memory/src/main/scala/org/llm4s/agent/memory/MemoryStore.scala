@@ -190,6 +190,14 @@ trait MemoryStore {
   def storageIdentity: Result[Option[String]] = Right(None)
 
   /**
+   * True if what the store holds outlives the store: closing it and opening the same storage again gives it all back
+   * (a SQLite file, a Postgres table). False - the default - for a store held only in this process, an `InMemoryStore`
+   * or an in-memory SQLite database, even one shared by name, which closing its last connection destroys.
+   * `SemanticMemoryMiddleware` releases only a durable store to stay within `maxTenants` (#3040).
+   */
+  def durable: Boolean = false
+
+  /**
    * Counts of what the store holds. This default reads every memory; the SQL stores override it with aggregate
    * queries, so `MemoryManager.stats` never loads the store (#3040).
    */

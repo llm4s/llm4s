@@ -41,41 +41,60 @@ final case class LLMMemoryManager(
     olderThan: Instant,
     minCount: Int
   ): Result[MemoryManager] =
-    // 1. Find old memories that need consolidation
-    store
-      .recall(
-        filter = MemoryFilter.before(olderThan),
-        limit = config.consolidationConfig.maxMemoriesScanned
-      )
-      .flatMap { oldMemories =>
-        // 2. Group memories by type and context, applying minCount per group
-        val grouped = groupMemoriesForConsolidation(oldMemories, minCount)
+    consolidatePage(olderThan, minCount, None).map(_._1)
 
-        // 3. Consolidate each group (strict mode fails fast, best-effort logs and continues)
-        grouped
-          .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
-            accStore.flatMap { s =>
-              consolidateGroup(group, s) match {
-                case Right(newStore) => Right(newStore)
-                // a cancellation is not a group's failure: it stops consolidation, whatever the mode
-                case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
-                case Left(error)                                     =>
-                  // Log error with safe summary (no sensitive content)
-                  val groupType = group.headOption.map(_.memoryType.name).getOrElse("unknown")
-                  val groupSize = group.length
-                  val groupIds  = group.map(_.id.value.take(8)).mkString(", ")
-                  logger.warn(
-                    s"Consolidation failed for $groupType group (size=$groupSize, ids=[$groupIds]): ${error.message}"
-                  )
+  /**
+   * Consolidate one page of the memories older than `olderThan`: at most `maxMemoriesScanned`, in recall order from
+   * `from` (the start when `None`), and return the cursor of the next page, or `None` once this page reached the
+   * oldest (#3040). Calling it again with the cursor it returned, and wrapping to `None`, reaches every old memory in
+   * turn within the bound per call: a page that forms no group never hides the older ones. The cursor is a keyset
+   * (time, then id), so no memory that shares a page's last time is skipped.
+   */
+  def consolidatePage(
+    olderThan: Instant,
+    minCount: Int,
+    from: Option[ConsolidationCursor]
+  ): Result[(MemoryManager, Option[ConsolidationCursor])] = {
+    val limit = config.consolidationConfig.maxMemoriesScanned
+    val window = from.fold(MemoryFilter.before(olderThan))(c =>
+      MemoryFilter.And(MemoryFilter.before(olderThan), MemoryFilter.Preceding(c.timestamp, c.id))
+    )
+    store.recall(window, limit).flatMap { page =>
+      val next =
+        if (page.size < limit) None else page.lastOption.map(m => ConsolidationCursor(m.timestamp, m.id))
+      consolidateAll(page, minCount).map(_ -> next)
+    }
+  }
 
-                  // Strict mode: fail fast. Best-effort mode: continue with current store
-                  if (config.consolidationConfig.strictMode) Left(error)
-                  else Right(s)
-              }
-            }
+  private def consolidateAll(oldMemories: Seq[Memory], minCount: Int): Result[MemoryManager] = {
+    // 2. Group memories by type and context, applying minCount per group
+    val grouped = groupMemoriesForConsolidation(oldMemories, minCount)
+
+    // 3. Consolidate each group (strict mode fails fast, best-effort logs and continues)
+    grouped
+      .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
+        accStore.flatMap { s =>
+          consolidateGroup(group, s) match {
+            case Right(newStore) => Right(newStore)
+            // a cancellation is not a group's failure: it stops consolidation, whatever the mode
+            case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
+            case Left(error)                                     =>
+              // Log error with safe summary (no sensitive content)
+              val groupType = group.headOption.map(_.memoryType.name).getOrElse("unknown")
+              val groupSize = group.length
+              val groupIds  = group.map(_.id.value.take(8)).mkString(", ")
+              logger.warn(
+                s"Consolidation failed for $groupType group (size=$groupSize, ids=[$groupIds]): ${error.message}"
+              )
+
+              // Strict mode: fail fast. Best-effort mode: continue with current store
+              if (config.consolidationConfig.strictMode) Left(error)
+              else Right(s)
           }
-          .map(consolidatedStore => copy(store = consolidatedStore))
+        }
       }
+      .map(consolidatedStore => copy(store = consolidatedStore))
+  }
 
   /**
    * Group memories for consolidation.

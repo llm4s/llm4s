@@ -15,7 +15,6 @@ import org.llm4s.agent.graph.middleware.{
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
 import org.llm4s.agent.memory.{
   AppliedWrite,
-  ConsolidationConfig,
   LLMMemoryManager,
   Memory,
   MemoryBounds,
@@ -33,7 +32,7 @@ import org.llm4s.prompt.{ system, Untrusted }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 
-import java.time.{ Clock, Instant }
+import java.time.Clock
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.concurrent.duration.*
@@ -101,8 +100,8 @@ import scala.util.{ Try, Using }
  * @param id this middleware's id
  * @param maxTenants how many tenants' stores are held open at once (#3040): past it, the least recently used one that
  *                   no turn is using is released (`release`) and resolved again on its tenant's next turn. Only a
- *                   store that names its storage (`storageIdentity`: a SQLite file, a Postgres table) is evicted; one
- *                   held only in this process, such as an `InMemoryStore`, would lose its memories, so it is kept
+ *                   `durable` store (a SQLite file, a Postgres table) is evicted; one whose memories die with it, such
+ *                   as an `InMemoryStore` or an in-memory SQLite database, is kept
  * @param release what releasing a tenant's store does, when it is evicted or the middleware is [[close]]d; by default it
  *                closes a store that is `AutoCloseable` (the SQLite and Postgres stores), which the resolver made for it
  *
@@ -264,18 +263,15 @@ final class SemanticMemoryMiddleware(
         .map(out => if out.added.nonEmpty || out.removed.nonEmpty || out.evicted > 0 then outcomes.add(out): Unit)
     }
     val cutoff = clock.instant().minusNanos(settings.olderThan.toNanos)
-    val built  = manager(view, context.accounted(client))
-    // A manager reads at most a page of the newest memories before the time it is given. Starting each run where the
-    // last page ended, and wrapping at the oldest, every old memory is reached in turn (#3040): a page that forms no
-    // group can never hide the older ones from consolidation.
-    val page = built match
-      case llm: LLMMemoryManager => llm.config.consolidationConfig.maxMemoriesScanned
-      case _                     => ConsolidationConfig.default.maxMemoriesScanned
-    val start = tenant.consolidationCursor.filter(_.isBefore(cutoff)).getOrElse(cutoff)
-    val result = guarded(view.recall(MemoryFilter.before(start), page)).flatMap { window =>
-      tenant.consolidationCursor = nextCursor(window, page)
-      guarded(built.consolidateMemories(start, settings.minCount))
-    }
+    // An `LLMMemoryManager` reads one page of the old memories per run: each run goes on from the cursor the last one
+    // returned, and wraps at the oldest, so every old memory is reached in turn (#3040) and a page that forms no group
+    // never hides the older ones. Another manager consolidates as it does.
+    val result = manager(view, context.accounted(client)) match
+      case llm: LLMMemoryManager =>
+        guarded(llm.consolidatePage(cutoff, settings.minCount, tenant.consolidationCursor)).map { (_, next) =>
+          tenant.consolidationCursor = next
+        }
+      case other => guarded(other.consolidateMemories(cutoff, settings.minCount)).map(_ => ())
     // the groups that applied are durable whatever the manager did after them: announce them even when it failed
     val done = outcomes.asScala.toVector
     if done.nonEmpty then
@@ -371,17 +367,17 @@ final class SemanticMemoryMiddleware(
     }
 
   /**
-   * The least recently used cells beyond `maxTenants` that no call holds and whose store can be opened again,
-   * removed. A store without a `storageIdentity` (an `InMemoryStore`, any store held only in this process) holds the
-   * tenant's memories itself - the resolver cannot give them back - so it is never evicted: it stays until
-   * [[close]], and counts against the bound. The caller holds `resolving`.
+   * The least recently used cells beyond `maxTenants` that no call holds and whose store is `durable`, removed. A store
+   * that is not (an `InMemoryStore`, an in-memory SQLite database, even one shared by name) holds the tenant's memories
+   * only while it is open - the resolver cannot give them back - so it is never evicted: it stays until [[close]], and
+   * counts against the bound. The caller holds `resolving`.
    */
   private def evictIdle(): Vector[TenantMemory] =
     val over = cells.size - maxTenants
     if over <= 0 then Vector.empty
     else
       val idle = cells.entrySet.asScala.iterator
-        .filter(e => e.getValue.users == 0 && e.getValue.identity.isDefined)
+        .filter(e => e.getValue.users == 0 && e.getValue.initial.durable)
         .take(over)
         .toVector
       idle.foreach(e => cells.remove(e.getKey))
@@ -507,18 +503,6 @@ object SemanticMemoryMiddleware:
         used += cost
         end += Character.charCount(cp)
     s.substring(0, end)
-
-  /**
-   * Where the next consolidation's page starts, after one read `window` (a page of at most `page` memories, newest
-   * first): before the oldest it held - or a millisecond before, if they all share one time, so the page moves on -
-   * and `None`, starting again from the cutoff, once a page came back short (the oldest memories were reached).
-   */
-  private[memory] def nextCursor(window: Seq[Memory], page: Int): Option[Instant] =
-    if window.size < page then None
-    else
-      val times  = window.map(_.timestamp)
-      val oldest = times.min
-      Some(if oldest == times.max then oldest.minusMillis(1) else oldest)
 
   /** Holds `lock` from construction until `close`. */
   final private class Holding(lock: ReentrantLock) extends AutoCloseable:

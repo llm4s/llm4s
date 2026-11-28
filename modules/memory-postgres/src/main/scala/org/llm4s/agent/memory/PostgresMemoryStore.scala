@@ -69,6 +69,9 @@ final class PostgresMemoryStore private[memory] (
    * `SemanticMemoryMiddleware` refuses the turn: `GRANT EXECUTE ON FUNCTION pg_control_system() TO <role>`. The table is
    * its schema-qualified name, as `search_path` resolves it.
    */
+  /** A table outlives the store: it is durable. */
+  override def durable: Boolean = true
+
   override def storageIdentity: Result[Option[String]] =
     attempt("Failed to read the store's identity") {
       withConnection { conn =>
@@ -617,14 +620,15 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         if (plan.needsMatches)
           inTransaction(conn) {
-            val sql = s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            val sql =
+              s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC, id COLLATE \"C\" DESC"
             runQuery(conn, sql, plan.params, stream = true) { rows =>
               PostgresMemoryStore.firstN(rows.map(rowToMemory(_)).filter(_.forall(filter.matches)), limit)
             }
           }
         else {
           val sql =
-            s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC LIMIT ?"
+            s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC, id COLLATE \"C\" DESC LIMIT ?"
           runQuery(conn, sql, plan.params :+ SqlParam.PInt(limit), stream = false) { rows =>
             PostgresMemoryStore.firstN(rows.map(rowToMemory(_)), Int.MaxValue)
           }
@@ -776,7 +780,8 @@ final class PostgresMemoryStore private[memory] (
         val plan = scoped(filter)
         withConnection { conn =>
           inTransaction(conn) {
-            val sql = s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC"
+            val sql =
+              s"SELECT ${PostgresMemoryStore.AllColumns} FROM $tableName ${plan.where} ORDER BY created_at DESC, id COLLATE \"C\" DESC"
             runQuery(conn, sql, plan.params, stream = true) { rows =>
               val memories = rows.map(rowToMemory(_))
               PostgresMemoryStore.topScored(
@@ -1436,6 +1441,16 @@ object PostgresMemoryStore {
           before.map(b => "created_at <= ?" -> PTimestamp(Timestamp.from(floorMicros(b)))).toSeq
       if (bounds.isEmpty) Some(FilterSupport.unrestricted)
       else Some(FilterSupport.Sql(bounds.map(_._1).mkString(" AND "), bounds.map(_._2)))
+
+    case MemoryFilter.Preceding(t, id) =>
+      // the column keeps microseconds; a time finer than that is in no stored row, so `matches` decides it
+      Option.when(floorMicros(t) == t) {
+        val at = PTimestamp(Timestamp.from(t))
+        FilterSupport.Sql(
+          "(created_at < ? OR (created_at = ? AND id COLLATE \"C\" < ?))",
+          Seq(at, at, PString(id.value))
+        )
+      }
 
     case _ => None // ContentContains ignoring case; And, Or, Not, All, None and Custom are narrowed by FilterSupport
   }

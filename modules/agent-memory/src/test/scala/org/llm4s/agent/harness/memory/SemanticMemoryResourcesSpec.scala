@@ -225,11 +225,37 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
     (left should not).contain("turn o1")
   }
 
-  "The consolidation cursor" should "move past a page, and start again once a page comes back short" in {
-    val t           = Instant.parse("2026-11-28T00:00:00Z")
-    def at(s: Long) = Memory(MemoryId(s"m$s"), "x", MemoryType.Task, Map.empty, t.plusSeconds(s), None)
-    SemanticMemoryMiddleware.nextCursor(Seq(at(5), at(3), at(4)), 3) shouldBe Some(t.plusSeconds(3))
-    SemanticMemoryMiddleware.nextCursor(Seq(at(5), at(5)), 2) shouldBe Some(t.plusSeconds(5).minusMillis(1))
-    SemanticMemoryMiddleware.nextCursor(Seq(at(5)), 3) shouldBe None
+  "A paged consolidation" should "reach a group that shares its page's last time, skipping no tie (Codex on #3295)" in {
+    val t = Instant.parse("2026-11-27T12:00:00Z")
+    def turn(id: String, conversation: String) =
+      Memory(MemoryId(id), s"turn $id", MemoryType.Conversation, Map("conversation_id" -> conversation), t, None)
+    // 13 memories at one time, ids ordering the 10 unmergeable ones first in recall order (descending)
+    val unmergeable = (0 until 10).map(i => turn(s"z$i", s"c$i"))
+    val mergeable   = (1 to 3).map(i => turn(s"a$i", "old"))
+    val store       = InMemoryStore.withMemories(unmergeable ++ mergeable).value
+    val config      = MemoryManagerConfig.default.withConsolidationConfig(ConsolidationConfig(maxMemoriesScanned = 10))
+    val summary     = new MemoryTestSupport.FunctionClient(_ => "Summary.")
+    val first       = LLMMemoryManager(config, store, summary).consolidatePage(t.plusSeconds(60), 3, None).value
+    first._2 shouldBe Some(ConsolidationCursor(t, MemoryId("z0")))
+    MemoryTestSupport.contents(first._1.store) should not contain "Summary."
+    val second = first._1.asInstanceOf[LLMMemoryManager].consolidatePage(t.plusSeconds(60), 3, first._2).value
+    second._2 shouldBe None
+    MemoryTestSupport.contents(second._1.store) should contain("Summary.")
+  }
+
+  "Eviction" should "keep an in-memory SQLite database shared by name, which closing would destroy" in {
+    val m = new SemanticMemoryMiddleware(
+      tenant => SQLiteMemoryStore(s"file:mem3029-${tenant.fold("none")(_.value)}?mode=memory&cache=shared"),
+      simple,
+      answering(),
+      maxTenants = 1
+    )
+    val agent = agentWith(answering("a", "b", "c"), m)
+    agent.run(ThreadId("1"), "alice was here", tenant(t1)).value
+    agent.run(ThreadId("2"), "bob was here", tenant(t2)).value
+    agent.run(ThreadId("3"), "alice again", tenant(t1)).value
+    MemoryTestSupport.contents(held(m, Some(t1))) should contain("alice was here")
+    m.openTenants shouldBe 2
+    m.close()
   }
 }
