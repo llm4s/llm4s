@@ -187,6 +187,23 @@ class ChangeNotifierSpec extends AnyFlatSpec with Matchers {
     eventually(5.seconds)(fake.aborted.getCount == 0) shouldBe true
   }
 
+  it should "wake every waiter when it loses its connection, so a waiter that saw it listening polls (#3092)" in {
+    val stalled = new FakeConnection(stallHeartbeat = true)
+    val once    = new AtomicInteger()
+    val n = notifier(
+      () => if once.getAndIncrement() == 0 then stalled.connection else throw new SQLException("no server"),
+      callTimeout = 200.millis
+    )
+    val w = n.register(ThreadId("t"))
+    // woken as it starts listening
+    w.await(TimeUnit.SECONDS.toNanos(5)) shouldBe true
+    // and again when the heartbeat finds the connection lost, though no notification came and none can
+    w.await(TimeUnit.SECONDS.toNanos(5)) shouldBe true
+    n.listening shouldBe false
+    w.close()
+    n.close()
+  }
+
   it should "find a connection that stalls silently by its heartbeat, within the call timeout, and connect again" in {
     val stalled = new FakeConnection(stallHeartbeat = true)
     val healthy = new FakeConnection(stallHeartbeat = false)

@@ -3,14 +3,14 @@ package org.llm4s.agent.graph.postgres
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ GraphError, RunId, TenantId, ThreadId }
 import org.llm4s.agent.service.*
-import org.llm4s.error.ValidationError
-import org.llm4s.trace.TraceContext
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 
 import java.sql.{ Connection, ResultSet }
 import java.time.Instant
 import scala.annotation.tailrec
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
+import scala.util.Using
 
 /**
  * The [[org.llm4s.agent.service.RunQueue RunQueue]] of a [[PostgresCheckpointer]] (`PostgresCheckpointer.runQueue`,
@@ -57,7 +57,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       case None =>
         // only the submitter's tenant's entries are seen (rule 9, #3085): another tenant's are never reported
         val tenant = submission.tenantId.map(_.value)
-        val queued = openOf(c, submission.threadId, tenant)
+        val queued = openLight(c, submission.threadId, tenant)
         // Reject: busy with an open entry of the submitter's tenant, or with a live claim - a direct run (W3) - by the
         // database's clock; another tenant's entry or claim is never reported (rule 9): its submission is queued, and
         // the worker refuses it
@@ -69,8 +69,10 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           submission.tenantId.map(_.value),
           store.clockNow(c)
         )(_ => ()).nonEmpty
+        lazy val refused = Submission.refusal(submission, queued.size)
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
+        else if refused.isDefined then Left(refused.get)
         else
           val now = store.clockNow(c)
           val id  = query(c, Sql.nextQueueEntryId(t))(_.getLong(1)).head
@@ -91,7 +93,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           if submission.policy == BusyThreadPolicy.Interrupt then
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled;
             // decided under the thread's lock, which recording an attempt takes too
-            queued.filter(r => r.attempts > 0 && !cancelling(r)).foreach { r =>
+            queued.filter(r => r.attempts > 0 && !DecodedEntry.cancelling(r.stop)).foreach { r =>
               setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
             }
           update(
@@ -110,29 +112,19 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             micros(now),
             submission.traceContext.map(_.traceParent)
           )
-          val position = openOf(c, submission.threadId, tenant).indexWhere(_.id == id)
+          val position = positionOf(c, rowOf(c, id).get)
           sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
             Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
           }
   }
 
-  private def cancelling(row: Raw): Boolean =
-    row.stop.exists(json => StopRequest.fromJson(ujson.read(json)).exists(_.isInstanceOf[StopRequest.Cancel]))
-
   private def setStop(c: Connection, id: Long, request: StopRequest): Unit =
     update(c, Sql.setQueueStop(t), ujson.write(StopRequest.toJson(request)), id)
-
-  private def stopOf(row: Raw): Result[Option[StopRequest]] =
-    decoding("queue", "queue stop request")(
-      row.stop.map(json =>
-        StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-      )
-    )
 
   private def same(row: Raw, submission: Submission): Boolean =
     row.threadId == submission.threadId.value && row.agentId == submission.agentId.value &&
       row.tenantId == submission.tenantId.map(_.value) && row.policy == submission.policy.toString &&
-      ujson.read(row.input) == QueuedInput.toJson(submission.input)
+      DecodedEntry.sameInput(row.input, submission)
 
   /** Takes the transaction-scoped advisory lock `name`, in this store's schema, waiting for it. */
   private def lock(c: Connection, name: String): Unit =
@@ -158,6 +150,39 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     store.reading("queue.openEntries") { c =>
       sequence(openOf(c, threadId, tenantId.map(_.value)).zipWithIndex.map((r, i) => entryOf(c, r, Some(i))))
+        .map(_.map(_.entry))
+    }
+
+  /**
+   * Waits for entry `entryId` to close (#3092): the wait is registered with the store's change notification before the
+   * entry's state is read, and every close through any store over the schema notifies it in the closing
+   * transaction, so a wake reads the state again - its state alone, not the entry - and the entry is read once, when
+   * it has closed or the wait ends. While the listening connection is down, the state is read every
+   * [[PostgresRunQueue.UnheardPoll]] instead. Bounded by `timeout` plus the bound of each read.
+   */
+  override def awaitClosed(tenantId: Option[TenantId], entryId: EntryId, timeout: FiniteDuration): Result[QueueEntry] =
+    Using.resource(store.closeWaiter(entryId)) { waiter =>
+      val deadline = System.nanoTime() + timeout.toNanos
+      @tailrec def await(): Result[QueueEntry] =
+        val open = store.reading("queue.awaitClosed") { c =>
+          Right(
+            query(c, Sql.queueEntryState(t), entryId.value, tenantId.map(_.value), tenantId.map(_.value))(
+              _.getString(1)
+            ).headOption.contains("open")
+          )
+        }
+        val remaining = deadline - System.nanoTime()
+        open match
+          case Right(true) if remaining > 0 =>
+            val slice = if store.listening then remaining else math.min(remaining, UnheardPoll.toNanos)
+            CancelledError.catchInterrupt(waiter.await(slice)) match
+              case Right(_) => await()
+              case Left(interrupted) =>
+                Thread.currentThread().interrupt()
+                Left(CancelledError(s"waiting for queue entry ${entryId.value}", Some(interrupted)))
+          case Right(_)    => entry(tenantId, entryId)
+          case Left(error) => Left(error)
+      await()
     }
 
   // ---- leases ----
@@ -169,6 +194,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         val now    = store.clockNow(c)
         val agents = request.agents.toVector.map(_.value).toArray
         val skip   = request.skip.map(_.value)
+        val from   = request.after.fold(0L)(_.value)
         // the thread's lock, tried: a submission, an attempt or another take on the thread is deciding its order now
         def takeable(id: Long, thread: String): Boolean =
           lockIfFree(c, s"thread:$thread") && query(
@@ -182,6 +208,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         // another - and going on past a full batch none of which could be taken, so busy heads never hide a takeable
         // one behind them
         @tailrec def scan(after: Long): Option[(Long, String)] =
+          // candidates are read without locks; only the one a take tries is locked (#3096)
           val batch = query(
             c,
             Sql.queueCandidates(t),
@@ -194,7 +221,19 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           batch.filterNot((id, _) => skip(id)).find(takeable) match
             case None if batch.size == Candidates => scan(batch.last._1)
             case chosen                           => chosen
-        scan(0L) match
+        // a head that does not decode is closed, in this transaction, and the take goes on past it (#3091)
+        @tailrec def readable(after: Long, closed: Int): Result[Option[(Long, String)]] =
+          scan(after) match
+            case Some((id, thread)) =>
+              entryOf(c, rowOf(c, id).get, None) match
+                case Right(decoded) if !decoded.readable && closed < MaxClosedPerTake =>
+                  closeRow(c, id, decoded.unrunnable, now): Unit
+                  readable(id, closed + 1)
+                case Right(decoded) if !decoded.readable => Right(None)
+                case Right(_)                            => Right(Some(id -> thread))
+                case Left(error)                         => Left(error)
+            case None => Right(None)
+        readable(from, 0).flatMap {
           case None               => Right(None)
           case Some((id, thread)) =>
             // a takeable head still holding a lease token holds an expired lease, never released
@@ -219,6 +258,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             view(c, rowOf(c, id).get).map { e =>
               Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires, e.stopRequest), expired))
             }
+        }
       }
 
   /** Whether no other open entry of `thread` holds a live lease, its leased rows locked so none is renewed meanwhile. */
@@ -239,8 +279,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       case None => Left(QueueError.LeaseLost(lease.entryId, lease.token, None))
       case Some(row) =>
         row.outcome match
-          case Some(json) =>
-            outcomeOf(json).flatMap(outcome => Left(QueueError.EntryClosed(lease.entryId, outcome)))
+          case Some(json) => Left(QueueError.EntryClosed(lease.entryId, DecodedEntry.outcomeOf(json)))
           case None if !row.leaseToken.contains(lease.token.value) =>
             Left(QueueError.LeaseLost(lease.entryId, lease.token, row.leaseToken.map(LeaseToken(_))))
           case None => Right(row)
@@ -249,7 +288,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     leased(c, lease).flatMap { row =>
       val expires = micros(store.clockNow(c).plusNanos(ttl.toNanos))
       update(c, Sql.renewLease(t), expires, row.id)
-      stopOf(row).map(stop => lease.copy(expiresAt = expires, stop = stop))
+      entryOf(c, row, None).map(e => lease.copy(expiresAt = expires, stop = e.entry.stopRequest))
     }
   }
 
@@ -274,10 +313,16 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
               EntryId.unsafe(row.id)
             )
           else
-            if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            if row.outcome.isEmpty && !DecodedEntry.cancelling(row.stop) then
+              setStop(c, row.id, StopRequest.Cancel(reason))
             None
         }
-        sequence(rows.map(r => view(c, rowOf(c, r.id).get))).map(Cancellation(_, closed.toSet))
+        // read back in one pass, each position from one reading of the thread's order (#3095)
+        val after = rowsOf(c, rows.map(_.id))
+        val positions =
+          rows.headOption.fold(Map.empty[Long, Int])(r => positionsOf(c, ThreadId(r.threadId), r.tenantId))
+        sequence(after.map(r => entryOf(c, r, Option.when(r.outcome.isEmpty)(positions.getOrElse(r.id, 0)))))
+          .map(entries => Cancellation(entries.map(_.entry), closed.toSet))
       }
     }
 
@@ -306,7 +351,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           query(c, Sql.runIdUsed(t), row.threadId, runId.value, row.threadId, runId.value)(_.getBoolean(1)).head
         // an entry an Interrupt entry displaced after its take is no longer the head: its lease ends here, so the
         // interrupting entry runs first (W3, Codex round 6); decided under the thread's lock, as a submission is
-        if !openOf(c, ThreadId(row.threadId)).headOption.exists(_.id == row.id) then
+        if !query(c, Sql.queueHeadIdOf(t), row.threadId)(_.getLong(1)).headOption.contains(row.id) then
           update(c, Sql.releaseLease(t), row.id)
           // committed, so the lease's end lands; the refusal is answered below
           Right(None)
@@ -354,27 +399,65 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     id: Long,
     outcome: EntryOutcome,
     at: Instant,
-    unstarted: Boolean = false
+    unstarted: Boolean = false,
+    untaken: Option[Instant] = None
   ): Boolean =
-    updated(
-      c,
-      if unstarted then Sql.closeUnstartedQueueEntry(t) else Sql.closeQueueEntry(t),
-      outcome.state,
-      ujson.write(EntryOutcome.toJson(outcome)),
-      micros(at),
-      id
-    ) > 0
+    // an Interrupt entry that never started withdraws the stop it asked of its thread's other entries (#3094)
+    val withdrawing = query(c, Sql.unstartedInterruptThread(t), id)(_.getString(1)).headOption
+    val sql =
+      if untaken.isDefined then Sql.closeUntakenQueueEntry(t)
+      else if unstarted then Sql.closeUnstartedQueueEntry(t)
+      else Sql.closeQueueEntry(t)
+    val params = Vector(outcome.state, ujson.write(EntryOutcome.toJson(outcome)), micros(at), id) ++ untaken.toVector
+    val closed = updated(c, sql, params*) > 0
+    if closed then
+      withdrawing.foreach { thread =>
+        query(c, Sql.siblingStops(t), thread, id)(r => r.getLong(1) -> Option(r.getString(2)))
+          .filter((_, stop) => DecodedEntry.interruptsFor(stop, EntryId.unsafe(id)))
+          .foreach((sibling, _) => update(c, Sql.clearQueueStop(t), sibling))
+      }
+      // a waiter on the entry, in any store over the schema, wakes when this commits (#3092)
+      store.notifyClosed(c, EntryId.unsafe(id))
+    closed
 
   def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] =
-    if agents.isEmpty then Right(Map.empty)
+    if agents.isEmpty then Right(Map.empty) else depthOf(Some(agents))
+
+  def allDepths(): Result[Map[AgentId, QueueDepth]] = depthOf(None)
+
+  private def depthOf(agents: Option[Set[AgentId]]): Result[Map[AgentId, QueueDepth]] =
+    store.reading("queue.depth") { c =>
+      val now = store.clockNow(c)
+      val (sql, params) = agents match
+        case Some(asked) => Sql.queueDepth(t)     -> Vector(now, now, now, asked.toVector.map(_.value).toArray)
+        case None        => Sql.queueAllDepths(t) -> Vector(now, now, now)
+      val rows = query(c, sql, params*) { r =>
+        val oldest = Option(r.getObject(4)).map(_ => instant(r, 4))
+        AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+      }
+      Right(rows.toMap)
+    }
+
+  def closeUntaken(age: FiniteDuration, limit: Int): Result[Vector[QueueEntry]] =
+    if limit <= 0 then Right(Vector.empty)
     else
-      store.reading("queue.depth") { c =>
+      store.writing("queue.closeUntaken") { c =>
         val now = store.clockNow(c)
-        val rows = query(c, Sql.queueDepth(t), now, now, now, agents.toVector.map(_.value).toArray) { r =>
-          val oldest = Option(r.getObject(4)).map(_ => instant(r, 4))
-          AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+        val candidates = query(c, Sql.queueUntaken(t), now.minusNanos(age.toNanos), now, limit)(r =>
+          (r.getLong(1), r.getString(2), Option(r.getString(3)), r.getString(4))
+        )
+        // each under its thread's lock, tried, as a take's is: a submission or a take deciding the thread is left be
+        // each decided again under its thread's lock, tried, as a take's is: the candidates are an earlier snapshot, and
+        // a take may have leased one since (it leases only under that lock, so its lease has committed by now)
+        val untaken = candidates.filter { (id, thread, tenant, _) =>
+          lockIfFree(c, s"thread:$thread") &&
+          query(c, Sql.queueStillUntaken(t), id, now)(_ => ()).nonEmpty &&
+          query(c, Sql.queueThreadClaimed(t), thread, tenant, tenant, now)(_ => ()).isEmpty
         }
-        Right(rows.toMap)
+        val closed = untaken.filter((id, _, _, agent) =>
+          closeRow(c, id, RunQueue.untakenOutcome(AgentId.unsafe(agent), age), now, untaken = Some(now))
+        )
+        sequence(closed.map((id, _, _, _) => view(c, rowOf(c, id).get)))
       }
 
   def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] =
@@ -410,64 +493,74 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   private def rowOf(c: Connection, id: Long): Option[Raw] =
     query(c, Sql.queueEntry(t), id)(raw).headOption
 
-  /** The thread's open entries, in the order they run. */
-  private def openOf(c: Connection, threadId: ThreadId): Vector[Raw] =
-    query(
-      c,
-      Sql.openQueueEntries(t),
-      threadId.value
-    )(
-      raw
-    )
+  private def rowsOf(c: Connection, ids: Vector[Long]): Vector[Raw] =
+    if ids.isEmpty then Vector.empty
+    else
+      val read = query(c, Sql.queueEntriesOf(t), ids.map(_.toString).toArray)(raw).map(r => r.id -> r).toMap
+      ids.flatMap(read.get)
 
   /** The thread's open entries of `tenantId`, in the order they run. */
   private def openOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Raw] =
-    openOf(c, threadId).filter(_.tenantId == tenantId)
+    query(c, Sql.openQueueEntries(t), threadId.value, tenantId, tenantId)(raw)
+
+  /** [[openOf]] without the entries' inputs (#3095): what a submission decides by. */
+  private def openLight(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Light] =
+    query(c, Sql.openQueueEntriesLight(t), threadId.value, tenantId, tenantId)(r =>
+      Light(r.getLong(1), r.getBoolean(2), r.getInt(3), Option(r.getString(4)))
+    )
+
+  /** How many of its tenant's open entries of the thread run before `row` (rule 9), reading no input (#3095). */
+  private def positionOf(c: Connection, row: Raw): Int =
+    query(
+      c,
+      Sql.queuePosition(t),
+      row.threadId,
+      row.tenantId,
+      row.tenantId,
+      java.lang.Boolean.valueOf(row.attempts == 0),
+      java.lang.Boolean.valueOf(!row.interrupt),
+      row.id
+    )(_.getInt(1)).head
+
+  /** Every open entry's position among its tenant's open entries of the thread, read once. */
+  private def positionsOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Map[Long, Int] =
+    query(c, Sql.openQueueEntryIds(t), threadId.value, tenantId, tenantId)(_.getLong(1)).zipWithIndex.toMap
 
   private def view(c: Connection, row: Raw): Result[QueueEntry] =
     // only the entry's own tenant's entries are counted (rule 9)
-    val position =
-      Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId), row.tenantId).indexWhere(_.id == row.id))
-    entryOf(c, row, position)
+    entryOf(c, row, Option.when(row.outcome.isEmpty)(positionOf(c, row))).map(_.entry)
 
-  private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[QueueEntry] =
+  /** The entry `row` holds, decoded leniently: what does not decode is replaced and named (#3091). */
+  private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[DecodedEntry] =
     decoding("queue", "queue entry") {
       val recorded = query(
         c,
         Sql.queueAttemptsOf(t),
         row.id
       )(a => Attempt(RunId(a.getString(1)), instant(a, 2), a.getString(3)))
-      QueueEntry.stored(
+      DecodedEntry(
         EntryId.unsafe(row.id),
         ThreadId(row.threadId),
         AgentId.unsafe(row.agentId),
         row.tenantId.map(TenantId(_)),
-        QueuedInput.fromJson(ujson.read(row.input)).fold(p => throw new IllegalStateException(p), identity),
-        BusyThreadPolicy.valueOf(row.policy),
+        row.input,
+        row.policy,
+        row.interrupt,
         row.key.map(SubmissionKey.unsafe),
         row.maxAttempts,
-        row.traceParent.map(t => TraceContext.parse(t).fold(e => throw new IllegalStateException(e.message), identity)),
+        row.traceParent,
         row.submitted,
         recorded,
         row.admitted,
         row.leaseHolder,
         row.leaseExpires,
-        row.outcome.map(json =>
-          EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-        ),
+        row.outcome,
         row.closed,
         row.closedSeq,
         position,
-        row.stop.map(json =>
-          StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-        )
+        row.stop
       )
     }
-
-  private def outcomeOf(json: String): Result[EntryOutcome] =
-    decoding("queue", "queue outcome")(
-      EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-    )
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
@@ -501,8 +594,17 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
 private[postgres] object PostgresRunQueue:
 
-  /** How many candidate heads one `take` locks and tries at a time. */
+  /** How many candidate heads one `take` reads and tries at a time; it locks only the one it tries (#3096). */
   val Candidates: Int = 16
+
+  /** The most heads one take closes because they do not decode before it answers none, for its bound (#3091). */
+  val MaxClosedPerTake: Int = 16
+
+  /** How often [[PostgresRunQueue.awaitClosed]] reads an entry's state while the store's listener is down (#3092). */
+  val UnheardPoll: FiniteDuration = 1.second
+
+  /** An open entry without its input: what a submission decides by (#3095). */
+  final case class Light(id: Long, interrupt: Boolean, attempts: Int, stop: Option[String])
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,

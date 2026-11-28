@@ -442,6 +442,60 @@ class AgentWorkerSpec
     entry.attempts shouldBe empty
   }
 
+  it should "take a runnable entry behind more passed-over heads than one take can skip (#3096)" in {
+    val store  = InMemoryCheckpointer()
+    val writer = agentOver(store, answering("x"), "writer")
+    // threads of another graph, each with a head this worker passes over for a whole lease ttl
+    val stuck = (0 until TakeRequest.MaxSkip + 40).map { _ =>
+      val on = thread()
+      writer.run(on, "hi").value
+      submit(store, on)
+    }
+    val runnable = submit(store, thread())
+    // a default lease: each head is passed over for 30 seconds, so none comes back while the test runs
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))), queueSettings = RunQueueSettings())
+    worker.start()
+    store.runQueue.awaitClosed(None, runnable, 15.seconds).value.outcome.value shouldBe a[EntryOutcome.Done]
+    stuck.map(store.runQueue.entry(None, _).value.isOpen).distinct shouldBe Vector(true)
+  }
+
+  it should "keep taking after a take throws (#3091)" in {
+    val store  = InMemoryCheckpointer()
+    val thrown = new AtomicInteger(0)
+    val queue = new ForwardingRunQueue(store.runQueue) {
+      override def take(r: TakeRequest) =
+        if (thrown.getAndIncrement() < 2) throw new IllegalStateException("a store bug") else super.take(r)
+    }
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))), queue = Some(queue))
+    val id     = submit(store, thread())
+    worker.start()
+    closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
+    thrown.get should be > 2
+  }
+
+  it should "dead-letter an entry whose thread cannot be read, each failed read spending an attempt (#3093)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    val broken = new ForwardingCheckpointer(store) {
+      override def latest(threadId: ThreadId) =
+        if (threadId == on) Left(ProcessingError("store", "a stored checkpoint does not decode"))
+        else super.latest(threadId)
+    }
+    val id = submit(store, on, maxAttempts = 2)
+    val worker = AgentWorker(
+      store.runQueue,
+      broken,
+      Seq(QueuedAgent(agentOver(store, answering("x")))),
+      fast,
+      RunQueueSettings(lease = LeasePolicy(ttl = 300.millis, renewEvery = 100.millis))
+    ).value
+    started.add(worker)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(2))
+    entry.attempts should have size 2
+  }
+
   it should "close an entry for another tenant's thread at once, busy or not, judging nothing of that thread" in {
     val store = InMemoryCheckpointer()
     val other = thread()
@@ -511,6 +565,8 @@ class AgentWorkerSpec
       def reclaim(d: FiniteDuration, n: Int)             = inner.reclaim(d, n)
       def openRuns(ts: Vector[ThreadId])                 = inner.openRuns(ts)
       def depth(as: Set[org.llm4s.agent.AgentId])        = inner.depth(as)
+      def allDepths()                                    = inner.allDepths()
+      def closeUntaken(age: FiniteDuration, limit: Int)  = inner.closeUntaken(age, limit)
       def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason) = inner.cancel(t, c, r)
       def renew(l: Lease, ttl: FiniteDuration): Result[Lease] =
         if (refuse.get) Left(QueueError.LeaseLost(l.entryId, l.token, None)) else inner.renew(l, ttl)
@@ -655,13 +711,35 @@ class AgentWorkerSpec
     val old    = submit(store, thread())
     val leased = store.runQueue.take(TakeRequest("w", Set(agentId), 30.seconds)).value.value
     store.runQueue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    // leased, so the sweep does not close it as untaken (#3093)
     val open = submit(store, thread())
+    store.runQueue.take(TakeRequest("w", Set(agentId), 30.hours)).value.value.entry.id shouldBe open
     clock.advance(25.hours)
     val report = worker.sweepOnce().value
     report.entries shouldBe 1
     report.skipped shouldBe false
     store.runQueue.entry(None, old).left.value shouldBe QueueError.TicketExpired(old)
     store.runQueue.entry(None, open).value.isOpen shouldBe true
+  }
+
+  it should "close a head no worker took within unrunnableAfter, of an agent no worker serves (#3093)" in {
+    val clock  = new MovableClock(Instant.parse("2026-10-22T12:00:00Z"))
+    val store  = InMemoryCheckpointer(clock)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))), fast.withUnrunnableAfter(1.hour))
+    val typo   = AgentId.of("asistant").value
+    val on     = thread()
+    val stray  = submit(store, on, agent = typo)
+    val behind = submit(store, on, agent = typo)
+    store.runQueue.allDepths().value(typo).waiting shouldBe 2L
+    clock.advance(30.minutes)
+    worker.sweepOnce().value
+    store.runQueue.entry(None, stray).value.isOpen shouldBe true
+    clock.advance(31.minutes)
+    worker.sweepOnce().value
+    val failed = store.runQueue.entry(None, stray).value
+    failed.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.Unrunnable]
+    // the next head is closed only once it has been the head, unless it too was submitted long enough ago
+    store.runQueue.entry(None, behind).value.isOpen shouldBe true
   }
 
   it should "reclaim closed entries although a page of the checkpoint sweep failed, and report the sweep's error" in {

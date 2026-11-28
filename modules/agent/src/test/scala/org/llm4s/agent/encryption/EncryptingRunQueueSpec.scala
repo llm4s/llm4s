@@ -95,12 +95,16 @@ class EncryptingRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues
       EncryptingRunQueue(other, keys).entry(to.tenantId, id)
     }
 
+    // a moved input is never opened: it is answered as unreadable (#3091), and a take closes it
+    def refused(entry: org.llm4s.types.Result[QueueEntry]) = entry.value.input match {
+      case QueuedInput.Unreadable(problem) => problem should include("Cannot decrypt")
+      case other                           => fail(s"opened $other")
+    }
     planted(submission(on, tenant = Some("acme"))).value.input shouldBe start()
-    planted(submission(thread(), tenant = Some("acme"))).left.value shouldBe a[EncryptionError.DecryptionFailed]
-    planted(submission(on, tenant = Some("globex"))).left.value shouldBe a[EncryptionError.DecryptionFailed]
-    planted(submission(on, tenant = None)).left.value shouldBe a[EncryptionError.DecryptionFailed]
-    planted(submission(on, tenant = Some("acme")).withAgentId(AgentId.of("other").value)).left.value shouldBe
-      a[EncryptionError.DecryptionFailed]
+    refused(planted(submission(thread(), tenant = Some("acme"))))
+    refused(planted(submission(on, tenant = Some("globex"))))
+    refused(planted(submission(on, tenant = None)))
+    refused(planted(submission(on, tenant = Some("acme")).withAgentId(AgentId.of("other").value)))
   }
 
   it should "queue nothing when the tenant has no key, and refuse a plaintext entry unless migrating" in {
@@ -113,7 +117,10 @@ class EncryptingRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues
     raw.openEntries(Some(TenantId("globex")), on).value shouldBe empty
 
     val plain = raw.submit(submission(on, tenant = Some("acme"))).value
-    queue.entry(Some(TenantId("acme")), plain.entryId).left.value shouldBe a[EncryptionError.NotEncrypted]
+    queue.entry(Some(TenantId("acme")), plain.entryId).value.input match {
+      case QueuedInput.Unreadable(problem) => problem should include("unencrypted")
+      case other                           => fail(s"opened $other")
+    }
     val migrating = EncryptingRunQueue(raw, keys, EncryptionSettings(plaintextReads = true))
     migrating.entry(Some(TenantId("acme")), plain.entryId).value.input shouldBe start()
   }

@@ -9,6 +9,7 @@ import org.llm4s.agent.encryption.{
   StaticKeySource
 }
 import org.llm4s.agent.graph.{ Checkpointer, InMemoryCheckpointer, TenantId }
+import org.llm4s.agent.service.{ EntryId, InMemoryRunQueue, QueuedInput }
 import org.llm4s.agent.harness.{ FileBackend, InMemoryLongTermStore, LongTermStore, StoreLimits }
 import org.scalatest.flatspec.AnyFlatSpec
 
@@ -49,6 +50,19 @@ class EncryptingRunQueueContractSpec extends AnyFlatSpec with RunQueueContract {
       EncryptingRunQueue(store.runQueue, ContractKeys.keys)
     )
   }
+
+  // a ciphertext that does not open: the wrapper's own unreadable input
+  override protected def spoilInput(stores: RunQueueContract.Stores, entryId: EntryId): Boolean =
+    stores.queue match {
+      case encrypting: EncryptingRunQueue =>
+        encrypting.inner match {
+          case inner: InMemoryRunQueue =>
+            inner.corruptInput(entryId, QueuedInput.toJson(QueuedInput.Start(ujson.Str("not a ciphertext"))))
+            true
+          case _ => false
+        }
+      case _ => false
+    }
 }
 
 /** The encrypted long-term stores the contract runs use, over the reference store. */

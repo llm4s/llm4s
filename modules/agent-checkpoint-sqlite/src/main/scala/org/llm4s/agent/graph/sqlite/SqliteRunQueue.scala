@@ -4,7 +4,6 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ GraphError, RunId, TenantId, ThreadId }
 import org.llm4s.agent.service.*
 import org.llm4s.error.ValidationError
-import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 import java.sql.{ Connection, ResultSet }
@@ -45,12 +44,14 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       case None =>
         // only the submitter's tenant's entries are seen (rule 9, #3085): another tenant's are never reported
         val tenant = submission.tenantId.map(_.value)
-        val queued = openOf(c, submission.threadId, tenant)
+        val queued = openLight(c, submission.threadId, tenant)
         // Reject: busy with an open entry of the submitter's tenant, or with a live claim of its tenant - a direct run
         // (W3) - by the store's clock; another tenant's entry or claim is never reported (rule 9)
-        val busy = claimed(c, submission.threadId, submission.tenantId)
+        val busy         = claimed(c, submission.threadId, submission.tenantId)
+        lazy val refused = Submission.refusal(submission, queued.size)
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || busy) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
+        else if refused.isDefined then Left(refused.get)
         else
           val now = epochNanos(clock.instant())
           val id  = bump(c, "last_entry")
@@ -66,7 +67,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
               }
           if submission.policy == BusyThreadPolicy.Interrupt then
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled
-            queued.filter(r => r.attempts > 0 && !cancelling(r)).foreach { r =>
+            queued.filter(r => r.attempts > 0 && !DecodedEntry.cancelling(r.stop)).foreach { r =>
               setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
             }
           update(
@@ -88,7 +89,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             now,
             submission.traceContext.map(_.traceParent)
           )
-          val position = openOf(c, submission.threadId, tenant).indexWhere(_.id == id)
+          val position = positionOf(c, rowOf(c, id).get)
           sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
             Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
           }
@@ -112,9 +113,6 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       now.getNano.toLong
     )(_ => ()).nonEmpty
 
-  private def cancelling(row: Raw): Boolean =
-    row.stop.exists(json => StopRequest.fromJson(ujson.read(json)).exists(_.isInstanceOf[StopRequest.Cancel]))
-
   private def setStop(c: Connection, id: Long, request: StopRequest): Unit =
     update(
       c,
@@ -126,7 +124,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   private def same(row: Raw, submission: Submission): Boolean =
     row.threadId == submission.threadId.value && row.agentId == submission.agentId.value &&
       row.tenantId == submission.tenantId.map(_.value) && row.policy == submission.policy.toString &&
-      ujson.read(row.input) == QueuedInput.toJson(submission.input)
+      DecodedEntry.sameInput(row.input, submission)
 
   // ---- reads ----
 
@@ -144,6 +142,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     store.reading("queue.openEntries") { c =>
       sequence(openOf(c, threadId, tenantId.map(_.value)).zipWithIndex.map((r, i) => entryOf(c, r, Some(i))))
+        .map(_.map(_.entry))
     }
 
   // ---- leases ----
@@ -155,26 +154,41 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         val now    = epochNanos(clock.instant())
         val agents = request.agents.toVector.map(_.value)
         val skip   = request.skip.toVector.map(_.value)
+        val after  = request.after.fold(0L)(_.value)
         val passed =
           if skip.isEmpty then "" else s"AND e.entry_id NOT IN (${skip.map(_ => "?").mkString(", ")})"
-        val head = query(
+        def head = query(
           c,
           // each thread with an open entry of the agents, its head found once (#3085: not once per candidate)
           s"""SELECT e.entry_id, e.lease_token
              |FROM (SELECT DISTINCT thread_id FROM llm4s_checkpoint_queue_entries
              |      WHERE state = 'open' AND agent_id IN (${agents.map(_ => "?").mkString(", ")})) t
              |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = (${headOf("t.thread_id")})
-             |WHERE e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed
+             |WHERE e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed AND e.entry_id > ?
              |  AND (e.lease_token IS NULL OR e.lease_expires_nanos <= ?)
              |  AND NOT EXISTS (
              |    SELECT 1 FROM llm4s_checkpoint_queue_entries o
              |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
              |      AND o.lease_token IS NOT NULL AND o.lease_expires_nanos > ?)
              |ORDER BY e.entry_id LIMIT 1""".stripMargin,
-          (agents ++ agents ++ skip ++ Vector(now, now))*
+          (agents ++ agents ++ skip ++ Vector(after, now, now))*
           // a takeable head still holding a lease token holds an expired lease, never released
         )(r => r.getLong(1) -> (r.getObject(2) != null)).headOption
-        head match
+        // a head that does not decode is closed, in this transaction, and the take goes on to the next (#3091)
+        @scala.annotation.tailrec
+        def readable(closed: Int): Result[Option[(Long, Boolean)]] =
+          head match
+            case Some((id, expired)) =>
+              val row = rowOf(c, id).get
+              entryOf(c, row, None) match
+                case Right(decoded) if !decoded.readable && closed < MaxClosedPerTake =>
+                  closeRow(c, id, decoded.unrunnable, epochNanos(clock.instant()))
+                  readable(closed + 1)
+                case Right(decoded) if !decoded.readable => Right(None)
+                case Right(_)                            => Right(Some(id -> expired))
+                case Left(error)                         => Left(error)
+            case None => Right(None)
+        readable(0).flatMap {
           case None                => Right(None)
           case Some((id, expired)) =>
             // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
@@ -208,29 +222,64 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
                 )
               )
             }
+        }
       }
 
   def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] =
-    if agents.isEmpty then Right(Map.empty)
-    else
-      store.reading("queue.depth") { c =>
-        val now = clock.instant()
-        val ids = agents.toVector.map(_.value)
-        val rows = query(
-          c,
-          s"""SELECT agent_id,
+    if agents.isEmpty then Right(Map.empty) else depthOf(Some(agents))
+
+  def allDepths(): Result[Map[AgentId, QueueDepth]] = depthOf(None)
+
+  private def depthOf(agents: Option[Set[AgentId]]): Result[Map[AgentId, QueueDepth]] =
+    store.reading("queue.depth") { c =>
+      val now   = clock.instant()
+      val ids   = agents.toVector.flatten.map(_.value)
+      val asked = if agents.isEmpty then "" else s"AND agent_id IN (${ids.map(_ => "?").mkString(", ")})"
+      val rows = query(
+        c,
+        s"""SELECT agent_id,
              |  SUM(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN 0 ELSE 1 END),
              |  SUM(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN 1 ELSE 0 END),
              |  MIN(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN NULL ELSE submitted_nanos END)
              |FROM llm4s_checkpoint_queue_entries
-             |WHERE state = 'open' AND agent_id IN (${ids.map(_ => "?").mkString(", ")})
+             |WHERE state = 'open' $asked
              |GROUP BY agent_id""".stripMargin,
-          (Vector(epochNanos(now), epochNanos(now), epochNanos(now)) ++ ids)*
-        ) { r =>
-          val oldest = Option(r.getObject(4)).map(_ => fromEpochNanos(r.getLong(4)))
-          AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+        (Vector(epochNanos(now), epochNanos(now), epochNanos(now)) ++ ids)*
+      ) { r =>
+        val oldest = Option(r.getObject(4)).map(_ => fromEpochNanos(r.getLong(4)))
+        AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+      }
+      Right(rows.toMap)
+    }
+
+  def closeUntaken(age: FiniteDuration, limit: Int): Result[Vector[QueueEntry]] =
+    if limit <= 0 then Right(Vector.empty)
+    else
+      store.writing("queue.closeUntaken") { c =>
+        val now = clock.instant()
+        val candidates = query(
+          c,
+          // each thread's head, as take finds it, untaken: no attempt, no live lease on the thread, old enough
+          s"""SELECT e.entry_id, e.thread_id, e.tenant_id, e.agent_id
+             |FROM (SELECT DISTINCT thread_id FROM llm4s_checkpoint_queue_entries WHERE state = 'open') t
+             |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = (${headOf("t.thread_id")})
+             |WHERE e.attempt_count = 0 AND e.submitted_nanos <= ?
+             |  AND NOT EXISTS (
+             |    SELECT 1 FROM llm4s_checkpoint_queue_entries o
+             |    WHERE o.thread_id = e.thread_id AND o.state = 'open'
+             |      AND o.lease_token IS NOT NULL AND o.lease_expires_nanos > ?)
+             |ORDER BY e.entry_id LIMIT ?""".stripMargin,
+          epochNanos(now.minusNanos(age.toNanos)),
+          epochNanos(now),
+          limit
+        )(r => (r.getLong(1), r.getString(2), Option(r.getString(3)), r.getString(4)))
+        // a direct run holding the thread is what it waits for, not a missing worker
+        val untaken =
+          candidates.filterNot((_, thread, tenant, _) => claimed(c, ThreadId(thread), tenant.map(TenantId(_))))
+        untaken.foreach { (id, _, _, agent) =>
+          closeRow(c, id, RunQueue.untakenOutcome(AgentId.unsafe(agent), age), epochNanos(now))
         }
-        Right(rows.toMap)
+        sequence(untaken.map((id, _, _, _) => view(c, rowOf(c, id).get)))
       }
 
   /** `lease`'s entry, if `lease` is its current lease and it is open. */
@@ -239,8 +288,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       case None => Left(QueueError.LeaseLost(lease.entryId, lease.token, None))
       case Some(row) =>
         row.outcome match
-          case Some(json) =>
-            outcomeOf(json).flatMap(outcome => Left(QueueError.EntryClosed(lease.entryId, outcome)))
+          case Some(json) => Left(QueueError.EntryClosed(lease.entryId, DecodedEntry.outcomeOf(json)))
           case None if !row.leaseToken.contains(lease.token.value) =>
             Left(QueueError.LeaseLost(lease.entryId, lease.token, row.leaseToken.map(LeaseToken(_))))
           case None => Right(row)
@@ -249,7 +297,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     leased(c, lease).flatMap { row =>
       val expires = epochNanos(clock.instant().plusNanos(ttl.toNanos))
       update(c, "UPDATE llm4s_checkpoint_queue_entries SET lease_expires_nanos = ? WHERE entry_id = ?", expires, row.id)
-      stopOf(row).map(stop => lease.copy(expiresAt = fromEpochNanos(expires), stop = stop))
+      entryOf(c, row, None).map(e => lease.copy(expiresAt = fromEpochNanos(expires), stop = e.entry.stopRequest))
     }
   }
 
@@ -266,19 +314,18 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             closeRow(c, row.id, EntryOutcome.Cancelled(reason), epochNanos(clock.instant()))
             Some(EntryId.unsafe(row.id))
           else
-            if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            if row.outcome.isEmpty && !DecodedEntry.cancelling(row.stop) then
+              setStop(c, row.id, StopRequest.Cancel(reason))
             None
         }
-        sequence(rows.map(r => view(c, rowOf(c, r.id).get))).map(Cancellation(_, closed.toSet))
+        // read back in one pass, each position from one reading of the thread's order (#3095)
+        val after = rowsOf(c, rows.map(_.id))
+        val positions =
+          rows.headOption.fold(Map.empty[Long, Int])(r => positionsOf(c, ThreadId(r.threadId), r.tenantId))
+        sequence(after.map(r => entryOf(c, r, Option.when(r.outcome.isEmpty)(positions.getOrElse(r.id, 0)))))
+          .map(entries => Cancellation(entries.map(_.entry), closed.toSet))
       }
     }
-
-  private def stopOf(row: Raw): Result[Option[StopRequest]] =
-    decoding("queue", "queue stop request")(
-      row.stop.map(json =>
-        StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-      )
-    )
 
   def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
     leased(c, lease) match
@@ -311,7 +358,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         )(_ => ()).nonEmpty
         // an entry an Interrupt entry displaced after its take is no longer the head: its lease ends here, so the
         // interrupting entry runs first (W3, Codex round 6)
-        if !openOf(c, ThreadId(row.threadId)).headOption.exists(_.id == row.id) then
+        if !headIdOf(c, row.threadId).contains(row.id) then
           update(
             c,
             """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
@@ -354,7 +401,27 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     }
   }
 
+  /**
+   * Closes entry `id`; an `Interrupt` entry that never started withdraws the stop it asked of its thread's other open
+   * entries (#3094), so a cancelled or superseded interruption stops nothing.
+   */
   private def closeRow(c: Connection, id: Long, outcome: EntryOutcome, at: Long): Unit =
+    query(
+      c,
+      "SELECT thread_id FROM llm4s_checkpoint_queue_entries WHERE entry_id = ? AND is_interrupt = 1 AND attempt_count = 0",
+      id
+    )(_.getString(1)).headOption.foreach { thread =>
+      val asked = query(
+        c,
+        """SELECT entry_id, stop_json FROM llm4s_checkpoint_queue_entries
+          |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND stop_json IS NOT NULL""".stripMargin,
+        thread,
+        id
+      )(r => r.getLong(1) -> Option(r.getString(2)))
+      asked.filter((_, stop) => DecodedEntry.interruptsFor(stop, EntryId.unsafe(id))).foreach { (sibling, _) =>
+        update(c, "UPDATE llm4s_checkpoint_queue_entries SET stop_json = NULL WHERE entry_id = ?", sibling)
+      }
+    }
     update(
       c,
       """UPDATE llm4s_checkpoint_queue_entries
@@ -407,62 +474,103 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   private def rowOf(c: Connection, id: Long): Option[Raw] =
     query(c, s"SELECT $Columns FROM llm4s_checkpoint_queue_entries WHERE entry_id = ?", id)(raw).headOption
 
-  /** The thread's open entries, in the order they run. */
-  private def openOf(c: Connection, threadId: ThreadId): Vector[Raw] =
-    query(
-      c,
-      s"SELECT $Columns FROM (${ranked("thread_id = ?")}) q ORDER BY ${runOrder("q")}",
-      threadId.value
-    )(raw)
+  private def rowsOf(c: Connection, ids: Vector[Long]): Vector[Raw] =
+    if ids.isEmpty then Vector.empty
+    else
+      val read = query(
+        c,
+        s"SELECT $Columns FROM llm4s_checkpoint_queue_entries WHERE entry_id IN (${ids.map(_ => "?").mkString(", ")})",
+        ids*
+      )(raw).map(r => r.id -> r).toMap
+      ids.flatMap(read.get)
 
   /** The thread's open entries of `tenantId`, in the order they run. */
   private def openOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Raw] =
-    openOf(c, threadId).filter(_.tenantId == tenantId)
+    query(
+      c,
+      s"SELECT $Columns FROM (${ranked("thread_id = ? AND tenant_id IS ?")}) q ORDER BY ${runOrder("q")}",
+      threadId.value,
+      tenantId
+    )(raw)
+
+  /**
+   * The thread's open entries of `tenantId`, in the order they run, without their inputs (#3095): what a submission
+   * decides by.
+   */
+  private def openLight(c: Connection, threadId: ThreadId, tenantId: Option[String]): Vector[Light] =
+    query(
+      c,
+      s"""SELECT entry_id, is_interrupt, attempt_count, stop_json
+         |FROM (${ranked("thread_id = ? AND tenant_id IS ?")}) q ORDER BY ${runOrder("q")}""".stripMargin,
+      threadId.value,
+      tenantId
+    )(r => Light(r.getLong(1), r.getInt(2) == 1, r.getInt(3), Option(r.getString(4))))
+
+  /** The id of the thread's head, in the run order of every tenant's entries. */
+  private def headIdOf(c: Connection, threadId: String): Option[Long] =
+    query(c, headOf("?"), threadId)(_.getLong(1)).headOption
+
+  /**
+   * How many of its tenant's open entries of the thread run before `row` (rule 9), counted in SQL from the columns
+   * the run order is made of, reading no input (#3095).
+   */
+  private def positionOf(c: Connection, row: Raw): Int =
+    query(
+      c,
+      """SELECT COUNT(*) FROM llm4s_checkpoint_queue_entries o
+        |WHERE o.thread_id = ? AND o.tenant_id IS ? AND o.state = 'open'
+        |  AND ((o.attempt_count = 0), (1 - o.is_interrupt), o.entry_id) < (?, ?, ?)""".stripMargin,
+      row.threadId,
+      row.tenantId,
+      if row.attempts == 0 then 1 else 0,
+      if row.interrupt then 0 else 1,
+      row.id
+    )(_.getInt(1)).head
+
+  /** Every open entry's position among its tenant's open entries of the thread, read once. */
+  private def positionsOf(c: Connection, threadId: ThreadId, tenantId: Option[String]): Map[Long, Int] =
+    query(
+      c,
+      s"SELECT entry_id FROM (${ranked("thread_id = ? AND tenant_id IS ?")}) q ORDER BY ${runOrder("q")}",
+      threadId.value,
+      tenantId
+    )(_.getLong(1)).zipWithIndex.toMap
 
   private def view(c: Connection, row: Raw): Result[QueueEntry] =
     // only the entry's own tenant's entries are counted (rule 9)
-    val position =
-      Option.when(row.outcome.isEmpty)(openOf(c, ThreadId(row.threadId), row.tenantId).indexWhere(_.id == row.id))
-    entryOf(c, row, position)
+    entryOf(c, row, Option.when(row.outcome.isEmpty)(positionOf(c, row))).map(_.entry)
 
-  private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[QueueEntry] =
+  /** The entry `row` holds, decoded leniently: what does not decode is replaced and named (#3091). */
+  private def entryOf(c: Connection, row: Raw, position: Option[Int]): Result[DecodedEntry] =
     decoding("queue", "queue entry") {
       val attempts = query(
         c,
         "SELECT run_id, started_nanos, holder FROM llm4s_checkpoint_queue_attempts WHERE entry_id = ? ORDER BY attempt",
         row.id
       )(a => Attempt(RunId(a.getString(1)), fromEpochNanos(a.getLong(2)), a.getString(3)))
-      QueueEntry.stored(
+      DecodedEntry(
         EntryId.unsafe(row.id),
         ThreadId(row.threadId),
         AgentId.unsafe(row.agentId),
         row.tenantId.map(TenantId(_)),
-        QueuedInput.fromJson(ujson.read(row.input)).fold(p => throw new IllegalStateException(p), identity),
-        BusyThreadPolicy.valueOf(row.policy),
+        row.input,
+        row.policy,
+        row.interrupt,
         row.key.map(SubmissionKey.unsafe),
         row.maxAttempts,
-        row.traceParent.map(t => TraceContext.parse(t).fold(e => throw new IllegalStateException(e.message), identity)),
+        row.traceParent,
         fromEpochNanos(row.submitted),
         attempts,
         row.admitted,
         row.leaseHolder,
         row.leaseExpires.map(fromEpochNanos),
-        row.outcome.map(json =>
-          EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-        ),
+        row.outcome,
         row.closed.map(fromEpochNanos),
         row.closedSeq,
         position,
-        row.stop.map(json =>
-          StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-        )
+        row.stop
       )
     }
-
-  private def outcomeOf(json: String): Result[EntryOutcome] =
-    decoding("queue", "queue outcome")(
-      EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
-    )
 
   /** The meta counter `key`, moved on by one, inside the caller's write transaction. */
   private def bump(c: Connection, key: String): Long =
@@ -473,6 +581,12 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
 
 private[sqlite] object SqliteRunQueue:
+
+  /** The most heads one take closes because they do not decode before it answers none, for its bound (#3091). */
+  val MaxClosedPerTake: Int = 16
+
+  /** An open entry without its input: what a submission decides by (#3095). */
+  final case class Light(id: Long, interrupt: Boolean, attempts: Int, stop: Option[String])
 
   /**
    * A thread's open entries, the rows aliased `a` and [[ranked]], in the order they run (rule 5): attempted first; then each tenant's

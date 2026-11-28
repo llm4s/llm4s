@@ -73,6 +73,12 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
   protected def advanceStoreClock(@unused stores: Stores, clock: ManualClock, by: FiniteDuration): Unit =
     clock.advance(by)
 
+  /**
+   * Makes entry `entryId`'s stored input one this build cannot read, as a newer build's or a hand edit might
+   * (#3091), answering whether the store can; the case that needs it is cancelled when it cannot. The default cannot.
+   */
+  protected def spoilInput(@unused stores: Stores, @unused entryId: EntryId): Boolean = false
+
   /** Whether lease expiries and close times are exactly the injected clock's; `false` for a store's own clock. */
   protected def exactExpiry: Boolean = true
 
@@ -91,6 +97,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val other: AgentId                    = AgentId.of(s"b-${unique()}").toOption.get
     val thread: ThreadId                  = newThread()
     def newThread(): ThreadId             = ThreadId(s"queue-contract-${unique()}")
+    def stores: Stores                    = current
     def queue: RunQueue                   = current.queue
     def checkpointer: Checkpointer        = current.checkpointer
     def reopened(): Unit                  = current = reopen(current, clock)
@@ -1197,6 +1204,109 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.close(retaken.lease, EntryOutcome.Done(None, None)).value
     val after = c.queue.depth(Set(c.agent)).value(c.agent)
     (after.waiting, after.leased) shouldBe (2L, 0L)
+  }
+
+  it should "close a head whose stored entry does not decode, take the next, and answer it without its input (#3091)" in {
+    val c      = Case()
+    val bad    = c.submit().value.entryId
+    val queued = c.submit().value.entryId
+    val other  = c.newThread()
+    c.submit(on = other).value
+    if !spoilInput(c.stores, bad) then cancel("the store cannot store an entry it cannot read")
+    // read back, with what cannot be read replaced: never a failed call
+    c.entry(bad).input shouldBe a[QueuedInput.Unreadable]
+    c.ids() shouldBe Vector(bad, queued)
+    // the take closes it and goes on: the thread's next entry is now the oldest head
+    c.take().value.entry.id shouldBe queued
+    val failed = c.entry(bad)
+    failed.outcome.value match
+      case EntryOutcome.Failed(FailureReason.Unrunnable(message)) => message should include("cannot be read")
+      case other                                                  => fail(s"closed $other")
+    failed.input shouldBe a[QueuedInput.Unreadable]
+    c.queue.cancel(None, CancelTarget.Entry(bad), CancelReason.Requested(None)).value.entries.map(_.id) shouldBe
+      Vector(bad)
+    c.queue.awaitClosed(None, bad, 1.second).value.isOpen shouldBe false
+  }
+
+  it should "withdraw the stop an Interrupt entry asked when it is cancelled before it starts (#3094)" in {
+    val c       = Case()
+    val running = c.submit().value.entryId
+    val leased  = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value
+    val interrupting = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.queue.renew(leased.lease, ttl).value.stop shouldBe Some(StopRequest.Interrupt(interrupting))
+    c.queue.cancel(None, CancelTarget.Entry(interrupting), CancelReason.Requested(None)).value.closed shouldBe
+      Set(interrupting)
+    // nothing interrupts the running entry now: it runs on, and is not closed Interrupted
+    c.queue.renew(leased.lease, ttl).value.stop shouldBe None
+    c.entry(running).stopRequest shouldBe None
+    // a cancel asked of the running entry is never withdrawn by another entry's close
+    val second = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    val reason = CancelReason.Requested(Some("stop"))
+    c.queue.cancel(None, CancelTarget.Entry(running), reason).value
+    c.queue.cancel(None, CancelTarget.Entry(second), reason).value
+    c.queue.renew(leased.lease, ttl).value.stop shouldBe Some(StopRequest.Cancel(reason))
+  }
+
+  it should "refuse a submission past its thread's open-entry bound, per tenant, or past its input bound (#3095)" in {
+    val c      = Case()
+    val tenant = Some(TenantId(s"t-${unique()}"))
+    def bounded(by: Option[TenantId]) =
+      c.queue.submit(
+        Submission(c.thread, c.agent, QueuedInput.query("q"), by, BusyThreadPolicy.Enqueue).withMaxOpenPerThread(2)
+      )
+    bounded(None).value.position shouldBe Some(0)
+    bounded(None).value.position shouldBe Some(1)
+    bounded(None).left.value shouldBe QueueError.ThreadQueueFull(c.thread, 2)
+    // another tenant's entries are its own (rule 9)
+    bounded(tenant).value.position shouldBe Some(0)
+    // a closed entry makes room
+    val leased = c.take().value
+    c.queue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    bounded(None).value.position shouldBe Some(1)
+    val large = Submission(c.newThread(), c.agent, QueuedInput.query("x" * 200)).withMaxInputBytes(100)
+    // a store that stores the input otherwise - sealed - may count more bytes
+    c.queue.submit(large).left.value match
+      case QueueError.InputTooLarge(bytes, limit) =>
+        bytes should be >= large.inputBytes
+        limit shouldBe 100L
+      case other => fail(s"refused with $other")
+  }
+
+  it should "take only heads past a request's after (#3096)" in {
+    val c      = Case()
+    val first  = c.submit().value.entryId
+    val second = c.submit(on = c.newThread()).value.entryId
+    c.queue.take(TakeRequest("w", Set(c.agent), ttl, after = Some(first))).value.value.entry.id shouldBe second
+    c.queue.take(TakeRequest("w", Set(c.agent), ttl, after = Some(second))).value shouldBe None
+    c.take().value.entry.id shouldBe first
+  }
+
+  it should "close heads no worker took within an age, and nothing else, and show every agent's depth (#3093)" in {
+    val c       = Case()
+    val stray   = AgentId.of(s"s-${unique()}").toOption.get
+    val untaken = c.submit(by = stray).value.entryId
+    val behind  = c.submit(by = stray).value.entryId
+    // a head leased for longer than the age, and one a live direct run's claim holds back
+    val leasedOn = c.newThread()
+    val leased   = c.submit(on = leasedOn).value.entryId
+    c.queue.take(TakeRequest("w", Set(c.agent), 3.hours)).value.value.entry.id shouldBe leased
+    val claimedOn = c.newThread()
+    val claimed   = c.submit(on = claimedOn, by = stray).value.entryId
+    c.checkpointer.claim(claimedOn, ClaimRequest(RunId(s"direct-${unique()}"), None, 3.hours)).value
+    c.queue.allDepths().value(stray).waiting shouldBe 3L
+    c.queue.depth(Set(c.agent)).value.keySet shouldBe Set(c.agent)
+    c.advance(2.hours)
+    val fresh = c.submit(on = c.newThread(), by = stray).value.entryId
+    // store-wide: earlier cases' leftovers may close too
+    val closed = c.queue.closeUntaken(1.hour, 10_000).value
+    closed.map(_.id) should contain(untaken)
+    closed.map(_.id) should not contain behind
+    c.entry(untaken).outcome.value match
+      case EntryOutcome.Failed(FailureReason.Unrunnable(message)) => message should include(stray.value)
+      case other                                                  => fail(s"closed $other")
+    Vector(behind, leased, claimed, fresh).map(c.entry(_).isOpen) shouldBe Vector(true, true, true, true)
+    c.queue.closeUntaken(1.hour, 0).value shouldBe empty
   }
 
   it should "keep refusing a deleted entry's attempt once a sweep has reclaimed the thread's tombstone" in {

@@ -654,6 +654,14 @@ final class PostgresCheckpointer private (
   /** The channel this store's commits notify and its listener listens on. */
   private[postgres] def channel: String = notifier.channel
 
+  /** A waiter for the close of queue entry `entryId`, woken by [[notifyClosed]] in any store over the schema. */
+  private[postgres] def closeWaiter(entryId: org.llm4s.agent.service.EntryId): ChangeNotifier.Waiter =
+    notifier.register(entryId)
+
+  /** Tells every store listening on the schema's channel that entry `entryId` closed, when this transaction commits. */
+  private[postgres] def notifyClosed(c: Connection, entryId: org.llm4s.agent.service.EntryId): Unit =
+    query(c, ChangeNotifier.NotifySql, notifier.channel, ChangeNotifier.payload(entryId))(_ => ()): Unit
+
   /** Tells every store listening on the schema's channel that `threadId` changed, when this transaction commits. */
   private def notifyCommit(c: Connection, threadId: ThreadId): Unit =
     query(c, ChangeNotifier.NotifySql, notifier.channel, ChangeNotifier.payload(threadId))(_ => ()): Unit

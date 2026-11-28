@@ -99,7 +99,8 @@ final class InMemoryRunQueue private[agent] (
       row.threadId,
       row.agentId,
       row.tenantId,
-      QueuedInput.fromJson(row.input).fold(problem => throw new IllegalStateException(problem), identity),
+      // an input that cannot be read is answered as such, never thrown (#3091)
+      QueuedInput.fromJson(row.input).fold(p => QueuedInput.Unreadable(s"its input cannot be read: $p"), identity),
       row.policy,
       row.key,
       row.maxAttempts,
@@ -136,48 +137,52 @@ final class InMemoryRunQueue private[agent] (
         val claimed = liveClaim(submission.threadId, submission.tenantId.map(_.value))
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
-        else
-          lastId += 1
-          val id  = lastId
-          val now = clock.instant()
-          // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
-          // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it runs
-          // the entries closed here are answered in the ticket, under the lock, so only this submit reports them
-          val interrupted =
-            if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
-            else
-              queued
-                .filter(r => r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty)
-                .map(r => closeRow(r, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now))
-          if submission.policy == BusyThreadPolicy.Interrupt then
-            // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled (W3)
-            queued.filter(r => r.attempts.nonEmpty && !cancelling(r)).foreach { r =>
-              rows.update(r.id, r.copy(stop = Some(StopRequest.Interrupt(EntryId.unsafe(id)))))
-            }
-          val row = Row(
-            id,
-            submission.threadId,
-            submission.agentId,
-            submission.tenantId,
-            QueuedInput.toJson(submission.input),
-            submission.policy,
-            submission.submissionKey,
-            submission.maxAttempts,
-            submission.traceContext,
-            now,
-            false,
-            Vector.empty,
-            None,
-            None,
-            None
-          )
-          rows.update(id, row)
-          openByThread.getOrElseUpdate(row.threadId, mutable.Set.empty) += id
-          submission.submissionKey.foreach(k => keys.update(tenant -> k.value, id))
-          Right(
-            Ticket(EntryId.unsafe(id), submission.threadId, view(row).position, existing = false, interrupted.map(view))
-          )
+        else Submission.refusal(submission, queued.size).toLeft(()).flatMap(_ => inserted(submission, queued))
   }
+
+  /** Inserts `submission`, behind `queued` - its tenant's open entries of the thread - under the lock. */
+  private def inserted(submission: Submission, queued: Vector[Row]): Result[Ticket] =
+    val tenant = submission.tenantId.map(_.value)
+    lastId += 1
+    val id  = lastId
+    val now = clock.instant()
+    // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
+    // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it runs
+    // the entries closed here are answered in the ticket, under the lock, so only this submit reports them
+    val interrupted =
+      if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
+      else
+        queued
+          .filter(r => r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty)
+          .map(r => closeRow(r, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now))
+    if submission.policy == BusyThreadPolicy.Interrupt then
+      // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled (W3)
+      queued.filter(r => r.attempts.nonEmpty && !cancelling(r)).foreach { r =>
+        rows.update(r.id, r.copy(stop = Some(StopRequest.Interrupt(EntryId.unsafe(id)))))
+      }
+    val row = Row(
+      id,
+      submission.threadId,
+      submission.agentId,
+      submission.tenantId,
+      QueuedInput.toJson(submission.input),
+      submission.policy,
+      submission.submissionKey,
+      submission.maxAttempts,
+      submission.traceContext,
+      now,
+      false,
+      Vector.empty,
+      None,
+      None,
+      None
+    )
+    rows.update(id, row)
+    openByThread.getOrElseUpdate(row.threadId, mutable.Set.empty) += id
+    submission.submissionKey.foreach(k => keys.update(tenant -> k.value, id))
+    Right(
+      Ticket(EntryId.unsafe(id), submission.threadId, view(row).position, existing = false, interrupted.map(view))
+    )
 
   private def cancelling(row: Row): Boolean = row.stop.exists(_.isInstanceOf[StopRequest.Cancel])
 
@@ -217,15 +222,29 @@ final class InMemoryRunQueue private[agent] (
 
   def take(request: TakeRequest): Result[Option[LeasedEntry]] = withLock(lock) {
     val now = clock.instant()
-    val heads = openByThread.keysIterator
+    def heads = openByThread.keysIterator
       .flatMap { thread =>
         val ordered = queueOf(thread)
         val head    = ordered.head
         // one run per thread: no other entry of the thread holds a live lease
         Option.when(!live(head, now) && !ordered.tail.exists(live(_, now)))(head)
       }
-      .filter(head => request.agents.contains(head.agentId) && !request.skip.contains(EntryId.unsafe(head.id)))
-    heads.minByOption(_.id) match
+      .filter(head => request.agents.contains(head.agentId) && request.admits(EntryId.unsafe(head.id)))
+    // a head whose input cannot be read is closed, and the take goes on to the next (#3091)
+    @tailrec def readable(): Option[Row] =
+      heads.minByOption(_.id) match
+        case Some(head) if QueuedInput.fromJson(head.input).isLeft =>
+          closeRow(
+            head,
+            EntryOutcome.Failed(FailureReason.Unrunnable(view(head).input match
+              case QueuedInput.Unreadable(problem) => s"the stored entry cannot be read: $problem"
+              case _                               => "the stored entry cannot be read"
+            )),
+            now
+          )
+          readable()
+        case other => other
+    readable() match
       case None       => Right(None)
       case Some(head) =>
         // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
@@ -240,9 +259,31 @@ final class InMemoryRunQueue private[agent] (
         Right(Some(LeasedEntry(view(row), leaseOf(row, held), expiredLease = head.lease.isDefined)))
   }
 
-  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] = withLock(lock) {
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] = withLock(lock)(depthOf(agents.contains))
+
+  def allDepths(): Result[Map[AgentId, QueueDepth]] = withLock(lock)(depthOf(_ => true))
+
+  def closeUntaken(age: FiniteDuration, limit: Int): Result[Vector[QueueEntry]] = withLock(lock) {
+    val now    = clock.instant()
+    val cutoff = now.minusNanos(age.toNanos)
+    val untaken = openByThread.keysIterator
+      .map(queueOf)
+      .flatMap { ordered =>
+        val head = ordered.head
+        Option.when(
+          head.attempts.isEmpty && !head.submittedAt.isAfter(cutoff) && !ordered.exists(live(_, now)) &&
+            !liveClaim(head.threadId, head.tenantId.map(_.value))
+        )(head)
+      }
+      .toVector
+      .sortBy(_.id)
+      .take(math.max(limit, 0))
+    Right(untaken.map(head => view(closeRow(head, RunQueue.untakenOutcome(head.agentId, age), now))))
+  }
+
+  private def depthOf(asked: AgentId => Boolean): Result[Map[AgentId, QueueDepth]] =
     val now  = clock.instant()
-    val open = openByThread.valuesIterator.flatMap(_.iterator.map(rows)).filter(r => agents.contains(r.agentId))
+    val open = openByThread.valuesIterator.flatMap(_.iterator.map(rows)).filter(r => asked(r.agentId))
     Right(
       open.toVector.groupBy(_.agentId).map { (agent, entries) =>
         val (leased, waiting) = entries.partition(live(_, now))
@@ -250,7 +291,6 @@ final class InMemoryRunQueue private[agent] (
         agent -> QueueDepth(waiting.size.toLong, leased.size.toLong, oldest.map(QueueDepth.age(_, now)))
       }
     )
-  }
 
   private def leaseOf(row: Row, held: Held): Lease =
     Lease(EntryId.unsafe(row.id), LeaseToken(held.token), held.holder, held.expiresAt, row.stop)
@@ -337,10 +377,19 @@ final class InMemoryRunQueue private[agent] (
     leased(lease).map(row => view(closeRow(row, outcome)))
   }
 
+  /**
+   * Closes `row`; an `Interrupt` entry that never started withdraws the stop it asked of its thread's other open
+   * entries (#3094), so a cancelled or superseded interruption stops nothing.
+   */
   private def closeRow(row: Row, outcome: EntryOutcome, at: Instant = clock.instant()): Row =
     val done =
       row.copy(lease = None, outcome = Some(outcome), closedAt = Some(at), closedAtSeq = Some(lastEvent(row.threadId)))
     rows.update(row.id, done)
+    if row.policy == BusyThreadPolicy.Interrupt && row.attempts.isEmpty then
+      val asked = Some(StopRequest.Interrupt(EntryId.unsafe(row.id)))
+      openByThread
+        .get(row.threadId)
+        .foreach(_.iterator.map(rows).filter(_.stop == asked).foreach(r => rows.update(r.id, r.copy(stop = None))))
     closedOrder += (at -> row.id)
     openByThread.get(row.threadId).foreach { open =>
       open -= row.id
@@ -409,3 +458,15 @@ final class InMemoryRunQueue private[agent] (
    */
   private[agent] def keptRuns(threadId: ThreadId): Set[String] =
     queueOf(threadId).iterator.flatMap(_.attempts.map(_.runId.value)).toSet
+
+  /**
+   * Replaces entry `entryId`'s stored input with `input` - by default one that cannot be read, as a newer build's
+   * might be: for the contract.
+   */
+  private[agent] def corruptInput(
+    entryId: EntryId,
+    input: ujson.Value = ujson.Obj("kind" -> "from-a-newer-build")
+  ): Unit =
+    withLock(lock) {
+      rows.get(entryId.value).foreach(r => rows.update(r.id, r.copy(input = input)))
+    }

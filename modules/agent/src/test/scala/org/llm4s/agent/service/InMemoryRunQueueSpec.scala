@@ -309,6 +309,8 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       def openRuns(threads: Vector[ThreadId])                           = f.queue.openRuns(threads)
       def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason) = f.queue.cancel(t, c, r)
       def depth(agents: Set[org.llm4s.agent.AgentId])                   = f.queue.depth(agents)
+      def allDepths()                                                   = f.queue.allDepths()
+      def closeUntaken(age: FiniteDuration, limit: Int)                 = f.queue.closeUntaken(age, limit)
     }
     val id = polling.submit(Submission(thread, agent, QueuedInput.query("q"))).value.entryId
     polling.awaitClosed(None, id, 150.millis).value.isOpen shouldBe true

@@ -55,15 +55,34 @@ object LeasePolicy:
  *    store's clock, before the retention sweep reclaims it (default [[RunQueueSettings.DefaultTicketLifetime]]).
  *    Waiting on or following a reclaimed ticket answers [[QueueError.TicketExpired]].
  *  - `lease`: the [[LeasePolicy]] a worker leases entries with.
+ *  - `maxOpenPerThread`: the most open entries one tenant may have on one thread; a submission past it is refused
+ *    with [[QueueError.ThreadQueueFull]] (default [[RunQueueSettings.DefaultMaxOpenPerThread]], #3095).
+ *  - `maxInputBytes`: the longest a queued input's stored JSON may be, in bytes - a `QueuedInput.query` with a
+ *    `history` holds the whole conversation; a submission past it is refused with [[QueueError.InputTooLarge]]
+ *    (default [[RunQueueSettings.DefaultMaxInputBytes]], #3095).
  *
- * `maxAttempts` must be at least 1 and `ticketLifetime` positive: `apply` and the `with*` setters throw
- * `IllegalArgumentException` otherwise, and [[RunQueueSettings.of]] returns a `ValidationError`.
+ * `maxAttempts`, `maxOpenPerThread` and `maxInputBytes` must be at least 1 and `ticketLifetime` positive: `apply` and
+ * the `with*` setters throw `IllegalArgumentException` otherwise, and [[RunQueueSettings.of]] returns a
+ * `ValidationError`.
  */
 @Experimental
-final case class RunQueueSettings private (maxAttempts: Int, ticketLifetime: FiniteDuration, lease: LeasePolicy):
-  def withMaxAttempts(n: Int): RunQueueSettings               = RunQueueSettings(n, ticketLifetime, lease)
-  def withTicketLifetime(t: FiniteDuration): RunQueueSettings = RunQueueSettings(maxAttempts, t, lease)
-  def withLease(l: LeasePolicy): RunQueueSettings             = RunQueueSettings(maxAttempts, ticketLifetime, l)
+final case class RunQueueSettings private (
+  maxAttempts: Int,
+  ticketLifetime: FiniteDuration,
+  lease: LeasePolicy,
+  maxOpenPerThread: Int,
+  maxInputBytes: Long
+):
+  def withMaxAttempts(n: Int): RunQueueSettings =
+    RunQueueSettings(n, ticketLifetime, lease, maxOpenPerThread, maxInputBytes)
+  def withTicketLifetime(t: FiniteDuration): RunQueueSettings =
+    RunQueueSettings(maxAttempts, t, lease, maxOpenPerThread, maxInputBytes)
+  def withLease(l: LeasePolicy): RunQueueSettings =
+    RunQueueSettings(maxAttempts, ticketLifetime, l, maxOpenPerThread, maxInputBytes)
+  def withMaxOpenPerThread(n: Int): RunQueueSettings =
+    RunQueueSettings(maxAttempts, ticketLifetime, lease, n, maxInputBytes)
+  def withMaxInputBytes(n: Long): RunQueueSettings =
+    RunQueueSettings(maxAttempts, ticketLifetime, lease, maxOpenPerThread, n)
 
 @Experimental
 object RunQueueSettings:
@@ -74,29 +93,46 @@ object RunQueueSettings:
   /** A day: long enough for a caller to come back for its result, short enough to keep the queue bounded. */
   val DefaultTicketLifetime: FiniteDuration = 24.hours
 
-  private def problems(maxAttempts: Int, ticketLifetime: FiniteDuration): List[String] =
+  /** A thousand open entries per tenant and thread: far more than a conversation queues, few enough to read quickly. */
+  val DefaultMaxOpenPerThread: Int = 1000
+
+  /** 4 MiB: room for a long conversation's history, small enough that no read of an entry is a large one. */
+  val DefaultMaxInputBytes: Long = 4L * 1024 * 1024
+
+  private def problems(
+    maxAttempts: Int,
+    ticketLifetime: FiniteDuration,
+    maxOpenPerThread: Int,
+    maxInputBytes: Long
+  ): List[String] =
     List(
       Option.when(maxAttempts < 1)(s"maxAttempts must be at least 1, was $maxAttempts"),
-      Option.when(ticketLifetime.length <= 0)(s"ticketLifetime must be positive, was $ticketLifetime")
+      Option.when(ticketLifetime.length <= 0)(s"ticketLifetime must be positive, was $ticketLifetime"),
+      Option.when(maxOpenPerThread < 1)(s"maxOpenPerThread must be at least 1, was $maxOpenPerThread"),
+      Option.when(maxInputBytes < 1)(s"maxInputBytes must be at least 1, was $maxInputBytes")
     ).flatten
 
   /** Throws `IllegalArgumentException` for invalid settings; use [[of]] for untrusted input. */
   def apply(
     maxAttempts: Int = DefaultMaxAttempts,
     ticketLifetime: FiniteDuration = DefaultTicketLifetime,
-    lease: LeasePolicy = LeasePolicy.default
+    lease: LeasePolicy = LeasePolicy.default,
+    maxOpenPerThread: Int = DefaultMaxOpenPerThread,
+    maxInputBytes: Long = DefaultMaxInputBytes
   ): RunQueueSettings =
-    val found = problems(maxAttempts, ticketLifetime)
+    val found = problems(maxAttempts, ticketLifetime, maxOpenPerThread, maxInputBytes)
     require(found.isEmpty, found.mkString("; "))
-    new RunQueueSettings(maxAttempts, ticketLifetime, lease)
+    new RunQueueSettings(maxAttempts, ticketLifetime, lease, maxOpenPerThread, maxInputBytes)
 
   def of(
     maxAttempts: Int = DefaultMaxAttempts,
     ticketLifetime: FiniteDuration = DefaultTicketLifetime,
-    lease: LeasePolicy = LeasePolicy.default
+    lease: LeasePolicy = LeasePolicy.default,
+    maxOpenPerThread: Int = DefaultMaxOpenPerThread,
+    maxInputBytes: Long = DefaultMaxInputBytes
   ): Result[RunQueueSettings] =
-    problems(maxAttempts, ticketLifetime) match
-      case Nil   => Right(new RunQueueSettings(maxAttempts, ticketLifetime, lease))
+    problems(maxAttempts, ticketLifetime, maxOpenPerThread, maxInputBytes) match
+      case Nil   => Right(new RunQueueSettings(maxAttempts, ticketLifetime, lease, maxOpenPerThread, maxInputBytes))
       case found => Left(ValidationError("queue", found))
 
   /** The defaults. */

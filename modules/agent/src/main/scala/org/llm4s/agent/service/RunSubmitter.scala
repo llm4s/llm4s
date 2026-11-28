@@ -60,7 +60,18 @@ final class RunSubmitter(
     // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store, which answers them in the
     // ticket - only to the submit that closed them - and they are counted here (W3, #2368)
     Submission
-      .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts, traceContext)
+      .of(
+        threadId,
+        agentId,
+        input,
+        tenantId,
+        policy,
+        submissionKey,
+        settings.maxAttempts,
+        traceContext,
+        settings.maxOpenPerThread,
+        settings.maxInputBytes
+      )
       .flatMap(submission => ownedBy(threadId, tenantId).flatMap(_ => queue.submit(submission)))
       .map { ticket =>
         countClosed(ticket.interrupted)

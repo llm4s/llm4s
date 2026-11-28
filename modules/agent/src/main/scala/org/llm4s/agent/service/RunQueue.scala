@@ -29,7 +29,9 @@ import scala.concurrent.duration.*
  *    there; when an `Interrupt` entry is submitted, close every queued `Interrupt`
  *    entry of the thread that has recorded no attempt `Interrupted(by = the new entry)`, answering them in
  *    [[Ticket.interrupted]], and ask every open entry of the thread that has recorded one to stop for it
- *    ([[StopRequest.Interrupt]]) unless a cancel was asked of it; and
+ *    ([[StopRequest.Interrupt]]) unless a cancel was asked of it; refuse a submission whose tenant already has
+ *    [[Submission.maxOpenPerThread]] open entries on the thread ([[QueueError.ThreadQueueFull]]) or whose input is
+ *    longer than [[Submission.maxInputBytes]] ([[QueueError.InputTooLarge]], #3095); and
  *    issue entry ids in submission order, never reused;
  *  - '''order''' each thread's open entries (rule 5): an entry that has recorded an attempt first; then each tenant's
  *    entries together, the tenants in the order of their oldest open entry, so an `Interrupt` entry goes ahead of its
@@ -43,7 +45,12 @@ import scala.concurrent.duration.*
  *    a lease may be renewed, released, have attempts recorded under it and close its entry for as long as it is
  *    the entry's current one, expired or not, and every such call under another token is refused
  *    ([[QueueError.LeaseLost]]), as is any on a closed entry ([[QueueError.EntryClosed]]); taking is skip-locked
- *    where the store can, so workers do not contend for one entry;
+ *    where the store can, so workers do not contend for one entry, and locks no entry it does not lease (#3096);
+ *  - '''read every entry it stored''' (#3091): an entry whose stored form cannot be decoded - written by a newer
+ *    build, or by hand - is read back with what cannot be read replaced ([[QueuedInput.Unreadable]] for its input),
+ *    so [[entry]], [[openEntries]], [[cancel]] and [[awaitClosed]] answer it; a [[take]] that reaches such an entry
+ *    at a thread's head closes it `Failed(Unrunnable)`, naming what cannot be read, and goes on to the next head, so
+ *    one such entry never blocks a take;
  *  - '''record attempts''' durably before answering ([[recordAttempt]]): an attempt's `RunId` naming no other run on
  *    the thread - no checkpoint of the thread's history and no attempt of any entry of the thread has it - so the
  *    run-id lookup finds only the attempt's own run; none for an entry that is no longer its thread's head - an
@@ -64,14 +71,19 @@ import scala.concurrent.duration.*
  *    `Cancelled(reason)` at once, so it never runs, reporting it closed only to the call that closed it
  *    ([[Cancellation.closed]]), and ask one that has recorded an attempt to stop
  *    ([[StopRequest.Cancel]], replacing an interrupt), keeping the request until the entry closes and answering it with
- *    every lease granted or renewed on the entry ([[Lease.stop]]), so its worker - on any machine - sees it;
+ *    every lease granted or renewed on the entry ([[Lease.stop]]), so its worker - on any machine - sees it; closing
+ *    an `Interrupt` entry that has not started withdraws the [[StopRequest.Interrupt]] it asked of the thread's other
+ *    entries, in the same transaction (or under the same lock), so a cancelled interruption stops nothing (#3094);
  *  - '''close''' an entry once, with its [[EntryOutcome]], the store's time and the thread's last event number then
  *    ([[QueueEntry.closedAtSeq]]), and keep it for the ticket lifetime;
- *    [[reclaim]] removes closed entries older than that, oldest first, and never an open one;
+ *    [[reclaim]] removes closed entries older than that, oldest first, and never an open one; [[closeUntaken]]
+ *    closes the heads no worker has taken for a given age (#3093);
  *  - '''scope by tenant''' (rule 9): [[entry]], [[awaitClosed]], [[openEntries]] and [[cancel]] answer for the caller's tenant's
- *    entries only (`None` and `Some` differ), another tenant's being as unknown as a reclaimed one; [[openRuns]] and
- *    [[reclaim]] are the operator's, store-wide;
- *  - return from every call within a bound it documents, as `Checkpointer` does.
+ *    entries only (`None` and `Some` differ), another tenant's being as unknown as a reclaimed one; [[openRuns]],
+ *    [[reclaim]], [[closeUntaken]] and [[allDepths]] are the operator's, store-wide;
+ *  - return from every call within a bound it documents, as `Checkpointer` does: an entry's position is counted
+ *    without reading other entries' inputs, and a thread holds at most [[Submission.maxOpenPerThread]] open entries
+ *    per tenant (#3095).
  *
  * `RunQueueContract` in `llm4s-agent-testkit` is the executable form of this contract.
  */
@@ -127,6 +139,22 @@ trait RunQueue:
    * It counts entries by an index on the agent, within the store's bound.
    */
   def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]]
+
+  /**
+   * [[depth]] for every agent that has open entries, whether or not any worker asks for it (#3093): an entry submitted
+   * for an agent no worker serves - a typo, or an agent removed in a deploy - is never taken, and shows here. The
+   * operator's, store-wide; it counts entries by an index on the agent, within the store's bound.
+   */
+  def allDepths(): Result[Map[AgentId, QueueDepth]]
+
+  /**
+   * Closes `Failed(Unrunnable)` up to `limit` open entries, oldest first, that no worker has taken (#3093): each is its
+   * thread's head, has recorded no attempt, holds no live lease, its thread holds no live claim, and was submitted
+   * `age` or more ago, by the store's clock - so an entry of an agent no worker serves, which no worker ever takes,
+   * does not keep its thread busy for ever. Closing an `Interrupt` entry withdraws its stop requests, as [[cancel]]
+   * does. Answers the entries it closed. The store-wide retention sweep calls it with `WorkerSettings.unrunnableAfter`.
+   */
+  def closeUntaken(age: FiniteDuration, limit: Int): Result[Vector[QueueEntry]]
 
   /**
    * Extends `lease` to `ttl` from now, by the store's clock, answering it with the stop asked of the entry, if any
@@ -186,3 +214,12 @@ object RunQueue:
 
   /** How often the default [[RunQueue.awaitClosed]] reads the entry. */
   val PollInterval: FiniteDuration = 100.millis
+
+  /** The outcome [[RunQueue.closeUntaken]] closes an entry of `agent` with, after `age` untaken. */
+  private[llm4s] def untakenOutcome(agent: AgentId, age: FiniteDuration): EntryOutcome =
+    EntryOutcome.Failed(
+      FailureReason.Unrunnable(
+        s"no worker took the entry within $age of its submission: no worker serves agent '${agent.value}', " +
+          "or none could take it"
+      )
+    )
