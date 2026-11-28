@@ -1511,6 +1511,9 @@ private[provider] object OpenAIClientTransport {
           .builder()
           .baseUrl(config.baseUrl.asUrl)
           .organization(config.organization.orNull)
+          // One attempt per call: retrying belongs to ReliableClient, whose policy, deadline, breaker and metrics
+          // an SDK retry underneath would bypass (#3210).
+          .maxRetries(0)
         config.apiKeyProvider match {
           case None => builder.apiKey(config.apiKey.reveal)
           // The SDK asks the credential for its token on each request (#2313).
@@ -1554,6 +1557,7 @@ private[provider] object OpenAIClientTransport {
         .baseUrl(config.baseUrl.asUrl)
         .organization(config.organization.orNull)
         .workloadIdentity(sdkWorkloadIdentity(wi))
+        .maxRetries(0) // one attempt per call; ReliableClient retries (#3210)
         .build()
     )
 
@@ -1715,6 +1719,7 @@ private[provider] object OpenAIClientTransport {
       .builder()
       .baseUrl(config.endpoint.asUrl)
       .azureUrlPathMode(pathMode)
+      .maxRetries(0) // one attempt per call; ReliableClient retries (#3210)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.

@@ -172,7 +172,9 @@ final class AnthropicClient private[provider] (
 
   // Initialize Anthropic client
   private val client = {
-    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl.asUrl)
+    // One attempt per call: retrying belongs to ReliableClient, whose policy, deadline, breaker and metrics an SDK
+    // retry underneath would bypass (#3210).
+    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl.asUrl).maxRetries(0)
     config.workloadIdentity match {
       case None =>
         config.apiKeyProvider match {

@@ -451,8 +451,8 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 | `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
 | `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
 | `perplexity` | 5 minutes | 10 minutes | the wait for the response to begin |
-| `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
-| `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
+| `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the one request, including a streamed body |
+| `bedrock` | the AWS SDK's own default | no limit | the one request, including a streamed body |
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
 | Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
 
@@ -460,14 +460,15 @@ Five things to know:
 
 - **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
   run. A stream whose server has begun answering is not cut by `stream`.
-- **The OpenAI, Azure, Requesty and Anthropic clients use their vendor's SDK**, which bounds the whole
-  call and retries a call that fails or times out **twice** by default (llm4s does not change that). A
-  `request = 30s` there can therefore take up to three attempts and their backoff before the call
-  fails. `request` and `stream` are independent: a short `request` does not cut a stream.
-- **Bedrock uses the AWS SDK.** `request` becomes the SDK's API-call timeout, which covers its retries,
-  so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
-  call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
-  `TimeoutError`.
+- **The OpenAI, Azure, Requesty and Anthropic clients use their vendor's SDK**, with the SDK's own
+  retries turned off, so a call is one request and `request` bounds that request, a streamed body
+  included: a `request = 30s` call fails within about 30 seconds. `request` and `stream` are
+  independent: a short `request` does not cut a stream. No client retries on its own; to retry, wrap it
+  in [`ReliableClient`](../guide/reliability), which gives each attempt the full `request`.
+- **Bedrock uses the AWS SDK**, also with its retries turned off. `request` becomes the SDK's API-call
+  timeout, so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole
+  `ConverseStream` call, so unlike the HTTP-based clients it does cut a stream that is still running.
+  Either expiry is a `TimeoutError`.
 - **The workload identity token exchange of an `openai-compatible` section with `auth`** (see
   [Workload identity](#workload-identity-spiffe)) follows that section's `timeouts.request`, so a
   slow token endpoint is given up on when a slow completion would be; with `request` unset it uses

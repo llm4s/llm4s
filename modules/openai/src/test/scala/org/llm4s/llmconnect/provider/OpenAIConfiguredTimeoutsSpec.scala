@@ -87,8 +87,8 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
-        // The SDK's own default is ten minutes: the configured 300ms must be what ended the call. The
-        // SDK retries a timed-out call twice, so allow for three attempts and their backoff.
+        // The SDK's own default is ten minutes: the configured 300ms must be what ended the call (one
+        // attempt: the SDK's retries are off, #3210).
         elapsed should be < 30.seconds
       } finally client.close()
     }
@@ -151,7 +151,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
-        // the 20s request timeout would end it later than the stream's 500ms (the SDK retries a timed-out call)
+        // the 20s request timeout would end it later than the stream's 500ms
         elapsed should be < 15.seconds
       } finally client.close()
     }

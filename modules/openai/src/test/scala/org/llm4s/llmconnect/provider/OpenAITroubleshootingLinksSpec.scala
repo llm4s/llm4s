@@ -37,7 +37,6 @@ final class OpenAITroubleshootingLinksSpec extends AnyWordSpec with Matchers {
     var result: Option[LLMError] = None
     LocalProviderTestServer.withServer("/") { exchange =>
       exchange.getRequestBody.readAllBytes(): Unit
-      exchange.getResponseHeaders.add("x-should-retry", "false") // an SDK must not retry on its own
       LocalProviderTestServer.sendJsonResponse(exchange, status, body)
     } { baseUrl =>
       result = Some(call(baseUrl).fold(identity, completion => fail(s"expected HTTP $status to fail, got $completion")))

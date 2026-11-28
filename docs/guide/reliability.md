@@ -6,6 +6,7 @@ search_title: "Retries and circuit breakers for LLM calls in Scala"
 parent: Core
 nav_order: 104
 grand_parent: User Guide
+cites_issues: [3210]
 ---
 
 # Reliable LLM Calling
@@ -38,6 +39,13 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
                     ↓                 ↓              ↓
               Metrics Collector  State Tracking  Timeout Control
 ```
+
+**Provider clients do not retry on their own.** Every provider client sends one request per call: the ones built on
+a vendor SDK (`openai`, `azure`, `requesty`, `anthropic`, `bedrock`) have the SDK's own retries turned off, and the
+others never had any. A client you use bare fails on the first error; wrap it in `ReliableClient` to retry. Each
+attempt `ReliableClient` makes is then exactly one request, bounded by the section's `timeouts.request`
+([Timeouts](../getting-started/configuration#timeouts)), and its policy, deadline, circuit breaker and metrics see
+every one ([#3210](https://github.com/llm4s/llm4s/issues/3210)).
 
 ## Features
 

@@ -56,7 +56,6 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
 
   "A 429" should "become a RateLimitError carrying the Retry-After header" in {
     LocalProviderTestServer.withServer("/") { exchange =>
-      exchange.getResponseHeaders.add("x-should-retry", "false") // the SDK must not retry on its own
       exchange.getResponseHeaders.add("Retry-After", "7")
       LocalProviderTestServer.sendJsonResponse(
         exchange,
@@ -72,7 +71,6 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
 
   it should "keep the default retry delay when the service sends no Retry-After" in {
     LocalProviderTestServer.withServer("/") { exchange =>
-      exchange.getResponseHeaders.add("x-should-retry", "false")
       LocalProviderTestServer.sendJsonResponse(
         exchange,
         429,
@@ -119,7 +117,6 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
   private def refused(status: Int, body: String, headers: (String, String)*): LLMError = {
     var error = Option.empty[LLMError]
     LocalProviderTestServer.withServer("/") { exchange =>
-      exchange.getResponseHeaders.add("x-should-retry", "false") // the SDK must not retry on its own
       exchange.getResponseHeaders.add("request-id", "req_011")
       headers.foreach((name, value) => exchange.getResponseHeaders.add(name, value))
       LocalProviderTestServer.sendJsonResponse(exchange, status, body)

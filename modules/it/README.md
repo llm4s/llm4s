@@ -121,8 +121,8 @@ section, and a section changed through system properties is picked up on the nex
 llm4s has no built-in failover client, so the failover tests cover the documented pattern
 ([reliability guide](../../docs/guide/reliability.md), the cookbook's `FallbackRecipe`): each provider in its own
 `ReliableClient`, the second asked only when the first still fails - after its retries, or at once while its circuit is open.
-The mock servers send `x-should-retry: false` on errors so the vendor SDKs leave retrying to `ReliableClient`, and no test
-asserts on elapsed time.
+No client retries on its own (the SDK-backed ones have their SDK's retries off, #3210), so retrying is `ReliableClient`'s
+alone, and no test asserts on elapsed time.
 
 ## Running the containerised tier
 
