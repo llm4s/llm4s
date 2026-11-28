@@ -63,8 +63,9 @@ private[mcp] object MCPInputSchema {
       case Some(raw) =>
         resolve(raw.toMap, defs, seen) match {
           case Left(reason) =>
+            // Any value the keywords beside the reference allow: those are still checked
             val text = describe(raw.toMap)
-            RawJsonSchema(ujson.Obj("description" -> s"${if (text.isEmpty) "" else s"$text "}($reason: any value)"))
+            this.raw(raw.toMap, s"${if (text.isEmpty) "" else s"$text "}($reason: any value)")
           case Right((fields, path)) => typed(fields, defs, path)
         }
     }
@@ -94,8 +95,9 @@ private[mcp] object MCPInputSchema {
         if (nulls.nonEmpty && converted.nonEmpty) NullableSchema(union) else union
       case (None, List(single))                         => nullable(typedOne(single, description, fields, defs, seen))
       case (None, Nil) if fields.contains("properties") => nullable(objectSchema(fields, defs, seen, None))
-      case (None, Nil) if fields.contains("enum") || fields.contains("const") => raw(fields, description)
-      case (None, Nil) => RawJsonSchema(ujson.Obj("description" -> description))
+      // `{"type":"null"}`, or constraints with no `type` (`{"minLength":3}`): the checkable keywords as written, so
+      // no restriction is lost; with none, any value
+      case (None, Nil) => raw(fields, description)
       case (None, first :: rest) =>
         val each = (first :: rest).map(t => typedOne(t, "", fields, defs, seen))
         nullable(AnyOfSchema[Value](description, each.head, each.tail: _*))
@@ -189,10 +191,26 @@ private[mcp] object MCPInputSchema {
     )
   }
 
-  /** The keywords an agent's argument validator checks, as JSON, with `description`. */
+  /**
+   * The keywords an agent's argument validator checks that carry a value, not a schema, as the server wrote them,
+   * with `description`: what a schema the model has no case for keeps, so no restriction is lost.
+   */
   private def raw(fields: Fields, description: String): RawJsonSchema = {
-    val kept = Seq("type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "multipleOf")
-      .flatMap(key => fields.get(key).map(key -> _))
+    val kept = Seq(
+      "type",
+      "enum",
+      "minLength",
+      "maxLength",
+      "pattern",
+      "minimum",
+      "maximum",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+      "multipleOf",
+      "minItems",
+      "maxItems",
+      "uniqueItems"
+    ).flatMap(key => fields.get(key).map(key -> _))
     val withConst = fields.get("const").filterNot(_ => fields.contains("enum")).map(c => "enum" -> ujson.Arr(c))
     RawJsonSchema(ujson.Obj.from((kept ++ withConst.toSeq) :+ ("description" -> ujson.Str(description))))
   }

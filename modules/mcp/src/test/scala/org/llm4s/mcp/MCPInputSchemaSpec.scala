@@ -144,6 +144,27 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
     p.obj.contains("default") shouldBe false
   }
 
+  it should "keep a null-only type, and constraints with no type, as written" in {
+    property(withProperty("nothing", ujson.Obj("type" -> "null")), "nothing") shouldBe
+      ujson.Obj("type" -> "null", "description" -> "")
+    property(withProperty("code", ujson.Obj("minLength" -> 3, "pattern" -> "^x")), "code") shouldBe
+      ujson.Obj("minLength" -> 3, "pattern" -> "^x", "description" -> "")
+    property(withProperty("n", ujson.Obj("minimum" -> 1, "exclusiveMaximum" -> 9)), "n") shouldBe
+      ujson.Obj("minimum" -> 1, "exclusiveMaximum" -> 9, "description" -> "")
+  }
+
+  it should "keep every checkable bound of a schema it keeps as JSON, such as an enum of numbers" in {
+    property(
+      withProperty("level", ujson.Obj("type" -> "number", "enum" -> ujson.Arr(1.5, 2.5), "exclusiveMinimum" -> 1)),
+      "level"
+    ) shouldBe ujson.Obj(
+      "type"             -> "number",
+      "enum"             -> ujson.Arr(1.5, 2.5),
+      "exclusiveMinimum" -> 1,
+      "description"      -> ""
+    )
+  }
+
   it should "give an array without items items of any kind, not strings" in {
     property(withProperty("xs", ujson.Obj("type" -> "array")), "xs")("items") shouldBe ujson.Obj()
   }
