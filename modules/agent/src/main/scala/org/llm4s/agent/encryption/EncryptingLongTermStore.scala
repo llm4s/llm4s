@@ -1,6 +1,6 @@
 package org.llm4s.agent.encryption
 
-import org.llm4s.agent.graph.{ EffectKey, FencingToken, ReplayGuard }
+import org.llm4s.agent.graph.{ EffectKey, FencingToken, ReplayGuard, TenantId }
 import org.llm4s.agent.harness.*
 import org.llm4s.annotation.Experimental
 import org.llm4s.types.Result
@@ -145,6 +145,10 @@ final class EncryptingLongTermStore private (
 
   /** Passed to the store unchanged: an applied key and a token are stored in plain. */
   def forget(key: EffectKey, token: FencingToken): Result[Unit] = inner.forget(key, token)
+
+  // keys and namespaces are stored in plain: the inner store deletes by them (#3269)
+  override def deleteNamespace(ns: Namespace): Result[Int]         = inner.deleteNamespace(ns)
+  override def deleteTenant(tenant: Option[TenantId]): Result[Int] = inner.deleteTenant(tenant)
 
   /** What a change sees: `view`, each value opened as it is read. */
   final private class Opened(open: PayloadCipher, view: StoreView, val current: Option[StoreItem]) extends StoreView:

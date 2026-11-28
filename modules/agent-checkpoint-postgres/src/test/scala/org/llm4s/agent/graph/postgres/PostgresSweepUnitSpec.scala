@@ -51,6 +51,7 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
       {
         case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
           Vector(Vector("a"), Vector("b"), Vector("c"))
+        case (sql, _) if sql == Sql.tombstoneCandidates(t)                                 => Vector(Vector("a"))
         case (sql, Vector(id)) if sql == Sql.lockedRow(t) || sql == Sql.lockedRowIfFree(t) => Vector(rowOf(id))
         case (sql, Vector("a", _, _)) if sql == Sql.reclaim(t)                             => Vector(Vector(7L))
         case (sql, _) if sql == Sql.reclaim(t)                                             => Vector.empty
@@ -88,9 +89,89 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     made.map(_._1) should not contain Sql.deleteHistoryAtAny(t)
   }
 
+  // #3261: a page of live threads takes neither the exclusive reclamation lock nor any row's lock
+  it should "lock nothing when the page holds no tombstone old enough, and lock only the tombstones otherwise" in {
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+        Vector(Vector("a"), Vector("b"))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t) => Vector.empty
+    }
+    script.store().sweep(SweepPolicy(tombstoneAge = Some(1.day)), None, SweepGuard.none).value shouldBe
+      SweepPage(2, 0, None)
+    script.made.map(_._1) should not contain Sql.lockReclamation
+    script.made.map(_._1) should not contain Sql.lockedRowIfFree(t)
+    // the candidates are read once for the page, every unprotected thread asked about, without a lock
+    script.made.filter(_._1 == Sql.tombstoneCandidates(t)) should have size 1
+    (Sql.tombstoneCandidates(t) should not).include("FOR UPDATE")
+  }
+
+  // #3261 (Codex): reclamation and pruning share the page's one budget; a page that runs out of it mid-reclamation
+  // stops between chunks, and its cursor makes the next call start at the first tombstone left
+  it should "stop reclaiming between chunks once the page's budget is spent, handing back a cursor to resume from" in {
+    val ids = (1 to 60).map(i => f"t$i%03d").toVector
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.lockedRowIfFree(t)                                  => Vector(rowOf("a"))
+      case (sql, _) if sql == Sql.reclaim(t)                                          => Vector(Vector(7L))
+    }
+    val store = script.store()
+    // spent at once: the first chunk always runs, so every call makes progress, and no other does
+    store.sweepBudget = Duration.Zero
+    val page = store.sweep(SweepPolicy(tombstoneAge = Some(1.day), batchSize = 100), None, SweepGuard.none).value
+    script.made.count(_._1 == Sql.reclaim(t)) shouldBe 50
+    page.reclaimed shouldBe 50
+    page.examined shouldBe 50
+    page.next shouldBe Some(ThreadId("t050"))
+  }
+
+  // Codex on #3264: a sweep whose prune an interrupt ends stops, rather than going on through the page
+  it should "stop, with CancelledError, when an interrupt ends one of its thread's prunes" in {
+    val script = ScriptedPostgres(
+      now,
+      {
+        case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") =>
+          Vector(Vector("b"), Vector("c"))
+        case (sql, Vector(id)) if sql == Sql.lockedRow(t) => Vector(rowOf(id))
+      }
+    )
+    val store = script.store()
+    script.interruptOn = Some(Sql.lockedRow(t))
+    val outcome = new java.util.concurrent.LinkedBlockingQueue[Either[org.llm4s.error.LLMError, SweepPage]]()
+    Thread.ofVirtual().start { () =>
+      outcome.add(store.sweep(SweepPolicy(RetentionPolicy(maxEvents = Some(1))), None, SweepGuard.none)): Unit
+    }
+    outcome.poll(10, java.util.concurrent.TimeUnit.SECONDS).left.value shouldBe a[org.llm4s.error.CancelledError]
+    // the first thread's prune was the only one tried
+    script.madeWith(Sql.lockedRow(t)) shouldBe Vector(Vector("b"))
+  }
+
+  // Codex on #3261: the page cut short is the database's order's prefix - never a Scala comparison of ids, whose
+  // UTF-16 order puts U+1F600 before U+E000 where a C collation puts it after
+  it should "cut a page short by the database's order, ids whose UTF-16 and code-point orders differ included" in {
+    val bmp    = (1 to 50).map(i => f"\uE000$i%02d").toVector
+    val astral = "\uD83D\uDE00"
+    // the database's order: code point, U+E000 before U+1F600
+    val ids = bmp :+ astral
+    val script = Script {
+      case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => ids.map(Vector(_))
+      case (sql, _) if sql == Sql.lockedRowIfFree(t)                                  => Vector(rowOf("a"))
+      case (sql, _) if sql == Sql.reclaim(t)                                          => Vector(Vector(7L))
+    }
+    val store = script.store()
+    store.sweepBudget = Duration.Zero
+    // keep-all: nothing to prune, so the cursor is the page cut short at the 51st, the astral id
+    val page = store.sweep(SweepPolicy(tombstoneAge = Some(1.day), batchSize = 100), None, SweepGuard.none).value
+    page.reclaimed shouldBe 50
+    page.examined shouldBe 50
+    page.next shouldBe Some(ThreadId(bmp.last))
+  }
+
   it should "skip, not wait for, a tombstone whose row another call holds" in {
     val script = Script {
       case (sql, _) if sql.startsWith(s"SELECT thread_id FROM ${t.threads} ORDER BY") => Vector(Vector("a"))
+      case (sql, _) if sql == Sql.tombstoneCandidates(t)                              => Vector(Vector("a"))
       // SKIP LOCKED reads no row: a claim of the id holds it
       case (sql, _) if sql == Sql.lockedRowIfFree(t) => Vector.empty
     }
@@ -228,7 +309,8 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
    * the clock as `now`; every other query reads no row. `made` is every statement prepared, with its parameters.
    */
   final private case class Script(answer: PartialFunction[(String, Vector[Any]), Vector[Vector[Any]]]) {
-    private val log = new CopyOnWriteArrayList[(String, Vector[Any])]()
+    private val log    = new CopyOnWriteArrayList[(String, Vector[Any])]()
+    private val arrays = new java.util.IdentityHashMap[AnyRef, Vector[AnyRef]]()
 
     def made: Vector[(String, Vector[Any])] = log.asScala.toVector
 
@@ -253,8 +335,20 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     private def connection(): Connection = {
       val handler: InvocationHandler = (_: Any, method: Method, args: Array[AnyRef]) =>
         method.getName match {
-          case "prepareStatement"                                          => statement(args(0).toString)
-          case "createStatement"                                           => statement("")
+          case "prepareStatement" => statement(args(0).toString)
+          case "createStatement"  => statement("")
+          // an array parameter (the sweep's tombstone candidates, #3261): bound as its elements
+          case "createArrayOf" =>
+            val elements = args(1).asInstanceOf[Array[AnyRef]].toVector
+            val array = Proxy
+              .newProxyInstance(
+                getClass.getClassLoader,
+                Array(classOf[java.sql.Array]),
+                (_: Any, m: Method, _: Array[AnyRef]) => if m.getName == "hashCode" then Integer.valueOf(0) else null
+              )
+              .asInstanceOf[java.sql.Array]
+            arrays.put(array, elements)
+            array
           case "setAutoCommit" | "rollback" | "commit" | "abort" | "close" => null
           case "isClosed"                                                  => java.lang.Boolean.FALSE
           case other => throw new UnsupportedOperationException(other)
@@ -270,7 +364,11 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
           case "setString" | "setLong" | "setInt" | "setObject" =>
             params(args(0).asInstanceOf[Int]) = args(1)
             null
-          case "execute" => java.lang.Boolean.FALSE
+          case "setArray" =>
+            params(args(0).asInstanceOf[Int]) = arrays.get(args(1))
+            null
+          case "getConnection" => connection()
+          case "execute"       => java.lang.Boolean.FALSE
           case "executeUpdate" =>
             log.add(prepared -> bound)
             Integer.valueOf(1)

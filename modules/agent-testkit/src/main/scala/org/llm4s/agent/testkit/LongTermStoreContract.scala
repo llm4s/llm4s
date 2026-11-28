@@ -98,6 +98,31 @@ trait LongTermStoreContract extends AnyFlatSpecLike with Matchers with EitherVal
   private def text(s: LongTermStore, key: String, in: Namespace = ns): Option[String] =
     s.get(in, key).value.map(_.value.str)
 
+  // #3269: an operator forgets a namespace, or offboards a tenant, without knowing every key
+  "A long-term store's deletes" should "remove a namespace's items, and a tenant's every namespace, leaving the rest" in {
+    val s     = store()
+    val t1    = Some(org.llm4s.agent.graph.TenantId(s"t1-${java.util.UUID.randomUUID()}"))
+    val t2    = Some(org.llm4s.agent.graph.TenantId(s"t2-${java.util.UUID.randomUUID()}"))
+    val notes = Namespace(t1, Vector("notes"))
+    val prefs = Namespace(t1, Vector("prefs"))
+    val other = Namespace(t2, Vector("notes"))
+    val none  = Namespace(None, Vector(s"plain-${java.util.UUID.randomUUID()}"))
+    Seq(notes -> "a", notes -> "b", prefs -> "c", other -> "d", none -> "e").foreach { (in, key) =>
+      put(s, key, ujson.Str(key), in).value
+    }
+    s.deleteNamespace(notes).value shouldBe 2
+    s.get(notes, "a").value shouldBe None
+    s.get(prefs, "c").value shouldBe defined
+    s.deleteNamespace(notes).value shouldBe 0
+    s.deleteTenant(t1).value shouldBe 1
+    s.get(prefs, "c").value shouldBe None
+    s.get(other, "d").value shouldBe defined
+    s.get(none, "e").value shouldBe defined
+    // the namespace takes new items again
+    put(s, "a", ujson.Str("again"), notes).value
+    text(s, "a", notes) shouldBe Some("again")
+  }
+
   "A long-term store" should "put, get, list by prefix and delete through the guard, leaving no applied key" in {
     val s = store()
     s.replaySupport shouldBe ReplaySupport.Transactional

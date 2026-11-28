@@ -563,6 +563,47 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(newThread(), 0L, 2).value shouldBe empty
   }
 
+  // #3264: one interrupt rule for every store - a flag set before a call decides nothing, and is kept
+  it should "behave, with the caller's interrupt flag set, as without it, and return with the flag still set" in {
+    val s = Store()
+    def flagged[A](call: => A): (A, Boolean) =
+      @volatile var outcome: Option[(A, Boolean)] = None
+      val runner = Thread.ofVirtual().start { () =>
+        Thread.currentThread().interrupt()
+        val result = call
+        outcome = Some(result -> Thread.currentThread().isInterrupted)
+      }
+      runner.join(contractWait.toMillis)
+      outcome.getOrElse(fail("the call did not return"))
+    val (claimed, flag1) = flagged(s.claim("run"))
+    flag1 shouldBe true
+    val token              = claimed.value.token
+    val (committed, flag2) = flagged(s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("e"))))
+    flag2 shouldBe true
+    committed.value should have size 1
+    val (read, flag3) = flagged(s.store.latest(s.thread))
+    flag3 shouldBe true
+    read.value.map(_.checkpoint.id) shouldBe Some("c1")
+    val (released, flag4) = flagged(s.store.release(s.thread, token))
+    flag4 shouldBe true
+    released.value shouldBe (())
+    // released: another claim is granted at once
+    s.claim("next").isRight shouldBe true
+  }
+
+  // #3263: a limit near Int.MaxValue once overflowed the in-memory store's slice and answered nothing
+  it should "page events after a sequence with any limit, Int.MaxValue included, and answer none for a limit below 1" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    s.store.eventsAfter(s.thread, 0L, Int.MaxValue).value.map(_.seq) shouldBe Vector(1L, 2L, 3L, 4L, 5L)
+    s.store.eventsAfter(s.thread, 3L, Int.MaxValue).value.map(_.seq) shouldBe Vector(4L, 5L)
+    s.store.eventsAfter(s.thread, 3L, Int.MaxValue - 1).value.map(_.seq) shouldBe Vector(4L, 5L)
+    s.store.eventsAfter(s.thread, 2L, 0).value shouldBe empty
+    s.store.eventsAfter(s.thread, 2L, -1).value shouldBe empty
+    s.store.eventsAfter(s.thread, 2L, Int.MinValue).value shouldBe empty
+  }
+
   it should "compact behind a floor that never moves back, reporting it to replay from before it" in {
     val s     = Store()
     val token = s.claim("run").value.token
@@ -580,10 +621,12 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   }
 
   it should "number events contiguously and uniquely when one claim commits from many threads at once" in {
-    val s       = Store()
-    val token   = s.claim("run").value.token
+    val s     = Store()
+    val token = s.claim("run").value.token
+    // 8 writers racing is the contention; 10 commits each keeps the case within its wait on storage whose every
+    // durable commit is slow (#3311: ~60 ms each on a Windows runner, so 200 commits outlasted the wait)
     val writers = 8
-    val each    = 25
+    val each    = 10
     s.commit(token, Some(s.checkpoint("c1", None))).value
     val barrier = new CyclicBarrier(writers)
     val results = new LinkedBlockingQueue[Result[Vector[EventRecord]]]()
@@ -593,7 +636,12 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         (1 to each).foreach(i => results.put(s.commit(token, events = Vector(s.event(s"w$w-$i"), s.event(s"w$w-$i'")))))
       }
     }
-    threads.foreach(_.join(contractWait.toMillis))
+    // every writer finished: a join that timed out returns quietly, and the results would be read mid-race (#3311)
+    val deadline = System.nanoTime() + contractWait.toNanos
+    threads.foreach(t => t.join(math.max(1L, (deadline - System.nanoTime()) / 1000000L)))
+    withClue(s"writers still committing after $contractWait: ") {
+      threads.count(_.isAlive) shouldBe 0
+    }
     val committed = Iterator.continually(results.poll()).takeWhile(_ != null).toVector
     committed should have size (writers * each).toLong
     val seqs = committed.flatMap(_.value.map(_.seq))
@@ -2421,6 +2469,25 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val page = s.store.threads(all.withOldestFirst(true).withLimit(1)).value
     page.threads.map(_.threadId) shouldBe Vector(a)
     listed(s, all.withOldestFirst(true).withLimit(2).withAfter(page.next)) shouldBe Vector(b, c)
+  }
+
+  // #3264: the stores agree on ties and on extreme bounds
+  it should "break a tie on updatedAt by thread id in code-point order, and accept any instant as a bound" in {
+    val s      = Store()
+    val tenant = newTenant()
+    val bmp    = ThreadId(s"tie-${java.util.UUID.randomUUID()}-\uE000")
+    val astral = ThreadId(bmp.value.dropRight(1) + "\uD83D\uDE00")
+    // registered at the same instant: the store's clock does not move between them
+    registered(s, bmp, tenant)
+    registered(s, astral, tenant)
+    val all = ThreadQuery(tenant)
+    if summary(s, tenant, bmp).value.updatedAt == summary(s, tenant, astral).value.updatedAt then
+      // newest first, ties by id descending: U+1F600 after U+E000 by code point (before it by UTF-16 unit)
+      listed(s, all) shouldBe Vector(astral, bmp)
+    listed(s, all.withUpdatedSince(java.time.Instant.MIN)).toSet shouldBe Set(bmp, astral)
+    listed(s, all.withUpdatedSince(java.time.Instant.MAX)) shouldBe empty
+    listed(s, all.withUpdatedBefore(java.time.Instant.MAX)).toSet shouldBe Set(bmp, astral)
+    listed(s, all.withUpdatedBefore(java.time.Instant.MIN)) shouldBe empty
   }
 
   it should "list a tenant's incomplete root threads that no live claim holds, oldest first, an expired claim's included, paged" in {

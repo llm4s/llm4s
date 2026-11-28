@@ -169,10 +169,12 @@ private[graph] object RetentionSweep:
 
     /**
      * The page's cursor: the last thread finished when the call was cut short - so the next call, paging after it,
-     * starts with the thread the budget stopped, or stopped before - else as [[next]] has it.
+     * starts with the thread the budget stopped, or stopped before - else as [[next]] has it. A call cut short before it
+     * finished any thread of `page` resumes where it began, `resumeAfter` (the cursor it was called with), so the
+     * answer is total and never skips the page.
      */
-    def cursor(page: Vector[ThreadId], batchSize: Int): Option[ThreadId] =
-      if cutShort then Some(page(examined - 1)) else next(page, batchSize)
+    def cursor(page: Vector[ThreadId], batchSize: Int, resumeAfter: Option[ThreadId] = None): Option[ThreadId] =
+      if cutShort then page.lift(examined - 1).orElse(resumeAfter) else next(page, batchSize)
 
   /**
    * Visits `threads` in order, each by `step` - one bounded transaction of the store's, called again with the plan

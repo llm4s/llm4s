@@ -845,15 +845,38 @@ final class SqliteCheckpointer private (
    * busy file, or a disk that stalls - must not hold every later call of the store with it.
    */
   private def guarded[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
-    if !lockBy(deadline) then Left(failure(operation, storeBusy(busyTimeout), None))
+    // a flag set before the call decides nothing (#3264): cleared for the call, set again on return
+    val flagged = Thread.interrupted()
+    val result  = guardedUnflagged(operation, deadline)(body)
+    if flagged then Thread.currentThread().interrupt()
+    result
+
+  private def guardedUnflagged[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
+    if !lockBy(deadline) then Left(unavailable(operation, storeBusy(busyTimeout)))
     else
       Using.resource(Unlock(lock)) { _ =>
-        if shut then Left(failure(operation, "the store is closed", None))
+        if shut then Left(GraphError.StoreClosed(s"SQLite file $path", s"sqlite-checkpointer.$operation"))
         else
-          Try(body(connection)).toEither.left
-            .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-            .flatten
+          Try(body(connection)).toEither.left.map { e =>
+            val message = Option(e.getMessage).getOrElse(e.getClass.getName)
+            // an interrupt that ended the call - a wait between busy retries, say - is the caller's cancel, with the
+            // flag set again, never a store failure to retry (Codex, #3264); a transaction ended so is rolled back
+            if interruptedBy(e) || Thread.currentThread().isInterrupted then
+              Thread.currentThread().interrupt()
+              CancelledError(s"sqlite-checkpointer.$operation", Some(e))
+            // a file another process held for the whole busy timeout: retry later (#3264)
+            else if isBusy(e) then unavailable(operation, message)
+            else failure(operation, message, Some(e))
+          }.flatten
       }
+
+  /** Whether `e`, or a cause of it, is an interrupt's. */
+  private def interruptedBy(e: Throwable): Boolean =
+    Iterator.iterate(e)(_.getCause).takeWhile(_ != null).take(8).exists(_.isInstanceOf[InterruptedException])
+
+  /** A call that could not be answered now, changing nothing (#3264). */
+  private def unavailable(operation: String, detail: String): LLMError =
+    GraphError.StoreUnavailable(s"SQLite file $path", s"sqlite-checkpointer.$operation", detail)
 
   /**
    * Takes the store's lock, waiting at most until `deadline` (a `System.nanoTime` value); whether it was taken. As
@@ -889,6 +912,14 @@ final class SqliteCheckpointer private (
    */
   private[sqlite] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     val deadline = System.nanoTime() + busyTimeout.toNanos
+    // the one interrupt rule of every store (#3264): a flag set before the call decides nothing, and is set again on
+    // return; an interrupt while the call waits for the gate cancels it
+    val flagged = Thread.interrupted()
+    val result  = writingUnflagged(operation, deadline)(body)
+    if flagged then Thread.currentThread().interrupt()
+    result
+
+  private def writingUnflagged[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
     guarded(operation, deadline) { c =>
       val written = CancelledError.catchInterrupt {
         gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
@@ -909,7 +940,7 @@ final class SqliteCheckpointer private (
       }
       written match
         case Right(Some(result)) => result
-        case Right(None)         => Left(failure(operation, gateTimedOut(busyTimeout), None))
+        case Right(None)         => Left(unavailable(operation, gateTimedOut(busyTimeout)))
         case Left(interrupted) =>
           Thread.currentThread().interrupt()
           Left(CancelledError(s"sqlite-checkpointer.$operation", Some(interrupted)))
@@ -1104,10 +1135,16 @@ object SqliteCheckpointer:
   ): LLMError =
     ProcessingError(s"sqlite-checkpointer.$operation", s"$message (${context.path})", cause)
 
-  private def undecodable(operation: String, what: String, problem: String, cause: Option[Throwable])(using
-    ErrorContext
+  private def undecodable(
+    operation: String,
+    what: String,
+    problem: String,
+    @scala.annotation.unused cause: Option[Throwable]
+  )(using
+    context: ErrorContext
   ): LLMError =
-    failure(operation, s"a stored $what does not decode: $problem", cause)
+    // a row that does not decode is not a failure to retry (#3264)
+    GraphError.StoreCorrupt(s"SQLite file ${context.path}", s"sqlite-checkpointer.$operation", what, problem)
 
   /** `body`, decoding stored rows; a row that does not decode is a `ProcessingError` naming the operation and file. */
   private[sqlite] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
@@ -1200,6 +1237,10 @@ object SqliteCheckpointer:
   private[sqlite] def epochNanos(at: Instant): Long =
     Math.addExact(Math.multiplyExact(at.getEpochSecond, 1000000000L), at.getNano.toLong)
 
+  /** [[epochNanos]], clamped to what a `Long` of nanoseconds holds: for a bound, never a stored time. */
+  private[sqlite] def clampedNanos(at: Instant): Long =
+    scala.util.Try(epochNanos(at)).getOrElse(if at.isBefore(Instant.EPOCH) then Long.MinValue else Long.MaxValue)
+
   private[sqlite] def fromEpochNanos(nanos: Long): Instant =
     Instant.ofEpochSecond(Math.floorDiv(nanos, 1000000000L), Math.floorMod(nanos, 1000000000L))
 
@@ -1229,8 +1270,9 @@ object SqliteCheckpointer:
     registryStatement(query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
-      query.updatedSince.foreach(since => where.add("updated_nanos >= ?", epochNanos(since)))
-      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", epochNanos(before)))
+      // an instant past what epoch nanoseconds hold (Instant.MIN or MAX) is clamped, never thrown (#3264)
+      query.updatedSince.foreach(since => where.add("updated_nanos >= ?", clampedNanos(since)))
+      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", clampedNanos(before)))
       query.metadata.entries.toVector.sortBy(_._1).foreach { (key, value) =>
         where.add(
           "thread_id IN (SELECT thread_id FROM llm4s_checkpoint_thread_metadata WHERE key = ? AND value = ?)",

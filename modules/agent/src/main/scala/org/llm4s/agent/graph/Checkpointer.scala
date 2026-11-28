@@ -87,12 +87,21 @@ import scala.util.Try
  *    the checkpoint it answers with through [[prune]] while an open entry of the store's run queue names that run;
  *  - visit every thread it holds, tombstones included, through [[sweep]], a bounded page at a time, pruning each as
  *    [[prune]] does and reclaiming old tombstones, but never what the sweep's [[org.llm4s.agent.graph.SweepGuard SweepGuard]] protects;
- *  - return from every call within a bound it documents (#1919) - see below.
+ *  - return from every call within a bound it documents (#1919) - see below;
+ *  - treat a caller's interrupt flag the same way (#3264): a call made with the flag already set behaves as one made
+ *    without it - a commit lands, a release releases - and returns with the flag still set; only an interrupt that
+ *    arrives while the call waits may end it, with `Left(CancelledError)` and nothing changed;
+ *  - fail in kind (#3264): [[GraphError.StoreUnavailable]] for a call that could not be answered now and changed
+ *    nothing (busy, a bound reached, the storage unreachable: retryable), [[GraphError.StoreClosed]] once it is
+ *    closed, [[GraphError.StoreCorrupt]] for a stored row that does not decode, and [[GraphError.CommitOutcomeUnknown]]
+ *    for a write that failed while its commit was in flight (#3262); anything else is a `ProcessingError`.
  *
  * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
  * configuration (such as `SqliteCheckpointerConfig.busyTimeout`), within which every call returns, whatever its
  * storage is doing - waiting for a lock, for another connection's or process's write, for the store's own earlier
- * calls, or for a network - and a call that reaches the bound fails, changing nothing. [[awaitEventsAfter]] returns
+ * calls, or for a network - and a call that reaches the bound fails, changing nothing, except a write whose bound
+ * passes while its commit is in flight on a networked store, such as PostgreSQL: that call fails
+ * [[GraphError.CommitOutcomeUnknown]], since the commit may have landed (#3262). [[awaitEventsAfter]] returns
  * within its `timeout` plus that bound. A store that cannot bound some call - a disk that stalls inside a write, say,
  * which no driver can time out - documents which call, and why. Keep the bound well inside `ClaimPolicy.ttl -
  * ClaimPolicy.renewEvery`: a renewal must land within that, and a store that serialises its calls queues a renewal
@@ -209,20 +218,27 @@ trait Checkpointer:
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]
 
   /**
-   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
-   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
-   * the latest a prune before the commit always kept (#3254). The default prunes without keeping them; every llm4s
-   * store keeps them.
-   */
-  /**
    * [[deleteThread]] for the sweep's idle-thread removal (#3260), fenced by `token` alone, done only if no open entry
    * of the store's run queue names the thread - checked atomically with the delete, under the lock or in the
    * transaction a submission to that queue also takes, so an entry enqueued after the sweep's guard ran keeps the
-   * thread. Whether it deleted. The default deletes as [[deleteThread]] does; every llm4s store checks.
+   * thread. Whether it deleted.
+   *
+   * Only llm4s's own stores (in-memory, SQLite, PostgreSQL) and wrappers (`EncryptingCheckpointer`,
+   * `MeteredCheckpointer`) make that check atomic. Being `private[agent]`, this cannot be overridden by a checkpointer
+   * written outside llm4s, or by a wrapper of your own that delegates to one of the llm4s stores: such a store gets
+   * this default, an unchecked [[deleteThread]], and the sweep relies on its own earlier snapshot of the queue (the
+   * guard's `openRuns`), so an entry enqueued between that read and the delete can find its thread deleted.
    */
   private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
     deleteThread(threadId, token, None).map(_ => true)
 
+  /**
+   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
+   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
+   * the latest a prune before the commit always kept (#3254). Every llm4s store and wrapper keeps them; a checkpointer
+   * or delegating wrapper written outside llm4s cannot override this `private[agent]` member, so it gets this
+   * default, a plain [[prune]], and a `maxAge` retention may then remove the previous run's latest checkpoint.
+   */
   private[agent] def pruneKeeping(
     threadId: ThreadId,
     policy: RetentionPolicy,
@@ -854,7 +870,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       val from =
         current.events.search(first)(using Ordering.by[(Long, ujson.Value, Instant), Long](_._1)).insertionPoint
       Try(
-        current.events.slice(from, from + limit).map((_, json, _) => upickle.default.read[EventRecord](json))
+        // drop then take: `from + limit` overflows for a limit near Int.MaxValue (#3263); a limit below 1 takes none
+        current.events.drop(from).take(math.max(limit, 0)).map((_, json, _) => upickle.default.read[EventRecord](json))
       ).toResult
   }
 
@@ -1020,10 +1037,28 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
 private object RegistryOrder:
 
+  /**
+   * Thread ids by code point - UTF-8 byte order, as the SQL stores compare them (`COLLATE "C"`, SQLite's `BINARY`) -
+   * never by UTF-16 unit, which puts a supplementary character before U+E000-U+FFFF (#3264).
+   */
+  private val byCodePoint: Ordering[String] = (a: String, b: String) =>
+    @scala.annotation.tailrec
+    def at(i: Int, j: Int): Int =
+      if i >= a.length || j >= b.length then (a.length - i).sign - (b.length - j).sign
+      else
+        val (x, y) = (a.codePointAt(i), b.codePointAt(j))
+        if x != y then Integer.compare(x, y) else at(i + Character.charCount(x), j + Character.charCount(y))
+    at(0, 0)
+
   /** The registry's order: newest first by `updatedAt`, then by thread id, descending. */
   val newestFirst: Ordering[ThreadSummary] =
-    Ordering.by[ThreadSummary, (Instant, String)](t => (t.updatedAt, t.threadId.value)).reverse
+    Ordering
+      .by[ThreadSummary, (Instant, String)](t => (t.updatedAt, t.threadId.value))(using
+        Ordering.Tuple2(using Ordering[Instant], byCodePoint)
+      )
+      .reverse
 
   /** Whether position `a` comes before `b` in ascending order: by `updatedAt`, then by thread id. */
   def before(a: ThreadCursor, b: ThreadCursor): Boolean =
-    a.updatedAt.isBefore(b.updatedAt) || (a.updatedAt == b.updatedAt && a.threadId.value < b.threadId.value)
+    a.updatedAt.isBefore(b.updatedAt) ||
+      (a.updatedAt == b.updatedAt && byCodePoint.lt(a.threadId.value, b.threadId.value))

@@ -298,7 +298,12 @@ whole conversation's state - its effect records, metadata and registry row, howe
 `threadAge` to have the sweep delete them: a settled top-level thread (its latest checkpoint `Completed` or `Failed`)
 that the store has not updated for `threadAge`, that no live run holds, that has no child threads, and that no open
 queue entry names. The sweep claims it, checks it has not changed, and deletes it under the claim, so a run that
-starts meanwhile is never cut. A thread waiting on an approval (`Suspended`) or for `recover` is kept. To find old
+starts meanwhile is never cut. The check that no queue entry was enqueued meanwhile is atomic with the delete only
+in llm4s's own stores and their wrappers (`EncryptingCheckpointer`, `MeteredCheckpointer`): a checkpointer written
+outside llm4s, or a delegating wrapper of your own, gets only the sweep's earlier snapshot of the queue, so an entry
+submitted between that snapshot and the delete can find its thread gone. Its admission prune is a plain `prune` too,
+so a `maxAge` retention may remove the previous run's checkpoint. A thread waiting on an approval (`Suspended`) or for
+`recover` is kept. To find old
 threads yourself, `checkpointer.threads(ThreadQuery(tenant).withUpdatedBefore(cutoff).withOldestFirst(true))` lists a
 tenant's oldest first.
 

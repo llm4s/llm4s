@@ -143,6 +143,36 @@ object GraphError:
     override val message: String =
       s"$store is at checkpoint schema version $found, newer than the $supported this build supports"
 
+  /**
+   * A store could not answer `operation` now (#3264) - it was busy for its whole bound, a call reached its time bound,
+   * or its database could not be reached - and the call changed nothing: retry later ([[isRetryable]]). `store` names
+   * the storage; `detail` says what happened, with no stored content in it. A PostgreSQL write that failed while its
+   * commit was in flight is [[CommitOutcomeUnknown]] instead: it may have landed.
+   */
+  final case class StoreUnavailable(store: String, operation: String, detail: String) extends GraphError:
+    override val message: String      = s"$store could not answer $operation now: $detail"
+    override def isRetryable: Boolean = true
+
+  /** The store is closed (#3264): no call on it will succeed again. */
+  final case class StoreClosed(store: String, operation: String) extends GraphError:
+    override val message: String = s"the store is closed: $operation was refused ($store)"
+
+  /**
+   * A row the store holds does not decode (#3264): a damaged or hand-edited row, or one a newer build wrote. Not
+   * retryable: the call reads the same row again. `what` names the kind of row, `detail` why, never its content.
+   */
+  final case class StoreCorrupt(store: String, operation: String, what: String, detail: String) extends GraphError:
+    override val message: String = s"$store holds a $what that does not decode ($operation): $detail"
+
+  /**
+   * A write's outcome is unknown (#3262): it failed - its connection broke, or it reached its time bound - while its
+   * transaction's commit was in flight, so the commit may have landed. Read the thread before writing it again: a
+   * commit retried blindly could add its events twice, or be refused as conflicting with itself. Not retryable.
+   */
+  final case class CommitOutcomeUnknown(store: String, operation: String, detail: String) extends GraphError:
+    override val message: String =
+      s"$store may or may not have applied $operation: $detail; read the thread before writing it again"
+
   /** A new checkpoint's parent is not the thread's latest: another writer advanced the thread. */
   final case class CheckpointConflict(threadId: String, expected: Option[String], actual: Option[String])
       extends GraphError:

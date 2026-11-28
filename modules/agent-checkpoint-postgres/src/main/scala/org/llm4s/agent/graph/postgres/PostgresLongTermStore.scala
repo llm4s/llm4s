@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.postgres
 
-import org.llm4s.agent.graph.{ EffectKey, FencingToken, KeyDigest }
+import org.llm4s.agent.graph.{ EffectKey, FencingToken, KeyDigest, TenantId }
 import org.llm4s.agent.harness.*
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
@@ -49,6 +49,16 @@ final private[postgres] class PostgresLongTermStore(store: PostgresCheckpointer,
 
   private val t                                   = store.t
   private given PostgresCheckpointer.ErrorContext = store.errorContext
+
+  // ---- an operator's deletes (#3269) ----
+
+  override def deleteNamespace(ns: Namespace): Result[Int] =
+    if unstorable(ns) then Right(0)
+    else store.writing("store.deleteNamespace")(c => Right(updated(c, Sql.deleteStoreNamespace(t), id(ns))))
+
+  override def deleteTenant(tenant: Option[TenantId]): Result[Int] =
+    if tenant.exists(t => unstorable(t.value)) then Right(0)
+    else store.writing("store.deleteTenant")(c => Right(updated(c, Sql.deleteStoreTenant(t), tenantKey(tenant))))
 
   // ---- reads ----
 

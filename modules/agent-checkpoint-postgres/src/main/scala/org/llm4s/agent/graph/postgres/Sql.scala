@@ -50,6 +50,16 @@ private[postgres] object Sql:
     s"SELECT thread_id FROM ${t.threads} WHERE thread_id > ? ORDER BY thread_id LIMIT ?"
 
   /**
+   * Of the threads `?` (an array), those whose row looks like a tombstone deleted before the cutoff bound second, read
+   * without a lock (#3261): the candidates a sweep then locks and [[reclaim]]s, which checks every condition again.
+   */
+  def tombstoneCandidates(t: Tables): String =
+    s"""SELECT thread_id FROM ${t.threads}
+       |WHERE thread_id = ANY(?) AND checkpoint_id IS NULL AND next_seq = first_seq AND metadata IS NULL
+       |  AND deleted_at IS NOT NULL AND deleted_at < ?
+       |ORDER BY thread_id""".stripMargin
+
+  /**
    * Removes the thread's row if it is only a tombstone, deleted before the cutoff bound second, with nothing stored
    * under the id since - no checkpoint, event, metadata, effect or pending write, and no claim but one that expired
    * before the cutoff (bound third) - returning its first event number.
@@ -579,6 +589,12 @@ private[postgres] object Sql:
   def deleteStoreFence(t: Tables): String   = s"DELETE FROM ${t.storeFences} WHERE scope = ?"
 
   private val storeColumns = "item_key, value_json, updated_at"
+
+  /** Deletes every item of namespace `?` (its digest, #3269). */
+  def deleteStoreNamespace(t: Tables): String = s"DELETE FROM ${t.storeItems} WHERE namespace_id = ?"
+
+  /** Deletes every item of tenant `?` (its key, `=` and the tenant or empty for none), by its index (#3269). */
+  def deleteStoreTenant(t: Tables): String = s"DELETE FROM ${t.storeItems} WHERE tenant_key = ?"
 
   def storeItem(t: Tables): String =
     s"SELECT $storeColumns FROM ${t.storeItems} WHERE namespace_id = ? AND item_key = ?"

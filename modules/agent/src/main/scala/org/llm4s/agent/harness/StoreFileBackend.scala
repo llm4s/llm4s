@@ -65,9 +65,23 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
         }
         .flatMap(FileTree.validated(operation, _, bounds))
 
-  /** The files, for a read: the one point a read takes the namespace. */
-  private def all(operation: String, ctx: FileContext): Result[Map[VPath, FileEntry]] =
-    store.list(namespace(ctx), "", store.limits.maxItems).flatMap(l => filesOf(operation, l.items, l.truncated))
+  /**
+   * The files at and under `path`, for a read (#3269): one listing of the keys that start with `path` - one store call,
+   * so one snapshot, never a file read at one moment and its directory at another (Codex) - keeping `path` itself and
+   * what is under it as a directory, never a sibling such as `/ab` for `/a`. Never the whole namespace, which every
+   * read and grep used to fetch and decode, but from the root, where it is the whole namespace (a key that is no path
+   * included, so a listing from `/` still finds what another writer left corrupt). What is read is validated as
+   * [[filesOf]] validates the namespace; the tree's shape as a whole is a write's to keep, checked in its transaction.
+   * A namespace holds at most `maxItems` items, so the listing is never cut by a sibling's.
+   */
+  private def under(operation: String, path: VPath, ctx: FileContext): Result[Map[VPath, FileEntry]] =
+    if path == VPath.root then
+      store.list(namespace(ctx), "", store.limits.maxItems).flatMap(l => filesOf(operation, l.items, l.truncated))
+    else
+      val dir = s"${path.value}/"
+      store.list(namespace(ctx), path.value, store.limits.maxItems).flatMap { l =>
+        filesOf(operation, l.items.filter(e => e.key == path.value || e.key.startsWith(dir)), l.truncated)
+      }
 
   /** The files as `view` sees them, in the transaction: the one point a mutation but `delete` takes them. */
   private def viewed(operation: String, view: StoreView): Result[Map[VPath, FileEntry]] =
@@ -76,13 +90,19 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
       .flatMap(es => filesOf(operation, es.take(store.limits.maxItems), es.size > store.limits.maxItems))
 
   def ls(dir: VPath, limit: Int, ctx: FileContext): Result[Listing[FileInfo]] =
-    all("ls", ctx).flatMap(FileTree.ls(_, dir, limit))
+    under("ls", dir, ctx).flatMap(FileTree.ls(_, dir, limit))
 
   def read(file: VPath, offset: Int, limit: Int, ctx: FileContext): Result[FileLines] =
-    all("read", ctx).flatMap(FileTree.read(_, file, offset, limit))
+    // the file by its key; a missing one is read as a directory, or as nothing, from what is under it
+    store.get(namespace(ctx), file.value).flatMap {
+      case Some(item) =>
+        filesOf("read", Vector(StoreEntry(file.value, item)), more = false)
+          .flatMap(FileTree.read(_, file, offset, limit))
+      case None => under("read", file, ctx).flatMap(FileTree.read(_, file, offset, limit))
+    }
 
   def find(under: VPath, accept: VPath => Boolean, limit: Int, ctx: FileContext): Result[Listing[VPath]] =
-    all("glob", ctx).flatMap(FileTree.find(_, under, accept, limit))
+    this.under("glob", under, ctx).flatMap(FileTree.find(_, under, accept, limit))
 
   def search(
     under: VPath,
@@ -91,7 +111,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
     limit: Int,
     ctx: FileContext
   ): Result[Listing[GrepMatch]] =
-    all("grep", ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
+    this.under("grep", under, ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
   private def guarded[A: ReadWriter](operation: String, file: VPath, ctx: FileContext)(
     change: StoreView => Result[StoreChange[A]]

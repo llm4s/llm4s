@@ -1080,6 +1080,19 @@ retention are experimental.
 | An exhausted entry's thread was settled under a random run id; a re-taken entry's slot could be removed by its old one; a hung lease renewal was noticed only once it returned (#3259) | The settlement is the entry's admitted run; slots are removed only by themselves; a watch stops a run once no renewal has landed for 90% of the lease ttl |
 | The retention sweep never removed a thread, and `ThreadQuery` could not find old ones (#3260) | `SweepPolicy.threadAge` (`llm4s.agent.worker.sweep.threadAge`, unset by default) deletes settled top-level threads not updated for that long, under a claim; `ThreadQuery.withUpdatedBefore` and `withOldestFirst` list a tenant's oldest threads. `SweepPolicy.apply`/`of` and `ThreadQuery.apply` gain trailing parameters with defaults, so source is unchanged; a positional pattern on either case class needs the new fields |
 
+## Checkpointer stores: typed errors, one interrupt rule, unknown commit outcomes (#3261, #3262, #3263, #3264, #3269)
+
+`Checkpointer`, `GraphError`, the SQLite and PostgreSQL stores, `LongTermStore` and `StoreFileBackend` are
+experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| Every store failure was an untyped `ProcessingError`: busy, a timeout, a closed store and a row that does not decode alike; SQLite refused a write made with the caller's interrupt flag set, the other stores ran it (#3264) | `GraphError.StoreUnavailable` (retryable), `StoreClosed` and `StoreCorrupt` (not retryable); other failures stay `ProcessingError`. A `match` on `GraphError` needs the new cases, and code that checked for `ProcessingError` on a busy, closed or corrupt store checks the new types. Every store runs a call made with the flag set, and keeps the flag; only an interrupt while the call waits cancels it. `AgentWorker` closes an entry whose thread does not decode `Failed(Unrunnable)` at once |
+| A PostgreSQL write that failed at its bound, or lost its connection, while its commit was in flight reported a failure though it may have landed (#3262) | It is `GraphError.CommitOutcomeUnknown`: read the thread before writing it again. A queued run's admission retries it, reading the thread first |
+| `StoreFileBackend` read the whole namespace for every `ls`, `read_file`, `glob` and `grep`; a tenant's or a namespace's items could be removed only by hand-written SQL, or not at all in memory (#3269) | A read fetches its file by key, a listing what is under its directory (a listing from `/` still reads everything); a read no longer reports corruption elsewhere in the namespace, a write still does. New `LongTermStore.deleteNamespace(ns)` and `deleteTenant(tenant)` (a custom store answers a `ValidationError` unless it overrides them), and `InMemoryLongTermStore.forgetScope`. PostgreSQL migrates to schema 8 (an index on `checkpoint_store_items.tenant_key`); an older build refuses the migrated schema |
+| PostgreSQL's sweep reclaimed a page's tombstones in one transaction that locked every thread row of the page under the exclusive reclamation lock (#3261) | It reads the candidates without a lock and reclaims them 50 at a time; nothing changes for callers |
+| `InMemoryCheckpointer.eventsAfter` answered nothing for a `limit` near `Int.MaxValue` (#3263) | It answers as the SQL stores do; every store answers none for a `limit` below 1 |
+
 ## Memory stores share one contract and one score rule (#3036, #3037, #3038)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. Every store now passes one `MemoryStoreContract`, so a call gets

@@ -136,6 +136,28 @@ trait LongTermStore extends AppliedKeys:
     change: StoreView => Result[StoreChange[A]]
   ): Result[A]
 
+  /**
+   * Deletes every item of `ns` (#3269), answering how many: an operator's call - a user's memories forgotten, a
+   * namespace retired - not a run's, so it is neither fenced nor guarded, and a run writing to `ns` meanwhile may
+   * leave items behind. Applied keys stay, as their threads' replay needs them. The default answers that this store
+   * cannot; every llm4s store can.
+   */
+  def deleteNamespace(ns: Namespace): Result[Int] =
+    Left(ValidationError("namespace", s"${getClass.getSimpleName} cannot delete a namespace (${ns.render})"))
+
+  /**
+   * Deletes every item of every namespace of `tenant` (#3269) - `None`, the namespaces of no tenant - answering how
+   * many: a tenant's offboarding, by an index, without knowing its namespaces or keys. Unfenced, as
+   * [[deleteNamespace]] is. The default answers that this store cannot; every llm4s store can.
+   */
+  def deleteTenant(tenant: Option[TenantId]): Result[Int] =
+    Left(
+      ValidationError(
+        "tenant",
+        s"${getClass.getSimpleName} cannot delete a tenant's namespaces (${tenant.fold("none")(_.value)})"
+      )
+    )
+
   /** Writes `value` at `key`, guarded under `store.put`: `true` when the key was new. */
   final def put(ns: Namespace, key: String, value: ujson.Value, ctx: FileContext): Result[Boolean] =
     LongTermStore.checked("put", ns, key).flatMap { _ =>
@@ -377,6 +399,27 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   def forget(key: EffectKey, token: FencingToken): Result[Unit] =
     transaction("forget")(fenced(key, token) { applied -= key.value; Right(()) })
+
+  override def deleteNamespace(ns: Namespace): Result[Int] = transaction("deleteNamespace") {
+    val gone = items(ns).size
+    namespaces -= ns
+    Right(gone)
+  }
+
+  override def deleteTenant(tenant: Option[TenantId]): Result[Int] = transaction("deleteTenant") {
+    val (gone, kept) = namespaces.partition(_._1.tenant == tenant)
+    namespaces = kept
+    Right(gone.valuesIterator.map(_.size).sum)
+  }
+
+  /**
+   * Forgets the newest fencing token seen for `scope` - a thread's (`EffectKey.scopeOf`) - once that thread is
+   * deleted (#3269): this store is not tied to a checkpointer, so nothing else removes it, and a store serving many
+   * short threads would otherwise keep one per thread for good. A later write of the scope is fenced afresh.
+   */
+  def forgetScope(scope: String): Unit = synchronized {
+    newest -= scope
+  }
 
   // whether this store's lock is held by a transaction now: `synchronized` is reentrant, so a `change`
   // that called back into the store would run a second transaction inside the first, and the first would

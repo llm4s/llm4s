@@ -578,6 +578,10 @@ final class AgentWorker private (
   private def unread(entry: QueueEntry, error: LLMError): Next = error match
     case mismatch: GraphError.TenantMismatch =>
       Next.Close(EntryOutcome.Failed(FailureReason.RunFailed(mismatch.message)))
+    // a stored row that does not decode reads the same on every attempt: closed at once, not retried (#3264)
+    case corrupt: GraphError.StoreCorrupt =>
+      logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread cannot be read; closing it: ${corrupt.message}")
+      Next.Close(EntryOutcome.Failed(FailureReason.Unrunnable(s"its thread cannot be read: ${corrupt.message}")))
     case _ =>
       logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
       Next.Expire
@@ -1085,7 +1089,11 @@ object AgentWorker:
   private[service] def admissionTransient(error: LLMError): Boolean = error match
     case _: ProcessingError | _: CircuitOpenError | _: OptimisticLockFailure                      => true
     case _: GraphError.CheckpointWriteFailed | _: GraphError.ClaimLost | _: GraphError.RunCrashed => true
-    case other                                                                                    => other.isRetryable
+    // the next attempt reads the thread again, so a claim commit whose outcome is unknown is retried (#3262); a row
+    // that does not decode, or a closed store, is not (#3264)
+    case _: GraphError.CommitOutcomeUnknown                     => true
+    case _: GraphError.StoreCorrupt | _: GraphError.StoreClosed => false
+    case other                                                  => other.isRetryable
 
   /** The synthetic tool result and the outcome a run stopped by `request` is settled with. */
   private def settlementOf(request: StopRequest): (String, RunOutcome.Failed) = request match

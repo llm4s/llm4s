@@ -554,32 +554,66 @@ final class PostgresCheckpointer private (
             }
           }
         }
-        val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
-        val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
+        // in the page's own order, the database's: no id is compared in Scala, whose UTF-16 order is not the collation's
+        val candidates = visited.filterNot(protectedRuns.contains)
+        // one budget for the whole page, reclamation and pruning together (Codex, #3261): a chunk past it is left to
+        // the next call, which starts from the cursor this one returns
+        val deadline = System.nanoTime() + sweepBudget.toNanos
+        // the tombstones reclaimed, and the first one the budget left for the next call
+        val reclaimed: Result[(Set[ThreadId], Option[ThreadId])] = policy.tombstoneAge match
           case Some(age) if candidates.nonEmpty =>
-            writing("sweep") { c =>
-              query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+            // the page's tombstones old enough, read without a lock (#3261): only they are locked, under the exclusive
+            // reclamation lock, a few at a time, so a page never holds every live thread's row - or every new id's
+            // first claim - for the length of one transaction; the DELETE checks every condition again
+            reading("sweep") { c =>
               val cutoff = clockNow(c).minusNanos(age.toNanos)
-              val gone = candidates.flatMap { threadId =>
-                readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
-                  query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
-                }
+              Right(
+                query(c, Sql.tombstoneCandidates(t), candidates.map(_.value).toArray, cutoff)(r =>
+                  ThreadId(r.getString(1))
+                )
+              )
+            }.flatMap { tombstones =>
+              val chunks = tombstones.grouped(ReclaimChunk).toVector
+              chunks.zipWithIndex.foldLeft[Result[(Set[ThreadId], Option[ThreadId])]](Right(Set.empty -> None)) {
+                case (done, (chunk, i)) =>
+                  done.flatMap {
+                    // the budget ran out: the rest of the page's tombstones wait for the next call
+                    case (reclaimedSoFar, cut @ Some(_)) => Right(reclaimedSoFar -> cut)
+                    case (reclaimedSoFar, None) if i > 0 && System.nanoTime() - deadline > 0 =>
+                      Right(reclaimedSoFar -> chunk.headOption)
+                    case (reclaimedSoFar, None) =>
+                      writing("sweep") { c =>
+                        query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+                        val cutoff = clockNow(c).minusNanos(age.toNanos)
+                        val gone = chunk.flatMap { threadId =>
+                          readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
+                            query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption
+                              .map(threadId -> _)
+                          }
+                        }
+                        // the long-term store's fence of a reclaimed thread goes with its row (#2453)
+                        gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
+                        // readers of a reclaimed log are still refused: a new thread of the id starts past it
+                        gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
+                        Right((reclaimedSoFar ++ gone.map(_._1)) -> None)
+                      }
+                  }
               }
-              // the long-term store's fence of a reclaimed thread goes with its row (#2453)
-              gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
-              // readers of a reclaimed log are still refused: a new thread of the id starts past it
-              gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
-              Right(gone.map(_._1).toSet)
             }
-          case _ => Right(Set.empty)
-        reclaimed.flatMap { gone =>
+          case _ => Right(Set.empty -> None)
+        reclaimed.flatMap { (gone, cut) =>
+          // a page the budget cut short in its reclamation ends before its first tombstone left: pruned up to it
+          // the page's prefix before that tombstone, in the database's order the page was read in: never a Scala
+          // comparison of ids, whose UTF-16 order differs from the collation's (Codex)
+          val visitedNow = cut.fold(visited)(first => visited.takeWhile(_ != first))
           // one row locked per transaction, so in the page's own order: its cursor is the last thread finished
           val pruned =
-            if policy.retention == RetentionPolicy.keepAll then Right(RetentionSweep.Visited(visited.size, 0, false))
+            if policy.retention == RetentionPolicy.keepAll then
+              Right(RetentionSweep.Visited(visitedNow.size, 0, cutShort = cut.isDefined))
             else
               RetentionSweep.visit[RetentionSweep.PrunePlan](
-                visited,
-                sweepBudget,
+                visitedNow,
+                math.max(0L, deadline - System.nanoTime()).nanos,
                 s"PostgresCheckpointer(${config.schema})",
                 shut
               ) { (threadId, floor) =>
@@ -595,10 +629,19 @@ final class PostgresCheckpointer private (
                     )
                   }
               }
-          pruned.map(v => SweepPage(v.examined, gone.size, v.cursor(page, policy.batchSize)))
+          pruned.map { v =>
+            val next =
+              if v.cutShort then v.cursor(visitedNow, policy.batchSize, after)
+              else if cut.isDefined then visitedNow.lastOption.orElse(after)
+              else v.cursor(page, policy.batchSize)
+            SweepPage(v.examined, gone.size, next)
+          }
         }
       }
     }
+
+  /** The most tombstones one reclaiming transaction locks and deletes (#3261). */
+  private val ReclaimChunk: Int = 50
 
   /** The key of the reclamation lock (see `Sql.lockReclamation`): one per schema. */
   private val reclamationLock = PostgresSchema.lockName(config.schema) + ":reclamation"
@@ -876,12 +919,15 @@ final class PostgresCheckpointer private (
     timeout: FiniteDuration = callTimeout,
     migration: Boolean = false
   )(body: Connection => Result[A]): Result[A] =
-    if shut then Left(failure(operation, "the store is closed", None))
+    if shut then
+      Left(GraphError.StoreClosed(PostgresSchema.description(config.schema), s"postgres-checkpointer.$operation"))
     else
       // a flag set before the call decides nothing here: on a virtual thread it would close the socket
       val flagged = Thread.interrupted()
+      // set once the transaction's commit is sent: a failure from then on may have landed (#3262)
+      var committing = false
       val result = Try(dataSource.getConnection()).toEither.left
-        .map(e => failure(operation, describe(e), Some(e)))
+        .map(e => unavailable(operation, describe(e)))
         .flatMap { c =>
           val watch = Watch.arm(c, timeout)
           // a migration's statements may outlast the pool's socket timeout: its connection waits as long as its bound
@@ -899,6 +945,7 @@ final class PostgresCheckpointer private (
               execute(c, begin)
               val result = body(c)
               if result.isRight then
+                committing = true
                 c.commit()
                 guard.committed = true
               result
@@ -914,7 +961,15 @@ final class PostgresCheckpointer private (
             ).isSuccess
           if !returned then discard(c)
           outcome.toEither.left.map { e =>
-            if aborted then failure(operation, timedOut(timeout), Some(e))
+            // a write that failed while its commit was in flight may have landed: its outcome is unknown (#3262)
+            if committing && !migration && !begin.contains("READ ONLY") then
+              GraphError.CommitOutcomeUnknown(
+                PostgresSchema.description(config.schema),
+                s"postgres-checkpointer.$operation",
+                if aborted then timedOut(timeout) else describe(e)
+              )
+            else if aborted || transientState(e) then
+              unavailable(operation, if aborted then timedOut(timeout) else describe(e))
             else if e.isInstanceOf[UnstorableText] then
               val unstorable = e.asInstanceOf[UnstorableText]
               ValidationError(
@@ -932,12 +987,16 @@ final class PostgresCheckpointer private (
         }
       val interrupted = Thread.currentThread().isInterrupted
       if flagged || interrupted then Thread.currentThread().interrupt()
-      // an interrupt that landed during the call is why it failed
+      // an interrupt that landed during the call is why it failed: a failure of the call itself - however it was
+      // classified, a broken socket's StoreUnavailable included - is the caller's cancel (Codex, #3264), but a write
+      // whose commit was in flight may still have landed, and a refusal the store decided (a stale claim, say) stands
       if interrupted && !flagged then
         result.left.map {
-          case cancelled: CancelledError => cancelled
-          case failed: ProcessingError   => CancelledError(s"postgres-checkpointer.$operation", failed.cause)
-          case other                     => other
+          case cancelled: CancelledError                => cancelled
+          case unknown: GraphError.CommitOutcomeUnknown => unknown
+          case failed: ProcessingError        => CancelledError(s"postgres-checkpointer.$operation", failed.cause)
+          case _: GraphError.StoreUnavailable => CancelledError(s"postgres-checkpointer.$operation", None)
+          case other                          => other
         }
       else result
 
@@ -1188,6 +1247,14 @@ object PostgresCheckpointer:
    * tenant, or empty for none, so that no tenant is NULL in the indexes - PostgreSQL orders an index scan by the
    * columns after one compared by equality, but not after one tested with `IS NULL`.
    */
+  /** The earliest and latest instants a `timestamptz` holds, well inside its range: what a bound is clamped to. */
+  private val EarliestBound: Instant = java.time.LocalDate.of(-4712, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant
+  private val LatestBound: Instant   = java.time.LocalDate.of(294275, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant
+
+  /** `at`, clamped to what a `timestamptz` holds (#3264): for a query's bound, never a stored time. */
+  private[postgres] def clamped(at: Instant): Instant =
+    if at.isBefore(EarliestBound) then EarliestBound else if at.isAfter(LatestBound) then LatestBound else at
+
   private[postgres] def tenantKey(tenantId: Option[TenantId]): String = tenantId.fold("")(t => "=" + t.value)
 
   /** The statement and parameters of a page of `query`, its claims judged at `now`, the database's clock. */
@@ -1199,8 +1266,9 @@ object PostgresCheckpointer:
     registryStatement(t, query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
-      query.updatedSince.foreach(since => where.add("updated_at >= ?", since))
-      query.updatedBefore.foreach(before => where.add("updated_at < ?", before))
+      // an instant past what a timestamptz holds (Instant.MIN or MAX) is clamped, never thrown (#3264)
+      query.updatedSince.foreach(since => where.add("updated_at >= ?", PostgresCheckpointer.clamped(since)))
+      query.updatedBefore.foreach(before => where.add("updated_at < ?", PostgresCheckpointer.clamped(before)))
       // containment, through the GIN index on the metadata
       if !query.metadata.isEmpty then where.add("metadata @> CAST(? AS jsonb)", ujson.write(query.metadata.toJson))
     }
@@ -1315,10 +1383,31 @@ object PostgresCheckpointer:
       cause
     )
 
-  private def undecodable(operation: String, what: String, problem: String, cause: Option[Throwable])(using
-    ErrorContext
-  ): LLMError =
-    failure(operation, s"a stored $what does not decode: $problem", cause)
+  private def undecodable(
+    operation: String,
+    what: String,
+    problem: String,
+    @scala.annotation.unused cause: Option[Throwable]
+  )(using context: ErrorContext): LLMError =
+    // a row that does not decode is not a failure to retry (#3264)
+    GraphError.StoreCorrupt(
+      PostgresSchema.description(context.schema),
+      s"postgres-checkpointer.$operation",
+      what,
+      problem
+    )
+
+  /** A call that could not be answered now, changing nothing (#3264): the database unreachable, or a bound reached. */
+  private def unavailable(operation: String, detail: String)(using context: ErrorContext): LLMError =
+    GraphError.StoreUnavailable(PostgresSchema.description(context.schema), s"postgres-checkpointer.$operation", detail)
+
+  /**
+   * Whether `e` is a failure the database reports as passing: a timeout it enforced (57014, 55P03, 25P03), a lost or
+   * refused connection (class 08), or a server shutting down (57P01-57P03) - the call changed nothing.
+   */
+  private def transientState(e: Throwable): Boolean = sqlState(e).exists { state =>
+    state.startsWith("08") || Set("57014", "55P03", "25P03", "57P01", "57P02", "57P03")(state)
+  }
 
   private[postgres] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>

@@ -280,7 +280,8 @@ class PostgresLongTermStoreUnitSpec extends AnyFlatSpec with Matchers with Eithe
     item.updated shouldBe now.toInstant
     store.get(ns, "missing").value shouldBe None
     val broken = store.get(ns, "broken").left.value
-    broken shouldBe a[ProcessingError]
+    // a row that does not decode is typed, and not retryable (#3264)
+    broken shouldBe a[org.llm4s.agent.graph.GraphError.StoreCorrupt]
     broken.message should include("does not decode")
     val listing = store.list(ns, "a/", 2).value
     listing.items.map(_.key) shouldBe Vector("a/1", "a/2")
