@@ -93,7 +93,11 @@ final class SqliteCheckpointer private (
 
   // ---- claims ----
 
-  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
+  // an id this store cannot store exactly is refused before anything is read (#3097)
+  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] =
+    StorableText.ofClaim(threadId, request).toLeft(()).flatMap(_ => claimStorable(threadId, request))
+
+  private def claimStorable(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
     val current = readRow(c, threadId)
     val now     = clock.instant()
     current.flatMap(_.claim).filter(live => now.isBefore(live.expiresAt)) match
@@ -135,7 +139,10 @@ final class SqliteCheckpointer private (
 
   // ---- data ----
 
-  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
+  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+    StorableText.ofCommit(threadId, commit).toLeft(()).flatMap(_ => commitStorable(threadId, commit))
+
+  private def commitStorable(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
     val current  = readRow(c, threadId)
     val latestId = current.flatMap(_.checkpointId)
     // the thread's own claim first, then the fence's, both in the transaction the commit is made in
@@ -175,7 +182,7 @@ final class SqliteCheckpointer private (
         // what `prune` judges age by: the store's clock, never the producer's timestamps (schema 7)
         val committedAt = clock.instant()
         commit.checkpoint.foreach { checkpoint =>
-          val json = ujson.write(Checkpoint.toJson(checkpoint))
+          val json = ujson.write(Checkpoint.toJson(checkpoint), escapeUnicode = true)
           // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
           // a retraction below empties the history but leaves the thread the same one
           val fresh =
@@ -266,12 +273,13 @@ final class SqliteCheckpointer private (
             record.taskId.value,
             record.lineage,
             commit.token.value,
-            ujson.write(EffectRecord.toJson(record))
+            ujson.write(EffectRecord.toJson(record), escapeUnicode = true)
           )
         }
         val stored = commit.events.zipWithIndex.map { (draft, i) =>
           val seq = nextSeq + i
-          seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft))
+          seq -> upickle.default
+            .write(EventRecord.committed(threadId.value, seq, commit.token, draft), escapeUnicode = true)
         }
         Using.resource(
           c.prepareStatement(
@@ -842,7 +850,13 @@ final class SqliteCheckpointer private (
       val written = CancelledError.catchInterrupt {
         gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
           transaction(c, "BEGIN IMMEDIATE") { guard =>
-            val result = body(c)
+            // a file a newer build migrated since this store opened is written no more (#3090)
+            val found =
+              query(c, "SELECT MAX(version) FROM llm4s_checkpoint_schema")(_.getInt(1)).headOption.getOrElse(0)
+            val result =
+              if found > SqliteSchema.Current then
+                Left(GraphError.UnsupportedStoreSchema(s"SQLite file $path", found, SqliteSchema.Current))
+              else body(c)
             if result.isRight then
               execute(c, "COMMIT")
               guard.committed = true
@@ -1153,7 +1167,7 @@ object SqliteCheckpointer:
     update(
       c,
       "UPDATE llm4s_checkpoint_threads SET metadata_json = ?, updated_nanos = ? WHERE thread_id = ?",
-      Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
+      Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson, escapeUnicode = true)),
       epochNanos(at),
       threadId.value
     )
@@ -1383,7 +1397,13 @@ object SqliteCheckpointer:
         )
       ) { insert =>
         writes.zipWithIndex.foreach { (write, i) =>
-          bind(insert, threadId.value, first + i, write.checkpointId, upickle.default.write(write))
+          bind(
+            insert,
+            threadId.value,
+            first + i,
+            write.checkpointId,
+            upickle.default.write(write, escapeUnicode = true)
+          )
           insert.executeUpdate(): Unit
         }
       }

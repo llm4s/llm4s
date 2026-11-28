@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.AgentId
+import org.llm4s.agent.service.{ QueuedInput, Submission }
 import org.llm4s.error.ProcessingError
 import org.llm4s.it.tags.Docker
 import org.llm4s.security.Secret
@@ -139,6 +141,84 @@ class PostgresCheckpointerSpec
     PgCheckpointerDb.scalar(s"""SELECT version FROM "${config.schema}".checkpoint_schema""")(_.getInt(1)) shouldBe 99
     // an owned pool is closed with a refused store
     pool.isClosed shouldBe true
+  }
+
+  it should "store JSON with non-ASCII escaped, read a row 1.0.0 wrote unescaped, and refuse unstorable text (#3097)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = PostgresSchema.Tables(config.schema)
+    val thread = ThreadId(s"escaped-${java.util.UUID.randomUUID()}")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    val c1 = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "c1",
+      None,
+      thread.value,
+      "rün",
+      CheckpointStatus.Running,
+      Instant.parse("2026-11-27T12:00:00Z"),
+      GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false),
+      None,
+      Some(token)
+    )
+    store.commit(thread, Commit(token, Some(c1), Vector.empty, Vector.empty)).value
+    PgCheckpointerDb.scalar(s"SELECT checkpoint_json FROM ${t.threads} WHERE thread_id = '${thread.value}'")(
+      _.getString(1)
+    ) should include("\\u00fc")
+    // 1.0.0's form, UTF-8 as it is, still reads
+    PgCheckpointerDb.execute(
+      s"UPDATE ${t.threads} SET checkpoint_json = replace(checkpoint_json, '\\u00fc', 'ü') WHERE thread_id = '${thread.value}'"
+    )
+    store.latest(thread).value.value.checkpoint shouldBe c1
+    // text the server cannot hold is refused before it is sent, with a ValidationError rather than a driver error
+    store.runQueue
+      .submit(Submission(ThreadId("nul\u0000"), AgentId.unsafe("a"), QueuedInput.query("q")))
+      .left
+      .value shouldBe a[org.llm4s.error.ValidationError]
+    store.close()
+  }
+
+  it should "hold a write while a migration holds the schema's lock, so it never writes past a migration it raced (#3090)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.withConnection { c =>
+      c.setAutoCommit(false)
+      // what PostgresSchema.migrate takes, exclusively, for the whole migration
+      Using.resource(c.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) { st =>
+        st.setString(1, PostgresSchema.lockName(config.schema))
+        st.executeQuery().close()
+      }
+      val written = new LinkedBlockingQueue[Boolean]()
+      Thread.ofVirtual().start { () =>
+        written.put(
+          store
+            .claim(ThreadId(s"raced-${java.util.UUID.randomUUID()}"), ClaimRequest(RunId("r"), None, 30.seconds))
+            .isRight
+        )
+      }
+      // the write waits on the lock, shared, rather than reading the version under the migration
+      Option(written.poll(500, TimeUnit.MILLISECONDS)) shouldBe None
+      c.commit()
+      Option(written.poll(10, TimeUnit.SECONDS)) shouldBe Some(true)
+    }
+    store.close()
+  }
+
+  it should "refuse a running store's writes once a newer build has migrated the schema, reads still answered (#3090)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val thread = ThreadId(s"newer-${java.util.UUID.randomUUID()}")
+    store.claim(thread, ClaimRequest(RunId("r1"), None, 30.seconds)).isRight shouldBe true
+    PgCheckpointerDb.execute(s"""UPDATE "${config.schema}".checkpoint_schema SET version = 99""")
+    store
+      .claim(ThreadId(s"other-${java.util.UUID.randomUUID()}"), ClaimRequest(RunId("r2"), None, 30.seconds))
+      .left
+      .value shouldBe
+      GraphError.UnsupportedStoreSchema(s"""PostgreSQL schema "${config.schema}"""", 99, PostgresSchema.Current)
+    store.runQueue.submit(Submission(thread, AgentId.unsafe("a"), QueuedInput.query("q"))).left.value shouldBe
+      a[GraphError.UnsupportedStoreSchema]
+    store.latest(thread).isRight shouldBe true
+    store.close()
   }
 
   it should "open at the current version for a role that may only read and write its tables" in {

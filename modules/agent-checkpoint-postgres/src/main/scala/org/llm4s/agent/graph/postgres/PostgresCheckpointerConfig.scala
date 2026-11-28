@@ -22,6 +22,10 @@ import scala.concurrent.duration.*
  *    [[PostgresCheckpointer.open]]); at least 250 milliseconds, HikariCP's minimum. A caller-supplied pool
  *    ([[PostgresCheckpointer.create]]) keeps its own setting, which then takes this one's place in the bound.
  *  - `maxPoolSize`: the size of the store's own pool; ignored for a caller-supplied one.
+ *  - `migrationTimeout`: how long opening the store may take to bring the schema to this build's version, the wait
+ *    for another instance's migration included (#3089): its transaction is bounded by this rather than
+ *    `callTimeout`, on the server and the client, so a step that rewrites a large table is not cut off. Ten minutes
+ *    by default; an open that finds the schema current takes no longer than a call.
  *
  * '''The bound.''' Every call returns within `connectionTimeout + callTimeout`, plus the time it takes to roll back or
  * discard a connection: the bound the `Checkpointer` contract asks a store to document (#1919). Keep it well inside
@@ -36,16 +40,19 @@ final case class PostgresCheckpointerConfig private (
   schema: String,
   callTimeout: FiniteDuration,
   connectionTimeout: FiniteDuration,
-  maxPoolSize: Int
+  maxPoolSize: Int,
+  migrationTimeout: FiniteDuration
 ):
   def withSchema(name: String): PostgresCheckpointerConfig =
-    PostgresCheckpointerConfig(name, callTimeout, connectionTimeout, maxPoolSize)
+    PostgresCheckpointerConfig(name, callTimeout, connectionTimeout, maxPoolSize, migrationTimeout)
   def withCallTimeout(timeout: FiniteDuration): PostgresCheckpointerConfig =
-    PostgresCheckpointerConfig(schema, timeout, connectionTimeout, maxPoolSize)
+    PostgresCheckpointerConfig(schema, timeout, connectionTimeout, maxPoolSize, migrationTimeout)
   def withConnectionTimeout(timeout: FiniteDuration): PostgresCheckpointerConfig =
-    PostgresCheckpointerConfig(schema, callTimeout, timeout, maxPoolSize)
+    PostgresCheckpointerConfig(schema, callTimeout, timeout, maxPoolSize, migrationTimeout)
   def withMaxPoolSize(size: Int): PostgresCheckpointerConfig =
-    PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, size)
+    PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, size, migrationTimeout)
+  def withMigrationTimeout(timeout: FiniteDuration): PostgresCheckpointerConfig =
+    PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, maxPoolSize, timeout)
 
   /** The bound every call of a store with its own pool returns within: `connectionTimeout + callTimeout`. */
   def bound: FiniteDuration = connectionTimeout + callTimeout
@@ -60,11 +67,15 @@ object PostgresCheckpointerConfig:
   /** HikariCP refuses a connection timeout below 250 ms. */
   private val MinConnectionTimeout = 250.millis
 
+  /** How long an open may take to migrate the schema unless told otherwise (#3089). */
+  val DefaultMigrationTimeout: FiniteDuration = 10.minutes
+
   private def problems(
     schema: String,
     callTimeout: FiniteDuration,
     connectionTimeout: FiniteDuration,
-    maxPoolSize: Int
+    maxPoolSize: Int,
+    migrationTimeout: FiniteDuration
   ): List[String] =
     List(
       Option.when(!Identifier.matches(schema))(
@@ -80,7 +91,11 @@ object PostgresCheckpointerConfig:
       Option.when(connectionTimeout > Int.MaxValue.toLong.millis)(
         s"connectionTimeout must be at most ${Int.MaxValue} milliseconds, was $connectionTimeout"
       ),
-      Option.when(maxPoolSize < 1)(s"maxPoolSize must be at least 1, was $maxPoolSize")
+      Option.when(maxPoolSize < 1)(s"maxPoolSize must be at least 1, was $maxPoolSize"),
+      Option.when(migrationTimeout.length <= 0)(s"migrationTimeout must be positive, was $migrationTimeout"),
+      Option.when(migrationTimeout > Int.MaxValue.toLong.millis)(
+        s"migrationTimeout must be at most ${Int.MaxValue} milliseconds, was $migrationTimeout"
+      )
     ).flatten
 
   /** Throws `IllegalArgumentException` for an invalid setting; use [[of]] for untrusted input. */
@@ -88,21 +103,24 @@ object PostgresCheckpointerConfig:
     schema: String = DefaultSchema,
     callTimeout: FiniteDuration = 5.seconds,
     connectionTimeout: FiniteDuration = 5.seconds,
-    maxPoolSize: Int = 10
+    maxPoolSize: Int = 10,
+    migrationTimeout: FiniteDuration = DefaultMigrationTimeout
   ): PostgresCheckpointerConfig =
-    val found = problems(schema, callTimeout, connectionTimeout, maxPoolSize)
+    val found = problems(schema, callTimeout, connectionTimeout, maxPoolSize, migrationTimeout)
     require(found.isEmpty, found.mkString("; "))
-    new PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, maxPoolSize)
+    new PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, maxPoolSize, migrationTimeout)
 
   def of(
     schema: String = DefaultSchema,
     callTimeout: FiniteDuration = 5.seconds,
     connectionTimeout: FiniteDuration = 5.seconds,
-    maxPoolSize: Int = 10
+    maxPoolSize: Int = 10,
+    migrationTimeout: FiniteDuration = DefaultMigrationTimeout
   ): Result[PostgresCheckpointerConfig] =
-    problems(schema, callTimeout, connectionTimeout, maxPoolSize) match
-      case Nil   => Right(new PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, maxPoolSize))
+    problems(schema, callTimeout, connectionTimeout, maxPoolSize, migrationTimeout) match
+      case Nil =>
+        Right(new PostgresCheckpointerConfig(schema, callTimeout, connectionTimeout, maxPoolSize, migrationTimeout))
       case found => Left(ValidationError("postgres-checkpointer", found))
 
-  /** Schema `llm4s`, 5 second call and connection timeouts, a pool of 10. */
+  /** Schema `llm4s`, 5 second call and connection timeouts, a pool of 10, a 10 minute migration bound. */
   val default: PostgresCheckpointerConfig = apply()

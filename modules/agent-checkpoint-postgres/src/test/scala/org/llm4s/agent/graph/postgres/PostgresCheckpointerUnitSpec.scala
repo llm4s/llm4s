@@ -161,6 +161,19 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     PostgresCheckpointer.socketTimeoutSeconds(100.millis) shouldBe 1L
   }
 
+  it should "bound the open's migration by migrationTimeout, not the call timeout, the driver's wait included (#3089)" in {
+    val s      = ScriptedPostgres(java.time.OffsetDateTime.now(), PartialFunction.empty)
+    val config = PostgresCheckpointerConfig(callTimeout = 2.seconds, migrationTimeout = 20.minutes)
+    val opened = s.opening(config)
+    // the open's transaction: the schema's advisory lock is waited for, and every step runs, under the migration bound
+    opened.head shouldBe PostgresCheckpointer.settings(20.minutes)
+    opened should not contain PostgresCheckpointer.settings(2.seconds)
+    // the connection waits on the network as long as the bound, and is given back as it came
+    s.networkTimeouts.asScala.toVector shouldBe Vector(40.minutes.toMillis.toInt, 0)
+    PostgresCheckpointerConfig.default.migrationTimeout shouldBe 10.minutes
+    PostgresCheckpointerConfig.of(migrationTimeout = Duration.Zero).isLeft shouldBe true
+  }
+
   it should "name a timeout the server enforced as one" in {
     def failed(state: String) = new SQLException("boom", state)
     PostgresCheckpointer.describe(failed("57014")) should include("call timeout on the server")

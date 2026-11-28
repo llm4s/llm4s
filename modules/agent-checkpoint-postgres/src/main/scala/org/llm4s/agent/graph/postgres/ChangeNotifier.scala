@@ -4,6 +4,7 @@ import org.llm4s.agent.graph.{ Checkpointer, ThreadId }
 import org.llm4s.agent.service.EntryId
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 import org.postgresql.PGConnection
 import org.slf4j.LoggerFactory
 
@@ -109,15 +110,29 @@ final private[postgres] class ChangeNotifier(
     thread.start()
 
   private def run(): Unit =
-    var backoff = InitialBackoff
-    while !closed do
+    var backoff              = InitialBackoff
+    var warned: Option[Long] = None
+    var permanent            = false
+    while !closed && !permanent do
       listen() match
-        case None =>
+        case Left(Unlistenable.Never(problem)) =>
+          // a connection that is not PostgreSQL's never will be: said once, and the store polls from now on (#3098)
+          logger.warn(
+            s"cannot listen on channel $channel: $problem; the store will poll for commits instead (WatchPolicy.pollInterval)"
+          )
+          permanent = true
+        case Left(Unlistenable.Now(problem)) =>
+          // said at once, then at most once a minute while it lasts, so a database that refuses it is seen (#3098)
+          val now = System.nanoTime()
+          if warned.forall(at => now - at >= WarnEvery.toNanos) then
+            logger.warn(s"cannot listen on channel $channel, polling until it can: $problem")
+            warned = Some(now)
           // the waiters poll meanwhile; each attempt is bounded by the connection's own timeouts, and only close
           // interrupts this sleep, after which the loop ends
           CancelledError.catchInterrupt(Thread.sleep(backoff.toMillis)): Unit
           backoff = (backoff * 2).min(callTimeout.max(InitialBackoff))
-        case Some(listen) =>
+        case Right(listen) =>
+          warned = None
           backoff = InitialBackoff
           current = Some(listen)
           if closed then abort(listen.connection)
@@ -132,17 +147,22 @@ final private[postgres] class ChangeNotifier(
           wakeAll()
           if !closed then logger.warn(s"lost the connection listening on channel $channel; polling until it is back")
 
-  /** A connection `LISTEN`ing on the channel, or `None` if one cannot be had now. */
-  private def listen(): Option[Listen] =
-    Try(connect()).toOption.flatMap { c =>
+  /** A connection `LISTEN`ing on the channel, or why there is none: for now, or for good. */
+  private def listen(): Either[Unlistenable, Listen] =
+    Try(connect()).toEither.left.map(e => Unlistenable.Now(describe(e))).flatMap { c =>
       opened.incrementAndGet(): Unit
-      val listening = Try {
-        c.setAutoCommit(true)
-        bounded(c)(Using.resource(c.createStatement())(_.execute(s"""LISTEN "$channel"""")): Unit)
-        Listen(c, c.unwrap(classOf[PGConnection]))
-      }
-      if listening.isFailure then abort(c)
-      listening.toOption
+      // the driver's own connection first: one that is not PostgreSQL's never will be
+      val listening = Try(c.unwrap(classOf[PGConnection])).toEither.left
+        .map(e => Unlistenable.Never(s"its connections are not PostgreSQL JDBC connections (${describe(e)})"))
+        .flatMap { pg =>
+          Try {
+            c.setAutoCommit(true)
+            bounded(c)(Using.resource(c.createStatement())(_.execute(s"""LISTEN "$channel"""")): Unit)
+            Listen(c, pg)
+          }.toEither.left.map(e => Unlistenable.Now(describe(e)))
+        }
+      if listening.isLeft then abort(c)
+      listening
     }
 
   /** Receives notifications until the connection fails, or the notifier is closed. */
@@ -174,6 +194,18 @@ private[postgres] object ChangeNotifier:
   private val logger = LoggerFactory.getLogger(classOf[ChangeNotifier])
 
   private val InitialBackoff: FiniteDuration = 100.millis
+
+  /** How often a listener that still cannot listen says so (#3098). */
+  private val WarnEvery: FiniteDuration = 1.minute
+
+  /** Why there is no listening connection: for now (retried), or for good (never retried). */
+  private enum Unlistenable:
+    case Now(problem: String)
+    case Never(problem: String)
+
+  /** A failure's message for a log line, its known secrets scrubbed. */
+  private def describe(e: Throwable): String =
+    Redaction.scrubKnown(Option(e.getMessage).getOrElse(e.getClass.getName))
 
   /** PostgreSQL's longest identifier, which a channel name must fit. */
   private val MaxChannel = 63

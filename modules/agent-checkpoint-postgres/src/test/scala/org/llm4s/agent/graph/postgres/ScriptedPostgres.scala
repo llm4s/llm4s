@@ -30,6 +30,18 @@ final private[postgres] case class ScriptedPostgres(
   /** The parameters of every statement made whose SQL is `sql`, in order. */
   def madeWith(sql: String): Vector[Vector[Any]] = made.collect { case (`sql`, params) => params }
 
+  /** The SQL run with `execute` - the transactions' `SET LOCAL` bounds among it - not recorded in [[made]]. */
+  val executed: CopyOnWriteArrayList[String] = new CopyOnWriteArrayList[String]()
+
+  /** What opening a store with `config` ran with `execute`, in order. */
+  def opening(config: PostgresCheckpointerConfig = PostgresCheckpointerConfig.default): Vector[String] =
+    executed.clear()
+    PostgresCheckpointer.create(Pool(() => connection()), ownsDataSource = false, config).value.close()
+    executed.asScala.toVector
+
+  /** The network timeouts set on the script's connections, in milliseconds, in order. */
+  val networkTimeouts: CopyOnWriteArrayList[Int] = new CopyOnWriteArrayList[Int]()
+
   /** A store over the script's connections; what opening it ran is not recorded. */
   def store(config: PostgresCheckpointerConfig = PostgresCheckpointerConfig.default): PostgresCheckpointer =
     val opened = PostgresCheckpointer.create(Pool(() => connection()), ownsDataSource = false, config).value
@@ -59,6 +71,10 @@ final private[postgres] case class ScriptedPostgres(
         case "createArrayOf"    => textArray(args(1).asInstanceOf[Array[AnyRef]].toVector)
         case "setAutoCommit" | "rollback" | "commit" | "abort" | "close" => null
         case "isClosed"                                                  => java.lang.Boolean.FALSE
+        case "getNetworkTimeout"                                         => Integer.valueOf(0)
+        case "setNetworkTimeout" =>
+          networkTimeouts.add(args(1).asInstanceOf[Integer].intValue)
+          null
         case other => throw new UnsupportedOperationException(other)
       }
     self
@@ -92,7 +108,9 @@ final private[postgres] case class ScriptedPostgres(
             args(1).asInstanceOf[java.sql.Array].getArray.asInstanceOf[Array[?]].toVector
           null
         case "getConnection" => connection
-        case "execute"       => java.lang.Boolean.FALSE
+        case "execute" =>
+          Option(args).foreach(a => executed.add(a.head.toString))
+          java.lang.Boolean.FALSE
         // each row of a batch is recorded as a statement of its own
         case "addBatch" =>
           log.add(prepared -> bound)

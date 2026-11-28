@@ -96,6 +96,13 @@ final class PostgresCheckpointer private (
   /** How long one sweep call prunes before it hands back its cursor; a spec shortens it to cut a sweep short. */
   @volatile private[postgres] var sweepBudget: FiniteDuration = config.callTimeout
   private val transactionSetting                              = settings(callTimeout)
+
+  /**
+   * A write's transaction begins by checking the schema's version (#3090): one that a newer build migrated since this
+   * store opened fails the write with `GraphError.UnsupportedStoreSchema`, changing nothing, so an instance that was
+   * already running when a newer one migrated stops writing, as one that opens after it is refused.
+   */
+  private val writeSetting = s"$transactionSetting; ${schemaGuard(t)}"
   private val notifier = new ChangeNotifier(
     ChangeNotifier.channelFor(config.schema),
     listenerConnection(dataSource, config),
@@ -108,7 +115,11 @@ final class PostgresCheckpointer private (
 
   // ---- claims ----
 
-  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
+  // an id this store cannot store exactly is refused before anything is read (#3097)
+  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] =
+    StorableText.ofClaim(threadId, request).toLeft(()).flatMap(_ => claimStorable(threadId, request))
+
+  private def claimStorable(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = writing("claim") { c =>
     val current = lockOrCreate(c, threadId)
     val now     = clockNow(c)
     current.claim.filter(live => now.isBefore(live.expiresAt)) match
@@ -149,7 +160,10 @@ final class PostgresCheckpointer private (
 
   // ---- data ----
 
-  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
+  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+    StorableText.ofCommit(threadId, commit).toLeft(()).flatMap(_ => commitStorable(threadId, commit))
+
+  private def commitStorable(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
     val rows     = lockRows(c, threadId +: commit.fence.map(_._1).toVector)
     val current  = rows.get(threadId)
     val latestId = current.flatMap(_.checkpointId)
@@ -225,12 +239,16 @@ final class PostgresCheckpointer private (
             record.taskId.value,
             record.lineage,
             commit.token.value,
-            ujson.write(EffectRecord.toJson(record))
+            ujson.write(EffectRecord.toJson(record), escapeUnicode = true)
           )
         }
         val stored = commit.events.zipWithIndex.map { (draft, i) =>
           val seq = row.nextSeq + i
-          (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
+          (
+            seq,
+            draft,
+            upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft), escapeUnicode = true)
+          )
         }
         if stored.nonEmpty then
           Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
@@ -256,7 +274,7 @@ final class PostgresCheckpointer private (
     committedAt: Instant,
     checkpoint: Checkpoint
   ): Unit =
-    val json = ujson.write(Checkpoint.toJson(checkpoint))
+    val json = ujson.write(Checkpoint.toJson(checkpoint), escapeUnicode = true)
     // no checkpoint yet means a new thread under the id (a tombstone's, or none); a retraction below empties the
     // history but leaves the thread the same one
     val fresh = row.checkpointId.isEmpty
@@ -642,8 +660,13 @@ final class PostgresCheckpointer private (
       ChangeNotifier.readUntilWoken(threadId, waiter, timeout)(eventsAfter(threadId, afterSeq, limit))
     }
 
-  /** Whether this store's listening connection is up: for tests. */
-  private[postgres] def listening: Boolean = notifier.listening
+  /**
+   * Whether this store's listening connection is up (#3098): while it is, a commit or close through any store over the
+   * schema wakes this store's waits at once; while it is not - before the first wait, after the connection is lost,
+   * or for good over a `DataSource` whose connections are not PostgreSQL JDBC connections - they poll. For a health
+   * check or a gauge; the store logs each failure to listen at WARN.
+   */
+  def listening: Boolean = notifier.listening
 
   /** The listening connection's backend process id while it is up: for tests that kill it. */
   private[postgres] def listenerPid: Option[Int] = notifier.listenerPid
@@ -774,7 +797,15 @@ final class PostgresCheckpointer private (
 
   /** `body` in one read-committed transaction that locks the rows it writes; see [[call]]. */
   private[postgres] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
-    call(operation, transactionSetting)(body)
+    call(operation, writeSetting)(body)
+
+  /**
+   * `body` - opening the store: reading and migrating its schema - in one transaction bounded by `migrationTimeout`
+   * rather than `callTimeout` (#3089), on the server (its statement and lock timeouts, so the wait for another
+   * instance's migration too) and the client (the watch, and the connection's network timeout).
+   */
+  private[postgres] def migrating[A](body: Connection => Result[A]): Result[A] =
+    call("open", settings(config.migrationTimeout), config.migrationTimeout, migration = true)(body)
 
   /** `body` in one repeatable-read, read-only transaction, so what it reads is one snapshot; see [[call]]. */
   private[postgres] def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
@@ -787,7 +818,12 @@ final class PostgresCheckpointer private (
    * than returned to the pool, so a socket an interrupt closed, or a cancel that may still be in flight, never reaches
    * another call.
    */
-  private def call[A](operation: String, begin: String)(body: Connection => Result[A]): Result[A] =
+  private def call[A](
+    operation: String,
+    begin: String,
+    timeout: FiniteDuration = callTimeout,
+    migration: Boolean = false
+  )(body: Connection => Result[A]): Result[A] =
     if shut then Left(failure(operation, "the store is closed", None))
     else
       // a flag set before the call decides nothing here: on a virtual thread it would close the socket
@@ -795,7 +831,16 @@ final class PostgresCheckpointer private (
       val result = Try(dataSource.getConnection()).toEither.left
         .map(e => failure(operation, describe(e), Some(e)))
         .flatMap { c =>
-          val watch = Watch.arm(c, callTimeout)
+          val watch = Watch.arm(c, timeout)
+          // a migration's statements may outlast the pool's socket timeout: its connection waits as long as its bound
+          val network = Option.when(migration)(Try(c.getNetworkTimeout).toOption).flatten
+          if migration then
+            Try(
+              c.setNetworkTimeout(
+                DirectExecutor,
+                DurationRounding.ceilMillis(timeout * 2).min(Int.MaxValue.toLong).toInt
+              )
+            ): Unit
           val outcome = Try {
             c.setAutoCommit(false)
             Using.resource(RollbackUnlessCommitted(c)) { guard =>
@@ -807,14 +852,29 @@ final class PostgresCheckpointer private (
               result
             }
           }
-          val aborted = !watch.disarm()
+          val aborted  = !watch.disarm()
+          val restored = network.forall(ms => Try(c.setNetworkTimeout(DirectExecutor, ms)).isSuccess)
           // back to the pool only as it came, after a call that went well; anything else is discarded, so a connection
           // whose reset or close fails is never left checked out
           val returned =
-            !aborted && outcome.isSuccess && Try(c.setAutoCommit(true)).isSuccess && Try(c.close()).isSuccess
+            !aborted && restored && outcome.isSuccess && Try(c.setAutoCommit(true)).isSuccess && Try(
+              c.close()
+            ).isSuccess
           if !returned then discard(c)
           outcome.toEither.left.map { e =>
-            if aborted then failure(operation, timedOut(callTimeout), Some(e))
+            if aborted then failure(operation, timedOut(timeout), Some(e))
+            else if e.isInstanceOf[UnstorableText] then
+              val unstorable = e.asInstanceOf[UnstorableText]
+              ValidationError(
+                s"postgres-checkpointer.$operation",
+                s"parameter ${unstorable.index} ${unstorable.problem}"
+              )
+            else if newerSchema(e).isDefined then
+              GraphError.UnsupportedStoreSchema(
+                PostgresSchema.description(config.schema),
+                newerSchema(e).get,
+                PostgresSchema.Current
+              )
             else failure(operation, describe(e), Some(e))
           }.flatten
         }
@@ -908,7 +968,13 @@ final class PostgresCheckpointer private (
       val first = query(c, Sql.nextWritePosition(t), threadId.value)(_.getLong(1)).head
       Using.resource(c.prepareStatement(Sql.insertWrite(t))) { insert =>
         writes.zipWithIndex.foreach { (write, i) =>
-          bind(insert, threadId.value, first + i, write.checkpointId, upickle.default.write(write))
+          bind(
+            insert,
+            threadId.value,
+            first + i,
+            write.checkpointId,
+            upickle.default.write(write, escapeUnicode = true)
+          )
           insert.addBatch()
         }
         insert.executeBatch(): Unit
@@ -1021,7 +1087,7 @@ object PostgresCheckpointer:
     clockSql: String
   ): Result[PostgresCheckpointer] =
     val store    = new PostgresCheckpointer(dataSource, ownsDataSource, config, clockSql)
-    val migrated = store.writing("open")(c => PostgresSchema.migrate(c, config.schema))
+    val migrated = store.migrating(c => PostgresSchema.migrate(c, config.schema))
     migrated match
       case Right(_) => Right(store)
       case Left(error) =>
@@ -1238,6 +1304,37 @@ object PostgresCheckpointer:
       .map(name => s"SET LOCAL $name = $millis")
       .mkString("; ")
 
+  /** A bound text this store refuses to send, and why (#3097): see `StorableText`. */
+  final private[postgres] case class UnstorableText(index: Int, problem: String)
+      extends RuntimeException(s"parameter $index $problem", null, false, false)
+
+  /** The SQLSTATE [[schemaGuard]] raises for a schema newer than this build's. */
+  private[postgres] val NewerSchemaState: String = "LL4S1"
+
+  /**
+   * A statement that fails with [[NewerSchemaState]], naming the version, when the schema of `t` is newer than this
+   * build's: a single-row read of the version table, run as a write's transaction begins (#3090). It first takes the
+   * schema's advisory lock shared, held to the write's end: a migration holds it exclusively, so a write never reads
+   * the version while a migration is in flight and then writes after it commits.
+   */
+  private[postgres] def schemaGuard(t: PostgresSchema.Tables): String =
+    s"""DO $$llm4s$$ DECLARE found integer; BEGIN
+       |  PERFORM pg_advisory_xact_lock_shared(hashtextextended('${PostgresSchema.lockName(t.schema)}', 0));
+       |  SELECT COALESCE(MAX(version), 0) INTO found FROM ${t.version};
+       |  IF found > ${PostgresSchema.Current} THEN
+       |    RAISE EXCEPTION 'llm4s checkpoint schema version %', found USING ERRCODE = '$NewerSchemaState';
+       |  END IF;
+       |END $$llm4s$$""".stripMargin
+
+  /** The newer schema version [[schemaGuard]] found, if `e` (or a cause) is its failure. */
+  private[postgres] def newerSchema(e: Throwable): Option[Int] =
+    Iterator
+      .iterate(e)(_.getCause)
+      .takeWhile(_ != null)
+      .take(8)
+      .collectFirst { case sql: java.sql.SQLException if sql.getSQLState == NewerSchemaState => sql }
+      .flatMap(sql => "version (\\d+)".r.findFirstMatchIn(Option(sql.getMessage).getOrElse("")).map(_.group(1).toInt))
+
   /** The driver's socket timeout for an owned pool: whole seconds, past twice the call timeout. */
   private[postgres] def socketTimeoutSeconds(callTimeout: FiniteDuration): Long =
     math.max(1L, (callTimeout * 2).toSeconds + 1)
@@ -1299,9 +1396,11 @@ object PostgresCheckpointer:
     }
 
   private def bind1(statement: PreparedStatement, index: Int, value: Any): Unit = value match
-    case s: String   => statement.setString(index, s)
-    case l: Long     => statement.setLong(index, l)
-    case i: Int      => statement.setInt(index, i)
+    // text the server would refuse (NUL) or the driver would change (an unpaired surrogate) is never sent (#3097)
+    case s: String if StorableText.problem(s).isDefined => throw UnstorableText(index, StorableText.problem(s).get)
+    case s: String                                      => statement.setString(index, s)
+    case l: Long                                        => statement.setLong(index, l)
+    case i: Int                                         => statement.setInt(index, i)
     case at: Instant => statement.setObject(index, OffsetDateTime.ofInstant(at, ZoneOffset.UTC))
     case a: Array[String] =>
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))

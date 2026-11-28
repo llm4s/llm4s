@@ -187,6 +187,34 @@ class ChangeNotifierSpec extends AnyFlatSpec with Matchers {
     eventually(5.seconds)(fake.aborted.getCount == 0) shouldBe true
   }
 
+  it should "stop trying, for good, over connections that are not PostgreSQL's, the waiters polling (#3098)" in {
+    val attempts = new AtomicInteger()
+    val foreign = () => {
+      attempts.incrementAndGet()
+      Proxy
+        .newProxyInstance(
+          getClass.getClassLoader,
+          Array(classOf[Connection]),
+          (_: Any, method: Method, _: Array[AnyRef]) =>
+            method.getName match {
+              case "unwrap"          => throw new SQLException("not a wrapper for PGConnection")
+              case "abort" | "close" => null
+              case other             => throw new SQLException(s"$other is not scripted")
+            }
+        )
+        .asInstanceOf[Connection]
+    }
+    val n = notifier(foreign, callTimeout = 50.millis)
+    val w = n.register(ThreadId("t"))
+    eventually(5.seconds)(attempts.get >= 1) shouldBe true
+    // a backoff of 50 ms would have tried again several times by now
+    Thread.sleep(500)
+    attempts.get shouldBe 1
+    n.listening shouldBe false
+    w.close()
+    n.close()
+  }
+
   it should "wake every waiter when it loses its connection, so a waiter that saw it listening polls (#3092)" in {
     val stalled = new FakeConnection(stallHeartbeat = true)
     val once    = new AtomicInteger()

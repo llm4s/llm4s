@@ -316,7 +316,8 @@ Whether instances can be replaced one at a time depends on what the release chan
   its runs drain.
 - **A new store schema version or checkpoint format: full stop.** Stop every instance, then start the new release.
   The first new instance migrates the schema; an old instance that meets the newer schema refuses to open with
-  `GraphError.UnsupportedStoreSchema` and writes nothing, so a mixed fleet fails safe rather than corrupting threads.
+  `GraphError.UnsupportedStoreSchema` and writes nothing, and one still running fails each write with the same
+  error, so a mixed fleet fails safe rather than corrupting threads.
 
 The release notes and the [migration guide](../../reference/migration) say when a release changes either.
 A store schema change does not roll: there are no expand-then-contract migrations, so every one is a full stop.

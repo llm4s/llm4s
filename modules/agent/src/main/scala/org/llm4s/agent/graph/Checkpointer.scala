@@ -575,7 +575,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
 
-  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = withLock(lock) {
+  // an id this store cannot store exactly is refused before anything is read (#3097)
+  def claim(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] =
+    StorableText.ofClaim(threadId, request).toLeft(()).flatMap(_ => claimStorable(threadId, request))
+
+  private def claimStorable(threadId: ThreadId, request: ClaimRequest): Result[RunClaim] = withLock(lock) {
     val current = record(threadId)
     val now     = clock.instant()
     current.claim.filter(c => now.isBefore(c.expiresAt)) match
@@ -611,7 +615,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     Right(())
   }
 
-  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = withLock(lock) {
+  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+    StorableText.ofCommit(threadId, commit).toLeft(()).flatMap(_ => commitStorable(threadId, commit))
+
+  private def commitStorable(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = withLock(lock) {
     val current                 = record(threadId)
     val latestId                = current.latestId
     def invalid(reason: String) = GraphError.InvalidCommit(threadId.value, reason)
