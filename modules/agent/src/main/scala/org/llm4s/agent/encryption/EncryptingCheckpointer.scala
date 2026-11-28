@@ -177,6 +177,8 @@ final class EncryptingCheckpointer private (
     inner.renew(threadId, token, ttl)
   override def owner(threadId: ThreadId): Result[Option[ThreadOwner]]  = inner.owner(threadId)
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = inner.prune(threadId, policy)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    inner.deleteIdle(threadId, token)
   override private[agent] def pruneKeeping(
     threadId: ThreadId,
     policy: RetentionPolicy,

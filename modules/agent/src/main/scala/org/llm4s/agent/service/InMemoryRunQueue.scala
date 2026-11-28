@@ -490,6 +490,9 @@ final class InMemoryRunQueue private[agent] (
     deletedRuns.get(threadId).exists(_.contains(runId))
 
   /** Marks the thread's open entries as having outlived their thread: the checkpointer's `deleteThread`, under the lock. */
+  /** Whether the thread has an open entry, of any tenant: the sweep's idle-thread check (#3260). Call under the lock. */
+  private[agent] def hasOpen(threadId: ThreadId): Boolean = openByThread.contains(threadId)
+
   private[agent] def threadDeleted(threadId: ThreadId): Unit =
     queueOf(threadId).foreach { r =>
       rows.update(r.id, r.copy(threadDeleted = true))

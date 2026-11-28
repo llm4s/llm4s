@@ -156,6 +156,8 @@ final class MeteredCheckpointer private (val inner: Checkpointer, metrics: Metri
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     inner.checkpoint(threadId, checkpointId)
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = inner.prune(threadId, policy)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    inner.deleteIdle(threadId, token)
   override private[agent] def pruneKeeping(
     threadId: ThreadId,
     policy: RetentionPolicy,

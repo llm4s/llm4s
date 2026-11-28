@@ -214,6 +214,15 @@ trait Checkpointer:
    * the latest a prune before the commit always kept (#3254). The default prunes without keeping them; every llm4s
    * store keeps them.
    */
+  /**
+   * [[deleteThread]] for the sweep's idle-thread removal (#3260), fenced by `token` alone, done only if no open entry
+   * of the store's run queue names the thread - checked atomically with the delete, under the lock or in the
+   * transaction a submission to that queue also takes, so an entry enqueued after the sweep's guard ran keeps the
+   * thread. Whether it deleted. The default deletes as [[deleteThread]] does; every llm4s store checks.
+   */
+  private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    deleteThread(threadId, token, None).map(_ => true)
+
   private[agent] def pruneKeeping(
     threadId: ThreadId,
     policy: RetentionPolicy,
@@ -878,6 +887,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
     store(threadId, current.copy(events = current.events.filter(_._1 >= floor), earliestSeq = floor))
     Right(())
+  }
+
+  // under the lock the run queue's submissions take: an entry is enqueued before this, or after the delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] = withLock(lock) {
+    if runQueue.hasOpen(threadId) then Right(false) else deleteThread(threadId, token, None).map(_ => true)
   }
 
   def deleteThread(

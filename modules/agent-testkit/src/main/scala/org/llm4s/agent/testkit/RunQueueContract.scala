@@ -817,6 +817,31 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     failed.outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(2)))
   }
 
+  // #3260: the sweep's idle-thread removal checks for open entries atomically with its delete, so an entry enqueued
+  // after the sweep's guard read the queue keeps the thread, and runs
+  it should "keep an idle thread a sweep would remove when an entry is enqueued after its guard ran" in {
+    val c    = Case()
+    val idle = c.newThread()
+    c.commitAs(s"done-${unique()}", s"c-${unique()}", idle, CheckpointStatus.Completed)
+    c.advance(10.days)
+    val enqueued = new java.util.concurrent.atomic.AtomicReference[Option[EntryId]](None)
+    // the guard reads the queue, as the worker's does, and only then does the submission land
+    val guard: SweepGuard = threads =>
+      val read = c.queue.openRuns(threads)
+      if threads.contains(idle) && enqueued.get.isEmpty then enqueued.set(Some(c.submit(on = idle).value.entryId))
+      read
+    @annotation.tailrec
+    def sweepAll(after: Option[ThreadId]): Unit =
+      val page = c.checkpointer.sweep(SweepPolicy(threadAge = Some(1.day), batchSize = 1000), after, guard).value
+      if page.next.isDefined then sweepAll(page.next)
+    sweepAll(None)
+    val id = enqueued.get.getOrElse(fail("the guard was never asked about the idle thread"))
+    c.checkpointer.latest(idle).value shouldBe defined
+    val leased = c.queue.take(TakeRequest("worker", Set(c.agent), 30.seconds)).value.value
+    leased.entry.id shouldBe id
+    c.queue.recordAttempt(leased.lease, RunId(s"runs-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+  }
+
   // #3257: a failed attempt waits out its backoff, by the store's clock, and holds its thread back meanwhile
   it should "hold an entry given back for a retry, and its thread, until the delay has passed, the attempt charged" in {
     val c      = Case()

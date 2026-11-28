@@ -779,7 +779,30 @@ final class PostgresCheckpointer private (
     threadId: ThreadId,
     token: FencingToken,
     fence: Option[(ThreadId, FencingToken)]
-  ): Result[Unit] = writing("deleteThread") { c =>
+  ): Result[Unit] = writing("deleteThread")(c => deleting(c, threadId, token, fence))
+
+  // under the thread's lock a submission to the run queue also takes: an entry is enqueued before this, or after the
+  // delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    writing("deleteThread") { c =>
+      query(
+        c,
+        "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+        s"llm4s.agent.queue:${t.quotedSchema}:thread:${threadId.value}"
+      )(_ => ()): Unit
+      val queued =
+        query(c, s"SELECT 1 FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' LIMIT 1", threadId.value)(_ =>
+          ()
+        ).nonEmpty
+      if queued then Right(false) else deleting(c, threadId, token, None).map(_ => true)
+    }
+
+  private def deleting(
+    c: Connection,
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] =
     val rows    = lockRows(c, threadId +: fence.map(_._1).toVector)
     val current = rows.get(threadId)
     val refused = Option
@@ -805,7 +828,6 @@ final class PostgresCheckpointer private (
         // a reader waiting inside the deleted log is told at once
         notifyCommit(c, threadId)
         Right(())
-  }
 
   /**
    * Closes the store, and its pool if it owns one. Later calls return a `ProcessingError`; closing again does nothing.

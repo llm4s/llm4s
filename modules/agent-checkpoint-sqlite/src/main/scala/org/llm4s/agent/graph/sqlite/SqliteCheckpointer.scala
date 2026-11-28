@@ -756,7 +756,25 @@ final class SqliteCheckpointer private (
     threadId: ThreadId,
     token: FencingToken,
     fence: Option[(ThreadId, FencingToken)]
-  ): Result[Unit] = writing("deleteThread") { c =>
+  ): Result[Unit] = writing("deleteThread")(c => deleting(c, threadId, token, fence))
+
+  // in the write transaction a submission also takes: an entry is enqueued before this, or after the delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    writing("deleteThread") { c =>
+      val queued = query(
+        c,
+        "SELECT 1 FROM llm4s_checkpoint_queue_entries WHERE thread_id = ? AND state = 'open' LIMIT 1",
+        threadId.value
+      )(_ => ()).nonEmpty
+      if queued then Right(false) else deleting(c, threadId, token, None).map(_ => true)
+    }
+
+  private def deleting(
+    c: Connection,
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] =
     val current = readRow(c, threadId)
     val refused = Option
       .when(!current.flatMap(_.claim).exists(_.token == token.value))(stale(threadId, current, token))
@@ -799,7 +817,6 @@ final class SqliteCheckpointer private (
         )
         dropIfEmpty(c, threadId)
         Right(())
-  }
 
   /**
    * Closes the connection. Later calls return a `ProcessingError`; closing again does nothing. A claim this store

@@ -294,9 +294,10 @@ private[graph] object RetentionSweep:
               for
                 now       <- store.latest(threadId)
                 stillIdle <- idle
-                gone <-
+                gone      <-
+                  // and no open queue entry names it, checked atomically with the delete (Codex, round 3)
                   if now.exists(_.checkpoint.id == judgedLatest.id) && stillIdle then
-                    store.deleteThread(threadId, claim.token, None).map(_ => true)
+                    store.deleteIdle(threadId, claim.token)
                   else Right(false)
               yield gone
             // a deleted thread's claim went with it; one kept is given back
