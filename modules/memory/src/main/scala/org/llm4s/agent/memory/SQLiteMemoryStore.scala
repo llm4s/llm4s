@@ -22,14 +22,26 @@ import scala.util.{ Try, Using }
  * `deleteMatching` and opening the store. A write takes the database's write lock when it begins, waiting up to the
  * connection's busy timeout (sqlite-jdbc's default, 3 seconds) for a writer on another connection to the same file.
  *
+ * Semantic search: given an [[EmbeddingService]] ([[SQLiteMemoryStore.withEmbeddingService]]), the store embeds every
+ * memory it writes without an embedding (`store`, `storeAll`, `replace`, `applyAtomically`, and `update` when the
+ * content changes), before the write's transaction, and `search` ranks by similarity under the shared score rule
+ * (`org.llm4s.vectorstore.SearchScores`), falling back to its full-text index when nothing the filter admits has an
+ * embedding or the query cannot be embedded (#3039). It is then both semantic and transactional. Without one, `search`
+ * is full-text only.
+ *
+ * A file written by `VectorMemoryStore` before 1.1 (its own `memories` columns) is migrated to this schema when it is
+ * opened, so either store opens either file.
+ *
  * @param dbPath Path to SQLite database file (use ":memory:" for in-memory)
  * @param config Store configuration
  */
 final class SQLiteMemoryStore private (
   val dbPath: String,
   val config: MemoryStoreConfig,
-  private val connection: Connection
-) extends TransactionalMemoryStore {
+  private val connection: Connection,
+  val embeddingService: Option[EmbeddingService]
+) extends TransactionalMemoryStore
+    with AutoCloseable {
 
   import SQLiteMemoryStore._
   import FilterSupport.Sql
@@ -43,17 +55,44 @@ final class SQLiteMemoryStore private (
 
   private lazy val fileIdentity: Result[Option[String]] = SQLiteMemoryStore.fileIdentity(dbPath)
 
-  /** Stores `add`, then deletes `remove`, in one transaction. */
+  /** Stores `add`, then deletes `remove`, in one transaction, after embedding what `add` is missing. */
   override def replace(add: Seq[Memory], remove: Seq[MemoryId]): Result[MemoryStore] =
-    Try {
-      inTransaction {
-        writeAll(add)
-        deleteIds(remove.map(_.value))
-      }
-      this
-    }.toEither.left.map(e => ProcessingError("sqlite-replace", s"Failed to replace memories: ${e.getMessage}"))
+    embedMissing(add).flatMap { adds =>
+      Try {
+        inTransaction {
+          writeAll(adds)
+          deleteIds(remove.map(_.value)) // store, then delete: an id in both goes, as `MemoryStore.replace` says
+        }
+        this
+      }.toEither.left.map(e => ProcessingError("sqlite-replace", s"Failed to replace memories: ${e.getMessage}"))
+    }
 
+  /**
+   * `memories` with every missing embedding computed by the embedding service, in batches, before any transaction;
+   * unchanged without a service.
+   */
+  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] =
+    embeddingService.fold[Result[Seq[Memory]]](Right(memories))(service =>
+      MemoryEmbeddings.embedMissing(service, memories, "sqlite-memory-store")
+    )
+
+  /**
+   * A key already applied replays its outcome without asking the embedding service (which may be down); otherwise the
+   * memories are embedded first, so no embedding request runs while the write lock is held.
+   */
   override def applyAtomically(
+    key: AppliedWriteKey,
+    token: Long,
+    add: Seq[Memory],
+    remove: Seq[MemoryId],
+    bounds: MemoryBounds
+  ): Result[(TransactionalMemoryStore, AppliedWrite)] =
+    Try(readApplied(key.value).isDefined).toEither.left
+      .map(e => ProcessingError("sqlite-apply", s"Failed to read applied write: ${e.getMessage}"))
+      .flatMap(applied => if (applied) Right(add) else embedMissing(add))
+      .flatMap(adds => applyEmbedded(key, token, adds, remove, bounds))
+
+  private def applyEmbedded(
     key: AppliedWriteKey,
     token: Long,
     add: Seq[Memory],
@@ -151,43 +190,54 @@ final class SQLiteMemoryStore private (
       Using.resource(stmt.executeQuery())(_.next())
     }
 
-  /** Every stored memory `bounds` counts, as [[MemoryBounds.overflow]] ranks it, without its embedding. */
-  private def entries(bounds: MemoryBounds): Vector[MemoryBounds.Entry] =
-    Using.resource(connection.createStatement()) { stmt =>
-      Using.resource(stmt.executeQuery("SELECT id, importance, timestamp, content, metadata_json FROM memories")) {
-        rs =>
-          val out = Vector.newBuilder[MemoryBounds.Entry]
-          while (rs.next()) {
-            val importance = rs.getDouble(2)
-            val known      = !rs.wasNull()
-            val metadata   = jsonToMetadata(rs.getString(5))
-            if (bounds.counts(metadata))
-              out += MemoryBounds.Entry(
-                MemoryId(rs.getString(1)),
-                if (known) Some(importance) else None,
-                Instant.ofEpochMilli(rs.getLong(3)),
-                MemoryBounds.sizeOf(rs.getString(4), metadata)
-              )
-          }
-          out.result()
+  /**
+   * Every stored memory `bounds` counts, as [[MemoryBounds.overflow]] ranks it, without its embedding. A bound with an
+   * owner reads only the owner's rows (#3040), never the whole table.
+   */
+  private def entries(bounds: MemoryBounds): Vector[MemoryBounds.Entry] = {
+    val owner = bounds.owner.flatMap(o => FilterSupport.jsonPath(o.key).map(_ -> o.value))
+    val sql = "SELECT id, importance, timestamp, content, metadata_json FROM memories" +
+      owner.fold("")(_ => " WHERE json_valid(metadata_json) AND json_extract(metadata_json, ?) = ?")
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      owner.foreach { case (path, value) => stmt.setString(1, path); stmt.setString(2, value) }
+      Using.resource(stmt.executeQuery()) { rs =>
+        val out = Vector.newBuilder[MemoryBounds.Entry]
+        while (rs.next()) {
+          val importance = rs.getDouble(2)
+          val known      = !rs.wasNull()
+          val metadata   = jsonToMetadata(rs.getString(5))
+          if (bounds.counts(metadata))
+            out += MemoryBounds.Entry(
+              MemoryId(rs.getString(1)),
+              if (known) Some(importance) else None,
+              Instant.ofEpochMilli(rs.getLong(3)),
+              MemoryBounds.sizeOf(rs.getString(4), metadata)
+            )
+        }
+        out.result()
       }
     }
+  }
 
   override def store(memory: Memory): Result[MemoryStore] =
-    Try {
-      inTransaction(writeAll(Seq(memory)))
-      this
-    }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memory: ${e.getMessage}"))
+    embedMissing(Seq(memory)).flatMap { embedded =>
+      Try {
+        inTransaction(writeAll(embedded))
+        this
+      }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memory: ${e.getMessage}"))
+    }
 
   /**
    * Store `memories` in one transaction: all of them are stored or, if any fails, none is. The commit - and the
    * file sync behind it - is paid once for the batch, not once per row.
    */
   override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
-    Try {
-      if (memories.nonEmpty) inTransaction(writeAll(memories))
-      this
-    }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memories: ${e.getMessage}"))
+    embedMissing(memories).flatMap { embedded =>
+      Try {
+        if (embedded.nonEmpty) inTransaction(writeAll(embedded))
+        this
+      }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memories: ${e.getMessage}"))
+    }
 
   /**
    * Upsert each memory and replace its full-text entry, in order, reusing three prepared statements. The caller
@@ -215,7 +265,7 @@ final class SQLiteMemoryStore private (
       memories.foreach { memory =>
         stmt.setString(1, memory.id.value)
         stmt.setString(2, memory.content)
-        stmt.setString(3, memoryTypeToString(memory.memoryType))
+        stmt.setString(3, MemoryTypeCodec.encode(memory.memoryType))
         stmt.setLong(4, memory.timestamp.toEpochMilli)
         memory.importance match {
           case Some(imp) => stmt.setDouble(5, imp)
@@ -303,7 +353,100 @@ final class SQLiteMemoryStore private (
     filter: MemoryFilter = MemoryFilter.All
   ): Result[Seq[ScoredMemory]] =
     if (query.trim.isEmpty || topK <= 0) Right(Seq.empty)
-    else searchSome(query, topK, filter)
+    else
+      embeddingService match {
+        case None => searchSome(query, topK, filter)
+        case Some(service) =>
+          Try(service.embedQuery(query)).toEither.left
+            .map(e => ProcessingError("sqlite-search", s"Embedding the query failed: ${e.getMessage}"))
+            .flatten match {
+            case Right(vector) =>
+              semanticSearch(vector, topK, filter).flatMap {
+                case Some(found) => Right(found)
+                case None        => searchSome(query, topK, filter) // nothing the filter admits is embedded
+              }
+            case Left(cancelled: org.llm4s.error.CancelledError) => Left(cancelled)
+            case Left(_)                                         => searchSome(query, topK, filter)
+          }
+      }
+
+  /**
+   * The `topK` memories `filter` accepts nearest to `query`, or `None` when none of them has an embedding (the caller
+   * then searches the full-text index). Only the ids and vectors of the candidates are read and decoded, of the
+   * query's dimension only (`length(embedding_blob)`), unless `matches` must decide the filter; the `topK` memories are
+   * then read whole. Candidates all of another dimension are a `ConfigurationError`.
+   */
+  private def semanticSearch(
+    query: Array[Float],
+    topK: Int,
+    filter: MemoryFilter
+  ): Result[Option[Seq[ScoredMemory]]] =
+    Try {
+      val plan     = narrowing(filter)
+      val embedded = "embedding_blob IS NOT NULL AND length(embedding_blob) > 0"
+      val where    = plan.sql.fold(s"WHERE $embedded")(s => s"WHERE (${s.clause}) AND $embedded")
+      if (plan.needsMatches) {
+        // `matches` decides: read the candidate rows whole, keep those it accepts
+        val sql = s"SELECT * FROM memories $where"
+        Using
+          .resource(connection.prepareStatement(sql)) { stmt =>
+            plan.params.zipWithIndex.foreach { case (p, i) => setParameter(stmt, i + 1, p) }
+            Using.resource(stmt.executeQuery()) { rs =>
+              Iterator
+                .continually(rs)
+                .takeWhile(_.next())
+                .map(rowToMemory)
+                .filter(filter.matches)
+                .flatMap(m => m.embedding.map(m -> _))
+                .toVector
+            }
+          }
+          .map { case (m, v) => (m.id, v) }
+      } else {
+        // the vectors of the query's dimension, and one row of any other, to tell "none embedded" from "mismatch"
+        val sql =
+          s"SELECT id, embedding_blob FROM memories $where AND length(embedding_blob) = ? " +
+            s"UNION ALL SELECT * FROM (SELECT id, embedding_blob FROM memories $where AND length(embedding_blob) <> ? LIMIT 1)"
+        val bytes = query.length * 4
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          val params = (plan.params :+ bytes) ++ (plan.params :+ bytes)
+          params.zipWithIndex.foreach { case (p, i) => setParameter(stmt, i + 1, p) }
+          Using.resource(stmt.executeQuery()) { rs =>
+            Iterator
+              .continually(rs)
+              .takeWhile(_.next())
+              .map(r => MemoryId(r.getString(1)) -> bytesToEmbedding(r.getBytes(2)))
+              .toVector
+          }
+        }
+      }
+    }.toEither.left
+      .map(e => ProcessingError("sqlite-search", s"Failed to search memories: ${e.getMessage}"))
+      .flatMap { candidates =>
+        if (candidates.isEmpty) Right(None)
+        else
+          MemoryEmbeddings
+            .rankIds(query, candidates)
+            .flatMap { scored =>
+              val best = scored.sortBy(-_._2).take(topK)
+              readAll(best.map(_._1))
+                .map(found => Some(best.flatMap { case (id, score) => found.get(id).map(ScoredMemory(_, score)) }))
+            }
+      }
+
+  /** The memories of `ids`, by id. */
+  private def readAll(ids: Seq[MemoryId]): Result[Map[MemoryId, Memory]] =
+    if (ids.isEmpty) Right(Map.empty)
+    else
+      Try {
+        val sql = s"SELECT * FROM memories WHERE id IN (${ids.map(_ => "?").mkString(",")})"
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          ids.zipWithIndex.foreach { case (id, i) => stmt.setString(i + 1, id.value) }
+          Using.resource(stmt.executeQuery()) { rs =>
+            Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory).map(m => m.id -> m).toMap
+          }
+        }
+      }.toEither.left.map(e => ProcessingError("sqlite-search", s"Failed to read memories: ${e.getMessage}"))
 
   private def searchSome(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
     Try {
@@ -436,7 +579,11 @@ final class SQLiteMemoryStore private (
         (),
         ValidationError("id", s"update function changed Memory ID from $id to ${updated.id}; IDs must remain constant")
       )
-      result <- store(updated)
+      embedded <- embedMissing(Seq(updated))
+      result <- Try {
+        inTransaction(writeAll(embedded))
+        this: MemoryStore
+      }.toEither.left.map(e => ProcessingError("sqlite-update", s"Failed to update memory: ${e.getMessage}"))
     } yield result
 
   override def count(filter: MemoryFilter = MemoryFilter.All): Result[Long] =
@@ -477,10 +624,144 @@ final class SQLiteMemoryStore private (
    * Close the database connection.
    * Should be called when the store is no longer needed.
    */
-  def close(): Unit =
+  override def close(): Unit =
     if (!connection.isClosed) {
       connection.close()
     }
+
+  /** Embed every memory that has no embedding, `batchSize` at a time; needs an embedding service. */
+  def embedAll(batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] = embedWhere(batchSize, None)
+
+  /**
+   * Embed every memory with no embedding or one whose dimension is not `dimension`, `batchSize` at a time: after a
+   * change of embedding model, what the old one wrote is otherwise never compared with a query. Needs an embedding
+   * service.
+   */
+  def reembedAll(dimension: Int, batchSize: Int = VectorMemoryStore.EmbeddingBatchSize): Result[Int] =
+    if (dimension <= 0) Left(ProcessingError("sqlite-embed", s"reembedAll needs a positive dimension, got $dimension"))
+    else embedWhere(batchSize, Some(dimension))
+
+  /**
+   * Every memory without an embedding (or, with `dimension`, without one of that dimension) is visited once, by id:
+   * keyset pagination, so a service that answers with fewer vectors than texts is an error, never a loop. A memory
+   * whose content changes meanwhile is left for its own write to embed.
+   */
+  private def embedWhere(batchSize: Int, dimension: Option[Int]): Result[Int] =
+    embeddingService match {
+      case None => Left(ProcessingError("sqlite-embed", "embedding needs a store with an embedding service"))
+      case Some(_) if batchSize <= 0 =>
+        Left(ProcessingError("sqlite-embed", s"embedding needs a positive batch size, got $batchSize"))
+      case Some(service) =>
+        val wanted =
+          dimension.fold("(embedding_blob IS NULL OR length(embedding_blob) = 0)")(_ =>
+            "(embedding_blob IS NULL OR length(embedding_blob) <> ?)"
+          )
+        val wantedParams: Seq[Any] = dimension.map(_ * 4).toSeq
+
+        def fetch(after: Option[String]): Result[Vector[(String, String)]] =
+          Try {
+            val sql = s"SELECT id, content FROM memories WHERE $wanted" + after.fold("")(_ => " AND id > ?") +
+              " ORDER BY id LIMIT ?"
+            Using.resource(connection.prepareStatement(sql)) { stmt =>
+              (wantedParams ++ after.toSeq :+ batchSize).zipWithIndex.foreach { case (p, i) =>
+                setParameter(stmt, i + 1, p)
+              }
+              Using.resource(stmt.executeQuery()) { rs =>
+                Iterator.continually(rs).takeWhile(_.next()).map(r => r.getString(1) -> r.getString(2)).toVector
+              }
+            }
+          }.toEither.left.map(e => ProcessingError("sqlite-embed", s"Failed to read memories: ${e.getMessage}"))
+
+        def write(rows: Vector[(String, String)], vectors: Seq[Array[Float]]): Result[Int] =
+          Try {
+            inTransaction {
+              Using.resource(
+                connection.prepareStatement("UPDATE memories SET embedding_blob = ? WHERE id = ? AND content = ?")
+              ) { stmt =>
+                rows
+                  .zip(vectors)
+                  .map { case ((id, content), vector) =>
+                    stmt.setBytes(1, embeddingToBytes(vector))
+                    stmt.setString(2, id)
+                    stmt.setString(3, content)
+                    stmt.executeUpdate()
+                  }
+                  .sum
+              }
+            }
+          }.toEither.left.map(e => ProcessingError("sqlite-embed", s"Failed to store embeddings: ${e.getMessage}"))
+
+        @scala.annotation.tailrec
+        def loop(after: Option[String], total: Int): Result[Int] =
+          fetch(after).flatMap { rows =>
+            if (rows.isEmpty) Right(rows -> 0)
+            else
+              MemoryEmbeddings
+                .embedMissing(
+                  service,
+                  rows.map { case (id, content) => Memory(MemoryId(id), content, MemoryType.Task) },
+                  "sqlite-embed",
+                  batchSize
+                )
+                .flatMap(embedded => write(rows, embedded.flatMap(_.embedding)))
+                .map(rows -> _)
+          } match {
+            case Left(e)                          => Left(e)
+            case Right((rows, _)) if rows.isEmpty => Right(total)
+            case Right((rows, n))                 => loop(Some(rows.last._1), total + n)
+          }
+
+        loop(None, 0)
+    }
+
+  /** The store's statistics, by aggregate queries: no memory is read (#3040). */
+  override def stats: Result[MemoryStats] =
+    Try {
+      Using.resource(connection.createStatement()) { stmt =>
+        val byType =
+          Using.resource(stmt.executeQuery("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type")) { rs =>
+            Iterator
+              .continually(rs)
+              .takeWhile(_.next())
+              .map(r => MemoryTypeCodec.decode(r.getString(1)) -> r.getLong(2))
+              .toVector
+              .groupMapReduce(_._1)(_._2)(_ + _)
+          }
+        Using.resource(
+          stmt.executeQuery(
+            "SELECT COUNT(*), COUNT(DISTINCT entity_id), COUNT(DISTINCT conversation_id), " +
+              "COUNT(CASE WHEN embedding_blob IS NOT NULL THEN 1 END), MIN(timestamp), MAX(timestamp) FROM memories"
+          )
+        ) { rs =>
+          val total = rs.getLong(1)
+          MemoryStats(
+            totalMemories = total,
+            byType = MemoryStore.builtInCounts(byType),
+            entityCount = rs.getLong(2),
+            conversationCount = rs.getLong(3),
+            embeddedCount = rs.getLong(4),
+            oldestMemory = if (total == 0) None else Some(Instant.ofEpochMilli(rs.getLong(5))),
+            newestMemory = if (total == 0) None else Some(Instant.ofEpochMilli(rs.getLong(6)))
+          )
+        }
+      }
+    }.toEither.left.map(e => ProcessingError("sqlite-stats", s"Failed to count memories: ${e.getMessage}"))
+
+  /** How many memories there are, how many have an embedding, and of which dimensions. */
+  def vectorStats: Result[VectorStoreStats] =
+    Try {
+      Using.resource(connection.createStatement()) { stmt =>
+        val (total, embedded) = Using.resource(
+          stmt.executeQuery(
+            "SELECT COUNT(*), COUNT(CASE WHEN length(embedding_blob) > 0 THEN 1 END) FROM memories"
+          )
+        )(rs => (rs.getLong(1), rs.getLong(2)))
+        val dims = Using.resource(
+          stmt.executeQuery("SELECT DISTINCT length(embedding_blob) / 4 FROM memories WHERE length(embedding_blob) > 0")
+        )(rs => Iterator.continually(rs).takeWhile(_.next()).map(_.getInt(1)).toSet)
+        VectorStoreStats(totalMemories = total, embeddedMemories = embedded, embeddingDimensions = dims)
+      }
+    }.toEither.left.map(e => ProcessingError("sqlite-stats", s"Failed to get stats: ${e.getMessage}"))
 
   private def narrowing(filter: MemoryFilter): FilterSupport.Narrowing =
     FilterSupport.narrow(filter)(leafSql)
@@ -492,11 +773,13 @@ final class SQLiteMemoryStore private (
    */
   private def leafSql(filter: MemoryFilter): Option[FilterSupport.Sql] = filter match {
     case MemoryFilter.ByType(memoryType) =>
-      Some(Sql("memory_type = ?", Seq(memoryTypeToString(memoryType))))
+      // A custom type is stored as `custom:<name>`, or as its bare name by a file `VectorMemoryStore` wrote first
+      val names = MemoryTypeCodec.spellings(memoryType)
+      Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
     case MemoryFilter.ByTypes(memoryTypes) =>
       // A Seq, not the Set: mapping a Set to "?" would collapse the placeholders into one
-      val names = memoryTypes.toSeq.map(memoryTypeToString)
+      val names = memoryTypes.toSeq.flatMap(MemoryTypeCodec.spellings).distinct
       if (names.isEmpty) Some(Sql("1 = 0", Seq.empty))
       else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
@@ -551,7 +834,7 @@ final class SQLiteMemoryStore private (
     Memory(
       id = MemoryId(rs.getString("id")),
       content = rs.getString("content"),
-      memoryType = stringToMemoryType(rs.getString("memory_type")),
+      memoryType = MemoryTypeCodec.decode(rs.getString("memory_type")),
       metadata = storedMetadata,
       timestamp = Instant.ofEpochMilli(rs.getLong("timestamp")),
       importance = importance,
@@ -583,10 +866,23 @@ object SQLiteMemoryStore {
    * Open the store on a connection from `connect`. The seam exists so a test can prove that a failed open
    * closes the connection it made.
    */
+  /**
+   * A store that embeds what it writes with `service` and searches by similarity, falling back to its full-text index
+   * (#3039). Both semantic and transactional, so `SemanticMemoryMiddleware` can record, replay and consolidate on it.
+   */
+  def withEmbeddingService(
+    dbPath: String,
+    service: EmbeddingService,
+    config: MemoryStoreConfig = MemoryStoreConfig.default
+  ): Result[SQLiteMemoryStore] =
+    open(dbPath, config, path => DriverManager.getConnection(s"jdbc:sqlite:$path"), Some(service))
+
   private[memory] def open(
     dbPath: String,
     config: MemoryStoreConfig,
-    connect: String => Connection
+    connect: String => Connection,
+    embeddingService: Option[EmbeddingService] = None,
+    busyTimeoutMillis: Option[Int] = None
   ): Result[SQLiteMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
@@ -597,8 +893,11 @@ object SQLiteMemoryStore {
       Try {
         connection.setAutoCommit(true)
         FilterSupport.registerJavaLower(connection)
+        busyTimeoutMillis.foreach(ms =>
+          Using.resource(connection.createStatement())(_.execute(s"PRAGMA busy_timeout = $ms")): Unit
+        )
         initializeSchema(connection)
-        new SQLiteMemoryStore(dbPath, config, connection)
+        new SQLiteMemoryStore(dbPath, config, connection, embeddingService)
       }.recoverWith { case e =>
         Try(connection.close())
         scala.util.Failure(e)
@@ -686,9 +985,49 @@ object SQLiteMemoryStore {
   }
 
   /**
-   * Schema version for migrations.
+   * Schema version for migrations: 2 added the applied-write tables; 3 reads a `VectorMemoryStore` file (#3039).
    */
-  val SchemaVersion: Int = 2
+  val SchemaVersion: Int = 3
+
+  /** The columns of `memories` in a file `VectorMemoryStore` wrote before it shared this schema. */
+  private val VectorSchemaColumns = Set("metadata", "embedding", "embedding_dim")
+
+  /**
+   * Migrate a file written by the old `VectorMemoryStore` to this schema, in the caller's transaction: its `memories`
+   * columns are renamed (`metadata` to `metadata_json`, `embedding` to `embedding_blob`; `embedding_dim` is the blob's
+   * length), its `schema_version` table (which had an `applied_at` column) is rebuilt, and its full-text index, of the
+   * same shape, is kept. A file of this schema is untouched.
+   */
+  private def migrateVectorSchema(connection: Connection): Unit = {
+    val columns = Using.resource(connection.createStatement()) { stmt =>
+      Using.resource(stmt.executeQuery("PRAGMA table_info(memories)")) { rs =>
+        Iterator.continually(rs).takeWhile(_.next()).map(_.getString("name")).toSet
+      }
+    }
+    if (VectorSchemaColumns.subsetOf(columns) && !columns.contains("metadata_json"))
+      Using.resource(connection.createStatement()) { stmt =>
+        Seq(
+          "ALTER TABLE memories RENAME TO memories_vector_v1",
+          """CREATE TABLE memories (
+            |  id TEXT PRIMARY KEY,
+            |  content TEXT NOT NULL,
+            |  memory_type TEXT NOT NULL,
+            |  timestamp INTEGER NOT NULL,
+            |  importance REAL,
+            |  conversation_id TEXT,
+            |  entity_id TEXT,
+            |  source TEXT,
+            |  metadata_json TEXT DEFAULT '{}',
+            |  embedding_blob BLOB
+            |)""".stripMargin,
+          "INSERT INTO memories (id, content, memory_type, timestamp, importance, conversation_id, entity_id, " +
+            "source, metadata_json, embedding_blob) SELECT id, content, memory_type, timestamp, importance, " +
+            "conversation_id, entity_id, source, COALESCE(metadata, '{}'), embedding FROM memories_vector_v1",
+          "DROP TABLE memories_vector_v1",
+          "DROP TABLE IF EXISTS schema_version"
+        ).foreach(stmt.executeUpdate)
+      }
+  }
 
   private def initializeSchema(connection: Connection): Unit = {
     val statements = Seq(
@@ -735,28 +1074,9 @@ object SQLiteMemoryStore {
 
     // One transaction, so opening a store commits (and syncs the file) once rather than once per statement.
     SqliteTransaction.immediate(connection) {
+      migrateVectorSchema(connection)
       Using.resource(connection.createStatement())(stmt => statements.foreach(stmt.executeUpdate))
     }
-  }
-
-  private def memoryTypeToString(mt: MemoryType): String = mt match {
-    case MemoryType.Conversation => "conversation"
-    case MemoryType.Entity       => "entity"
-    case MemoryType.Knowledge    => "knowledge"
-    case MemoryType.UserFact     => "user_fact"
-    case MemoryType.Task         => "task"
-    case MemoryType.Custom(name) => s"custom:$name"
-  }
-
-  private def stringToMemoryType(s: String): MemoryType = s match {
-    case "conversation" => MemoryType.Conversation
-    case "entity"       => MemoryType.Entity
-    case "knowledge"    => MemoryType.Knowledge
-    case "user_fact"    => MemoryType.UserFact
-    case "task"         => MemoryType.Task
-    case custom if custom.startsWith("custom:") =>
-      MemoryType.Custom(custom.stripPrefix("custom:"))
-    case other => MemoryType.Custom(other)
   }
 
   private def metadataToJson(metadata: Map[String, String]): String =

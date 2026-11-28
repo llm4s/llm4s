@@ -70,3 +70,13 @@ class VectorFileMemoryStoreContractSpec extends MemoryStoreContract {
     )
   }
 }
+
+/** The contract over [[SQLiteMemoryStore]] with an embedding service: semantic and transactional (#3039). */
+class SqliteSemanticMemoryStoreContractSpec extends MemoryStoreContract {
+  protected def storeName: String = "SQLiteMemoryStore (semantic)"
+  protected def semantic: Boolean = true
+  protected def withStore[A](embeddings: EmbeddingService)(body: MemoryStore => A): A = {
+    val store = SQLiteMemoryStore.withEmbeddingService(":memory:", embeddings).fold(e => fail(e.message), identity)
+    MemoryStoreContract.after(store.close())(body(store))
+  }
+}

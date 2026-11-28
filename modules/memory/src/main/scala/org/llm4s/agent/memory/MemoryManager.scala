@@ -296,11 +296,19 @@ final case class MemoryManagerConfig private (
  *
  * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
  * @param strictMode If true, fail fast on any consolidation error. If false, log and continue (best-effort)
+ * @param maxMemoriesScanned The most old memories one call reads to group (#3040): the newest of those older than the
+ *                           cutoff; a later call reaches the rest, as each consolidation removes what it replaced
  */
 final case class ConsolidationConfig(
   maxMemoriesPerGroup: Int = 50,
-  strictMode: Boolean = false
-)
+  strictMode: Boolean = false,
+  maxMemoriesScanned: Int = 1000
+) {
+  require(
+    maxMemoriesScanned >= 1,
+    s"ConsolidationConfig: maxMemoriesScanned must be at least 1, was $maxMemoriesScanned"
+  )
+}
 
 object ConsolidationConfig {
 

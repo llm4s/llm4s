@@ -92,6 +92,8 @@ final class EmbeddingMemoryStore private (
   override def count(filter: MemoryFilter): Result[Long] =
     inner.count(filter)
 
+  override def stats: Result[MemoryStats] = inner.stats
+
   override def clear(): Result[MemoryStore] =
     inner.clear().map {
       case updated: InMemoryStore => new EmbeddingMemoryStore(updated, embeddingService)

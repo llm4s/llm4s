@@ -188,6 +188,33 @@ trait MemoryStore {
    * only the instance identifies it.
    */
   def storageIdentity: Result[Option[String]] = Right(None)
+
+  /**
+   * Counts of what the store holds. This default reads every memory; the SQL stores override it with aggregate
+   * queries, so `MemoryManager.stats` never loads the store (#3040).
+   */
+  def stats: Result[MemoryStats] = recall(MemoryFilter.All, Int.MaxValue).map(MemoryStore.statsOf)
+}
+
+object MemoryStore {
+
+  /** The statistics of `memories`, as every store reports them: `byType` counts the built-in types only. */
+  private[memory] def statsOf(memories: Seq[Memory]): MemoryStats = {
+    val timestamps = memories.map(_.timestamp)
+    MemoryStats(
+      totalMemories = memories.size.toLong,
+      byType = builtInCounts(memories.groupBy(_.memoryType).map { case (t, ms) => t -> ms.size.toLong }),
+      entityCount = memories.flatMap(_.getMetadata("entity_id")).distinct.size.toLong,
+      conversationCount = memories.flatMap(_.getMetadata("conversation_id")).distinct.size.toLong,
+      embeddedCount = memories.count(_.isEmbedded).toLong,
+      oldestMemory = if (timestamps.isEmpty) None else Some(timestamps.min),
+      newestMemory = if (timestamps.isEmpty) None else Some(timestamps.max)
+    )
+  }
+
+  /** `counts` of the built-in types that are not zero. */
+  private[memory] def builtInCounts(counts: Map[MemoryType, Long]): Map[MemoryType, Long] =
+    counts.filter { case (t, n) => MemoryType.builtIn.contains(t) && n > 0 }
 }
 
 /**

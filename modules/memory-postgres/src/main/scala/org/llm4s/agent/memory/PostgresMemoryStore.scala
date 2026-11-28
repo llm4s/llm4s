@@ -284,8 +284,8 @@ final class PostgresMemoryStore private[memory] (
     )
 
   /**
-   * `body` in one transaction, after a transaction-scoped advisory lock on this store's table - so writers in every
-   * process sharing the table are serialised, and a bound checked in the transaction holds - and after fencing
+   * `body` in one transaction, after a transaction-scoped advisory lock on this store's table and tenant - so the
+   * tenant's writers in every process sharing the table are serialised, and a bound checked in the transaction holds - and after fencing
    * `token` for `key.scope`: a token older than the scope's newest is refused, changing nothing; otherwise it becomes
    * the newest.
    */
@@ -294,8 +294,9 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         inTransaction(conn) {
           Using.resource(conn.prepareStatement("SELECT pg_advisory_xact_lock(hashtext(?))")) { stmt =>
-            // PostgreSQL folds the unquoted name to lower case: `Memories` and `memories` are one table, one lock
-            stmt.setString(1, tableName.toLowerCase(java.util.Locale.ROOT))
+            // PostgreSQL folds the unquoted name to lower case: `Memories` and `memories` are one table, one lock. One
+            // lock per tenant (#3040): what a write checks - its fences, applied keys and bounds - is the tenant's own
+            stmt.setString(1, tableName.toLowerCase(java.util.Locale.ROOT) + "/" + tenantKey)
             Using.resource(stmt.executeQuery())(_.next()): Unit
           }
           val newest =
@@ -363,29 +364,72 @@ final class PostgresMemoryStore private[memory] (
       }.toVector
     }
 
-  /** Every memory of this tenant that `bounds` counts, as [[MemoryBounds.overflow]] ranks it, without its embedding. */
-  private def entries(conn: Connection, bounds: MemoryBounds): Vector[MemoryBounds.Entry] =
-    Using.resource(
-      conn.prepareStatement(
-        s"SELECT id, importance, created_at, content, metadata::text FROM $tableName WHERE tenant = ?"
-      )
-    ) { stmt =>
+  /**
+   * Every memory of this tenant that `bounds` counts, as [[MemoryBounds.overflow]] ranks it: its id, importance, time
+   * and size, computed in SQL, so no content or metadata is sent (#3040). A bound with an owner reads only the owner's
+   * rows, through the GIN metadata index.
+   */
+  private def entries(conn: Connection, bounds: MemoryBounds): Vector[MemoryBounds.Entry] = {
+    val owned = bounds.owner.fold("")(_ => " AND metadata @> jsonb_build_object(CAST(? AS text), CAST(? AS text))")
+    val sql =
+      "SELECT id, importance, created_at, octet_length(content) + COALESCE((SELECT sum(octet_length(key) + " +
+        s"octet_length(COALESCE(value, 'null'))) FROM jsonb_each_text(metadata)), 0) FROM $tableName WHERE tenant = ?" +
+        owned
+    Using.resource(conn.prepareStatement(sql)) { stmt =>
       stmt.setString(1, tenantKey)
+      bounds.owner.foreach { o =>
+        stmt.setString(2, o.key)
+        stmt.setString(3, o.value)
+      }
       Using.resource(stmt.executeQuery()) { rs =>
         val out = Vector.newBuilder[MemoryBounds.Entry]
         while (rs.next()) {
           val importance = rs.getDouble(2)
           val known      = !rs.wasNull()
-          val metadata   = PostgresMemoryStore.jsonToMetadata(rs.getString(5))
-          if (bounds.counts(metadata))
-            out += MemoryBounds.Entry(
-              MemoryId(rs.getString(1)),
-              if (known) Some(importance) else None,
-              rs.getTimestamp(3).toInstant,
-              MemoryBounds.sizeOf(rs.getString(4), metadata)
-            )
+          out += MemoryBounds.Entry(
+            MemoryId(rs.getString(1)),
+            if (known) Some(importance) else None,
+            rs.getTimestamp(3).toInstant,
+            rs.getLong(4)
+          )
         }
         out.result()
+      }
+    }
+  }
+
+  /** The store's statistics, by aggregate queries over this tenant's rows: no memory is read (#3040). */
+  override def stats: Result[MemoryStats] =
+    attempt("Failed to count memories") {
+      withConnection { conn =>
+        val byType = runQuery(
+          conn,
+          s"SELECT memory_type, COUNT(*) FROM $tableName WHERE tenant = ? GROUP BY memory_type",
+          Seq(SqlParam.PString(tenantKey)),
+          stream = false
+        )(rows => rows.map(r => MemoryTypeCodec.decode(r.getString(1)) -> r.getLong(2)).toVector)
+          .groupMapReduce(_._1)(_._2)(_ + _)
+        runQuery(
+          conn,
+          "SELECT COUNT(*), COUNT(DISTINCT metadata->>'entity_id'), COUNT(DISTINCT metadata->>'conversation_id'), " +
+            s"COUNT(embedding), MIN(created_at), MAX(created_at) FROM $tableName WHERE tenant = ?",
+          Seq(SqlParam.PString(tenantKey)),
+          stream = false
+        ) { rows =>
+          val rs    = rows.next()
+          val total = rs.getLong(1)
+          Right(
+            MemoryStats(
+              totalMemories = total,
+              byType = MemoryStore.builtInCounts(byType),
+              entityCount = rs.getLong(2),
+              conversationCount = rs.getLong(3),
+              embeddedCount = rs.getLong(4),
+              oldestMemory = Option(rs.getTimestamp(5)).map(_.toInstant),
+              newestMemory = Option(rs.getTimestamp(6)).map(_.toInstant)
+            )
+          )
+        }
       }
     }
 

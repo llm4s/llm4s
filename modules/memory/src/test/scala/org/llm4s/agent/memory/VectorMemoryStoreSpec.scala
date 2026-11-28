@@ -653,7 +653,8 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
       Using.resource(c.createStatement()) { st =>
         Using.resource(st.executeQuery("SELECT COUNT(*), MIN(version), MAX(version) FROM schema_version")) { rs =>
           rs.next() shouldBe true
-          (rs.getInt(1), rs.getInt(2), rs.getInt(3)) shouldBe ((1, 1, 1))
+          val v = SQLiteMemoryStore.SchemaVersion
+          (rs.getInt(1), rs.getInt(2), rs.getInt(3)) shouldBe ((1, v, v))
         }
       }
     }

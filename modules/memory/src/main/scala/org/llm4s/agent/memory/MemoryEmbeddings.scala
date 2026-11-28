@@ -70,20 +70,33 @@ private[memory] object MemoryEmbeddings {
    * would hide that. Candidates of another dimension beside some of the query's are skipped and counted in the log.
    */
   def rank(query: Array[Float], candidates: Seq[(Memory, Array[Float])]): Result[Seq[ScoredMemory]] =
+    rankIds(query, candidates.map { case (m, v) => (m, v) }, (m: Memory) => m.id).map(_.map { case (m, score) =>
+      ScoredMemory(m, score)
+    })
+
+  /** [[rank]] over any candidates, identified by `idOf` in a mismatch's error; scores, unsorted. */
+  def rankIds(query: Array[Float], candidates: Seq[(MemoryId, Array[Float])]): Result[Seq[(MemoryId, Double)]] =
+    rankIds(query, candidates, identity[MemoryId])
+
+  def rankIds[A](
+    query: Array[Float],
+    candidates: Seq[(A, Array[Float])],
+    idOf: A => MemoryId
+  ): Result[Seq[(A, Double)]] =
     if (query.isEmpty) Right(Seq.empty)
     else {
       val (comparable, mismatched) = candidates.partition(_._2.length == query.length)
       mismatched.headOption match {
-        case Some((memory, stored)) if comparable.isEmpty =>
-          Left(dimensionMismatch(query.length, memory.id, stored.length))
+        case Some((candidate, stored)) if comparable.isEmpty =>
+          Left(dimensionMismatch(query.length, idOf(candidate), stored.length))
         case _ =>
           if (mismatched.nonEmpty)
             logger.warn(
               s"Vector search skipped ${mismatched.size} memories whose embedding has a different dimension than " +
                 s"the query's ${query.length}; re-embed the store to include them"
             )
-          Right(comparable.flatMap { case (memory, embedding) =>
-            SearchScores.cosine(query, embedding).flatMap(SearchScores.fromCosine).map(ScoredMemory(memory, _))
+          Right(comparable.flatMap { case (candidate, embedding) =>
+            SearchScores.cosine(query, embedding).flatMap(SearchScores.fromCosine).map(candidate -> _)
           })
       }
     }

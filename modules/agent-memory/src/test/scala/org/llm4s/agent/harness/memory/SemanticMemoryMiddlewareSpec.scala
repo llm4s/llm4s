@@ -28,7 +28,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   private val summarising = (store: MemoryStore, client: LLMClient) =>
     LLMMemoryManager(MemoryManagerConfig.default, store, client)
   private val later       = Clock.offset(Clock.systemUTC(), JDuration.ofDays(1))
-  private val consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 3))
+  private val consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 3).withInterval(Duration.Zero))
 
   /** One fresh in-memory store per tenant, resolved once each. */
   private def perTenant(): (Option[TenantId] => Result[MemoryStore], ConcurrentHashMap[Option[TenantId], Int]) =
@@ -401,7 +401,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
       _ => Right(InMemoryStore.empty),
       summarising,
       new FunctionClient(_ => "Consolidated summary."),
-      consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 2)),
+      consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 2).withInterval(Duration.Zero)),
       clock = later
     )
     agentWith(answering("teal"), m, Some(GraphRuntime(dying, clock, claims)))
@@ -911,4 +911,5 @@ final class Peek extends org.llm4s.agent.graph.middleware.AgentMiddleware:
     context.state.get(SemanticMemoryMiddleware.RecalledKey).map { text =>
       seen.add(text)
       Vector.empty
+
     }

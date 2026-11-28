@@ -78,9 +78,16 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
       else if (sql == s"SELECT COUNT(*) FROM ${table}_applied WHERE tenant = ?") rows(Seq(Seq(s.applied.size)))
       else if (sql == s"SELECT 1 FROM $table WHERE id = ? AND tenant = ?")
         rows(s.memories.get(params(1).toString).map(_ => Seq(1)).toSeq)
-      else if (sql.startsWith("SELECT id, importance, created_at, content, metadata::text"))
-        rows(s.memories.values.toSeq.map(r => Seq(r.id, r.importance.orNull, r.at, r.content, r.metadata)))
-      else throw new UnsupportedOperationException(sql)
+      else if (sql.startsWith("SELECT id, importance, created_at, octet_length(content)")) {
+        // the size the SQL computes, and the owner it filters by, if any (#3040)
+        val owner = params.get(2).map(k => k.toString -> params(3).toString)
+        rows(s.memories.values.toSeq.flatMap { r =>
+          val metadata = PostgresMemoryStore.jsonToMetadata(r.metadata)
+          Option.when(owner.forall { case (k, v) => metadata.get(k).contains(v) })(
+            Seq(r.id, r.importance.orNull, r.at, MemoryBounds.sizeOf(r.content, metadata))
+          )
+        })
+      } else throw new UnsupportedOperationException(sql)
     }
 
     private def update(sql: String, params: mutable.Map[Int, Any]): Int = {
@@ -229,7 +236,7 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     val db    = new FakePostgres("Mem")
     val store = new PostgresMemoryStore(new FakeDataSource(db), "Mem", None)
     store.appliedWrite(k, 1).value
-    db.locks.toVector shouldBe Vector("mem")
+    db.locks.toVector shouldBe Vector("mem/") // and one per tenant: the table, then the tenant ('' for none)
   }
 
   "PostgresMemoryStore.Config" should "accept a table name only while every name derived from it fits 63 bytes" in {

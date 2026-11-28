@@ -1,0 +1,140 @@
+package org.llm4s.agent.harness.memory
+
+import org.llm4s.agent.{ Agent, CompletionFixture, ScriptedLLMClient }
+import org.llm4s.agent.AgentFixture.built
+import org.llm4s.agent.graph.*
+import org.llm4s.agent.memory.*
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.*
+import org.llm4s.types.Result
+import org.scalatest.{ EitherValues, OptionValues }
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.time.Instant
+import java.util.concurrent.{ ConcurrentHashMap, CopyOnWriteArrayList }
+import scala.concurrent.duration.*
+
+/** `SemanticMemoryMiddleware`'s resources and recall scope (#3040): bounded tenant cells, `close`, scoped recall. */
+class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+
+  private val t1 = TenantId("t1")
+  private val t2 = TenantId("t2")
+
+  private def perTenant(): (Option[TenantId] => Result[MemoryStore], ConcurrentHashMap[Option[TenantId], Int]) =
+    val resolved = new ConcurrentHashMap[Option[TenantId], Int]()
+    val resolver = (tenant: Option[TenantId]) =>
+      resolved.merge(tenant, 1, _ + _)
+      Right(InMemoryStore.empty)
+    (resolver, resolved)
+
+  private val simple: (MemoryStore, LLMClient) => MemoryManager = (store, _) => SimpleMemoryManager.withStore(store)
+
+  private def answering(texts: String*): ScriptedLLMClient = ScriptedLLMClient.of(texts.map(CompletionFixture.simple)*)
+
+  private def tenant(t: TenantId): RunConfig = RunConfig().withTenantId(t)
+
+  private def systemPrompt(sent: Vector[Message]): String =
+    sent.collectFirst { case s: SystemMessage => s.content }.getOrElse("")
+
+  private def held(m: SemanticMemoryMiddleware, tenant: Option[TenantId]): MemoryStore =
+    m.withStore(tenant)(Right(_)).value
+
+  private def agentWith(client: LLMClient, m: SemanticMemoryMiddleware): Agent =
+    built(Agent.builder("assistant", client).withMiddleware(m))
+
+  // ===== #3040 =====
+
+  "A middleware with maxTenants" should "release the least recently used idle store, and resolve it again" in {
+    val released           = new CopyOnWriteArrayList[MemoryStore]()
+    val (stores, resolved) = perTenant()
+    val m =
+      new SemanticMemoryMiddleware(stores, simple, answering(), maxTenants = 2, release = s => released.add(s): Unit)
+    val agent = agentWith(answering("a", "b", "c", "d"), m)
+    agent.run(ThreadId("1"), "one", tenant(t1)).value
+    agent.run(ThreadId("2"), "two", tenant(t2)).value
+    agent.run(ThreadId("3"), "three", RunConfig().withTenantId(TenantId("t3"))).value
+    m.openTenants shouldBe 2
+    released.size shouldBe 1
+    agent.run(ThreadId("4"), "four", tenant(t1)).value
+    resolved.get(Some(t1)) shouldBe 2
+  }
+
+  it should "release every store on close, and refuse later turns" in {
+    val released    = new CopyOnWriteArrayList[MemoryStore]()
+    val (stores, _) = perTenant()
+    val m           = new SemanticMemoryMiddleware(stores, simple, answering(), release = s => released.add(s): Unit)
+    val agent       = agentWith(answering("a", "b"), m)
+    agent.run(ThreadId("1"), "one", tenant(t1)).value
+    agent.run(ThreadId("2"), "two", tenant(t2)).value
+    m.close()
+    m.close()
+    released.size shouldBe 2
+    m.openTenants shouldBe 0
+    m.withStore(Some(t1))(Right(_)).isLeft shouldBe true
+  }
+
+  it should "close an AutoCloseable store by default" in {
+    val file  = java.nio.file.Files.createTempFile("llm4s-release", ".db")
+    val store = SQLiteMemoryStore(file.toString).value
+    val m     = new SemanticMemoryMiddleware(_ => Right(store), simple, answering())
+    agentWith(answering("ok"), m).run(ThreadId("1"), "hello").value
+    m.close()
+    store.count().isLeft shouldBe true
+    java.nio.file.Files.deleteIfExists(file)
+  }
+
+  it should "still refuse a resolver giving a new tenant an evicted tenant's storage" in {
+    val file = java.nio.file.Files.createTempFile("llm4s-evicted", ".db")
+    val m = new SemanticMemoryMiddleware(
+      _ => SQLiteMemoryStore(file.toString),
+      simple,
+      answering(),
+      record = None,
+      recall = None,
+      maxTenants = 1
+    )
+    m.withStore(Some(t1))(_.count()).isRight shouldBe true
+    m.withStore(Some(t2))(_.count()).isLeft shouldBe true
+    m.close()
+    java.nio.file.Files.deleteIfExists(file)
+  }
+
+  "Recall" should "leave out the run's own thread by default, and recall by principal when scoped" in {
+    val store  = InMemoryStore.empty
+    val m      = new SemanticMemoryMiddleware(_ => Right(store), simple, answering())
+    val client = answering("Noted.", "Noted again.", "You said teal.", "I do not know.")
+    val agent  = agentWith(client, m)
+    val alice  = RunConfig().withPrincipal(Principal("alice"))
+    agent.run(ThreadId("same"), "teal is my colour", alice).value
+    agent.run(ThreadId("same"), "and what else", alice).value
+    (systemPrompt(client.sent(1)) should not).include("teal is my colour")
+    held(m, None)
+      .recall(MemoryFilter.ByMetadata(SemanticMemoryMiddleware.PrincipalKey, "alice"), 10)
+      .value should have size 4
+
+    val scoped = new SemanticMemoryMiddleware(
+      _ => Right(held(m, None)),
+      simple,
+      answering(),
+      recall = Some(MemoryRecall().withScope(MemoryRecall.byPrincipal)),
+      record = None
+    )
+    val c2 = answering("You said teal.", "I do not know.")
+    agentWith(c2, scoped).run(ThreadId("other"), "teal?", alice).value
+    agentWith(c2, scoped).run(ThreadId("bob"), "teal?", RunConfig().withPrincipal(Principal("bob"))).value
+    systemPrompt(c2.sent(0)) should include("teal is my colour")
+    (systemPrompt(c2.sent(1)) should not).include("teal is my colour")
+  }
+
+  "MemoryConsolidation" should "run at most once per interval for a tenant" in {
+    val cell = new TenantMemory(InMemoryStore.empty)
+    val now  = Instant.parse("2026-11-28T00:00:00Z")
+    cell.consolidationDue(now, 15.minutes) shouldBe true
+    cell.consolidationDue(now.plusSeconds(60), 15.minutes) shouldBe false
+    cell.consolidationDue(now.plusSeconds(15 * 60), 15.minutes) shouldBe true
+    cell.consolidationDue(now.plusSeconds(15 * 60), Duration.Zero) shouldBe true
+    MemoryConsolidation().interval shouldBe 15.minutes
+    an[IllegalArgumentException] should be thrownBy MemoryConsolidation(1.day, 1, -1.second)
+  }
+}

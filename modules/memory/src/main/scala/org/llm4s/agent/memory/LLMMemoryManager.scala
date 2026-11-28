@@ -45,7 +45,7 @@ final case class LLMMemoryManager(
     store
       .recall(
         filter = MemoryFilter.before(olderThan),
-        limit = Int.MaxValue
+        limit = config.consolidationConfig.maxMemoriesScanned
       )
       .flatMap { oldMemories =>
         // 2. Group memories by type and context, applying minCount per group

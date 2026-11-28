@@ -334,14 +334,14 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
       vector.storeAll(
         Seq(
           memory("a", "alpha").copy(metadata = Map("tag" -> "keep")),
-          memory("b", "beta").copy(metadata = Map("tag" -> "drop me"))
+          memory("b", "beta").copy(metadata = Map("" -> "drop me"))
         )
       ) shouldBe a[Right[_, _]]
       recording.clear()
 
-      // The file store has no exact SQL for MetadataContains, so `matches` decides it
-      vector.deleteMatching(MemoryFilter.MetadataContains("tag", "drop")) shouldBe a[Right[_, _]]
-      vector.count(MemoryFilter.MetadataContains("tag", "drop")) shouldBe Right(0L)
+      // An empty metadata key has no exact JSON path, so `matches` decides it
+      vector.deleteMatching(MemoryFilter.HasMetadata("")) shouldBe a[Right[_, _]]
+      vector.count(MemoryFilter.HasMetadata("")) shouldBe Right(0L)
 
       val reads = rowReads(recording)
       reads should have size 2
