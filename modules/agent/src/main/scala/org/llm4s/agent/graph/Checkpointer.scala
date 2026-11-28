@@ -787,7 +787,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       policy.threadAge.foreach { age =>
         val idleBefore = clock.instant().minusNanos(age.toNanos)
         visited.foreach { t =>
-          val updated = withLock(lock)(threads.get(t.value).filter(_.history.nonEmpty).map(_.updatedAt))
+          // read again under the sweep's claim, so an update that landed before it keeps the thread
+          val updated = () => Right(withLock(lock)(threads.get(t.value).filter(_.history.nonEmpty).map(_.updatedAt)))
           RetentionSweep.removeIdle(this, t, idleBefore, updated, protectedRuns): Unit
         }
       }

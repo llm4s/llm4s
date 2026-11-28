@@ -527,20 +527,21 @@ final class PostgresCheckpointer private (
       guard.retained(visited).flatMap { protectedRuns =>
         // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
         policy.threadAge.foreach { age =>
-          visited.filterNot(protectedRuns.contains).foreach { thread =>
-            val judged = reading("sweep") { c =>
-              val idleBefore = clockNow(c).minusNanos(age.toNanos)
-              Right(
-                idleBefore -> query(
-                  c,
-                  s"SELECT updated_at FROM ${t.threads} WHERE thread_id = ? AND updated_at IS NOT NULL",
-                  thread.value
-                )(rows => instant(rows, 1)).headOption
-              )
-            }
-            judged.foreach((idleBefore, updated) =>
+          reading("sweep")(c => Right(clockNow(c).minusNanos(age.toNanos))).foreach { idleBefore =>
+            visited.filterNot(protectedRuns.contains).foreach { thread =>
+              // read again under the sweep's claim, so an update that landed before it keeps the thread
+              val updated = () =>
+                reading("sweep") { c =>
+                  Right(
+                    query(
+                      c,
+                      s"SELECT updated_at FROM ${t.threads} WHERE thread_id = ? AND updated_at IS NOT NULL",
+                      thread.value
+                    )(rows => instant(rows, 1)).headOption
+                  )
+                }
               RetentionSweep.removeIdle(this, thread, idleBefore, updated, protectedRuns): Unit
-            )
+            }
           }
         }
         val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)

@@ -246,47 +246,59 @@ private[graph] object RetentionSweep:
 
   /**
    * Deletes `threadId` if `policy.threadAge` makes it idle (#3260): a top-level thread whose latest checkpoint is
-   * `Completed` or `Failed`, with no child threads, that the store last updated (`updatedAt`, by its clock) before
-   * `cutoff`, and that `protectedRuns` does not name. It is claimed under its own tenant - a live run makes the claim
-   * `ThreadBusy` and the thread is kept - then read again under the claim and deleted only if its latest checkpoint is
-   * still the one judged, fenced by the claim. Whether it was deleted; a failure is logged and the thread kept.
+   * `Completed` or `Failed`, with no child threads, that the store last updated (`updatedAt`, read from the store, by
+   * its clock) before `cutoff`, and that `protectedRuns` does not name. It is claimed under its own tenant - a live run
+   * makes the claim `ThreadBusy` and the thread is kept - then read again under the claim, its update time included,
+   * and deleted only if its latest checkpoint is still the one judged and it is still not updated since `cutoff`,
+   * fenced by the claim: a metadata update that landed between the first read and the claim keeps it. Whether it was
+   * deleted; a failure is logged and the thread kept.
    */
   def removeIdle(
     store: Checkpointer,
     threadId: ThreadId,
     cutoff: java.time.Instant,
-    updatedAt: Option[java.time.Instant],
+    updatedAt: () => Result[Option[java.time.Instant]],
     protectedRuns: Map[ThreadId, Set[RunId]]
   ): Boolean =
     def settled(c: Checkpoint) = c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed
+    def idle: Result[Boolean]  = updatedAt().map(_.exists(_.isBefore(cutoff)))
     val judged =
-      if protectedRuns.contains(threadId) || !updatedAt.exists(_.isBefore(cutoff)) then Right(None)
+      if protectedRuns.contains(threadId) then Right(None)
       else
-        for
-          latest <- store.latest(threadId).map(_.map(_.checkpoint).filter(c => settled(c) && c.origin.isEmpty))
-          children <- latest.fold[Result[Vector[ChildThread]]](Right(Vector.empty))(_ =>
-            store.children(threadId, None, 1)
-          )
-        yield latest.filter(_ => children.isEmpty)
+        idle.flatMap {
+          case false => Right(None)
+          case true =>
+            for
+              latest <- store.latest(threadId).map(_.map(_.checkpoint).filter(c => settled(c) && c.origin.isEmpty))
+              children <- latest.fold[Result[Vector[ChildThread]]](Right(Vector.empty))(_ =>
+                store.children(threadId, None, 1)
+              )
+            yield latest.filter(_ => children.isEmpty)
+        }
     val removed = judged.flatMap {
       case None => Right(false)
-      case Some(idle) =>
+      case Some(judgedLatest) =>
         store.claim(
           threadId,
           ClaimRequest(
             RunId(s"llm4s-sweep-${java.util.UUID.randomUUID()}"),
-            idle.tenantId.map(TenantId(_)),
+            judgedLatest.tenantId.map(TenantId(_)),
             IdleClaimTtl
           )
         ) match
           case Left(_: GraphError.ThreadBusy) => Right(false)
           case Left(error)                    => Left(error)
-          case Right(claim) =>
-            val deleted = store.latest(threadId).flatMap {
-              case Some(now) if now.checkpoint.id == idle.id =>
-                store.deleteThread(threadId, claim.token, None).map(_ => true)
-              case _ => Right(false)
-            }
+          case Right(claim)                   =>
+            // under the claim nothing else changes the thread: deleted only if it is still the one judged, and idle
+            val deleted =
+              for
+                now       <- store.latest(threadId)
+                stillIdle <- idle
+                gone <-
+                  if now.exists(_.checkpoint.id == judgedLatest.id) && stillIdle then
+                    store.deleteThread(threadId, claim.token, None).map(_ => true)
+                  else Right(false)
+              yield gone
             // a deleted thread's claim went with it; one kept is given back
             if !deleted.contains(true) then store.release(threadId, claim.token): Unit
             deleted

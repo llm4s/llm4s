@@ -157,8 +157,9 @@ final class AgentRun private[agent] (
     // the turn's outcome, decided once (#3251): a later turn on the thread never changes it
     Option(retained.get).getOrElse {
       val decided = outcomeOf(ended)
-      // a call interrupted while the turn still runs, or whose store read failed, decides nothing
-      if handle.status != RunStatus.Running && !lookupFailed.getAndSet(false) then retained.compareAndSet(null, decided)
+      // only a call that obtained the turn's own result decides it: one whose wait was interrupted got a
+      // CancelledError of its own, even if the turn ended meanwhile, and one whose store read failed decides nothing
+      if ended.isRight && !lookupFailed.getAndSet(false) then retained.compareAndSet(null, decided)
       Option(retained.get).getOrElse(decided)
     }
 

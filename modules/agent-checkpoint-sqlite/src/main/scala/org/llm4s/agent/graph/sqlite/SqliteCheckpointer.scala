@@ -576,16 +576,18 @@ final class SqliteCheckpointer private (
         policy.threadAge.foreach { age =>
           val idleBefore = clock.instant().minusNanos(age.toNanos)
           visited.foreach { t =>
-            val updated = reading("sweep") { c =>
-              Right(
-                query(
-                  c,
-                  "SELECT updated_nanos FROM llm4s_checkpoint_threads WHERE thread_id = ? AND updated_nanos IS NOT NULL",
-                  t.value
-                )(rows => fromEpochNanos(rows.getLong(1))).headOption
-              )
-            }
-            updated.foreach(at => RetentionSweep.removeIdle(this, t, idleBefore, at, protectedRuns): Unit)
+            // read again under the sweep's claim, so an update that landed before it keeps the thread
+            val updated = () =>
+              reading("sweep") { c =>
+                Right(
+                  query(
+                    c,
+                    "SELECT updated_nanos FROM llm4s_checkpoint_threads WHERE thread_id = ? AND updated_nanos IS NOT NULL",
+                    t.value
+                  )(rows => fromEpochNanos(rows.getLong(1))).headOption
+                )
+              }
+            RetentionSweep.removeIdle(this, t, idleBefore, updated, protectedRuns): Unit
           }
         }
         val cutoff = policy.tombstoneAge.map(age => epochNanos(clock.instant().minusNanos(age.toNanos)))
