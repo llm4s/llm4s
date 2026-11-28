@@ -20,6 +20,12 @@ class PromptInjectionDetectorScalingSpec extends AnyFlatSpec with Matchers {
   // read 9.0x once on CI.
   private val n = 80000
 
+  // The cheapest of five samples of each input, not three: on CI a linear pattern (creative_writing on a run of
+  // `about `, 50 ns a character locally from 20k to 1.28M characters, ratio 3.2 to 4.5 in 36 measurements) read 8.4x
+  // once at n = 80k, its large input's cheapest sample twice what the small one predicts. Noise only adds cost, so
+  // more samples only make a clean one likelier; a quadratic pattern still reads 16x on every one.
+  private val samples = 5
+
   private def run(prefix: String, unit: String, length: Int): String = prefix + unit * (length / unit.length)
 
   // Every word of a pattern, repeated with and without a separator, and a run of whitespace after it: what makes a
@@ -49,7 +55,9 @@ class PromptInjectionDetectorScalingSpec extends AnyFlatSpec with Matchers {
       val detector = new PromptInjectionDetector(Seq(pattern))
       adversarial(pattern).distinct.foreach { case (prefix, unit) =>
         val label = s"${pattern.name} on '$prefix' + a run of '$unit', n = $n"
-        LinearTime.assertLinear(label, run(prefix, unit, n), run(prefix, unit, 4 * n))(detector.validate)
+        LinearTime.assertLinear(label, run(prefix, unit, n), run(prefix, unit, 4 * n), runs = samples)(
+          detector.validate
+        )
       }
     }
   }
