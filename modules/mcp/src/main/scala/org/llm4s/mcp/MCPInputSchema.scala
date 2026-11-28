@@ -13,9 +13,10 @@ import ujson.Value
  *    sent to the provider has no dangling reference. A reference that cannot be resolved, or a recursive one past
  *    the first use, becomes a schema that accepts any value, described as such.
  *  - Constraints the model carries: `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`,
- *    `exclusiveMaximum` (the number form, and the older boolean form), `multipleOf`, `enum` and `const`, `minItems`,
- *    `maxItems`, `uniqueItems`. An `enum` of other values than strings is kept as JSON with the keywords an agent's
- *    argument validator checks.
+ *    `exclusiveMaximum` (the number form, and the older boolean form), `multipleOf`, a string `enum` and `const`,
+ *    `minItems`, `maxItems`, `uniqueItems`.
+ *  - Anything else is kept as the server wrote it: a schema is converted only when every keyword it has is one its
+ *    type's typed schema carries faithfully, with a value of a shape it holds (an allowlist, [[expressible]]).
  *  - `oneOf` is read as `anyOf`, and a `type` of several names as an `anyOf` of each.
  *  - A missing `description` is the property's `title`, or empty; a `default`, `format` or `examples` the model cannot
  *    carry as a keyword is added to the description, so the model still learns it.
@@ -29,78 +30,140 @@ private[mcp] object MCPInputSchema {
 
   /**
    * The tool's argument schema, an object whatever the server sent: an `ObjectSchema` when the model can express it,
-   * otherwise the server's own JSON (references inlined, `type: object` ensured).
+   * otherwise the server's own JSON (see [[asWritten]]), with `type: object` ensured.
    */
   def toSchema(toolName: String, inputSchema: Value): SchemaDefinition[_] = {
     val fields = inputSchema.objOpt.map(_.toMap).getOrElse(Map.empty[String, Value])
     val defs   = definitions(fields)
     val top    = fields -- Seq("$defs", "definitions")
-    if (unexpressible(top)) {
-      val written = asWritten(top, defs)
+    if (!expressible(top)) {
+      val written = asWritten(top, defs, Nil)
       written("type") = ujson.Str("object")
       RawJsonSchema(written)
     } else objectSchema(top, defs, Nil, Some(s"Parameters for $toolName"))
   }
 
+  /** Keywords that only describe: the model is told them in the description, wherever they appear. */
+  private val Annotations: Set[String] = Set("description", "title", "default", "examples", "format", "$comment")
+
   /**
-   * Keywords the schema model has no way to carry: a schema that has one is kept as the server wrote it, so the
-   * restriction reaches the provider and the argument validator (which refuses what it cannot check) instead of
-   * disappearing.
+   * The keywords the typed schema of each type carries faithfully. A schema is converted to a typed one only when every
+   * keyword it has, annotations aside, is on its type's list and of a shape the type holds ([[expressible]]); any
+   * other is kept as the server wrote it, so no restriction is lost (#3076).
    */
-  private val UnexpressibleKeywords: Set[String] = Set(
-    "allOf",
+  private val Faithful: Map[String, Set[String]] = Map(
+    "string"  -> Set("type", "enum", "const", "minLength", "maxLength", "pattern"),
+    "number"  -> Set("type", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"),
+    "integer" -> Set("type", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"),
+    "boolean" -> Set("type"),
+    "array"   -> Set("type", "items", "minItems", "maxItems", "uniqueItems"),
+    "object"  -> Set("type", "properties", "required", "additionalProperties")
+  )
+
+  private def isCount(v: Value)  = v.numOpt.exists(n => n.isWhole && n >= 0 && n.isValidInt)
+  private def isNumber(v: Value) = v.numOpt.isDefined
+  private def isInt(v: Value)    = v.numOpt.exists(n => n.isWhole && n.isValidInt)
+  private def isBound(v: Value)  = isNumber(v) || v.boolOpt.isDefined // the number form, or the older boolean one
+  private def strings(v: Value)  = v.arrOpt.exists(_.forall(_.strOpt.isDefined))
+  private def listed(v: Value)   = v.arrOpt.exists(_.nonEmpty)
+
+  /** Whether `value`, the keyword `key` of a schema of type `schemaType`, has a shape that type's typed schema holds. */
+  private def holds(schemaType: String, key: String, value: Value): Boolean = (schemaType, key) match {
+    case (_, "type")                                          => true
+    case ("string", "enum")                                   => strings(value)
+    case ("string", "const")                                  => value.strOpt.isDefined
+    case ("string", "minLength" | "maxLength")                => isCount(value)
+    case ("string", "pattern")                                => value.strOpt.isDefined
+    case ("number", "multipleOf")                             => isNumber(value)
+    case ("number", "exclusiveMinimum" | "exclusiveMaximum")  => isBound(value)
+    case ("number", _)                                        => isNumber(value)
+    case ("integer", "exclusiveMinimum" | "exclusiveMaximum") => isInt(value) || value.boolOpt.isDefined
+    case ("integer", _)                                       => isInt(value)
+    case ("array", "items")                                   => value.objOpt.isDefined
+    case ("array", "uniqueItems")                             => value.boolOpt.isDefined
+    case ("array", _)                                         => isCount(value)
+    case ("object", "properties")                             => value.objOpt.isDefined
+    case ("object", "additionalProperties")                   => value.boolOpt.isDefined
+    case ("object", "required")                               => strings(value)
+    case _                                                    => false
+  }
+
+  /**
+   * Whether the typed schema model can carry `fields` without losing anything: an allowlist, per type, of keywords and
+   * of the shapes of their values. A `required` name must be a property; an `anyOf` / `oneOf` stands alone.
+   */
+  private def expressible(fields: Fields): Boolean = {
+    val keys = fields.keySet -- Annotations
+    val types = fields.get("type") match {
+      case Some(ujson.Str(name))  => Some(List(name))
+      case Some(ujson.Arr(names)) => Some(names.toList.flatMap(_.strOpt)).filter(_.size == names.size)
+      case None                   => Some(Nil)
+      case _                      => None
+    }
+    val nonNull = types.map(_.filterNot(_ == "null"))
+    def faithfulAs(t: String) =
+      Faithful.get(t).exists(allowed => keys.subsetOf(allowed) && keys.forall(k => holds(t, k, fields(k))))
+    val requiredDeclared = {
+      val properties = fields.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty[String])
+      fields.get("required").flatMap(_.arrOpt).toSeq.flatMap(_.flatMap(_.strOpt)).toSet.subsetOf(properties)
+    }
+    val union = Seq("anyOf", "oneOf").filter(fields.contains)
+    nonNull match {
+      case None => false
+      case Some(_) if union.nonEmpty =>
+        union.size == 1 && listed(fields(union.head)) && keys.subsetOf(Set(union.head, "type")) &&
+        types.forall(_.forall(_ == "null"))
+      case Some(List(single))                         => faithfulAs(single) && requiredDeclared
+      case Some(Nil) if fields.contains("properties") => faithfulAs("object") && requiredDeclared
+      case Some(Nil)                                  => keys.subsetOf(Set("type"))
+      case Some(_)                                    => keys.subsetOf(Set("type")) // several types: no keyword
+    }
+  }
+
+  /** The keywords whose value is a schema, or a map or list of schemas: the only places a `$ref` is followed. */
+  private val SchemaKeywords: Set[String] = Set(
+    "items",
+    "additionalProperties",
+    "unevaluatedProperties",
+    "unevaluatedItems",
+    "contains",
+    "propertyNames",
     "not",
     "if",
     "then",
     "else",
-    "patternProperties",
-    "propertyNames",
-    "minProperties",
-    "maxProperties",
-    "dependentRequired",
-    "dependentSchemas",
-    "dependencies",
-    "unevaluatedProperties",
-    "unevaluatedItems",
-    "prefixItems",
-    "additionalItems",
-    "contains",
-    "minContains",
-    "maxContains"
+    "additionalItems"
   )
+  private val SchemaMapKeywords: Set[String]  = Set("properties", "patternProperties", "dependentSchemas")
+  private val SchemaListKeywords: Set[String] = Set("anyOf", "oneOf", "allOf", "prefixItems")
 
   /**
-   * Whether the model would lose something of `fields`: a keyword it has no case for; an `anyOf` / `oneOf` beside
-   * the schema's own `type` or `properties` (the union would replace them); a `required` name with no property; or
-   * `additionalProperties` given as a schema.
+   * `fields` as the server wrote them, for a schema the model cannot express: every keyword kept, except that a
+   * subschema (only under a schema-valued keyword, never inside `enum`, `const`, `default` or `examples`, which are
+   * data) is converted in turn, so its references are resolved and its annotations described; the annotations of this
+   * one go into its `description`, which an agent's argument validator reads, and `note` after them.
    */
-  private def unexpressible(fields: Fields): Boolean = {
-    val properties = fields.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty[String])
-    val required   = fields.get("required").flatMap(_.arrOpt).toSeq.flatMap(_.flatMap(_.strOpt)).toSet
-    fields.keySet.exists(UnexpressibleKeywords.contains) ||
-    ((fields.contains("anyOf") || fields.contains("oneOf")) &&
-      (fields.contains("properties") || fields.get("type").exists(_ != ujson.Str("null")))) ||
-    !required.subsetOf(properties) ||
-    fields.get("additionalProperties").exists(_.objOpt.isDefined)
-  }
-
-  /** `fields` as the server wrote them, with every local `$ref` inside replaced by its definition (recursive: `{}`). */
-  private def asWritten(fields: Fields, defs: Map[String, Value]): ujson.Obj = {
-    def inlined(value: Value, seen: List[String]): Value = value match {
-      case obj: ujson.Obj =>
-        obj.value.get("$ref").flatMap(_.strOpt) match {
-          case Some(ref)
-              if !seen.contains(ref) && seen.size < MaxRefDepth && defs.get(ref).exists(_.objOpt.isDefined) =>
-            val merged = defs(ref).obj.toMap ++ (obj.value.toMap - "$ref")
-            inlined(ujson.Obj.from(merged), ref :: seen)
-          case Some(_) =>
-            ujson.Obj.from(obj.value.toSeq.filterNot(_._1 == "$ref").map { case (k, v) => k -> inlined(v, seen) })
-          case None => ujson.Obj.from(obj.value.toSeq.map { case (k, v) => k -> inlined(v, seen) })
-        }
-      case arr: ujson.Arr => ujson.Arr.from(arr.value.map(inlined(_, seen)))
-      case other          => other
+  private def asWritten(
+    fields: Fields,
+    defs: Map[String, Value],
+    seen: List[String],
+    note: Option[String] = None
+  ): ujson.Obj = {
+    // a boolean schema (`true`, `false`) stays as it is
+    def sub(v: Value): Value = if (v.objOpt.isDefined) convert(v, defs, seen).toJsonSchema(strict = false) else v
+    val out                  = ujson.Obj()
+    fields.foreach { case (key, value) =>
+      if (Annotations.contains(key) || key == "$ref" || key == "$defs" || key == "definitions") ()
+      else if (SchemaKeywords.contains(key))
+        out(key) = value.arrOpt.fold(sub(value))(items => ujson.Arr.from(items.map(sub)))
+      else if (SchemaMapKeywords.contains(key))
+        out(key) = value.objOpt.fold(value)(m => ujson.Obj.from(m.toSeq.map { case (k, v) => k -> sub(v) }))
+      else if (SchemaListKeywords.contains(key)) out(key) = value.arrOpt.fold(value)(l => ujson.Arr.from(l.map(sub)))
+      else out(key) = value
     }
-    inlined(ujson.Obj.from(fields), Nil).obj
+    val description = (Seq(describe(fields)).filter(_.nonEmpty) ++ note).mkString(" ")
+    if (description.nonEmpty) out("description") = description
+    out
   }
 
   // `#/$defs/name` and `#/definitions/name`, from the top of the schema, where the specification and generators put them
@@ -134,10 +197,9 @@ private[mcp] object MCPInputSchema {
         resolve(raw.toMap, defs, seen) match {
           case Left(reason) =>
             // Any value the keywords beside the reference allow: those are still checked
-            val text = describe(raw.toMap)
-            this.raw(raw.toMap, s"${if (text.isEmpty) "" else s"$text "}($reason: any value)")
-          case Right((fields, _)) if unexpressible(fields) => RawJsonSchema(asWritten(fields, defs))
-          case Right((fields, path))                       => typed(fields, defs, path)
+            RawJsonSchema(asWritten(raw.toMap, defs, seen, Some(s"($reason: any value)")))
+          case Right((fields, path)) if !expressible(fields) => RawJsonSchema(asWritten(fields, defs, path))
+          case Right((fields, path))                         => typed(fields, defs, path)
         }
     }
 
@@ -166,9 +228,8 @@ private[mcp] object MCPInputSchema {
         if (nulls.nonEmpty && converted.nonEmpty) NullableSchema(union) else union
       case (None, List(single))                         => nullable(typedOne(single, description, fields, defs, seen))
       case (None, Nil) if fields.contains("properties") => nullable(objectSchema(fields, defs, seen, None))
-      // `{"type":"null"}`, or constraints with no `type` (`{"minLength":3}`): the checkable keywords as written, so
-      // no restriction is lost; with none, any value
-      case (None, Nil) => raw(fields, description)
+      // `{"type":"null"}`, or no type and no keyword: as written (a null type), or any value
+      case (None, Nil) => RawJsonSchema(asWritten(fields, defs, seen))
       case (None, first :: rest) =>
         val each = (first :: rest).map(t => typedOne(t, "", fields, defs, seen))
         nullable(AnyOfSchema[Value](description, each.head, each.tail: _*))
@@ -195,20 +256,20 @@ private[mcp] object MCPInputSchema {
     val values = fields.get("enum").flatMap(_.arrOpt).map(_.toList).orElse(fields.get("const").map(List(_)))
 
     schemaType match {
-      case "string" if values.forall(_.forall(_.strOpt.isDefined)) =>
+      case "string" =>
         StringSchema(description)
           .withEnum(values.map(_.flatMap(_.strOpt)))
           .withMinLength(int("minLength"))
           .withMaxLength(int("maxLength"))
           .withPattern(fields.get("pattern").flatMap(_.strOpt))
-      case "number" if values.isEmpty =>
+      case "number" =>
         NumberSchema(description)
           .withMinimum(inclusive("exclusiveMinimum", "minimum"))
           .withMaximum(inclusive("exclusiveMaximum", "maximum"))
           .withExclusiveMinimum(exclusive("exclusiveMinimum", "minimum"))
           .withExclusiveMaximum(exclusive("exclusiveMaximum", "maximum"))
           .withMultipleOf(double("multipleOf"))
-      case "integer" if values.isEmpty && integerBounds(fields) =>
+      case "integer" =>
         def intExclusive(flag: String, bound: String) = exclusive(flag, bound).map(_.toInt)
         def intInclusive(flag: String, bound: String) = inclusive(flag, bound).map(_.toInt)
         IntegerSchema(description)
@@ -217,7 +278,7 @@ private[mcp] object MCPInputSchema {
           .withExclusiveMinimum(intExclusive("exclusiveMinimum", "minimum"))
           .withExclusiveMaximum(intExclusive("exclusiveMaximum", "maximum"))
           .withMultipleOf(int("multipleOf"))
-      case "boolean" if values.isEmpty => BooleanSchema(description)
+      case "boolean" => BooleanSchema(description)
       case "array" =>
         val items = fields.get("items").map(convert(_, defs, seen)).getOrElse(RawJsonSchema(ujson.Obj()))
         val array = ArraySchema(description, items)
@@ -225,19 +286,10 @@ private[mcp] object MCPInputSchema {
           .withMaxItems(int("maxItems"))
         if (fields.get("uniqueItems").contains(ujson.Bool(true))) array.withUniqueItems() else array
       case "object" => objectSchema(fields, defs, seen, None)
-      // an enum of numbers or booleans, `null`, or a type the model has no case for: the checkable keywords as JSON
-      case _ => raw(fields + ("type" -> ujson.Str(schemaType)), description)
+      // a type the model has no case for (`expressible` sends none here): as written
+      case _ => RawJsonSchema(asWritten(fields + ("type" -> ujson.Str(schemaType)), defs, seen))
     }
   }
-
-  // Integer bounds the model can hold (whole numbers that fit an Int); otherwise the schema is kept as JSON
-  private def integerBounds(fields: Fields): Boolean =
-    Seq("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf").forall { key =>
-      fields.get(key) match {
-        case None | Some(_: ujson.Bool) => true
-        case Some(v)                    => v.numOpt.exists(n => n.isWhole && n.isValidInt)
-      }
-    }
 
   private def objectSchema(
     fields: Fields,
@@ -251,7 +303,7 @@ private[mcp] object MCPInputSchema {
     }
     val additional = fields.get("additionalProperties") match {
       case Some(ujson.Bool(allowed)) => allowed
-      case Some(_)                   => true // a schema for the extra keys: unexpressible, so not reached
+      case Some(_)                   => true // a schema for the extra keys: not expressible, so not reached
       case None                      => properties.isEmpty
     }
     val described = describe(fields)
@@ -260,30 +312,6 @@ private[mcp] object MCPInputSchema {
       properties,
       additional
     )
-  }
-
-  /**
-   * The keywords an agent's argument validator checks that carry a value, not a schema, as the server wrote them,
-   * with `description`: what a schema the model has no case for keeps, so no restriction is lost.
-   */
-  private def raw(fields: Fields, description: String): RawJsonSchema = {
-    val kept = Seq(
-      "type",
-      "enum",
-      "minLength",
-      "maxLength",
-      "pattern",
-      "minimum",
-      "maximum",
-      "exclusiveMinimum",
-      "exclusiveMaximum",
-      "multipleOf",
-      "minItems",
-      "maxItems",
-      "uniqueItems"
-    ).flatMap(key => fields.get(key).map(key -> _))
-    val withConst = fields.get("const").filterNot(_ => fields.contains("enum")).map(c => "enum" -> ujson.Arr(c))
-    RawJsonSchema(ujson.Obj.from((kept ++ withConst.toSeq) :+ ("description" -> ujson.Str(description))))
   }
 
   /**

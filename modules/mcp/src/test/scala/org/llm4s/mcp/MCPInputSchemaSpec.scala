@@ -14,6 +14,16 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
 
   private def property(inputSchema: ujson.Value, name: String): ujson.Value = rendered(inputSchema)("properties")(name)
 
+  /** `json` without the empty descriptions a typed subschema renders, to compare with what the server wrote. */
+  private def written(json: ujson.Value): ujson.Value = json match {
+    case obj: ujson.Obj =>
+      ujson.Obj.from(obj.value.toSeq.collect {
+        case (k, v) if !(k == "description" && v == ujson.Str("")) => k -> written(v)
+      })
+    case arr: ujson.Arr => ujson.Arr.from(arr.value.map(written))
+    case other          => other
+  }
+
   private def withProperty(name: String, schema: ujson.Value, extra: (String, ujson.Value)*): ujson.Obj =
     ujson.Obj.from(
       Seq("type" -> ujson.Str("object"), "properties" -> ujson.Obj(name -> schema)) ++ extra
@@ -29,7 +39,7 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
     rendered(withProperty("a", ujson.Obj("type" -> "string")))("additionalProperties") shouldBe ujson.Bool(false)
     val typedExtras =
       withProperty("a", ujson.Obj("type" -> "string"), "additionalProperties" -> ujson.Obj("type" -> "string"))
-    rendered(typedExtras)("additionalProperties") shouldBe ujson.Obj("type" -> "string") // kept as written
+    written(rendered(typedExtras)("additionalProperties")) shouldBe ujson.Obj("type" -> "string") // kept as written
   }
 
   it should "resolve a $ref into $defs or definitions, leaving no dangling reference" in {
@@ -103,7 +113,7 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
 
   it should "keep an enum of numbers, and a const, as the values allowed" in {
     property(withProperty("level", ujson.Obj("type" -> "integer", "enum" -> ujson.Arr(1, 2, 3))), "level") shouldBe
-      ujson.Obj("type" -> "integer", "enum" -> ujson.Arr(1, 2, 3), "description" -> "")
+      ujson.Obj("type" -> "integer", "enum" -> ujson.Arr(1, 2, 3))
     property(withProperty("kind", ujson.Obj("type" -> "string", "const" -> "fixed")), "kind")("enum") shouldBe ujson
       .Arr("fixed")
   }
@@ -146,11 +156,11 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
 
   it should "keep a null-only type, and constraints with no type, as written" in {
     property(withProperty("nothing", ujson.Obj("type" -> "null")), "nothing") shouldBe
-      ujson.Obj("type" -> "null", "description" -> "")
+      ujson.Obj("type" -> "null")
     property(withProperty("code", ujson.Obj("minLength" -> 3, "pattern" -> "^x")), "code") shouldBe
-      ujson.Obj("minLength" -> 3, "pattern" -> "^x", "description" -> "")
+      ujson.Obj("minLength" -> 3, "pattern" -> "^x")
     property(withProperty("n", ujson.Obj("minimum" -> 1, "exclusiveMaximum" -> 9)), "n") shouldBe
-      ujson.Obj("minimum" -> 1, "exclusiveMaximum" -> 9, "description" -> "")
+      ujson.Obj("minimum" -> 1, "exclusiveMaximum" -> 9)
   }
 
   it should "keep every checkable bound of a schema it keeps as JSON, such as an enum of numbers" in {
@@ -160,8 +170,7 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
     ) shouldBe ujson.Obj(
       "type"             -> "number",
       "enum"             -> ujson.Arr(1.5, 2.5),
-      "exclusiveMinimum" -> 1,
-      "description"      -> ""
+      "exclusiveMinimum" -> 1
     )
   }
 
@@ -199,8 +208,45 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
       "contains"    -> ujson.Obj("type" -> "array", "contains" -> ujson.Obj("type" -> "integer"))
     )
     unexpressible.foreach { case (label, schema) =>
-      withClue(s"$label: ")(property(withProperty("p", schema), "p") shouldBe schema)
+      withClue(s"$label: ")(written(property(withProperty("p", schema), "p")) shouldBe schema)
     }
+  }
+
+  it should "keep a schema as written unless every keyword is one its type carries, with a value it holds" in {
+    // One row per type: a keyword, or a value, the typed schema of that type cannot hold
+    val notFaithful: Seq[(String, ujson.Obj)] = Seq(
+      "an object enum"            -> ujson.Obj("type" -> "object", "enum" -> ujson.Arr(ujson.Obj("mode" -> "safe"))),
+      "an object const"           -> ujson.Obj("type" -> "object", "const" -> ujson.Obj("mode" -> "safe")),
+      "string: contentEncoding"   -> ujson.Obj("type" -> "string", "contentEncoding" -> "base64"),
+      "string: a non-string enum" -> ujson.Obj("type" -> "string", "enum" -> ujson.Arr("a", 1)),
+      "string: a fractional minLength" -> ujson.Obj("type" -> "string", "minLength" -> 1.5),
+      "number: an enum"                -> ujson.Obj("type" -> "number", "enum" -> ujson.Arr(1, 2)),
+      "number: a string bound"         -> ujson.Obj("type" -> "number", "minimum" -> "0"),
+      "integer: a fractional bound"    -> ujson.Obj("type" -> "integer", "minimum" -> 1.5),
+      "integer: a const"               -> ujson.Obj("type" -> "integer", "const" -> 3),
+      "boolean: an enum"               -> ujson.Obj("type" -> "boolean", "enum" -> ujson.Arr(true)),
+      "array: tuple items"         -> ujson.Obj("type" -> "array", "items" -> ujson.Arr(ujson.Obj("type" -> "string"))),
+      "array: a negative minItems" -> ujson.Obj("type" -> "array", "minItems" -> -1),
+      "object: a string additionalProperties" -> ujson.Obj("type" -> "object", "additionalProperties" -> "yes"),
+      "several types with a keyword"          -> ujson.Obj("type" -> ujson.Arr("string", "integer"), "minimum" -> 1),
+      "an unknown keyword"                    -> ujson.Obj("type" -> "string", "x-vendor" -> true)
+    )
+    notFaithful.foreach { case (label, schema) =>
+      withClue(s"$label: ")(written(property(withProperty("p", schema), "p")) shouldBe schema)
+    }
+  }
+
+  it should "follow a $ref only where a schema goes, never inside enum, const, default or examples" in {
+    val literal = ujson.Obj(
+      "required"   -> ujson.Arr("$ref"),
+      "properties" -> ujson.Obj("$ref" -> ujson.Obj("type" -> "string")),
+      "enum"       -> ujson.Arr(ujson.Obj("$ref" -> "literal")),
+      "const"      -> ujson.Obj("$ref" -> "#/$defs/A")
+    )
+    val p = property(withProperty("p", literal, "$defs" -> ujson.Obj("A" -> ujson.Obj("type" -> "integer"))), "p")
+    p("enum") shouldBe ujson.Arr(ujson.Obj("$ref" -> "literal"))
+    p("const") shouldBe ujson.Obj("$ref" -> "#/$defs/A")
+    p("properties")("$ref")("type").str shouldBe "string"
   }
 
   it should "keep a top-level schema the model cannot express as written, an object, with its references inlined" in {
@@ -210,7 +256,7 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
       "minProperties" -> 1,
       "$defs"         -> ujson.Obj("A" -> ujson.Obj("type" -> "string"))
     )
-    rendered(top) shouldBe ujson.Obj(
+    written(rendered(top)) shouldBe ujson.Obj(
       "type"          -> "object",
       "properties"    -> ujson.Obj("a" -> ujson.Obj("type" -> "string")),
       "minProperties" -> 1
