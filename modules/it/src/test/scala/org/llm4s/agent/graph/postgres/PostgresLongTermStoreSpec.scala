@@ -2,7 +2,6 @@ package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.harness.{ BackendRefused, LongTermStore, Namespace, StoreChange }
-import org.llm4s.error.ProcessingError
 import org.llm4s.it.tags.Docker
 import org.llm4s.types.Result
 import org.scalatest.{ BeforeAndAfterAll, EitherValues, OptionValues }
@@ -68,7 +67,7 @@ class PostgresLongTermStoreSpec
     val effect = keyOf(t)
     put(first.longTermStore(), "k", "kept", effect = effect, token = 5).value
     first.close()
-    first.longTermStore().get(ns, "k").left.value shouldBe a[ProcessingError]
+    first.longTermStore().get(ns, "k").left.value shouldBe a[GraphError.StoreClosed]
 
     val second = stores.checkpointer(schema).longTermStore()
     second.get(ns, "k").value.map(_.value.str) shouldBe Some("kept")
@@ -172,7 +171,8 @@ class PostgresLongTermStoreSpec
       c.rollback()
       refused
     }
-    held.left.value shouldBe a[ProcessingError]
+    // the call's bound reached before its commit: unavailable, nothing changed (#3264)
+    held.left.value shouldBe a[GraphError.StoreUnavailable]
     (System.nanoTime() - began).nanos should be < 10.seconds
     store.get(ns, "k").value shouldBe None
     count(schema, "checkpoint_store_applied") shouldBe 0

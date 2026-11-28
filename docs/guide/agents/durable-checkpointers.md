@@ -7,7 +7,7 @@ nav_order: 6
 parent: Agents
 grand_parent: User Guide
 cites_closed_issues: [1739, 1919]
-cites_issues: [3087, 3242, 3262, 3264]
+cites_issues: [3087, 3242, 3262, 3264, 3269]
 ---
 
 # Durable Checkpointers
@@ -656,8 +656,13 @@ yield files // thread state everywhere else, the shared store under /memories
   namespace), fenced by the run's claim token and recorded under the effect's key, so a run that is recovered on
   another machine applies each write once. Every call is bounded as the store's other calls are.
 - **A tenant has its own namespaces.** `StoreFileBackend` keeps each run's tenant's files apart; nothing reads
-  across namespaces. To offboard a tenant, delete its rows:
-  `DELETE FROM llm4s.checkpoint_store_items WHERE tenant_key = '=acme'` (an empty `tenant_key` is no tenant).
+  across namespaces. To offboard a tenant, `longTermStore.deleteTenant(Some(TenantId("acme")))` deletes every item of
+  its namespaces by an index (schema 8), and `deleteNamespace(ns)` forgets one namespace
+  ([#3269](https://github.com/llm4s/llm4s/issues/3269)). Neither is fenced: they are an operator's calls, so stop
+  the tenant's runs first. `InMemoryLongTermStore` has both, and `forgetScope` for a deleted thread's fence.
+- **A file read takes only what it reads.** `StoreFileBackend` reads a file by its key and lists a directory by its
+  prefix; only a listing from `/` reads the whole namespace. A write still checks the tree's shape in its
+  transaction.
 - **Items outlive threads.** Deleting a thread, `prune` and the retention sweep never remove an item, and none
   expires by age; `updated_at` is the database's clock at the last write. What the store keeps per thread - the
   applied keys of effects in flight, and the newest claim token it has seen - goes with the thread: the keys when

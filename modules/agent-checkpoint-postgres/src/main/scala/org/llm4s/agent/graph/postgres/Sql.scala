@@ -590,6 +590,12 @@ private[postgres] object Sql:
 
   private val storeColumns = "item_key, value_json, updated_at"
 
+  /** Deletes every item of namespace `?` (its digest, #3269). */
+  def deleteStoreNamespace(t: Tables): String = s"DELETE FROM ${t.storeItems} WHERE namespace_id = ?"
+
+  /** Deletes every item of tenant `?` (its key, `=` and the tenant or empty for none), by its index (#3269). */
+  def deleteStoreTenant(t: Tables): String = s"DELETE FROM ${t.storeItems} WHERE tenant_key = ?"
+
   def storeItem(t: Tables): String =
     s"SELECT $storeColumns FROM ${t.storeItems} WHERE namespace_id = ? AND item_key = ?"
 

@@ -529,6 +529,23 @@ class AgentWorkerSpec
     thrown.get should be > 2
   }
 
+  it should "close an entry whose thread does not decode at once, spending no attempt (#3264)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    val corrupt = new ForwardingCheckpointer(store) {
+      override def latest(threadId: ThreadId) =
+        if (threadId == on) Left(GraphError.StoreCorrupt("test store", "latest", "checkpoint", "not JSON"))
+        else super.latest(threadId)
+    }
+    val id = submit(store, on, maxAttempts = 5)
+    val worker = AgentWorker(store.runQueue, corrupt, Seq(QueuedAgent(agentOver(store, answering("x")))), fast, shortLease).value
+    started.add(worker)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.Unrunnable]
+    entry.attempts shouldBe empty
+  }
+
   it should "dead-letter an entry whose thread cannot be read, each failed read spending an attempt (#3093)" in {
     val store = InMemoryCheckpointer()
     val on    = thread()

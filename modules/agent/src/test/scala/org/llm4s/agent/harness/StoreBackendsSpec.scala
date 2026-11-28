@@ -215,7 +215,37 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
     refusal.message should include("larger than the limit")
   }
 
-  it should "refuse a namespace another writer left invalid as Corrupt, for every operation but delete" in {
+  // #3269: a read fetches its file by key, a listing what is under its directory - never the whole namespace
+  it should "read a file by its key and list a directory by its prefix, not the whole namespace" in {
+    val inner = InMemoryLongTermStore()
+    val asked = new java.util.concurrent.CopyOnWriteArrayList[String]()
+    val counting = new LongTermStore {
+      def limits                                      = inner.limits
+      def get(ns: Namespace, key: String)             = { asked.add(s"get $key"); inner.get(ns, key) }
+      def list(ns: Namespace, prefix: String, n: Int) = { asked.add(s"list '$prefix'"); inner.list(ns, prefix, n) }
+      def search(ns: Namespace, q: String, n: Int)    = inner.search(ns, q, n)
+      def modify[A: upickle.default.ReadWriter](
+        ns: Namespace,
+        key: String,
+        effect: org.llm4s.agent.graph.EffectKey,
+        token: FencingToken
+      )(
+        change: StoreView => Result[StoreChange[A]]
+      ) = inner.modify(ns, key, effect, token)(change)
+      def forget(key: org.llm4s.agent.graph.EffectKey, token: FencingToken) = inner.forget(key, token)
+    }
+    val files = storeFiles(counting)
+    files.write(p("/a/one"), "1", call()).value
+    files.write(p("/b/two"), "2", call()).value
+    asked.clear()
+    files.read(p("/a/one"), 0, 10, call()).value
+    asked.toArray.toVector shouldBe Vector("get /a/one")
+    asked.clear()
+    files.ls(p("/a"), 10, call()).value
+    asked.toArray.toVector shouldBe Vector("get /a", "list '/a/'")
+  }
+
+  it should "refuse a namespace another writer left invalid as Corrupt, for every operation but delete and a read" in {
     val memories = Namespace(None, Vector("memories"))
     def corrupt[A](r: Result[A], problem: String): Unit =
       r.left.value match {
@@ -250,7 +280,11 @@ class StoreBackendsSpec extends AnyFlatSpec with Matchers with EitherValues {
       val files = storeFiles(store)
       stored.foreach((key, value) => seed(store, key, value))
       corrupt(files.ls(VPath.root, 10, call()), problem)
-      corrupt(files.read(p("/x"), 0, 1, call()), problem)
+      // a read takes only the file it reads (#3269): a file elsewhere in the namespace is not its concern
+      files.read(p("/x"), 0, 1, call()).left.value match {
+        case b: BackendRefused => b.kind should not be BackendRefused.Kind.Corrupt
+        case _                 => ()
+      }
       corrupt(files.write(p("/new"), "y", call()), problem)
       corrupt(files.edit(p("/x"), "x", "y", replaceAll = false, call()), problem)
       corrupt(files.glob(Glob("**"), VPath.root, 10, call()), problem)

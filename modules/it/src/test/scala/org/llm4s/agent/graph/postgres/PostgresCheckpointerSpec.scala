@@ -279,7 +279,7 @@ class PostgresCheckpointerSpec
     store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value
     store.close()
     store.isClosed shouldBe true
-    store.latest(t).left.value shouldBe a[ProcessingError]
+    store.latest(t).left.value shouldBe a[GraphError.StoreClosed]
     val unreachable = PostgresCheckpointer
       .open("jdbc:postgresql://127.0.0.1:1/none", "nobody", Secret("nothing"), config.withConnectionTimeout(500.millis))
       .left
@@ -329,6 +329,7 @@ class PostgresCheckpointerSpec
       s"""DROP TABLE $q.checkpoint_store_items, $q.checkpoint_store_applied, $q.checkpoint_store_fences;
          |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
          |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
+         |DROP INDEX IF EXISTS $q.checkpoint_store_items_tenant;
          |UPDATE $q.checkpoint_schema SET version = 4""".stripMargin
     )
   }
@@ -345,6 +346,7 @@ class PostgresCheckpointerSpec
     val q = s""""${config.schema}""""
     PgCheckpointerDb.execute(
       s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
+         |DROP INDEX IF EXISTS $q.checkpoint_store_items_tenant;
          |UPDATE $q.checkpoint_schema SET version = 6""".stripMargin
     )
     val reopened = PgCheckpointerDb.store(config)

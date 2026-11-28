@@ -51,7 +51,7 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 7
+  val Current: Int = 8
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
@@ -65,8 +65,16 @@ private[postgres] object PostgresSchema:
       3 -> addRunQueue,
       4 -> addStopRequests,
       5 -> addLongTermStore,
-      6 -> addRetryAccounting
+      6 -> addRetryAccounting,
+      7 -> addStoreTenantIndex
     )
+
+  /**
+   * Version 8: the long-term store's items by tenant (#3269), so a tenant's offboarding (`LongTermStore.deleteTenant`)
+   * deletes by an index rather than scanning every item. Adds an index and changes no row.
+   */
+  private def addStoreTenantIndex(t: Tables): Vector[String] =
+    Vector(s"CREATE INDEX checkpoint_store_items_tenant ON ${t.storeItems} (tenant_key)")
 
   /**
    * Version 7: retry and crash accounting (#3257, #3287). Each queue entry gains `not_before`, the time by the
