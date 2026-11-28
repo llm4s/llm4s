@@ -37,6 +37,17 @@ class HarnessConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValue
     settings(load("").value) shouldBe settings(HarnessProfile.deepAgents)
   }
 
+  "The loaded permissions" should "guard the configured instruction and skill paths, as the preset does (#3268)" in {
+    val loaded = load(
+      """llm4s.agent.harness {
+        |  skills.sources = ["/project/skills"]
+        |  instructions.paths = ["/user/AGENTS.md"]
+        |}""".stripMargin
+    ).value
+    val asked = loaded.permissions.filter(_.decision == org.llm4s.agent.graph.middleware.PermissionDecision.Ask)
+    asked.map(_.target.pattern).distinct shouldBe Vector("/user/AGENTS.md", "/project/skills/**")
+  }
+
   "Overrides" should "change the settings they name, and only those" in {
     val loaded = load(
       """llm4s.agent.harness {

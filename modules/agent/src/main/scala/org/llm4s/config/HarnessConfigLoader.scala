@@ -44,7 +44,8 @@ import scala.util.Try
  * The loaded profile is checked as `AgentBuilder.build()` checks it, so a bad value is a `ConfigurationError` here -
  * except that `execute` may be selected before the sandbox it needs is set.
  * Backends, a sandbox, permission rules, a model compressor, specialist subagents and subagent models are code: set
- * them on the loaded profile.
+ * them on the loaded profile. Its permission rules are the preset's: approval for a write or delete of the
+ * configured instruction paths and skill sources, everything else allowed (#3268); `withPermissions` replaces them.
  */
 @Experimental
 object HarnessConfigLoader:
@@ -136,6 +137,8 @@ object HarnessConfigLoader:
       skills = skills,
       instructions = instructions,
       systemPrompt = systemPrompt,
+      // the preset's standing-file rules, for the configured instruction and skill paths (#3268)
+      permissions = HarnessProfile.presetPermissions(instructions, skills),
       toolTimeout = toolTimeout,
       retention = retention,
       subagents = subagents

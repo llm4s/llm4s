@@ -436,7 +436,7 @@ object HarnessProfile:
       offload = Some(OffloadConfig()),
       skills = Some(skills),
       instructions = Some(instructions),
-      permissions = standingFileRules(instructions.paths, skills.sources) ++ allowEverything,
+      permissions = presetPermissions(Some(instructions), Some(skills)),
       subagents = SubagentConfig.deepAgents
     )
 
@@ -452,6 +452,17 @@ object HarnessProfile:
       target    <- targets.distinct.toVector
       operation <- Vector(Operation.Write, Operation.Delete)
     yield PermissionRule.ask(operation, target)
+
+  /**
+   * The preset's rules for the instructions and skills it turns on: [[standingFileRules]] for their paths, then allow
+   * everything; none when neither is on, so nothing needs guarding (`HarnessConfigLoader` uses it too).
+   */
+  private[llm4s] def presetPermissions(
+    instructions: Option[InstructionsConfig],
+    skills: Option[SkillsConfig]
+  ): Vector[PermissionRule] =
+    if instructions.isEmpty && skills.isEmpty then Vector.empty
+    else standingFileRules(instructions.toSeq.flatMap(_.paths), skills.toSeq.flatMap(_.sources)) ++ allowEverything
 
   /** A rule allowing every operation on every target: what a profile without rules allows, as rules. */
   private val allowEverything: Vector[PermissionRule] =
