@@ -1,7 +1,9 @@
 package org.llm4s.toolapi.builtin.filesystem
 
-import java.nio.file.Path
+import java.nio.file.{ Files, Path, Paths }
 import java.util.Locale
+import scala.jdk.CollectionConverters.*
+import scala.util.{ Try, Using }
 
 /**
  * Configuration for file system tools.
@@ -17,9 +19,10 @@ import java.util.Locale
  * is `data/x` for them), so the two readings agree, and then judge and open that location, so what they open is what
  * they checked. `/srv/data` allows `/srv/data/x` and does not allow `/srv/data-secret/x`. A symbolic link that cannot be resolved (a dangling link) is refused. The tools open the
  * resolved path, so a link swapped in after the check does not redirect the open; a directory swapped for a link
- * between the resolution and the open is a race this narrows and does not close. A hard link is not contained: a
- * hard link inside an allowed directory to a file elsewhere is that file under an allowed name, and no path check
- * can tell it apart, so do not let untrusted parties create files in an allowed directory.
+ * between the resolution and the open is a race this narrows and does not close. A hard link is not something a path
+ * check can see: a hard link inside an allowed directory to a file elsewhere is that file under an allowed name. So
+ * `read_file` refuses a regular file that has other hard links, where the file system reports link counts (POSIX;
+ * not Windows), unless [[allowHardLinks]] is set (#3272).
  *
  * @param maxFileSize Maximum file size to read in bytes (default: 1MB)
  * @param allowedPaths Paths that are allowed to be accessed. None means any path. An entry that is itself reached
@@ -41,12 +44,22 @@ import java.util.Locale
  *                       `file_info` and `list_directory` describe the link itself. This does not decide whether a
  *                       link may lead out of the allowed area: a link anywhere on the path, final or not, is
  *                       resolved first, and the path is allowed only if its real location is.
+ * @param blockedNames File names blocked wherever they are, in every tool: a path with a component equal to one, or
+ *                     to one followed by `.` and a suffix (`.env` blocks `.env` and `.env.local`), whatever its case,
+ *                     is refused. The default is [[FileConfig.DefaultBlockedNames]], files that hold secrets in a
+ *                     project directory (`.env`, `.envrc`); `Seq.empty` turns it off.
+ * @param allowHardLinks Whether `read_file` may read a regular file that other hard links also name (default:
+ *                       false). A hard link planted in an allowed directory is a file elsewhere under an allowed
+ *                       name, which no path check can tell apart; where the file system reports no link count
+ *                       (Windows) a file is taken to have one.
  */
 case class FileConfig(
   maxFileSize: Long = 1024 * 1024,
   allowedPaths: Option[Seq[String]] = None,
   blockedPaths: Seq[String] = FileConfig.DefaultBlockedPaths,
-  followSymlinks: Boolean = false
+  followSymlinks: Boolean = false,
+  blockedNames: Seq[String] = FileConfig.DefaultBlockedNames,
+  allowHardLinks: Boolean = false
 ) {
 
   /**
@@ -56,17 +69,21 @@ case class FileConfig(
 
   /** The real path to open when `path` is allowed. The tools open this, not the path they were given. */
   private[builtin] def resolve(path: Path): Option[Path] =
-    PathPolicy.resolve(path, allowedPaths, blockedPaths)
+    PathPolicy.resolve(path, entries)
 
   /** The allowed and blocked entries resolved now, for checking many paths in a row (one shell command's). */
-  private[builtin] def entries: PathPolicy.Entries = PathPolicy.prepare(allowedPaths, blockedPaths)
+  private[builtin] def entries: PathPolicy.Entries = PathPolicy.prepare(allowedPaths, blockedPaths, blockedNames)
 
   /**
-   * The blocked paths for a tool description, with the user's home directory written `~`, so the description sent
-   * to the model provider does not carry the account name.
+   * The blocked paths and names for a tool description, with the user's home directory written `~` and other
+   * users' homes collapsed, so the description sent to the model provider carries no account name.
    */
   private[builtin] def describedBlockedPaths: String =
-    FileConfig.describe(blockedPaths, FileConfig.userHome)
+    (FileConfig.describe(blockedPaths, FileConfig.userHome) +: blockedNames).filter(_.nonEmpty).mkString(", ")
+
+  /** The allowed paths for a tool description, the home directory written `~` as for blocked paths. */
+  private[builtin] def describedAllowedPaths: Option[String] =
+    allowedPaths.map(FileConfig.describe(_, FileConfig.userHome))
 }
 
 object FileConfig {
@@ -100,7 +117,35 @@ object FileConfig {
    * lists them). Extend it rather than replace it:
    * `FileConfig(blockedPaths = FileConfig.DefaultBlockedPaths :+ "/srv/keys")`.
    */
-  lazy val DefaultBlockedPaths: Seq[String] = defaultBlockedPaths(Platform.current, userHome)
+  lazy val DefaultBlockedPaths: Seq[String] =
+    defaultBlockedPaths(Platform.current, userHome, userHome.toSeq.flatMap(otherHomes))
+
+  /**
+   * The default [[FileConfig.blockedNames]]: `.env` and `.envrc`, which hold a project's secrets wherever the project
+   * is (so `.env.local` and `.env.production` too).
+   */
+  val DefaultBlockedNames: Seq[String] = Seq(".env", ".envrc")
+
+  /**
+   * The other users' home directories beside `home`: the directories next to it when it is in a directory of homes
+   * (`/home`, `/Users`, `C:\Users`, matched without regard to case), read once, when [[DefaultBlockedPaths]] is first
+   * used. A home created later is not listed; an unreadable directory lists none.
+   */
+  private[builtin] def otherHomes(home: String): Seq[String] =
+    Try {
+      val own    = Paths.get(withoutTrailingSeparators(home)).toAbsolutePath.normalize()
+      val parent = Option(own.getParent).filter(p => isHomesDirectory(p))
+      parent.toSeq.flatMap { dir =>
+        Using.resource(Files.list(dir)) { children =>
+          children.iterator().asScala.filter(c => c != own && Files.isDirectory(c)).map(_.toString).toSeq.sorted
+        }
+      }
+    }.getOrElse(Seq.empty)
+
+  private def isHomesDirectory(dir: Path): Boolean =
+    Option(dir.getFileName).exists(n => HomesDirectoryNames.contains(n.toString.toLowerCase(Locale.ROOT)))
+
+  private val HomesDirectoryNames = Set("home", "users")
 
   /**
    * The default blocked paths for a platform and a home directory.
@@ -126,9 +171,20 @@ object FileConfig {
    *    CLI and PostgreSQL keep credentials there (`AppData\Roaming\gcloud`, `AppData\Roaming\gnupg`,
    *    `AppData\Roaming\GitHub CLI`, `AppData\Roaming\postgresql`).
    *
+   *  - Added in #3272, under the home directory: shell and REPL histories (`.bash_history`, `.zsh_history`, ...),
+   *    `.vault-token`, the Terraform, Cargo, Gradle (`.gradle/gradle.properties`), RubyGems, 1Password, Helm,
+   *    rclone, OCI, Databricks, Snowflake, s3cmd, Composer, NuGet, Yarn, pip, Poetry, container-registry and SOPS
+   *    credentials, editor extension storage, and the Chrome, Chromium, Brave, Edge, Firefox, Thunderbird and Safari
+   *    profiles, in each platform's location. `otherHomes` (the other users' home directories, [[otherHomes]]) are
+   *    blocked whole.
+   *
    * Without a home directory the home entries are left out.
    */
-  private[builtin] def defaultBlockedPaths(platform: Platform, home: Option[String]): Seq[String] = {
+  private[builtin] def defaultBlockedPaths(
+    platform: Platform,
+    home: Option[String],
+    otherHomes: Seq[String] = Seq.empty
+  ): Seq[String] = {
     val separator = if (platform == Platform.Windows) "\\" else "/"
     val system = platform match {
       case Platform.Posix   => PosixSystem ++ Seq("/boot", "/root", "/run")
@@ -137,12 +193,12 @@ object FileConfig {
     }
     val homeEntries = platform match {
       case Platform.Posix   => HomeCredentials :+ ".local/share/keyrings"
-      case Platform.MacOS   => HomeCredentials :+ "Library/Keychains"
+      case Platform.MacOS   => HomeCredentials ++ MacHomeCredentials
       case Platform.Windows => HomeCredentials ++ WindowsHomeCredentials
     }
     system ++ home.map(withoutTrailingSeparators).toSeq.flatMap { h =>
       homeEntries.map(relative => h + separator + relative.replace("/", separator))
-    }
+    } ++ otherHomes
   }
 
   private val PosixSystem = Seq("/etc", "/var", "/sys", "/proc", "/dev")
@@ -165,7 +221,75 @@ object FileConfig {
     ".m2/settings.xml",
     ".m2/settings-security.xml",
     ".ivy2/.credentials",
-    ".sbt/.credentials"
+    ".sbt/.credentials",
+    // added in #3272: shell and REPL histories, and more tools' credentials
+    ".bash_history",
+    ".zsh_history",
+    ".sh_history",
+    ".history",
+    ".local/share/fish/fish_history",
+    ".python_history",
+    ".node_repl_history",
+    ".psql_history",
+    ".mysql_history",
+    ".sqlite_history",
+    ".rediscli_history",
+    ".lesshst",
+    ".vault-token",
+    ".terraform.d/credentials.tfrc.json",
+    ".terraformrc",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".gradle/gradle.properties",
+    ".gem/credentials",
+    ".config/op",
+    ".op",
+    ".config/hub",
+    ".config/glab-cli",
+    ".config/helm",
+    ".config/doctl",
+    ".config/heroku",
+    ".config/rclone",
+    ".oci",
+    ".ibmcloud",
+    ".databrickscfg",
+    ".snowflake",
+    ".s3cfg",
+    ".boto",
+    ".config/composer/auth.json",
+    ".composer/auth.json",
+    ".nuget/NuGet/NuGet.Config",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".config/pip/pip.conf",
+    ".pip/pip.conf",
+    ".config/pypoetry/auth.toml",
+    ".config/containers/auth.json",
+    ".config/sops",
+    ".age",
+    ".config/age",
+    ".config/Code/User/globalStorage",
+    ".mozilla",
+    ".thunderbird",
+    ".config/google-chrome",
+    ".config/chromium",
+    ".config/BraveSoftware",
+    ".config/microsoft-edge",
+    ".var/app"
+  )
+
+  private val MacHomeCredentials = Seq(
+    "Library/Keychains",
+    "Library/Cookies",
+    "Library/Application Support/Google/Chrome",
+    "Library/Application Support/Chromium",
+    "Library/Application Support/BraveSoftware",
+    "Library/Application Support/Microsoft Edge",
+    "Library/Application Support/Firefox",
+    "Library/Safari",
+    "Library/Containers/com.apple.Safari",
+    "Library/Group Containers/2BUA8C4S2C.com.1password",
+    "Library/Application Support/Code/User/globalStorage"
   )
 
   private val WindowsHomeCredentials = Seq(
@@ -178,7 +302,21 @@ object FileConfig {
     "AppData/Roaming/gcloud",
     "AppData/Roaming/gnupg",
     "AppData/Roaming/GitHub CLI",
-    "AppData/Roaming/postgresql"
+    "AppData/Roaming/postgresql",
+    // added in #3272: browser profiles and more tools' credentials
+    "AppData/Local/Google/Chrome/User Data",
+    "AppData/Local/Chromium/User Data",
+    "AppData/Local/BraveSoftware",
+    "AppData/Local/Microsoft/Edge/User Data",
+    "AppData/Roaming/Mozilla",
+    "AppData/Roaming/Thunderbird",
+    "AppData/Roaming/NuGet/NuGet.Config",
+    "AppData/Roaming/pip",
+    "AppData/Roaming/pypoetry",
+    "AppData/Roaming/terraform.rc",
+    "AppData/Roaming/Code/User/globalStorage",
+    "AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine",
+    "AppData/Local/1Password"
   )
 
   private def withoutTrailingSeparators(path: String): String =
@@ -187,12 +325,28 @@ object FileConfig {
   /** `paths` joined for a tool description, with `home` written `~`. */
   private[builtin] def describe(paths: Seq[String], home: Option[String]): String = {
     val h = home.map(withoutTrailingSeparators).filter(_.nonEmpty)
-    paths
+    // the directory holding the homes, as it is spelled in `home`, and its separator
+    val homes = h.flatMap { h =>
+      val cut = math.max(h.lastIndexOf('/'), h.lastIndexOf('\\'))
+      Option.when(cut > 0)((h.take(cut), h.charAt(cut))).filter { case (dir, _) =>
+        HomesDirectoryNames.contains(
+          dir.drop(math.max(dir.lastIndexOf('/'), dir.lastIndexOf('\\')) + 1).toLowerCase(Locale.ROOT)
+        )
+      }
+    }
+    def isOtherHome(path: String): Boolean =
+      homes.exists { case (dir, sep) =>
+        val rest = withoutTrailingSeparators(path).stripPrefix(dir + sep)
+        rest != withoutTrailingSeparators(path) && rest.nonEmpty && !rest.exists(c => c == '/' || c == '\\') &&
+        !h.contains(withoutTrailingSeparators(path))
+      }
+    val others = homes.filter(_ => paths.exists(isOtherHome)).map { case (dir, sep) => s"$dir$sep* (other users)" }
+    (paths
+      .filterNot(isOtherHome)
       .map(path =>
         h.filter(h => path == h || path.startsWith(h + "/") || path.startsWith(h + "\\"))
           .fold(path)(h => "~" + path.drop(h.length))
-      )
-      .mkString(", ")
+      ) ++ others).mkString(", ")
   }
 }
 
@@ -210,13 +364,21 @@ object FileConfig {
  *                    refused when the existing file plus the new content would exceed it
  * @param allowOverwrite Whether to allow overwriting existing files (an overwrite replaces the file atomically)
  * @param createDirectories Whether to create parent directories if they don't exist
+ * @param allowHardLinks Whether an append may write to a regular file that other hard links also name (default:
+ *                       false): an append writes in place, so through a hard link planted in an allowed directory it
+ *                       would change a file elsewhere. A replace writes a new file, so it never does. Where the file
+ *                       system reports no link count (Windows) a file is taken to have one.
  */
 case class WriteConfig(
   allowedPaths: Seq[String],
   maxFileSize: Long = 10 * 1024 * 1024,
   allowOverwrite: Boolean = false,
-  createDirectories: Boolean = true
+  createDirectories: Boolean = true,
+  allowHardLinks: Boolean = false
 ) {
+
+  /** The allowed paths for a tool description, with the user's home directory written `~`. */
+  private[builtin] def describedAllowedPaths: String = FileConfig.describe(allowedPaths, FileConfig.userHome)
 
   /**
    * Check if a path is allowed for writing, by its real location (see the class documentation).

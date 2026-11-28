@@ -42,11 +42,15 @@ import scala.util.Try
  *
  * A symbolic link that cannot be resolved (a dangling link) is refused, since where it would lead is unknown.
  *
+ * A blocked name ([[FileConfig.blockedNames]]) blocks a path with a component equal to it, or to it followed by `.`
+ * and a suffix, whatever its case, in any of the three locations.
+ *
  * '''What this narrows and what it does not.''' The tools open the resolved path, not the one that was checked,
  * so a link swapped in after the check no longer redirects the open. A directory swapped for a link between the
  * resolution and the open is a race this does not close. A hard link is not a symbolic link: a hard link inside
- * an allowed directory to a file elsewhere is the file itself as far as any path check can tell, so it is not
- * contained.
+ * an allowed directory to a file elsewhere is the file itself as far as any path check can tell, so the tools that
+ * open a file's content refuse one with other hard links where the file system reports a count
+ * ([[hasOtherHardLinks]], #3272).
  */
 private[builtin] object PathPolicy {
 
@@ -129,7 +133,15 @@ private[builtin] object PathPolicy {
           (isRemoteRoot(lexical) && sameRoot(lexical, spelled)) || (isRemoteRoot(real) && sameRoot(real, spelled))
         })) ||
         entries.allowed.exists(roots => !roots.exists(inside)) ||
-        entries.blocked.exists(inside)
+        entries.blocked.exists(inside) ||
+        hasBlockedName(spelled, entries)
+    }
+
+  /** Whether a component of `path` is a blocked name, or a blocked name followed by `.` and a suffix. */
+  private def hasBlockedName(path: Path, entries: Entries): Boolean =
+    entries.blockedNames.nonEmpty && path.iterator().asScala.exists { component =>
+      val name = fold(component.toString)
+      entries.blockedNames.exists(blocked => name == blocked || name.startsWith(blocked + "."))
     }
 
   /**
@@ -252,12 +264,32 @@ private[builtin] object PathPolicy {
     private[PathPolicy] val allowed: Option[Seq[(Path, Path)]],
     private[PathPolicy] val blocked: Seq[(Path, Path)],
     private[PathPolicy] val blockedKeys: Set[AnyRef],
-    private[PathPolicy] val keyOf: Path => Option[AnyRef]
+    private[PathPolicy] val keyOf: Path => Option[AnyRef],
+    private[PathPolicy] val blockedNames: Seq[String] = Seq.empty
   )
 
   /** The entries of a policy, resolved now (see [[Entries]]). */
   def prepare(allowed: Option[Seq[String]], blocked: Seq[String]): Entries =
     prepare(allowed, blocked, fileKey)
+
+  /** As the `prepare` above, with names blocked wherever they are ([[FileConfig.blockedNames]]). */
+  def prepare(allowed: Option[Seq[String]], blocked: Seq[String], blockedNames: Seq[String]): Entries = {
+    val e = prepare(allowed, blocked, fileKey)
+    new Entries(e.allowed, e.blocked, e.blockedKeys, e.keyOf, blockedNames.map(fold).filter(_.nonEmpty))
+  }
+
+  /**
+   * Whether the regular file at `real` has other hard links, where the file system reports a link count (the POSIX
+   * `unix:nlink` attribute); `false` for anything else, and where no count is reported (Windows) (#3272).
+   */
+  def hasOtherHardLinks(real: Path): Boolean =
+    Try {
+      Files.isRegularFile(real, LinkOption.NOFOLLOW_LINKS) &&
+      (Files.getAttribute(real, "unix:nlink", LinkOption.NOFOLLOW_LINKS) match {
+        case n: Integer => n.intValue > 1
+        case _          => false
+      })
+    }.getOrElse(false)
 
   /**
    * As the `prepare` above, with the file identity it compares blocked entries by given, for tests (#3237): the
@@ -281,6 +313,7 @@ private[builtin] object PathPolicy {
 
   private def permitted(spelled: Path, physical: Path, lexical: Path, entries: Entries): Boolean = {
     val locations = Seq(physical, lexical)
+    !(spelled +: locations).exists(hasBlockedName(_, entries)) &&
     !entries.blocked.exists { case (blockedLexical, blockedReal) =>
       (spelled +: locations).exists(location => within(location, blockedLexical) || within(location, blockedReal))
     } &&

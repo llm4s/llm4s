@@ -96,7 +96,7 @@ object ListDirectoryTool {
       description = s"List contents of a directory. Returns file names, sizes, and types. " +
         s"Maximum entries: $MaxEntries. " +
         s"Blocked paths: ${config.describedBlockedPaths}. " +
-        config.allowedPaths.map(p => s"Allowed paths: ${p.mkString(", ")}").getOrElse(""),
+        config.describedAllowedPaths.map(p => s"Allowed paths: $p").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
       for {
@@ -145,6 +145,8 @@ object ListDirectoryTool {
                 .asScala
                 .toSeq
                 .filter(p => includeHidden || !p.getFileName.toString.startsWith("."))
+                // a write_file staging file a crash left behind is not an entry of the directory (#3272)
+                .filterNot(p => WriteFileTool.isStagingName(p.getFileName.toString))
                 .sortBy(_.getFileName.toString)
 
               val truncated      = allEntries.size > maxEntries

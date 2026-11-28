@@ -77,7 +77,7 @@ object ReadFileTool {
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
         s"Blocked paths: ${config.describedBlockedPaths}. " +
-        config.allowedPaths.map(p => s"Allowed paths: ${p.mkString(", ")}").getOrElse(""),
+        config.describedAllowedPaths.map(p => s"Allowed paths: $p").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
       for {
@@ -115,6 +115,9 @@ object ReadFileTool {
             Left(s"File not found: $pathStr")
           } else if (!Files.isRegularFile(path, linkOptions: _*)) {
             Left(s"Not a regular file: $pathStr")
+          } else if (!config.allowHardLinks && PathPolicy.hasOtherHardLinks(real)) {
+            // a hard link planted in an allowed directory is a file elsewhere under an allowed name (#3272)
+            Left(s"Access denied: '$pathStr' has other hard links, which are refused")
           } else {
             val fileSize = Files.size(real)
             if (fileSize > config.maxFileSize) {

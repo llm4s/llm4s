@@ -126,7 +126,9 @@ object ShellTool {
       description = s"Execute shell commands. " +
         s"Allowed commands: ${config.allowedCommands.mkString(", ")}. " +
         s"Timeout: ${config.timeout.toMillis}ms. " +
-        config.workingDirectory.map(d => s"Working directory: $d").getOrElse(""),
+        config.workingDirectory
+          .map(d => s"Working directory: ${FileConfig.describe(Seq(d), FileConfig.userHome)}")
+          .getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
       for {

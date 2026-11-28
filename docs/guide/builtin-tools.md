@@ -238,8 +238,11 @@ device path (`\\host\share\x`, `\\?\`, `\\.\`) is refused unless an allowed entr
 looking it up would open an SMB session to a host the model chose. `followSymlinks = false` (the default) additionally refuses a path that is itself a link when reading or
 listing; it does not decide whether a link may lead out of the allowed area, which is always refused. The tools open
 the resolved path; a directory swapped for a link between the check and the open is a race this narrows and does not
-close. A hard link inside an allowed directory to a file elsewhere is not contained: no path check can tell it from the
-file itself. On macOS `/var` is a link to `/private/var`, so the default blocklist's `/var` also blocks the temporary
+close. A hard link inside an allowed directory to a file elsewhere is that file under an allowed name, which no path
+check can tell apart, so `read_file` refuses a regular file with other hard links and `write_file` refuses to append to
+one, where the file system reports link counts (Linux, macOS; not Windows); `allowHardLinks = true` on `FileConfig` or
+`WriteConfig` turns this off. A replace writes a new file, so it never changes a file the link shared; it refuses a file
+with a setuid, setgid or sticky bit, which the replacement could not keep, and keeps the DOS hidden and system flags. On macOS `/var` is a link to `/private/var`, so the default blocklist's `/var` also blocks the temporary
 directories under `/private/var/folders`.
 
 The default blocklist, `FileConfig.DefaultBlockedPaths`, depends on the platform the JVM runs on:
@@ -252,7 +255,16 @@ The default blocklist, `FileConfig.DefaultBlockedPaths`, depends on the platform
 
 The common entries under the home directory (`user.home`) are `.ssh`, `.gnupg`, `.aws`, `.azure`, `.config/gcloud`,
 `.kube`, `.docker`, `.config/gh`, `.netrc`, `.git-credentials`, `.pgpass`, `.password-store`, `.npmrc`, `.pypirc`,
-`.m2/settings.xml`, `.m2/settings-security.xml`, `.ivy2/.credentials` and `.sbt/.credentials`. A blocked entry is
+`.m2/settings.xml`, `.m2/settings-security.xml`, `.ivy2/.credentials` and `.sbt/.credentials`, plus shell and REPL
+histories (`.bash_history`, `.zsh_history`, ...), `.vault-token`, the Terraform, Cargo, Gradle
+(`.gradle/gradle.properties`), RubyGems, 1Password, Helm, rclone, OCI, pip, Poetry, Composer, NuGet, Yarn and
+container-registry credentials, and the browser profiles (Chrome, Chromium, Brave, Edge, Firefox, Thunderbird, and
+Safari on macOS) in each platform's location; `FileConfig.defaultBlockedPaths` in the source is the full list. The
+other users' home directories beside the user's own (in `/home`, `/Users` or `C:\Users`) are blocked whole, as they
+are when the list is first used. `blockedNames` (default `.env`, `.envrc`) blocks a file name wherever it is: a path
+with a component equal to one, or to one followed by `.` and a suffix (`.env.local`), is refused. Tool descriptions
+write the home directory as `~` in blocked and allowed paths and the working directory, and other users' homes as
+`/home/* (other users)`, so they carry no account name. A blocked entry is
 matched without regard to case (`/ETC/hosts` is inside `/etc`), as a case-insensitive file system such as the macOS
 and Windows defaults requires. A Windows installed on a drive other than `C:` is not covered: add its directory, as
 in `FileConfig(blockedPaths = FileConfig.DefaultBlockedPaths :+ "D:\\Windows")`. A blocklist cannot name every
