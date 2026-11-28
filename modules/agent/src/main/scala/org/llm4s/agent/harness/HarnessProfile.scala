@@ -2,6 +2,7 @@ package org.llm4s.agent.harness
 
 import org.llm4s.agent.graph.RetentionPolicy
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, PermissionMiddleware, PermissionRule }
+import org.llm4s.agent.graph.tool.Operation
 import org.llm4s.agent.graph.tool.AgentTool
 import org.llm4s.annotation.Experimental
 import org.llm4s.context.ConversationTokenCounter
@@ -417,18 +418,44 @@ object HarnessProfile:
   /**
    * The opinionated preset: the file tools over a new `StateFileBackend`, todos, summarisation (with the model-free
    * digest compressor), offload of large results, skills under `/skills` and instructions in `/AGENTS.md`, each at
-   * its component's defaults, with the default prompt and no permission rules, and the general-purpose subagent
+   * its component's defaults, with the default prompt, and the general-purpose subagent
    * ([[SubagentConfig.deepAgents]]), offered through the `task` tool. Each call has its own backend.
+   *
+   * Its permission rules are [[standingFileRules]] for those paths: a write or delete of `/AGENTS.md` or anything
+   * under `/skills` asks for approval, since what is written there becomes part of the system prompt from the next
+   * run - a prompt injection in a tool result could otherwise make itself a standing instruction (#3268) - and every
+   * other call is allowed. `withPermissions` replaces them; keep [[standingFileRules]] in front of your own rules, or
+   * serve the instructions and skills from a read-only `StaticFileBackend`.
    */
   def deepAgents: HarnessProfile =
+    val skills       = SkillsConfig()
+    val instructions = InstructionsConfig()
     HarnessProfile(
       todos = Some(TodoConfig()),
       summarization = Some(SummarizationConfig()),
       offload = Some(OffloadConfig()),
-      skills = Some(SkillsConfig()),
-      instructions = Some(InstructionsConfig()),
+      skills = Some(skills),
+      instructions = Some(instructions),
+      permissions = standingFileRules(instructions.paths, skills.sources) ++ allowEverything,
       subagents = SubagentConfig.deepAgents
     )
+
+  /**
+   * Rules that ask approval for a `Write` or `Delete` of each instruction file in `instructionPaths` and of anything
+   * under each skill source in `skillSources` (#3268). They decide only those operations on those paths, so put them
+   * first and follow them with the rules for everything else: a `PermissionMiddleware` denies a call no rule matches.
+   */
+  def standingFileRules(instructionPaths: Seq[VPath], skillSources: Seq[VPath]): Vector[PermissionRule] =
+    val targets = instructionPaths.map(_.value) ++
+      skillSources.map(s => if s == VPath.root then "/**" else s"${s.value}/**")
+    for
+      target    <- targets.distinct.toVector
+      operation <- Vector(Operation.Write, Operation.Delete)
+    yield PermissionRule.ask(operation, target)
+
+  /** A rule allowing every operation on every target: what a profile without rules allows, as rules. */
+  private val allowEverything: Vector[PermissionRule] =
+    Operation.values.toVector.map(PermissionRule.allow(_, "**"))
 
   /**
    * The prompt `PromptMode.Default` gives `profile`: how to plan, act and verify, manage context and use tools safely,

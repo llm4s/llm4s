@@ -1062,7 +1062,8 @@ for {
   or resumed run reads again. A missing file is skipped.
 - **Editable when permitted.** The agent edits a file with `edit_file` (`FileTools(backend)`) over the same backend when the
   backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
-  scope read-only. A host backend refuses a path that names an existing file by another case or Unicode
+  scope read-only. `HarnessProfile.deepAgents` asks approval for it; a profile you build yourself has
+  no rule unless you add one, so the model can rewrite its own instructions. A host backend refuses a path that names an existing file by another case or Unicode
   normalisation than its own, so a rule for `/AGENTS.md` is not side-stepped by `/agents.md`.
 - **Bounded.** Each file at most `maxFileTokens` (default 1000), the section at most
   `maxTotalTokens` (2000); a file over either is cut and marked, files past a full section are left
@@ -1098,8 +1099,12 @@ for {
 
 - **`HarnessProfile.deepAgents`** turns everything on at its defaults: the file tools over a
   `StateFileBackend`, todos, summarisation (the model-free digest compressor), offload of large tool
-  results, skills under `/skills` and instructions in `/AGENTS.md`. `HarnessProfile()` is the file
-  tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
+  results, skills under `/skills` and instructions in `/AGENTS.md`. Its permission rules ask approval
+  before a write or delete of `/AGENTS.md` or anything under `/skills`, and allow everything else: what is
+  written there becomes part of the system prompt from the next run, so a prompt injection in a tool
+  result could otherwise make itself a standing instruction. `withPermissions` replaces the rules; keep
+  `HarnessProfile.standingFileRules(paths, sources)` in front of your own, or serve instructions and
+  skills from a read-only `StaticFileBackend`. `HarnessProfile()` is the file tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
   `withTools(ToolSelection.Only(...))`, `withTodos(None)`, `withToolTimeout`, `withRetention`, ...
 - **Subagents.** `deepAgents` also offers the general-purpose subagent through the `task` tool;
   `HarnessProfile()` offers none. See [Subagents in a harness](delegation#subagents-in-a-harness).

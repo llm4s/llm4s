@@ -95,7 +95,8 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
     gp.tools.filter(_.granted).map(_.name) shouldBe Vector("lookup")
     gp.tools.filterNot(_.granted).map(_.name) shouldBe FileTools.Names
     gp.delegates shouldBe false
-    gp.middleware shouldBe empty
+    // the preset's permission rules (#3268) bind the subagent too
+    gp.middleware shouldBe Vector("ancestor-permissions")
     gp.modelInherited shouldBe true
   }
 
@@ -118,7 +119,7 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
       .value
       .delegation
     plan.toString should include(
-      s"assistant -> general-purpose via task: tools [${FileTools.Names.mkString(", ")}, lookup (granted)]; middleware []"
+      s"assistant -> general-purpose via task: tools [${FileTools.Names.mkString(", ")}, lookup (granted)]; middleware [ancestor-permissions]"
     )
     plan.toString should include("does not delegate; depth 1 of 1")
   }
@@ -248,7 +249,9 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
     val rest = Vector("summarization", "tool-output-offload", "skills", "instructions", "todos", "mine")
     order(HarnessProfile.deepAgents.withPermissions(Vector(PermissionRule.allow(Operation.Invoke, "**")))) shouldBe
       ("permissions" +: "delegation" +: rest)
-    order(HarnessProfile.deepAgents) shouldBe ("delegation" +: rest)
+    // the preset has permission rules of its own (#3268)
+    order(HarnessProfile.deepAgents) shouldBe ("permissions" +: "delegation" +: rest)
+    order(HarnessProfile.deepAgents.withPermissions(Vector.empty)) shouldBe ("delegation" +: rest)
     // builder-level subagents without a harness stay innermost, as before
     Agent
       .builder("assistant", client)

@@ -994,6 +994,7 @@ No signature changed and no stored format changed; what is refused is new:
 | Before (1.0.0) | After |
 |---|---|
 | On Windows the shell tool passed an argument holding `"` to the program, which the JDK quotes without escaping: `sort 'x" /O "C:\out.txt'` was one operand to the checks and `/O` to `sort.exe` (#3271) | On Windows an argument holding a double quote is refused, with or without a path policy. The workspace runner already refused it |
+| `HarnessProfile.deepAgents` had no permission rules, and the instruction guide tells the model to edit `/AGENTS.md`, so a prompt injection in a tool result could rewrite the agent's standing instructions or skills, which are part of the system prompt from the next run (#3268) | The preset's rules are `HarnessProfile.standingFileRules` (ask for `Write` and `Delete` of `/AGENTS.md` and `/skills/**`) and an allow-all rule per operation, so a write there suspends the run for approval. The preset now installs a `PermissionMiddleware`, which its general-purpose subagent inherits. `withPermissions(Vector.empty)` restores the old behaviour |
 
 ## Guardrails see and keep every rewrite, and fail closed (#3231, #3232, #3233, #3234, #3235)
 
