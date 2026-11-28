@@ -41,7 +41,7 @@ object PostgresCheckpointerBackend:
   /** The `llm4s.agent.checkpointer.kind` this backend serves. */
   val Kind: String = "postgres"
 
-  /** The keys the `postgres` block may hold (`migrationTimeout`: #3089, read once that lands). */
+  /** The keys the `postgres` block may hold. */
   val Keys: Set[String] =
     Set("url", "user", "password", "schema", "callTimeout", "connectionTimeout", "maxPoolSize", "migrationTimeout")
 
