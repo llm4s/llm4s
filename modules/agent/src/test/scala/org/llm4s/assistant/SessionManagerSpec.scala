@@ -1,5 +1,7 @@
 package org.llm4s.assistant
 
+import scala.util.Using
+
 import org.llm4s.testutil.TestTimeLimit
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -114,11 +116,51 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
       uniqueSuffix = () => { calls += 1; s"stub-$calls" }
     )
 
-    manager.saveSession(createTestState("s1"), Some("Same Title"))
-    manager.saveSession(createTestState("s2"), Some("Same Title"))
+    manager.saveSession(createTestState("s1"), Some("Same Title"), overwrite = false)
+    val second = manager.saveSession(createTestState("s2"), Some("Same Title"), overwrite = false)
 
     calls shouldBe 1
     Files.exists(tempDir.resolve("Same_Title-stub-1.json")) shouldBe true
+    // the name it reports is one loadSession finds
+    second.map(_.title) shouldBe Right("Same Title-stub-1")
+    manager.loadSession("Same Title-stub-1").map(_.sessionId.value) shouldBe Right("s2")
+  }
+
+  it should "replace an earlier save under the same title, so loading it restores the latest (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-overwrite")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    manager.saveSession(createTestState("first"), Some("notes")).map(_.title) shouldBe Right("notes")
+    manager.saveSession(createTestState("second"), Some("notes")).map(_.title) shouldBe Right("notes")
+    manager.loadSession("notes").map(_.sessionId.value) shouldBe Right("second")
+    Using.resource(Files.list(dir))(_.toArray.length) shouldBe 2 // notes.json and notes.md, no temporary file left
+  }
+
+  it should "keep titles in other scripts apart, and never name a file by a dot, nothing or a device (#3277)" in {
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
+    manager.sanitizeFilename("日本語") should not be manager.sanitizeFilename("中文版")
+    manager.sanitizeFilename("日本語") shouldBe "日本語"
+    manager.sanitizeFilename("") shouldBe "_"
+    manager.sanitizeFilename("..") shouldBe "_.."
+    manager.sanitizeFilename("CON") shouldBe "_CON"
+    manager.sanitizeFilename("con.txt") shouldBe "_con.txt"
+    manager.sanitizeFilename("a/b:c") shouldBe "a_b_c"
+  }
+
+  it should "load a session a release before #3277 saved under its ASCII-only name" in {
+    val dir     = Files.createTempDirectory("sessions-legacy")
+    val manager = new SessionManager(DirectoryPath(dir.toString))
+    manager.saveSession(createTestState("legacy"), Some("___"))
+    manager.loadSession("日本語").map(_.sessionId.value) shouldBe Right("legacy")
+  }
+
+  it should "write the session files owner-only where the file system has POSIX permissions" in {
+    val dir = Files.createTempDirectory("sessions-private")
+    assume(dir.getFileSystem.supportedFileAttributeViews.contains("posix"), "POSIX permissions")
+    new SessionManager(DirectoryPath(dir.toString)).saveSession(createTestState("p"), Some("private"))
+    Seq("private.json", "private.md").foreach { name =>
+      java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(dir.resolve(name))) shouldBe
+        "rw-------"
+    }
   }
 
   // ==========================================================================

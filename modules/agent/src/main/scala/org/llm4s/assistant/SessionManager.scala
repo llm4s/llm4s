@@ -5,11 +5,13 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.error.AssistantError
 import org.llm4s.types.{ SessionId, DirectoryPath, FilePath }
 import cats.implicits._
-import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
+import java.nio.file.{ Files, Path, Paths, StandardCopyOption }
+import java.nio.file.attribute.PosixFilePermissions
 import java.nio.charset.StandardCharsets
+import java.text.Normalizer
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import scala.util.Try
+import scala.util.{ Try, Using }
 import org.slf4j.LoggerFactory
 import upickle.default._
 
@@ -46,7 +48,13 @@ import upickle.default._
  * }}}
  *
  * @param sessionDir Directory path where sessions are stored
- * @param uniqueSuffix Generator for the suffix used to disambiguate filename collisions; injectable for testing
+ * == Writes ==
+ * Each file is written to an owner-only temporary file beside it (POSIX permissions where the file system has them)
+ * and moved over the old one in one atomic rename, so a crash mid-write leaves the previous save whole, and a saved
+ * conversation is readable by its owner alone (#3277).
+ *
+ * @param uniqueSuffix Generator for the suffix used to disambiguate filename collisions when a save does not
+ *                     overwrite; injectable for testing
  * @see [[SessionState]] for the state being persisted
  * @see [[SessionInfo]] for session metadata returned after save
  */
@@ -89,17 +97,23 @@ class SessionManager(
   }
 
   /**
-   * Saves a session in both JSON and markdown formats
+   * Saves a session in both JSON and markdown formats, and returns what was saved: its `title` is the name to load it
+   * by. With `overwrite` (the default), a save under a title already saved replaces that save, so `loadSession(title)`
+   * restores the latest one; without it, the name gains a suffix (`title-<suffix>`) and nothing is replaced.
    */
-  def saveSession(state: SessionState, title: Option[String] = None): Either[AssistantError, SessionInfo] =
+  def saveSession(
+    state: SessionState,
+    title: Option[String] = None,
+    overwrite: Boolean = true
+  ): Either[AssistantError, SessionInfo] =
     state.messages match {
       case messages if messages.isEmpty =>
         Left(AssistantError.SessionError("No conversation to save", SessionId("unknown"), "save"))
       case messages =>
-        val sessionTitle = title.getOrElse("Session")
-        logger.info("Saving session {} with title: {}", state.sessionId, sessionTitle)
+        val requested = title.getOrElse("Untitled Session")
+        logger.info("Saving session {} with title: {}", state.sessionId, requested)
         ensureSessionDirectory().flatMap { _ =>
-          createFilePaths(title).flatMap { case (jsonPath, markdownPath) =>
+          createFilePaths(requested, overwrite).flatMap { case (sessionTitle, jsonPath, markdownPath) =>
             for {
               jsonContent     <- createJsonContent(state)
               markdownContent <- formatSessionContent(messages, sessionTitle, state.created)
@@ -140,7 +154,11 @@ class SessionManager(
    * Loads a session from JSON file by title
    */
   def loadSession(sessionTitle: String): Either[AssistantError, SessionState] = {
-    val jsonPath = Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.json")
+    // a session saved before #3277 has its non-ASCII characters as `_`: found by that name when not by its own
+    val jsonPath = Seq(sanitizeFilename(sessionTitle), legacyFilename(sessionTitle))
+      .map(name => Paths.get(sessionDir.value, s"$name.json"))
+      .find(Files.exists(_))
+      .getOrElse(Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.json"))
 
     for {
       _ <- ensureSessionDirectory()
@@ -167,11 +185,9 @@ class SessionManager(
    */
   def listRecentSessions(limit: Int = 5): Either[AssistantError, Seq[String]] =
     Try {
-      Files
-        .list(Paths.get(sessionDir.value))
-        .filter(_.toString.endsWith(".json"))
-        .toArray
-        .map(_.asInstanceOf[Path])
+      Using
+        .resource(Files.list(Paths.get(sessionDir.value)))(_.toArray.map(_.asInstanceOf[Path]))
+        .filter(_.getFileName.toString.endsWith(".json"))
         .sortBy(path => Try(Files.getLastModifiedTime(path)).getOrElse(java.nio.file.attribute.FileTime.fromMillis(0)))
         .reverse
         .take(limit)
@@ -183,17 +199,15 @@ class SessionManager(
   /**
    * Creates file paths for the session (both JSON and markdown)
    */
-  private def createFilePaths(title: Option[String]): Either[AssistantError, (Path, Path)] =
+  private def createFilePaths(title: String, overwrite: Boolean): Either[AssistantError, (String, Path, Path)] =
     Try {
-      val sessionTitle = title.getOrElse("Untitled Session")
-      val baseFilename = sanitizeFilename(sessionTitle)
-
-      // Handle naming collisions by appending numbers
-      val uniqueBasename = findUniqueFilename(baseFilename)
-
-      val jsonPath     = Paths.get(sessionDir.value, s"$uniqueBasename.json")
-      val markdownPath = Paths.get(sessionDir.value, s"$uniqueBasename.md")
-      (jsonPath, markdownPath)
+      val baseFilename = sanitizeFilename(title)
+      // without overwrite, a name already taken gains a suffix, and the title the caller loads it by gains it too
+      val suffix       = if (overwrite) None else findUniqueSuffix(baseFilename)
+      val basename     = suffix.fold(baseFilename)(s => s"$baseFilename-$s")
+      val jsonPath     = Paths.get(sessionDir.value, s"$basename.json")
+      val markdownPath = Paths.get(sessionDir.value, s"$basename.md")
+      (suffix.fold(title)(s => s"$title-$s"), jsonPath, markdownPath)
     }.toEither.leftMap(ex =>
       AssistantError.FileError(
         s"Failed to create file paths: ${ex.getMessage}",
@@ -203,19 +217,12 @@ class SessionManager(
       )
     )
 
-  /**
-   * Finds a unique filename, appending a generated suffix on collision
-   */
-  private def findUniqueFilename(baseFilename: String): String = {
+  /** A suffix for `baseFilename` when a session is already saved under it, else `None`. */
+  private def findUniqueSuffix(baseFilename: String): Option[String] = {
     def checkExists(filename: String): Boolean =
       Files.exists(Paths.get(sessionDir.value, s"$filename.json")) ||
         Files.exists(Paths.get(sessionDir.value, s"$filename.md"))
-
-    if (!checkExists(baseFilename)) {
-      baseFilename
-    } else {
-      s"$baseFilename-${uniqueSuffix()}"
-    }
+    Option.when(checkExists(baseFilename))(uniqueSuffix())
   }
 
   /**
@@ -253,16 +260,24 @@ class SessionManager(
   /**
    * Writes session content to file and returns file size
    */
-  private def writeSessionFile(filePath: Path, content: String): Either[AssistantError, Long] =
+  private def writeSessionFile(filePath: Path, content: String): Either[AssistantError, Long] = {
+    val dir   = filePath.toAbsolutePath.getParent
+    val posix = dir.getFileSystem.supportedFileAttributeViews.contains("posix")
     Try {
-      Files.write(
-        filePath,
-        content.getBytes(StandardCharsets.UTF_8),
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING
-      )
+      val temp =
+        if (posix) Files.createTempFile(dir, ".session-", ".tmp", PosixFilePermissions.asFileAttribute(OwnerOnly))
+        else Files.createTempFile(dir, ".session-", ".tmp")
+      val written = Try {
+        Files.write(temp, content.getBytes(StandardCharsets.UTF_8))
+        Files.move(temp, filePath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+      }
+      if (written.isFailure) Try(Files.deleteIfExists(temp))
+      written.get
       Files.size(filePath)
     }.toEither.leftMap(ex => AssistantError.fileWriteFailed(FilePath(filePath.toString), ex))
+  }
+
+  private val OwnerOnly = PosixFilePermissions.fromString("rw-------")
 
   /**
    * Creates session info from the saved session
@@ -306,9 +321,29 @@ class SessionManager(
        |""".stripMargin
 
   /**
-   * Sanitizes filename by removing invalid characters
+   * A title as a file name: NFC-normalised, every character that is not a letter, a digit, `.` or `-` (in any script,
+   * so two titles in another alphabet stay apart) as `_`, at most 50 characters; a name of dots only, an empty one or
+   * a Windows device name (`CON`, `NUL`, `COM1`...) is prefixed `_` (#3277).
    */
-  private def sanitizeFilename(filename: String): String =
+  private[assistant] def sanitizeFilename(filename: String): String = {
+    val name = Normalizer
+      .normalize(filename, Normalizer.Form.NFC)
+      .codePoints()
+      .toArray
+      .map(cp =>
+        if (Character.isLetterOrDigit(cp) || cp == '.' || cp == '-') new String(Character.toChars(cp)) else "_"
+      )
+      .take(50)
+      .mkString
+    val stem = name.takeWhile(_ != '.').toUpperCase(java.util.Locale.ROOT)
+    if (name.forall(_ == '.') || WindowsDeviceNames.contains(stem)) s"_$name" else name
+  }
+
+  private val WindowsDeviceNames =
+    Set("CON", "PRN", "AUX", "NUL") ++ (1 to 9).flatMap(i => Seq(s"COM$i", s"LPT$i"))
+
+  /** The file name a title had before #3277: every character but ASCII letters, digits, `.` and `-` as `_`. */
+  private def legacyFilename(filename: String): String =
     filename.replaceAll("[^a-zA-Z0-9.-]", "_").take(50)
 
 }
