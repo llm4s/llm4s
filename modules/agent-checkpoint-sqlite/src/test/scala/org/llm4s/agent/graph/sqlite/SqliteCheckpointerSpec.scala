@@ -762,7 +762,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       )
       .value
     val error = store.effect(thread, probe.key).left.value
-    error shouldBe a[org.llm4s.error.ProcessingError]
+    // a row that does not decode is typed, and not retryable (#3264)
+    error shouldBe a[GraphError.StoreCorrupt]
+    error.isRetryable shouldBe false
     error.message should include("effect record")
     store.close()
   }
@@ -846,10 +848,11 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
     def undecodable(result: Either[org.llm4s.error.LLMError, ?], operation: String, what: String): Unit =
       result.left.value match {
-        case e: ProcessingError =>
+        case e: GraphError.StoreCorrupt =>
           e.operation shouldBe s"sqlite-checkpointer.$operation"
-          e.message should (include(s"stored $what does not decode").and(include(db.toString)))
-        case other => fail(s"not a ProcessingError: $other")
+          e.what shouldBe what
+          e.message should include(db.toString)
+        case other => fail(s"not a StoreCorrupt: $other")
       }
     exec(db, "UPDATE llm4s_checkpoint_events SET record_json = '{not json'")
     undecodable(store.eventsAfter(thread, 0L, 10), "eventsAfter", "event")
@@ -874,7 +877,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
 
   // ---- connections ----
 
-  "A closed store" should "refuse every call with a ProcessingError, and close only once" in {
+  "A closed store" should "refuse every call with StoreClosed, and close only once" in {
     val store  = SqliteFiles.opened(SqliteFiles.fresh(), ManualClock(start))
     val thread = ThreadId("closed")
     store.isClosed shouldBe false
@@ -893,7 +896,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       store.deleteThread(thread, token, None)
     )
     calls.foreach { result =>
-      result.left.value shouldBe a[ProcessingError]
+      result.left.value shouldBe a[GraphError.StoreClosed]
       result.left.value.message should include("closed")
     }
   }
@@ -910,7 +913,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       val began  = System.nanoTime()
       val failed = store.commit(thread, Commit(token, events = Vector(event("blocked"))))
       (System.nanoTime() - began).nanos should be >= 150.millis // SQLite waits the whole timeout; a margin for timer granularity
-      failed.left.value shouldBe a[ProcessingError]
+      // busy for the whole timeout: unavailable, retryable, nothing changed (#3264)
+      failed.left.value shouldBe a[GraphError.StoreUnavailable]
+      failed.left.value.isRetryable shouldBe true
       // WAL: reads go on while another connection writes
       store.latest(thread).value.value.checkpoint.id shouldBe "c1"
       Using.resource(other.createStatement())(_.execute("ROLLBACK"): Unit)
@@ -1227,30 +1232,50 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       Option(result.poll(30, TimeUnit.SECONDS)).value
     }
     val error = failed.value.left.value
-    error shouldBe a[ProcessingError]
+    error shouldBe a[GraphError.StoreUnavailable]
     error.message should (include("busy").and(include(db.toString)))
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
     store.commit(thread, Commit(token, events = Vector(event("after")))).value.map(_.seq) shouldBe Vector(1L)
     store.close()
   }
 
-  it should "return CancelledError, with the flag set and nothing written, when interrupted waiting for its turn" in {
+  // #3264: one interrupt rule for every store - a flag set before the call decides nothing; one that arrives while
+  // the call waits for its turn cancels it, writing nothing
+  it should "write with the caller's interrupt flag set, and return CancelledError when interrupted waiting for its turn" in {
     val db     = SqliteFiles.fresh()
     val store  = SqliteFiles.opened(db, ManualClock(start))
     val thread = ThreadId("interrupted")
     val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     val result = new LinkedBlockingQueue[(Either[LLMError, Vector[EventRecord]], Boolean)]()
-    // interrupted before it asks for the gate, so the wait for its turn ends at once
     Thread.ofPlatform().start { () =>
       Thread.currentThread().interrupt()
       val committed = store.commit(thread, Commit(token, events = Vector(event("x"))))
       result.add(committed -> Thread.currentThread().isInterrupted): Unit
     }
     val (committed, flagged) = Option(result.poll(30, TimeUnit.SECONDS)).value
-    committed.left.value shouldBe a[CancelledError]
-    committed.left.value.context("operation") shouldBe "sqlite-checkpointer.commit"
+    committed.value.map(_.seq) shouldBe Vector(1L)
     flagged shouldBe true
-    store.eventsAfter(thread, 0L, 10).value shouldBe empty
+    // the gate held, as another store's write holds it: the waiting commit is interrupted
+    val waiting = new java.util.concurrent.atomic.AtomicReference[Thread]()
+    val cancelled = WriteGate
+      .of(db)
+      .value
+      .holding(1.minute) {
+        val outcome = new LinkedBlockingQueue[(Either[LLMError, Vector[EventRecord]], Boolean)]()
+        val t = Thread.ofPlatform().start { () =>
+          val r = store.commit(thread, Commit(token, events = Vector(event("y"))))
+          outcome.add(r -> Thread.currentThread().isInterrupted): Unit
+        }
+        waiting.set(t)
+        Thread.sleep(100)
+        t.interrupt()
+        Option(outcome.poll(30, TimeUnit.SECONDS)).value
+      }
+      .value
+    cancelled._1.left.value shouldBe a[CancelledError]
+    cancelled._1.left.value.context("operation") shouldBe "sqlite-checkpointer.commit"
+    cancelled._2 shouldBe true
+    store.eventsAfter(thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L)
     store.close()
   }
 

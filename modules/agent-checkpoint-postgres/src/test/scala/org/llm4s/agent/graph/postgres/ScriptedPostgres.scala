@@ -24,6 +24,9 @@ final private[postgres] case class ScriptedPostgres(
 ) {
   private val log = new CopyOnWriteArrayList[(String, Vector[Any])]()
 
+  /** When set, every commit fails as a connection reset mid-commit does: its outcome is unknown (#3262). */
+  @volatile var failCommits: Boolean = false
+
   /** Every statement made since the store opened, with its bound parameters. */
   def made: Vector[(String, Vector[Any])] = log.asScala.toVector
 
@@ -66,9 +69,10 @@ final private[postgres] case class ScriptedPostgres(
       .asInstanceOf[Connection]
     lazy val handler: InvocationHandler = (_: Any, method: Method, args: Array[AnyRef]) =>
       method.getName match {
-        case "prepareStatement" => statement(args(0).toString, self)
-        case "createStatement"  => statement("", self)
-        case "createArrayOf"    => textArray(args(1).asInstanceOf[Array[AnyRef]].toVector)
+        case "prepareStatement"      => statement(args(0).toString, self)
+        case "createStatement"       => statement("", self)
+        case "createArrayOf"         => textArray(args(1).asInstanceOf[Array[AnyRef]].toVector)
+        case "commit" if failCommits => throw new SQLException("connection reset", "08006")
         case "setAutoCommit" | "rollback" | "commit" | "abort" | "close" => null
         case "isClosed"                                                  => java.lang.Boolean.FALSE
         case "getNetworkTimeout"                                         => Integer.valueOf(0)

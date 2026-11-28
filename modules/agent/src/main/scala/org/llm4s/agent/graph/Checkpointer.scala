@@ -87,12 +87,21 @@ import scala.util.Try
  *    the checkpoint it answers with through [[prune]] while an open entry of the store's run queue names that run;
  *  - visit every thread it holds, tombstones included, through [[sweep]], a bounded page at a time, pruning each as
  *    [[prune]] does and reclaiming old tombstones, but never what the sweep's [[org.llm4s.agent.graph.SweepGuard SweepGuard]] protects;
- *  - return from every call within a bound it documents (#1919) - see below.
+ *  - return from every call within a bound it documents (#1919) - see below;
+ *  - treat a caller's interrupt flag the same way (#3264): a call made with the flag already set behaves as one made
+ *    without it - a commit lands, a release releases - and returns with the flag still set; only an interrupt that
+ *    arrives while the call waits may end it, with `Left(CancelledError)` and nothing changed;
+ *  - fail in kind (#3264): [[GraphError.StoreUnavailable]] for a call that could not be answered now and changed
+ *    nothing (busy, a bound reached, the storage unreachable: retryable), [[GraphError.StoreClosed]] once it is
+ *    closed, [[GraphError.StoreCorrupt]] for a stored row that does not decode, and [[GraphError.CommitOutcomeUnknown]]
+ *    for a write that failed while its commit was in flight (#3262); anything else is a `ProcessingError`.
  *
  * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
  * configuration (such as `SqliteCheckpointerConfig.busyTimeout`), within which every call returns, whatever its
  * storage is doing - waiting for a lock, for another connection's or process's write, for the store's own earlier
- * calls, or for a network - and a call that reaches the bound fails, changing nothing. [[awaitEventsAfter]] returns
+ * calls, or for a network - and a call that reaches the bound fails, changing nothing, except a write whose bound
+ * passes while its commit is in flight on a networked store, such as PostgreSQL: that call fails
+ * [[GraphError.CommitOutcomeUnknown]], since the commit may have landed (#3262). [[awaitEventsAfter]] returns
  * within its `timeout` plus that bound. A store that cannot bound some call - a disk that stalls inside a write, say,
  * which no driver can time out - documents which call, and why. Keep the bound well inside `ClaimPolicy.ttl -
  * ClaimPolicy.renewEvery`: a renewal must land within that, and a store that serialises its calls queues a renewal

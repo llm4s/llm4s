@@ -7,7 +7,7 @@ nav_order: 6
 parent: Agents
 grand_parent: User Guide
 cites_closed_issues: [1739, 1919]
-cites_issues: [3087, 3242]
+cites_issues: [3087, 3242, 3262, 3264]
 ---
 
 # Durable Checkpointers
@@ -284,7 +284,18 @@ Every store must return from each call within a bound it documents, and fail a c
 nothing ([#1919](https://github.com/llm4s/llm4s/issues/1919)). `SqliteCheckpointer`'s is twice its `busyTimeout`,
 plus the time its own SQL takes (see [The SQLite store](#the-sqlite-store)); `InMemoryCheckpointer` never waits on
 anything but its own brief lock. A store's bound should be well inside `ttl - renewEvery`, the time a renewal has
-to land, so that a slow call never costs a run its claim.
+to land, so that a slow call never costs a run its claim. One exception: a PostgreSQL write whose bound passes, or
+whose connection breaks, while its commit is in flight may have landed, so it fails `GraphError.CommitOutcomeUnknown`
+rather than claim it changed nothing. Read the thread before writing it again: a blind retry could add its events
+twice, or be refused as conflicting with itself ([#3262](https://github.com/llm4s/llm4s/issues/3262)).
+
+Every store fails in kind ([#3264](https://github.com/llm4s/llm4s/issues/3264)): `GraphError.StoreUnavailable` for a
+call it could not answer now and that changed nothing (busy for its bound, a timeout, the database unreachable;
+`isRetryable` is `true`), `GraphError.StoreClosed` once it is closed, `GraphError.StoreCorrupt` for a stored row that
+does not decode (not retryable: the row reads the same next time), and `CommitOutcomeUnknown` as above. Anything else
+is a `ProcessingError`. And every store treats a caller's interrupt flag the same way: a call made with the flag
+already set behaves as one made without it, and returns with the flag still set; only an interrupt that arrives
+while the call waits (for SQLite's write gate, say) ends it, with `CancelledError` and nothing changed.
 
 The runtime bounds two waits itself, both by `2 × ttl`, so that a store that breaks the contract cannot hold a
 run's result or its thread:
@@ -1120,7 +1131,10 @@ the contract. In short:
   root threads only, by an index, within your bound;
 - return from every call within a bound you document - a configured timeout - whatever the storage is doing:
   waiting for a lock, another connection's write, the store's own earlier calls or the network. A call that reaches
-  it fails, changing nothing; `awaitEventsAfter` returns within its `timeout` plus the bound. Say which calls, if
+  it fails, changing nothing (`GraphError.StoreUnavailable`), unless the commit was already in flight
+  (`GraphError.CommitOutcomeUnknown`); `awaitEventsAfter` returns within its `timeout` plus the bound. A row that
+  does not decode is `GraphError.StoreCorrupt`, a closed store `GraphError.StoreClosed`; a call made with the
+  caller's interrupt flag set behaves as without it. Say which calls, if
   any, you cannot bound, and why. Keep the bound well inside `ttl - renewEvery` (see
   [When the store hangs](#when-the-store-hangs)).
 

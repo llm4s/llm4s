@@ -896,12 +896,15 @@ final class PostgresCheckpointer private (
     timeout: FiniteDuration = callTimeout,
     migration: Boolean = false
   )(body: Connection => Result[A]): Result[A] =
-    if shut then Left(failure(operation, "the store is closed", None))
+    if shut then
+      Left(GraphError.StoreClosed(PostgresSchema.description(config.schema), s"postgres-checkpointer.$operation"))
     else
       // a flag set before the call decides nothing here: on a virtual thread it would close the socket
       val flagged = Thread.interrupted()
+      // set once the transaction's commit is sent: a failure from then on may have landed (#3262)
+      var committing = false
       val result = Try(dataSource.getConnection()).toEither.left
-        .map(e => failure(operation, describe(e), Some(e)))
+        .map(e => unavailable(operation, describe(e)))
         .flatMap { c =>
           val watch = Watch.arm(c, timeout)
           // a migration's statements may outlast the pool's socket timeout: its connection waits as long as its bound
@@ -919,6 +922,7 @@ final class PostgresCheckpointer private (
               execute(c, begin)
               val result = body(c)
               if result.isRight then
+                committing = true
                 c.commit()
                 guard.committed = true
               result
@@ -934,7 +938,15 @@ final class PostgresCheckpointer private (
             ).isSuccess
           if !returned then discard(c)
           outcome.toEither.left.map { e =>
-            if aborted then failure(operation, timedOut(timeout), Some(e))
+            // a write that failed while its commit was in flight may have landed: its outcome is unknown (#3262)
+            if committing && !migration && !begin.contains("READ ONLY") then
+              GraphError.CommitOutcomeUnknown(
+                PostgresSchema.description(config.schema),
+                s"postgres-checkpointer.$operation",
+                if aborted then timedOut(timeout) else describe(e)
+              )
+            else if aborted || transientState(e) then
+              unavailable(operation, if aborted then timedOut(timeout) else describe(e))
             else if e.isInstanceOf[UnstorableText] then
               val unstorable = e.asInstanceOf[UnstorableText]
               ValidationError(
@@ -1335,10 +1347,31 @@ object PostgresCheckpointer:
       cause
     )
 
-  private def undecodable(operation: String, what: String, problem: String, cause: Option[Throwable])(using
-    ErrorContext
-  ): LLMError =
-    failure(operation, s"a stored $what does not decode: $problem", cause)
+  private def undecodable(
+    operation: String,
+    what: String,
+    problem: String,
+    @scala.annotation.unused cause: Option[Throwable]
+  )(using context: ErrorContext): LLMError =
+    // a row that does not decode is not a failure to retry (#3264)
+    GraphError.StoreCorrupt(
+      PostgresSchema.description(context.schema),
+      s"postgres-checkpointer.$operation",
+      what,
+      problem
+    )
+
+  /** A call that could not be answered now, changing nothing (#3264): the database unreachable, or a bound reached. */
+  private def unavailable(operation: String, detail: String)(using context: ErrorContext): LLMError =
+    GraphError.StoreUnavailable(PostgresSchema.description(context.schema), s"postgres-checkpointer.$operation", detail)
+
+  /**
+   * Whether `e` is a failure the database reports as passing: a timeout it enforced (57014, 55P03, 25P03), a lost or
+   * refused connection (class 08), or a server shutting down (57P01-57P03) - the call changed nothing.
+   */
+  private def transientState(e: Throwable): Boolean = sqlState(e).exists { state =>
+    state.startsWith("08") || Set("57014", "55P03", "25P03", "57P01", "57P02", "57P03")(state)
+  }
 
   private[postgres] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>

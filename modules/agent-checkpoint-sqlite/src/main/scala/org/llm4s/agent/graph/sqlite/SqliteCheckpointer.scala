@@ -845,15 +845,21 @@ final class SqliteCheckpointer private (
    * busy file, or a disk that stalls - must not hold every later call of the store with it.
    */
   private def guarded[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
-    if !lockBy(deadline) then Left(failure(operation, storeBusy(busyTimeout), None))
+    if !lockBy(deadline) then Left(unavailable(operation, storeBusy(busyTimeout)))
     else
       Using.resource(Unlock(lock)) { _ =>
-        if shut then Left(failure(operation, "the store is closed", None))
+        if shut then Left(GraphError.StoreClosed(s"SQLite file $path", s"sqlite-checkpointer.$operation"))
         else
-          Try(body(connection)).toEither.left
-            .map(e => failure(operation, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-            .flatten
+          Try(body(connection)).toEither.left.map { e =>
+            // a file another process held for the whole busy timeout: retry later (#3264)
+            val message = Option(e.getMessage).getOrElse(e.getClass.getName)
+            if isBusy(e) then unavailable(operation, message) else failure(operation, message, Some(e))
+          }.flatten
       }
+
+  /** A call that could not be answered now, changing nothing (#3264). */
+  private def unavailable(operation: String, detail: String): LLMError =
+    GraphError.StoreUnavailable(s"SQLite file $path", s"sqlite-checkpointer.$operation", detail)
 
   /**
    * Takes the store's lock, waiting at most until `deadline` (a `System.nanoTime` value); whether it was taken. As
@@ -889,6 +895,14 @@ final class SqliteCheckpointer private (
    */
   private[sqlite] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     val deadline = System.nanoTime() + busyTimeout.toNanos
+    // the one interrupt rule of every store (#3264): a flag set before the call decides nothing, and is set again on
+    // return; an interrupt while the call waits for the gate cancels it
+    val flagged = Thread.interrupted()
+    val result  = writingUnflagged(operation, deadline)(body)
+    if flagged then Thread.currentThread().interrupt()
+    result
+
+  private def writingUnflagged[A](operation: String, deadline: Long)(body: Connection => Result[A]): Result[A] =
     guarded(operation, deadline) { c =>
       val written = CancelledError.catchInterrupt {
         gate.holding(math.max(0L, deadline - System.nanoTime()).nanos) {
@@ -909,7 +923,7 @@ final class SqliteCheckpointer private (
       }
       written match
         case Right(Some(result)) => result
-        case Right(None)         => Left(failure(operation, gateTimedOut(busyTimeout), None))
+        case Right(None)         => Left(unavailable(operation, gateTimedOut(busyTimeout)))
         case Left(interrupted) =>
           Thread.currentThread().interrupt()
           Left(CancelledError(s"sqlite-checkpointer.$operation", Some(interrupted)))
@@ -1104,10 +1118,16 @@ object SqliteCheckpointer:
   ): LLMError =
     ProcessingError(s"sqlite-checkpointer.$operation", s"$message (${context.path})", cause)
 
-  private def undecodable(operation: String, what: String, problem: String, cause: Option[Throwable])(using
-    ErrorContext
+  private def undecodable(
+    operation: String,
+    what: String,
+    problem: String,
+    @scala.annotation.unused cause: Option[Throwable]
+  )(using
+    context: ErrorContext
   ): LLMError =
-    failure(operation, s"a stored $what does not decode: $problem", cause)
+    // a row that does not decode is not a failure to retry (#3264)
+    GraphError.StoreCorrupt(s"SQLite file ${context.path}", s"sqlite-checkpointer.$operation", what, problem)
 
   /** `body`, decoding stored rows; a row that does not decode is a `ProcessingError` naming the operation and file. */
   private[sqlite] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
