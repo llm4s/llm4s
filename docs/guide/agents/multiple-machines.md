@@ -288,12 +288,22 @@ llm4s.agent.worker.sweep {
   every = 5 minutes
   batchSize = 100
   tombstoneAge = 7 days                                      # unset: tombstones are kept
+  threadAge = 90 days                                        # unset: no thread is ever deleted
   retention { maxAge = 30 days, maxCheckpoints = 20, maxEvents = 10000 }   # unset keys remove nothing
 }
 ```
 
-- Each pass prunes every thread by `retention`, reclaims the tombstones of threads deleted more than `tombstoneAge`
-  ago, and reclaims closed queue entries older than `llm4s.agent.queue.ticketLifetime`. Entries are reclaimed even
+**Retention prunes a thread's history; it never removes the thread.** Every thread keeps its latest checkpoint - the
+whole conversation's state - its effect records, metadata and registry row, however old, until it is deleted. Set
+`threadAge` to have the sweep delete them: a settled top-level thread (its latest checkpoint `Completed` or `Failed`)
+that the store has not updated for `threadAge`, that no live run holds, that has no child threads, and that no open
+queue entry names. The sweep claims it, checks it has not changed, and deletes it under the claim, so a run that
+starts meanwhile is never cut. A thread waiting on an approval (`Suspended`) or for `recover` is kept. To find old
+threads yourself, `checkpointer.threads(ThreadQuery(tenant).withUpdatedBefore(cutoff).withOldestFirst(true))` lists a
+tenant's oldest first.
+
+- Each pass prunes every thread by `retention`, deletes the idle threads `threadAge` names, reclaims the tombstones of
+  threads deleted more than `tombstoneAge` ago, and reclaims closed queue entries older than `llm4s.agent.queue.ticketLifetime`. Entries are reclaimed even
   when the checkpoint sweep fails. A thread that cannot be pruned is logged and skipped, and tried again on the next
   pass.
 - A thread with an open queue entry is still pruned, but keeps the newest checkpoint each of the entry's attempts

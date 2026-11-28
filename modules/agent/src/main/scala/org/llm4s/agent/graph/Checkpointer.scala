@@ -783,6 +783,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val visited = page.take(policy.batchSize)
     // asked outside the lock: the guard may read another store
     guard.retained(visited).flatMap { protectedRuns =>
+      // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+      policy.threadAge.foreach { age =>
+        val idleBefore = clock.instant().minusNanos(age.toNanos)
+        visited.foreach { t =>
+          val updated = withLock(lock)(threads.get(t.value).filter(_.history.nonEmpty).map(_.updatedAt))
+          RetentionSweep.removeIdle(this, t, idleBefore, updated, protectedRuns): Unit
+        }
+      }
       val cutoff = policy.tombstoneAge.map(age => clock.instant().minusNanos(age.toNanos))
       // each thread under the lock on its own, so a sweep never holds every other call for a whole page, and a
       // thread whose prune fails is skipped rather than failing the page (#3086)
@@ -932,8 +940,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   def threads(query: ThreadQuery): Result[ThreadPage] = withLock(lock) {
     val listed = registered(query.tenantId).filter(query.matches)
-    val after  = query.after.fold(listed)(cursor => listed.filter(t => RegistryOrder.before(t.cursor, cursor)))
-    Right(ThreadPage.of(after.sorted(using RegistryOrder.newestFirst).take(query.limit + 1), query.limit))
+    // the page's order: newest first, or oldest first (#3260), `after` a cursor in that order
+    val after = query.after.fold(listed)(cursor =>
+      listed.filter(t =>
+        if query.oldestFirst then RegistryOrder.before(cursor, t.cursor) else RegistryOrder.before(t.cursor, cursor)
+      )
+    )
+    val order = if query.oldestFirst then RegistryOrder.newestFirst.reverse else RegistryOrder.newestFirst
+    Right(ThreadPage.of(after.sorted(using order).take(query.limit + 1), query.limit))
   }
 
   def incompleteThreads(

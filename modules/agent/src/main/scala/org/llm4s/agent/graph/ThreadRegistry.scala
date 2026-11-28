@@ -126,7 +126,10 @@ final case class ThreadCursor(updatedAt: Instant, threadId: ThreadId)
  *  - `status`: only threads of that [[ThreadStatus]];
  *  - `agent`: only threads whose latest checkpoint is of that graph (`GraphSnapshot.graphId`; an `Agent`'s is its id);
  *  - `metadata`: only threads whose metadata holds every one of these entries ([[ThreadMetadata.matches]]);
- *  - `updatedSince`: only threads the store changed at or after this instant, by its clock.
+ *  - `updatedSince`: only threads the store changed at or after this instant, by its clock;
+ *  - `updatedBefore`: only threads the store last changed before this instant, by its clock (#3260);
+ *  - `oldestFirst`: the page's order, oldest first by [[ThreadSummary.updatedAt]] (ties by thread id, ascending), and
+ *    `after` a cursor in that order: with `updatedBefore`, what finds a tenant's oldest threads (#3260).
  */
 @Experimental
 final case class ThreadQuery private (
@@ -136,8 +139,13 @@ final case class ThreadQuery private (
   metadata: ThreadMetadata,
   updatedSince: Option[Instant],
   after: Option[ThreadCursor],
-  limit: Int
+  limit: Int,
+  updatedBefore: Option[Instant],
+  oldestFirst: Boolean
 ):
+  def withUpdatedBefore(at: Instant): ThreadQuery          = copy(updatedBefore = Some(at))
+  def withUpdatedBefore(at: Option[Instant]): ThreadQuery  = copy(updatedBefore = at)
+  def withOldestFirst(oldest: Boolean): ThreadQuery        = copy(oldestFirst = oldest)
   def withTenantId(t: TenantId): ThreadQuery               = copy(tenantId = Some(t))
   def withTenantId(t: Option[TenantId]): ThreadQuery       = copy(tenantId = t)
   def withStatus(s: ThreadStatus): ThreadQuery             = copy(status = Some(s))
@@ -154,7 +162,8 @@ final case class ThreadQuery private (
   /** Whether `thread` passes every filter but the page's position and size. */
   def matches(thread: ThreadSummary): Boolean =
     thread.tenantId == tenantId && status.forall(_ == thread.status) && agent.forall(_ == thread.agent) &&
-      thread.metadata.matches(metadata) && updatedSince.forall(at => !thread.updatedAt.isBefore(at))
+      thread.metadata.matches(metadata) && updatedSince.forall(at => !thread.updatedAt.isBefore(at)) &&
+      updatedBefore.forall(at => thread.updatedAt.isBefore(at))
 
 @Experimental
 object ThreadQuery:
@@ -172,8 +181,11 @@ object ThreadQuery:
     metadata: ThreadMetadata = ThreadMetadata.empty,
     updatedSince: Option[Instant] = None,
     after: Option[ThreadCursor] = None,
-    limit: Int = DefaultLimit
-  ): ThreadQuery = checked(new ThreadQuery(tenantId, status, agent, metadata, updatedSince, after, limit))
+    limit: Int = DefaultLimit,
+    updatedBefore: Option[Instant] = None,
+    oldestFirst: Boolean = false
+  ): ThreadQuery =
+    checked(new ThreadQuery(tenantId, status, agent, metadata, updatedSince, after, limit, updatedBefore, oldestFirst))
 
   /** A page size a registry call accepts - 1 to [[MaxLimit]] - or a `ValidationError`. */
   def checkLimit(limit: Int): Result[Int] =

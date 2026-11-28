@@ -572,6 +572,22 @@ final class SqliteCheckpointer private (
     }.flatMap { page =>
       val visited = page.take(policy.batchSize)
       guard.retained(visited).flatMap { protectedRuns =>
+        // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+        policy.threadAge.foreach { age =>
+          val idleBefore = clock.instant().minusNanos(age.toNanos)
+          visited.foreach { t =>
+            val updated = reading("sweep") { c =>
+              Right(
+                query(
+                  c,
+                  "SELECT updated_nanos FROM llm4s_checkpoint_threads WHERE thread_id = ? AND updated_nanos IS NOT NULL",
+                  t.value
+                )(rows => fromEpochNanos(rows.getLong(1))).headOption
+              )
+            }
+            updated.foreach(at => RetentionSweep.removeIdle(this, t, idleBefore, at, protectedRuns): Unit)
+          }
+        }
         val cutoff = policy.tombstoneAge.map(age => epochNanos(clock.instant().minusNanos(age.toNanos)))
         RetentionSweep
           .visit[RetentionSweep.PrunePlan](visited, sweepBudget, s"SqliteCheckpointer($path)", shut) {
@@ -1184,10 +1200,11 @@ object SqliteCheckpointer:
 
   /** The statement and parameters of a page of `query`, its claims judged at `now`. */
   private[sqlite] def threadsStatement(query: ThreadQuery, now: Instant): (String, Vector[Any]) =
-    registryStatement(query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+    registryStatement(query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
       query.updatedSince.foreach(since => where.add("updated_nanos >= ?", epochNanos(since)))
+      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", epochNanos(before)))
       query.metadata.entries.toVector.sortBy(_._1).foreach { (key, value) =>
         where.add(
           "thread_id IN (SELECT thread_id FROM llm4s_checkpoint_thread_metadata WHERE key = ? AND value = ?)",

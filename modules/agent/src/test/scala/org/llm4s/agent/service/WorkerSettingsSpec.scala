@@ -50,6 +50,7 @@ class WorkerSettingsSpec extends AnyFlatSpec with Matchers with EitherValues {
           |    every = 10 minutes
           |    batchSize = 50
           |    tombstoneAge = 7 days
+          |    threadAge = 90 days
           |    retention { maxAge = 30 days, maxCheckpoints = 20 }
           |  }
           |  label = "pod-1"
@@ -63,7 +64,12 @@ class WorkerSettingsSpec extends AnyFlatSpec with Matchers with EitherValues {
       drainGrace = 1.minute,
       exitTimeout = 5.seconds,
       sweepEvery = Some(10.minutes),
-      sweep = SweepPolicy(RetentionPolicy(maxAge = Some(30.days), maxCheckpoints = Some(20)), Some(7.days), 50),
+      sweep = SweepPolicy(
+        RetentionPolicy(maxAge = Some(30.days), maxCheckpoints = Some(20)),
+        Some(7.days),
+        50,
+        threadAge = Some(90.days)
+      ),
       label = Some("pod-1")
     )
   }

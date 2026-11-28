@@ -525,6 +525,24 @@ final class PostgresCheckpointer private (
       val visited = page.take(policy.batchSize)
       // asked outside the store's transactions: the guard may read another store, such as a run queue
       guard.retained(visited).flatMap { protectedRuns =>
+        // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+        policy.threadAge.foreach { age =>
+          visited.filterNot(protectedRuns.contains).foreach { thread =>
+            val judged = reading("sweep") { c =>
+              val idleBefore = clockNow(c).minusNanos(age.toNanos)
+              Right(
+                idleBefore -> query(
+                  c,
+                  s"SELECT updated_at FROM ${t.threads} WHERE thread_id = ? AND updated_at IS NOT NULL",
+                  thread.value
+                )(rows => instant(rows, 1)).headOption
+              )
+            }
+            judged.foreach((idleBefore, updated) =>
+              RetentionSweep.removeIdle(this, thread, idleBefore, updated, protectedRuns): Unit
+            )
+          }
+        }
         val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
         val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
           case Some(age) if candidates.nonEmpty =>
@@ -1145,10 +1163,11 @@ object PostgresCheckpointer:
     query: ThreadQuery,
     now: Instant
   ): (String, Vector[Any]) =
-    registryStatement(t, query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+    registryStatement(t, query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
       query.updatedSince.foreach(since => where.add("updated_at >= ?", since))
+      query.updatedBefore.foreach(before => where.add("updated_at < ?", before))
       // containment, through the GIN index on the metadata
       if !query.metadata.isEmpty then where.add("metadata @> CAST(? AS jsonb)", ujson.write(query.metadata.toJson))
     }

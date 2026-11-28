@@ -1024,6 +1024,15 @@ the SQLite and PostgreSQL run queues.
 | A failed attempt came back when its lease lapsed (20 to 30 seconds), with no growth, so a few minutes' provider outage dead-lettered every run attempted in it; an authentication or invalid-request error used up every attempt; dead letters could not be listed or re-driven (#3257) | A failed attempt is given back with a backoff (`llm4s.agent.worker.retry.delay`, 30 seconds, doubling to `retry.maxDelay`, 10 minutes, with jitter); the entry's thread waits behind it, and `QueueEntry.retryAt` says until when. A model call's `AuthenticationError`, `ConfigurationError`, `ContentFilteredError`, `ContextLengthError`, `InvalidInputError` or `ModelNotFoundError` is not retried: the thread is settled and the entry closed `Failed(RunFailed)`. New: `RunQueue.closedEntries(tenant, state, after, limit)` and `RunQueue.requeue(tenant, entryId, maxAttempts)`; a custom `RunQueue` answers `closedEntries` with a `ValidationError` unless it overrides it. The SQLite store migrates to schema 13 and PostgreSQL to schema 7 (one new nullable column, `not_before_nanos` / `not_before`); an older build refuses the migrated store |
 | A worker crash (its lease lapsed with an attempt open) spent one of the entry's `maxAttempts`, so a fleet that restarts often could dead-letter a long run that never failed (#3287) | The take that finds such a lease counts a crash (`QueueEntry.crashes`) and gives the attempt back to `maxAttempts`, as a drain does; a worker dead-letters the entry (`Failed(AttemptsExhausted)`) once its crashes reach `llm4s.agent.worker.maxCrashes` (5). In the in-memory, SQLite (schema 13: `crashes`, `attempt_open`) and PostgreSQL (schema 7) queues; a custom `RunQueue` reports no crashes and charges them, as before |
 
+## Run lifecycle: retained outcomes, admission pruning, worker bookkeeping and idle threads (#3251, #3253, #3254, #3259, #3260)
+
+`AgentRun` is stable and keeps its signature; `SweepPolicy`, `ThreadQuery`, `AgentWorker` and `GraphRuntime`'s
+retention are experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| The retention sweep never removed a thread, and `ThreadQuery` could not find old ones (#3260) | `SweepPolicy.threadAge` (`llm4s.agent.worker.sweep.threadAge`, unset by default) deletes settled top-level threads not updated for that long, under a claim; `ThreadQuery.withUpdatedBefore` and `withOldestFirst` list a tenant's oldest threads. `SweepPolicy.apply`/`of` and `ThreadQuery.apply` gain trailing parameters with defaults, so source is unchanged; a positional pattern on either case class needs the new fields |
+
 ## Memory stores share one contract and one score rule (#3036, #3037, #3038)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. Every store now passes one `MemoryStoreContract`, so a call gets

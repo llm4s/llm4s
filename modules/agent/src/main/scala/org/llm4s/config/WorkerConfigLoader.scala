@@ -47,6 +47,7 @@ object WorkerConfigLoader:
       every           <- duration(c, "sweep.every")
       batchSize       <- field("sweep.batchSize")(c.getInt("sweep.batchSize"))
       tombstoneAge    <- optional(c, "sweep.tombstoneAge")(duration(c, _))
+      threadAge       <- optional(c, "sweep.threadAge")(duration(c, _))
       maxAge          <- optional(c, "sweep.retention.maxAge")(duration(c, _))
       maxCheckpoints  <- optional(c, "sweep.retention.maxCheckpoints")(p => field(p)(c.getInt(p)))
       maxEvents       <- optional(c, "sweep.retention.maxEvents")(p => field(p)(c.getInt(p)))
@@ -56,7 +57,7 @@ object WorkerConfigLoader:
       maxRetryDelay   <- duration(c, "retry.maxDelay")
       maxCrashes      <- field("maxCrashes")(c.getInt("maxCrashes"))
       retention <- RetentionPolicy.of(maxAge, maxCheckpoints, maxEvents).left.map(invalid(s"$Path.sweep.retention"))
-      sweep     <- SweepPolicy.of(retention, tombstoneAge, batchSize).left.map(invalid(s"$Path.sweep"))
+      sweep     <- SweepPolicy.of(retention, tombstoneAge, batchSize, threadAge).left.map(invalid(s"$Path.sweep"))
       settings <- WorkerSettings
         .of(
           concurrency,
