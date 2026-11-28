@@ -479,7 +479,8 @@ for {
 - **Consolidation** (`consolidate = Some(MemoryConsolidation(olderThan = 1.day, minCount = 10))`)
   replaces groups of old memories with a summary after a turn, at most once per `interval` for a tenant (15 minutes
   by default; `withInterval(Duration.Zero)` for every turn), reading at most
-  `ConsolidationConfig.maxMemoriesScanned` (1000) old memories. It needs a `TransactionalMemoryStore`:
+  `ConsolidationConfig.maxMemoriesScanned` (1000) old memories. Each run starts where the last one's page ended and
+  wraps at the oldest, so every old memory is reached in turn. It needs a `TransactionalMemoryStore`:
   `InMemoryStore`, `SQLiteMemoryStore` (with or without an embedding service), `VectorMemoryStore` or
   `PostgresMemoryStore`. A
   summary carries its sources' `llm4s.writer`, so it counts against `bounds` only when they did; one
@@ -497,7 +498,9 @@ for {
   memory a later consolidation removed. A store that is not transactional records too, but a
   recording interrupted mid-write is skipped on recovery rather than repeated.
 - **Open stores are bounded.** The middleware holds at most `maxTenants` (1000) tenants' stores open; past that, it
-  releases the least recently used one no turn is using and resolves it again on its tenant's next turn. Releasing
+  releases the least recently used one no turn is using and resolves it again on its tenant's next turn, and a burst
+  of more tenants is brought back within the bound as its turns end. Only a store that names its storage (a SQLite
+  file, a Postgres table) is released: an `InMemoryStore` holds the tenant's memories itself, so it stays open. Releasing
   closes a store that is `AutoCloseable` (the SQLite and Postgres stores), or does what `release` says. `close()`
   releases every store and refuses later turns.
 - **Failures never cost the answer.** A store that cannot be searched or written is skipped, and

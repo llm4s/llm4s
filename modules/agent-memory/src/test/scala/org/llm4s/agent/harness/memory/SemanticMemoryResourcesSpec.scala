@@ -46,10 +46,20 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
   // ===== #3040 =====
 
   "A middleware with maxTenants" should "release the least recently used idle store, and resolve it again" in {
-    val released           = new CopyOnWriteArrayList[MemoryStore]()
-    val (stores, resolved) = perTenant()
-    val m =
-      new SemanticMemoryMiddleware(stores, simple, answering(), maxTenants = 2, release = s => released.add(s): Unit)
+    val released = new CopyOnWriteArrayList[MemoryStore]()
+    val resolved = new ConcurrentHashMap[Option[TenantId], Int]()
+    val dir      = java.nio.file.Files.createTempDirectory("llm4s-evict")
+    // a store in a file: evicting it loses nothing, its tenant's next turn opens the file again
+    val stores = (tenant: Option[TenantId]) =>
+      resolved.merge(tenant, 1, _ + _)
+      SQLiteMemoryStore(dir.resolve(s"${tenant.fold("none")(_.value)}.db").toString)
+    val m = new SemanticMemoryMiddleware(
+      stores,
+      simple,
+      answering(),
+      maxTenants = 2,
+      release = s => { released.add(s); SemanticMemoryMiddleware.closeStore(s) }
+    )
     val agent = agentWith(answering("a", "b", "c", "d"), m)
     agent.run(ThreadId("1"), "one", tenant(t1)).value
     agent.run(ThreadId("2"), "two", tenant(t2)).value
@@ -58,6 +68,10 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
     released.size shouldBe 1
     agent.run(ThreadId("4"), "four", tenant(t1)).value
     resolved.get(Some(t1)) shouldBe 2
+    MemoryTestSupport.contents(held(m, Some(t1))) should contain("one")
+    m.close()
+    java.nio.file.Files.list(dir).forEach(p => java.nio.file.Files.delete(p))
+    java.nio.file.Files.delete(dir)
   }
 
   it should "release every store on close, and refuse later turns" in {
@@ -136,5 +150,86 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
     cell.consolidationDue(now.plusSeconds(15 * 60), Duration.Zero) shouldBe true
     MemoryConsolidation().interval shouldBe 15.minutes
     an[IllegalArgumentException] should be thrownBy MemoryConsolidation(1.day, 1, -1.second)
+  }
+
+  // ===== Codex on #3295 =====
+
+  "Eviction" should "never drop a store the resolver cannot give back, such as an InMemoryStore" in {
+    val m     = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), simple, answering(), maxTenants = 1)
+    val agent = agentWith(answering("a", "b", "c"), m)
+    agent.run(ThreadId("1"), "alice was here", tenant(t1)).value
+    agent.run(ThreadId("2"), "bob was here", tenant(t2)).value
+    agent.run(ThreadId("3"), "alice again", tenant(t1)).value
+    MemoryTestSupport.contents(held(m, Some(t1))) should contain("alice was here")
+    m.openTenants shouldBe 2
+  }
+
+  it should "bring the open stores back within maxTenants once a burst of more tenants ends" in {
+    val dir      = java.nio.file.Files.createTempDirectory("llm4s-burst")
+    val released = new CopyOnWriteArrayList[MemoryStore]()
+    val m = new SemanticMemoryMiddleware(
+      tenant => SQLiteMemoryStore(dir.resolve(s"${tenant.fold("none")(_.value)}.db").toString),
+      simple,
+      answering(),
+      maxTenants = 1,
+      release = s => { released.add(s); SemanticMemoryMiddleware.closeStore(s) }
+    )
+    val tenants = Vector("a", "b", "c").map(TenantId(_))
+    val inside  = new java.util.concurrent.CountDownLatch(tenants.size)
+    val leave   = new java.util.concurrent.CountDownLatch(1)
+    val threads = tenants.map { t =>
+      val thread = new Thread(() =>
+        m.withStore(Some(t)) { store =>
+          inside.countDown()
+          leave.await()
+          store.count()
+        }: Unit
+      )
+      thread.start()
+      thread
+    }
+    inside.await()
+    m.openTenants shouldBe 3 // all in use: none can go
+    leave.countDown()
+    threads.foreach(_.join())
+    m.openTenants shouldBe 1
+    released.size shouldBe 2
+    m.close()
+    java.nio.file.Files.list(dir).forEach(p => java.nio.file.Files.delete(p))
+    java.nio.file.Files.delete(dir)
+  }
+
+  "Consolidation" should "reach an older group behind a full page of memories that form none" in {
+    val now   = Instant.parse("2026-11-28T12:00:00Z")
+    val clock = java.time.Clock.fixed(now, java.time.ZoneOffset.UTC)
+    def turn(id: String, conversation: String, at: Instant) =
+      Memory(MemoryId(id), s"turn $id", MemoryType.Conversation, Map("conversation_id" -> conversation), at, None)
+    val unmergeable = (1 to 30).map(i => turn(s"n$i", s"c$i", now.minusSeconds(3600L + i)))
+    val mergeable   = (1 to 3).map(i => turn(s"o$i", "old", now.minusSeconds(86400L + i)))
+    val store       = InMemoryStore.withMemories(unmergeable ++ mergeable).value
+    val config      = MemoryManagerConfig.default.withConsolidationConfig(ConsolidationConfig(maxMemoriesScanned = 10))
+    val m = new SemanticMemoryMiddleware(
+      _ => Right(store),
+      (s, c) => LLMMemoryManager(config, s, c),
+      new MemoryTestSupport.FunctionClient(_ => "Summary of the old conversation."),
+      recall = None,
+      record = None,
+      consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 3).withInterval(Duration.Zero)),
+      clock = clock
+    )
+    val agent = agentWith(answering(Seq.fill(8)("ok")*), m)
+    // 33 old memories, 10 a page: the old group is in the fourth page
+    (1 to 5).foreach(i => agent.run(ThreadId(s"t$i"), "hello").value)
+    val left = MemoryTestSupport.contents(held(m, None))
+    left should contain("Summary of the old conversation.")
+    (left should not).contain("turn o1")
+  }
+
+  "The consolidation cursor" should "move past a page, and start again once a page comes back short" in {
+    val t           = Instant.parse("2026-11-28T00:00:00Z")
+    def at(s: Long) = Memory(MemoryId(s"m$s"), "x", MemoryType.Task, Map.empty, t.plusSeconds(s), None)
+    SemanticMemoryMiddleware.nextCursor(Seq(at(5), at(3), at(4)), 3) shouldBe Some(t.plusSeconds(3))
+    SemanticMemoryMiddleware.nextCursor(Seq(at(5), at(5)), 2) shouldBe Some(t.plusSeconds(5).minusMillis(1))
+    SemanticMemoryMiddleware.nextCursor(Seq(at(5)), 3) shouldBe None
   }
 }

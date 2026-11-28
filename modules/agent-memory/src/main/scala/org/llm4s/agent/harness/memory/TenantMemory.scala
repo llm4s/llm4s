@@ -25,6 +25,9 @@ final private[memory] class TenantMemory(val initial: MemoryStore, val identity:
 
   @volatile private var lastConsolidated: Option[java.time.Instant] = None
 
+  /** Where the next consolidation's page of old memories starts; `None` from the cutoff (#3040). */
+  @volatile private[memory] var consolidationCursor: Option[java.time.Instant] = None
+
   /** True, and the time recorded, if no consolidation of this tenant began within `interval` of `now`. */
   def consolidationDue(now: java.time.Instant, interval: scala.concurrent.duration.FiniteDuration): Boolean =
     locked {

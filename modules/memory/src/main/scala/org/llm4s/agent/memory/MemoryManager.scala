@@ -297,7 +297,8 @@ final case class MemoryManagerConfig private (
  * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
  * @param strictMode If true, fail fast on any consolidation error. If false, log and continue (best-effort)
  * @param maxMemoriesScanned The most old memories one call reads to group (#3040): the newest of those older than the
- *                           cutoff; a later call reaches the rest, as each consolidation removes what it replaced
+ *                           cutoff. A caller that consolidates repeatedly reaches older ones by passing, as the next
+ *                           cutoff, the oldest time of the page before, as `SemanticMemoryMiddleware` does
  */
 final case class ConsolidationConfig(
   maxMemoriesPerGroup: Int = 50,
