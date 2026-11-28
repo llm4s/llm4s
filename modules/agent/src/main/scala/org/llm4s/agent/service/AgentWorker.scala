@@ -5,9 +5,15 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{
+  AuthenticationError,
   CancelledError,
   CircuitOpenError,
+  ConfigurationError,
+  ContentFilteredError,
+  ContextLengthError,
+  InvalidInputError,
   LLMError,
+  ModelNotFoundError,
   OptimisticLockFailure,
   ProcessingError,
   ValidationError
@@ -18,11 +24,11 @@ import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, Semaphore, TimeUnit }
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
-import scala.util.Try
+import scala.util.{ Random, Try }
 
 /**
  * Where an [[AgentWorker]] is in its life: built and not started, taking and running entries, draining on shutdown, or
@@ -416,7 +422,11 @@ final class AgentWorker private (
     /** Give the entry back at once, recording nothing more. */
     case Release
 
-    /** Stop renewing: the entry comes back when its lease expires, by the store's clock - a backoff before a retry. */
+    /**
+     * Stop renewing: the entry comes back when its lease expires, by the store's clock. After a recorded attempt the
+     * entry is given back with a retry's backoff instead ([[RunQueue.releaseRetry]], #3257), so a failed attempt
+     * never comes back sooner than its delay.
+     */
     case Expire
 
     /** Nothing: the store closed the entry, or another worker holds it now. */
@@ -439,6 +449,13 @@ final class AgentWorker private (
           released.left.foreach { e =>
             logger.debug(s"Worker $holder: releasing entry ${slot.entryId.value}: ${e.message}")
           }
+        case Next.Expire if slot.attemptRecorded.get =>
+          // a failed attempt waits out its backoff, which grows with the entry's attempts (#3257)
+          val delay = settings.retryAfter(slot.attemptNumber.get, Random.nextDouble())
+          queue.releaseRetry(slot.lease.get, delay).left.foreach { e =>
+            logger.debug(s"Worker $holder: giving entry ${slot.entryId.value} back for a retry: ${e.message}")
+          }
+          meter.lapsed(slot.entry.agentId)
         case Next.Expire => meter.lapsed(slot.entry.agentId)
         case Next.Leave  => ()
 
@@ -477,6 +494,14 @@ final class AgentWorker private (
                 case AttemptPlan.Close(_) => Right(())
                 case _                    => latest.fold[Result[Unit]](Right(()))(agent.agent.canContinue)
               continues match
+                // another agent's thread: no version of this agent ever takes it on, so it fails now (#3256)
+                case Left(_: GraphError.RestoreRejected) if latest.exists(_.snapshot.graphId != agent.agent.graphId) =>
+                  foreign(entry, latest.get)
+                // a stop asked of an entry whose input never ran: nothing to settle, so it is acted on now rather
+                // than after the unrunnable wait (#3256)
+                case Left(_: GraphError.RestoreRejected)
+                    if slot.stop.get.isDefined && admitted.isEmpty && !entry.admitted =>
+                  Next.Close(slot.stop.get.get.outcome)
                 case Left(rejected: GraphError.RestoreRejected) => unrunnable(slot, rejected)
                 case Left(error) =>
                   logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread cannot be read: ${error.message}")
@@ -485,7 +510,14 @@ final class AgentWorker private (
                   slot.stop.get match
                     // a stop asked of an entry no run of ours is running - its worker died: acted on with no attempt
                     case Some(request) => stopped(entry, agent, request, admitted, latest)
-                    case None          => attempt(slot, agent)
+                    // its run crashed its worker `maxCrashes` times: dead-lettered, as exhausted attempts are - only
+                    // by a worker whose graph can take the thread on, so it can settle it (#3287)
+                    case None if entry.crashes >= settings.maxCrashes =>
+                      logger.warn(
+                        s"Worker $holder: entry ${entry.id.value}'s attempts ended in ${entry.crashes} crashes; closing it"
+                      )
+                      exhausted(entry, agent)
+                    case None => attempt(slot, agent)
 
   /**
    * Whether a live claim holds `entry`'s thread, by the store's clock: a claim is asked for, as a probe that is given
@@ -535,7 +567,9 @@ final class AgentWorker private (
    */
   private def unreadable(slot: Slot): Next =
     queue.recordAttempt(slot.lease.get, RunId.random()) match
-      case Right(AttemptStart.Recorded(_)) => Next.Expire
+      case Right(AttemptStart.Recorded(entry)) =>
+        noteAttempt(slot, entry)
+        Next.Expire
       case Right(AttemptStart.Exhausted(entry)) =>
         Next.Close(EntryOutcome.Failed(FailureReason.AttemptsExhausted(entry.attempts.size)))
       case Right(AttemptStart.ThreadDeleted(_)) => Next.Leave
@@ -569,6 +603,21 @@ final class AgentWorker private (
       passOver(entry.id, lease.ttl)
       Next.Release
 
+  /**
+   * An entry for a thread another agent's graph created (`latest` names that graph, #3256): told apart from a version
+   * difference, which another worker may run, it is closed `Failed(Unrunnable)` at once - also with a stop asked of
+   * it - running nothing, rather than holding the thread's queue for `unrunnableAfter`.
+   */
+  private def foreign(entry: QueueEntry, latest: Checkpoint): Next =
+    logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread belongs to another agent's graph; closing it")
+    Next.Close(
+      EntryOutcome.Failed(
+        FailureReason.Unrunnable(
+          s"the thread belongs to graph '${latest.snapshot.graphId}', which agent '${entry.agentId.value}' cannot take on"
+        )
+      )
+    )
+
   private def attempt(slot: Slot, agent: QueuedAgent): Next =
     beforeAttempt(slot.entry)
     val runId    = RunId.random()
@@ -582,8 +631,13 @@ final class AgentWorker private (
       case Right(AttemptStart.ThreadDeleted(_)) => Next.Leave
       case Right(AttemptStart.Exhausted(entry)) => exhausted(entry, agent)
       case Right(AttemptStart.Recorded(entry)) =>
-        slot.attemptRecorded.set(true)
+        noteAttempt(slot, entry)
         run(slot, entry, agent, runId)
+
+  /** `slot` recorded an attempt at `entry`, which `AttemptStart.Recorded` answered. */
+  private def noteAttempt(slot: Slot, entry: QueueEntry): Unit =
+    slot.attemptRecorded.set(true)
+    slot.attemptNumber.set(entry.attempts.size)
 
   /**
    * `entry` has made its `maxAttempts` attempts: closed `Failed(AttemptsExhausted)` - after its thread is settled, if
@@ -602,23 +656,36 @@ final class AgentWorker private (
           case AttemptPlan.Close(outcome) => Next.Close(outcome)
           case AttemptPlan.Recover if admitted.isDefined =>
             val message = s"attempts exhausted: queue entry ${entry.id.value} made ${entry.attempts.size} attempts"
-            val config  = entry.attemptConfig(RunId.random())
-            agent.agent.settleQueued(
-              entry.threadId,
-              entry.runIds,
-              RunOutcome.Failed("AttemptsExhausted", message),
-              message,
-              ExhaustedResult,
-              config
-            ) match
-              case Right(_) => Next.Close(dead)
-              case Left(_: GraphError.ThreadBusy) =>
-                passOver(entry.id, settings.pollInterval)
-                Next.Release
-              case Left(error) =>
-                logger.warn(s"Worker $holder: settling entry ${entry.id.value}'s thread failed: ${error.message}")
-                Next.Expire
+            settled(entry, agent, dead, RunOutcome.Failed("AttemptsExhausted", message), ExhaustedResult)
           case _ => Next.Close(dead)
+
+  /**
+   * Settles `entry`'s admitted, incomplete thread - its turn's calls closed with `result`, its run with `outcome`
+   * (`Agent.settleQueued`) - then closes the entry with `closing`; a thread busy with another run is given back to try
+   * later, and a settlement that fails lets the lease lapse.
+   */
+  private def settled(
+    entry: QueueEntry,
+    agent: QueuedAgent,
+    closing: EntryOutcome,
+    outcome: RunOutcome.Failed,
+    result: String
+  ): Next =
+    agent.agent.settleQueued(
+      entry.threadId,
+      entry.runIds,
+      outcome,
+      outcome.message,
+      result,
+      entry.attemptConfig(RunId.random())
+    ) match
+      case Right(_) => Next.Close(closing)
+      case Left(_: GraphError.ThreadBusy) =>
+        passOver(entry.id, settings.pollInterval)
+        Next.Release
+      case Left(error) =>
+        logger.warn(s"Worker $holder: settling entry ${entry.id.value}'s thread failed: ${error.message}")
+        Next.Expire
 
   /**
    * `entry`, a stop `request` asked of it (W3), once no run of its is running here - the run exited, or none was
@@ -689,8 +756,14 @@ final class AgentWorker private (
           case (AttemptPlan.Start, _) =>
             Right(entry.input match
               case QueuedInput.Start(input) =>
-                // admitted now, unless its submitter admitted it (#2854): `Agent.admit`, then `QueuedInput.admitted`
-                agent.input(input).flatMap(agent.agent.startQueued(entry.threadId, _, config))
+                // admitted now: a mark inside a start's input is not trusted (#3258)
+                agent
+                  .input(input)
+                  .map(QueuedAgent.unadmitted)
+                  .flatMap(agent.agent.startQueued(entry.threadId, _, config))
+              case QueuedInput.Admitted(input) =>
+                // its submitter admitted it (#2854): `Agent.admit`, then `QueuedInput.admitted`
+                QueuedAgent.admittedInput(input).flatMap(agent.agent.startQueued(entry.threadId, _, config))
               case QueuedInput.Resume(answers) => agent.agent.startResume(entry.threadId, answers, config)
               case QueuedInput.Recover         => agent.agent.startRecover(entry.threadId, config)
               // a take closes an entry it cannot read (#3091); one read so here is never run
@@ -735,6 +808,19 @@ final class AgentWorker private (
           AttemptPlan.of(now, admitted, latest) match
             case AttemptPlan.Close(outcome) => Next.Close(outcome)
             case _ if slot.drained.get      => Next.Release
+            // a failure no retry can mend - the provider refused the credentials or the request - is not retried: the
+            // thread is settled and the entry closed (#3257)
+            case AttemptPlan.Recover if admitted.isDefined && result.left.exists(AgentWorker.permanent) =>
+              val error   = result.left.toOption.get
+              val message = s"the run failed with an error no retry can mend: ${error.message}"
+              logger.warn(s"Worker $holder: the run of entry ${entry.id.value} failed for good: ${error.message}")
+              settled(
+                now,
+                agent,
+                EntryOutcome.Failed(FailureReason.RunFailed(error.message)),
+                RunOutcome.Failed("RunFailed", message),
+                FailedResult
+              )
             case _ =>
               result.left.foreach(e =>
                 logger.info(
@@ -837,8 +923,11 @@ final class AgentWorker private (
 
     /** This slot recorded an attempt at its entry: one a drain that cuts it gives back (#3241). */
     val attemptRecorded: AtomicBoolean = new AtomicBoolean(false)
-    val ended: CountDownLatch          = new CountDownLatch(1)
-    private val run                    = new AtomicReference[Option[AgentRun]](None)
+
+    /** How many attempts the entry has made with this slot's: what its retry's backoff grows with (#3257). */
+    val attemptNumber: AtomicInteger = new AtomicInteger(0)
+    val ended: CountDownLatch        = new CountDownLatch(1)
+    private val run                  = new AtomicReference[Option[AgentRun]](None)
 
     /** The stop asked of the entry (W3), from its take and its renewals: a cancel is never replaced by an interrupt. */
     val stop: AtomicReference[Option[StopRequest]] = new AtomicReference(leased.entry.stopRequest)
@@ -914,6 +1003,10 @@ object AgentWorker:
   /** The synthetic result a tool call left unanswered gets when an exhausted entry's thread is settled. */
   val ExhaustedResult: String = "cancelled: the run's attempts ran out before this tool call returned a result"
 
+  /** The synthetic result of a tool call left open by a run that failed for good, with an error no retry mends (#3257). */
+  val FailedResult: String =
+    "cancelled: the run failed before this tool call returned a result, and will not be retried"
+
   /** The synthetic result a tool call left unanswered gets when a cancelled entry's run is settled (W3). */
   val CancelledResult: String = "cancelled: the run was cancelled before this tool call returned a result"
 
@@ -936,6 +1029,18 @@ object AgentWorker:
    * thread suspended, at rest, another tenant's, an input that does not validate - closes the entry
    * `Failed(RunFailed)`.
    */
+  /**
+   * Whether `error` - a run's failure - is one no retry can mend (#3257): a model call's (`GraphError.NodeFailed`) that
+   * the provider refused for its credentials, its configuration, its content, its length or its model. Anything else,
+   * a tool's failure included, is retried.
+   */
+  private[service] def permanent(error: LLMError): Boolean = error match
+    case GraphError.NodeFailed(_, _, cause) => permanent(cause)
+    case _: AuthenticationError | _: ConfigurationError | _: ContentFilteredError | _: ContextLengthError |
+        _: InvalidInputError | _: ModelNotFoundError =>
+      true
+    case _ => false
+
   private[service] def admissionTransient(error: LLMError): Boolean = error match
     case _: ProcessingError | _: CircuitOpenError | _: OptimisticLockFailure                      => true
     case _: GraphError.CheckpointWriteFailed | _: GraphError.ClaimLost | _: GraphError.RunCrashed => true

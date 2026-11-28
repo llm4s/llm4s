@@ -43,6 +43,8 @@ import scala.util.{ Try, Using }
  *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
  *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`); from version 11 an entry's stop request
  *    (`stop_json`, design 4.57).
+ *  - from version 13, a queue entry's retry time and crash count (`not_before_nanos`, `crashes`, `attempt_open`,
+ *    [[addRetryAccounting]]).
  *  - from version 12, the meta table's `last_child`: the highest place a child thread has taken, so a new child's
  *    place is drawn from it rather than from a scan of every thread (#3101).
  *
@@ -54,7 +56,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 12
+  val Current: Int = 13
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -72,9 +74,27 @@ private[sqlite] object SqliteSchema:
     8  -> addReclamation,
     9  -> addRunQueue,
     10 -> addStopRequests,
-    // the newest step, keyed off Current so it renumbers with it; it reads only what version 6 added (#3101)
-    (Current - 1) -> addChildCounter
+    // reads only what version 6 added (#3101)
+    11 -> addChildCounter,
+    // the newest step, keyed off Current so it renumbers with it; it reads only what version 10 added (#3257)
+    (Current - 1) -> addRetryAccounting
   )
+
+  /**
+   * Version 13: retry and crash accounting (#3257, #3287). Each queue entry gains `not_before_nanos`, the time by the
+   * store's clock before which no take hands it out - set when a failed attempt is given back for a retry, cleared by
+   * the take that hands it out; `NULL` for none - and `crashes`, how many of its attempts ended with their lease
+   * lapsing, with `attempt_open`, whether the current lease recorded an attempt it has not given back (so a take of an
+   * expired lease with one open counts a crash). Every entry of a version-12 file may be taken as before, has no crash
+   * counted and no attempt open. Needs only version 10's queue table.
+   */
+  private def addRetryAccounting(connection: Connection): Unit =
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN not_before_nanos INTEGER",
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN crashes INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN attempt_open INTEGER NOT NULL DEFAULT 0"
+    )
 
   /**
    * Version 9: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_nanos`, when

@@ -74,6 +74,8 @@ final private[agent] class QueueMetrics(metrics: MetricsCollector):
       case EntryOutcome.Failed(FailureReason.RunFailed(_))         => "run_failed"
       case EntryOutcome.Failed(FailureReason.Unrunnable(_))        => "unrunnable"
       case EntryOutcome.Failed(FailureReason.Abandoned)            => "abandoned"
+      case EntryOutcome.Failed(FailureReason.Blocked(_))           => "blocked"
+      case EntryOutcome.Failed(FailureReason.OutputInvalid(_))     => "output_invalid"
       case EntryOutcome.Cancelled(CancelReason.ThreadDeleted)      => "thread_deleted"
       case EntryOutcome.Cancelled(CancelReason.Requested(_))       => "requested"
       case _                                                       => "none"

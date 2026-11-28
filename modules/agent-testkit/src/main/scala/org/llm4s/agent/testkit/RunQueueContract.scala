@@ -208,6 +208,18 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.entry(recover.entryId).input shouldBe QueuedInput.Recover
   }
 
+  // #3258: the admitted kind is the only one the worker takes an admission mark from, so a store keeps it apart
+  it should "keep an admitted input as its own kind, apart from a start with the same JSON" in {
+    val c        = Case()
+    val value    = ujson.Obj("query" -> "hi", "admission" -> ujson.Obj("agents" -> ujson.Arr("assistant")))
+    val admitted = c.submit(input = QueuedInput.Admitted(value)).value
+    val started  = c.submit(input = QueuedInput.Start(value)).value
+    same(c.entry(admitted.entryId).input, QueuedInput.Admitted(value))
+    same(c.entry(started.entryId).input, QueuedInput.Start(value))
+    c.reopened()
+    c.entry(admitted.entryId).input shouldBe a[QueuedInput.Admitted]
+  }
+
   it should "keep the submitter's trace context with the entry, the first submission's under a retried key" in {
     val c       = Case()
     val context = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
@@ -791,7 +803,8 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       val leased = c.take(s"worker-$n").value
       val run    = RunId(s"run-${unique()}")
       c.queue.recordAttempt(leased.lease, run).value shouldBe a[AttemptStart.Recorded]
-      c.advance(31.seconds)
+      // given back charged, as a failed attempt is; a lapsed lease would be a crash, given back free (#3287)
+      c.queue.release(leased.lease).value
       run
     }
     val last = c.take("worker-3").value
@@ -804,8 +817,103 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     failed.outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(2)))
   }
 
-  // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it
-  it should "not charge an attempt a drain gave back, and still charge one whose lease lapsed" in {
+  // #3257: a failed attempt waits out its backoff, by the store's clock, and holds its thread back meanwhile
+  it should "hold an entry given back for a retry, and its thread, until the delay has passed, the attempt charged" in {
+    val c      = Case()
+    val id     = c.submit(maxAttempts = 2).value.entryId
+    val behind = c.submit().value.entryId
+    val first  = c.take().value
+    first.entry.id shouldBe id
+    c.queue.recordAttempt(first.lease, RunId(s"failed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.releaseRetry(first.lease, 20.seconds).value
+    c.entry(id).retryAt.isDefined shouldBe true
+    c.take() shouldBe None
+    c.advance(10.seconds)
+    c.take() shouldBe None
+    c.advance(11.seconds)
+    val again = c.take().value
+    again.entry.id shouldBe id
+    again.entry.attempts should have size 1
+    again.entry.retryAt shouldBe None
+    c.queue.recordAttempt(again.lease, RunId(s"second-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(again.lease, EntryOutcome.Done(None, None)).value
+    c.take().value.entry.id shouldBe behind
+  }
+
+  it should "hand out an entry waiting out a retry's delay once a stop is asked of it (#3257)" in {
+    val c     = Case()
+    val id    = c.submit().value.entryId
+    val first = c.take().value
+    c.queue.recordAttempt(first.lease, RunId(s"failed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.releaseRetry(first.lease, 10.minutes).value
+    c.take() shouldBe None
+    c.queue.cancel(None, CancelTarget.Entry(id), CancelReason.Requested(Some("stop"))).value
+    val stopped = c.take().value
+    stopped.entry.id shouldBe id
+    stopped.lease.stop shouldBe Some(StopRequest.Cancel(CancelReason.Requested(Some("stop"))))
+  }
+
+  it should "list closed entries by state, oldest first, a page at a time, of the caller's tenant only (#3257)" in {
+    val c      = Case()
+    val tenant = Some(TenantId(s"t-${unique()}"))
+    def closedAs(outcome: EntryOutcome, on: ThreadId = c.newThread(), by: Option[TenantId] = tenant): EntryId =
+      val id     = c.submit(on = on, tenant = by).value.entryId
+      val leased = c.take().value
+      leased.entry.id shouldBe id
+      c.queue.close(leased.lease, outcome).value
+      id
+    val dead1 = closedAs(EntryOutcome.Failed(FailureReason.AttemptsExhausted(3)))
+    closedAs(EntryOutcome.Done(None, None))
+    val dead2 = closedAs(EntryOutcome.Failed(FailureReason.RunFailed("boom")))
+    closedAs(EntryOutcome.Failed(FailureReason.Abandoned), by = None)
+    val dead3 = closedAs(EntryOutcome.Failed(FailureReason.Unrunnable("no worker")))
+    c.submit(on = c.newThread(), tenant = tenant).value
+    c.queue.closedEntries(tenant, "failed", None, 10).value.map(_.id) shouldBe Vector(dead1, dead2, dead3)
+    c.queue.closedEntries(tenant, "failed", None, 2).value.map(_.id) shouldBe Vector(dead1, dead2)
+    c.queue.closedEntries(tenant, "failed", Some(dead2), 2).value.map(_.id) shouldBe Vector(dead3)
+    c.queue.closedEntries(tenant, "done", None, 10).value should have size 1
+    c.queue.closedEntries(tenant, "open", None, 10).left.value shouldBe a[ValidationError]
+    c.queue.closedEntries(tenant, "failed", None, 0).left.value shouldBe a[ValidationError]
+    c.reopened()
+    c.queue.closedEntries(tenant, "failed", None, 10).value.map(_.outcome) shouldBe Vector(
+      Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(3))),
+      Some(EntryOutcome.Failed(FailureReason.RunFailed("boom"))),
+      Some(EntryOutcome.Failed(FailureReason.Unrunnable("no worker")))
+    )
+  }
+
+  it should "re-drive a dead letter as a new entry with its input, and refuse an open or a done one (#3257)" in {
+    val c       = Case()
+    val context = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
+    val input   = QueuedInput.query("try me again")
+    val dead = c.queue
+      .submit(Submission(c.thread, c.agent, input, policy = BusyThreadPolicy.Enqueue).withTraceContext(context))
+      .value
+      .entryId
+    val leased = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"dead-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(leased.lease, EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))).value
+    val open  = c.submit(on = c.newThread()).value.entryId
+    val again = c.queue.requeue(None, dead, maxAttempts = 4).value
+    again.entryId should not be dead
+    val redriven = c.entry(again.entryId)
+    redriven.isOpen shouldBe true
+    redriven.threadId shouldBe c.thread
+    redriven.agentId shouldBe c.agent
+    same(redriven.input, input)
+    redriven.trace shouldBe Some(context)
+    redriven.maxAttempts shouldBe 4
+    redriven.attempts shouldBe empty
+    c.entry(dead).outcome shouldBe Some(EntryOutcome.Failed(FailureReason.AttemptsExhausted(1)))
+    c.queue.requeue(None, open).left.value shouldBe a[ValidationError]
+    val doneLease = c.take().value
+    c.queue.close(doneLease.lease, EntryOutcome.Done(None, None)).value
+    c.queue.requeue(None, doneLease.entry.id).left.value shouldBe a[ValidationError]
+  }
+
+  // #3241: a drain gives an attempt back, so a long run cut by every rolling deploy is never dead-lettered for it;
+  // #3287: so does a crash - an attempt whose lease lapsed with it open - which is counted instead
+  it should "not charge an attempt a drain or a crash gave back, and count the crash" in {
     val c  = Case()
     val id = c.submit(maxAttempts = 1).value.entryId
     // drained twice: each recorded attempt is given back with the lease
@@ -814,27 +922,44 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       c.queue.recordAttempt(leased.lease, RunId(s"drained-$n-${unique()}")).value shouldBe a[AttemptStart.Recorded]
       c.queue.releaseDrained(leased.lease).value
     }
-    // a lease that lapses (a crashed worker) is charged
+    // a lease that lapses with its attempt open (a crashed worker) is counted as a crash, and given back
     val crashed = c.take("worker-3").value
+    crashed.entry.crashes shouldBe 0
     c.queue.recordAttempt(crashed.lease, RunId(s"crashed-${unique()}")).value shouldBe a[AttemptStart.Recorded]
     c.advance(31.seconds)
-    val last = c.take("worker-4").value
+    val after = c.take("worker-4").value
+    after.expiredLease shouldBe true
+    after.entry.crashes shouldBe 1
+    c.queue.recordAttempt(after.lease, RunId(s"after-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // an attempt given back plainly is charged: the budget is spent
+    c.queue.release(after.lease).value
+    val last = c.take("worker-5").value
+    last.entry.crashes shouldBe 1
     c.queue.recordAttempt(last.lease, RunId(s"last-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
     // every attempt stays in the history
-    c.entry(id).attempts should have size 3
+    c.entry(id).attempts should have size 4
     c.entry(id).isOpen shouldBe true
+    c.reopened()
+    c.entry(id).crashes shouldBe 1
   }
 
-  it should "give nothing back when an entry released by a drain recorded no attempt" in {
+  it should "count no crash for a lapsed lease that recorded no attempt, nor for one given back (#3287)" in {
     val c     = Case()
     val id    = c.submit(maxAttempts = 1).value.entryId
     val first = c.take("worker-1").value
     c.queue.releaseDrained(first.lease).value
-    val second = c.take("worker-2").value
-    c.queue.recordAttempt(second.lease, RunId(s"only-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // a lease that lapses without an attempt: nothing to give back, no crash
+    c.take("worker-2").value
     c.advance(31.seconds)
     val third = c.take("worker-3").value
-    c.queue.recordAttempt(third.lease, RunId(s"over-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
+    third.entry.crashes shouldBe 0
+    c.queue.recordAttempt(third.lease, RunId(s"only-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    // given back for a retry: charged, and no crash when its lease is next taken
+    c.queue.releaseRetry(third.lease, 1.second).value
+    c.advance(2.seconds)
+    val fourth = c.take("worker-4").value
+    fourth.entry.crashes shouldBe 0
+    c.queue.recordAttempt(fourth.lease, RunId(s"over-${unique()}")).value shouldBe a[AttemptStart.Exhausted]
     c.entry(id).attempts should have size 1
   }
 

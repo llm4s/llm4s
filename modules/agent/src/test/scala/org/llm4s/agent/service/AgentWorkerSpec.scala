@@ -40,7 +40,13 @@ class AgentWorkerSpec
   /** A short lease, so an abandoned one expires within a test. */
   private val shortLease = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
 
-  private val fast = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
+  private val fast = WorkerSettings(
+    pollInterval = 20.millis,
+    sweepEvery = None,
+    drainGrace = 2.seconds,
+    retryDelay = 50.millis,
+    maxRetryDelay = 200.millis
+  )
 
   private val started = new ConcurrentLinkedQueue[AgentWorker]()
 
@@ -387,7 +393,8 @@ class AgentWorkerSpec
     val first = submit(store, on, maxAttempts = 1)
     diedMidRun(store, agent, on, entered)
     val second = submit(store, on, QueuedInput.query("again"))
-    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    // the dead worker's crash is the one it may have (#3287): its next take dead-letters it
+    val worker = workerOf(store, Seq(QueuedAgent(agent)), fast.withMaxCrashes(1))
     worker.start()
     closed(store, first).outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))
     closed(store, second).outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe Some(CheckpointStatus.Completed)
@@ -406,7 +413,7 @@ class AgentWorkerSpec
     val id     = submit(store, on, maxAttempts = 1)
     val leased = store.runQueue.take(TakeRequest("dead-worker", Set(agentId), 200.millis)).value.value
     store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
-    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))))
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))), fast.withMaxCrashes(1))
     worker.start()
     closed(store, id).outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))
     store.latest(on).value shouldBe None
@@ -414,11 +421,30 @@ class AgentWorkerSpec
 
   // ---- graph versions ----
 
+  /**
+   * A thread left `Running` by a direct run of `assistant` at another version of its graph (another system prompt),
+   * cancelled in its model call: a worker's `assistant` cannot take that run on, but a worker at the old version could.
+   */
+  private def inFlightAtOtherVersion(store: InMemoryCheckpointer, on: ThreadId): Unit = {
+    val entered = new Semaphore(0)
+    val older = Agent
+      .builder("assistant", new FnClient((_, _) => blocked(entered)))
+      .withSystemPrompt("an older version")
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .value
+    val running = older.start(on, "hi").value
+    entered.acquire()
+    running.cancel()
+    running.await().isLeft shouldBe true
+    store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Running
+  }
+
   it should "leave an entry its graph cannot take on for another worker, taking the other threads' entries past it" in {
     val store = InMemoryCheckpointer()
     val other = thread()
-    // a thread of another graph: this worker's agent cannot take it on
-    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    // a run in flight at another version of the graph: this worker's agent cannot take it on
+    inFlightAtOtherVersion(store, other)
     val stuck  = submit(store, other)
     val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
     worker.start()
@@ -432,7 +458,7 @@ class AgentWorkerSpec
   it should "close an entry no worker could take on Failed(Unrunnable) once it has waited unrunnableAfter" in {
     val store = InMemoryCheckpointer()
     val other = thread()
-    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    inFlightAtOtherVersion(store, other)
     val stuck  = submit(store, other)
     val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))), fast.withUnrunnableAfter(1.milli))
     Thread.sleep(5)
@@ -442,13 +468,43 @@ class AgentWorkerSpec
     entry.attempts shouldBe empty
   }
 
+  it should "close an entry for a thread of another agent's graph Failed(Unrunnable) at once (#3256)" in {
+    val store = InMemoryCheckpointer()
+    val other = thread()
+    // a thread the agent `writer` created: no version of `assistant` can ever take it on
+    agentOver(store, answering("x"), "writer").run(other, "hi").value
+    val stuck  = submit(store, other)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
+    worker.start()
+    val entry = closed(store, stuck)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason match {
+      case FailureReason.Unrunnable(message) => message should include("writer")
+      case other                             => fail(s"unexpected $other")
+    }
+    entry.attempts shouldBe empty
+  }
+
+  it should "act on a cancel of an entry it cannot take on whose input was never admitted, without waiting (#3256)" in {
+    val store = InMemoryCheckpointer()
+    val other = thread()
+    inFlightAtOtherVersion(store, other)
+    val stuck = submit(store, other)
+    // taken once by a worker whose graph cannot run it, so the entry has started and a cancel is a stop request
+    val leased = store.runQueue.take(TakeRequest("earlier", Set(agentId), 100.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    store.runQueue.cancel(None, CancelTarget.Entry(stuck), CancelReason.Requested(Some("stop"))).value
+    Thread.sleep(150)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
+    worker.start()
+    closed(store, stuck).outcome.value shouldBe EntryOutcome.Cancelled(CancelReason.Requested(Some("stop")))
+  }
+
   it should "take a runnable entry behind more passed-over heads than one take can skip (#3096)" in {
-    val store  = InMemoryCheckpointer()
-    val writer = agentOver(store, answering("x"), "writer")
-    // threads of another graph, each with a head this worker passes over for a whole lease ttl
+    val store = InMemoryCheckpointer()
+    // runs in flight at another version, each with a head this worker passes over for a whole lease ttl
     val stuck = (0 until TakeRequest.MaxSkip + 40).map { _ =>
       val on = thread()
-      writer.run(on, "hi").value
+      inFlightAtOtherVersion(store, on)
       submit(store, on)
     }
     val runnable = submit(store, thread())
@@ -634,7 +690,9 @@ class AgentWorkerSpec
     refunds.get shouldBe 0
     val entry = store.runQueue.entry(None, id).value
     entry.isOpen shouldBe true
-    entry.maxAttempts shouldBe 2
+    // the earlier holder's attempt was a crash, given back by the take (#3287); the drain gave back nothing more
+    entry.crashes shouldBe 1
+    entry.maxAttempts shouldBe 3
     entry.attempts should have size 1
   }
 
@@ -884,6 +942,126 @@ class AgentWorkerSpec
     val next = submit(store, thread())
     closed(store, next).outcome.value shouldBe a[EntryOutcome.Done]
     store.runQueue.entry(None, boom).value.isOpen shouldBe true
+  }
+
+  // ---- retries (#3257) ----
+
+  "A failed attempt" should "be given back for a retry that waits out its backoff, growing per attempt (#3257)" in {
+    val store   = InMemoryCheckpointer()
+    val started = new ConcurrentLinkedQueue[Long]()
+    val client = new FnClient((n, _) => {
+      started.add(System.nanoTime())
+      if (n <= 2) Left(ProcessingError("provider", "overloaded")) else Right(CompletionFixture.simple("at last"))
+    })
+    val worker = workerOf(
+      store,
+      Seq(QueuedAgent(agentOver(store, client))),
+      fast.withMaxRetryDelay(2.seconds).withRetryDelay(400.millis)
+    )
+    val id = submit(store, thread(), maxAttempts = 3)
+    worker.start()
+    closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
+    val at = started.asScala.toVector
+    at should have size 3
+    // the first retry waits at least half of 400ms, the second at least half of 800ms
+    (at(1) - at(0)).nanos should be >= 200.millis
+    (at(2) - at(1)).nanos should be >= 400.millis
+  }
+
+  it should "not be retried when its error is one no retry can mend, closing the entry and settling the thread" in {
+    val store = InMemoryCheckpointer()
+    val client = new FnClient((_, _) =>
+      Left(org.llm4s.error.AuthenticationError(org.llm4s.types.ProviderModelTypes.ProviderId("fixture"), "bad key"))
+    )
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, client))))
+    val on     = thread()
+    val id     = submit(store, on, maxAttempts = 5)
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.RunFailed]
+    entry.attempts should have size 1
+    client.calls shouldBe 1
+    store.latest(on).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+  }
+
+  "An entry whose attempts keep crashing" should "be dead-lettered at maxCrashes, its crashes never spending maxAttempts (#3287)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    val id    = submit(store, on, maxAttempts = 2)
+    // three workers die mid-attempt: each lease lapses with its attempt open
+    (1 to 3).foreach { n =>
+      val leased = store.runQueue.take(TakeRequest(s"dead-$n", Set(agentId), 50.millis)).value.value
+      store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+      Thread.sleep(80)
+    }
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("never")))), fast.withMaxCrashes(3))
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(3))
+    entry.crashes shouldBe 3
+    // every crash was given back, so none of them spent maxAttempts
+    entry.maxAttempts shouldBe 5
+  }
+
+  it should "leave an entry at maxCrashes whose run this worker's graph cannot take on for another worker (#3287)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    inFlightAtOtherVersion(store, on)
+    val id     = submit(store, on, maxAttempts = 5)
+    val leased = store.runQueue.take(TakeRequest("dead", Set(agentId), 50.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    Thread.sleep(80)
+    // at its crash bound, but passed over as unrunnable rather than settled by a graph that cannot restore it
+    val worker = workerOf(
+      store,
+      Seq(QueuedAgent(agentOver(store, answering("y")))),
+      fast.withMaxCrashes(1).withUnrunnableAfter(1.milli)
+    )
+    worker.start()
+    closed(store, id).outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.Unrunnable]
+  }
+
+  it should "run once a crash is given back, however few attempts it had (#3287)" in {
+    val store  = InMemoryCheckpointer()
+    val id     = submit(store, thread(), maxAttempts = 1)
+    val leased = store.runQueue.take(TakeRequest("dead", Set(agentId), 50.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    Thread.sleep(80)
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("done")))))
+    worker.start()
+    val entry = closed(store, id)
+    entry.outcome.value shouldBe a[EntryOutcome.Done]
+    entry.crashes shouldBe 1
+  }
+
+  "WorkerSettings.retryAfter" should "double per attempt up to the cap, less at most half (#3257)" in {
+    val s = fast.withMaxRetryDelay(5.seconds).withRetryDelay(1.second)
+    s.retryAfter(1, 0.0) shouldBe 1.second
+    s.retryAfter(2, 0.0) shouldBe 2.seconds
+    s.retryAfter(3, 0.0) shouldBe 4.seconds
+    s.retryAfter(4, 0.0) shouldBe 5.seconds
+    s.retryAfter(50, 0.0) shouldBe 5.seconds
+    s.retryAfter(1, 0.999999) should be >= 500.millis
+    an[IllegalArgumentException] should be thrownBy fast.withMaxRetryDelay(10.millis)
+  }
+
+  // ---- how a run's outcome closes its entry (#3255) ----
+
+  "A queued turn a guardrail blocks" should "close its entry Failed(Blocked) naming the guardrail, never RunFailed (#3255)" in {
+    val store = InMemoryCheckpointer()
+    val refusing = new org.llm4s.agent.guardrails.InputGuardrail {
+      val name: String = "NoBoom"
+      def validate(value: String): Result[String] =
+        if (value == "boom") Left(ValidationError("query", "no booms")) else Right(value)
+    }
+    val agent =
+      Agent.builder("assistant", answering("fine")).withRuntime(new GraphRuntime(store)).withInputGuardrails(refusing)
+    val worker = workerOf(store, Seq(QueuedAgent(agent.build().value)))
+    val boom   = submit(store, thread(), QueuedInput.query("boom"))
+    worker.start()
+    val entry = closed(store, boom)
+    entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.Blocked("NoBoom"))
+    entry.attempts should have size 1
   }
 
   it should "keep sweeping after a pass throws, and report a sweep that is running (#3240)" in {

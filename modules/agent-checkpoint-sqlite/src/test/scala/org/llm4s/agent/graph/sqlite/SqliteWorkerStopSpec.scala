@@ -25,7 +25,13 @@ class SqliteWorkerStopSpec extends AnyFlatSpec with Matchers with EitherValues w
 
   private val agentId = AgentId.unsafe("assistant")
   private val lease   = RunQueueSettings(lease = LeasePolicy(ttl = 2.seconds, renewEvery = 100.millis))
-  private val fast    = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
+  private val fast = WorkerSettings(
+    pollInterval = 20.millis,
+    sweepEvery = None,
+    drainGrace = 2.seconds,
+    retryDelay = 50.millis,
+    maxRetryDelay = 200.millis
+  )
 
   /** A model whose first call blocks until it is interrupted, releasing `entered`; the rest answer at once. */
   final private class FirstBlocks(entered: Semaphore) extends LLMClient {

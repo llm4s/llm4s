@@ -3,11 +3,11 @@ package org.llm4s.agent.service
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ RunId, TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 
 import java.util.concurrent.TimeUnit
-import scala.annotation.tailrec
+import scala.annotation.{ tailrec, unused }
 import scala.concurrent.duration.*
 
 /**
@@ -187,10 +187,73 @@ trait RunQueue:
    * against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its `attempts`, as history.
    * Internal to llm4s: only `AgentWorker` calls it, and only for a slot that recorded its own attempt under the lease it
    * releases, which is what keeps a refund to that attempt (the store does not check it: an attempt row does not name
-   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash is still charged.
+   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash - its lease
+   * lapsing with an attempt recorded under it - is given back by the take that finds it, and counted
+   * ([[QueueEntry.crashes]], #3287), in every llm4s queue.
    * The default is [[release]].
    */
   private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = release(lease)
+
+  /**
+   * Gives back an entry whose attempt failed, for a retry after `delay` (#3257): as [[release]], and no take hands the
+   * entry out - nor any other entry of its thread - until `delay` has passed by the store's clock
+   * ([[QueueEntry.retryAt]]). The attempt stays charged. Internal to llm4s: `AgentWorker` calls it with its backoff
+   * (`WorkerSettings.retryDelay`, doubling per attempt). The default leaves the lease to lapse, so the entry comes
+   * back a lease ttl later, as before.
+   */
+  private[llm4s] def releaseRetry(@unused lease: Lease, @unused delay: FiniteDuration): Result[Unit] = Right(())
+
+  /**
+   * The closed entries of `tenantId` in `state` - `done`, `failed` (the dead letters), `cancelled` or `interrupted`
+   * ([[EntryOutcome.state]]) - oldest first by id, `limit` at a time, after entry `after` (#3257): an operator's view of
+   * what has not run. Only the tenant's own entries are listed (rule 9); entries reclaimed by the ticket lifetime are
+   * gone. An unknown state or a `limit` below 1 is a `ValidationError`. The default answers that this queue cannot list
+   * its entries; every llm4s queue lists them.
+   */
+  def closedEntries(
+    @unused tenantId: Option[TenantId],
+    @unused state: String,
+    @unused after: Option[EntryId],
+    @unused limit: Int
+  ): Result[Vector[QueueEntry]] =
+    Left(ValidationError("queue", s"${getClass.getSimpleName} cannot list its closed entries"))
+
+  /**
+   * Re-drives a dead letter (#3257): submits entry `entryId`'s input again, as a new entry of the same thread, agent,
+   * tenant and trace context, queued behind the thread's open entries (`Enqueue`) with `maxAttempts` attempts of its
+   * own. The closed entry is left as it is. Only a `failed` entry is re-driven; an open entry, or one closed otherwise,
+   * is a `ValidationError`, and so is one whose stored input cannot be read. A resume re-driven onto a thread that is no
+   * longer waiting fails as a resume would.
+   */
+  def requeue(
+    tenantId: Option[TenantId],
+    entryId: EntryId,
+    maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts
+  ): Result[Ticket] =
+    entry(tenantId, entryId).flatMap { closed =>
+      val refusal = closed.outcome match
+        case None                         => Some(s"entry ${entryId.value} is still open")
+        case Some(EntryOutcome.Failed(_)) => None
+        case Some(other)                  => Some(s"entry ${entryId.value} closed ${other.state}, not failed")
+      val unreadable = closed.input match
+        case QueuedInput.Unreadable(_) => Some(s"entry ${entryId.value}'s input cannot be read")
+        case _                         => None
+      refusal.orElse(unreadable) match
+        case Some(problem) => Left(ValidationError("entryId", problem))
+        case None =>
+          Submission
+            .of(
+              closed.threadId,
+              closed.agentId,
+              closed.input,
+              closed.tenantId,
+              BusyThreadPolicy.Enqueue,
+              None,
+              maxAttempts,
+              closed.trace
+            )
+            .flatMap(submit)
+    }
 
   /**
    * Records an attempt at `lease`'s entry running as `runId`, durably, before the caller touches the thread (rule 4);
@@ -221,6 +284,21 @@ trait RunQueue:
 
 @Experimental
 object RunQueue:
+
+  /** The states [[RunQueue.closedEntries]] lists by: those of [[EntryOutcome.state]]. */
+  val ClosedStates: Set[String] = Set("done", "failed", "cancelled", "interrupted")
+
+  /** Why a [[RunQueue.closedEntries]] call is refused, if it is. */
+  private[llm4s] def closedEntriesRefusal(state: String, limit: Int): Option[ValidationError] =
+    if !ClosedStates.contains(state) then
+      Some(
+        ValidationError(
+          "state",
+          s"'$state' is not a closed state: one of ${ClosedStates.toVector.sorted.mkString(", ")}"
+        )
+      )
+    else if limit < 1 then Some(ValidationError("limit", s"limit must be at least 1, was $limit"))
+    else None
 
   /** How often the default [[RunQueue.awaitClosed]] reads the entry. */
   val PollInterval: FiniteDuration = 100.millis

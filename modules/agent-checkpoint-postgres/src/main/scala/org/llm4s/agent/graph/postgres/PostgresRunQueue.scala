@@ -202,6 +202,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             Sql.queueTakeable(t),
             id,
             now,
+            now,
             now
           )(_ => ()).nonEmpty && siblingsFree(c, thread, id, now)
         // candidate heads a batch at a time, skipping rows another worker has locked - workers do not wait for one
@@ -214,6 +215,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             Sql.queueCandidates(t),
             agents,
             agents,
+            now,
             now,
             after,
             now
@@ -331,6 +333,31 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   // the drained attempt stays in the history, and the entry is given one more (#3241)
   override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] =
     released(lease, "queue.releaseDrained", Sql.releaseDrainedLease(t))
+
+  // the attempt stays charged; no take hands the entry out until its delay has passed by the database's clock (#3257)
+  override private[llm4s] def releaseRetry(lease: Lease, delay: FiniteDuration): Result[Unit] =
+    store.writing("queue.releaseRetry") { c =>
+      leased(c, lease) match
+        case Left(_: QueueError.LeaseLost) => Right(())
+        case Left(other)                   => Left(other)
+        case Right(row) =>
+          update(c, Sql.releaseRetryLease(t), micros(store.clockNow(c).plusNanos(delay.toNanos)), row.id)
+          Right(())
+    }
+
+  override def closedEntries(
+    tenantId: Option[TenantId],
+    state: String,
+    after: Option[EntryId],
+    limit: Int
+  ): Result[Vector[QueueEntry]] =
+    RunQueue.closedEntriesRefusal(state, limit).toLeft(()).flatMap { _ =>
+      store.reading("queue.closedEntries") { c =>
+        val tenant = tenantId.map(_.value)
+        val rows   = query(c, Sql.queueClosedEntries(t), state, tenant, tenant, after.fold(0L)(_.value), limit)(raw)
+        sequence(rows.map(view(c, _)))
+      }
+    }
 
   private def released(lease: Lease, operation: String, sql: String): Result[Unit] = store.writing(operation) { c =>
     leased(c, lease) match
@@ -567,7 +594,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         position,
         row.stop
       )
-    }
+    }.map(d => d.copy(entry = d.entry.withAccounting(row.crashes, row.notBefore)))
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
@@ -596,7 +623,9 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       long(18),
       r.getBoolean(19),
       Option(r.getString(20)),
-      Option(r.getString(21))
+      Option(r.getString(21)),
+      at(22),
+      r.getInt(23)
     )
 
 private[postgres] object PostgresRunQueue:
@@ -616,7 +645,7 @@ private[postgres] object PostgresRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at, closed_seq, admitted, trace_parent, stop_json""".stripMargin
+      |closed_at, closed_seq, admitted, trace_parent, stop_json, not_before, crashes""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -639,7 +668,9 @@ private[postgres] object PostgresRunQueue:
     closedSeq: Option[Long],
     admitted: Boolean,
     traceParent: Option[String],
-    stop: Option[String]
+    stop: Option[String],
+    notBefore: Option[Instant],
+    crashes: Int
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */

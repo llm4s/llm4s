@@ -328,8 +328,35 @@ class PostgresCheckpointerSpec
     PgCheckpointerDb.execute(
       s"""DROP TABLE $q.checkpoint_store_items, $q.checkpoint_store_applied, $q.checkpoint_store_fences;
          |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
+         |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
          |UPDATE $q.checkpoint_schema SET version = 4""".stripMargin
     )
+  }
+
+  "A version-6 schema" should "open at the current version, its open entry takeable with no retry time (#3257)" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = ThreadId("v6-thread")
+    val agent  = org.llm4s.agent.AgentId.unsafe("upgraded")
+    val queued = store.runQueue
+      .submit(org.llm4s.agent.service.Submission(t, agent, org.llm4s.agent.service.QueuedInput.query("q")))
+      .value
+    store.close()
+    val q = s""""${config.schema}""""
+    PgCheckpointerDb.execute(
+      s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN not_before, DROP COLUMN crashes, DROP COLUMN attempt_open;
+         |UPDATE $q.checkpoint_schema SET version = 6""".stripMargin
+    )
+    val reopened = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    reopened.runQueue.entry(None, queued.entryId).value.retryAt shouldBe None
+    reopened.runQueue
+      .take(org.llm4s.agent.service.TakeRequest("w", Set(agent), 30.seconds))
+      .value
+      .value
+      .entry
+      .id shouldBe queued.entryId
+    reopened.close()
   }
 
   "A version-4 schema" should "open at the current version, its open entries with no stop request" in {

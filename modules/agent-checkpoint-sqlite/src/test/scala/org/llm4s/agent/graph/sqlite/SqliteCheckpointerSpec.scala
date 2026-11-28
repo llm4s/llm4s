@@ -51,7 +51,20 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN stop_json",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
       "UPDATE llm4s_checkpoint_schema SET version = 10"
+    )
+
+  /** The file as a version-12 build left it: no retry accounting on queue entries (#3257). */
+  private def asVersionTwelve(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
+      "UPDATE llm4s_checkpoint_schema SET version = 12"
     )
 
   /** The file as a version-9 build left it: no run queue and no run ids on history rows (design 4.55). */
@@ -250,7 +263,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       db,
       "DELETE FROM llm4s_checkpoint_meta WHERE key = 'last_child'",
       "INSERT INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq, child_order) VALUES ('old', 1, 1, 41)",
-      s"UPDATE llm4s_checkpoint_schema SET version = ${SqliteSchema.Current - 1}"
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN not_before_nanos",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN crashes",
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN attempt_open",
+      "UPDATE llm4s_checkpoint_schema SET version = 11"
     )
     SqliteCheckpointer.open(db).value.close()
     scalar(db, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'last_child'")(_.getLong(1)) shouldBe 41L
@@ -1322,6 +1338,29 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       steps.exists(_.contains("USING INDEX llm4s_checkpoint_history_run")) shouldBe true
       steps.exists(_.contains("TEMP B-TREE")) shouldBe false
     }
+  }
+
+  "A version-12 file" should "open at the current version, its open entry takeable with no retry time (#3257)" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v12-thread")
+    val agent  = org.llm4s.agent.AgentId.unsafe("upgraded")
+    val first  = SqliteCheckpointer.open(db).value
+    val queued = first.runQueue
+      .submit(org.llm4s.agent.service.Submission(thread, agent, org.llm4s.agent.service.QueuedInput.query("q")))
+      .value
+    first.close()
+    asVersionTwelve(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    reopened.runQueue.entry(None, queued.entryId).value.retryAt shouldBe None
+    reopened.runQueue
+      .take(org.llm4s.agent.service.TakeRequest("w", Set(agent), 30.seconds))
+      .value
+      .value
+      .entry
+      .id shouldBe queued.entryId
+    reopened.close()
   }
 
   "A version-10 file" should "open at the current version, its open entries with no stop request, and take one" in {

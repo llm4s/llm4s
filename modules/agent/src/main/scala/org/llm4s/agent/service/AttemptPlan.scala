@@ -63,9 +63,19 @@ object AttemptPlan:
       case _                                         => false
     }
 
-  /** The outcome of an entry closed from the thread's state `latest`, without running anything. */
+  /**
+   * The outcome of an entry closed from the thread's state `latest`, without running anything. A `Failed` checkpoint is
+   * read by its outcome (#3255): a guardrail's block is `Blocked`, a typed answer that failed its schema
+   * `OutputInvalid`, and a settled failure `RunFailed` with its message; one with no outcome is `RunFailed` naming it.
+   */
   def closedFrom(latest: Checkpoint): EntryOutcome =
     latest.status match
       case CheckpointStatus.Failed =>
-        EntryOutcome.Failed(FailureReason.RunFailed(s"the thread's run failed at checkpoint ${latest.id}"))
+        EntryOutcome.Failed(latest.outcome match
+          case Some(RunOutcome.Blocked(guardrail))    => FailureReason.Blocked(guardrail)
+          case Some(RunOutcome.OutputInvalid(errors)) => FailureReason.OutputInvalid(errors)
+          case Some(RunOutcome.Failed(_, message)) =>
+            FailureReason.RunFailed(s"the thread's run failed at checkpoint ${latest.id}: $message")
+          case _ => FailureReason.RunFailed(s"the thread's run failed at checkpoint ${latest.id}")
+        )
       case status => EntryOutcome.Done(Some(latest.id), Some(status))

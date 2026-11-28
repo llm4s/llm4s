@@ -27,7 +27,13 @@ final class ServiceFixture(
       store.runQueue,
       store,
       Seq(QueuedAgent(agent)),
-      WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds),
+      WorkerSettings(
+        pollInterval = 20.millis,
+        sweepEvery = None,
+        drainGrace = 2.seconds,
+        retryDelay = 50.millis,
+        maxRetryDelay = 200.millis
+      ),
       queueSettings
     ).fold(e => throw new IllegalStateException(e.message), identity)
   }

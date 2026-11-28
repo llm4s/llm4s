@@ -661,6 +661,9 @@ final class Agent private[agent] (
    */
   private[agent] def canContinue(checkpoint: Checkpoint): Result[Unit] = loop.graph.canContinue(checkpoint)
 
+  /** The id of this agent's graph: a thread whose snapshot names another was created by another agent (#3256). */
+  private[agent] def graphId: String = loop.graph.id
+
   /**
    * Settles `threadId` - its latest checkpoint incomplete and committed by one of `runs` - as `outcome`, with the
    * history closed: each tool call left without a result gets `result` as its synthetic one ([[SettledTurn]]), and a

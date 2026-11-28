@@ -49,6 +49,9 @@ final case class Attempt(runId: RunId, startedAt: Instant, holder: String)
  *    resume of a thread that is not waiting - with the error's message.
  *  - `Unrunnable`: no worker could run the entry (no worker has its agent at a graph version that can restore its
  *    thread, W2), with why.
+ *  - `Blocked`: the run's turn was refused by guardrail (or middleware) `guardrail` - its input at admission, or its
+ *    answer - and ended as a direct run's `AgentStatus.Blocked` does (#3255). Not a crash: it is never retried.
+ *  - `OutputInvalid`: the typed agent's answer failed its output schema twice, with every problem reported (#3255).
  *  - `Abandoned`: the entry's run stopped mid-turn - its worker died - and the thread's owner closed it with
  *    `Agent.abandon` rather than leave it for a worker to recover: every tool call of the turn has a result, nothing
  *    ran again, and the thread may have taken other turns since.
@@ -59,6 +62,8 @@ enum FailureReason:
   case RunFailed(message: String)
   case Unrunnable(message: String)
   case Abandoned
+  case Blocked(guardrail: String)
+  case OutputInvalid(errors: Vector[String])
 
 /**
  * Why an entry closed `cancelled` (design 4.55). `ThreadDeleted`: the thread was deleted after the entry was
@@ -169,6 +174,14 @@ object EntryOutcome:
         case FailureReason.Unrunnable(message) =>
           ujson.Obj("state" -> "failed", "reason" -> "unrunnable", "message" -> message)
         case FailureReason.Abandoned => ujson.Obj("state" -> "failed", "reason" -> "abandoned")
+        case FailureReason.Blocked(guardrail) =>
+          ujson.Obj("state" -> "failed", "reason" -> "blocked", "guardrail" -> guardrail)
+        case FailureReason.OutputInvalid(errors) =>
+          ujson.Obj(
+            "state"  -> "failed",
+            "reason" -> "outputInvalid",
+            "errors" -> ujson.Arr.from(errors.map(ujson.Str(_)))
+          )
     case Cancelled(CancelReason.ThreadDeleted) => ujson.Obj("state" -> "cancelled", "reason" -> "threadDeleted")
     case Cancelled(CancelReason.Requested(note)) =>
       val json = ujson.Obj("state" -> "cancelled", "reason" -> "requested")
@@ -192,9 +205,12 @@ object EntryOutcome:
         case ("failed", Some("runFailed"))         => Failed(FailureReason.RunFailed(str("message")))
         case ("failed", Some("unrunnable"))        => Failed(FailureReason.Unrunnable(str("message")))
         case ("failed", Some("abandoned"))         => Failed(FailureReason.Abandoned)
-        case ("cancelled", Some("threadDeleted"))  => Cancelled(CancelReason.ThreadDeleted)
-        case ("cancelled", Some("requested"))      => Cancelled(CancelReason.Requested(opt("note")))
-        case ("interrupted", _)                    => Interrupted(o.get("by").map(b => EntryId.unsafe(b.num.toLong)))
+        case ("failed", Some("blocked"))           => Failed(FailureReason.Blocked(str("guardrail")))
+        case ("failed", Some("outputInvalid")) =>
+          Failed(FailureReason.OutputInvalid(o("errors").arr.map(_.str).toVector))
+        case ("cancelled", Some("threadDeleted")) => Cancelled(CancelReason.ThreadDeleted)
+        case ("cancelled", Some("requested"))     => Cancelled(CancelReason.Requested(opt("note")))
+        case ("interrupted", _)                   => Interrupted(o.get("by").map(b => EntryId.unsafe(b.num.toLong)))
         case (state, reason) => throw new IllegalArgumentException(s"unknown outcome $state/${reason.getOrElse("")}")
     }.toEither.left.map(e => s"not an entry outcome: ${e.getMessage}")
 
@@ -209,7 +225,7 @@ object EntryOutcome:
  * holds it, if one does - a lease that has expired by the store's clock may be taken over.
  *
  * @param maxAttempts the most attempts the entry may make: fixed at submission, raised by one for each attempt a
- *   drain cut short (#3241)
+ *   drain cut short (#3241) or a crash ended (#3287)
  * @param trace the submitter's trace context ([[Submission.traceContext]]), which every attempt continues
  *   ([[attemptConfig]]); `None` when the submission named none
  * @param attempts the attempts recorded, oldest first, each before it touched the thread
@@ -221,6 +237,11 @@ object EntryOutcome:
  *   entry's runs is at or below it, so following the entry stops there ([[RunSubmitter.follow]])
  * @param stopRequest the stop asked of the entry's running attempt, if any (W3): a cancel, or an interrupt by a later
  *   `Interrupt` entry; kept until the entry closes
+ * @param crashes how many of its attempts ended with their lease lapsing - the worker crashed or lost the lease - rather
+ *   than being given back (#3287): each is given back to `maxAttempts`, as a drain's is, and a worker dead-letters the
+ *   entry once they reach its `maxCrashes`; `0` in a store that does not count them
+ * @param retryAt when a failed attempt was given back for a retry (#3257), the time by the store's clock before which
+ *   no take hands the entry out; `None` once it may be taken
  */
 @Experimental
 final case class QueueEntry private (
@@ -242,10 +263,16 @@ final case class QueueEntry private (
   closedAt: Option[Instant],
   closedAtSeq: Option[Long],
   position: Option[Int],
-  stopRequest: Option[StopRequest]
+  stopRequest: Option[StopRequest],
+  crashes: Int = 0,
+  retryAt: Option[Instant] = None
 ):
   /** Whether the entry is still to run or running: it has no outcome. */
   def isOpen: Boolean = outcome.isEmpty
+
+  /** The entry with a store's crash count and retry time ([[crashes]], [[retryAt]]). */
+  private[llm4s] def withAccounting(crashes: Int, retryAt: Option[Instant]): QueueEntry =
+    copy(crashes = crashes, retryAt = retryAt)
 
   /**
    * The `RunConfig` an attempt at the entry runs with (Stage 5 rule 4, design 4.58): as run `runId` - the attempt's,

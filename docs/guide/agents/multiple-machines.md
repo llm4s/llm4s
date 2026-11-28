@@ -136,7 +136,8 @@ AgentId.of("assistant").flatMap { agentId =>
   what a guardrail would refuse or rewrite out of the queue as well, admit the query on the submitting instance and
   queue the result: `agent.admit(threadId, text).map(QueuedInput.admitted)`. The entry then holds the query as the
   guardrails left it - or, for a refused one, only the refusing guardrail's name - and the worker does not run them
-  again. See [Admission](middleware#admission).
+  again. Only `QueuedInput.admitted` makes an entry the worker trusts this way: a `QueuedInput.Start` built from a
+  client's JSON is admitted by the worker, whatever `admission` mark its input carries. See [Admission](middleware#admission).
 - **Following a run** is `submitter.follow(tenant, entryId, after, limit, wait)`, a page at a time from a thread
   sequence number: it waits for the next commit on whichever machine makes it, and resuming from the last number seen
   repeats nothing. `submitter.await(tenant, entryId, timeout)` waits for the entry to close.
@@ -144,13 +145,21 @@ AgentId.of("assistant").flatMap { agentId =>
   the entry, records a new attempt and recovers the thread from its last checkpoint; a follower sees the recovered
   run's events continue the same log, with no gap and no repeat. Recovery takes about the longer of the lease
   and claim `ttl`s.
-- **Attempts are bounded** by `llm4s.agent.queue.maxAttempts` (an attempt a drain cut short is not counted; see
-  Shutdown drains below); an entry that runs out is closed `failed` (a dead letter), and so is one no worker's graph version can run for `unrunnableAfter`. A worker that cannot read the
+- **Attempts are bounded** by `llm4s.agent.queue.maxAttempts` (an attempt a drain cut short or a crash ended is not
+  counted; crashes have their own bound, `maxCrashes`; see Shutdown drains below); an entry that runs out is closed `failed` (a dead letter), and so is one no worker's graph version can run for `unrunnableAfter`. A worker that cannot read the
   entry's thread spends an attempt each time, so a thread that never reads dead-letters its entry too. The sweep
   closes `failed` (`Unrunnable`) a thread's head that no worker has taken within `unrunnableAfter` of its
   submission, such as one for an agent id no worker serves; `queue.allDepths()` shows every agent's open entries,
   served or not. An entry whose stored form this build cannot read (written by a newer release, or by hand) is closed
   `failed` when a take reaches it, and the take goes on to the next.
+- **A failed attempt is retried after a backoff**: `llm4s.agent.worker.retry.delay` (30 seconds) after the first,
+  doubling with each attempt up to `retry.maxDelay` (10 minutes), less a random part of up to half, so a provider
+  outage of a few minutes does not use up every entry's attempts. The thread's later entries wait behind it. A failure
+  no retry can mend - the provider refused the credentials, the request's content or length, or the model - is not
+  retried: the thread is settled and the entry closed `failed` (`RunFailed`).
+- **Dead letters can be listed and re-driven**: `queue.closedEntries(tenant, "failed", after, limit)` pages through a
+  tenant's failed entries, oldest first, until the ticket lifetime reclaims them, and `queue.requeue(tenant, entryId)`
+  submits a failed entry's input again as a new entry on its thread, leaving the dead letter as it was.
 - **Queues are bounded**: a tenant may have `maxOpenPerThread` open entries on one thread, and a queued input (its
   history included) may be `maxInputBytes` long; a submission past either is refused with
   `QueueError.ThreadQueueFull` or `QueueError.InputTooLarge`.
@@ -180,8 +189,10 @@ llm4s.agent {
 then cancels the rest and gives their entries back, so another instance recovers them at once instead of waiting for
 the lease to lapse. An attempt a drain cuts short costs its entry nothing: the entry's `maxAttempts` rises by one
 (in the in-memory, SQLite and PostgreSQL queues; a custom `RunQueue` still charges it), so a run longer than `drain.grace` survives any number of rolling deploys. A worker that
-crashes gives nothing back, and that attempt does count: `maxAttempts` is what dead-letters an entry whose run crashes
-its worker every time. Give the process `grace + exitTimeout` plus a margin to stop (Kubernetes'
+crashes (or is OOM-killed) gives nothing back; the next take sees its lease lapsed with an attempt open, counts a crash
+on the entry (`QueueEntry.crashes`) and gives the attempt back too, so restarts never use up `maxAttempts`. An entry
+whose run crashes its worker every time is dead-lettered once its crashes reach `llm4s.agent.worker.maxCrashes` (5).
+Give the process `grace + exitTimeout` plus a margin to stop (Kubernetes'
 `terminationGracePeriodSeconds`).
 
 **Readiness is `worker.health()`**: the worker is running, its loop is alive and the store answers. Keep liveness on
@@ -258,7 +269,7 @@ val runtime      = RuntimeConfigLoader.runtime(checkpointer)
 | Runs | `runs.started`, `runs.ended` (by outcome), `run.duration` |
 | Claims | `claims` (acquired, taken over, busy, failed), `claim.renewals` (renewed, lost, failed) |
 | Commits | `commit.duration` |
-| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`, abandoned runs `failed` / `abandoned`) |
+| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`, abandoned runs `failed` / `abandoned`, guardrail-blocked turns `failed` / `blocked`) |
 | Child tasks | `tasks.started`, `tasks.ended`, `task.duration` |
 | Retention | `sweep.passes`, `sweep.threads.examined`, `sweep.tombstones.reclaimed`, `sweep.entries.reclaimed` |
 | Shutdown | `worker.drained` |
@@ -316,7 +327,8 @@ Whether instances can be replaced one at a time depends on what the release chan
   drains on SIGTERM and gives back what it could not finish; new instances take it. If the agent's graph changed, a
   run in flight at the old graph version is passed over by new workers until an old one takes it, and closed `failed`
   if none does within `llm4s.agent.worker.unrunnableAfter` (1 hour by default): keep at least one old instance until
-  its runs drain.
+  its runs drain. A cancel of such an entry whose input never ran is acted on at once. An entry for a thread another
+  agent created (its graph id differs, not just its version) is closed `failed` (`Unrunnable`) as soon as it is taken.
 - **A new store schema version or checkpoint format: full stop.** Stop every instance, then start the new release.
   The first new instance migrates the schema; an old instance that meets the newer schema refuses to open with
   `GraphError.UnsupportedStoreSchema` and writes nothing, and one still running fails each write with the same

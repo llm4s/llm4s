@@ -29,7 +29,14 @@ class WorkerMetricsSpec
   private val agentId    = AgentId.of("assistant").value
   private val shortLease = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
   private val fast =
-    WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds, queueDepthEvery = 20.millis)
+    WorkerSettings(
+      pollInterval = 20.millis,
+      sweepEvery = None,
+      drainGrace = 2.seconds,
+      queueDepthEvery = 20.millis,
+      retryDelay = 50.millis,
+      maxRetryDelay = 200.millis
+    )
 
   private val started = new ConcurrentLinkedQueue[AgentWorker]()
 

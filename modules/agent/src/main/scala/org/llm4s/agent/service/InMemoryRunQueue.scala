@@ -48,9 +48,15 @@ final class InMemoryRunQueue private[agent] (
     closedAt: Option[Instant],
     closedAtSeq: Option[Long] = None,
     admitted: Boolean = false,
-    stop: Option[StopRequest] = None
+    stop: Option[StopRequest] = None,
+    retryAt: Option[Instant] = None,
+    crashes: Int = 0,
+    attemptOpen: Boolean = false
   ):
     def open: Boolean = outcome.isEmpty
+
+    /** Whether a retry's delay still holds the entry back at `now` (#3257). */
+    def waiting(now: Instant): Boolean = retryAt.exists(now.isBefore)
 
   private val rows      = mutable.TreeMap.empty[Long, Row]
   private val keys      = mutable.Map.empty[(Option[String], String), Long]
@@ -94,28 +100,30 @@ final class InMemoryRunQueue private[agent] (
   private def view(row: Row): QueueEntry =
     // only the entry's own tenant's entries are counted (rule 9)
     val position = Option.when(row.open)(tenantQueueOf(row.threadId, row.tenantId).indexWhere(_.id == row.id))
-    QueueEntry.stored(
-      EntryId.unsafe(row.id),
-      row.threadId,
-      row.agentId,
-      row.tenantId,
-      // an input that cannot be read is answered as such, never thrown (#3091)
-      QueuedInput.fromJson(row.input).fold(p => QueuedInput.Unreadable(s"its input cannot be read: $p"), identity),
-      row.policy,
-      row.key,
-      row.maxAttempts,
-      row.trace,
-      row.submittedAt,
-      row.attempts,
-      row.admitted,
-      row.lease.map(_.holder),
-      row.lease.map(_.expiresAt),
-      row.outcome,
-      row.closedAt,
-      row.closedAtSeq,
-      position,
-      row.stop
-    )
+    QueueEntry
+      .stored(
+        EntryId.unsafe(row.id),
+        row.threadId,
+        row.agentId,
+        row.tenantId,
+        // an input that cannot be read is answered as such, never thrown (#3091)
+        QueuedInput.fromJson(row.input).fold(p => QueuedInput.Unreadable(s"its input cannot be read: $p"), identity),
+        row.policy,
+        row.key,
+        row.maxAttempts,
+        row.trace,
+        row.submittedAt,
+        row.attempts,
+        row.admitted,
+        row.lease.map(_.holder),
+        row.lease.map(_.expiresAt),
+        row.outcome,
+        row.closedAt,
+        row.closedAtSeq,
+        position,
+        row.stop
+      )
+      .withAccounting(row.crashes, row.retryAt)
 
   private def live(row: Row, now: Instant): Boolean = row.lease.exists(l => now.isBefore(l.expiresAt))
 
@@ -226,8 +234,11 @@ final class InMemoryRunQueue private[agent] (
       .flatMap { thread =>
         val ordered = queueOf(thread)
         val head    = ordered.head
-        // one run per thread: no other entry of the thread holds a live lease
-        Option.when(!live(head, now) && !ordered.tail.exists(live(_, now)))(head)
+        // one run per thread: no other entry of the thread holds a live lease; a head waiting out a retry's delay holds
+        // its thread back (#3257), unless a stop was asked of it, which a worker acts on at once
+        Option.when(
+          !live(head, now) && (!head.waiting(now) || head.stop.isDefined) && !ordered.tail.exists(live(_, now))
+        )(head)
       }
       .filter(head => request.agents.contains(head.agentId) && request.admits(EntryId.unsafe(head.id)))
     // a head whose input cannot be read is closed, and the take goes on to the next (#3091)
@@ -253,7 +264,16 @@ final class InMemoryRunQueue private[agent] (
           .foreach(r => rows.update(r.id, r.copy(lease = None)))
         lastLease += 1
         val held = Held(request.holder, lastLease, now.plusNanos(request.ttl.toNanos))
-        val row  = head.copy(lease = Some(held))
+        // an attempt whose lease lapsed with it still open ended in a crash, not a failure of its own (#3287): it is
+        // counted as one and given back to the entry's maxAttempts
+        val crashed = head.lease.isDefined && head.attemptOpen
+        val row = head.copy(
+          lease = Some(held),
+          retryAt = None,
+          crashes = if crashed then head.crashes + 1 else head.crashes,
+          maxAttempts = if crashed then head.maxAttempts + 1 else head.maxAttempts,
+          attemptOpen = false
+        )
         rows.update(row.id, row)
         // a takeable head still holding a lease holds an expired one, never released
         Right(Some(LeasedEntry(view(row), leaseOf(row, held), expiredLease = head.lease.isDefined)))
@@ -315,7 +335,7 @@ final class InMemoryRunQueue private[agent] (
   }
 
   def release(lease: Lease): Result[Unit] = withLock(lock) {
-    released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None))))
+    released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None, attemptOpen = false))))
   }
 
   override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = withLock(lock) {
@@ -323,8 +343,33 @@ final class InMemoryRunQueue private[agent] (
       // the drained attempt stays in the history, and the entry is given one more (#3241); an entry with no attempt
       // recorded has nothing to give back
       val budget = if row.attempts.isEmpty then row.maxAttempts else row.maxAttempts + 1
-      rows.update(row.id, row.copy(lease = None, maxAttempts = budget))
+      rows.update(row.id, row.copy(lease = None, maxAttempts = budget, attemptOpen = false))
     })
+  }
+
+  override private[llm4s] def releaseRetry(lease: Lease, delay: FiniteDuration): Result[Unit] = withLock(lock) {
+    released(leased(lease)).map(_.foreach { row =>
+      rows.update(
+        row.id,
+        row.copy(lease = None, retryAt = Some(clock.instant().plusNanos(delay.toNanos)), attemptOpen = false)
+      )
+    })
+  }
+
+  override def closedEntries(
+    tenantId: Option[TenantId],
+    state: String,
+    after: Option[EntryId],
+    limit: Int
+  ): Result[Vector[QueueEntry]] = withLock(lock) {
+    RunQueue.closedEntriesRefusal(state, limit).toLeft {
+      rows
+        .valuesIteratorFrom(after.fold(0L)(_.value + 1))
+        .filter(r => r.tenantId == tenantId && r.outcome.exists(_.state == state))
+        .take(limit)
+        .map(view)
+        .toVector
+    }
   }
 
   /** What `release` does with `leased`'s answer: a closed entry is reported, a lease that is not current is a no-op. */
@@ -354,7 +399,8 @@ final class InMemoryRunQueue private[agent] (
         Right(AttemptStart.ThreadDeleted(view(closeRow(row, EntryOutcome.Cancelled(CancelReason.ThreadDeleted)))))
       else if row.attempts.size >= row.maxAttempts then Right(AttemptStart.Exhausted(view(row)))
       else
-        val recorded = row.copy(attempts = row.attempts :+ Attempt(runId, clock.instant(), lease.holder))
+        val recorded =
+          row.copy(attempts = row.attempts :+ Attempt(runId, clock.instant(), lease.holder), attemptOpen = true)
         rows.update(row.id, recorded)
         attemptRuns.getOrElseUpdate(row.threadId, mutable.Set.empty) += runId
         Right(AttemptStart.Recorded(view(recorded)))

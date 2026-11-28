@@ -53,7 +53,8 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   ): Result[QueuedInput] =
     val place = Vector("queue") ++ tenantId.fold(Vector("-", ""))(t => Vector("t", t.value)) :+ agentId.value
     input match
-      case QueuedInput.Start(value) => codec(place :+ "start", value).map(QueuedInput.Start(_))
+      case QueuedInput.Start(value)    => codec(place :+ "start", value).map(QueuedInput.Start(_))
+      case QueuedInput.Admitted(value) => codec(place :+ "admitted", value).map(QueuedInput.Admitted(_))
       case QueuedInput.Resume(answers) =>
         traverse(answers.toVector)((id, answer) => codec(place ++ Vector("resume", id.value), answer).map(id -> _))
           .map(opened => QueuedInput.Resume(opened.toMap))
@@ -75,27 +76,29 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
     through(cipher(entry.threadId).open, entry.tenantId, entry.agentId, entry.input).map(withInput(entry, _))
 
   private def withInput(entry: QueueEntry, input: QueuedInput): QueueEntry =
-    QueueEntry.stored(
-      entry.id,
-      entry.threadId,
-      entry.agentId,
-      entry.tenantId,
-      input,
-      entry.policy,
-      entry.submissionKey,
-      entry.maxAttempts,
-      entry.trace,
-      entry.submittedAt,
-      entry.attempts,
-      entry.admitted,
-      entry.leaseHolder,
-      entry.leaseExpiresAt,
-      entry.outcome,
-      entry.closedAt,
-      entry.closedAtSeq,
-      entry.position,
-      entry.stopRequest
-    )
+    QueueEntry
+      .stored(
+        entry.id,
+        entry.threadId,
+        entry.agentId,
+        entry.tenantId,
+        input,
+        entry.policy,
+        entry.submissionKey,
+        entry.maxAttempts,
+        entry.trace,
+        entry.submittedAt,
+        entry.attempts,
+        entry.admitted,
+        entry.leaseHolder,
+        entry.leaseExpiresAt,
+        entry.outcome,
+        entry.closedAt,
+        entry.closedAtSeq,
+        entry.position,
+        entry.stopRequest
+      )
+      .withAccounting(entry.crashes, entry.retryAt)
 
   /** Submits `submission` with its input encrypted; a reused submission key is compared against the stored entry in plain. */
   def submit(submission: Submission): Result[Ticket] =
@@ -208,8 +211,19 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   def renew(lease: Lease, ttl: FiniteDuration): Result[Lease] = inner.renew(lease, ttl)
 
   /** Passed to the store unchanged. */
-  def release(lease: Lease): Result[Unit]                                    = inner.release(lease)
-  override private[llm4s] def releaseDrained(lease: Lease): Result[Unit]     = inner.releaseDrained(lease)
+  def release(lease: Lease): Result[Unit]                                = inner.release(lease)
+  override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = inner.releaseDrained(lease)
+  override private[llm4s] def releaseRetry(lease: Lease, delay: FiniteDuration): Result[Unit] =
+    inner.releaseRetry(lease, delay)
+
+  /** The closed entries, each with its input opened, as [[entry]] opens it. */
+  override def closedEntries(
+    tenantId: Option[TenantId],
+    state: String,
+    after: Option[EntryId],
+    limit: Int
+  ): Result[Vector[QueueEntry]] =
+    inner.closedEntries(tenantId, state, after, limit).flatMap(traverse(_)(opened))
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int]       = inner.reclaim(ticketLifetime, limit)
   def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] = inner.openRuns(threads)
 

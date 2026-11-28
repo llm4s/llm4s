@@ -130,8 +130,9 @@ class PostgresRunQueueContractSpec extends AnyFlatSpec with RunQueueContract wit
         st.setArray(1, agents)
         st.setArray(2, agents)
         st.setObject(3, now)
-        st.setLong(4, 0L)
-        st.setObject(5, now)
+        st.setObject(4, now)
+        st.setLong(5, 0L)
+        st.setObject(6, now)
         st.executeQuery().close()
       }
       val taken = stores.queue.take(TakeRequest("worker", Set(agent), 30.seconds)).toOption.get
