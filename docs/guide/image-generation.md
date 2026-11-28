@@ -133,7 +133,8 @@ def drawWithHuggingFace(token: String): Either[org.llm4s.error.LLMError, Generat
 ## A Stable Diffusion server
 
 This client connects to the [AUTOMATIC1111 stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
-API, running locally or on a server of yours (`http://localhost:7860` by default; pass `apiKey` if it needs one).
+API, running locally or on a server of yours (`http://localhost:7860` by default). The optional
+`apiKey` sends a Bearer token. AUTOMATIC1111's built-in authentication uses HTTP Basic, which this client does not send.
 
 ```scala
 import org.llm4s.imagegeneration._
@@ -159,7 +160,7 @@ val lion = for {
 | Option | Type | Used by | Description |
 |--------|------|---------|-------------|
 | `size` | `ImageSize` | all | `Square512` (default), `Square1024`, `Landscape768x512`, `Portrait512x768`, `Landscape1536x1024`, `Portrait1024x1536`, `Auto`, or `Custom(width, height)` |
-| `format` | `ImageMediaType` | all | The image format, from `org.llm4s.media` (`MediaType.Png` by default, or `MediaType.Jpeg`; see [Media Types](media-types)) |
+| `format` | `ImageMediaType` | Response metadata | Defaults to `MediaType.Png`. Hugging Face, Stability AI and Stable Diffusion copy it to the result. OpenAI can use it as a fallback. Use `outputFormat` to request a specific encoding from GPT Image. |
 | `seed` | `Option[Long]` | Stable Diffusion, Stability AI, Hugging Face | A seed for reproducible results |
 | `guidanceScale` | `Double` | Stable Diffusion, Stability AI, Hugging Face | How strictly the model follows the prompt (default 7.5) |
 | `inferenceSteps` | `Int` | Stable Diffusion, Stability AI, Hugging Face | Diffusion steps (default 20) |
@@ -183,5 +184,5 @@ exports generic metrics exports them; see [Monitoring](observability/#metrics) f
 
 - [Examples](/examples/) - Working code examples
 - [Multimodal Content](multimodal) - Send images to a chat model
-- [Media Types](media-types) - The `MediaType` and `MediaCategory` vocabulary `ImageOptions.format` comes from
+- [Media Types](media-types) - The `MediaType` and `MediaCategory` vocabulary `ImageGenerationOptions.format` comes from
 - [Data Protection](data-protection) - Where image prompts are sent

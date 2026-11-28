@@ -186,6 +186,8 @@ not treat it as structured output from the model:
 | `text` | A quotation after `text says`, `reads` or `contains the text` in the reply, lower-cased; otherwise `None` |
 | `metadata` | Facts read from the local file |
 
+The OpenAI and Anthropic vision clients expose `extractText`, `detectObjects` and `generateTags` as convenience methods over `analyzeImage`. `extractText` returns an empty string when the reply has no recognised text section. The objects and tags come from the same keyword matching as the fields above.
+
 `analyzeImageAsync` runs the same call in a `Future`:
 
 ```scala

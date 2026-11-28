@@ -26,7 +26,7 @@ A comprehensive speech recognition and text-to-speech synthesis module for the L
 ### Text-to-Speech (TTS)
 - **Tacotron2**: Neural speech synthesis via CLI integration
 - **Cloud**: `OpenAITTSClient`, `ElevenLabsTTSClient` and `AzureTTSClient`, see [Cloud providers](#cloud-providers)
-- **Voice Customization**: Language, speaking rate, pitch, volume control
+- **Voice customization**: OpenAI, Azure and ElevenLabs support a voice override. OpenAI and Azure also support speaking rate, and Azure sets the SSML language. Tacotron2 forwards voice, language, rate, pitch and gain to its wrapper.
 - **Output Formats**: WAV and raw PCM16 audio support
 - **Cross-platform**: Works on Windows, Linux, and macOS
 
@@ -195,7 +195,7 @@ Behaviour worth knowing:
 - **OpenAI TTS limits are checked locally**: text over 4096 characters and a `speakingRate` outside
   0.25 to 4.0 are a `ValidationError` before any request is sent. Split long text yourself; the clients
   do not chunk it.
-- **STT input is WAV.** `BytesAudio` and `StreamAudio` are treated as WAV data, as for Whisper and Vosk.
+- **STT input depends on the engine.** The local Whisper wrapper writes byte and stream inputs to a temporary WAV file as supplied. Vosk treats `BytesAudio` and `StreamAudio` as headerless 16-bit PCM, using the supplied sample rate and channel count to standardise the audio. Vosk sends file bytes directly to the recogniser, so use raw PCM at its target sample rate for file inputs.
   Azure's REST endpoint recognises about 60 seconds of audio per request.
 - **Errors map like the chat providers**: HTTP 401/403 is `AuthenticationError`, 429 is
   `RateLimitError` (with `Retry-After`), 400 is `ValidationError`, other statuses are `ServiceError`,
