@@ -506,10 +506,16 @@ private[llm4s] object Text:
       // a file whose lines end `\r\n` reads without the `\r` (`lines`), so the model writes `\n`: in such a
       // file an `old` not found as written is matched with `\r\n` for each `\n`, and the replacement is
       // written with the file's ending, so an edit never mixes endings (#3266)
-      val crlf = dominantlyCrlf(content)
       val (o, r) =
-        if !crlf then (old, replacement)
-        else (if old.contains('\n') && content.indexOf(old) < 0 then withCrlf(old) else old, withCrlf(replacement))
+        if !dominantlyCrlf(content) then (old, replacement)
+        else if old.indexOf('\n') < 0 && old.indexOf('\r') < 0 then (old, withCrlf(replacement))
+        else
+          // `old` with its breaks as `\r\n` is matched first: it takes whole CRLF pairs, so an `old` that starts
+          // with `\n` (the LF half of a pair) or ends with `\r` cannot split one and leave `\r\r\n` behind (#3266).
+          // Only when that is not there is `old` matched as written, and then the replacement is not rewritten
+          // either: the match is somewhere the file does not end its lines in CRLF
+          val asCrlf = withCrlf(old)
+          if content.indexOf(asCrlf) >= 0 then (asCrlf, withCrlf(replacement)) else (old, replacement)
       replaced(path, content, o, r, replaceAll, maxBytes)
 
   /** Whether most of `content`'s line endings are `\r\n`. */
