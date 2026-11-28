@@ -258,7 +258,7 @@ val runtime      = RuntimeConfigLoader.runtime(checkpointer)
 | Runs | `runs.started`, `runs.ended` (by outcome), `run.duration` |
 | Claims | `claims` (acquired, taken over, busy, failed), `claim.renewals` (renewed, lost, failed) |
 | Commits | `commit.duration` |
-| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`, abandoned runs `failed` / `abandoned`) |
+| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`, abandoned runs `failed` / `abandoned`, guardrail-blocked turns `failed` / `blocked`) |
 | Child tasks | `tasks.started`, `tasks.ended`, `task.duration` |
 | Retention | `sweep.passes`, `sweep.threads.examined`, `sweep.tombstones.reclaimed`, `sweep.entries.reclaimed` |
 | Shutdown | `worker.drained` |

@@ -88,6 +88,25 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       AttemptPlan.Close(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
   }
 
+  it should "close a Failed thread by its run's outcome: a block, an invalid output, a settled failure (#3255)" in {
+    val own = checkpoint("c1", "r1", CheckpointStatus.Running)
+    def closed(outcome: Option[RunOutcome]) =
+      AttemptPlan.of(
+        entry(QueuedInput.query("q")),
+        Some(own),
+        Some(checkpoint("c2", "r1", CheckpointStatus.Failed).withOutcome(outcome))
+      )
+    closed(Some(RunOutcome.Blocked("NoBoom"))) shouldBe
+      AttemptPlan.Close(EntryOutcome.Failed(FailureReason.Blocked("NoBoom")))
+    closed(Some(RunOutcome.OutputInvalid(Vector("a", "b")))) shouldBe
+      AttemptPlan.Close(EntryOutcome.Failed(FailureReason.OutputInvalid(Vector("a", "b"))))
+    closed(Some(RunOutcome.Failed("Kind", "it broke"))) match {
+      case AttemptPlan.Close(EntryOutcome.Failed(FailureReason.RunFailed(message))) =>
+        message should (include("c2").and(include("it broke")))
+      case other => fail(s"unexpected $other")
+    }
+  }
+
   it should "close an admitted entry whose checkpoints a retraction removed, never starting its input again" in {
     // the lookup finds none of the entry's runs, but the store recorded that one of them committed
     val failed = checkpoint("c3", "direct", CheckpointStatus.Failed)

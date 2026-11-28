@@ -179,7 +179,8 @@ object AgentMetrics:
 
   /**
    * Entries closed: `agent`, `outcome` (`done`, `failed`, `cancelled`, `interrupted`) and `reason`: for `failed`,
-   * `attempts_exhausted` (a dead letter), `run_failed`, `unrunnable` or `abandoned`; for `cancelled`, `requested` or `thread_deleted`;
+   * `attempts_exhausted` (a dead letter), `run_failed`, `unrunnable`, `abandoned`, `blocked` (a guardrail refused the turn) or
+   * `output_invalid`; for `cancelled`, `requested` or `thread_deleted`;
    * otherwise `none`.
    */
   val QueueClosed: Metric.Counter =

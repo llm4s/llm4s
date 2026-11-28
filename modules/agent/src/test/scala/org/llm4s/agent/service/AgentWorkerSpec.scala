@@ -886,6 +886,25 @@ class AgentWorkerSpec
     store.runQueue.entry(None, boom).value.isOpen shouldBe true
   }
 
+  // ---- how a run's outcome closes its entry (#3255) ----
+
+  "A queued turn a guardrail blocks" should "close its entry Failed(Blocked) naming the guardrail, never RunFailed (#3255)" in {
+    val store = InMemoryCheckpointer()
+    val refusing = new org.llm4s.agent.guardrails.InputGuardrail {
+      val name: String = "NoBoom"
+      def validate(value: String): Result[String] =
+        if (value == "boom") Left(ValidationError("query", "no booms")) else Right(value)
+    }
+    val agent =
+      Agent.builder("assistant", answering("fine")).withRuntime(new GraphRuntime(store)).withInputGuardrails(refusing)
+    val worker = workerOf(store, Seq(QueuedAgent(agent.build().value)))
+    val boom   = submit(store, thread(), QueuedInput.query("boom"))
+    worker.start()
+    val entry = closed(store, boom)
+    entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.Blocked("NoBoom"))
+    entry.attempts should have size 1
+  }
+
   it should "keep sweeping after a pass throws, and report a sweep that is running (#3240)" in {
     val store  = InMemoryCheckpointer()
     val passes = new AtomicInteger(0)

@@ -1000,6 +1000,15 @@ stored schema is the same.
 | A fatal throwable (a `StackOverflowError` in a guardrail) on a slot's run thread kept the slot, lost its permit and renewed its lease for good; a take or sweep loop that threw ended for good (#3240) | The slot is given up however its run ends, so its lease lapses and the entry is taken again; each loop logs a throw and goes on, and `health()` reports a sweep thread that is not running |
 | An attempt a drain cut short counted against `maxAttempts`, so a run longer than `drain.grace` was dead-lettered after a few rolling deploys (#3241) | A drained attempt raises the entry's `maxAttempts` by one (it stays in `attempts`). A worker crash still counts: that bound dead-letters an entry whose run crashes its worker every time. The in-memory, SQLite and PostgreSQL queues do this for `AgentWorker`; a custom `RunQueue` charges drained attempts, as before |
 
+## Run queue outcomes, retries, crashes and admitted inputs (#3255, #3256, #3257, #3258, #3287)
+
+`RunQueue`, `AgentWorker`, `EntryOutcome`, `FailureReason` and `QueuedInput` are experimental (`llm4s-agent`), and so are
+the SQLite and PostgreSQL run queues.
+
+| Before (1.0.0) | After |
+|---|---|
+| A queued turn a guardrail blocked closed `Failed(RunFailed)`, as a crash does, and counted as `queue.closed{failed,run_failed}`; a typed answer that failed its schema the same (#3255) | It closes `Failed(FailureReason.Blocked(guardrail))` or `Failed(FailureReason.OutputInvalid(errors))`, counted `blocked` / `output_invalid`; a settled failure's `RunFailed` message carries the run's own. `FailureReason` has two new cases: a `match` on it needs them. Stored outcomes written before read back unchanged |
+
 ## Memory stores share one contract and one score rule (#3036, #3037, #3038)
 
 `llm4s-memory` and `llm4s-memory-postgres` are Beta. Every store now passes one `MemoryStoreContract`, so a call gets
