@@ -15,7 +15,10 @@ import org.scalatest.matchers.should.Matchers
  */
 class PromptInjectionDetectorScalingSpec extends AnyFlatSpec with Matchers {
 
-  private val n = 20000
+  // Large enough that a small sample is milliseconds of matching per run, well above timer and JIT noise: at 20k
+  // characters a linear pattern (no_restrictions on a run of `guardrails`, 50 ns a character from 20k to 320k)
+  // read 9.0x once on CI.
+  private val n = 80000
 
   private def run(prefix: String, unit: String, length: Int): String = prefix + unit * (length / unit.length)
 
