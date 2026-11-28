@@ -99,6 +99,7 @@ BUILD=(
   '^\.scalafix\.conf$'
   '^scripts/ci-changes\.sh$'
   '^scripts/merge-group-labels\.sh$'
+  '^scripts/merge-queue-tested\.sh$'
   '^scripts/retry-on-transient-network\.sh$'
 )
 # Build files judged by the graph diff (above), not as BUILD.
