@@ -41,8 +41,9 @@ object PostgresCheckpointerBackend:
   /** The `llm4s.agent.checkpointer.kind` this backend serves. */
   val Kind: String = "postgres"
 
-  /** The keys the `postgres` block may hold. */
-  val Keys: Set[String] = Set("url", "user", "password", "schema", "callTimeout", "connectionTimeout", "maxPoolSize")
+  /** The keys the `postgres` block may hold (`migrationTimeout`: #3089, read once that lands). */
+  val Keys: Set[String] =
+    Set("url", "user", "password", "schema", "callTimeout", "connectionTimeout", "maxPoolSize", "migrationTimeout")
 
   /** A pgjdbc URL parameter that carries a credential (`password`, `sslpassword`), or user info before the host. */
   private val CredentialParameter = "(?i)[?&;](?:ssl)?password=|^jdbc:postgresql://[^/?]*@".r
