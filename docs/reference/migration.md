@@ -987,6 +987,14 @@ No signature changed and no stored format changed; what is refused is new:
 | `edit_file` matched `old_string` against the raw content, while `read_file` shows a CRLF file's lines without their `\r`, so a multi-line edit of such a file was "not found", and a replacement with `\n` mixed endings (#3266) | In a file whose endings are mostly CRLF, an `old_string` with a line break is matched with `\r\n` for each `\n` (whole pairs, so one that starts with `\n` or ends with `\r` never splits one), and the replacement is written with CRLF endings; where only the `old_string` as written is there, both are used as written. In every backend (host, state, store) |
 | `ToolOutputOffload` stored a JSON result as compact, one-line JSON, and `read_file` shows at most 2,000 characters of a line, so all but the start of a large one-line result could not be read (#3265) | A JSON result is stored indented (`render(indent = 2)`), and every stored line longer than `ToolOutputOffload.StoredLineChars` (1,000) is split, with no marker, which the preview says. `originalBytes` is still the size of the text sent. Code that reads `OffloadedResult.content` sees the stored form |
 
+## Shell quotes, tool result caps and hints, guarded instructions, assistant sessions (#3268, #3271, #3273, #3277)
+
+`llm4s-agent-tools` is Beta; the harness and the assistant of `llm4s-agent` are experimental.
+
+| Before (1.0.0) | After |
+|---|---|
+| On Windows the shell tool passed an argument holding `"` to the program, which the JDK quotes without escaping: `sort 'x" /O "C:\out.txt'` was one operand to the checks and `/O` to `sort.exe` (#3271) | On Windows an argument holding a double quote is refused, with or without a path policy. The workspace runner already refused it |
+
 ## Guardrails see and keep every rewrite, and fail closed (#3231, #3232, #3233, #3234, #3235)
 
 The guardrails and the streaming path are experimental, and `Agent.run`'s history import keeps its `@Stable`

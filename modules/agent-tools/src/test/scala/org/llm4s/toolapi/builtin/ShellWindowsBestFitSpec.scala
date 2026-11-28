@@ -56,6 +56,28 @@ class ShellWindowsBestFitSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "refuse an argument holding a double quote, which the program would split into options (#3271)" in {
+    val config = ShellConfig.readOnly().copy(allowedCommands = ShellConfig.readOnly().allowedCommands :+ "sort")
+    // one token to the checks, `sort "x" /O "C:\out.txt"` to sort.exe, which then writes the file
+    val why = withClue("no path policy")(verdict(config, """sort 'x" /O "C:\out.txt'""").getOrElse(fail("not refused")))
+    why should include("double quote")
+    why should include("not allowed on Windows")
+    verdict(config, """sort 'x" /O "C:\out.txt'""", windows = false) shouldBe None
+    refusedOnWindows(config, """cat 'a"b'""")
+    refusedOnWindows(contained(newRoot()), """grep 'x" -r "/'""")
+    verdict(config, "cat a.txt") shouldBe None
+  }
+
+  it should "refuse it end to end on a Windows host, without starting the program" in {
+    assume(isWindowsHost, "the JDK's Windows command-line quoting")
+    val config = ShellConfig.readOnly().copy(allowedCommands = ShellConfig.readOnly().allowedCommands :+ "sort")
+    val out    = newRoot().resolve("out.txt")
+    val tool   = ShellTool.createSafe(config).fold(e => fail(e.formatted), identity)
+    val result = tool.handler(SafeParameterExtractor(ujson.Obj("command" -> s"""sort 'x" /O "$out'""")))
+    result.isLeft shouldBe true
+    java.nio.file.Files.exists(out) shouldBe false
+  }
+
   it should "refuse one in a value attached to a flag" in {
     val root = newRoot()
     Separators.foreach { c =>

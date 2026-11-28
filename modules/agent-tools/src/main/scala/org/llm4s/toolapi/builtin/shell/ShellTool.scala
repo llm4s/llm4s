@@ -292,7 +292,9 @@ object ShellTool {
    * arguments as UTF-16, so an argument, the working directory or an environment value holding such a character is
    * refused, whatever the program and with or without a path policy (see [[WindowsBestFit]]). On a double-byte ANSI
    * host (code pages 932, 936, 950), an argument the JDK puts in quotes is also refused when it holds a character
-   * whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote (#1807).
+   * whose second byte is 0x5C (`\`), which a byte-wise parser reads as escaping the closing quote (#1807). An
+   * argument holding `"` is refused on every Windows host, since the JDK does not escape it and the program splits
+   * it into several arguments the checks never saw (#3271).
    */
   private def bestFitRefusal(args: Seq[String], config: ShellConfig, ansiCodePage: Option[Charset]): Option[String] =
     args.iterator
@@ -300,6 +302,7 @@ object ShellTool {
         WindowsBestFit
           .refusal(arg, WindowsBestFit.isOptionLike(arg), ansiCodePage)
           .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
+          .orElse(WindowsBestFit.doubleQuoteRefusal(arg))
           .map(why => s"Argument '$arg' is not allowed on Windows: it holds $why")
       )
       .nextOption()
