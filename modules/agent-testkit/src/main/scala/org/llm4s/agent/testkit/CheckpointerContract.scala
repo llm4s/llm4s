@@ -541,6 +541,38 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(newThread(), 0L, 2).value shouldBe empty
   }
 
+  it should "return the remaining events for a limit near Int.MaxValue (#3263)" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    for limit <- Vector(Int.MaxValue, Int.MaxValue - 1) do
+      s.store.eventsAfter(s.thread, 0L, limit).value.map(_.seq) shouldBe Vector(1L, 2L, 3L, 4L, 5L)
+      s.store.eventsAfter(s.thread, 1L, limit).value.map(_.seq) shouldBe Vector(2L, 3L, 4L, 5L)
+      s.store.eventsAfter(s.thread, 3L, limit).value.map(_.seq) shouldBe Vector(4L, 5L)
+      s.store.eventsAfter(s.thread, 5L, limit).value shouldBe empty
+      s.store.eventsAfter(s.thread, 6L, limit).value shouldBe empty
+      s.store.eventsAfter(newThread(), 0L, limit).value shouldBe empty
+    s.store.compactEvents(s.thread, 3L).value
+    s.store.eventsAfter(s.thread, 3L, Int.MaxValue).value.map(_.seq) shouldBe Vector(4L, 5L)
+  }
+
+  it should "return no events for a nonpositive limit, preserving replay and deletion errors (#3263)" in {
+    val s      = Store()
+    val token  = s.claim("run").value.token
+    val limits = Vector(0, -1, Int.MinValue)
+    s.commit(token, events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    for
+      limit <- limits
+      after <- Vector(0L, 2L, 5L)
+    do s.store.eventsAfter(s.thread, after, limit).value shouldBe empty
+    s.store.compactEvents(s.thread, 3L).value
+    limits.foreach { limit =>
+      s.store.eventsAfter(s.thread, 1L, limit).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 3L)
+    }
+    s.store.deleteThread(s.thread, token, None).value
+    limits.foreach(limit => s.store.eventsAfter(s.thread, 2L, limit).refused shouldBe a[GraphError.ThreadDeleted])
+  }
+
   it should "compact behind a floor that never moves back, reporting it to replay from before it" in {
     val s     = Store()
     val token = s.claim("run").value.token
@@ -1303,6 +1335,8 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(token, events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
     // an hour's timeout: a store that waited although events were there would fail the case
     within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 1L, 10, 1.hour)).value.map(_.seq) shouldBe
+      Vector(2L, 3L)
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 1L, Int.MaxValue, 1.hour)).value.map(_.seq) shouldBe
       Vector(2L, 3L)
     within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 0L, 2, 1.hour)).value.map(_.seq) shouldBe
       Vector(1L, 2L)

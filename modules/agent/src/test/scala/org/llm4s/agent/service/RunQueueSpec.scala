@@ -190,6 +190,7 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     page.events.map(_.runId) shouldBe Vector("queued-run")
     page.next shouldBe 2L
     page.finished shouldBe false
+    submitter.follow(None, ticket.entryId, 1L, Int.MaxValue, 1.second).value shouldBe page
     // a follower waiting when the entry closes is told it has finished on that page
     val waiting = new java.util.concurrent.atomic.AtomicReference[FollowedRun]()
     val follower =
@@ -215,6 +216,7 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val rest = submitter.follow(None, ticket.entryId, 1L, 1, 1.second).value
     rest.events.map(_.runId) shouldBe Vector("queued-run")
     rest.finished shouldBe true
+    submitter.follow(None, ticket.entryId, 1L, Int.MaxValue, 1.second).value shouldBe rest
     submitter.await(None, ticket.entryId, 1.second).value.outcome shouldBe
       Some(EntryOutcome.Done(Some("c2"), Some(CheckpointStatus.Completed)))
     submitter.follow(None, ticket.entryId, 0L, 0, 10.millis).left.value shouldBe a[ValidationError]
