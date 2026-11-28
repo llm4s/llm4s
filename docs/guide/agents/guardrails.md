@@ -768,10 +768,20 @@ agent.run(query) match {
     }
 
   case Left(error) =>
-    // a provider error, a tool's failure, a blank query, or another middleware's beforeAgent/afterAgent Left
+    // a provider error, a tool's failure, a blank query, a guardrail that could not decide (GuardrailUnavailable),
+    // or another middleware's beforeAgent/afterAgent Left
     println(s"Run failed: ${error.message}")
 }
 ```
+
+**A guardrail that could not decide is not a block** (#3247). An LLM judge whose provider call fails - a rate limit,
+a timeout, a refused key - returns that error, not a `ValidationError`. When no guardrail of the list refused, the
+run fails with `GuardrailUnavailable(guardrail, cause)` instead of ending `Blocked`: nothing is let through, but the
+answer is not retracted either. `run` returns it as its `Left` (wrapped in the failed node's `GraphError`), the
+durable events record a failed task rather than a `GuardrailBlocked`, and `agent.recover(threadId)` runs the output
+guardrails again on the kept answer, asking the judge again. An input judge's outage at admission starts no turn.
+When one guardrail refuses and another could not decide, the turn is blocked. Inside `CompositeGuardrail.all` and
+`.any` the same rule holds: a provider error with no refusal beside it is returned unchanged.
 
 ### What a Failing Check Does: `GuardrailAction`
 

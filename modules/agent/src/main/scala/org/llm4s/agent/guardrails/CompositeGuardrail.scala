@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.agent.graph.middleware.UsageAccounting
+import org.llm4s.agent.graph.middleware.{ GuardrailUnavailable, UsageAccounting }
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 
@@ -46,7 +46,9 @@ class CompositeGuardrail[A](
    * Runs all guardrails and aggregates all errors. The value is threaded through them as a guardrail
    * list threads it: each sees the value as the one before it rewrote it, `all` returns the last rewrite
    * (so a masking guardrail inside it masks), and a failing guardrail leaves the value unchanged for the
-   * next (#3232).
+   * next (#3232). When a guardrail refuses (a `ValidationError`), the errors are reported together as one; when
+   * some failed but none refused (a judge's provider call failed), the first such error is returned unchanged, so
+   * `GuardrailMiddleware` reports an outage, not a block (#3247).
    */
   private def validateAll(value: A, check: (Guardrail[A], A) => Result[A]): Result[A] = {
     val (last, errors) = guardrails.foldLeft((value, Vector.empty[LLMError])) { case ((current, failed), guardrail) =>
@@ -56,25 +58,33 @@ class CompositeGuardrail[A](
       }
     }
 
-    if (errors.isEmpty) Right(last) else Left(CompositeGuardrail.multipleFailures(errors))
+    if (errors.isEmpty) Right(last)
+    else if (errors.exists(GuardrailUnavailable.isRefusal)) Left(CompositeGuardrail.multipleFailures(errors))
+    else Left(errors.head) // none refused: a guardrail could not decide, and its error says why (#3247)
   }
 
   /**
    * At least one guardrail must pass.
    * Stops at the first guardrail that passes and returns its result, so a guardrail after it does not
    * run (an LLM judge costs a call). When none passes, every guardrail has run and their errors are
-   * reported together.
+   * reported together, unless one could not decide (an error that is not a refusal, such as a judge's rate limit):
+   * that error is returned unchanged, since that guardrail might have passed (#3247).
    */
   private def validateAny(check: Guardrail[A] => Result[A]): Result[A] = {
     @tailrec def next(remaining: List[Guardrail[A]], errors: Vector[LLMError]): Result[A] =
       remaining match {
         case Nil =>
-          Left(
-            ValidationError.invalid(
-              "composite",
-              s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
-            )
-          )
+          // one that could not decide might have passed, so its error is the result, not a refusal (#3247)
+          errors.find(e => !GuardrailUnavailable.isRefusal(e)) match {
+            case Some(undecided) => Left(undecided)
+            case None =>
+              Left(
+                ValidationError.invalid(
+                  "composite",
+                  s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
+                )
+              )
+          }
         case guardrail :: rest =>
           check(guardrail) match {
             case passed @ Right(_) => passed
