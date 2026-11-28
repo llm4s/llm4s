@@ -465,12 +465,6 @@ final class AgentWorker private (
     val agent = agents(entry.agentId)
     if slot.leaseLost.get then Next.Leave
     else if slot.drained.get then Next.Release
-    // its run crashed its worker `maxCrashes` times: dead-lettered, as exhausted attempts are (#3287)
-    else if entry.crashes >= settings.maxCrashes then
-      logger.warn(
-        s"Worker $holder: entry ${entry.id.value}'s attempts ended in ${entry.crashes} crashes; closing it"
-      )
-      exhausted(entry, agent)
     else
       // the tenant first (rule 9): probing another tenant's busy thread would defer to its run, which the entry's
       // tenant could then time
@@ -516,7 +510,14 @@ final class AgentWorker private (
                   slot.stop.get match
                     // a stop asked of an entry no run of ours is running - its worker died: acted on with no attempt
                     case Some(request) => stopped(entry, agent, request, admitted, latest)
-                    case None          => attempt(slot, agent)
+                    // its run crashed its worker `maxCrashes` times: dead-lettered, as exhausted attempts are - only
+                    // by a worker whose graph can take the thread on, so it can settle it (#3287)
+                    case None if entry.crashes >= settings.maxCrashes =>
+                      logger.warn(
+                        s"Worker $holder: entry ${entry.id.value}'s attempts ended in ${entry.crashes} crashes; closing it"
+                      )
+                      exhausted(entry, agent)
+                    case None => attempt(slot, agent)
 
   /**
    * Whether a live claim holds `entry`'s thread, by the store's clock: a claim is asked for, as a probe that is given

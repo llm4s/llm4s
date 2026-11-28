@@ -1003,6 +1003,24 @@ class AgentWorkerSpec
     entry.maxAttempts shouldBe 5
   }
 
+  it should "leave an entry at maxCrashes whose run this worker's graph cannot take on for another worker (#3287)" in {
+    val store = InMemoryCheckpointer()
+    val on    = thread()
+    inFlightAtOtherVersion(store, on)
+    val id     = submit(store, on, maxAttempts = 5)
+    val leased = store.runQueue.take(TakeRequest("dead", Set(agentId), 50.millis)).value.value
+    store.runQueue.recordAttempt(leased.lease, RunId.random()).value shouldBe a[AttemptStart.Recorded]
+    Thread.sleep(80)
+    // at its crash bound, but passed over as unrunnable rather than settled by a graph that cannot restore it
+    val worker = workerOf(
+      store,
+      Seq(QueuedAgent(agentOver(store, answering("y")))),
+      fast.withMaxCrashes(1).withUnrunnableAfter(1.milli)
+    )
+    worker.start()
+    closed(store, id).outcome.value.asInstanceOf[EntryOutcome.Failed].reason shouldBe a[FailureReason.Unrunnable]
+  }
+
   it should "run once a crash is given back, however few attempts it had (#3287)" in {
     val store  = InMemoryCheckpointer()
     val id     = submit(store, thread(), maxAttempts = 1)
