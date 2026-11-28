@@ -2471,6 +2471,25 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     listed(s, all.withOldestFirst(true).withLimit(2).withAfter(page.next)) shouldBe Vector(b, c)
   }
 
+  // #3264: the stores agree on ties and on extreme bounds
+  it should "break a tie on updatedAt by thread id in code-point order, and accept any instant as a bound" in {
+    val s      = Store()
+    val tenant = newTenant()
+    val bmp    = ThreadId(s"tie-${java.util.UUID.randomUUID()}-\uE000")
+    val astral = ThreadId(bmp.value.dropRight(1) + "\uD83D\uDE00")
+    // registered at the same instant: the store's clock does not move between them
+    registered(s, bmp, tenant)
+    registered(s, astral, tenant)
+    val all = ThreadQuery(tenant)
+    if summary(s, tenant, bmp).value.updatedAt == summary(s, tenant, astral).value.updatedAt then
+      // newest first, ties by id descending: U+1F600 after U+E000 by code point (before it by UTF-16 unit)
+      listed(s, all) shouldBe Vector(astral, bmp)
+    listed(s, all.withUpdatedSince(java.time.Instant.MIN)).toSet shouldBe Set(bmp, astral)
+    listed(s, all.withUpdatedSince(java.time.Instant.MAX)) shouldBe empty
+    listed(s, all.withUpdatedBefore(java.time.Instant.MAX)).toSet shouldBe Set(bmp, astral)
+    listed(s, all.withUpdatedBefore(java.time.Instant.MIN)) shouldBe empty
+  }
+
   it should "list a tenant's incomplete root threads that no live claim holds, oldest first, an expired claim's included, paged" in {
     val s        = Store()
     val tenant   = newTenant()

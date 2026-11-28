@@ -1220,6 +1220,14 @@ object PostgresCheckpointer:
    * tenant, or empty for none, so that no tenant is NULL in the indexes - PostgreSQL orders an index scan by the
    * columns after one compared by equality, but not after one tested with `IS NULL`.
    */
+  /** The earliest and latest instants a `timestamptz` holds, well inside its range: what a bound is clamped to. */
+  private val EarliestBound: Instant = java.time.LocalDate.of(-4712, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant
+  private val LatestBound: Instant   = java.time.LocalDate.of(294275, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant
+
+  /** `at`, clamped to what a `timestamptz` holds (#3264): for a query's bound, never a stored time. */
+  private[postgres] def clamped(at: Instant): Instant =
+    if at.isBefore(EarliestBound) then EarliestBound else if at.isAfter(LatestBound) then LatestBound else at
+
   private[postgres] def tenantKey(tenantId: Option[TenantId]): String = tenantId.fold("")(t => "=" + t.value)
 
   /** The statement and parameters of a page of `query`, its claims judged at `now`, the database's clock. */
@@ -1231,8 +1239,9 @@ object PostgresCheckpointer:
     registryStatement(t, query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
-      query.updatedSince.foreach(since => where.add("updated_at >= ?", since))
-      query.updatedBefore.foreach(before => where.add("updated_at < ?", before))
+      // an instant past what a timestamptz holds (Instant.MIN or MAX) is clamped, never thrown (#3264)
+      query.updatedSince.foreach(since => where.add("updated_at >= ?", PostgresCheckpointer.clamped(since)))
+      query.updatedBefore.foreach(before => where.add("updated_at < ?", PostgresCheckpointer.clamped(before)))
       // containment, through the GIN index on the metadata
       if !query.metadata.isEmpty then where.add("metadata @> CAST(? AS jsonb)", ujson.write(query.metadata.toJson))
     }

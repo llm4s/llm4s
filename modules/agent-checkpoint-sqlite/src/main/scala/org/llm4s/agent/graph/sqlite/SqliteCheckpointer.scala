@@ -1220,6 +1220,10 @@ object SqliteCheckpointer:
   private[sqlite] def epochNanos(at: Instant): Long =
     Math.addExact(Math.multiplyExact(at.getEpochSecond, 1000000000L), at.getNano.toLong)
 
+  /** [[epochNanos]], clamped to what a `Long` of nanoseconds holds: for a bound, never a stored time. */
+  private[sqlite] def clampedNanos(at: Instant): Long =
+    scala.util.Try(epochNanos(at)).getOrElse(if at.isBefore(Instant.EPOCH) then Long.MinValue else Long.MaxValue)
+
   private[sqlite] def fromEpochNanos(nanos: Long): Instant =
     Instant.ofEpochSecond(Math.floorDiv(nanos, 1000000000L), Math.floorMod(nanos, 1000000000L))
 
@@ -1249,8 +1253,9 @@ object SqliteCheckpointer:
     registryStatement(query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
-      query.updatedSince.foreach(since => where.add("updated_nanos >= ?", epochNanos(since)))
-      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", epochNanos(before)))
+      // an instant past what epoch nanoseconds hold (Instant.MIN or MAX) is clamped, never thrown (#3264)
+      query.updatedSince.foreach(since => where.add("updated_nanos >= ?", clampedNanos(since)))
+      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", clampedNanos(before)))
       query.metadata.entries.toVector.sortBy(_._1).foreach { (key, value) =>
         where.add(
           "thread_id IN (SELECT thread_id FROM llm4s_checkpoint_thread_metadata WHERE key = ? AND value = ?)",

@@ -1030,10 +1030,28 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
 private object RegistryOrder:
 
+  /**
+   * Thread ids by code point - UTF-8 byte order, as the SQL stores compare them (`COLLATE "C"`, SQLite's `BINARY`) -
+   * never by UTF-16 unit, which puts a supplementary character before U+E000-U+FFFF (#3264).
+   */
+  private val byCodePoint: Ordering[String] = (a: String, b: String) =>
+    @scala.annotation.tailrec
+    def at(i: Int, j: Int): Int =
+      if i >= a.length || j >= b.length then (a.length - i).sign - (b.length - j).sign
+      else
+        val (x, y) = (a.codePointAt(i), b.codePointAt(j))
+        if x != y then Integer.compare(x, y) else at(i + Character.charCount(x), j + Character.charCount(y))
+    at(0, 0)
+
   /** The registry's order: newest first by `updatedAt`, then by thread id, descending. */
   val newestFirst: Ordering[ThreadSummary] =
-    Ordering.by[ThreadSummary, (Instant, String)](t => (t.updatedAt, t.threadId.value)).reverse
+    Ordering
+      .by[ThreadSummary, (Instant, String)](t => (t.updatedAt, t.threadId.value))(using
+        Ordering.Tuple2(using Ordering[Instant], byCodePoint)
+      )
+      .reverse
 
   /** Whether position `a` comes before `b` in ascending order: by `updatedAt`, then by thread id. */
   def before(a: ThreadCursor, b: ThreadCursor): Boolean =
-    a.updatedAt.isBefore(b.updatedAt) || (a.updatedAt == b.updatedAt && a.threadId.value < b.threadId.value)
+    a.updatedAt.isBefore(b.updatedAt) ||
+      (a.updatedAt == b.updatedAt && byCodePoint.lt(a.threadId.value, b.threadId.value))

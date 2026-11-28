@@ -538,7 +538,8 @@ class AgentWorkerSpec
         else super.latest(threadId)
     }
     val id = submit(store, on, maxAttempts = 5)
-    val worker = AgentWorker(store.runQueue, corrupt, Seq(QueuedAgent(agentOver(store, answering("x")))), fast, shortLease).value
+    val worker =
+      AgentWorker(store.runQueue, corrupt, Seq(QueuedAgent(agentOver(store, answering("x")))), fast, shortLease).value
     started.add(worker)
     worker.start()
     val entry = closed(store, id)
