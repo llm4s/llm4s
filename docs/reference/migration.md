@@ -848,14 +848,14 @@ stored format is the same; what changed is what passes:
 
 ## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
 
-`AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. `RunQueue` gains `releaseDrained`,
-with a default that calls `release`; no signature changed, and the stored schema is the same.
+`AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. No public signature changed, and the
+stored schema is the same.
 
 | Before (1.0.0) | After |
 |---|---|
 | Any caller could run or queue work on `llm4s-worker-retention-sweep`, holding the sweep's claim and stalling every worker's retention (#3239) | `GraphRuntime.start`, `recover` and `resume`, and `RunSubmitter.submit`, refuse the worker's two thread ids (`llm4s-worker-retention-sweep`, `llm4s-worker-health`) with a `ValidationError`. A thread already stored under one of them can still be read and forgotten |
 | A fatal throwable (a `StackOverflowError` in a guardrail) on a slot's run thread kept the slot, lost its permit and renewed its lease for good; a take or sweep loop that threw ended for good (#3240) | The slot is given up however its run ends, so its lease lapses and the entry is taken again; each loop logs a throw and goes on, and `health()` reports a sweep thread that is not running |
-| An attempt a drain cut short counted against `maxAttempts`, so a run longer than `drain.grace` was dead-lettered after a few rolling deploys (#3241) | A drained attempt raises the entry's `maxAttempts` by one (it stays in `attempts`). A worker crash still counts: that bound dead-letters an entry whose run crashes its worker every time. A custom `RunQueue` overrides `releaseDrained` to do the same; one that does not charges drained attempts, as before |
+| An attempt a drain cut short counted against `maxAttempts`, so a run longer than `drain.grace` was dead-lettered after a few rolling deploys (#3241) | A drained attempt raises the entry's `maxAttempts` by one (it stays in `attempts`). A worker crash still counts: that bound dead-letters an entry whose run crashes its worker every time. The in-memory, SQLite and PostgreSQL queues do this for `AgentWorker`; a custom `RunQueue` charges drained attempts, as before |
 
 ## An error's `provider` is a `ProviderId` (#2936)
 

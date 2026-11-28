@@ -179,7 +179,7 @@ llm4s.agent {
 **Shutdown drains.** `worker.shutdown()` stops taking entries, lets running runs reach rest within `drain.grace`,
 then cancels the rest and gives their entries back, so another instance recovers them at once instead of waiting for
 the lease to lapse. An attempt a drain cuts short costs its entry nothing: the entry's `maxAttempts` rises by one
-(`RunQueue.releaseDrained`), so a run longer than `drain.grace` survives any number of rolling deploys. A worker that
+(in the in-memory, SQLite and PostgreSQL queues; a custom `RunQueue` still charges it), so a run longer than `drain.grace` survives any number of rolling deploys. A worker that
 crashes gives nothing back, and that attempt does count: `maxAttempts` is what dead-letters an entry whose run crashes
 its worker every time. Give the process `grace + exitTimeout` plus a margin to stop (Kubernetes'
 `terminationGracePeriodSeconds`).

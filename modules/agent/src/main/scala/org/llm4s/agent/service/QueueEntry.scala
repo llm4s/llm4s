@@ -208,7 +208,8 @@ object EntryOutcome:
  * counted, rule 9), and `leaseHolder` and `leaseExpiresAt` say which worker
  * holds it, if one does - a lease that has expired by the store's clock may be taken over.
  *
- * @param maxAttempts the most attempts the entry may make, fixed at submission
+ * @param maxAttempts the most attempts the entry may make: fixed at submission, raised by one for each attempt a
+ *   drain cut short (#3241)
  * @param trace the submitter's trace context ([[Submission.traceContext]]), which every attempt continues
  *   ([[attemptConfig]]); `None` when the submission named none
  * @param attempts the attempts recorded, oldest first, each before it touched the thread

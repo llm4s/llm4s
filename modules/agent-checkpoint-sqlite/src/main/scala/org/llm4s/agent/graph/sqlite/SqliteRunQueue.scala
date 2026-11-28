@@ -335,7 +335,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   )
 
   // the drained attempt stays in the history, and the entry is given one more if it made one (#3241)
-  override def releaseDrained(lease: Lease): Result[Unit] = released(
+  override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = released(
     lease,
     "queue.releaseDrained",
     """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL,

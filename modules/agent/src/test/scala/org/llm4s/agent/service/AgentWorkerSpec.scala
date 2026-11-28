@@ -603,6 +603,39 @@ class AgentWorkerSpec
     entry.attempts should have size 3
   }
 
+  // #3241, Codex on #3286: a refund is for the slot's own attempt only. A slot that re-takes an entry whose earlier
+  // attempt's lease lapsed, and is drained before it records one, releases it plainly: nothing is refunded.
+  it should "drain: refund nothing for an earlier holder's attempt, when the slot recorded none of its own (#3241)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, _) => if (n == 1) blocked(entered) else Right(CompletionFixture.simple("done")))
+    val agent   = agentOver(store, client)
+    val on      = thread()
+    val id      = submit(store, on, maxAttempts = 2)
+    diedMidRun(store, agent, on, entered)
+    val refunds = new AtomicInteger(0)
+    val queue = new ForwardingRunQueue(store.runQueue) {
+      override private[llm4s] def releaseDrained(l: Lease) = { refunds.incrementAndGet(); super.releaseDrained(l) }
+    }
+    val deciding = new Semaphore(0)
+    val go       = new java.util.concurrent.CountDownLatch(1)
+    val worker   = workerOf(store, Seq(QueuedAgent(agent)), fast.withDrainGrace(20.millis), queue = Some(queue))
+    worker.beforeDecide = _ => { deciding.release(); go.await(10, java.util.concurrent.TimeUnit.SECONDS): Unit }
+    worker.start()
+    deciding.acquire()
+    // the drain cancels the slot once its grace has passed, before the slot decides or records anything
+    val drain = Thread.ofVirtual().start(() => worker.shutdown(): Unit)
+    eventually(worker.currentState shouldBe WorkerState.Draining)
+    Thread.sleep(200)
+    go.countDown()
+    drain.join()
+    refunds.get shouldBe 0
+    val entry = store.runQueue.entry(None, id).value
+    entry.isOpen shouldBe true
+    entry.maxAttempts shouldBe 2
+    entry.attempts should have size 1
+  }
+
   it should "drain: cancel runs past the grace period and give their entries back once they exited" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)

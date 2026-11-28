@@ -183,15 +183,14 @@ trait RunQueue:
   def release(lease: Lease): Result[Unit]
 
   /**
-   * As [[release]], for an attempt a drain cut short (#3241): the entry is given back, and the attempt `lease`'s holder
-   * recorded is not charged against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its
-   * `attempts`, as history - so a long run cut by every rolling deploy is never dead-lettered for it. An entry with no
-   * attempt recorded is released as by [[release]]. An attempt that ends any other way still counts, a worker's crash
-   * included (its lease expires with no release): that is the bound that dead-letters an entry whose run crashes its
-   * worker every time. The default is [[release]], so a queue that does not override it charges drained attempts as
-   * before.
+   * As [[release]], for an attempt a drain cut short (#3241): the entry is given back, and the attempt is not charged
+   * against its budget - the entry's `maxAttempts` rises by one, and the attempt stays in its `attempts`, as history.
+   * Internal to llm4s: only `AgentWorker` calls it, and only for a slot that recorded its own attempt under the lease it
+   * releases, which is what keeps a refund to that attempt (the store does not check it: an attempt row does not name
+   * its lease). An entry with no attempt recorded is released as by [[release]]. A worker's crash is still charged.
+   * The default is [[release]].
    */
-  def releaseDrained(lease: Lease): Result[Unit] = release(lease)
+  private[llm4s] def releaseDrained(lease: Lease): Result[Unit] = release(lease)
 
   /**
    * Records an attempt at `lease`'s entry running as `runId`, durably, before the caller touches the thread (rule 4);

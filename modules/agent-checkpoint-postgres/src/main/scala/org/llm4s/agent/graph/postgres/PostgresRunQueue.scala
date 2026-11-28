@@ -329,7 +329,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   def release(lease: Lease): Result[Unit] = released(lease, "queue.release", Sql.releaseLease(t))
 
   // the drained attempt stays in the history, and the entry is given one more (#3241)
-  override def releaseDrained(lease: Lease): Result[Unit] =
+  override private[llm4s] def releaseDrained(lease: Lease): Result[Unit] =
     released(lease, "queue.releaseDrained", Sql.releaseDrainedLease(t))
 
   private def released(lease: Lease, operation: String, sql: String): Result[Unit] = store.writing(operation) { c =>

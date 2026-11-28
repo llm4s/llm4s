@@ -145,6 +145,9 @@ final class AgentWorker private (
   /** A test hook run by an entry's slot just before it records its attempt; a no-op by default. */
   @volatile private[service] var beforeAttempt: QueueEntry => Unit = _ => ()
 
+  /** A test hook run by an entry's slot before it decides what to do with its entry; a no-op by default. */
+  @volatile private[service] var beforeDecide: QueueEntry => Unit = _ => ()
+
   // ---- life ----
 
   /** Starts taking entries, and the retention sweep's schedule. Once only: a second call changes nothing. */
@@ -437,6 +440,7 @@ final class AgentWorker private (
         case Next.Leave  => ()
 
   private def decide(slot: Slot): Next =
+    beforeDecide(slot.entry)
     val entry = slot.entry
     val agent = agents(entry.agentId)
     if slot.leaseLost.get then Next.Leave
