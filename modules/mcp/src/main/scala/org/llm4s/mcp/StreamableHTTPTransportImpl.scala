@@ -257,12 +257,17 @@ class StreamableHTTPTransportImpl(
 
   /**
    * Answers a request the server sent in a reply stream (#3079): `ping` with an empty result, anything else with
-   * method-not-found. Posted like a notification; a failure is logged, since the reply being read is unaffected.
+   * method-not-found. Posted like a notification, bounded by `timeout`, on a thread of its own: the reply stream
+   * being read must never wait for the server to acknowledge the answer, or a reply queued behind the request could
+   * time out. A failure is logged, since the reply being read is unaffected.
    */
   private def answerServer(id: ujson.Value, method: String): Unit = {
     logger.debug(s"StreamableHTTPTransport($name) answering the server's request $method")
-    postMessage(JsonRpcReplies.answerToServerRequest(id, method).render(), "answer").left.foreach { error =>
-      logger.warn(s"StreamableHTTPTransport($name) could not answer the server's $method: ${error.message}")
+    val answer = JsonRpcReplies.answerToServerRequest(id, method).render()
+    val _ = Thread.ofVirtual().name(s"StreamableHTTPTransport-$name-answer").start { () =>
+      postMessage(answer, "answer").left.foreach { error =>
+        logger.warn(s"StreamableHTTPTransport($name) could not answer the server's $method: ${error.message}")
+      }
     }
   }
 

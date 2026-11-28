@@ -89,6 +89,9 @@ class StreamableHTTPReplyMatchingSpec extends AnyFlatSpec with Matchers with Eit
       result = Some(
         new StreamableHTTPTransportImpl(s"$url/mcp", "answering", 5.seconds).sendRequest(request).left.map(_.message)
       )
+      // The answers are posted off the reader thread: wait for both before the server goes
+      val deadline = Deadline.now + 5.seconds
+      while (posted.size < 2 && deadline.hasTimeLeft()) Thread.sleep(10)
     }
 
     result.flatMap(_.toOption).map(_.id) shouldBe Some("7")
@@ -96,6 +99,34 @@ class StreamableHTTPReplyMatchingSpec extends AnyFlatSpec with Matchers with Eit
     answers.map(_("id")) should contain theSameElementsAs Seq(ujson.Str("7"), ujson.Num(41))
     answers.find(_("id") == ujson.Str("7")).map(_("result")) shouldBe Some(ujson.Obj())
     answers.find(_("id") == ujson.Num(41)).map(_("error")("code").num.toInt) shouldBe Some(-32601)
+  }
+
+  it should "read on past a server request whose answer the server is slow to acknowledge" in {
+    val ping                                            = event("""{"jsonrpc":"2.0","id":"7","method":"ping"}""")
+    val release                                         = new java.util.concurrent.CountDownLatch(1)
+    val answered                                        = new java.util.concurrent.CountDownLatch(1)
+    var result: Option[Either[String, JsonRpcResponse]] = None
+    LocalProviderTestServer.withServer("/mcp") { exchange =>
+      val body = ujson.read(new String(exchange.getRequestBody.readAllBytes(), UTF_8))
+      if (body.obj.contains("method")) sendSse(ping + realReply)(exchange)
+      else {
+        // The answer to the ping: held open until the test ends
+        answered.countDown()
+        release.await(30, java.util.concurrent.TimeUnit.SECONDS): Unit
+        LocalProviderTestServer.sendJsonResponse(exchange, 202, "")
+      }
+    } { url =>
+      try {
+        val started = System.nanoTime()
+        result = Some(
+          new StreamableHTTPTransportImpl(s"$url/mcp", "slow-ack", 5.seconds).sendRequest(request).left.map(_.message)
+        )
+        (System.nanoTime() - started).nanos should be < 5.seconds
+        answered.await(5, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+      } finally release.countDown()
+    }
+
+    result.flatMap(_.toOption).map(_.id) shouldBe Some("7")
   }
 
   it should "include a JSON-RPC error's data in the error (#3079)" in {
