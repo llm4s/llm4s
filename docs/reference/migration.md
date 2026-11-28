@@ -846,6 +846,9 @@ approval. Untrusted servers' tools keep `ToolHints.default`.
 `MCPServerOptions` gains `sessionIdleTimeout` and `maxSessions`, with defaults, so a positional pattern on it takes
 two more arguments.
 
+The `DemonstrationMCPServer` sample (#3200) is now built on `MCPServer`: its two tools are `ToolFunction`s
+(`DemonstrationMCPServer.demoTools`), and it no longer has its own `SessionStore` or handler.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

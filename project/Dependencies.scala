@@ -12,6 +12,8 @@ object Versions {
   val scalatestplusScalacheck = "3.2.19.0"
   val junitJupiter            = "5.12.2"
   val reactor                 = "3.8.8"
+  // MIT. Test-only, llm4s-mcp: the official MCP Java SDK's client drives MCPServer as a reference client (#3200)
+  val mcpJavaSdk = "2.2.0"
   // Apache-2.0. Only llm4s-schema-iron (#2294). Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the
   // 3.7 compiler cannot read; 3.3.x is built with Scala 3.3 LTS.
   val iron     = "3.3.2"
@@ -185,6 +187,8 @@ object Deps {
   val termflow                = "org.llm4s"               %% "termflow"        % Versions.termflow
   val scalatest               = "org.scalatest"           %% "scalatest"       % Versions.scalatest
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
+  // Test-only (llm4s-mcp): the official MCP Java SDK, as a reference client for MCPServer (#3200)
+  val mcpJavaSdk = "io.modelcontextprotocol.sdk" % "mcp" % Versions.mcpJavaSdk
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
   // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
   val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter

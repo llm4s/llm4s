@@ -1265,7 +1265,9 @@ lazy val mcp = (project in file("modules/mcp"))
     libraryDependencies ++= Seq(
       Deps.ujson,
       Deps.scalatest % Test,
-      Deps.scalamock % Test
+      Deps.scalamock % Test,
+      // MCPServerReferenceClientSpec: the official MCP Java SDK's client against MCPServer (#3200)
+      Deps.mcpJavaSdk % Test
     )
   )
 
