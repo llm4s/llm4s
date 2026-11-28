@@ -809,6 +809,7 @@ tool without a `description` is kept (it was skipped as malformed), described by
 | An `enum` of numbers dropped | Kept |
 | `oneOf`, a `type` of several names | Read as `anyOf` |
 | A missing description became `"Parameter"` | The `title`, or empty; a `default`, `format` or `examples` is added to the description |
+| A schema with a keyword the model cannot express (`allOf`, `not`, `if`, `patternProperties`, `minProperties`, a `required` name with no property, `additionalProperties` as a schema, ...) lost it | Kept as the server wrote it, local references inlined; an agent's argument validator refuses a keyword it cannot check when the agent is built |
 
 Arguments the server's schema refuses are now refused before they are sent, and arguments it accepts are no
 longer refused.

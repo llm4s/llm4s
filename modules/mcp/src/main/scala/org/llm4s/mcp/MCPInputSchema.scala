@@ -27,10 +27,80 @@ private[mcp] object MCPInputSchema {
   /** How many references one path through the schema may follow; a deeper or recursive one accepts any value. */
   private val MaxRefDepth = 16
 
-  /** The tool's argument schema, an object whatever the server sent. */
-  def toObjectSchema(toolName: String, inputSchema: Value): ObjectSchema[Value] = {
+  /**
+   * The tool's argument schema, an object whatever the server sent: an `ObjectSchema` when the model can express it,
+   * otherwise the server's own JSON (references inlined, `type: object` ensured).
+   */
+  def toSchema(toolName: String, inputSchema: Value): SchemaDefinition[_] = {
     val fields = inputSchema.objOpt.map(_.toMap).getOrElse(Map.empty[String, Value])
-    objectSchema(fields, definitions(fields), Nil, Some(s"Parameters for $toolName"))
+    val defs   = definitions(fields)
+    val top    = fields -- Seq("$defs", "definitions")
+    if (unexpressible(top)) {
+      val written = asWritten(top, defs)
+      written("type") = ujson.Str("object")
+      RawJsonSchema(written)
+    } else objectSchema(top, defs, Nil, Some(s"Parameters for $toolName"))
+  }
+
+  /**
+   * Keywords the schema model has no way to carry: a schema that has one is kept as the server wrote it, so the
+   * restriction reaches the provider and the argument validator (which refuses what it cannot check) instead of
+   * disappearing.
+   */
+  private val UnexpressibleKeywords: Set[String] = Set(
+    "allOf",
+    "not",
+    "if",
+    "then",
+    "else",
+    "patternProperties",
+    "propertyNames",
+    "minProperties",
+    "maxProperties",
+    "dependentRequired",
+    "dependentSchemas",
+    "dependencies",
+    "unevaluatedProperties",
+    "unevaluatedItems",
+    "prefixItems",
+    "additionalItems",
+    "contains",
+    "minContains",
+    "maxContains"
+  )
+
+  /**
+   * Whether the model would lose something of `fields`: a keyword it has no case for; an `anyOf` / `oneOf` beside
+   * the schema's own `type` or `properties` (the union would replace them); a `required` name with no property; or
+   * `additionalProperties` given as a schema.
+   */
+  private def unexpressible(fields: Fields): Boolean = {
+    val properties = fields.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty[String])
+    val required   = fields.get("required").flatMap(_.arrOpt).toSeq.flatMap(_.flatMap(_.strOpt)).toSet
+    fields.keySet.exists(UnexpressibleKeywords.contains) ||
+    ((fields.contains("anyOf") || fields.contains("oneOf")) &&
+      (fields.contains("properties") || fields.get("type").exists(_ != ujson.Str("null")))) ||
+    !required.subsetOf(properties) ||
+    fields.get("additionalProperties").exists(_.objOpt.isDefined)
+  }
+
+  /** `fields` as the server wrote them, with every local `$ref` inside replaced by its definition (recursive: `{}`). */
+  private def asWritten(fields: Fields, defs: Map[String, Value]): ujson.Obj = {
+    def inlined(value: Value, seen: List[String]): Value = value match {
+      case obj: ujson.Obj =>
+        obj.value.get("$ref").flatMap(_.strOpt) match {
+          case Some(ref)
+              if !seen.contains(ref) && seen.size < MaxRefDepth && defs.get(ref).exists(_.objOpt.isDefined) =>
+            val merged = defs(ref).obj.toMap ++ (obj.value.toMap - "$ref")
+            inlined(ujson.Obj.from(merged), ref :: seen)
+          case Some(_) =>
+            ujson.Obj.from(obj.value.toSeq.filterNot(_._1 == "$ref").map { case (k, v) => k -> inlined(v, seen) })
+          case None => ujson.Obj.from(obj.value.toSeq.map { case (k, v) => k -> inlined(v, seen) })
+        }
+      case arr: ujson.Arr => ujson.Arr.from(arr.value.map(inlined(_, seen)))
+      case other          => other
+    }
+    inlined(ujson.Obj.from(fields), Nil).obj
   }
 
   // `#/$defs/name` and `#/definitions/name`, from the top of the schema, where the specification and generators put them
@@ -66,7 +136,8 @@ private[mcp] object MCPInputSchema {
             // Any value the keywords beside the reference allow: those are still checked
             val text = describe(raw.toMap)
             this.raw(raw.toMap, s"${if (text.isEmpty) "" else s"$text "}($reason: any value)")
-          case Right((fields, path)) => typed(fields, defs, path)
+          case Right((fields, _)) if unexpressible(fields) => RawJsonSchema(asWritten(fields, defs))
+          case Right((fields, path))                       => typed(fields, defs, path)
         }
     }
 
@@ -180,7 +251,7 @@ private[mcp] object MCPInputSchema {
     }
     val additional = fields.get("additionalProperties") match {
       case Some(ujson.Bool(allowed)) => allowed
-      case Some(_)                   => true // a schema for the extra keys: they are allowed
+      case Some(_)                   => true // a schema for the extra keys: unexpressible, so not reached
       case None                      => properties.isEmpty
     }
     val described = describe(fields)

@@ -390,7 +390,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     val inputSchema = toolJson("inputSchema")
 
     // The server's schema, kept as it declared it as far as the model can carry it (#3076)
-    val schema = MCPInputSchema.toObjectSchema(name, inputSchema)
+    val schema = MCPInputSchema.toSchema(name, inputSchema)
 
     ToolFunction[Value](
       name = name,

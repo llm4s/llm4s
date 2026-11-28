@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
 
   private def rendered(inputSchema: ujson.Value): ujson.Value =
-    MCPInputSchema.toObjectSchema("t", inputSchema).toJsonSchema(strict = false)
+    MCPInputSchema.toSchema("t", inputSchema).toJsonSchema(strict = false)
 
   private def property(inputSchema: ujson.Value, name: String): ujson.Value = rendered(inputSchema)("properties")(name)
 
@@ -29,7 +29,7 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
     rendered(withProperty("a", ujson.Obj("type" -> "string")))("additionalProperties") shouldBe ujson.Bool(false)
     val typedExtras =
       withProperty("a", ujson.Obj("type" -> "string"), "additionalProperties" -> ujson.Obj("type" -> "string"))
-    rendered(typedExtras)("additionalProperties") shouldBe ujson.Bool(true)
+    rendered(typedExtras)("additionalProperties") shouldBe ujson.Obj("type" -> "string") // kept as written
   }
 
   it should "resolve a $ref into $defs or definitions, leaving no dangling reference" in {
@@ -162,6 +162,58 @@ class MCPInputSchemaSpec extends AnyFlatSpec with Matchers {
       "enum"             -> ujson.Arr(1.5, 2.5),
       "exclusiveMinimum" -> 1,
       "description"      -> ""
+    )
+  }
+
+  it should "keep as written every property schema the model cannot express" in {
+    val unexpressible: Seq[(String, ujson.Obj)] = Seq(
+      "required without a property" -> ujson
+        .Obj("type" -> "object", "required" -> ujson.Arr("id"), "additionalProperties" -> true),
+      "patternProperties" -> ujson
+        .Obj("type" -> "object", "patternProperties" -> ujson.Obj("^x" -> ujson.Obj("type" -> "string"))),
+      "propertyNames" -> ujson.Obj("type" -> "object", "propertyNames" -> ujson.Obj("maxLength" -> 3)),
+      "minProperties" -> ujson.Obj("type" -> "object", "minProperties" -> 1),
+      "maxProperties" -> ujson.Obj("type" -> "object", "maxProperties" -> 2),
+      "dependentRequired" -> ujson.Obj(
+        "type"              -> "object",
+        "properties"        -> ujson.Obj("a" -> ujson.Obj("type" -> "string"), "b" -> ujson.Obj("type" -> "string")),
+        "dependentRequired" -> ujson.Obj("a" -> ujson.Arr("b"))
+      ),
+      "if/then/else" -> ujson.Obj(
+        "type" -> "object",
+        "if"   -> ujson.Obj("required" -> ujson.Arr("a")),
+        "then" -> ujson.Obj("required" -> ujson.Arr("b")),
+        "else" -> ujson.Obj("required" -> ujson.Arr("c"))
+      ),
+      "allOf" -> ujson.Obj("allOf" -> ujson.Arr(ujson.Obj("type" -> "string"), ujson.Obj("minLength" -> 2))),
+      "anyOf beside properties" -> ujson.Obj(
+        "type"       -> "object",
+        "properties" -> ujson.Obj("a" -> ujson.Obj("type" -> "string")),
+        "anyOf"      -> ujson.Arr(ujson.Obj("required" -> ujson.Arr("a")))
+      ),
+      "oneOf beside a type" -> ujson.Obj("type" -> "string", "oneOf" -> ujson.Arr(ujson.Obj("minLength" -> 1))),
+      "not"                 -> ujson.Obj("not" -> ujson.Obj("type" -> "null")),
+      "additionalProperties as a schema" -> ujson
+        .Obj("type" -> "object", "additionalProperties" -> ujson.Obj("type" -> "integer")),
+      "prefixItems" -> ujson.Obj("type" -> "array", "prefixItems" -> ujson.Arr(ujson.Obj("type" -> "string"))),
+      "contains"    -> ujson.Obj("type" -> "array", "contains" -> ujson.Obj("type" -> "integer"))
+    )
+    unexpressible.foreach { case (label, schema) =>
+      withClue(s"$label: ")(property(withProperty("p", schema), "p") shouldBe schema)
+    }
+  }
+
+  it should "keep a top-level schema the model cannot express as written, an object, with its references inlined" in {
+    val top = ujson.Obj(
+      "type"          -> "object",
+      "properties"    -> ujson.Obj("a" -> ujson.Obj("$ref" -> "#/$defs/A")),
+      "minProperties" -> 1,
+      "$defs"         -> ujson.Obj("A" -> ujson.Obj("type" -> "string"))
+    )
+    rendered(top) shouldBe ujson.Obj(
+      "type"          -> "object",
+      "properties"    -> ujson.Obj("a" -> ujson.Obj("type" -> "string")),
+      "minProperties" -> 1
     )
   }
 
