@@ -171,6 +171,12 @@ call fails, the message stays recorded and a warning is logged. A cancelled call
 `recordMessage` returns the `CancelledError` (and `recordConversation` stops there), and an
 interrupted thread keeps its interrupt flag.
 
+The text sent to the extraction and consolidation prompts - the message, and the stored memories a
+consolidation summarises - is fenced as an escaped `<untrusted>` block that the system prompt says holds
+data only (#3275), as recall is. An extracted fact is stored once per entity: a fact already stored for that
+entity (compared lower-cased, whitespace collapsed) is not stored again. The importance the model suggests
+can lower a fact's importance, never raise it above the score llm4s computes from the fact itself.
+
 {: .warning }
 > **`autoExtractEntities` costs one extra LLM call per recorded message.** With
 > `MemoryManagerConfig.fullFeatured`, or `autoExtractEntities = true`, an `LLMMemoryManager` sends one
