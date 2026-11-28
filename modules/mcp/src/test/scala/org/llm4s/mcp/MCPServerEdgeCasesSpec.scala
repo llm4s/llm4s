@@ -118,15 +118,14 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       readBody(c) should include("Method not found")
     }
 
-    it("should return Invalid session error for unrecognised session ID") {
+    it("should answer 404 for an unrecognised session ID (#3081)") {
       val c = mkConn("/mcp", "POST")
       c.setDoOutput(true)
       c.setRequestProperty("Content-Type", "application/json")
       c.setRequestProperty("MCP-Protocol-Version", "2025-06-18")
       c.setRequestProperty("mcp-session-id", "bad-session-id")
       c.getOutputStream.write(rpc("s-1", "tools/list", None).getBytes("UTF-8"))
-      c.getResponseCode shouldBe 200
-      readBody(c) should include("Invalid session")
+      c.getResponseCode shouldBe 404
     }
   }
 
@@ -165,7 +164,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   // ── POST tool calls ────────────────────────────────────────────────────────
 
   describe("POST - tool calls") {
-    it("should return TOOL_NOT_FOUND for unknown tool name") {
+    it("should answer an unknown tool name with invalid params, -32602 (#3081)") {
       val (sid, _) = initSession()
       val c        = sessionConn(sid)
       c.getOutputStream.write(
@@ -173,7 +172,9 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           .getBytes("UTF-8")
       )
       c.getResponseCode shouldBe 200
-      readBody(c) should include("Tool not found")
+      val body = readBody(c)
+      body should include("-32602")
+      body should include("Unknown tool")
     }
 
     it("should return an isError result, not a JSON-RPC error, when tool handler returns Left") {
@@ -232,7 +233,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   // ── SSE edge cases ────────────────────────────────────────────────────────
 
   describe("SSE transport - edge cases") {
-    it("should use 127.0.0.1 in endpoint URL when server is bound to 0.0.0.0") {
+    it("should send the endpoint as a path, with no loopback URL, when bound to 0.0.0.0 (#3081)") {
       // Binding 0.0.0.0 requires an apiKey (start() refuses a public bind otherwise).
       val key = "wildcard-key"
       val s = new MCPServer(
@@ -242,7 +243,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       s.start().fold(e => throw e, _ => ())
       try {
         val event = readFirstSSEEvent(s.boundPort, "/mcp/sse", Some(key))
-        extractMessageUrl(event) should startWith("http://127.0.0.1:")
+        extractMessageUrl(event) should startWith("/mcp/messages?sessionId=")
       } finally s.stop()
     }
 
@@ -380,7 +381,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
             if (line.isEmpty) {
               val ev = sb.toString()
               if (ev.startsWith("event: endpoint")) {
-                msgUrl.set(extractMessageUrl(ev))
+                msgUrl.set(s"http://127.0.0.1:$port${extractMessageUrl(ev)}")
                 latch.countDown()
               } else if (ev.startsWith("event: message")) {
                 events.put(ev)

@@ -162,7 +162,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       body should include("Method not found")
     }
 
-    it("should return INVALID_REQUEST for tools/list with an unknown session ID") {
+    it("should answer 404 for tools/list with an unknown session ID (#3081)") {
       val conn = openConn(port, "/mcp", "POST")
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
@@ -171,12 +171,10 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       conn.getOutputStream.write(
         """{"jsonrpc":"2.0","id":"s1","method":"tools/list","params":{}}""".getBytes("UTF-8")
       )
-      conn.getResponseCode shouldBe 200
-      val body = scala.io.Source.fromInputStream(conn.getInputStream).mkString
-      body should include("Invalid session")
+      conn.getResponseCode shouldBe 404
     }
 
-    it("should return TOOL_NOT_FOUND error for an unknown tool name") {
+    it("should answer an unknown tool name with invalid params (#3081)") {
       val sessionId = initializeSession(port)
       val conn      = openConn(port, "/mcp", "POST")
       conn.setDoOutput(true)
@@ -189,7 +187,8 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       )
       conn.getResponseCode shouldBe 200
       val body = scala.io.Source.fromInputStream(conn.getInputStream).mkString
-      body should include("Tool not found")
+      body should include("Unknown tool")
+      body should include("-32602")
     }
 
     it("should return an isError result when a tool returns Left (failure)") {
