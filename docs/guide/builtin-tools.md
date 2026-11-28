@@ -221,6 +221,10 @@ read-only; setuid, setgid and sticky bits, extended ACLs and extended attributes
 `encoding` cannot represent is refused, never written as `?`. In every file tool, an optional argument that is absent
 or `null` takes its default, and one of the wrong type (`"append": "true"`) refuses the call.
 
+`list_directory` leaves out a child the same path policy refuses, rather than describing its size or time, and skips
+one whose metadata cannot be read. `max_entries` is at most 100 and at least 1. `totalFiles` and `totalDirectories`
+count only the returned entries; `truncated` is true when the directory holds more listable entries than the page.
+
 A path is judged by where it really is: symbolic links are resolved, then that real location is compared with each
 allowed or blocked entry (resolved the same way), one path component at a time. The file tools remove `..` as text
 first and then open the location they judged. `FileConfig.isPathAllowed`, and the shell tool's path policy, judge the
