@@ -227,16 +227,18 @@ it does. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refu
 `ConfigurationError`. On a POSIX file system, a key file readable by its group or by others is
 logged once as a WARN naming the path; mount it with mode `0400`.
 
-`apiKeyFile` is accepted wherever `apiKey` is: in an embeddings block (`llm4s.embeddings.<id>`), in
-the reranker's block (`llm4s.rerank.cohere`) and in the vendor's shared credentials
-(`llm4s.credentials.<id>`), which every client of the vendor falls back to. The precedence is the
+`apiKeyFile` is supported in chat provider blocks that take a key, embedding blocks
+(`llm4s.embeddings.<id>`), the Cohere reranker block (`llm4s.rerank.cohere`) and shared credentials
+(`llm4s.credentials.<id>`). Speech, image generation and vision take keys fixed at construction.
+Jev can read a shared key file when its configuration loads. Recreate these clients with fresh
+configuration to pick up a rotated key. The precedence is the
 same as for `apiKey`: the client's own key or key file, then the shared key or key file, then an
 error naming both. So one mounted file can serve a vendor's chat sections, its embeddings and the
 reranker:
 
 ```hocon
 llm4s {
-  credentials.openai.apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # every OpenAI client
+  credentials.openai.apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # supported OpenAI chat and embedding clients
   embeddings.voyage.apiKeyFile  = "/var/run/secrets/llm4s/voyage-api-key"   # Voyage embeddings only
   rerank.cohere.apiKeyFile      = "/var/run/secrets/llm4s/cohere-api-key"   # the Cohere reranker only
 }
