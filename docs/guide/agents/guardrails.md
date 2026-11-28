@@ -66,6 +66,20 @@ the same thread id. Imported assistant messages and tool results are not checked
 and tool output. A `resume` answer (a tool question's reply, an approval's rejection reason, a reviewer's
 `GuardrailVerdict.Edit`) is not checked by the input guardrails either.
 
+**What guardrails do not see** (#3246). Input guardrails run only on the turn's query and its imported user
+messages, and output guardrails only on the turn's final answer (the last assistant message, the one without tool
+calls). Nothing else passes through them:
+
+- the system prompt and the middleware's prompt sections;
+- a tool call's arguments, and a tool's result: text a web-search or file tool returns, injected instructions or PII
+  included, is stored and sent to the model unchecked. `PromptInjectionDetector` is an input guardrail and cannot be
+  attached to tool results;
+- the text of an assistant message that also makes tool calls, which is stored and streams live;
+- a turn that ends `StepLimitReached` or `TokenLimitReached`: it has no final answer, so no output guardrail runs.
+
+Check a tool's arguments in the tool itself, and its result in a middleware's `wrapToolCall`, which can rewrite the
+outcome `next` returns or replace it with `ToolOutcome.Error`.
+
 ### `GuardrailMiddleware`: choosing the position
 
 `withInputGuardrails` and `withOutputGuardrails` are `@Stable`. Underneath they install a `GuardrailMiddleware`

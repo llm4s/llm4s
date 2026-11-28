@@ -13,6 +13,9 @@ import scala.annotation.unused
  * Guardrails are used to validate inputs before agent processing and
  * outputs before returning results to users.
  *
+ * Inside an agent a guardrail sees only the turn's query (and the user messages of an imported `history`) and the
+ * turn's final answer; see [[InputGuardrail]] and [[OutputGuardrail]] for what that leaves unguarded.
+ *
  * @tparam A The type of value to validate
  */
 @Stable
@@ -68,10 +71,15 @@ trait Guardrail[A] {
 /**
  * Validates user input before agent processing.
  *
- * Input guardrails run BEFORE the LLM is called, validating:
- * - User queries
- * - System prompts
- * - Tool arguments
+ * In an agent (`withInputGuardrails`, `GuardrailMiddleware`) input guardrails run once per turn, as the turn is
+ * admitted and before the model is called, on:
+ * - the turn's query;
+ * - the text of each user message in a `history` the turn imports.
+ *
+ * Nothing else is an input to them (#3246): the system prompt, a middleware's prompt sections, a tool call's
+ * arguments and a tool's result are never passed to an input guardrail, so text a tool returns (a web page, a file)
+ * reaches the model unguarded. Validate a tool's arguments in the tool, and its result in a `wrapToolCall`
+ * middleware.
  */
 @Stable
 trait InputGuardrail extends Guardrail[String] {
@@ -111,10 +119,13 @@ object InputGuardrail {
 /**
  * Validates agent output before returning to user.
  *
- * Output guardrails run AFTER the LLM responds, validating:
- * - Assistant messages
- * - Tool results
- * - Final responses
+ * In an agent (`withOutputGuardrails`, `GuardrailMiddleware`) output guardrails run on the turn's final answer: the
+ * last assistant message, the one without tool calls, once the model has finished. What they return is the answer
+ * stored and returned.
+ *
+ * Nothing else is an output to them (#3246): tool results, and the text of an assistant message that also makes tool
+ * calls, are stored, streamed and sent back to the model unguarded, and a turn that ends at its step or token limit
+ * has no final answer, so its output guardrails do not run.
  */
 @Stable
 trait OutputGuardrail extends Guardrail[String] {
