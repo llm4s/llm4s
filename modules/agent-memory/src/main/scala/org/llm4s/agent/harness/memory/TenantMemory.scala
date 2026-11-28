@@ -14,8 +14,11 @@ import scala.util.Using
  * serialised (design §4.31, "Tenant scope"). It is the `Transactional` target's `AppliedKeys` for C4's guard: its
  * `forget` is the store's `forgetApplied`, under the same lock and fenced by the same token.
  */
-final private[memory] class TenantMemory(val initial: MemoryStore, val identity: Option[String] = None)
-    extends AppliedKeys:
+final private[memory] class TenantMemory(
+  val initial: MemoryStore,
+  val identity: Option[String] = None,
+  val progress: ConsolidationProgress = new ConsolidationProgress
+) extends AppliedKeys:
   private val lock                        = new ReentrantLock()
   @volatile private var held: MemoryStore = initial
 
@@ -23,18 +26,13 @@ final private[memory] class TenantMemory(val initial: MemoryStore, val identity:
   private[memory] var users: Int       = 0
   private[memory] var retired: Boolean = false
 
-  @volatile private var lastConsolidated: Option[java.time.Instant] = None
-
-  /** Where the next consolidation's page of old memories starts; `None` from the cutoff (#3040). */
-  @volatile private[memory] var consolidationCursor: Option[org.llm4s.agent.memory.ConsolidationCursor] = None
-
-  /** True, and the time recorded, if no consolidation of this tenant began within `interval` of `now`. */
+  /** Whether a consolidation is due, and where its page starts: the tenant's, kept by the middleware past eviction. */
   def consolidationDue(now: java.time.Instant, interval: scala.concurrent.duration.FiniteDuration): Boolean =
-    locked {
-      val due = lastConsolidated.forall(last => !now.isBefore(last.plusNanos(interval.toNanos)))
-      if due then lastConsolidated = Some(now)
-      due
-    }
+    progress.due(now, interval)
+
+  private[memory] def consolidationCursor: Option[org.llm4s.agent.memory.ConsolidationCursor] = progress.cursor
+  private[memory] def consolidationCursor_=(c: Option[org.llm4s.agent.memory.ConsolidationCursor]): Unit =
+    progress.cursor = c
 
   /**
    * `f` on the store as the last write left it, under the lock: a store need not be thread-safe
@@ -99,3 +97,19 @@ private[memory] object TenantMemory:
   final private class Held(lock: ReentrantLock) extends AutoCloseable:
     lock.lock()
     def close(): Unit = lock.unlock()
+
+/**
+ * A tenant's consolidation schedule and scan position (#3040): when its last consolidation began, and where the next
+ * page starts. Small, and kept by the middleware apart from the tenant's store, so neither is lost when the store is
+ * evicted and opened again.
+ */
+final private[memory] class ConsolidationProgress:
+  @volatile private var last: Option[java.time.Instant]                                    = None
+  @volatile private[memory] var cursor: Option[org.llm4s.agent.memory.ConsolidationCursor] = None
+
+  /** True, and the time recorded, if no consolidation began within `interval` of `now`. */
+  def due(now: java.time.Instant, interval: scala.concurrent.duration.FiniteDuration): Boolean = synchronized {
+    val isDue = last.forall(l => !now.isBefore(l.plusNanos(interval.toNanos)))
+    if isDue then last = Some(now)
+    isDue
+  }

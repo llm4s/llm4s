@@ -236,7 +236,7 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
     val config      = MemoryManagerConfig.default.withConsolidationConfig(ConsolidationConfig(maxMemoriesScanned = 10))
     val summary     = new MemoryTestSupport.FunctionClient(_ => "Summary.")
     val first       = LLMMemoryManager(config, store, summary).consolidatePage(t.plusSeconds(60), 3, None).value
-    first._2 shouldBe Some(ConsolidationCursor(t, MemoryId("z0")))
+    first._2.map(c => (c.timestamp, c.id)) shouldBe Some((t, MemoryId("z0")))
     MemoryTestSupport.contents(first._1.store) should not contain "Summary."
     val second = first._1.asInstanceOf[LLMMemoryManager].consolidatePage(t.plusSeconds(60), 3, first._2).value
     second._2 shouldBe None
@@ -257,5 +257,71 @@ class SemanticMemoryResourcesSpec extends AnyFlatSpec with Matchers with EitherV
     MemoryTestSupport.contents(held(m, Some(t1))) should contain("alice was here")
     m.openTenants shouldBe 2
     m.close()
+  }
+
+  // ===== Codex round 3 on #3295 =====
+
+  "A paged consolidation" should "form a group whose members straddle a page boundary" in {
+    val t = Instant.parse("2026-11-27T12:00:00Z")
+    def turn(id: String, conversation: String, secondsAgo: Long) =
+      Memory(
+        MemoryId(id),
+        s"turn $id",
+        MemoryType.Conversation,
+        Map("conversation_id" -> conversation),
+        t.minusSeconds(secondsAgo),
+        None
+      )
+    // newest first: two of the group, eight unrelated, then the group's third, on the next page
+    val memories = Seq(turn("g1", "old", 1), turn("g2", "old", 2)) ++
+      (3 to 10).map(i => turn(s"u$i", s"c$i", i.toLong)) :+ turn("g3", "old", 11)
+    val store   = InMemoryStore.withMemories(memories).value
+    val config  = MemoryManagerConfig.default.withConsolidationConfig(ConsolidationConfig(maxMemoriesScanned = 10))
+    val summary = new MemoryTestSupport.FunctionClient(_ => "Summary.")
+    val first   = LLMMemoryManager(config, store, summary).consolidatePage(t, 3, None).value
+    first._2.map(_.carried.take(2).toSet) shouldBe Some(Set(MemoryId("g1"), MemoryId("g2")))
+    val second = first._1.asInstanceOf[LLMMemoryManager].consolidatePage(t, 3, first._2).value
+    second._2 shouldBe None
+    val left = MemoryTestSupport.contents(second._1.store)
+    left should contain("Summary.")
+    (left should not).contain("turn g3")
+  }
+
+  "Consolidation progress" should "survive the eviction of a tenant's store, alternating two tenants with maxTenants = 1" in {
+    val now   = Instant.parse("2026-11-28T12:00:00Z")
+    val clock = java.time.Clock.fixed(now, java.time.ZoneOffset.UTC)
+    val dir   = java.nio.file.Files.createTempDirectory("llm4s-progress")
+    def turn(id: String, conversation: String, at: Instant) =
+      Memory(MemoryId(id), s"turn $id", MemoryType.Conversation, Map("conversation_id" -> conversation), at, None)
+    def fileOf(t: TenantId) = dir.resolve(s"${t.value}.db").toString
+    // A: 30 newest that form no group, then an older group of 3; B: nothing
+    val seed = SQLiteMemoryStore(fileOf(t1)).value
+    seed
+      .storeAll(
+        (1 to 30).map(i => turn(s"n$i", s"c$i", now.minusSeconds(3600L + i))) ++
+          (1 to 3).map(i => turn(s"o$i", "old", now.minusSeconds(86400L + i)))
+      )
+      .value
+    seed.close()
+    val config = MemoryManagerConfig.default.withConsolidationConfig(ConsolidationConfig(maxMemoriesScanned = 10))
+    val m = new SemanticMemoryMiddleware(
+      tenant => SQLiteMemoryStore(fileOf(tenant.get)),
+      (s, c) => LLMMemoryManager(config, s, c),
+      new MemoryTestSupport.FunctionClient(_ => "Summary of the old conversation."),
+      recall = None,
+      record = None,
+      consolidate = Some(MemoryConsolidation(olderThan = 1.minute, minCount = 3).withInterval(Duration.Zero)),
+      clock = clock,
+      maxTenants = 1
+    )
+    val agent = agentWith(answering(Seq.fill(12)("ok")*), m)
+    (1 to 5).foreach { i =>
+      agent.run(ThreadId(s"a$i"), "hello", tenant(t1)).value
+      agent.run(ThreadId(s"b$i"), "hello", tenant(t2)).value // evicts A's store
+    }
+    MemoryTestSupport.contents(held(m, Some(t1))) should contain("Summary of the old conversation.")
+    m.close()
+    java.nio.file.Files.list(dir).forEach(p => java.nio.file.Files.delete(p))
+    java.nio.file.Files.delete(dir)
   }
 }

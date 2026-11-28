@@ -481,7 +481,8 @@ for {
   by default; `withInterval(Duration.Zero)` for every turn), reading at most
   `ConsolidationConfig.maxMemoriesScanned` (1000) old memories. Each run goes on from where the last one's page ended
   (`LLMMemoryManager.consolidatePage`, a keyset cursor of time and id) and wraps at the oldest, so every old memory is
-  reached in turn. It needs a `TransactionalMemoryStore`:
+  reached in turn; a group spread over pages is carried to the next page and still forms. The schedule and the scan
+  position are kept per tenant even while its store is released. It needs a `TransactionalMemoryStore`:
   `InMemoryStore`, `SQLiteMemoryStore` (with or without an embedding service), `VectorMemoryStore` or
   `PostgresMemoryStore`. A
   summary carries its sources' `llm4s.writer`, so it counts against `bounds` only when they did; one

@@ -49,6 +49,10 @@ final case class LLMMemoryManager(
    * oldest (#3040). Calling it again with the cursor it returned, and wrapping to `None`, reaches every old memory in
    * turn within the bound per call: a page that forms no group never hides the older ones. The cursor is a keyset
    * (time, then id), so no memory that shares a page's last time is skipped.
+   *
+   * A group can straddle pages: the members of groups too small to merge are carried in the cursor (at most a page of
+   * them, the largest groups first) and read again with the next page, so a group spread over pages still forms. At
+   * most two pages of memories are read per call.
    */
   def consolidatePage(
     olderThan: Instant,
@@ -59,10 +63,27 @@ final case class LLMMemoryManager(
     val window = from.fold(MemoryFilter.before(olderThan))(c =>
       MemoryFilter.And(MemoryFilter.before(olderThan), MemoryFilter.Preceding(c.timestamp, c.id))
     )
-    store.recall(window, limit).flatMap { page =>
+    for {
+      page <- store.recall(window, limit)
+      // the members carried from earlier pages, if they are still there, old enough, and not on this page
+      onPage = page.map(_.id).toSet
+      carried <- from.toSeq
+        .flatMap(_.carried)
+        .filterNot(onPage)
+        .foldLeft[Result[Vector[Memory]]](Right(Vector.empty))((acc, id) =>
+          acc.flatMap(found => store.get(id).map(m => found ++ m.filter(mm => !mm.timestamp.isAfter(olderThan))))
+        )
+      memories = carried ++ page
+      consolidated <- consolidateAll(memories, minCount)
+    } yield {
       val next =
-        if (page.size < limit) None else page.lastOption.map(m => ConsolidationCursor(m.timestamp, m.id))
-      consolidateAll(page, minCount).map(_ -> next)
+        if (page.size < limit) None
+        else
+          page.lastOption.map { last =>
+            val small = incompleteGroups(memories, minCount).sortBy(-_.size).flatten.map(_.id).take(limit).toVector
+            ConsolidationCursor(last.timestamp, last.id, small)
+          }
+      consolidated -> next
     }
   }
 
@@ -121,7 +142,13 @@ final case class LLMMemoryManager(
   private def groupMemoriesForConsolidation(
     memories: Seq[Memory],
     minCount: Int
-  ): Seq[Seq[Memory]] = {
+  ): Seq[Seq[Memory]] = scopedGroups(memories, minCount, complete = true)
+
+  /** The groups of `memories` that could merge but have fewer than `minCount` members: carried to the next page. */
+  private def incompleteGroups(memories: Seq[Memory], minCount: Int): Seq[Seq[Memory]] =
+    scopedGroups(memories, minCount, complete = false)
+
+  private def scopedGroups(memories: Seq[Memory], minCount: Int, complete: Boolean): Seq[Seq[Memory]] = {
     // contextBudget() already applies HeadroomPercent.Standard (~8% headroom)
     val tokenBudget = client.contextBudget()
     val maxPerGroup = config.consolidationConfig.maxMemoriesPerGroup
@@ -158,8 +185,8 @@ final case class LLMMemoryManager(
         .filter(m => required.forall(k => m.getMetadata(k).exists(_.nonEmpty)))
         .groupBy(ConsolidationProvenance.scopeOf)
         .values
-        .map(group => takeUntilBudget(order(group.toSeq)))
-        .filter(_.length >= minCount)
+        .map(group => if (complete) takeUntilBudget(order(group.toSeq)) else group.toSeq)
+        .filter(group => if (complete) group.length >= minCount else group.length < minCount)
         .toSeq
 
     // Conversations by conversation id, sorted by timestamp for stable summaries

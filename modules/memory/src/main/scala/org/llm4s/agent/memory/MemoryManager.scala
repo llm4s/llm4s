@@ -313,9 +313,14 @@ final case class ConsolidationConfig(
 
 /**
  * Where a paged consolidation goes on (`LLMMemoryManager.consolidatePage`): after the memory of `timestamp` and `id`,
- * in recall order (#3040).
+ * in recall order, with `carried`, the members of groups still too small to merge, read again with the next page
+ * (#3040).
  */
-final case class ConsolidationCursor(timestamp: java.time.Instant, id: MemoryId)
+final case class ConsolidationCursor(
+  timestamp: java.time.Instant,
+  id: MemoryId,
+  carried: Vector[MemoryId] = Vector.empty
+)
 
 object ConsolidationConfig {
 

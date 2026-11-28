@@ -130,8 +130,14 @@ final class SemanticMemoryMiddleware(
   // kept after its cell is evicted, so a resolver can never hand an evicted tenant's storage to another (#3032).
   private val cells      = new java.util.LinkedHashMap[Option[TenantId], TenantMemory](16, 0.75f, true)
   private val identities = mutable.Map.empty[String, Option[TenantId]]
-  private var closed     = false
-  private val resolving  = new ReentrantLock()
+  // Guarded by `resolving`: each tenant's consolidation schedule and scan position, kept when its cell is evicted so a
+  // tenant that comes back neither rescans from the start nor consolidates early (#3040); least recently used first,
+  // at most `ProgressEntries` of them
+  private val progress = new java.util.LinkedHashMap[Option[TenantId], ConsolidationProgress](16, 0.75f, true):
+    override def removeEldestEntry(e: java.util.Map.Entry[Option[TenantId], ConsolidationProgress]): Boolean =
+      size > ProgressEntries
+  private var closed    = false
+  private val resolving = new ReentrantLock()
 
   /** `bounds`, counting only what this middleware wrote. */
   private val owned: MemoryBounds = bounds.withOwner(WriterKey, id.value)
@@ -422,7 +428,9 @@ final class SemanticMemoryMiddleware(
         )
       )
     yield
-      val created = new TenantMemory(store, identity)
+      val kept = Option(progress.get(tenant)).getOrElse(new ConsolidationProgress)
+      progress.put(tenant, kept)
+      val created = new TenantMemory(store, identity, kept)
       identity.foreach(identities.update(_, tenant))
       cells.put(tenant, created)
       created
@@ -435,6 +443,9 @@ object SemanticMemoryMiddleware:
 
   /** The default most tenants whose stores are held open at once. */
   val DefaultMaxTenants: Int = 1000
+
+  /** How many tenants' consolidation progress is remembered after their stores are released. */
+  private val ProgressEntries = 100000
 
   /** The default release of a tenant's store: close it if it is `AutoCloseable`. */
   val closeStore: MemoryStore => Unit = {
