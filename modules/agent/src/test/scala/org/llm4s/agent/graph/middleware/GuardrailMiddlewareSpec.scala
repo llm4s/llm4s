@@ -1,15 +1,15 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.toolloop.ToolLoopFixtures.{ answered, completion }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.agent.graph.tool.*
 import org.llm4s.agent.graph.toolloop.*
-import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.*
-import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.error.{ LLMError, RateLimitError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
@@ -174,5 +174,59 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     val (kept, error) = runInMemory(build(ScriptedModel("unsafe"), mw).graph, AgentInput("hi"), thread = "b").failed
     blocked(error).reason should not be empty
     keptMessages(kept) shouldBe empty
+  }
+
+  /** A judge whose calls fail with a rate limit until `failures` have been made, then score `score`. */
+  final private class Flaky(failures: Int, score: String) extends LLMClient {
+    val calls = new AtomicInteger()
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      if (calls.getAndIncrement() < failures) Left(RateLimitError(ProviderId("judge")))
+      else Right(Completion("id", Instant.EPOCH, ModelName("test"), AssistantMessage(score)))
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+    override def contextWindow: Int     = 4096
+    override def reserveCompletion: Int = 1024
+  }
+
+  it should "fail the run, not block it, when a judge's provider call fails, and keep the turn for recover (#3247)" in {
+    val judge           = new Flaky(1, "0.95")
+    val mw              = new GuardrailMiddleware(none, Seq(LLMSafetyGuardrail(judge)))
+    val graph           = build(ScriptedModel("safe"), mw).graph
+    val runtime         = GraphRuntime.inMemory()
+    val thread          = ThreadId("outage")
+    val (kept, failure) = await(runtime.start(thread, graph, AgentInput("hi")).value).failed
+    val error = failure match {
+      case GraphError.NodeFailed(_, _, unavailable: GuardrailUnavailable) => unavailable
+      case other                                                          => fail(s"not a failed guardrail: $other")
+    }
+    error.guardrail shouldBe "LLMSafetyGuardrail"
+    error.cause shouldBe a[RateLimitError]
+    error.message should include("could not decide")
+    keptMessages(kept).map(_.message.content) should contain("safe")
+    await(runtime.recover(thread, graph).value).answered._2 shouldBe "safe"
+    judge.calls.get shouldBe 2
+  }
+
+  it should "block when one guardrail refuses even though another could not decide (#3247)" in {
+    val outage = LLMSafetyGuardrail(new Flaky(1, "0.95"))
+    val result = GuardrailMiddleware.run(Seq(outage, new Reject("R")), "text", testModelContext())
+    result.left.value shouldBe a[GuardrailBlocked]
+    result.left.value.asInstanceOf[GuardrailBlocked].guardrail shouldBe "R"
+  }
+
+  it should "report an input judge's outage at admission as a GuardrailUnavailable (#3247)" in {
+    val mw = new GuardrailMiddleware(Seq(InputGuardrail.from(LLMSafetyGuardrail(new Flaky(1, "0.95")))), Nil)
+    mw.admit("hi", testAdmissionContext()).left.value shouldBe a[GuardrailUnavailable]
+  }
+
+  "CompositeGuardrail" should "return a judge's provider error unchanged when nothing in it refused (#3247)" in {
+    val all = CompositeGuardrail.all(Seq[Guardrail[String]](LLMSafetyGuardrail(new Flaky(1, "0.95")), new Upper))
+    all.validate("x").left.value shouldBe a[RateLimitError]
+    val refused =
+      CompositeGuardrail.all(Seq[Guardrail[String]](LLMSafetyGuardrail(new Flaky(1, "0.95")), new Reject("R")))
+    refused.validate("x").left.value shouldBe a[ValidationError]
+    val any = CompositeGuardrail.any(Seq[Guardrail[String]](new Reject("R"), LLMSafetyGuardrail(new Flaky(1, "0.95"))))
+    any.validate("x").left.value shouldBe a[RateLimitError]
   }
 }

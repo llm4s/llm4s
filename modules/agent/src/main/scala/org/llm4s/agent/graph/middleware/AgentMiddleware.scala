@@ -332,7 +332,8 @@ trait AgentMiddleware:
    * `AgentStatus.Blocked(id, reason)` - an outcome of `agent.run`, not its `Left` - exactly as a guardrail's block
    * does with the guardrail's name: an input block stores nothing of the turn, an output block removes it, the
    * thread stays usable, and a durable `GuardrailBlocked` event names this middleware and never the reason. Any other
-   * `Left` from a boundary hook blocks the turn too, but reaches the caller as the `Left` of `agent.run`.
+   * `Left` from a boundary hook blocks the turn too, but reaches the caller as the `Left` of `agent.run`, except a
+   * cancellation and a [[GuardrailUnavailable]], which fail the run and leave it to `recover` (#3247).
    *
    * It blocks only there: returned from `promptSections` or `wrapModelCall` it is a failure of the run like
    * any other `Left`.

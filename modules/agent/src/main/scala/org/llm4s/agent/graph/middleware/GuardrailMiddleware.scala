@@ -13,6 +13,11 @@ import org.llm4s.types.Result
  * block storing nothing of the turn and an output block removing it, and the thread stays usable.
  * `Agent` reports it as `AgentStatus.Blocked`. A guardrail does not suspend.
  *
+ * A guardrail that could not decide - an LLM judge whose provider call failed, with an error that is not a
+ * `ValidationError` - is not a refusal (#3247): when no guardrail of the list refused, the result is a
+ * [[GuardrailUnavailable]], which fails the run instead of blocking it. Nothing is let through, an output failure
+ * keeps the turn so `recover` runs the output guardrails again, and `Agent.run` returns it as its `Left`.
+ *
  * The input guardrails run before anything of the turn is stored, and before every middleware's `beforeAgent`,
  * wherever this middleware is in the stack: a query they refuse is in no checkpoint, event, queue entry or trace,
  * and one they rewrite is stored only as rewritten. They see the query as submitted - after the `admit` stages of
@@ -42,21 +47,34 @@ final class GuardrailMiddleware(
 object GuardrailMiddleware:
 
   /**
-   * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next.
-   * The block names the first failing guardrail and joins every failure's formatted error. Each guardrail validates
-   * with the stage's `context`, so a judge's model calls are counted in the thread's usage.
+   * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next. When one refuses
+   * (`GuardrailUnavailable.isRefusal`: a `ValidationError`, a `ContentFilteredError` or a `GuardrailBlocked`), the
+   * result is a [[GuardrailBlocked]] naming the first that refused and joining every failure's formatted error. When
+   * some failed but none refused - a judge's provider call failed - it is a [[GuardrailUnavailable]] naming the
+   * first that failed, with its error (#3247). Each guardrail validates with the stage's `context`, so a judge's model
+   * calls are counted in the thread's usage.
    */
   private[middleware] def run(
     guardrails: Seq[Guardrail[String]],
     value: String,
     context: UsageAccounting
   ): Result[String] =
-    val (last, failures) = guardrails.foldLeft((value, Vector.empty[(String, LLMError)])) {
-      case ((current, failed), guardrail) =>
-        guardrail.validateIn(current, context) match
-          case Right(next) => (next, failed)
-          case Left(err)   => (current, failed :+ (guardrail.name -> err))
-    }
-    failures.headOption match
-      case None             => Right(last)
+    val (last, failures) = threaded(guardrails, value, context)
+    failures.find((_, error) => GuardrailUnavailable.isRefusal(error)) match
       case Some((first, _)) => Left(GuardrailBlocked(first, Some(failures.map(_._2.formatted).mkString("; "))))
+      case None =>
+        failures.headOption match
+          case None                 => Right(last)
+          case Some((first, error)) => Left(GuardrailUnavailable(first, error))
+
+  /** `value` as `guardrails` left it, each failing one leaving it unchanged, and each failure with its guardrail. */
+  private[middleware] def threaded(
+    guardrails: Seq[Guardrail[String]],
+    value: String,
+    context: UsageAccounting
+  ): (String, Vector[(String, LLMError)]) =
+    guardrails.foldLeft((value, Vector.empty[(String, LLMError)])) { case ((current, failed), guardrail) =>
+      guardrail.validateIn(current, context) match
+        case Right(next) => (next, failed)
+        case Left(err)   => (current, failed :+ (guardrail.name -> err))
+    }

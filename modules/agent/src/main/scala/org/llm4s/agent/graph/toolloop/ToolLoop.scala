@@ -17,6 +17,7 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{
   AdmissionContext,
   GuardrailBlocked,
+  GuardrailUnavailable,
   MiddlewareAsked,
   MiddlewareId,
   MiddlewareStack,
@@ -438,7 +439,8 @@ object ModelStep:
  *    `<id>/finish` of a handoff target runs its own `afterAgent` stack, then the root's. A `Left`
  *    from either hook, a blank query from `beforeAgent` and a blank answer from `afterAgent`
  *    *block* the run (design 4.13): it ends as a finished failure, `RunResult.Failed`, carrying
- *    that error, and the thread stays usable; a cancellation is not a Block. An input Block
+ *    that error, and the thread stays usable; a cancellation is not a Block, nor a guardrail that
+ *    could not decide (`GuardrailUnavailable`): either fails the run, recoverable. An input Block
  *    commits only a new thread's seed - its imported history and the root as active agent - and an
  *    output Block retracts the blocked turn: every key the turn wrote, a middleware's or a tool's,
  *    returns to its value before the turn (recorded in [[TurnState.priorValues]]), the turn is
@@ -1996,13 +1998,15 @@ object ToolLoop:
 
   /**
    * A run-boundary failure (a `beforeAgent` or `afterAgent` `Left`): a guardrail's Block, which ends the run as a
-   * finished failure and commits `update` first (design 4.13). A cancellation is not a Block: it fails the run
-   * as before, leaving the checkpoint `Running` for `recover`. A guardrail's block is reported as a durable
+   * finished failure and commits `update` first (design 4.13). A cancellation is not a Block, nor is a guardrail that
+   * could not decide (`GuardrailUnavailable`, #3247): each fails the run, leaving the checkpoint `Running` for
+   * `recover`, and an output one retracts nothing. A guardrail's block is reported as a durable
    * `GuardrailBlocked` naming the guardrail and `phase`, never its reason; the Block commits it with the task.
    */
   private def boundary(error: LLMError, update: StateUpdate, context: RunContext, phase: GuardrailPhase): NodeResult =
     error match
-      case cancelled: CancelledError => NodeResult.Fail(cancelled)
+      case cancelled: CancelledError         => NodeResult.Fail(cancelled)
+      case unavailable: GuardrailUnavailable => NodeResult.Fail(unavailable)
       case other =>
         other match
           case blocked: GuardrailBlocked =>

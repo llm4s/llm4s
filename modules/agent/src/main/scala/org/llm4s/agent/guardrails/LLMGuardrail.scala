@@ -75,8 +75,10 @@ import org.llm4s.util.Redaction
  *  - A failing `llmClient.complete` (network, rate limit, authentication): the client's own error, returned
  *    unchanged.
  *
- * Inside an agent run a failing guardrail blocks the run: `GuardrailMiddleware` reports the name of the first
- * failing guardrail together with the failure messages.
+ * Inside an agent run a refusal (any `ValidationError` above) blocks the run: `GuardrailMiddleware` reports the name
+ * of the first refusing guardrail together with the failure messages. A failing judge call is not a refusal
+ * (#3247): when no guardrail refused, the run fails with `GuardrailUnavailable`, nothing is let through, and an
+ * output turn is kept for `recover`, which asks the judge again.
  *
  * **Limits:** `validate` is not pure here, unlike the contract of [[Guardrail]]: it performs a network call, and
  * the same content can score differently between calls (the default temperature of 0.0 reduces this but does

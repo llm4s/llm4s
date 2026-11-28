@@ -27,8 +27,8 @@ import org.llm4s.agent.graph.toolloop.{
   ToolQuestionRequest,
   ToolTask
 }
-import org.llm4s.agent.guardrails.OutputGuardrail
-import org.llm4s.agent.guardrails.builtin.LengthCheck
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
+import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -446,7 +446,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     agent.run(parked.threadId, "hi").value.answer shouldBe Some("fine")
   }
 
-  it should "end the review with the verdict when the guardrail's reason varies, without calling it again" in {
+  it should "end the review with the verdict when the guardrail's reason varies, without asking again" in {
     val calls = new AtomicInteger
     // an LLM judge: refuses every time, worded differently each time
     val judge: OutputGuardrail = new OutputGuardrail {
@@ -466,7 +466,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     }
 
     agentOver(GuardrailVerdict.Allow).answer shouldBe Some("answer")
-    calls.get shouldBe 1
+    // an Allow runs the list once more, its failures ignored, to apply the passing guardrails' rewrites (#3248)
+    calls.get shouldBe 2
     agentOver(GuardrailVerdict.Edit("edited")).answer shouldBe Some("edited")
     calls.get shouldBe 1
     agentOver(GuardrailVerdict.Block).status match {
@@ -476,6 +477,40 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       case other => fail(s"expected Blocked, got $other")
     }
     calls.get shouldBe 1
+  }
+
+  it should "keep the passing guardrails' rewrites on Allow (#3248)" in {
+    // refuses any text that still holds the word "darn"; the masker beside it rewrites the SSN
+    val listed: InputGuardrail with OutputGuardrail = new InputGuardrail with OutputGuardrail {
+      def validate(value: String): Result[String] =
+        if (value.contains("darn")) Left(ValidationError("listed", "listed word")) else Right(value)
+      val name: String                      = "listed"
+      override def transform(input: String) = input
+    }
+    val client = ScriptedLLMClient.of(CompletionFixture.simple("ssn 123-45-6789, darn"))
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withMiddleware(new GuardrailReviewMiddleware(Seq(PIIMasker(), listed), Seq(PIIMasker(), listed)))
+    )
+    val parked = agent.run("my ssn is 123-45-6789, darn").value
+    ToolLoop.middlewareQuestion[GuardrailReview](askedOf(parked).head._2).map(_.phase) shouldBe Right(
+      GuardrailPhase.Input
+    )
+    val answered = agent
+      .resume(parked.threadId, Map(parked.reply[GuardrailVerdict](askedOf(parked).head._1, GuardrailVerdict.Allow)))
+      .value
+    client.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("my ssn is [REDACTED_SSN], darn")
+    ToolLoop.middlewareQuestion[GuardrailReview](askedOf(answered).head._2).map(_.phase) shouldBe Right(
+      GuardrailPhase.Output
+    )
+    agent
+      .resume(
+        answered.threadId,
+        Map(answered.reply[GuardrailVerdict](askedOf(answered).head._1, GuardrailVerdict.Allow))
+      )
+      .value
+      .answer shouldBe Some("ssn [REDACTED_SSN], darn")
   }
 
   it should "run the guardrails again, and ask again, when the hook runs on different text" in {

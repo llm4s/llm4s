@@ -20,6 +20,12 @@ import scala.util.matching.Regex
  *
  * Note: These patterns favor recall over precision - they may have false
  * positives but minimize false negatives for security-sensitive use cases.
+ *
+ * The patterns match the text and a normalised copy of it, so look-alike spellings of a number or address are
+ * found too (#3244), and nothing the text itself holds is lost to normalising: format characters (zero-width space, soft hyphen, joiners) and combining marks are removed, every dash
+ * (a non-breaking hyphen, an en dash) reads as `-`, and everything else is in Unicode NFKC (fullwidth digits, a
+ * fullwidth `@` or `.`). A match is reported, and masked, at the original text's indices, so an invisible
+ * character inside a match is masked with it and the text around it is kept as it was.
  */
 @Experimental
 object PIIPatterns {
@@ -46,12 +52,14 @@ object PIIPatterns {
 
     /**
      * Find all matches of this PII type in text.
+     *
+     * The pattern runs on the text and on a normalised copy of it (see [[PIIPatterns]]); each match is reported at
+     * the text's own indices, with `value` the text's own characters, and matches of the two that overlap are one.
      */
     def findAll(text: String): Seq[PIIMatch] =
-      pattern
-        .findAllMatchIn(text)
-        .map(m => PIIMatch(this, m.matched, m.start, m.end))
-        .toSeq
+      MatchView
+        .spans(text)(t => pattern.findAllMatchIn(t).map(m => (m.start, m.end)))
+        .map((start, end) => PIIMatch(this, text.substring(start, end), start, end))
   }
 
   object PIIType {
@@ -60,19 +68,19 @@ object PIIPatterns {
      * Social Security Number (US format: XXX-XX-XXXX)
      * Validates against known invalid SSNs (000, 666, 9XX prefix)
      *
-     * The groups may be separated by a dash or by horizontal whitespace (`\h`: a space, a tab, a no-break space),
-     * never by a line break, so digits on separate lines are not joined into one number.
+     * The groups may be separated by a dash, a dot or horizontal whitespace (`\h`: a space, a tab, a no-break
+     * space), never by a line break, so digits on separate lines are not joined into one number.
      */
     case object SSN extends PIIType {
-      val name                        = "SSN"
-      val pattern                     = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\h]?(?!00)\d{2}[-\h]?(?!0000)\d{4}(?!\d)""".r
+      val name    = "SSN"
+      val pattern = """(?<!\d)(?!000|666|9\d{2})\d{3}[-.\h]?(?!00)\d{2}[-.\h]?(?!0000)\d{4}(?!\d)""".r
       def mask(value: String): String = "[REDACTED_SSN]"
     }
 
     /**
      * Credit Card Numbers (major providers: Visa, MasterCard, Amex, Discover)
-     * Supports common formats with spaces, dashes, or no separators: 16 digits as 4-4-4-4, and the 15-digit
-     * American Express layout 4-6-5 (prefix 34 or 37).
+     * Supports common formats with spaces, dashes, dots, or no separators: 16 digits as 4-4-4-4, and the 15-digit
+     * American Express layout 4-6-5 (prefix 34 or 37). As for an SSN, groups on separate lines are not joined.
      *
      * The check digit is not validated: a number shaped like a card is masked.
      */
@@ -80,8 +88,8 @@ object PIIPatterns {
       val name = "Credit Card"
       // Visa: 4xxx, MC: 51-55xx/2221-2720, Amex: 34/37xx, Discover: 6011/65xx; then the 15-digit Amex layout
       val pattern =
-        ("""(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\h]?\d{4}[-\h]?\d{4}[-\h]?\d{4}(?!\d)""" +
-          """|(?<!\d)3[47]\d{2}[-\h]?\d{6}[-\h]?\d{5}(?!\d)""").r
+        ("""(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-.\h]?\d{4}[-.\h]?\d{4}[-.\h]?\d{4}(?!\d)""" +
+          """|(?<!\d)3[47]\d{2}[-.\h]?\d{6}[-.\h]?\d{5}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_CARD]"
     }
 

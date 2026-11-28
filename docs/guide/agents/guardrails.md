@@ -66,6 +66,20 @@ the same thread id. Imported assistant messages and tool results are not checked
 and tool output. A `resume` answer (a tool question's reply, an approval's rejection reason, a reviewer's
 `GuardrailVerdict.Edit`) is not checked by the input guardrails either.
 
+**What guardrails do not see** (#3246). Input guardrails run only on the turn's query and its imported user
+messages, and output guardrails only on the turn's final answer (the last assistant message, the one without tool
+calls). Nothing else passes through them:
+
+- the system prompt and the middleware's prompt sections;
+- a tool call's arguments, and a tool's result: text a web-search or file tool returns, injected instructions or PII
+  included, is stored and sent to the model unchecked. `PromptInjectionDetector` is an input guardrail and cannot be
+  attached to tool results;
+- the text of an assistant message that also makes tool calls, which is stored and streams live;
+- a turn that ends `StepLimitReached` or `TokenLimitReached`: it has no final answer, so no output guardrail runs.
+
+Check a tool's arguments in the tool itself, and its result in a middleware's `wrapToolCall`, which can rewrite the
+outcome `next` returns or replace it with `ToolOutcome.Error`.
+
 ### `GuardrailMiddleware`: choosing the position
 
 `withInputGuardrails` and `withOutputGuardrails` are `@Stable`. Underneath they install a `GuardrailMiddleware`
@@ -663,6 +677,15 @@ type, so `summarize` counts that text once for each type (`123456789` gives `SSN
 `PIIType.all`), and `PIIDetector`'s block message lists both types. A finding is one match of one type, so the sum of
 the counts is how often the patterns fired, not how many stretches of PII the text holds.
 
+The patterns match the text and a normalised copy of it (#3244), as `SecretLeakGuardrail`'s do, so normalising
+never loses a match the text itself holds (a superscript `²` after an SSN, which NFKC makes a digit). In the copy,
+format characters (a zero-width space, a soft hyphen, joiners) and combining marks are removed, every dash (a
+non-breaking hyphen, an en dash) reads as `-`, and everything else is in Unicode NFKC, so fullwidth digits and a fullwidth `@` or `.` read as
+ASCII. `123-45-\u200B6789`, `１２３-４５-６７８９` and `alice＠example.com` are all found, and an SSN or card number may
+also be written with dots (`123.45.6789`, `4111.1111.1111.1111`). A match is reported and masked at the original
+text's indices, so an invisible character inside it is masked with it. Groups on separate lines are still not joined
+into one number.
+
 ---
 
 ## Prompt Injection Protection
@@ -746,10 +769,20 @@ agent.run(query) match {
     }
 
   case Left(error) =>
-    // a provider error, a tool's failure, a blank query, or another middleware's beforeAgent/afterAgent Left
+    // a provider error, a tool's failure, a blank query, a guardrail that could not decide (GuardrailUnavailable),
+    // or another middleware's beforeAgent/afterAgent Left
     println(s"Run failed: ${error.message}")
 }
 ```
+
+**A guardrail that could not decide is not a block** (#3247). An LLM judge whose provider call fails - a rate limit,
+a timeout, a refused key - returns that error, not a `ValidationError`. When no guardrail of the list refused, the
+run fails with `GuardrailUnavailable(guardrail, cause)` instead of ending `Blocked`: nothing is let through, but the
+answer is not retracted either. `run` returns it as its `Left` (wrapped in the failed node's `GraphError`), the
+durable events record a failed task rather than a `GuardrailBlocked`, and `agent.recover(threadId)` runs the output
+guardrails again on the kept answer, asking the judge again. An input judge's outage at admission starts no turn.
+When one guardrail refuses and another could not decide, the turn is blocked. Inside `CompositeGuardrail.all` and
+`.any` the same rule holds: a provider error with no refusal beside it is returned unchanged.
 
 ### What a Failing Check Does: `GuardrailAction`
 

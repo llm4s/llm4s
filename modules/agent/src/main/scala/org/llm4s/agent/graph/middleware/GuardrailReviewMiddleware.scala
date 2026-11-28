@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.middleware
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.events.GuardrailPhase
-import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
+import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -26,7 +26,10 @@ object GuardrailReview:
 /** A reviewer's verdict on a refused query or answer. */
 @Experimental
 enum GuardrailVerdict derives ReadWriter:
-  /** Let the refused text through unchanged. */
+  /**
+   * Let the refused text through, overriding the guardrails that refused it: it goes on as the guardrails that
+   * passed it rewrote it (a `PIIMasker` beside the refusing guardrail still masks it, #3248).
+   */
   case Allow
 
   /** Use `text` in its place; it is not checked by the guardrails again, since the reviewer wrote it. */
@@ -41,11 +44,16 @@ enum GuardrailVerdict derives ReadWriter:
  * the text through, replaces it, or blocks the run as `GuardrailMiddleware` would have. Text the
  * guardrails accept passes without a question, and a guardrail that transforms (`Fix`) still applies.
  *
- * While an input review waits, nothing of the turn is stored; while an output review waits, the answer
- * is stored but the turn has no outcome yet. A verdict is used only for the text and phase it was asked
- * about, whatever the refusal's reason, and the guardrails do not run on that text again once it is given,
- * so a judge whose reason varies is asked once; if the hook runs again on different text, the guardrails
- * run on it and the reviewer may be asked again.
+ * Its input guardrails run in `beforeAgent`, not at admission, because a review suspends the turn: the query is in
+ * the turn's first checkpoint before they see it, and while an input review waits the suspended question holds the
+ * refused text and the guardrail's reason. While an output review waits, the answer is stored but the turn has no
+ * outcome yet. Use [[GuardrailMiddleware]] for what must never be stored.
+ *
+ * A verdict is used only for the text and phase it was asked about, whatever the refusal's reason, and the
+ * guardrails do not decide on that text again once it is given, so a judge whose reason varies is asked once; if
+ * the hook runs again on different text, the guardrails run on it and the reviewer may be asked again. On `Allow`
+ * the list runs once more on the text with every failure ignored, so the rewrites of the guardrails that passed it
+ * apply (#3248); a judge in the list is called again then, and its verdict ignored.
  */
 @Experimental
 final class GuardrailReviewMiddleware(
@@ -55,30 +63,33 @@ final class GuardrailReviewMiddleware(
 ) extends AgentMiddleware.Asking[GuardrailReview, GuardrailVerdict]:
 
   override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
-    reviewed(GuardrailPhase.Input, text, context)(GuardrailMiddleware.run(input, text, context)).map(BoundaryResult(_))
+    reviewed(GuardrailPhase.Input, input, text, context).map(BoundaryResult(_))
 
   /** `true` when there are output guardrails: a streamed answer is held until they pass it (#3231). */
   override def guardsAnswer: Boolean = output.nonEmpty
 
   override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-    reviewed(GuardrailPhase.Output, answer, context)(GuardrailMiddleware.run(output, answer, context))
-      .map(BoundaryResult(_))
+    reviewed(GuardrailPhase.Output, output, answer, context).map(BoundaryResult(_))
 
   // A verdict is matched on the refused text and phase, not on the refusal's wording: a guardrail whose reason
   // varies between runs (an LLM judge) would otherwise be asked about forever. Once a verdict is given, the
-  // guardrails do not run on that text again - the reviewer has decided it - so a judge is not called again.
-  private def reviewed(phase: GuardrailPhase, text: String, context: ModelContext)(
-    guarded: => Result[String]
+  // guardrails do not decide on that text again - the reviewer has decided it. An Allow overrides only the refusals:
+  // the list runs once more, its failures ignored, so the rewrites of the guardrails that passed still apply (#3248).
+  private def reviewed(
+    phase: GuardrailPhase,
+    guardrails: Seq[Guardrail[String]],
+    text: String,
+    context: ModelContext
   ): Result[String] =
     answered(context).filter(r => r.question.phase == phase && r.question.text == text) match
       case Some(verdict) =>
         verdict.answer match
-          case GuardrailVerdict.Allow      => Right(text)
+          case GuardrailVerdict.Allow      => Right(GuardrailMiddleware.threaded(guardrails, text, context)._1)
           case GuardrailVerdict.Edit(next) => Right(next)
           case GuardrailVerdict.Block =>
             Left(GuardrailBlocked(verdict.question.guardrail, Some(verdict.question.reason)))
       case None =>
-        guarded match
+        GuardrailMiddleware.run(guardrails, text, context) match
           case Left(blocked: GuardrailBlocked) =>
             ask(GuardrailReview(phase, blocked.guardrail, blocked.reason.getOrElse(blocked.message), text))
           case other => other
