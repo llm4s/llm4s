@@ -272,6 +272,69 @@ class MCPServerConformanceSpec extends AnyFlatSpec with Matchers with BeforeAndA
     }
   }
 
+  /** A server that holds an HTTP+SSE request between its 202 and its processing, for a cancel to arrive then. */
+  private class AckHooked extends MCPServer(MCPServerOptions(0, "/mcp", "AckHooked", "1.0"), Seq(gate)) {
+    val acknowledged = new CountDownLatch(1)
+    val proceed      = new CountDownLatch(1)
+    override private[mcp] def afterAcknowledged(): Unit = {
+      acknowledged.countDown()
+      proceed.await(10, TimeUnit.SECONDS): Unit
+    }
+  }
+
+  it should "honour an HTTP+SSE cancel sent between the 202 and the call's start: the tool never runs" in {
+    val hooked = new AckHooked
+    hooked.start().fold(e => throw e, _ => ())
+    val stream = SseTestStream.open(hooked.boundPort, "/mcp/sse")
+    try {
+      val events = new java.util.concurrent.LinkedBlockingQueue[String]()
+      val reader = Thread.ofVirtual().start { () =>
+        val lines = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body, "UTF-8"))
+        val event = new StringBuilder
+        org.llm4s.error.CancelledError.catchInterrupt(scala.util.Try {
+          var line = lines.readLine()
+          while (line != null) {
+            if (line.isEmpty) { if (event.nonEmpty) events.put(event.toString); event.clear() }
+            else event.append(line).append('\n')
+            line = lines.readLine()
+          }
+        }): Unit
+      }
+      val endpoint = events.poll(10, TimeUnit.SECONDS)
+      endpoint should include("event: endpoint")
+      val path = endpoint.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ").trim).getOrElse("")
+      def postSse(body: ujson.Value): Int =
+        http
+          .send(
+            HttpRequest
+              .newBuilder(URI.create(s"http://127.0.0.1:${hooked.boundPort}$path"))
+              .header("Content-Type", "application/json")
+              .POST(HttpRequest.BodyPublishers.ofString(body.render()))
+              .build(),
+            HttpResponse.BodyHandlers.ofString()
+          )
+          .statusCode()
+
+      @volatile var callStatus = -1
+      val call = Thread.ofVirtual().start(() => callStatus = postSse(gateCall(ujson.Num(60), "never-runs")))
+      hooked.acknowledged.await(10, TimeUnit.SECONDS) shouldBe true
+      postSse(cancelOf(ujson.Num(60))) shouldBe 202
+      hooked.proceed.countDown()
+      call.join(10_000)
+      callStatus shouldBe 202
+
+      val deadline = scala.concurrent.duration.Deadline.now + 10.seconds
+      while (hooked.registeredCalls > 0 && deadline.hasTimeLeft()) Thread.sleep(10)
+      hooked.registeredCalls shouldBe 0
+      gateFor("never-runs")._1.getCount shouldBe 1 // the tool never started
+      Option(events.poll(200, TimeUnit.MILLISECONDS)).filterNot(_.startsWith(":")) shouldBe None // and nothing replied
+      reader.interrupt()
+    } finally {
+      stream.close()
+      hooked.stop()
+    }
+  }
+
   it should "interrupt a tool call the client cancels, and send no reply for it" in {
     val (session, _)     = initialize()
     @volatile var status = -1

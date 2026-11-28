@@ -273,26 +273,37 @@ class MCPServer(
   // ── Cancellation (#3081) ──────────────────────────────────────────────────
 
   /**
-   * One `tools/call` that may be cancelled: the thread running it, and whether it is running, cancelled or completed.
-   * Cancelling and completing are mutually exclusive, decided under the call's lock: an interrupt is delivered only
-   * by a cancellation that won, and only while the call still runs, so it never reaches a completed call's reply or
-   * the next request on the pooled thread.
+   * One `tools/call` that may be cancelled: registered (so a cancel for it is never lost), then running on a thread,
+   * then completed, or cancelled at any point before completion. Every change is decided under the call's lock, so
+   * cancelling and completing are mutually exclusive: an interrupt is delivered only by a cancellation that won while
+   * the call ran, never to a completed call's reply or the next request on the pooled thread. A call cancelled
+   * before it starts never runs.
    */
-  final private class RunningCall(val thread: Thread) {
-    private var state = 0 // 0 running, 1 cancelled, 2 completed; guarded by this
+  final private class RunningCall {
+    private var state                  = 0 // 0 registered, 1 running, 2 cancelled, 3 completed; guarded by this
+    private var thread: Option[Thread] = None
 
-    /** Marks the call cancelled and interrupts it; `false` when it had already completed. */
+    /** Marks the call cancelled, interrupting it if it runs; `false` when it had already completed. */
     def cancel(): Boolean = synchronized {
+      if (state == 0 || state == 1) {
+        if (state == 1) thread.foreach(_.interrupt())
+        state = 2
+        true
+      } else false
+    }
+
+    /** Marks the call running on this thread; `false` when it was cancelled first, and must not run. */
+    def start(): Boolean = synchronized {
       if (state == 0) {
         state = 1
-        thread.interrupt()
+        thread = Some(Thread.currentThread())
         true
       } else false
     }
 
     /** Marks the call completed; `false` when a cancellation won, whose interrupt has then been delivered. */
     def complete(): Boolean = synchronized {
-      if (state == 0) { state = 2; true }
+      if (state == 1) { state = 3; true }
       else false
     }
   }
@@ -302,50 +313,71 @@ class MCPServer(
   // calls apart, so no `notifications/cancelled` can reach one.
   private val runningCalls = new ConcurrentHashMap[(String, ujson.Value), RunningCall]()
 
+  /** How many calls are registered for cancellation, for a spec. */
+  private[mcp] def registeredCalls: Int = runningCalls.size
+
   /** Called after a call has run and before it is marked completed; a spec forces an interleaving here. */
   private[mcp] def beforeCallCompletes(): Unit = ()
 
-  /**
-   * Runs a `tools/call` so that a `notifications/cancelled` for it on the same channel can interrupt it. `Some` of the
-   * reply, or `None` when the call was cancelled: the specification says no reply is sent for a cancelled request.
-   * A call on no channel (a sessionless Streamable HTTP client) runs without cancellation.
-   */
-  private def cancellable(channel: Option[String], id: ujson.Value, request: JsonRpcRequest)(
-    run: => JsonRpcResponse
-  ): Option[JsonRpcResponse] = {
-    val registered = channel.map { c =>
+  /** Called after an HTTP+SSE request is acknowledged and before it is processed; a spec forces an interleaving here. */
+  private[mcp] def afterAcknowledged(): Unit = ()
+
+  /** A call registered for cancellation, on a channel; `None` for a call on none, which cannot be cancelled. */
+  private type Registration = Option[((String, ujson.Value), RunningCall)]
+
+  private def register(channel: Option[String], id: ujson.Value): Registration =
+    channel.map { c =>
       val key  = c -> id
-      val call = new RunningCall(Thread.currentThread())
+      val call = new RunningCall
       runningCalls.put(key, call)
       key -> call
     }
-    // A handler that lets the interrupt escape is still a cancelled (or failed) call, never a dead pool thread
-    val reply = CancelledError.catchInterrupt(Try(run))
-    beforeCallCompletes()
-    val completed = registered.forall { case (key, call) =>
-      val done = call.complete()
-      runningCalls.remove(key, call): Unit
-      done
-    }
-    if (!completed) {
-      // The cancellation's interrupt was delivered under the call's lock, before `complete` returned: clear it here,
-      // so it never reaches the next request on this pooled thread
-      Thread.interrupted(): Unit
-      logger.info(s"Tool call ${request.id} was cancelled by the client; its reply is not sent")
+
+  private def unregister(registration: Registration): Unit =
+    registration.foreach { case (key, call) => runningCalls.remove(key, call): Unit }
+
+  /** Registers the call, then runs it: see [[runRegistered]]. */
+  private def cancellable(channel: Option[String], id: ujson.Value, request: JsonRpcRequest)(
+    run: => JsonRpcResponse
+  ): Option[JsonRpcResponse] = runRegistered(register(channel, id), request)(run)
+
+  /**
+   * Runs a registered `tools/call` so that a `notifications/cancelled` for it on the same channel can interrupt it.
+   * `Some` of the reply, or `None` when the call was cancelled, before it started or while it ran: the specification
+   * says no reply is sent for a cancelled request.
+   */
+  private def runRegistered(registration: Registration, request: JsonRpcRequest)(
+    run: => JsonRpcResponse
+  ): Option[JsonRpcResponse] =
+    if (!registration.forall(_._2.start())) {
+      unregister(registration)
+      logger.info(s"Tool call ${request.id} was cancelled before it ran")
       None
-    } else
-      reply match {
-        case Right(Success(response)) => Some(response)
-        case Right(Failure(e))        => throw e
-        case Left(_) =>
-          Some(
-            JsonRpcResponse(
-              id = request.id,
-              error = Some(JsonRpcError(MCPErrorCodes.INTERNAL_ERROR, "Tool call interrupted", None))
+    } else {
+      // A handler that lets the interrupt escape is still a cancelled (or failed) call, never a dead pool thread
+      val reply = CancelledError.catchInterrupt(Try(run))
+      beforeCallCompletes()
+      val completed = registration.forall(_._2.complete())
+      unregister(registration)
+      if (!completed) {
+        // The cancellation's interrupt was delivered under the call's lock, before `complete` returned: clear it
+        // here, so it never reaches the next request on this pooled thread
+        Thread.interrupted(): Unit
+        logger.info(s"Tool call ${request.id} was cancelled by the client; its reply is not sent")
+        None
+      } else
+        reply match {
+          case Right(Success(response)) => Some(response)
+          case Right(Failure(e))        => throw e
+          case Left(_) =>
+            Some(
+              JsonRpcResponse(
+                id = request.id,
+                error = Some(JsonRpcError(MCPErrorCodes.INTERNAL_ERROR, "Tool call interrupted", None))
+              )
             )
-          )
-      }
-  }
+        }
+    }
 
   private def cancel(channel: Option[String], notification: JsonRpcNotification): Unit =
     (
@@ -502,7 +534,7 @@ class MCPServer(
   }
 
   // Dispatch a JSON-RPC request for the SSE transport (no HTTP session management); `None` for a cancelled call
-  private def processSSERequest(channel: String, id: ujson.Value, request: JsonRpcRequest): Option[JsonRpcResponse] =
+  private def processSSERequest(registration: Registration, request: JsonRpcRequest): Option[JsonRpcResponse] =
     request.method match {
       case "initialize" =>
         val version = negotiate(request, "2024-11-05")
@@ -510,7 +542,7 @@ class MCPServer(
         Some(JsonRpcResponse(id = request.id, result = Some(initializeResult(version))))
       case "ping"       => Some(JsonRpcResponse(id = request.id, result = Some(ujson.Obj())))
       case "tools/list" => Some(handleToolsList(request))
-      case "tools/call" => cancellable(Some(channel), id, request)(handleToolsCall(request))
+      case "tools/call" => runRegistered(registration, request)(handleToolsCall(request))
       case other =>
         Some(
           JsonRpcResponse(
@@ -668,10 +700,19 @@ class MCPServer(
                     case Incoming.Request(request, id) =>
                       logger.debug(s"SSE request: ${request.method} (id=${request.id})")
                       // POST returns 202 Accepted at once; the reply is delivered via the SSE stream, so a long tool
-                      // call does not hold the POST, and a cancellation can arrive while it runs
-                      sendAccepted(exchange)
-                      processSSERequest(s"sse:$sid", id, request).foreach { reply =>
-                        conn.queue.put(Some(s"event: message\ndata: ${renderReply(id, reply)}\n\n"))
+                      // call does not hold the POST, and a cancellation can arrive while it runs. A tools/call is
+                      // registered before the 202, so a cancel the client sends once it is acknowledged is never lost.
+                      val registration =
+                        if (request.method == "tools/call") register(Some(s"sse:$sid"), id) else None
+                      Try(sendAccepted(exchange)) match {
+                        case Failure(e) =>
+                          unregister(registration)
+                          throw e
+                        case Success(()) =>
+                          afterAcknowledged()
+                          processSSERequest(registration, request).foreach { reply =>
+                            conn.queue.put(Some(s"event: message\ndata: ${renderReply(id, reply)}\n\n"))
+                          }
                       }
                     case Incoming.Notification(notification) =>
                       handleNotification(Some(s"sse:$sid"), notification)
