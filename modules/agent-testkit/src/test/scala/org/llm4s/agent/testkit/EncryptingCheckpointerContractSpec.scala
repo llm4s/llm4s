@@ -29,6 +29,8 @@ object ContractKeys {
  * above a store changes nothing a runtime can observe of it.
  */
 class EncryptingCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract {
+  // the reference store keeps nothing beyond its instance: runtimes share it by sharing the instance
+  override protected def durable: Boolean = false
 
   protected def newCheckpointer(clock: Clock): Checkpointer =
     EncryptingCheckpointer(InMemoryCheckpointer(clock), ContractKeys.keys)

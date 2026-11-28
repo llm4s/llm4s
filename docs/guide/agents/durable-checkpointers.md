@@ -1063,9 +1063,11 @@ A `StoreFileBackend` over the wrapper needs nothing more: its files are items of
 
 ## Writing a store
 
-A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `history`,
-`checkpoint`, `eventsAfter`, `compactEvents`, `prune` and `deleteThread` for the data. `awaitEventsAfter`, which
-subscriptions use to watch the store, has a default that polls `eventsAfter`. The Scaladoc of `Checkpointer` states
+A store implements `Checkpointer`'s 17 abstract methods: `claim`, `renew` and `release` for claims; `commit`,
+`latest`, `effect`, `history`, `checkpoint`, `latestOfRuns`, `eventsAfter`, `compactEvents`, `prune` and
+`deleteThread` for a thread's data; `children`, `threads` and `incompleteThreads` for listing threads; and `sweep` for
+the retention sweep. `awaitEventsAfter`, which subscriptions use to watch the store, has a default that polls
+`eventsAfter`, and `owner` one that reads `latest`. The Scaladoc of `Checkpointer` states
 the contract. In short:
 
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
@@ -1148,7 +1150,8 @@ revealing its run to the thread's tenant through `ThreadBusy`, `RunRecoveredDeta
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
 across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 
-Four hooks fit it to a durable store:
+`newCheckpointer` is the one method a spec must write; the hooks below, each with a default, fit the suite to a
+durable store:
 
 ```scala
 class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
@@ -1178,6 +1181,24 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
   such as a database server's `now()`, overrides it to make claims expire as if that clock had moved - by moving
   every stored expiry back by `by`, for example - and sets `exactExpiry = false`, so that `expiresAt` is checked by
   its effect rather than against the `ManualClock`.
+- **`durable`** (`true` by default) says the store keeps what it holds beyond its instance. A case that restarts the
+  store or opens a second one over its storage then cancels, naming the hook, when `reopen` or `sibling` hands the
+  same instance back, rather than passing without testing anything (#3278). A store that keeps nothing beyond its
+  instance, as `InMemoryCheckpointer`, sets it to `false`.
+- **`contenders`** gives the cases that race many claims at once one store each over the same storage, `store`
+  first: by default `store` and `n - 1` `sibling`s. **`closeExtra`** closes those extra stores (by default an
+  `AutoCloseable` one).
+- **`isolatedCheckpointer`** gives the retention-sweep cases a store over storage no other case shares: they page
+  through every thread the store holds and move the mark new threads number their events from. It defaults to
+  `newCheckpointer`, right when each case gets new storage; a spec whose cases share one database overrides it with
+  a new database or schema.
+- **`refuseDeletes`** makes removing one thread's rows fail until the returned function is called (a SQL store can
+  install a trigger), for the cases that a sweep skips a thread it cannot prune and that a cut-short prune is
+  finished. **`shortenSweepBudget`** makes each sweep call stop after the first thread of its page, for the case that
+  a cut-short sweep resumes where it stopped. Their defaults (`None`, `false`) skip those cases.
+- **`wakeBound`**, for a store told of commits rather than polling, is how soon a waiting `awaitEventsAfter` must
+  return after a commit through a `sibling`. `None`, the default, skips the case.
+- **`contractWait`** (10 seconds) is how long a case waits for a run or a background step before it fails.
 
 ## See also
 

@@ -99,7 +99,7 @@ object Tone {
  * calm.validate("Please find the report attached.") // Right(...): Professional
  * calm.validate("Hey, that is cool.")               // Left(ValidationError): Casual is not allowed
  *
- * agent.run(query, tools, outputGuardrails = Seq(customerFacing))
+ * Agent.builder("assistant", client).withOutputGuardrails(customerFacing).build()
  * }}}
  *
  * @param allowedTones The tones that pass. An empty set rejects everything; `Tone.all` accepts everything.

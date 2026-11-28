@@ -26,7 +26,7 @@ As conversations grow, token counts increase, leading to:
 
 LLM4S provides context window management via `ContextWindowConfig` and `ContextWindowMiddleware`, with multiple pruning strategies to keep conversations within budget while preserving important context. The middleware trims what is sent to the model on each call; the thread keeps its full history.
 
-Two rules hold for every strategy: the current turn (the latest user message onward) is never pruned, so the request always starts with a user message and may exceed the budget; and a tool call is never separated from its result. The agent's system prompt is outside the budget.
+Two rules hold for every strategy: the current turn (the latest user message onward) is never pruned, so the request always starts with a user message and may exceed the budget; and a tool call is never separated from its result: a call is kept only with the tool results straight after it, matched by position as providers match them, so a provider that reuses ids (`call_0` on every turn) cannot keep a call whose result was pruned (#3249). The agent's system prompt is outside the budget.
 
 ## Configuration Basics
 

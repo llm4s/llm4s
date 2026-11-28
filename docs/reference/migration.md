@@ -1012,6 +1012,26 @@ what changed is what passes:
 | A guardrail's error of any kind blocked the turn: an LLM judge's rate limit or timeout ended `AgentStatus.Blocked`, an output one retracting the turn for good, with a durable `GuardrailBlocked` event (#3247) | An error that is not a refusal (not a `ValidationError`, `ContentFilteredError` or `GuardrailBlocked`) is the new `GuardrailUnavailable(guardrail, cause)` when no other guardrail refused: the run fails (`agent.run`'s `Left`, inside the failed node's `GraphError`) and keeps the turn, and `recover` runs the output guardrails again. `CompositeGuardrail.all`/`.any` return such an error unchanged when nothing in them refused. A custom guardrail that refuses with another error type should return a `ValidationError` |
 | `GuardrailReviewMiddleware` on `Allow` let the original text through, dropping the rewrites of the guardrails that passed it: a query refused by a filter and allowed by the reviewer went on with its SSN unmasked (#3248) | `Allow` runs the list once more on the text, failures ignored, and lets it through as the passing guardrails rewrote it. An LLM judge in the list is called once more on `Allow` |
 
+## Handoffs admit the target's query, and delegation and memory stay inside the parent's guards (#3245, #3274, #3275, #3276)
+
+The handoff, delegation and memory types involved are experimental, and `llm4s-memory` is Beta. What changed is what
+passes:
+
+| Before (1.0.0) | After |
+|---|---|
+| On the turn that handed off to a specialist, its input guardrails and `admit` stages never saw the query: they first ran on the next turn (#3245) | They run on that turn's query at the handoff, before the specialist's model is called. A refusal ends the turn `AgentStatus.Blocked` and retracts it with its handoff, as an output block does; a rewrite replaces the stored user message. A specialist's `beforeAgent` hooks still first run on its next turn |
+| A task call the parent had no steps or tokens left to start, under `ChildFailure.Fail`, failed the run with a `ProcessingError`, and `recover` failed the same way (#3274) | It is a tool error under both failure policies, so the parent's turn ends `AgentStatus.StepLimitReached` or `TokenLimitReached` |
+| A subagent could be granted a middleware that must run outside one of the parent's (semantic memory, outside the guardrails) without it, so the child's answers were recorded unguarded (#3276) | `build()` refuses the grant, naming both: grant the other middleware too (the builder's guardrails are `MiddlewareId("agent-guardrails")`), or give the subagent its own guardrails |
+| `LLMMemoryManager` sent the user's text into its entity-extraction prompt raw, and the consolidation prompts only one-lined their memories; an extracted fact was stored again on every mention, with the model's importance weighing 70% (#3275) | Both prompts fence their inputs as an escaped `<untrusted>` block (the task prompt's `success` value is one-lined too). A fact already stored for the same entity (lower-cased, whitespace collapsed) is not stored again, and the model's importance can only lower the computed score. A store already holding duplicates keeps them: delete them with `deleteMatching` if you want them gone |
+
+## `CheckpointerContract` cancels a durable case its hooks cannot test (#3278)
+
+`llm4s-agent-testkit` is Beta. `CheckpointerContract` gains `durable` (`true` by default). A case that restarts the
+store (`reopen`) or opens a second one over its storage (`sibling`) now cancels, naming the hook, when the hook hands
+the same instance back, where it used to pass without testing anything. A spec for a store that persists overrides
+`reopen` and `sibling`, as the guide says; a spec for a store that keeps nothing beyond its instance, like
+`InMemoryCheckpointer`, adds `override protected def durable: Boolean = false` to keep running those cases.
+
 ## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
 
 `AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. No public signature changed, and the

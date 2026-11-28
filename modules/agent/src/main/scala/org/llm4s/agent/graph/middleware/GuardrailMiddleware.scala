@@ -25,7 +25,8 @@ import org.llm4s.types.Result
  *
  * On a root agent it guards the whole agent family: its input guardrails run on every turn's query
  * and its output guardrails on every final answer, whichever agent is active after a handoff. On a
- * handoff target it applies only while that agent is active, inside the root's.
+ * handoff target it applies only while that agent is active, inside the root's, and its input guardrails also run at
+ * the handoff on the query of the turn that hands off to it (#3245), a refusal retracting that turn.
  */
 @Experimental
 final class GuardrailMiddleware(

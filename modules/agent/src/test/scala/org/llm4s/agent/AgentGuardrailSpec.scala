@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest
 }
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck, ProfanityFilter }
+import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck, PIIMasker, ProfanityFilter }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -347,6 +347,121 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "NoSecrets"
     result.messages shouldBe empty
+  }
+
+  "A handoff target's input guardrail" should "check the query of the turn that hands off to it (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("never sent")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(Handoff.to("specialist", Agent.builder("specialist", specialist).withInputGuardrails(rejectNo)))
+    )
+
+    val result = agent.run("no card for you").value
+
+    result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "RejectNo"
+    result.messages shouldBe empty
+    // the handoff was part of the retracted turn: the thread is with the root again
+    result.activeAgent.value shouldBe "triage"
+    specialist.callCount shouldBe 0
+  }
+
+  it should "end the turn TokenLimitReached, not Blocked, when the handoff call used the budget its judge needed (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("never sent")
+    val judge      = answers("0.95")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(
+          Handoff.to(
+            "specialist",
+            Agent
+              .builder("specialist", specialist)
+              .withInputGuardrails(
+                InputGuardrail.from(org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail(judge))
+              )
+          )
+        )
+    )
+
+    val result = agent
+      .run(
+        org.llm4s.agent.graph.ThreadId("budget-at-handoff"),
+        "hello",
+        org.llm4s.agent.graph
+          .RunConfig()
+          .withBudgets(org.llm4s.agent.graph.RunBudgets.default.withMaxTokens(1L))
+      )
+      .value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    judge.callCount shouldBe 0
+    specialist.callCount shouldBe 0
+    result.activeAgent.value shouldBe "triage"
+  }
+
+  private def judgedHandoff(judge: ScriptedLLMClient, specialist: ScriptedLLMClient) = built(
+    Agent
+      .builder("triage", ScriptedLLMClient.of(handoffTo("specialist")))
+      .withHandoffs(
+        Handoff.to(
+          "specialist",
+          Agent
+            .builder("specialist", specialist)
+            .withInputGuardrails(InputGuardrail.from(org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail(judge)))
+        )
+      )
+  )
+
+  it should "count the target judge's call in the run's usage (#3245)" in {
+    val judge      = answers("0.95")
+    val specialist = answers("done")
+    val result     = judgedHandoff(judge, specialist).run("hello").value
+
+    result.answer shouldBe Some("done")
+    judge.callCount shouldBe 1
+    // the handoff call, the judge's and the specialist's, 30 tokens each
+    result.usage.requestCount shouldBe 3L
+    (result.usage.inputTokens + result.usage.outputTokens) shouldBe 90L
+  }
+
+  it should "end the turn TokenLimitReached before the target's model when its judge used the budget (#3245)" in {
+    val judge      = answers("0.95")
+    val specialist = answers("never sent")
+    val result = judgedHandoff(judge, specialist)
+      .run(
+        org.llm4s.agent.graph.ThreadId("judge-uses-budget"),
+        "hello",
+        org.llm4s.agent.graph
+          .RunConfig()
+          .withBudgets(org.llm4s.agent.graph.RunBudgets.default.withMaxTokens(60L))
+      )
+      .value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    judge.callCount shouldBe 1
+    specialist.callCount shouldBe 0
+    (result.usage.inputTokens + result.usage.outputTokens) shouldBe 60L
+  }
+
+  it should "give the target's model the query as its admission rewrote it (#3245)" in {
+    val root       = ScriptedLLMClient.of(handoffTo("specialist"))
+    val specialist = answers("done")
+    val agent = built(
+      Agent
+        .builder("triage", root)
+        .withHandoffs(
+          Handoff.to("specialist", Agent.builder("specialist", specialist).withInputGuardrails(new PIIMasker()))
+        )
+    )
+
+    val result = agent.run("my ssn is 123-45-6789").value
+
+    result.answer shouldBe Some("done")
+    specialist.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("my ssn is [REDACTED_SSN]")
+    result.messages.collect { case u: UserMessage => u.content } shouldBe Seq("my ssn is [REDACTED_SSN]")
   }
 
   "Boundary middleware across a handoff" should "run the root's then the target's beforeAgent, and the target's then the root's afterAgent" in {

@@ -53,8 +53,9 @@ file backends.
 
 [Durable Checkpointers](durable-checkpointers#writing-a-store) says what a `Checkpointer` must do, and
 [Testing it with the contract suite](durable-checkpointers#testing-it-with-the-contract-suite) covers
-`CheckpointerContract` in full: the cases it runs and the hooks (`reopen`, `sibling`, `boundedStore`,
-`advanceStoreClock`) that fit it to a durable store. In short:
+`CheckpointerContract` in full: the cases it runs and the hooks (`reopen`, `sibling`, `durable`, `contenders`,
+`closeExtra`, `isolatedCheckpointer`, `refuseDeletes`, `shortenSweepBudget`, `boundedStore`, `advanceStoreClock`,
+`exactExpiry`, `wakeBound`) that fit it to a durable store. In short:
 
 ```scala
 import org.llm4s.agent.graph.Checkpointer
@@ -67,7 +68,10 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ```
 
 Each case gets a new store from `newCheckpointer` and uses thread ids of its own, so the storage need not be empty
-of other threads.
+of other threads - except for the retention-sweep cases, which page through every thread the store holds: they get
+their store from `isolatedCheckpointer`, which a spec whose cases share one database overrides with storage of its
+own. A durable store overrides `reopen` and `sibling`; with their defaults, which hand the same instance back, the
+cases that restart the store or open a second one cancel unless the spec sets `durable = false`.
 
 ### Its run queue
 

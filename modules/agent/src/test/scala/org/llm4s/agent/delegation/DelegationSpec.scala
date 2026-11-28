@@ -957,13 +957,12 @@ class DelegationSpec
     agent.children(ThreadId("t1")).value should have size 1
   }
 
-  "a task refused before any child existed" should "be a tool error under Report and Fatal under Fail, naming no child" in {
+  "a task refused before any child existed" should "be a tool error under Report and under Fail, naming no child (#3274)" in {
     val notStarted: TaskOutcome[Findings] = TaskOutcome.NotStarted(researcher.id, TaskRefusal.TokenLimitReached)
-    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Report, 1024, notStarted, None) shouldBe
-      ToolOutcome.Error("subagent 'researcher' was not started: reached its token budget without an answer")
-    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Fail, 1024, notStarted, None) match
-      case ToolOutcome.Fatal(error) => error.message should include("was not started")
-      case other                    => fail(s"expected Fatal, got $other")
+    Seq(ChildFailure.Report, ChildFailure.Fail).foreach { policy =>
+      DelegationMiddleware.toolOutcome("researcher", policy, 1024, notStarted, None) shouldBe
+        ToolOutcome.Error("subagent 'researcher' was not started: reached its token budget without an answer")
+    }
   }
 
   "every task tool message" should "fit maxReportBytes, an oversized provider message cut" in {

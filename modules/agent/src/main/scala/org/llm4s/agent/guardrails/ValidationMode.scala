@@ -36,12 +36,9 @@ object ValidationMode {
   case object Any extends ValidationMode
 
   /**
-   * Returns on first result (success or failure).
-   *
-   * Useful for expensive guardrails where order matters and you want
-   * to avoid running all checks.
-   *
-   * Example: Check cheap validation first, then expensive API call only if needed
+   * Runs only the first guardrail and returns its result, success or failure; the others never run (#3278). An
+   * empty composite passes the value unchanged. For "cheap check first, then the expensive one only if it passed",
+   * use `CompositeGuardrail.sequential` (or `andThen`).
    */
   case object First extends ValidationMode
 }

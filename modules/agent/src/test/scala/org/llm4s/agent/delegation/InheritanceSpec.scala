@@ -215,6 +215,30 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     built(MiddlewareId("delegation")).left.value.message should include("cannot be granted")
   }
 
+  it should "be refused for a middleware that must run outside a parent's middleware not granted with it (#3276)" in {
+    // a recorder that, like semantic memory, must run outside the guardrails so a blocked answer is never recorded
+    final class Recorder extends AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("recorder")
+      override def placement(other: AgentMiddleware): Option[org.llm4s.agent.graph.middleware.Placement] =
+        other match {
+          case _: org.llm4s.agent.graph.middleware.GuardrailMiddleware =>
+            Some(org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary("records answers"))
+          case _ => None
+        }
+    }
+    val client = RoutingClient(PartialFunction.empty)
+    def built(ids: MiddlewareId*) =
+      lead(client)
+        .withMiddleware(new Recorder)
+        .withOutputGuardrails(org.llm4s.agent.guardrails.builtin.LengthCheck(1, 100))
+        .withSubagents(researcher.withInheritance(Inheritance().withMiddleware(ids*)))
+        .build()
+    val refused = built(MiddlewareId("recorder")).left.value.message
+    refused should include("'recorder' is granted without 'agent-guardrails'")
+    refused should include("records answers")
+    built(MiddlewareId("recorder"), MiddlewareId.AgentGuardrails).isRight shouldBe true
+  }
+
   "an ancestor's permission rules" should "deny a call the child's own rules allow (rule 15)" in {
     val ran = new AtomicInteger(0)
     val tool = AgentTool(SpecText.spec("child_tool")) { (_, _) =>
@@ -374,6 +398,16 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     message should include("step limit")
     (message should not).include("child thread")
     client.sentTo("CHILD:researcher") shouldBe empty
+    agent.children(ThreadId("t1")).value shouldBe empty
+  }
+
+  it should "end the parent at its step limit under ChildFailure.Fail too, not fail the run (#3274)" in {
+    val client = RoutingClient(delegatingOnce.orElse(answering))
+    val agent  = lead(client).withMaxSteps(1).withSubagents(researcher.withFailure(ChildFailure.Fail)).build().value
+    val result = agent.run(ThreadId("t1"), "go").value
+
+    result.status shouldBe AgentStatus.StepLimitReached
+    toolResults(result.messages).loneElement should include("subagent 'researcher' was not started")
     agent.children(ThreadId("t1")).value shouldBe empty
   }
 

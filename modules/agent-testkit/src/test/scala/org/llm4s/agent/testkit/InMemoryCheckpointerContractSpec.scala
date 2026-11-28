@@ -8,6 +8,9 @@ import scala.concurrent.duration.*
 
 /** The reference store passes the contract every store must pass; it is the first to. */
 class InMemoryCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract {
+  // the reference store keeps nothing beyond its instance: runtimes share it by sharing the instance
+  override protected def durable: Boolean = false
+
   protected def newCheckpointer(clock: Clock): Checkpointer = InMemoryCheckpointer(clock)
 
   /**
@@ -27,6 +30,9 @@ class InMemoryCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
  * its own clock moved by the hook rather than by the suite.
  */
 class OwnClockContractSpec extends AnyFlatSpec with CheckpointerContract {
+  // the reference store keeps nothing beyond its instance: runtimes share it by sharing the instance
+  override protected def durable: Boolean = false
+
   import OwnClockContractSpec.clocks
 
   protected def newCheckpointer(clock: Clock): Checkpointer = {

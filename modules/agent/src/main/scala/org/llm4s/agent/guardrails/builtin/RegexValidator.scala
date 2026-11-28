@@ -60,7 +60,7 @@ import scala.util.matching.Regex
  * orderId.validate("ORD-123456\n") // Right: `$` also accepts one trailing line break
  * orderId.validate("ORD-12")       // Left(ValidationError): "Order ids look like ORD-123456"
  *
- * agent.run(query, tools, inputGuardrails = Seq(RegexValidator.email))
+ * Agent.builder("assistant", client).withInputGuardrails(RegexValidator.email).build()
  * }}}
  *
  * @param compiledPattern    the pattern to search for, already compiled; used as given, without the safety

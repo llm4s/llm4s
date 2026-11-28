@@ -23,7 +23,8 @@ import scala.concurrent.duration.FiniteDuration
  * the run was admitted: before each model call - the loop's own and every one a middleware makes
  * through `next` or `ModelContext.accounted` - the run's tokens so far are compared with it, and at
  * or above it the turn ends `TokenLimitReached` without calling the model. A model call in flight is
- * never interrupted, so a run can overshoot the budget by one call. A completion without usage is
+ * never interrupted, so a run can overshoot the budget by the calls in flight when it is crossed: one, or one per
+ * task running in the same superstep (parallel subagents, a middleware's calls beside the model's). A completion without usage is
  * charged an estimate of its whole request and answer. A retrying client (`ReliableClient`) is one
  * call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in
  * mind. `None`, the default, sets no token budget. A plain graph's nodes never read it.

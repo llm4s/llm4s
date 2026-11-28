@@ -52,7 +52,7 @@ import org.llm4s.types.Result
  * strict.validate("well, heck")  // Left(ValidationError): the token "heck" is in the list
  * strict.validate("well, heck!") // Right("well, heck!"): "heck!" is a different token
  *
- * agent.run(query, tools, inputGuardrails = Seq(strict), outputGuardrails = Seq(strict))
+ * Agent.builder("assistant", client).withInputGuardrails(strict).withOutputGuardrails(strict).build()
  * }}}
  *
  * @param customBadWords Words to reject in addition to the built-in list; empty by default. Single words only
