@@ -11,6 +11,9 @@
 #   integration  `Integration Tests`: modules/it, deploy/, config/, or a module the @Docker suites reach (INTEGRATION)
 #   workspace    the @Workspace tier (scripts/workspace-tier-changes.sh, which has its own, narrower rules); always
 #                false in a merge group, where the queued pull request has already run it
+#   mcp          `MCP Reference Server Integration` (#3308): the MCP client's main sources, the agent's tool-schema checks
+#                it feeds, the suite or the pinned server (MCP_REFERENCE, paths: every core change reaches mcp by the
+#                graph); like workspace, never from a full selection and always false in a merge group
 #   windows      `Test (Windows)`: the change touches a module that runs whole on Windows (PlatformTests.wholeModules),
 #                a source scripts/platform-sensitive-sources.txt lists, or a suite PlatformTests.suites names, and those
 #                files reach the tests of a project the lists hold; windows_modules names those projects
@@ -68,7 +71,8 @@
 #        scripts/ci-changes.sh --all WHY    every module (push to main, nightly, manual, release): prints only
 #                                           modules, legs and full, so the decisions stay empty, which every job reads
 #                                           as "run"
-# Environment: CI_FULL=<why> selects everything (the PR's `ci:full` label); CI_EVENT=merge_group sets workspace=false.
+# Environment: CI_FULL=<why> selects everything (the PR's `ci:full` label); CI_EVENT=merge_group sets workspace=false
+# and mcp=false.
 # Needs git and ruby.
 set -euo pipefail
 
@@ -181,6 +185,14 @@ INTEGRATION=(
 # shellcheck disable=SC2034 # read by scripts/test-ci-changes.sh
 INTEGRATION_UNREACHED='mcp image speech ollama gemini anthropic azureIdentity voyage bedrock jina jev cohere watsonx
   perplexity jlama workspaceClient observabilityPrometheus traceOpentelemetry schemaDerivation'
+# What MCPReferenceServerSpec exercises (#3308): the job pulls node from Docker Hub and the server from npm, so it runs
+# on the pull requests that change these, not on every one an MCP or core change reaches.
+MCP_REFERENCE=(
+  '^modules/mcp/src/main/'
+  '^modules/agent/src/main/scala/org/llm4s/agent/graph/tool/'
+  '^modules/it/mcp-reference-server/'
+  '^modules/it/src/test/scala/org/llm4s/mcp/MCPReference'
+)
 # The consumers job builds the Java, Maven, Gradle, Quarkus, Micronaut and Helidon consumers of llm4s-java-api, the BOM,
 # the doctor and the REPL against the published library: a change it can see is one an affected project of
 # CONSUMER_ROOTS reaches (their dependencies, by the graph), or one of the files outside the sbt build it reads.
@@ -556,6 +568,16 @@ if [ "${CI_EVENT:-}" = merge_group ]; then
   say workspace false "a merge group: the queued pull request has already run the tier"
 else
   "$HERE/workspace-tier-changes.sh" "$BASE" "$HEAD" | sed 's/^changed=/workspace=/'
+fi
+if [ "${CI_EVENT:-}" = merge_group ]; then
+  say mcp false "a merge group: the queued pull request has already run the tier"
+else
+  mcp_files="$(any "${MCP_REFERENCE[@]}")"
+  if [ -n "$mcp_files" ]; then
+    say mcp true "the change touches $(printf '%s\n' "$mcp_files" | head -1) ($(count "$mcp_files") file(s))"
+  else
+    say mcp false "nothing it covers changed"
+  fi
 fi
 # windows, consumers, spring, performance and other, by the project graph; then modules, legs and full. The build
 # files handled above are not traced as files (build.sbt is in no project): their nodes are EXTRA_NODES.
