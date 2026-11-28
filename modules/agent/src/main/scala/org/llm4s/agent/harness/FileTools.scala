@@ -327,7 +327,8 @@ object FileTools:
         EditFile,
         "Replace exact text in a file. `old_string` must occur exactly once, unless `replace_all` is true, which " +
           "replaces every occurrence. Edits of one file in one message apply in order, each to the result of the " +
-          "one before. " + SnapshotNote,
+          "one before. In a file whose lines end in CRLF, write line breaks as `\\n`: they match and are written as the " +
+          "file's. " + SnapshotNote,
         Schema
           .`object`[EditArgs]("edit_file arguments")
           .withRequiredField("path", Schema.string("The absolute path of the file"))

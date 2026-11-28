@@ -106,6 +106,29 @@ trait FileBackendContract extends AnyFlatSpecLike with Matchers with EitherValue
     results(4) shouldBe "z y z"
   }
 
+  it should "match a multi-line edit in a CRLF file as read_file shows it, and keep the file's line endings" in {
+    // read shows lines without their `\r`; `editall \r \r` counts the carriage returns the file holds (#3266)
+    val results = one(
+      newBackend(),
+      "write|/crlf.txt|a\r\nb\r\nc\r\n",
+      "edit|/crlf.txt|a\nb|A\nB",
+      "read|/crlf.txt",
+      "editall|/crlf.txt|\r|\r",
+      "edit|/crlf.txt|c|c\nd",
+      "editall|/crlf.txt|\r|\r",
+      "write|/lf.txt|a\nb\n",
+      "edit|/lf.txt|a\nb|A\nB",
+      "editall|/lf.txt|\r|\r"
+    )
+    results(1) should include("replacements=1")
+    results(2) shouldBe "A\nB\nc"
+    results(3) should include("replacements=3")
+    results(4) should include("replacements=1")
+    results(5) should include("replacements=4")
+    results(7) should include("replacements=1")
+    results(8) should (startWith("error:").and(include("not found")))
+  }
+
   it should "delete a file, and refuse a missing one or a read of it after" in {
     val results = one(newBackend(), "write|/d/a.txt|x", "delete|/d/a.txt", "delete|/d/a.txt", "read|/d/a.txt")
     results(1) should include("wasDirectory=false")
