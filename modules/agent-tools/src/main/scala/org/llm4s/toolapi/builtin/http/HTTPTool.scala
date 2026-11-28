@@ -122,7 +122,8 @@ object HTTPTool {
         config.allowedDomains
           .map(d => s"Allowed domains: ${d.mkString(", ")}")
           .getOrElse("All domains allowed (except blocked).") +
-        s" Timeout: ${config.timeout.toMillis}ms.",
+        s" Timeout: ${config.timeout.toMillis}ms." +
+        s" A body over $maxResultChars characters is cut there, and the result's truncated is true.",
       schema = createSchema
     ).withHandler { extractor =>
       for {

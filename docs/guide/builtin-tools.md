@@ -124,7 +124,7 @@ a call without it comes back as a `Left` naming it. The others have defaults.
 | `generate_uuid` | core | `count` (1 to 10, default 1), `format` (`standard` or `compact`) | `uuids`: each with `uuid`, `version`, `variant` |
 | `json_tool` | core | **`operation`** (`parse`, `format`, `query`, `validate`), **`json`**, `path` (for `query`) | `success`, `result`, `formatted` |
 | `http_request` | http | **`url`**, `method`, `headers`, `body`, `content_type` | `statusCode`, `headers`, `body`, `contentType`, `truncated`, and more |
-| `read_file` | files | **`path`**, `max_lines`, `encoding` | `path`, `content`, `size`, `lines`, `truncated` |
+| `read_file` | files | **`path`**, `max_lines`, `offset`, `encoding` | `path`, `content`, `size`, `lines`, `truncated`, `nextOffset` |
 | `list_directory` | files | **`path`**, `max_entries` (at most 100), `include_hidden` | `entries`, `totalFiles`, `totalDirectories`, `truncated` |
 | `file_info` | files | **`path`** | `exists`, `size`, `sizeHuman`, timestamps, permissions, `isSymlink`, `extension` |
 | `write_file` | development | **`path`**, **`content`**, `append`, `encoding` | `path`, `bytesWritten`, `created`, `appended` |
@@ -194,7 +194,10 @@ not pass one.
 
 A result goes whole into the next model request, so each tool bounds what it hands the model:
 `BuiltinTools.DefaultMaxResultChars` (40,000 characters, as one result of the harness file tools) of a read file
-or an HTTP body, cut and marked `truncated`, and half as much of a command's stdout and of its stderr each.
+or an HTTP body, cut and marked `truncated`, and half as much of a command's stdout and of its stderr each. A cut
+`read_file` result is a page: its `nextOffset` is the `offset` (a character offset into the text, the file's lines
+joined with `\n`) to read the next one with, so successive calls read the whole file with no gap or overlap. A cut
+HTTP body is not paged: `truncated` says it was cut.
 `ReadFileTool.createSafe(config, maxResultChars)` and `HTTPTool.createSafe(config, maxResultChars)` change it.
 
 Build the agent's registry with `BuiltinTools.registry(tools)` rather than `ToolRegistry.of(tools)`, and each

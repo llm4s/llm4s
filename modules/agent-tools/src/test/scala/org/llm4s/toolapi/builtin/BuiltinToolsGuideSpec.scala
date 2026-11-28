@@ -118,7 +118,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       "generate_uuid"        -> Set("count", "format"),
       "json_tool"            -> Set("operation", "json", "path"),
       "http_request"         -> Set("url", "method", "headers", "body", "content_type"),
-      "read_file"            -> Set("path", "max_lines", "encoding"),
+      "read_file"            -> Set("path", "max_lines", "offset", "encoding"),
       "list_directory"       -> Set("path", "max_entries", "include_hidden"),
       "file_info"            -> Set("path"),
       "write_file"           -> Set("path", "content", "append", "encoding"),

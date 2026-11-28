@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelMetadata
 import org.llm4s.rag.RAGConfig
 import org.llm4s.security.Secret
-import org.llm4s.toolapi.builtin.filesystem.{ FileConfig, WriteConfig }
+import org.llm4s.toolapi.builtin.filesystem.{ FileConfig, ReadFileResult, WriteConfig }
 import org.llm4s.types.ProviderModelTypes.ModelName
 
 // OpenAIConfig gained `api`, `reasoningSummary` and `keepReasoning`, ModelMetadata `supportedEndpoints`: a positional
@@ -48,6 +48,11 @@ object PositionalPatternsGainFieldsTest {
 
   def writableOf(config: WriteConfig): Seq[String] = config match {
     case WriteConfig(paths, _, _, _) => paths
+  }
+
+  // ReadFileResult gained `nextOffset` (#3273)
+  def contentOf(result: ReadFileResult): String = result match {
+    case ReadFileResult(_, content, _, _, _) => content
   }
 
   // Not positional patterns: left as they are.

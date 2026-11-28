@@ -49,7 +49,7 @@ class BuiltinHintsAndCapsSpec extends AnyFlatSpec with Matchers {
     hintsOf(ok(BuiltinTools.registry(Seq(mine))), "read_file") shouldBe None
   }
 
-  "read_file" should "hand the model at most maxResultChars characters, marked truncated" in {
+  "read_file" should "hand the model at most maxResultChars characters, and say where the next page starts" in {
     val dir  = Files.createTempDirectory("cap")
     val file = Files.writeString(dir.resolve("big.txt"), ("x" * 99 + "\n") * 1000)
     val tool = ok(ReadFileTool.createSafe(FileConfig(blockedPaths = Seq.empty), maxResultChars = 5000))
@@ -57,10 +57,49 @@ class BuiltinHintsAndCapsSpec extends AnyFlatSpec with Matchers {
       tool.handler(SafeParameterExtractor(ujson.Obj("path" -> file.toString))).fold(e => fail(e.message), identity)
     read.content.length shouldBe 5000
     read.truncated shouldBe true
+    read.nextOffset shouldBe Some(5000)
     read.size shouldBe 100000L
     val default = ok(ReadFileTool.createSafe(FileConfig(blockedPaths = Seq.empty)))
     default.handler(SafeParameterExtractor(ujson.Obj("path" -> file.toString))).map(_.content.length) shouldBe
       Right(BuiltinTools.DefaultMaxResultChars)
+  }
+
+  it should "read a whole 100k-character file across pages, with no gap or overlap, multi-byte text and CRLF included" in {
+    val dir = Files.createTempDirectory("pages")
+    // CRLF line ends, and a surrogate pair and an accented letter on every line, so cuts fall inside them
+    val line   = "ab\ud83d\ude00c\u00e9" + "z" * 93
+    val file   = Files.writeString(dir.resolve("crlf.txt"), (line + "\r\n") * 1000)
+    val config = FileConfig(blockedPaths = Seq.empty, maxFileSize = 10L * 1024 * 1024)
+    def call(tool: ToolFunction[ReadFileResult], offset: Option[Int]) =
+      tool
+        .handler(
+          SafeParameterExtractor(
+            ujson.Obj.from(Seq("path" -> ujson.Str(file.toString)) ++ offset.map(o => "offset" -> ujson.Num(o)))
+          )
+        )
+        .fold(e => fail(e.message), identity)
+    val whole = call(ok(ReadFileTool.createSafe(config, maxResultChars = Int.MaxValue)), None).content
+    whole.length should be > 99000
+    Seq(7001, 4096, 2).foreach { cap =>
+      val tool = ok(ReadFileTool.createSafe(config, maxResultChars = cap))
+      val pages = Iterator
+        .iterate(Option(call(tool, None)))(_.flatMap(p => p.nextOffset.map(o => call(tool, Some(o)))))
+        .takeWhile(_.isDefined)
+        .flatten
+        .toVector
+      withClue(s"cap $cap") {
+        pages.map(_.content).mkString shouldBe whole
+        pages.foreach(p => p.content.length should be <= cap)
+        pages.foreach(p => Character.isLowSurrogate(p.content.head) shouldBe false)
+        pages.init.foreach(_.truncated shouldBe true)
+        pages.last.nextOffset shouldBe None
+      }
+    }
+    val tool = ok(ReadFileTool.createSafe(config, maxResultChars = 100))
+    tool
+      .handler(SafeParameterExtractor(ujson.Obj("path" -> file.toString, "offset" -> whole.length)))
+      .isLeft shouldBe true
+    tool.handler(SafeParameterExtractor(ujson.Obj("path" -> file.toString, "offset" -> -1))).isLeft shouldBe true
   }
 
   "http_request" should "cut a body over maxResultChars, never inside a surrogate pair" in {
