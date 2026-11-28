@@ -302,7 +302,7 @@ object ShellTool {
         WindowsBestFit
           .refusal(arg, WindowsBestFit.isOptionLike(arg), ansiCodePage)
           .orElse(WindowsBestFit.quotedTrailByteRefusal(arg, ansiCodePage))
-          .orElse(WindowsBestFit.doubleQuoteRefusal(arg))
+          .orElse(doubleQuoteRefusal(arg))
           .map(why => s"Argument '$arg' is not allowed on Windows: it holds $why")
       )
       .nextOption()
@@ -322,6 +322,20 @@ object ShellTool {
           }
           .nextOption()
       )
+
+  /**
+   * Why `arg` may not be passed on Windows because it holds a double quote, or `None` (#3271). The JDK hands a child
+   * one command-line string, and in its default legacy mode wraps an argument that needs quoting in quotes without
+   * escaping the ones inside: `x" /O "C:\out.txt` reaches `sort.exe` as `"x" /O "C:\out.txt"`, which the child's
+   * parser (`CommandLineToArgvW` or the C runtime's) splits into three arguments, one of them `/O`. Every check here
+   * saw one operand, so an argument that holds `"` is refused, whatever the program and with or without a path
+   * policy (a path policy refuses it anyway: `"` is not valid in a Windows path).
+   */
+  private def doubleQuoteRefusal(arg: String): Option[String] =
+    Option.when(arg.indexOf('"') >= 0)(
+      "a double quote ('\"'), which the program may read as ending the argument, so the one argument the checks " +
+        "saw could reach it as several"
+    )
 
   /**
    * Every argument that looks like a flag, `--` or not before it. A `--` does not reliably end the options: when it
