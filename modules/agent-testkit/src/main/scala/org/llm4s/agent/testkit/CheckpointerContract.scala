@@ -623,8 +623,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   it should "number events contiguously and uniquely when one claim commits from many threads at once" in {
     val s     = Store()
     val token = s.claim("run").value.token
+    // 8 writers racing is the contention; 10 commits each keeps the case within its wait on storage whose every
+    // durable commit is slow (#3311: ~60 ms each on a Windows runner, so 200 commits outlasted the wait)
     val writers = 8
-    val each    = 25
+    val each    = 10
     s.commit(token, Some(s.checkpoint("c1", None))).value
     val barrier = new CyclicBarrier(writers)
     val results = new LinkedBlockingQueue[Result[Vector[EventRecord]]]()
@@ -634,7 +636,12 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         (1 to each).foreach(i => results.put(s.commit(token, events = Vector(s.event(s"w$w-$i"), s.event(s"w$w-$i'")))))
       }
     }
-    threads.foreach(_.join(contractWait.toMillis))
+    // every writer finished: a join that timed out returns quietly, and the results would be read mid-race (#3311)
+    val deadline = System.nanoTime() + contractWait.toNanos
+    threads.foreach(t => t.join(math.max(1L, (deadline - System.nanoTime()) / 1000000L)))
+    withClue(s"writers still committing after $contractWait: ") {
+      threads.count(_.isAlive) shouldBe 0
+    }
     val committed = Iterator.continually(results.poll()).takeWhile(_ != null).toVector
     committed should have size (writers * each).toLong
     val seqs = committed.flatMap(_.value.map(_.seq))
