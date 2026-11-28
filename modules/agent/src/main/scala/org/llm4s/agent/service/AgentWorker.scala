@@ -833,10 +833,10 @@ object AgentWorker:
   private val MaxTakeRounds: Int = 16
 
   /** The reserved thread id whose claim keeps two instances from sweeping one store at once. */
-  val SweepLock: ThreadId = ThreadId("llm4s-worker-retention-sweep")
+  val SweepLock: ThreadId = ThreadId("llm4s-worker-retention-sweep") // in ThreadId.Reserved: no run takes it (#3239)
 
   /** The reserved thread id [[AgentWorker.health]] reads the store at: it has no checkpoints. */
-  val HealthProbe: ThreadId = ThreadId("llm4s-worker-health")
+  val HealthProbe: ThreadId = ThreadId("llm4s-worker-health") // in ThreadId.Reserved
 
   /** The synthetic result a tool call left unanswered gets when an exhausted entry's thread is settled. */
   val ExhaustedResult: String = "cancelled: the run's attempts ran out before this tool call returned a result"
