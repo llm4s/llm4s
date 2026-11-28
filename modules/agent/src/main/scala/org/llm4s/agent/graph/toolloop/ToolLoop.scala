@@ -429,7 +429,7 @@ object ModelStep:
  *    the thread's usage since the run was admitted, plus the task's own - and at the run's
  *    `RunBudgets.maxTokens` ends the turn with [[TurnOutcome.TokenLimitReached]], also without
  *    calling the model; the call in flight when the budget is crossed is never interrupted, so a run
- *    can overshoot it by one call. Otherwise it sends the agent's system prompt, then the history;
+ *    can overshoot it by one call per task running at once. Otherwise it sends the agent's system prompt, then the history;
  *    the prompt is never stored.
  *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
  *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every

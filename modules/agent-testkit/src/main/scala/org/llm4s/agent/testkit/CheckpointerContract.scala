@@ -130,6 +130,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   protected def reopen(store: Checkpointer, @unused clock: ManualClock): Checkpointer = store
 
   /**
+   * Whether the store keeps what it holds beyond its instance, so a [[reopen]] or [[sibling]] must give back another
+   * instance over the same storage. `true`, the default: a case that restarts the store or opens a second one over its
+   * storage cancels, naming the hook, when the hook hands the same instance back - it would otherwise pass without
+   * testing anything a durable store must do (#3278). A store that keeps nothing beyond its instance, such as
+   * `InMemoryCheckpointer`, sets it to `false`, and those cases then run on the one instance.
+   */
+  protected def durable: Boolean = true
+
+  /**
    * Another store over the same storage as `store`, as another runtime or process would open it,
    * judging claims by the same `clock`; `store` stays open. The default hands `store` back, which is
    * right for a store that keeps nothing beyond its instance, such as `InMemoryCheckpointer`: runtimes
@@ -243,11 +252,24 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
     /** Closes the store and opens its storage again; see [[CheckpointerContract.reopen]]. */
     def reopened(): Checkpointer =
-      current = reopen(current, clock)
+      val next = reopen(current, clock)
+      sameInstance(next, "reopen")
+      current = next
       current
 
     /** Another store over the same storage; see [[CheckpointerContract.sibling]]. */
-    def other(): Checkpointer = sibling(current, clock)
+    def other(): Checkpointer =
+      val next = sibling(current, clock)
+      sameInstance(next, "sibling")
+      next
+
+    // a durable store whose hook hands the instance back would pass the case vacuously (#3278)
+    private def sameInstance(next: Checkpointer, hook: String): Unit =
+      if durable && (next eq current) then
+        cancel(
+          s"$hook returned the same instance: override $hook to open the store's storage again, " +
+            "or set durable = false for a store that keeps nothing beyond its instance"
+        )
 
     /** `n` stores over the same storage, this one first; see [[CheckpointerContract.contenders]]. */
     def contending(n: Int): Vector[Checkpointer] = contenders(current, clock, n)

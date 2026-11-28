@@ -81,8 +81,8 @@ enum AgentStatus:
 
   /**
    * The run used its token budget (`RunBudgets.maxTokens`) without a final answer: at the budget the turn
-   * ended before the next model call. The call in flight when the budget was crossed was not interrupted,
-   * so `usage` can exceed the budget by one call. Like `StepLimitReached`, a completed turn: the next
+   * ended before the next model call. The calls in flight when the budget was crossed were not interrupted,
+   * so `usage` can exceed the budget by one call, or by one per task running at once (parallel subagents). Like `StepLimitReached`, a completed turn: the next
    * turn, with its own budget, runs normally.
    */
   case TokenLimitReached

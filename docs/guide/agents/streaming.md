@@ -64,7 +64,10 @@ Every event is an `EventType` in `org.llm4s.agent.events.AgentEvents`, named `ag
 version 1.
 
 **Durable** events are committed with the task that emits them, so they are stored, replayed, and
-never duplicated by a retry or a `recover`. They carry no message content.
+never duplicated by a retry or a `recover`. They carry no message content, with one exception (#3278): `TaskFailed`
+and `RunFailed` record the failing error's `message` as it is. llm4s's own errors keep content out of their message
+(a guardrail block names only the guardrail), but a provider's or a tool's error message is stored as that provider or
+tool wrote it, and may quote text; seal events with `EncryptingCheckpointer` where that matters.
 
 | Event | Fields | Sent |
 |---|---|---|
@@ -96,7 +99,7 @@ agent
 
 `finishReason` is the call's `Completion.finishReason` ([RFC 0009](../../rfcs/0009-model-call-contract)): why the
 model's turn ended, `Stop`, `ToolCalls`, `Length` or `Other(raw)`. `Length` means the reply was cut at an output limit;
-the run still ends `Completed` with that answer, so check the event when a cut answer matters. It is `None` for usage
+a final answer cut that way ends the run `AgentStatus.Truncated(partialAnswer)`, not `Completed`. It is `None` for usage
 a hook records without a call (`ModelContext.recordUsage`) and in an event stored before the field existed. Tracing
 reports it on the call's span as `gen_ai.response.finish_reasons`.
 

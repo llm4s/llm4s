@@ -1012,6 +1012,14 @@ passes:
 | A subagent could be granted a middleware that must run outside one of the parent's (semantic memory, outside the guardrails) without it, so the child's answers were recorded unguarded (#3276) | `build()` refuses the grant, naming both: grant the other middleware too (the builder's guardrails are `MiddlewareId("agent-guardrails")`), or give the subagent its own guardrails |
 | `LLMMemoryManager` sent the user's text into its entity-extraction prompt raw, and the consolidation prompts only one-lined their memories; an extracted fact was stored again on every mention, with the model's importance weighing 70% (#3275) | Both prompts fence their inputs as an escaped `<untrusted>` block (the task prompt's `success` value is one-lined too). A fact already stored for the same entity (lower-cased, whitespace collapsed) is not stored again, and the model's importance can only lower the computed score. A store already holding duplicates keeps them: delete them with `deleteMatching` if you want them gone |
 
+## `CheckpointerContract` cancels a durable case its hooks cannot test (#3278)
+
+`llm4s-agent-testkit` is Beta. `CheckpointerContract` gains `durable` (`true` by default). A case that restarts the
+store (`reopen`) or opens a second one over its storage (`sibling`) now cancels, naming the hook, when the hook hands
+the same instance back, where it used to pass without testing anything. A spec for a store that persists overrides
+`reopen` and `sibling`, as the guide says; a spec for a store that keeps nothing beyond its instance, like
+`InMemoryCheckpointer`, adds `override protected def durable: Boolean = false` to keep running those cases.
+
 ## The worker's thread ids are reserved, a dead slot is given back, and a drain costs no attempt (#3239, #3240, #3241)
 
 `AgentWorker`, `RunQueue`, `RunSubmitter` and `GraphRuntime` are experimental. No public signature changed, and the
