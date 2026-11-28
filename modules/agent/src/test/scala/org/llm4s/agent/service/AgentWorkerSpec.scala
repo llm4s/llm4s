@@ -787,4 +787,68 @@ class AgentWorkerSpec
     store.release(AgentWorker.SweepLock, other.token).value
     worker.sweepOnce().value.skipped shouldBe false
   }
+
+  // ---- reserved thread ids (#3239) ----
+
+  "The worker's reserved thread ids" should "be refused as a run's thread and as a queued submission's (#3239)" in {
+    val store = InMemoryCheckpointer()
+    val agent = agentOver(store, answering("x"))
+    Seq(AgentWorker.SweepLock, AgentWorker.HealthProbe).foreach { reserved =>
+      agent.run(reserved, "hi").left.value.message should include("reserved")
+      new RunSubmitter(store.runQueue, store)
+        .submit(reserved, agentId, QueuedInput.query("hi"))
+        .left
+        .value
+        .message should
+        include("reserved")
+      store.latest(reserved).value shouldBe None
+    }
+    // so the sweep is never skipped for a caller's run
+    val worker = workerOf(store, Seq(QueuedAgent(agent)))
+    worker.sweepOnce().value.skipped shouldBe false
+  }
+
+  // ---- a slot's run thread and the loops (#3240) ----
+
+  it should "give a slot back when its run thread dies of a fatal throwable, so the next entry runs (#3240)" in {
+    val store = InMemoryCheckpointer()
+    val overflowing = new org.llm4s.agent.guardrails.InputGuardrail {
+      val name: String = "Overflowing"
+      def validate(value: String): Result[String] =
+        if (value == "boom") throw new StackOverflowError("a guardrail's regex on a long input") else Right(value)
+    }
+    val agent =
+      Agent
+        .builder("assistant", answering("fine"))
+        .withRuntime(new GraphRuntime(store))
+        .withInputGuardrails(overflowing)
+    val worker = workerOf(store, Seq(QueuedAgent(agent.build().value)), fast.withConcurrency(1))
+    val boom   = submit(store, thread(), QueuedInput.query("boom"), maxAttempts = 2)
+    worker.start()
+    // the one slot comes back: an entry behind the fatal one runs, while the fatal one's lease runs out
+    val next = submit(store, thread())
+    closed(store, next).outcome.value shouldBe a[EntryOutcome.Done]
+    store.runQueue.entry(None, boom).value.isOpen shouldBe true
+  }
+
+  it should "keep sweeping after a pass throws, and report a sweep that is running (#3240)" in {
+    val store  = InMemoryCheckpointer()
+    val passes = new AtomicInteger(0)
+    val throwing = new ForwardingCheckpointer(store) {
+      override def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard) =
+        if (passes.getAndIncrement() < 2) throw new IllegalStateException("a store bug")
+        else super.sweep(policy, after, guard)
+    }
+    val worker = AgentWorker(
+      store.runQueue,
+      throwing,
+      Seq(QueuedAgent(agentOver(store, answering("x")))),
+      fast.withSweepEvery(30.millis),
+      shortLease
+    ).value
+    started.add(worker)
+    worker.start()
+    eventually(passes.get should be > 3)
+    worker.health().problems.filter(_.contains("sweep")) shouldBe empty
+  }
 }

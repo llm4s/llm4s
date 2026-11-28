@@ -140,6 +140,7 @@ final class AgentWorker private (
 
   @volatile private var loopBeat: Long              = System.nanoTime()
   @volatile private var takeProblem: Option[String] = None
+  @volatile private var sweepThread: Option[Thread] = None
 
   /** A test hook run by an entry's slot just before it records its attempt; a no-op by default. */
   @volatile private[service] var beforeAttempt: QueueEntry => Unit = _ => ()
@@ -159,6 +160,7 @@ final class AgentWorker private (
       )
       // the take loop first: health reads it as the head
       threads.set(Vector(loop) ++ sweep ++ depth)
+      sweepThread = sweep
       logger.info(s"Worker $holder started: agents ${agents.keys.map(_.value).toVector.sorted.mkString(", ")}")
 
   /**
@@ -220,9 +222,13 @@ final class AgentWorker private (
       else if !threads.get.headOption.exists(_.isAlive) then Vector("the worker's loop is not running")
       else if System.nanoTime() - loopBeat > loopBound then Vector("the worker's loop has stalled")
       else takeProblem.map(p => s"the worker's last take failed: $p").toVector
+    // the sweep's thread, when the worker sweeps (#3240): a dead one stops retention for this worker
+    val sweep =
+      if now != WorkerState.Running then Vector.empty
+      else sweepThread.filterNot(_.isAlive).map(_ => "the worker's retention sweep is not running").toVector
     val store    = checkpointer.latest(HealthProbe).left.map(e => s"the checkpoint store failed: ${e.message}")
     val held     = queue.openEntries(None, HealthProbe).left.map(e => s"the run queue failed: ${e.message}")
-    val problems = life ++ loop ++ store.left.toOption ++ held.left.toOption
+    val problems = life ++ loop ++ sweep ++ store.left.toOption ++ held.left.toOption
     WorkerHealth(problems.isEmpty, now, slots.size, problems)
 
   // ---- taking ----
@@ -232,32 +238,54 @@ final class AgentWorker private (
   private def takeLoop(): Unit =
     while !stopRequested do
       loopBeat = System.nanoTime()
-      if Try(permits.tryAcquire(settings.pollInterval.toNanos, TimeUnit.NANOSECONDS)).getOrElse(false) then
-        if stopRequested then permits.release()
-        else
-          takeNext() match
-            case Right(Some(leased)) =>
-              takeProblem = None
-              meter.taken(leased)
-              // a take that outlived the drain's join gives its entry back rather than run it untracked; the check
-              // and the launch are atomic with the drain's start, so a launched slot is always in the drain's read
-              val launched = withLock(launching)(!stopRequested && launch(leased))
-              if !launched then
-                queue.release(leased.lease).left.foreach { e =>
-                  logger.debug(
-                    s"Worker $holder: releasing entry ${leased.entry.id.value} taken during drain: ${e.message}"
-                  )
-                }
-                permits.release()
-            case Right(None) =>
-              takeProblem = None
-              permits.release()
-              pause(settings.pollInterval)
-            case Left(problem) =>
-              takeProblem = Some(problem)
-              logger.warn(s"Worker $holder could not take an entry: $problem")
-              permits.release()
-              pause(settings.pollInterval)
+      // a turn that throws - a third-party queue's release, a launch - is logged and the loop goes on (#3240)
+      Try(takeTurn()).failed.foreach { thrown =>
+        takeProblem = Some(s"the take loop threw ${thrown.getClass.getName}: ${thrown.getMessage}")
+        logger.warn(s"Worker $holder: a turn of the take loop failed: $thrown", thrown)
+        pause(settings.pollInterval)
+      }
+
+  /**
+   * One turn of [[takeLoop]]: a permit, then an entry to run, or a pause. The permit is the turn's until it gives it
+   * back or a launched slot's run thread takes it over; a throw before either gives it back, so a turn that fails
+   * never loses one (#3240). A leased entry a failed turn did not launch is renewed by nobody: its lease expires and it
+   * is taken again.
+   */
+  private def takeTurn(): Unit =
+    if Try(permits.tryAcquire(settings.pollInterval.toNanos, TimeUnit.NANOSECONDS)).getOrElse(false) then
+      val owned            = new AtomicBoolean(true)
+      def giveBack(): Unit = if owned.compareAndSet(true, false) then permits.release()
+      Try(withPermit(owned, () => giveBack())).failed.foreach { thrown =>
+        giveBack()
+        throw thrown
+      }
+
+  private def withPermit(owned: AtomicBoolean, giveBack: () => Unit): Unit =
+    if stopRequested then giveBack()
+    else
+      takeNext() match
+        case Right(Some(leased)) =>
+          takeProblem = None
+          meter.taken(leased)
+          // a take that outlived the drain's join gives its entry back rather than run it untracked; the check
+          // and the launch are atomic with the drain's start, so a launched slot is always in the drain's read
+          val launched = withLock(launching)(!stopRequested && launch(leased, owned))
+          if !launched then
+            queue.release(leased.lease).left.foreach { e =>
+              logger.debug(
+                s"Worker $holder: releasing entry ${leased.entry.id.value} taken during drain: ${e.message}"
+              )
+            }
+            giveBack()
+        case Right(None) =>
+          takeProblem = None
+          giveBack()
+          pause(settings.pollInterval)
+        case Left(problem) =>
+          takeProblem = Some(problem)
+          logger.warn(s"Worker $holder could not take an entry: $problem")
+          giveBack()
+          pause(settings.pollInterval)
 
   /**
    * The next entry to run: a take that passes over every entry the worker is passing over (#3096). A take carries at
@@ -302,22 +330,46 @@ final class AgentWorker private (
   private def passOver(id: EntryId, d: FiniteDuration): Unit =
     skipped.put(id, java.lang.Long.valueOf(System.nanoTime() + d.toNanos))
 
-  /** Starts `leased`'s slot: its lease's renewal and its run. Always `true`, for the launch's check. */
-  private def launch(leased: LeasedEntry): Boolean =
+  /**
+   * Starts `leased`'s slot: its lease's renewal and its run, whose thread takes the turn's permit over (`owned`, #3240).
+   * Always `true`, for the launch's check. A start that throws removes the slot and stops its renewal first.
+   */
+  private def launch(leased: LeasedEntry, owned: AtomicBoolean): Boolean =
     val slot = new Slot(leased, System.nanoTime())
     slots.put(slot.entryId, slot)
-    Thread.ofVirtual().name(s"llm4s-worker-lease-${leased.entry.id.value}").start(() => renewLoop(slot))
-    Thread.ofVirtual().name(s"llm4s-worker-run-${leased.entry.id.value}").start { () =>
-      val done = Try(act(slot, decide(slot)))
-      done.failed.foreach(thrown =>
-        logger.error(s"Worker $holder: entry ${slot.entryId.value} failed in the worker: $thrown", thrown)
-      )
+    Try(startSlot(leased, slot)).failed.foreach { thrown =>
       slot.renewing.set(false)
       slots.remove(slot.entryId)
       slot.ended.countDown()
-      permits.release()
+      throw thrown
     }
+    owned.set(false)
     true
+
+  private def startSlot(leased: LeasedEntry, slot: Slot): Unit =
+    Thread.ofVirtual().name(s"llm4s-worker-lease-${leased.entry.id.value}").start(() => renewLoop(slot))
+    Thread.ofVirtual().name(s"llm4s-worker-run-${leased.entry.id.value}").start { () =>
+      // The slot is given up however its body ends (#3240): `Try` does not catch a fatal throwable - a guardrail's
+      // regex overflowing the stack on a long input, out of memory, a linkage error - which would otherwise leave the
+      // slot in place, its permit lost and its lease renewed for good. Renewal stops, so the entry's lease expires and
+      // it is taken again; the fatal throwable is logged and still ends this thread.
+      // scalafix:off DisableSyntax.NoKeywordFinally
+      try
+        val done = Try(act(slot, decide(slot)))
+        done.failed.foreach(thrown =>
+          logger.error(s"Worker $holder: entry ${slot.entryId.value} failed in the worker: $thrown", thrown)
+        )
+      catch
+        case fatal: Throwable =>
+          logger.error(s"Worker $holder: entry ${slot.entryId.value} ended its run thread with $fatal", fatal)
+          throw fatal
+      finally
+        slot.renewing.set(false)
+        slots.remove(slot.entryId)
+        slot.ended.countDown()
+        permits.release()
+      // scalafix:on DisableSyntax.NoKeywordFinally
+    }: Unit
 
   // ---- the lease ----
 
@@ -684,7 +736,11 @@ final class AgentWorker private (
     @tailrec def next(): Unit =
       pause(every)
       if !stopRequested then
-        sweepOnce().left.foreach(e => logger.warn(s"Worker $holder: the retention sweep failed: ${e.message}"))
+        // a pass that throws - a third-party store's - is logged and the schedule goes on (#3240)
+        Try(sweepOnce()).toEither match
+          case Right(pass) =>
+            pass.left.foreach(e => logger.warn(s"Worker $holder: the retention sweep failed: ${e.message}"))
+          case Left(thrown) => logger.warn(s"Worker $holder: the retention sweep threw: $thrown", thrown)
         next()
     next()
 
