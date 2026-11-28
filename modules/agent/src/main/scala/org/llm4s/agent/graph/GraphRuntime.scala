@@ -65,12 +65,16 @@ object GraphRuntime:
 
   /**
    * `policy` raised by what a run's claim commit adds - one checkpoint and one event - for a top-level thread pruned
-   * after that commit (#3254): it keeps what the policy kept when it pruned before the commit, and the claim's own.
-   * `maxAge` is unchanged: the claim's checkpoint is new.
+   * after that commit (#3254), and its `maxAge` by `sinceAdmission`, the time from just before the commit to the
+   * prune: it keeps what the policy kept when it pruned before the commit - its age cutoff is the same instant - and
+   * the claim's own checkpoint and event, committed after that instant.
    */
-  private[graph] def besideClaim(policy: RetentionPolicy): RetentionPolicy =
+  private[graph] def besideClaim(policy: RetentionPolicy, sinceAdmission: FiniteDuration): RetentionPolicy =
     def plusOne(n: Int) = if n == Int.MaxValue then n else n + 1
-    policy.withMaxCheckpoints(policy.maxCheckpoints.map(plusOne)).withMaxEvents(policy.maxEvents.map(plusOne))
+    policy
+      .withMaxCheckpoints(policy.maxCheckpoints.map(plusOne))
+      .withMaxEvents(policy.maxEvents.map(plusOne))
+      .withMaxAge(policy.maxAge.map(_ + sinceAdmission))
 
   /**
    * The id of a new checkpoint that run `runId` writes over `parent`: `<runId>/<n>`, where `n` is one
@@ -2376,6 +2380,16 @@ final class GraphRuntime(
                     () => releaseBoth(),
                     waitClock
                   )
+                // a cancel or an expiry bounds the run's end as a lost claim does (#3253): a node that ignores its
+                // interrupt is given up on after the same bound, the run settled without its thread and its claim
+                // released, fenced so nothing more of it lands
+                handle.onStopped = () =>
+                  handle.endWithin(
+                    waitClock.now() + lossBound,
+                    () => run.stoppedWithoutRunThread(),
+                    () => releaseBoth(),
+                    waitClock
+                  )
                 run.abandonedWrites = Some(abandoned)
                 handle.launch(() => run.execute(), run.crashed, () => releaseBoth(), run.deadline)
                 launched = true
@@ -3147,7 +3161,8 @@ final class GraphRuntime(
                   // every thread is pruned only after the claim commit, so a commit that fails prunes nothing
                   // (#3254); a child's claim commit also stores what `amend` folded from the events retention would
                   // remove (design 4.42)
-                  val child = origin.isDefined
+                  val child      = origin.isDefined
+                  val committing = System.nanoTime()
                   if retainChildren then
                     abandonLater = keepChildren(
                       threadId,
@@ -3168,7 +3183,11 @@ final class GraphRuntime(
                   )
                     .map { run =>
                       // a top-level thread keeps, besides the claim's own checkpoint and event, what the policy keeps
-                      config.retention.foreach(p => retain(if child then p else GraphRuntime.besideClaim(p)))
+                      config.retention.foreach { p =>
+                        // the age cutoff of a prune before the commit, plus a millisecond for the stores' rounding
+                        val since = FiniteDuration(System.nanoTime() - committing + 1000000L, TimeUnit.NANOSECONDS)
+                        retain(if child then p else GraphRuntime.besideClaim(p, since))
+                      }
                       run
                     }
               }
@@ -3470,6 +3489,37 @@ final class GraphRuntime(
         )
       RunResult.Failed(position._1.state, lost)
 
+    /**
+     * The run's result when a cancel or an expiry is given up on ([[DefaultRunHandle.endWithin]], #3253): its run
+     * thread has not ended within the bound - a node ignores its interrupt. As [[endedWithoutRunThread]] ends a lost
+     * run: the committer is fenced and orphaned, and the run's subscriptions cut at what the hub has handed over, so
+     * nothing more of the run lands; it fails as the stop does, `Cancelled` or `DeadlineExceeded`, at the last
+     * durable checkpoint, which `recover` continues from. A run whose claim was lost meanwhile ends as that does.
+     * Never throws.
+     */
+    def stoppedWithoutRunThread(): RunResult[O] =
+      if claimWasLost then endedWithoutRunThread()
+      else
+        val (execution, checkpointId) = position
+        val error: LLMError = cause.get match
+          case Some(StopCause.Expired) => GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
+          case _                       => GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
+        GraphRuntime.logger.warn(
+          s"Run ${named(runId)} on thread '${threadId.value}' did not stop within ${lossBound / 1000000} ms of its " +
+            "stop; ending it without its run thread"
+        )
+        DefaultRunHandle
+          .guarded {
+            committer.settledWithoutRunThread(error)
+            abandonedWrites.foreach(cut => hub.atMark(threadId)(cut.abandonAfter))
+          }
+          .left
+          .foreach(thrown =>
+            GraphRuntime.logger
+              .warn(s"Ending run '${runId.value}' on thread '${threadId.value}' without it failed", thrown)
+          )
+        RunResult.Failed(execution.state, error)
+
     /** Runs the claimed execution to its end; on the run thread. */
     def execute(): RunResult[O] =
       val (execution, checkpointId) = position
@@ -3706,7 +3756,9 @@ final class GraphRuntime(
         owner = Some(task.arrivalId -> task.arrivalLineage),
         resumeDigest = task.resumeDigest,
         deadline = deadlineAt,
-        admitted = admittedState
+        admitted = admittedState,
+        // a recorded stop cancels the task as its interrupt does, also once the node swallowed that (#3253)
+        stopped = () => stopRecorded
       )
       def settled(executed: Result[TaskResult]): Result[Settled] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
@@ -3714,7 +3766,9 @@ final class GraphRuntime(
           case Left(cancelled: CancelledError) =>
             uncommitted(context)
             Left(cancelled)
-          case Right(_) if Thread.currentThread().isInterrupted =>
+          // a task that returned after a stop was recorded - it swallowed the interrupt - is dropped, never committed
+          // for recover to reuse (#3253)
+          case Right(_) if Thread.currentThread().isInterrupted || stopRecorded =>
             uncommitted(context)
             Left(CancelledError(s"task ${task.id.value}"))
           case Right((result, write)) =>
@@ -3742,7 +3796,7 @@ final class GraphRuntime(
             )
             Left(error)
       graph.executeTask(task, execution, context) match
-        case Right(_: TaskResult.Blocked) if Thread.currentThread().isInterrupted =>
+        case Right(_: TaskResult.Blocked) if Thread.currentThread().isInterrupted || stopRecorded =>
           uncommitted(context)
           Left(CancelledError(s"task ${task.id.value}"))
         // a blocked task has no pending write, since its error is not data: its event records the failure,

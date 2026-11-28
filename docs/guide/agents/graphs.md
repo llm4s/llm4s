@@ -244,6 +244,11 @@ val config = RunConfig(
 - `timeout` (default none) is measured from the run's claim on the thread. When it passes, the run stops as a cancel
   stops it and fails with `GraphError.DeadlineExceeded`; `recover` with a new budget continues it. Nodes can read the
   deadline as `context.deadline`.
+- A cancel or a timeout interrupts the run's tasks, and `context.isCancelled` is `true` from then on, also in a node
+  that caught the interrupt and cleared the flag: such a node is not retried, and whatever it returns is dropped, so
+  `recover` runs it again. A node that ignores the interrupt altogether is given up on after twice the claim's `ttl`:
+  the run ends `Cancelled` or `DeadlineExceeded` without it, nothing more of it is committed, and its thread's claim is
+  released, though the node's own thread runs on until it returns.
 - `maxConcurrency` (default 16) is how many tasks of one superstep run at once.
 - `maxTokens` (default none) is enforced by an agent's model step. Nodes of your own graph do not read it.
 

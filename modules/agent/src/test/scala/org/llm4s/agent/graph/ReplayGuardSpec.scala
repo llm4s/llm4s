@@ -366,7 +366,8 @@ class ReplayGuardSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     ReplayGuard.verifiable[Int](c, begun)(boom)(Left(ProcessingError("x", "y"))).isLeft shouldBe true
   }
 
-  it should "not start an effect whose task was cancelled after its intent was written" in {
+  // #3253: a stop recorded before the intent is written writes none, so `recover` runs the effect rather than refuse it
+  it should "neither start nor record an intent for an effect whose task was cancelled before it began" in {
     val journal = new Journal
     val ran     = new AtomicInteger()
     val c       = context(journal)
@@ -382,7 +383,7 @@ class ReplayGuardSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       }
       .join()
     outcome.get.left.value shouldBe a[CancelledError]
-    journal.record(c.effectKey("op")).value.completed shouldBe false
+    journal.record(c.effectKey("op")) shouldBe None
     ran.get shouldBe 0
   }
 
