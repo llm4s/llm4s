@@ -153,9 +153,12 @@ class ContainerisedWorkspaceLifecycleSpec extends AnyFlatSpec with Matchers {
       val token = fake.token.getOrElse(fail("no token in docker's environment"))
       token.length should be >= RunnerHandshake.MinTokenLength
       fake.commands.flatten.exists(_.contains(token)) shouldBe false
-      runner.opened.get() shouldBe 1
       runner.origins.get() shouldBe 0
       ws.getWorkspaceInfo().root shouldBe "/workspace"
+      // read only after a reply on the connection (#3171): the server queues its handshake response before it calls
+      // onOpen, so the client can be open before `opened` counts it; a message is handled on the connection's own
+      // worker after onOpen, so its reply means onOpen has run
+      runner.opened.get() shouldBe 1
     } finally {
       ws.close()
       runner.stop(1000)
@@ -170,6 +173,8 @@ class ContainerisedWorkspaceLifecycleSpec extends AnyFlatSpec with Matchers {
     val ws = new TestWorkspace(port, fake, tempDir())
     try {
       ws.startContainer() shouldBe true
+      // the runner's onOpen can follow the client's open (#3171): wait for the connection it holds
+      eventually("the runner's side of the connection open")(runner.current.get() != null)
       // what the runner's heartbeat timeout does
       runner.current.get().close(CloseFrame.NORMAL, "Heartbeat timeout")
       ws.getWorkspaceInfo().root shouldBe "/workspace"
