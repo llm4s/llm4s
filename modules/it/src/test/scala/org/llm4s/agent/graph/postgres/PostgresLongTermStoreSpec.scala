@@ -266,6 +266,21 @@ class PostgresLongTermStoreSpec
     store.list(ns, "item-", 10).value.items should have size 3
   }
 
+  "release" should "take a thread's fence and applied keys with the row it drops, as a delete does (#3101)" in {
+    val schema       = stores.freshSchema()
+    val checkpointer = stores.checkpointer(schema)
+    val store        = checkpointer.longTermStore()
+    // a claim on a thread that never committed: releasing it drops the thread's row
+    val bare  = thread()
+    val token = checkpointer.claim(bare, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    put(store, s"item-${bare.value}", "kept", effect = keyOf(bare), token = token.value).value
+    count(schema, "checkpoint_store_fences") shouldBe 1
+    checkpointer.release(bare, token).value
+    count(schema, "checkpoint_store_fences") shouldBe 0
+    count(schema, "checkpoint_store_applied") shouldBe 0
+    store.list(ns, "item-", 10).value.items should have size 1
+  }
+
   override def afterAll(): Unit = {
     stores.close()
     super.afterAll()

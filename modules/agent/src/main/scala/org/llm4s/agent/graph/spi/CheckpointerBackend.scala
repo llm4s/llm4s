@@ -50,3 +50,10 @@ trait CheckpointerBackend:
    * line: the block may hold a password. A thrown exception is caught and reported, but loses what went wrong.
    */
   def open(settings: CheckpointerSettings): Result[CheckpointStore]
+
+  /**
+   * The keys this backend reads from its block (#3099), if it declares them: `CheckpointerConfigLoader.open` then
+   * refuses a block holding any other key - a misspelt `calltimeout` would otherwise be ignored and its default used -
+   * naming it and the nearest declared key. `None`, the default, reads any block as it is.
+   */
+  def keys: Option[Set[String]] = None

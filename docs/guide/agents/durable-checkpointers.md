@@ -41,14 +41,25 @@ Every agent turn and every graph run executes on a `GraphRuntime`, which stores 
 - the durable event log, numbered `1, 2, 3, ...` per thread;
 - the **claim** of the run that holds the thread, if one does.
 
-Two stores ship with LLM4S:
+Three stores ship with LLM4S:
 
 - `InMemoryCheckpointer`, the one `GraphRuntime.inMemory()` and `Agent.builder` use. Its threads live as long as
   its instance.
 - `SqliteCheckpointer`, in `llm4s-agent-checkpoint-sqlite`: one SQLite file that survives a restart and that
   processes on one host can share. See [The SQLite store](#the-sqlite-store).
+- `PostgresCheckpointer`, in `llm4s-agent-checkpoint-postgres`: a PostgreSQL schema that machines share. See
+  [The PostgreSQL store](#the-postgresql-store).
 
-Both meet the same contract, described below.
+All three meet the same contract, described below. What else each has:
+
+| | In-memory | SQLite | PostgreSQL |
+|---|---|---|---|
+| Checkpointer | `InMemoryCheckpointer` | `SqliteCheckpointer` | `PostgresCheckpointer` |
+| Run queue | `.runQueue` | `.runQueue` | `.runQueue` |
+| Long-term store | `InMemoryLongTermStore` (separate) | none | `.longTermStore(limits)` |
+| Told of other stores' commits | n/a: one instance | no: polls every `pollInterval` | yes: `LISTEN`/`NOTIFY` |
+| Clock claims expire by | the store's `Clock` | the store's `Clock` (each host's) | the database server's |
+| Shared by | one process | processes on one host | any number of machines |
 
 ## Runs claim their thread
 
@@ -457,7 +468,8 @@ applied, so two stores cannot both pass the checks.
   interrupts, so a disk that stalls inside a write holds that call, and the store's later calls fail once they have
   waited `busyTimeout` for it. With the default 5 seconds and the default `ttl` of 30 seconds, the bound is well
   inside `ttl - renewEvery`; keep it so if you raise either (see [When the store hangs](#when-the-store-hangs)).
-- **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
+- **Durable commits.** `synchronous = FULL`, with `fullfsync` on macOS (where a plain `fsync` leaves the commit in
+  the disk's cache): a commit that returned survives a crash or a power loss.
 - **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
   a busy runtime gains from a store of its own rather than from sharing another runtime's.
 - **Virtual threads.** sqlite-jdbc makes its native calls inside `synchronized` methods, so on JDK 21 a call from
@@ -497,13 +509,15 @@ checkpoint and event records when the store committed it, which retention judges
 by their producer's timestamps), and 8 for the thread registry (see [Finding threads](#finding-threads)), filled from
 each thread's latest checkpoint when a version-7 file is opened, and 9 for tombstone reclamation (see
 [Sweeping the whole store](#sweeping-the-whole-store)), which dates the tombstones a version-8 file holds from the
-upgrade. A claim a version-4 file holds when it is
+upgrade, 10 for the run queue, 11 for its stop requests, and 12 for the counter new child threads take their place from
+(seeded from the file's highest place). A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one. An older
 process that already has the file open is refused from its next write (`GraphError.UnsupportedStoreSchema`: each write
-checks the file's version first), so it stops writing, but it is not stopped by it. Opening a file at an older version upgrades it in one transaction, and
-opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
+checks the file's version first), so it stops writing, but it is not stopped by it. Opening a file at an older version
+upgrades it in one transaction, and opening a file written by a newer build is refused with
+`GraphError.UnsupportedStoreSchema`, as the PostgreSQL store refuses a newer schema, so an older process never misreads
 it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
 
 ### What it stores
@@ -532,6 +546,8 @@ way ([#3087](https://github.com/llm4s/llm4s/issues/3087)).
 
 `PostgresCheckpointer`, in `llm4s-agent-checkpoint-postgres` (`org.llm4s.agent.graph.postgres`), keeps threads in a
 PostgreSQL schema that runtimes on any number of machines share: the store for one agent service on several machines.
+It needs PostgreSQL 12 or later (it uses a stored generated column and `hashtextextended`); its integration suite
+runs on 16.
 [Running agents on several machines](multiple-machines) puts it together with the run queue, workers, cancel,
 tracing, metrics and retention into one service.
 
@@ -605,8 +621,9 @@ and runs in flight at an older graph version.
 
 ### Long-term memory on the same database
 
-`store.longTermStore(limits)` is a `LongTermStore` (`org.llm4s.agent.harness`) in the same schema, over the same
-pool: the `/memories/` files an agent writes on one machine are there on every other, and so is anything else an
+`store.longTermStore(limits)` - on a `PostgresCheckpointer` itself, so a store opened through
+`CheckpointerConfigLoader.open()` is reached as `store.checkpointer` matched against `PostgresCheckpointer` - is a
+`LongTermStore` (`org.llm4s.agent.harness`) in the same schema, over the same pool: the `/memories/` files an agent writes on one machine are there on every other, and so is anything else an
 application keeps by `(Namespace, key)`
 ([spec](https://github.com/llm4s/llm4s/blob/main/docs/superpowers/specs/2026-11-22-postgres-long-term-store-design.md)).
 
@@ -620,7 +637,8 @@ for
 yield files // thread state everywhere else, the shared store under /memories
 ```
 
-- **It behaves as `InMemoryLongTermStore` does.** Both pass `LongTermStoreContract` (`llm4s-agent-testkit`), and
+- **It behaves as `InMemoryLongTermStore` does.** Both list keys in code-point order (UTF-8 bytes), and a
+  `modify` whose change throws changes nothing, its token included. Both pass `LongTermStoreContract` (`llm4s-agent-testkit`), and
   check `StoreLimits` with the same code: 64 KiB an item, 1000 items and 4 MiB a namespace by default, counted in
   UTF-8 bytes. Each instance enforces the limits it was given, so give every machine the same.
 - **A write is one transaction**, serialisable within its namespace on every machine (an advisory lock on the
@@ -708,8 +726,12 @@ yield (store, agent, submitter)
   `Cancelled` - or with the run's own outcome if it finished first. `submitter.deleteThread(runtime, tenant, threadId,
   timeout)` cancels the thread's entries, waits for them to close, then deletes it.
 - **Only the selected kind's block is read**, so a half-written `postgres` block does not matter while `kind = sqlite`.
-- **Credentials stay out of logs.** No setting's value reaches a log line or an error; set the password through its
-  variable rather than in a checked-in file.
+- **Credentials stay out of logs.** No secret - the password, a URL that may carry credentials - reaches a log line
+  or an error. Other settings may: an error that refuses a timeout, a pool size or a schema name names its value, and
+  the SQLite store's errors name its file. Set the password through its variable rather than in a checked-in file.
+- **A key the store does not read is refused**, naming the nearest it does, so a misspelt `calltimeout` fails the
+  load rather than leaving the default in place. A backend of your own declares its keys with
+  `CheckpointerBackend.keys`. The PostgreSQL pool is at most 1000 connections (`maxPoolSize`).
 - **A store of your own** registers a `CheckpointerBackend` (`org.llm4s.agent.graph.spi`): a `class` with a public
   no-arg constructor, listed in `META-INF/services/org.llm4s.agent.graph.spi.CheckpointerBackend`, that opens its store
   from its block `llm4s.agent.checkpointer.<kind>`, handed to it as a `CheckpointerSettings`.
@@ -913,7 +935,8 @@ A store keeps what users said and what tools returned in plain. `EncryptingCheck
 `EncryptingLongTermStore` (`org.llm4s.agent.encryption`, experimental) wrap any store, its run queue and its
 [long-term store](#long-term-memory-on-the-same-database) so those values are stored encrypted, with keys your
 application holds: AES-256-GCM from the JDK, no schema change, and the same code over the in-memory, SQLite and
-PostgreSQL stores.
+PostgreSQL checkpointers and run queues, and over `InMemoryLongTermStore` and the PostgreSQL long-term store (the
+SQLite store has none).
 
 ```scala
 import org.llm4s.agent.encryption.*

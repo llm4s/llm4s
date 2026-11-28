@@ -98,6 +98,22 @@ class PostgresCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eit
       include("connectionTimeout")
     connection("llm4s.agent.checkpointer.postgres.maxPoolSize = lots").left.value.message should
       include("llm4s.agent.checkpointer.postgres.maxPoolSize")
+    // bounded above, too (#3099)
+    connection("llm4s.agent.checkpointer.postgres.maxPoolSize = 100000").left.value.message should
+      include(s"at most ${PostgresCheckpointerConfig.MaxPoolSize}")
+  }
+
+  "A key the block does not have" should "be refused by the loader, naming the nearest key, before anything opens (#3099)" in {
+    val error = CheckpointerConfigLoader
+      .open(
+        ReferenceConfig.withEnv("llm4s.agent.checkpointer.postgres.maxPoolsize = 50", Env),
+        CheckpointerBackends.discover()
+      )
+      .left
+      .value
+    error.message should include("llm4s.agent.checkpointer.postgres.maxPoolsize is not a setting")
+    error.message should include("did you mean llm4s.agent.checkpointer.postgres.maxPoolSize?")
+    (error.message should not).include("hunter2")
   }
 
   "A server that cannot be reached" should "fail the load within the connection timeout, never showing the password" in {

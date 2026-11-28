@@ -76,7 +76,7 @@ trait StoreView:
   /** Another item of the namespace. */
   def get(key: String): Result[Option[StoreItem]]
 
-  /** The entries of the namespace whose key starts with `prefix`, in key order, at most `limit`. */
+  /** The entries of the namespace whose key starts with `prefix`, in key order ([[LongTermStore.KeyOrder]]), at most `limit`. */
   def withPrefix(prefix: String, limit: Int): Result[Vector[StoreEntry]]
 
 /**
@@ -108,7 +108,10 @@ trait LongTermStore extends AppliedKeys:
 
   def get(ns: Namespace, key: String): Result[Option[StoreItem]]
 
-  /** The entries of `ns` whose key starts with `prefix`, in key order, at most `limit`. */
+  /**
+   * The entries of `ns` whose key starts with `prefix`, in key order - [[LongTermStore.KeyOrder]], by code point, which
+   * every store keeps (#3101) - at most `limit`.
+   */
   def list(ns: Namespace, prefix: String, limit: Int): Result[Listing[StoreEntry]]
 
   /** The entries of `ns` matching `query`, at most `limit`; each store documents how it matches. */
@@ -122,6 +125,8 @@ trait LongTermStore extends AppliedKeys:
    * nothing written or recorded), then the namespace's and item's bounds, then the write and
    * `(effect, outcome)` recorded together. An over-limit change is a [[BackendRefused]]. The newest
    * token per scope is kept as long as the store keeps that thread's data: durably, in a real store.
+   *
+   * A `change` that throws is a `Left`, and changes nothing - its token is not made the newest either (#3101).
    *
    * The outcome returned is the recorded one, decoded, so a first run and its replay return the same
    * value. `A`'s codec must be a pure function of its value: C4's guard encodes the outcome again for its
@@ -153,6 +158,20 @@ trait LongTermStore extends AppliedKeys:
 
 @Experimental
 object LongTermStore:
+
+  /**
+   * The order every long-term store lists keys in (#3101): by Unicode code point, which is the order of their UTF-8
+   * bytes - PostgreSQL's `COLLATE "C"` - rather than of their UTF-16 code units, which put a supplementary character
+   * before U+E000-U+FFFF.
+   */
+  val KeyOrder: Ordering[String] = (a: String, b: String) =>
+    @scala.annotation.tailrec
+    def at(i: Int, j: Int): Int =
+      if i >= a.length || j >= b.length then (a.length - i).sign - (b.length - j).sign
+      else
+        val (x, y) = (a.codePointAt(i), b.codePointAt(j))
+        if x != y then Integer.compare(x, y) else at(i + Character.charCount(x), j + Character.charCount(y))
+    at(0, 0)
 
   /** The deepest a stored value may nest arrays and objects. */
   val MaxDepth: Int = 64
@@ -383,7 +402,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   def list(ns: Namespace, prefix: String, limit: Int): Result[Listing[StoreEntry]] =
     LongTermStore.checked("list", ns, prefix).flatMap(_ => Text.checkLimit("list", prefix, limit)).map { _ =>
       val all  = synchronized(items(ns))
-      val hits = all.toVector.filter(_._1.startsWith(prefix)).sortBy(_._1).iterator
+      val hits = all.toVector.filter(_._1.startsWith(prefix)).sortBy(_._1)(LongTermStore.KeyOrder).iterator
       Listing.of(hits.map((k, item) => StoreEntry(k, detached(item))), limit)
     }
 
@@ -391,7 +410,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
     LongTermStore.checked("search", ns, query).flatMap(_ => Text.checkLimit("search", query, limit)).map { _ =>
       val matches = LongTermStore.matcher(query)
       val all     = synchronized(items(ns))
-      val hits = all.toVector.sortBy(_._1).iterator.collect {
+      val hits = all.toVector.sortBy(_._1)(LongTermStore.KeyOrder).iterator.collect {
         case (k, item) if matches(k, item.value) => StoreEntry(k, detached(item))
       }
       Listing.of(hits, limit)
@@ -403,7 +422,18 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   private def modifyChecked[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
-  ): Result[A] = transaction("modify")(fenced(effect, token) {
+  ): Result[A] = transaction("modify") {
+    // a change that throws changes nothing, the fence included, as a rolled-back transaction does (#3101)
+    val seen = newest
+    Try(modifyFenced(ns, key, effect, token)(change)).toEither.left.map { thrown =>
+      newest = seen
+      ProcessingError("long-term-store.modify", s"the change threw ${thrown.getClass.getName}")
+    }.flatten
+  }
+
+  private def modifyFenced[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
+    change: StoreView => Result[StoreChange[A]]
+  ): Result[A] = fenced(effect, token) {
     LongTermStore.invalidKey(key) match
       case Some(refused) => Left(refused)
       case None =>
@@ -418,7 +448,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                 Right(
                   items(ns).toVector
                     .filter(_._1.startsWith(prefix))
-                    .sortBy(_._1)
+                    .sortBy(_._1)(LongTermStore.KeyOrder)
                     .take(limit)
                     .map((k, i) => StoreEntry(k, detached(i)))
                 )
@@ -436,7 +466,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
                 decoded
               }
             }
-  })
+  }
 
   /** The bounds of `next`, the namespace after a change; `None` changes nothing. */
   private def within(key: String, next: Option[Map[String, StoreItem]]): Result[Unit] =

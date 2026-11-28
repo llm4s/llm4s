@@ -27,6 +27,9 @@ import scala.util.Try
 final class SqliteCheckpointerBackend extends CheckpointerBackend:
   val kind: String = SqliteCheckpointerBackend.Kind
 
+  /** The block's keys, `path` and `busyTimeout`; any other is refused (#3099). */
+  override def keys: Option[Set[String]] = Some(Set("path", "busyTimeout"))
+
   def open(settings: CheckpointerSettings): Result[CheckpointStore] =
     for
       raw         <- settings.string("path", Some("LLM4S_CHECKPOINTER_SQLITE_PATH"))

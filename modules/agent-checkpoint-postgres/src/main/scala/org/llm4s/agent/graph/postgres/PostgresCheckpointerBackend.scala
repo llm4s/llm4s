@@ -27,6 +27,9 @@ import org.llm4s.types.Result
 final class PostgresCheckpointerBackend extends CheckpointerBackend:
   val kind: String = PostgresCheckpointerBackend.Kind
 
+  /** The block's keys; any other is refused (#3099). */
+  override def keys: Option[Set[String]] = Some(PostgresCheckpointerBackend.Keys)
+
   def open(settings: CheckpointerSettings): Result[CheckpointStore] =
     PostgresCheckpointerBackend
       .connection(settings)
@@ -37,6 +40,9 @@ object PostgresCheckpointerBackend:
 
   /** The `llm4s.agent.checkpointer.kind` this backend serves. */
   val Kind: String = "postgres"
+
+  /** The keys the `postgres` block may hold. */
+  val Keys: Set[String] = Set("url", "user", "password", "schema", "callTimeout", "connectionTimeout", "maxPoolSize")
 
   /** A pgjdbc URL parameter that carries a credential (`password`, `sslpassword`), or user info before the host. */
   private val CredentialParameter = "(?i)[?&;](?:ssl)?password=|^jdbc:postgresql://[^/?]*@".r

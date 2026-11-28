@@ -2,7 +2,7 @@
 package org.llm4s.config
 
 import com.typesafe.config.{ ConfigObject, ConfigRenderOptions, ConfigUtil, ConfigValue, ConfigValueType }
-import org.llm4s.agent.graph.spi.{ CheckpointStore, CheckpointerBackends, CheckpointerSettings }
+import org.llm4s.agent.graph.spi.{ CheckpointStore, CheckpointerBackend, CheckpointerBackends, CheckpointerSettings }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.types.Result
@@ -39,8 +39,11 @@ import scala.util.control.NonFatal
  * }}}
  *
  * Only the selected kind's block is read, and only a load is affected by a missing module: a kind whose backend is not
- * on the classpath fails `open` with a `ConfigurationError` naming the module to add, and nothing else. No setting's
- * value reaches an error or a log line.
+ * on the classpath fails `open` with a `ConfigurationError` naming the module to add, and nothing else. A key the
+ * backend does not declare ([[org.llm4s.agent.graph.spi.CheckpointerBackend.keys CheckpointerBackend.keys]]) is
+ * refused, naming the nearest it does (#3099). No secret - a password, or a URL that may carry credentials - reaches
+ * an error or a log line; other settings, such as a timeout, a pool size, a schema or a file path, may be named in
+ * the error that refuses them.
  */
 @Experimental
 object CheckpointerConfigLoader:
@@ -67,7 +70,8 @@ object CheckpointerConfigLoader:
       case None => Left(missingBackend(settings.kind, backends))
       case Some(backend) =>
         logger.info(s"Opening the '${settings.kind}' checkpoint store (${backend.getClass.getName})")
-        try backend.open(settings).left.map(scrubbed(settings, _))
+        try
+          unknownKey(settings, backend).toLeft(()).flatMap(_ => backend.open(settings).left.map(scrubbed(settings, _)))
         catch
           // A stale or half-present backend jar throws a LinkageError, which NonFatal lets through.
           case e: LinkageError => Left(thrown(settings, backend.getClass.getName, e))
@@ -88,6 +92,38 @@ object CheckpointerConfigLoader:
         s"The '${settings.kind}' checkpoint store failed to open: ${settings.redact(error.message)}",
         List(s"$Path.${settings.kind}")
       )
+
+  /**
+   * A `ConfigurationError` for the first key of `settings`' block that `backend` does not declare, naming it and the
+   * nearest declared key; none if it declares no keys.
+   */
+  private def unknownKey(settings: CheckpointerSettings, backend: CheckpointerBackend): Option[ConfigurationError] =
+    backend.keys.flatMap { known =>
+      settings.extras.keys.toVector.sorted.find(k => !known.contains(k)).map { unknown =>
+        val nearest =
+          known.toVector.sorted.minByOption(k => distance(unknown.toLowerCase(Locale.ROOT), k.toLowerCase(Locale.ROOT)))
+        val hint = nearest.fold("")(k => s"; did you mean ${settings.key(k)}?")
+        ConfigurationError(
+          s"${settings.key(unknown)} is not a setting of the '${settings.kind}' checkpoint store$hint " +
+            s"(it reads ${known.toVector.sorted.mkString(", ")})",
+          List(settings.key(unknown))
+        )
+      }
+    }
+
+  /** The edit distance between `a` and `b`. */
+  private def distance(a: String, b: String): Int =
+    val row = Array.tabulate(b.length + 1)(identity)
+    a.indices.foreach { i =>
+      var diagonal = row(0)
+      row(0) = i + 1
+      b.indices.foreach { j =>
+        val above = row(j + 1)
+        row(j + 1) = math.min(math.min(row(j) + 1, above + 1), diagonal + (if a(i) == b(j) then 0 else 1))
+        diagonal = above
+      }
+    }
+    row(b.length)
 
   /** The exceptions `error` carries, with their causes. */
   private def causes(error: LLMError): Vector[Throwable] =

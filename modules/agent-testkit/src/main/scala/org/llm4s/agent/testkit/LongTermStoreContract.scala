@@ -154,6 +154,20 @@ trait LongTermStoreContract extends AnyFlatSpecLike with Matchers with EitherVal
     s.search(ns, "a", 0).left.value shouldBe a[BackendRefused]
   }
 
+  it should "order keys by code point, a supplementary character after U+E000-U+FFFF, in every listing (#3101)" in {
+    val s = store()
+    // UTF-16 code units would put the emoji (a surrogate pair, 0xD83D...) before U+E000 and U+FFFD
+    val keys = Vector("k/\uFFFD", "k/\uE000", "k/😀", "k/z")
+    keys.foreach(k => put(s, k, ujson.Str(k)).value)
+    val ordered = Vector("k/z", "k/\uE000", "k/\uFFFD", "k/😀")
+    s.list(ns, "k/", 10).value.items.map(_.key) shouldBe ordered
+    s.list(ns, "k/", 3).value.items.map(_.key) shouldBe ordered.take(3)
+    if matchesSubstrings then s.search(ns, "k/", 10).value.items.map(_.key) shouldBe ordered
+    change[Vector[String]](s, "k/z")(view =>
+      Right(StoreChange.Keep(view.withPrefix("k/", 10).value.map(_.key)))
+    ).value shouldBe ordered
+  }
+
   it should "search only its namespace, cut at the limit, handing out copies" in {
     val s     = store()
     val other = Namespace(None, Vector("elsewhere"))
@@ -524,6 +538,18 @@ trait LongTermStoreContract extends AnyFlatSpecLike with Matchers with EitherVal
       .message should include("stale claim")
     s.get(ns, "k").value shouldBe None
     appliedKeys(s) shouldBe 0
+  }
+
+  it should "change nothing for a change that throws, its token included, and answer a Left (#3101)" in {
+    val s      = store()
+    val thread = freshThread()
+    s.modify[Unit](ns, "k", effectKey(thread), FencingToken(7))(_ => throw new IllegalStateException("a bug"))
+      .left
+      .value shouldBe a[org.llm4s.error.LLMError]
+    // the throwing call's token never became the newest: an older one is still taken
+    s.modify[Unit](ns, "k", effectKey(thread), FencingToken(5))(_ => Right(StoreChange.Put(ujson.Str("kept"), ())))
+      .value
+    text(s, "k") shouldBe Some("kept")
   }
 
   "Concurrent writers of a long-term store" should "each be counted: no increment is lost" in {
