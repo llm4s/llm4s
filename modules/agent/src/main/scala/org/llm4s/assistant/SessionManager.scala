@@ -69,7 +69,7 @@ class SessionManager(
    * Converts SessionState to JSON for persistence: its identity and the conversation's messages.
    * The agent thread is not saved; loading imports the messages into a new one.
    */
-  private def sessionStateToJson(state: SessionState): Either[AssistantError, String] =
+  private def sessionStateToJson(state: SessionState, title: String): Either[AssistantError, String] =
     Try(writeJs(state.messages)).toEither
       .leftMap { ex =>
         logger.error("Failed to serialize messages", ex)
@@ -78,6 +78,8 @@ class SessionManager(
       .map { messagesJson =>
         ujson.write(
           ujson.Obj(
+            // the title it was saved under, so a save replaces only a save of the same title (#3277)
+            "title"      -> ujson.Str(title),
             "sessionId"  -> ujson.Str(state.sessionId.value),
             "sessionDir" -> ujson.Str(state.sessionDir.value),
             "created"    -> ujson.Str(state.created.toString),
@@ -115,7 +117,7 @@ class SessionManager(
         ensureSessionDirectory().flatMap { _ =>
           createFilePaths(requested, overwrite).flatMap { case (sessionTitle, jsonPath, markdownPath) =>
             for {
-              jsonContent     <- createJsonContent(state)
+              jsonContent     <- sessionStateToJson(state, sessionTitle)
               markdownContent <- formatSessionContent(messages, sessionTitle, state.created)
               jsonSize        <- writeSessionFile(jsonPath, jsonContent)
               _               <- writeSessionFile(markdownPath, markdownContent)
@@ -127,12 +129,6 @@ class SessionManager(
           }
         }
     }
-
-  /**
-   * Creates JSON content for session storage
-   */
-  private def createJsonContent(state: SessionState): Either[AssistantError, String] =
-    sessionStateToJson(state)
 
   /**
    * Converts JSON back to SessionState for loading: the saved messages become the history the
@@ -154,11 +150,15 @@ class SessionManager(
    * Loads a session from JSON file by title
    */
   def loadSession(sessionTitle: String): Either[AssistantError, SessionState] = {
-    // a session saved before #3277 has its non-ASCII characters as `_`: found by that name when not by its own
-    val jsonPath = Seq(sanitizeFilename(sessionTitle), legacyFilename(sessionTitle))
+    // the file whose stored title is this one; else one saved before #3277, which stores no title: by its file
+    // name, or by the name it had then, when its non-ASCII characters became `_`
+    def untitled(name: String): Option[Path] =
+      Some(Paths.get(sessionDir.value, s"$name.json")).filter(p => Files.exists(p) && storedTitle(p).isEmpty)
+    val jsonPath = savedAs(sessionTitle)
       .map(name => Paths.get(sessionDir.value, s"$name.json"))
-      .find(Files.exists(_))
-      .getOrElse(Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.json"))
+      .orElse(untitled(sanitizeFilename(sessionTitle)))
+      .orElse(untitled(legacyFilename(sessionTitle)))
+      .getOrElse(Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.missing"))
 
     for {
       _ <- ensureSessionDirectory()
@@ -191,7 +191,7 @@ class SessionManager(
         .sortBy(path => Try(Files.getLastModifiedTime(path)).getOrElse(java.nio.file.attribute.FileTime.fromMillis(0)))
         .reverse
         .take(limit)
-        .map(_.getFileName.toString.stripSuffix(".json"))
+        .map(path => storedTitle(path).getOrElse(path.getFileName.toString.stripSuffix(".json")))
         .toSeq
     }.toEither
       .leftMap(ex => AssistantError.fileReadFailed(FilePath(sessionDir.value), ex))
@@ -202,12 +202,21 @@ class SessionManager(
   private def createFilePaths(title: String, overwrite: Boolean): Either[AssistantError, (String, Path, Path)] =
     Try {
       val baseFilename = sanitizeFilename(title)
-      // without overwrite, a name already taken gains a suffix, and the title the caller loads it by gains it too
-      val suffix       = if (overwrite) None else findUniqueSuffix(baseFilename)
-      val basename     = suffix.fold(baseFilename)(s => s"$baseFilename-$s")
+      // with overwrite, the files of an earlier save of this same title are replaced; a different title whose name
+      // is the same (`project/a` and `project:a`, or the same first 50 characters) never is: it gains a suffix,
+      // keeping its own title, which `loadSession` finds it by. Without overwrite, a taken name gains a suffix and the
+      // title gains it too
+      val (savedTitle, basename) =
+        if (overwrite)
+          savedAs(title).orElse(Option.when(!taken(baseFilename))(baseFilename)) match {
+            case Some(existing) => (title, existing)
+            case None           => (title, s"$baseFilename-${uniqueSuffix()}")
+          }
+        else
+          findUniqueSuffix(baseFilename).fold((title, baseFilename))(s => (s"$title-$s", s"$baseFilename-$s"))
       val jsonPath     = Paths.get(sessionDir.value, s"$basename.json")
       val markdownPath = Paths.get(sessionDir.value, s"$basename.md")
-      (suffix.fold(title)(s => s"$title-$s"), jsonPath, markdownPath)
+      (savedTitle, jsonPath, markdownPath)
     }.toEither.leftMap(ex =>
       AssistantError.FileError(
         s"Failed to create file paths: ${ex.getMessage}",
@@ -218,11 +227,31 @@ class SessionManager(
     )
 
   /** A suffix for `baseFilename` when a session is already saved under it, else `None`. */
-  private def findUniqueSuffix(baseFilename: String): Option[String] = {
-    def checkExists(filename: String): Boolean =
-      Files.exists(Paths.get(sessionDir.value, s"$filename.json")) ||
-        Files.exists(Paths.get(sessionDir.value, s"$filename.md"))
-    Option.when(checkExists(baseFilename))(uniqueSuffix())
+  private def findUniqueSuffix(baseFilename: String): Option[String] =
+    Option.when(taken(baseFilename))(uniqueSuffix())
+
+  /** Whether a session file is saved under `filename`. */
+  private def taken(filename: String): Boolean =
+    Files.exists(Paths.get(sessionDir.value, s"$filename.json")) ||
+      Files.exists(Paths.get(sessionDir.value, s"$filename.md"))
+
+  /** The title a session file stores, `None` for one saved before titles were stored or unreadable. */
+  private def storedTitle(json: Path): Option[String] =
+    Try(ujson.read(Files.readString(json, StandardCharsets.UTF_8)).obj.get("title").map(_.str)).toOption.flatten
+
+  /**
+   * The file name (without `.json`) of the session saved with exactly `title`: the title's own name or one with a
+   * suffix (`name-<suffix>`), whichever stores that title.
+   */
+  private def savedAs(title: String): Option[String] = {
+    val base = sanitizeFilename(title)
+    Try(Using.resource(Files.list(Paths.get(sessionDir.value)))(_.toArray.map(_.asInstanceOf[Path]).toVector))
+      .getOrElse(Vector.empty)
+      .map(_.getFileName.toString)
+      .filter(n => n.endsWith(".json") && (n == s"$base.json" || n.startsWith(s"$base-")))
+      .sortBy(n => (n != s"$base.json", n))
+      .find(n => storedTitle(Paths.get(sessionDir.value, n)).contains(title))
+      .map(_.stripSuffix(".json"))
   }
 
   /**

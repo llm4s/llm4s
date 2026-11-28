@@ -1,6 +1,7 @@
 package org.llm4s.assistant
 
 import scala.util.Using
+import scala.util.chaining.scalaUtilChainingOps
 
 import org.llm4s.testutil.TestTimeLimit
 
@@ -149,8 +150,34 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
   it should "load a session a release before #3277 saved under its ASCII-only name" in {
     val dir     = Files.createTempDirectory("sessions-legacy")
     val manager = new SessionManager(DirectoryPath(dir.toString))
+    // the format before #3277: no stored title, the name with every non-ASCII character as `_`
     manager.saveSession(createTestState("legacy"), Some("___"))
+    val json = dir.resolve("___.json")
+    Files.writeString(json, ujson.write(ujson.read(Files.readString(json)).obj.tap(_.remove("title"))))
     manager.loadSession("日本語").map(_.sessionId.value) shouldBe Right("legacy")
+  }
+
+  it should "never replace a save of a different title whose file name is the same (#3277)" in {
+    val dir     = Files.createTempDirectory("sessions-collide")
+    var n       = 0
+    val manager = new SessionManager(DirectoryPath(dir.toString), uniqueSuffix = () => { n += 1; s"s$n" })
+    manager.saveSession(createTestState("slash"), Some("project/a")).map(_.title) shouldBe Right("project/a")
+    manager.saveSession(createTestState("colon"), Some("project:a")).map(_.title) shouldBe Right("project:a")
+    manager.loadSession("project/a").map(_.sessionId.value) shouldBe Right("slash")
+    manager.loadSession("project:a").map(_.sessionId.value) shouldBe Right("colon")
+    // a save of the same title still replaces its own file, whichever name it has
+    manager.saveSession(createTestState("colon-2"), Some("project:a"))
+    manager.loadSession("project:a").map(_.sessionId.value) shouldBe Right("colon-2")
+    manager.loadSession("project/a").map(_.sessionId.value) shouldBe Right("slash")
+    // titles that agree in their first 50 sanitised characters
+    val prefix = "x" * 50
+    manager.saveSession(createTestState("one"), Some(prefix + "one"))
+    manager.saveSession(createTestState("two"), Some(prefix + "two"))
+    manager.loadSession(prefix + "one").map(_.sessionId.value) shouldBe Right("one")
+    manager.loadSession(prefix + "two").map(_.sessionId.value) shouldBe Right("two")
+    manager.listRecentSessions(10).map(_.toSet) shouldBe Right(
+      Set("project/a", "project:a", prefix + "one", prefix + "two")
+    )
   }
 
   it should "write the session files owner-only where the file system has POSIX permissions" in {
