@@ -183,7 +183,7 @@ trait MemoryStore {
 
   /**
    * What this store reads and writes, when it can say: two stores with the same `Some` identity hold the same
-   * memories, whatever instances they are. `SQLiteMemoryStore` names its file's real path, `PostgresMemoryStore` its
+   * memories, whatever instances they are. `SQLiteMemoryStore` and `VectorMemoryStore` name their file's real path, `PostgresMemoryStore` its
    * database, table and tenant. `None` - the default, and every store held only in this process - makes no claim, so
    * only the instance identifies it.
    */

@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import java.nio.file.{ Files, LinkOption, Path, Paths }
+import java.nio.file.attribute.BasicFileAttributes
 import java.text.Normalizer
 import java.util.Locale
 import scala.jdk.CollectionConverters.*
@@ -30,7 +31,9 @@ import scala.util.Try
  * A tail that does not exist yet, such as the target of a write, is kept as written (its `.` and `..` applied to
  * it). Allowed and blocked entries are resolved the same way, and the comparison is `Path.startsWith`, which
  * compares whole path components: `/srv/data` contains `/srv/data/x` and does not contain `/srv/data-secret/x`.
- * A blocked entry is also matched without regard to case ([[within]]), so `/ETC/hosts` is inside a blocked `/etc`.
+ * A blocked entry is also matched without regard to case ([[within]]), so `/ETC/hosts` is inside a blocked `/etc`,
+ * and by file identity: a path one of whose existing ancestors has a blocked entry's file key is blocked, so a
+ * blocked directory reached through a macOS firmlink (`/System/Volumes/Data/...`) is blocked too (#3237).
  *
  * The file tools remove `.` and `..` from the path they are given as text before calling this, and then open the
  * location it returns, so for them `data/link/../x` is `data/x`, the two readings agree, and what they judge is what
@@ -192,22 +195,59 @@ private[builtin] object PathPolicy {
    */
   final class Entries private[PathPolicy] (
     private[PathPolicy] val allowed: Option[Seq[(Path, Path)]],
-    private[PathPolicy] val blocked: Seq[(Path, Path)]
+    private[PathPolicy] val blocked: Seq[(Path, Path)],
+    private[PathPolicy] val blockedKeys: Set[AnyRef],
+    private[PathPolicy] val keyOf: Path => Option[AnyRef]
   )
 
   /** The entries of a policy, resolved now (see [[Entries]]). */
   def prepare(allowed: Option[Seq[String]], blocked: Seq[String]): Entries =
-    new Entries(allowed.map(_.flatMap(entry)), blocked.flatMap(entry))
+    prepare(allowed, blocked, fileKey)
+
+  /**
+   * As the `prepare` above, with the file identity it compares blocked entries by given, for tests (#3237): the
+   * identity of each blocked entry that exists is taken now.
+   */
+  private[builtin] def prepare(
+    allowed: Option[Seq[String]],
+    blocked: Seq[String],
+    keyOf: Path => Option[AnyRef]
+  ): Entries = {
+    val blockedEntries = blocked.flatMap(entry)
+    new Entries(allowed.map(_.flatMap(entry)), blockedEntries, blockedEntries.flatMap(e => keyOf(e._2)).toSet, keyOf)
+  }
+
+  /**
+   * The file key (device and inode) of the entry at `path`, following links, where the platform reports one; `None`
+   * where it does not (Windows), or where nothing is there or it cannot be read.
+   */
+  private def fileKey(path: Path): Option[AnyRef] =
+    Try(Option(Files.readAttributes(path, classOf[BasicFileAttributes]).fileKey)).toOption.flatten
 
   private def permitted(spelled: Path, physical: Path, lexical: Path, entries: Entries): Boolean = {
     val locations = Seq(physical, lexical)
     !entries.blocked.exists { case (blockedLexical, blockedReal) =>
       (spelled +: locations).exists(location => within(location, blockedLexical) || within(location, blockedReal))
     } &&
+    !reachesBlockedIdentity(locations, entries) &&
     entries.allowed.forall(roots =>
       locations.forall(location => roots.exists { case (_, rootReal) => location.startsWith(rootReal) })
     )
   }
+
+  /**
+   * Whether a location, or an existing ancestor of it, is a blocked entry by file identity (#3237): a blocked
+   * directory reached by a path no spelling or real-path comparison connects to it - a macOS firmlink, such as the
+   * `/System/Volumes/Data` spelling of every path on the data volume, which `toRealPath` leaves as it is - has the
+   * same file key. Nothing is read where the platform reports no file keys.
+   */
+  private def reachesBlockedIdentity(locations: Seq[Path], entries: Entries): Boolean =
+    entries.blockedKeys.nonEmpty && locations.distinct.exists { location =>
+      Iterator
+        .iterate(location)(_.getParent)
+        .takeWhile(_ != null)
+        .exists(p => entryExists(p) && entries.keyOf(p).exists(entries.blockedKeys.contains))
+    }
 
   /**
    * Whether `path` is `entry` or inside it, comparing whole components without regard to case or Unicode

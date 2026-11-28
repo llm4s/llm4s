@@ -43,6 +43,15 @@ final class VectorMemoryStore private (
   import VectorMemoryStore._
   import FilterSupport.Sql
 
+  /**
+   * The SQLite file this store reads and writes, by its real path, as `SQLiteMemoryStore` names it (#3238): two
+   * instances over one file, however its path is spelled, are one store, so `SemanticMemoryMiddleware` refuses to
+   * give it to two tenants.
+   */
+  override def storageIdentity: Result[Option[String]] = fileIdentity
+
+  private lazy val fileIdentity: Result[Option[String]] = SQLiteMemoryStore.fileIdentity(dbPath)
+
   // Initialize schema on creation
   initializeSchema()
 

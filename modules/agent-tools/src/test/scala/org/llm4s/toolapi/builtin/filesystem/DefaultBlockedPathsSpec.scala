@@ -145,6 +145,41 @@ class DefaultBlockedPathsSpec extends AnyFlatSpec with Matchers {
     blocked(Path.of(home).resolve("library/keychains/login.keychain-db")) shouldBe true
   }
 
+  // #3237: /System/Volumes/Data is a firmlink spelling of the data volume, which toRealPath leaves as it is
+  "On macOS the default config" should "block the /System/Volumes/Data spelling of every blocked entry (#3237)" in {
+    assume(platform == Platform.MacOS, "macOS only")
+    val data = "/System/Volumes/Data"
+    // by file identity: the firmlink spelling of an existing blocked directory has its file key
+    blocked(Path.of(data + "/private/etc/hosts")) shouldBe true
+    blocked(Path.of(data + "/private/var/db/x")) shouldBe true
+    blocked(Path.of(data + "/Library/Keychains/System.keychain")) shouldBe true
+    val keychains = Path.of(home).resolve("Library/Keychains")
+    if (Files.isDirectory(keychains))
+      blocked(Path.of(data + keychains.toString).resolve("login.keychain-db")) shouldBe true
+    val ssh = Path.of(home).resolve(".ssh")
+    if (Files.isDirectory(ssh)) blocked(Path.of(data + ssh.toString).resolve("id_rsa")) shouldBe true
+    // the rest of the data volume is not blocked: /home resolves under it
+    FileConfig().isPathAllowed(Path.of(data + home).resolve("project/notes.txt")) shouldBe true
+  }
+
+  "A blocked entry" should "block a path that reaches it under another name with its file identity (#3237)" in {
+    val root                           = newRoot()
+    val secret                         = Files.createDirectories(root.resolve("secret"))
+    val alias                          = Files.createDirectories(root.resolve("alias"))
+    val other                          = Files.createDirectories(root.resolve("other"))
+    val shared                         = "the secret directory's key"
+    def keyOf(p: Path): Option[AnyRef] = if (p == secret || p == alias) Some(shared) else Some(p.toString)
+    val entries                        = PathPolicy.prepare(None, Seq(secret.toString), keyOf)
+    def allowed(p: Path)               = PathPolicy.resolve(p, entries).isDefined
+    allowed(alias.resolve("id_rsa")) shouldBe false
+    allowed(alias) shouldBe false
+    allowed(secret.resolve("id_rsa")) shouldBe false
+    allowed(other.resolve("x")) shouldBe true
+    // no file keys (Windows): nothing more is blocked than the spellings and real paths
+    val noKeys = PathPolicy.prepare(None, Seq(secret.toString), _ => None)
+    PathPolicy.resolve(alias.resolve("id_rsa"), noKeys).isDefined shouldBe true
+  }
+
   "On Windows the default config" should "block the system directory and the credential stores, whatever their case" in {
     assume(platform == Platform.Windows, "Windows only")
     blocked(Path.of("C:\\Windows\\System32\\config\\SAM")) shouldBe true

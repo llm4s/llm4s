@@ -1062,7 +1062,8 @@ for {
   or resumed run reads again. A missing file is skipped.
 - **Editable when permitted.** The agent edits a file with `edit_file` (`FileTools(backend)`) over the same backend when the
   backend accepts the write and the permission rules allow `Write` on its path; deny it to keep a
-  scope read-only.
+  scope read-only. A host backend refuses a path that names an existing file by another case or Unicode
+  normalisation than its own, so a rule for `/AGENTS.md` is not side-stepped by `/agents.md`.
 - **Bounded.** Each file at most `maxFileTokens` (default 1000), the section at most
   `maxTotalTokens` (2000); a file over either is cut and marked, files past a full section are left
   out, and each is named by path in a durable `HarnessEvents.DocumentsReported`.

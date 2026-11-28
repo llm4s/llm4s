@@ -27,7 +27,9 @@ import java.util.Locale
  *                     against it.
  * @param blockedPaths Paths that are blocked from access (takes precedence over allowedPaths). Matched on the real
  *                     location too, so blocking `/etc` also blocks `/private/etc` on macOS, and the default `/var`
- *                     also blocks `/private/var`, where macOS keeps per-user temporary directories. Matched without
+ *                     also blocks `/private/var`, where macOS keeps per-user temporary directories, and
+ *                     by file identity, so a blocked entry reached through a macOS firmlink
+ *                     (`/System/Volumes/Data/...`) is blocked too. Matched without
  *                     regard to case or Unicode normalisation, so `/ETC/hosts` is blocked by `/etc`, as it must be on
  *                     a case-insensitive file system such as the macOS and Windows defaults; on a case-sensitive one
  *                     this blocks a few more paths than it must, never fewer. The default is
@@ -107,7 +109,8 @@ object FileConfig {
    *    holds `/run/secrets` and the per-user keyrings and sockets of `/run/user`).
    *  - macOS: `/etc`, `/var`, `/sys`, `/proc`, `/dev`, their real locations `/private/etc` and `/private/var` (real
    *    locations are compared anyway; listing them makes the list say what it blocks), and the system keychains in
-   *    `/Library/Keychains`.
+   *    `/Library/Keychains`. Their `/System/Volumes/Data/...` firmlink spellings are blocked by file identity (#3237);
+   *    `/System/Volumes/Data` itself is not listed, because `/home` and other automount points resolve under it.
    *  - Windows: `C:\Windows` (system files, and the registry hives and SAM in `System32\config`),
    *    `C:\ProgramData\Microsoft\Crypto` (machine private keys) and `C:\ProgramData\ssh` (the OpenSSH server's host
    *    keys). A Windows installed on another drive is not covered: add its directory.
