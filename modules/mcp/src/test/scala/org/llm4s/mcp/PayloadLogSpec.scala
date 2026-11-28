@@ -59,7 +59,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "StdioTransportImpl" should "log a one-megabyte request as a bounded, redacted preview" in {
     val echoServer = StdioTestServers.echo("""{"jsonrpc":"2.0","id":"$id","result":{}}""", "--ready")
-    val transport  = new StdioTransportImpl(echoServer, startupTimeout = 500.millis, name = "payload-log")
+    val transport  = new StdioTransportImpl(echoServer, timeout = 30.seconds, name = "payload-log")
     val request = JsonRpcRequest(
       "2.0",
       "big",
@@ -86,7 +86,7 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
     // reports the server's stderr in its ERROR log and in the returned error. The server assembles the secret at
     // run time, because the transport logs its command line.
     val failingServer = StdioTestServers.command("--stderr-flood")
-    val transport     = new StdioTransportImpl(failingServer, startupTimeout = 500.millis, name = "stderr-log")
+    val transport     = new StdioTransportImpl(failingServer, timeout = 30.seconds, name = "stderr-log")
 
     val started = System.nanoTime()
     val (result, logged) = capturingDebug(classOf[StdioTransportImpl]) {
@@ -116,11 +116,6 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
       http =>
         new StreamableHTTPTransportImpl("http://localhost/mcp", "sse-log", exchangeTimeout, WholeBodyReplies(http)),
       classOf[StreamableHTTPTransportImpl]
-    ),
-    (
-      "SSETransportImpl",
-      http => new SSETransportImpl("http://localhost/mcp", "sse-log", exchangeTimeout, http),
-      classOf[SSETransportImpl]
     )
   ).foreach { case (transportName, newTransport, source) =>
     transportName should "log a large non-JSON-RPC SSE event as a bounded, redacted preview" in {
@@ -142,6 +137,27 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
       all(logged.map(_.length)) should be < PayloadLog.MaxChars + 300
       logged.foreach(line => (line should not).include("hunter2-SENTINEL"))
     }
+  }
+
+  "SSETransportImpl" should "log a large non-JSON-RPC SSE event as a bounded, redacted preview" in {
+    val nonJsonRpc = s"""{"api_key":"hunter2-SENTINEL","x":"${"x" * (1024 * 1024)}"}"""
+    val server = new LegacySseServer(onPost =
+      body =>
+        202 -> (s"data: $nonJsonRpc\n\n" + s"data: ${ujson.Obj("jsonrpc" -> "2.0", "id" -> body("id"), "result" -> ujson.Obj()).render()}\n\n")
+    )
+    val transport = new SSETransportImpl(server.url, "sse-log", exchangeTimeout)
+    val (result, logged) =
+      try
+        capturingDebug(classOf[SSETransportImpl])(transport.sendRequest(JsonRpcRequest("2.0", "1", "tools/list", None)))
+      finally {
+        transport.close()
+        server.close()
+      }
+
+    result.isRight shouldBe true
+    logged.exists(_.contains("received a notification")) shouldBe true
+    all(logged.map(_.length)) should be < PayloadLog.MaxChars + 300
+    logged.foreach(line => (line should not).include("hunter2-SENTINEL"))
   }
 
   /** Runs `body` with `source`'s logger at DEBUG, returning its result and the messages logged meanwhile. */

@@ -72,15 +72,17 @@ object MCPServerConfig {
    * @param url HTTP URL of the MCP endpoint (single endpoint for both POST and GET)
    * @param timeout Maximum response timeout
    * @param trustAnnotations Whether this server's tool annotations are trusted; see [[MCPServerConfig]]
+   * @param http Headers, credential and HTTP client for the server (#3078), used by the fallback too
    * @return MCPServerConfig configured for Streamable HTTP transport with automatic fallback
    */
   def streamableHTTP(
     name: String,
     url: String,
     timeout: FiniteDuration = 30.seconds,
-    trustAnnotations: Boolean = false
+    trustAnnotations: Boolean = false,
+    http: MCPHttpOptions = MCPHttpOptions.default
   ): MCPServerConfig =
-    MCPServerConfig(name, StreamableHTTPTransport(url, name), timeout, trustAnnotations)
+    MCPServerConfig(name, StreamableHTTPTransport(url, name, http), timeout, trustAnnotations)
 
   /**
    * Creates configuration for SSE-based MCP server (legacy 2024-11-05 spec).
@@ -91,13 +93,15 @@ object MCPServerConfig {
    * @param url HTTP URL of the SSE endpoint
    * @param timeout Maximum response timeout
    * @param trustAnnotations Whether this server's tool annotations are trusted; see [[MCPServerConfig]]
+   * @param http Headers, credential and HTTP client for the server (#3078)
    * @return MCPServerConfig configured for SSE transport with automatic upgrade attempt
    */
   def sse(
     name: String,
     url: String,
     timeout: FiniteDuration = 30.seconds,
-    trustAnnotations: Boolean = false
+    trustAnnotations: Boolean = false,
+    http: MCPHttpOptions = MCPHttpOptions.default
   ): MCPServerConfig =
-    MCPServerConfig(name, SSETransport(url, name), timeout, trustAnnotations)
+    MCPServerConfig(name, SSETransport(url, name, http), timeout, trustAnnotations)
 }

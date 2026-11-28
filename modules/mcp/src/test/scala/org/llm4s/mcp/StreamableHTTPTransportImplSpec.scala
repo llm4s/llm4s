@@ -175,13 +175,14 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
       // First initialize
       transport.sendRequest(initRequest)
 
-      // Then send regular request
+      // The client records the version the handshake agreed (#3079): an older one than the client offered
+      transport.useProtocolVersion("2025-03-26")
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
 
-      // Verify protocol version header is present in second call
+      // Verify the agreed protocol version is in the second call
       (secondCallHeaders should contain).key("MCP-Protocol-Version")
-      secondCallHeaders("MCP-Protocol-Version") shouldBe "2025-06-18"
+      secondCallHeaders("MCP-Protocol-Version") shouldBe "2025-03-26"
     }
 
     "handle successful JSON response" in {
@@ -706,6 +707,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
           }
         }
 
+      transport.useProtocolVersion("2025-06-18")
       val result = transport.sendNotification(notification)
       result.isRight shouldBe true
 

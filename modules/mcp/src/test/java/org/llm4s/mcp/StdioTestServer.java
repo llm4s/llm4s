@@ -46,6 +46,13 @@ import java.util.regex.Pattern;
  *   <li>{@code --exit=N} - exit N at once.</li>
  *   <li>{@code --require-init} - answer any request before the first {@code initialize} with a JSON-RPC error, as
  *       a server that has not been through the handshake does.</li>
+ *   <li>{@code --record=PATH} - append {@code started} to PATH at start, then every line read, as it is read.</li>
+ *   <li>{@code --exit-after-reply} - exit 0 straight after writing the first reply.</li>
+ *   <li>{@code --spawn-child=PATH} - first start a child JVM of this class that writes its process id to PATH and
+ *       sleeps; it outlives this process unless it is stopped too.</li>
+ *   <li>{@code --spawn-holder=PATH} - as {@code --spawn-child}, but the child inherits this process's stdout, so it
+ *       holds the transport's pipe open after this process exits.</li>
+ *   <li>{@code --sleep} - sleep for five minutes, reading nothing (the child of {@code --spawn-child}).</li>
  * </ul>
  * Lines are read with {@code readLine}, so CRLF and LF both work; replies end in {@code \n}.
  */
@@ -60,10 +67,16 @@ public final class StdioTestServer {
     boolean ready = false, hello = false, hang = false, exitAfterRead = false, flood = false;
     int delay = 0, stderrKb = 0;
     boolean dieAfterStderr = false, secretLine = false, endless = false, requireInit = false;
-    String pidFile = null, gotFile = null;
+    boolean exitAfterReply = false, sleep = false;
+    String pidFile = null, gotFile = null, recordFile = null, childPidFile = null, holderPidFile = null;
     for (String a : args) {
       if (a.equals("--ready")) ready = true;
       else if (a.equals("--require-init")) requireInit = true;
+      else if (a.equals("--exit-after-reply")) exitAfterReply = true;
+      else if (a.equals("--sleep")) sleep = true;
+      else if (a.startsWith("--record=")) recordFile = a.substring(9);
+      else if (a.startsWith("--spawn-child=")) childPidFile = a.substring(14);
+      else if (a.startsWith("--spawn-holder=")) holderPidFile = a.substring(15);
       else if (a.equals("--hello")) hello = true;
       else if (a.equals("--hang")) hang = true;
       else if (a.equals("--exit-after-read")) exitAfterRead = true;
@@ -84,6 +97,29 @@ public final class StdioTestServer {
       }
     }
     if (pidFile != null) writeFile(pidFile, Long.toString(ProcessHandle.current().pid()));
+    if (sleep) {
+      Thread.sleep(300_000);
+      return;
+    }
+    if (recordFile != null) append(recordFile, "started");
+    if (holderPidFile != null) {
+      String java = ProcessHandle.current().info().command().orElse("java");
+      new ProcessBuilder(
+              java, "-cp", System.getProperty("java.class.path"), StdioTestServer.class.getName(),
+              "--pidfile=" + holderPidFile, "--sleep")
+          .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+          .redirectError(ProcessBuilder.Redirect.DISCARD)
+          .start();
+    }
+    if (childPidFile != null) {
+      String java = ProcessHandle.current().info().command().orElse("java");
+      new ProcessBuilder(
+              java, "-cp", System.getProperty("java.class.path"), StdioTestServer.class.getName(),
+              "--pidfile=" + childPidFile, "--sleep")
+          .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+          .redirectError(ProcessBuilder.Redirect.DISCARD)
+          .start();
+    }
     if (ready) {
       System.err.println("ready");
       System.err.flush();
@@ -115,6 +151,7 @@ public final class StdioTestServer {
     boolean stderrWritten = false;
     boolean initialized = false;
     while ((line = in.readLine()) != null) {
+      if (recordFile != null) append(recordFile, line);
       Matcher id = ID.matcher(line);
       if (!id.find()) continue;
       if (secretLine || endless) {
@@ -157,6 +194,7 @@ public final class StdioTestServer {
       if (delay > 0) Thread.sleep(ThreadLocalRandom.current().nextInt(delay));
       out.print(environment(reply.replace("$id", id.group(1))) + "\n");
       out.flush();
+      if (exitAfterReply) System.exit(0);
     }
   }
 
@@ -179,6 +217,14 @@ public final class StdioTestServer {
 
   private static String jsonString(String s) {
     return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+  }
+
+  private static void append(String path, String line) throws IOException {
+    Files.write(
+        Paths.get(path),
+        (line + "\n").getBytes(StandardCharsets.UTF_8),
+        java.nio.file.StandardOpenOption.CREATE,
+        java.nio.file.StandardOpenOption.APPEND);
   }
 
   private static void writeFile(String path, String content) throws IOException {

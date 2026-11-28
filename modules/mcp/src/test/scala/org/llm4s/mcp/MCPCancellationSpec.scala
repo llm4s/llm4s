@@ -96,14 +96,21 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   // ---- the stdio transport
 
-  "StdioTransportImpl" should "return CancelledError and stop the server it started when interrupted during startup" in {
+  "StdioTransportImpl" should "return CancelledError and stop the server it started when interrupted awaiting initialize" in {
     val pidFile = Files.createTempFile("llm4s-mcp-", ".pid")
-    // A server that starts and says nothing: the transport is still waiting for it to be ready.
+    val gotFile = Files.createTempFile("llm4s-mcp-", ".got")
+    // A server that reads `initialize` and never answers it: a server that may be half way through the handshake is
+    // not kept for the next attempt (#3077).
     val transport =
-      new StdioTransportImpl(StdioTestServers.command("--pidfile=" + pidFile, "--hang"), "silent")
-    ProviderModuleChecks.assertCallCancelsOnceReady("stdio sendRequest during startup")(
-      transport.sendRequest(request)
-    )(awaitContent(pidFile, "recorded its process id"))
+      new StdioTransportImpl(
+        StdioTestServers.command("--pidfile=" + pidFile, "--gotfile=" + gotFile, "--hang"),
+        "silent"
+      )
+    val initialize = request.copy(method = "initialize")
+    ProviderModuleChecks.assertCallCancelsOnceReady("stdio sendRequest awaiting initialize")(
+      transport.sendRequest(initialize)
+    )(awaitContent(gotFile, "read the request"))
+    Files.deleteIfExists(gotFile): Unit
     val stopped = programStopped(pidFile)
     transport.close()
     Files.deleteIfExists(pidFile): Unit

@@ -15,10 +15,15 @@ import scala.util.{ Failure, Success, Try }
  *
  * == Transport auto-detection ==
  * For HTTP-based server configs (`StreamableHTTPTransport` or `SSETransport`),
- * this client first attempts to connect using the MCP 2025-06-18 Streamable HTTP
- * protocol.  If the server responds with HTTP 404 or 405, it automatically falls
- * back to the older 2024-11-05 HTTP+SSE protocol.  Stdio servers always use the
- * 2024-11-05 protocol.
+ * this client first attempts to connect using the Streamable HTTP transport. If the server
+ * refuses the `initialize` POST with a 4xx other than 401 or 403, it falls back to the
+ * 2024-11-05 HTTP+SSE transport (a `GET` of the same URL, which opens the event stream).
+ *
+ * == Handshake ==
+ * The client offers protocol version [[MCPClientImpl.LatestProtocolVersion]] on every transport, accepts
+ * any of [[MCPClientImpl.SupportedProtocolVersions]] in reply, and sends the agreed version on every
+ * later HTTP request (`MCP-Protocol-Version`). It declares no client capabilities. A request the server
+ * sends it is answered: `ping` with an empty result, anything else with method-not-found (-32601).
  *
  * == Failures in `getTools` ==
  * `getTools()` returns a `Left` for any failure during tool discovery (network error, JSON-RPC error,
@@ -44,64 +49,66 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private val requestId                                   = new AtomicLong(0)
   private var initialized                                 = false
   @volatile private var toolHints: Map[String, ToolHints] = Map.empty
-  private var protocolVersion                             = "2025-06-18" // Updated to latest version
+  private var negotiatedVersion: Option[String]           = None
+  private var serverCaps: Option[Value]                   = None
 
   logger.info(s"MCPClientImpl created for server: ${config.name}")
 
-  // Initialize transport with backward compatibility detection
-  private def initializeTransport(): Result[MCPTransportImpl] =
+  /**
+   * The transport and the server's reply to `initialize`: on the transport already open (a handshake run again after
+   * a lost session, #3072), or on a new one. An HTTP config tries Streamable HTTP first and falls back to HTTP+SSE
+   * when the server refuses the `initialize` POST with a 4xx (#3079).
+   */
+  private def connect(): Result[(MCPTransportImpl, JsonRpcResponse)] =
     transport match {
-      case Some(t) => Right(t)
+      case Some(t) =>
+        t.sendRequest(createInitializeRequest()) match {
+          case Right(response)                 => Right(t -> response)
+          case Left(cancelled: CancelledError) => Left(cancelled)
+          case Left(error)                     => Left(SimpleError(s"Initialize request failed: ${error.message}"))
+        }
       case None =>
         config.transport match {
-          case StreamableHTTPTransport(url, name) =>
-            tryHttpTransportWithFallback(url, name)
-          case SSETransport(url, name) =>
-            tryHttpTransportWithFallback(url, name)
+          case http: StreamableHTTPTransport => tryHttpTransportWithFallback(http.url, http.name, http.http)
+          case http: SSETransport            => tryHttpTransportWithFallback(http.url, http.name, http.http)
           case stdio: StdioTransport =>
-            // Stdio transport uses 2024-11-05 protocol version
-            val stdioTransport = StdioTransportImpl.of(stdio)
+            val stdioTransport = StdioTransportImpl.of(stdio, config.timeout)
             transport = Some(stdioTransport)
-            protocolVersion = "2024-11-05"
-            Right(stdioTransport)
+            connect()
         }
     }
 
-  // Unified HTTP transport logic: try Streamable HTTP first, fallback to SSE
-  private def tryHttpTransportWithFallback(url: String, name: String): Result[MCPTransportImpl] = {
-    // Try new 2025-06-18 Streamable HTTP transport first
-    logger.info(s"Attempting to connect using Streamable HTTP transport (2025-06-18) to $url")
-    val newTransport = new StreamableHTTPTransportImpl(url, name, config.timeout)
+  // Unified HTTP transport logic: try Streamable HTTP first, fall back to HTTP+SSE
+  private def tryHttpTransportWithFallback(
+    url: String,
+    name: String,
+    http: MCPHttpOptions
+  ): Result[(MCPTransportImpl, JsonRpcResponse)] = {
+    logger.info(s"Attempting to connect using Streamable HTTP transport to $url")
+    val newTransport = new StreamableHTTPTransportImpl(url, name, config.timeout, http)
 
-    // Test with a simple capability check (not full initialization)
-    val capabilityRequest = createCapabilityCheckRequest("2025-06-18")
-    newTransport.sendRequest(capabilityRequest) match {
-      case Right(_) =>
-        logger.info(s"Successfully connected using Streamable HTTP transport (2025-06-18)")
+    newTransport.sendRequest(createInitializeRequest()) match {
+      case Right(response) =>
+        logger.info(s"Connected to ${config.name} using Streamable HTTP transport")
         transport = Some(newTransport)
-        protocolVersion = "2025-06-18"
-        isTransportInitialized = true // Mark as initialized during testing
-        Right(newTransport)
-      case Left(error) if MCPClientImpl.isUnsupportedTransport(error.message) =>
-        // Server doesn't support new transport, try fallback
-        logger.info(s"Server doesn't support Streamable HTTP, attempting fallback to HTTP+SSE (2024-11-05)")
+        Right(newTransport -> response)
+      case Left(refused: MCPHttpStatus) if MCPClientImpl.fallsBackToLegacy(refused.status) =>
+        // The specification's backwards-compatibility rule: a 4xx to the initialize POST means the server may
+        // speak only the 2024-11-05 HTTP+SSE transport.
+        logger.info(s"Server refused Streamable HTTP (HTTP ${refused.status}), attempting fallback to HTTP+SSE")
         newTransport.close()
 
-        // Try old transport
-        val oldTransport         = new SSETransportImpl(url, name, config.timeout)
-        val oldCapabilityRequest = createCapabilityCheckRequest("2024-11-05")
-        oldTransport.sendRequest(oldCapabilityRequest) match {
-          case Right(_) =>
-            logger.info(s"Successfully connected using HTTP+SSE transport (2024-11-05)")
+        val oldTransport = new SSETransportImpl(url, name, config.timeout, http)
+        oldTransport.sendRequest(createInitializeRequest()) match {
+          case Right(response) =>
+            logger.info(s"Connected to ${config.name} using HTTP+SSE transport (2024-11-05)")
             transport = Some(oldTransport)
-            protocolVersion = "2024-11-05"
-            isTransportInitialized = true // Mark as initialized during testing
-            Right(oldTransport)
+            Right(oldTransport -> response)
           case Left(cancelled: CancelledError) =>
             oldTransport.close()
             Left(cancelled)
           case Left(fallbackError) =>
-            logger.error(s"Both transport methods failed. New: ${error.message}, Old: ${fallbackError.message}")
+            logger.error(s"Both transport methods failed. New: ${refused.message}, Old: ${fallbackError.message}")
             oldTransport.close()
             Left(SimpleError(s"Failed to connect with both transports. Latest error: ${fallbackError.message}"))
         }
@@ -112,23 +119,20 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     }
   }
 
-  // Create a simple capability check request (use initialize but mark as test)
-  private def createCapabilityCheckRequest(version: String): JsonRpcRequest =
-    createInitializeRequest(version)
-
-  private def createInitializeRequest(version: String): JsonRpcRequest =
+  /**
+   * The `initialize` request. It offers the latest version the client supports on every transport, and declares no
+   * client capability (#3079): the client implements neither `roots` nor `sampling`, and a server that acted on a
+   * declaration of them would wait for answers that never come. `tools` is a server capability, not a client one.
+   */
+  private def createInitializeRequest(): JsonRpcRequest =
     JsonRpcRequest(
-      jsonrpc = "2.0", // Explicitly set to ensure serialization
+      jsonrpc = "2.0",
       id = generateId(),
       method = "initialize",
       params = Some(
         ujson.Obj(
-          "protocolVersion" -> ujson.Str(version),
-          "capabilities" -> ujson.Obj(
-            "tools"    -> ujson.Obj(),
-            "roots"    -> ujson.Obj("listChanged" -> ujson.Bool(false)),
-            "sampling" -> ujson.Obj()
-          ),
+          "protocolVersion" -> ujson.Str(MCPClientImpl.LatestProtocolVersion),
+          "capabilities"    -> ujson.Obj(),
           "clientInfo" -> ujson.Obj(
             "name"    -> ujson.Str("llm4s-mcp"),
             "version" -> ujson.Str("1.0.0")
@@ -137,89 +141,56 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       )
     )
 
-  // Performs MCP protocol handshake with the server
+  /**
+   * Performs the MCP handshake: `initialize`, whose result is kept (#3079) - the server's protocol version must be one
+   * the client supports, and is then sent on every request; its capabilities are recorded - and then the
+   * `notifications/initialized` notification. A version the client does not support ends the handshake and closes the
+   * transport, as the specification asks.
+   */
   override def initialize(): Result[Unit] =
-    if (initialized) {
-      Right(())
-    } else {
-      initializeTransport().flatMap { transportImpl =>
-        // Check if we already did initialization during transport testing
-        if (isTransportInitialized) {
-          // Send initialized notification to complete handshake (notifications have no ID)
-          val initializedNotification = JsonRpcNotification(
-            jsonrpc = "2.0",
-            method = "notifications/initialized",
-            params = Some(ujson.Obj())
-          )
-
-          transportImpl.sendNotification(initializedNotification) match {
-            case Right(_) =>
-              initialized = true
-              logger.info(s"Completed MCP client initialization for ${config.name} with existing connection")
-              Right(())
-            case Left(cancelled: CancelledError) => Left(cancelled)
-            case Left(notificationError) =>
-              logger.warn(
-                s"Failed to send initialized notification: ${notificationError.message}, but continuing anyway"
-              )
-              // Some servers might not require the initialized notification
-              initialized = true
-              Right(())
-          }
-        } else {
-          // Full initialization process
-          val initRequest = createInitializeRequest(protocolVersion)
-
-          transportImpl.sendRequest(initRequest) match {
-            case Right(response) =>
-              response.result match {
-                case Some(result) =>
-                  Try {
-                    val serverProtocolVersion = result("protocolVersion").str
-                    logger.info(s"Server supports protocol version: $serverProtocolVersion")
-
-                    // Validate protocol version compatibility
-                    if (serverProtocolVersion.startsWith("2024-") || serverProtocolVersion.startsWith("2025-")) {
-                      // Send initialized notification to complete the handshake (notifications have no ID)
-                      val initializedNotification = JsonRpcNotification(
-                        jsonrpc = "2.0",
-                        method = "notifications/initialized",
-                        params = Some(ujson.Obj())
-                      )
-
-                      transportImpl.sendNotification(initializedNotification) match {
-                        case Right(_) =>
-                          initialized = true
-                          logger.info(
-                            s"Successfully initialized MCP client for ${config.name} with protocol $serverProtocolVersion"
-                          )
-                          Right(())
-                        case Left(cancelled: CancelledError) => Left(cancelled)
-                        case Left(notificationError) =>
-                          logger.warn(
-                            s"Failed to send initialized notification: ${notificationError.message}, but continuing anyway"
-                          )
-                          // Some servers might not require the initialized notification
-                          initialized = true
-                          Right(())
-                      }
-                    } else {
-                      Left(SimpleError(s"Unsupported protocol version: $serverProtocolVersion"))
-                    }
-                  }.getOrElse(Left(SimpleError("Invalid initialization response format")))
-                case None =>
-                  Left(SimpleError("Initialize request failed: no result in response"))
-              }
-            case Left(cancelled: CancelledError) => Left(cancelled)
-            case Left(error) =>
-              Left(SimpleError(s"Initialize request failed: ${error.message}"))
-          }
+    if (initialized) Right(())
+    else
+      connect().flatMap { case (transportImpl, response) =>
+        for {
+          result  <- response.result.toRight(SimpleError("Initialize request failed: no result in response"))
+          version <- negotiate(result)
+          _ = transportImpl.useProtocolVersion(version)
+          _ <- notifyInitialized(transportImpl)
+        } yield {
+          negotiatedVersion = Some(version)
+          serverCaps = result.objOpt.flatMap(_.get("capabilities"))
+          initialized = true
+          logger.info(s"Initialized MCP client for ${config.name} with protocol $version")
         }
       }
+
+  private def negotiate(result: Value): Result[String] =
+    result.objOpt.flatMap(_.get("protocolVersion")).flatMap(_.strOpt) match {
+      case None => Left(SimpleError("Invalid initialization response format"))
+      case Some(version) if MCPClientImpl.SupportedProtocolVersions.contains(version) => Right(version)
+      case Some(version) =>
+        logger.error(s"MCP server ${config.name} answered with protocol $version, which this client does not support")
+        close()
+        Left(SimpleError(s"Unsupported protocol version: $version"))
     }
 
-  // Track if transport was initialized during testing
-  private var isTransportInitialized = false
+  private def notifyInitialized(transportImpl: MCPTransportImpl): Result[Unit] =
+    transportImpl.sendNotification(
+      JsonRpcNotification(jsonrpc = "2.0", method = "notifications/initialized", params = Some(ujson.Obj()))
+    ) match {
+      case Left(cancelled: CancelledError) => Left(cancelled)
+      case Left(notificationError)         =>
+        // Some servers might not require the initialized notification
+        logger.warn(s"Failed to send initialized notification: ${notificationError.message}, but continuing anyway")
+        Right(())
+      case Right(_) => Right(())
+    }
+
+  /** The protocol version the last handshake agreed, `None` before one has completed. */
+  private[mcp] def protocolVersion: Option[String] = negotiatedVersion
+
+  /** The `capabilities` the server declared in its reply to `initialize`, `None` before a handshake. */
+  private[mcp] def serverCapabilities: Option[Value] = serverCaps
 
   /**
    * Sends the request `newRequest` builds on `transportImpl`; when the server's session is gone (#3072), runs the
@@ -235,7 +206,6 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       case Left(lost: MCPSessionLost) =>
         logger.warn(s"MCP server ${config.name}: ${lost.message}; running the handshake again and retrying once")
         initialized = false
-        isTransportInitialized = false
         initialize().flatMap(_ => transportImpl.sendRequest(newRequest()))
       case other => other
     }
@@ -495,19 +465,19 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
 object MCPClientImpl {
 
-  /**
-   * What `StreamableHTTPTransportImpl` says when the server answered 404 or 405, the replies of a server that does
-   * not speak Streamable HTTP: `Transport error: HTTP error 404: ...`, and for 405 `Transport error: Server does
-   * not support Streamable HTTP transport (405 Method Not Allowed)`. It is anchored to the start of the message on
-   * purpose: the text of any other failure carries a URL and a response body, and `404` or `405` appears in a port
-   * number (`:40413`) or a body without being the status.
-   */
-  private val UnsupportedTransportMessage =
-    """^Transport error: (?:HTTP error (?:404|405)\b|Server does not support Streamable HTTP transport)""".r
+  /** The protocol version the client offers in `initialize`, on every transport (#3079). */
+  val LatestProtocolVersion: String = "2025-06-18"
 
-  /** Whether `message` reports a 404 or 405 from the server, so the client should try HTTP+SSE instead. */
-  private[mcp] def isUnsupportedTransport(message: String): Boolean =
-    UnsupportedTransportMessage.findFirstIn(message).isDefined
+  /** The versions the client accepts in the server's reply to `initialize`; any other ends the handshake. */
+  val SupportedProtocolVersions: Set[String] = Set("2025-06-18", "2025-03-26", "2024-11-05")
+
+  /**
+   * Whether a Streamable HTTP server that refused the `initialize` POST with `status` should be tried over HTTP+SSE:
+   * any 4xx, as the specification's backwards-compatibility rule says (#3079), except 401 and 403, which say the
+   * credentials are wrong, not the transport, and are reported as they are.
+   */
+  private[mcp] def fallsBackToLegacy(status: Int): Boolean =
+    status >= 400 && status < 500 && status != 401 && status != 403
 
   /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
   private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =

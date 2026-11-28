@@ -71,17 +71,19 @@ class MCPErrorPathsSpec extends AnyFlatSpec with Matchers {
 
   it should "report a server that exits without answering, rather than waiting for it" in {
     val transport = transportFor(StdioTestServers.command("--ready", "--exit-after-read"))
-    try failure(transport.sendRequest(toolsRequest)) should include("Reader thread exited unexpectedly")
+    try failure(transport.sendRequest(toolsRequest)) should include("the MCP server process exited with code 0")
     finally transport.close()
   }
 
-  it should "report a server process that dies while starting" in {
-    // No output before exiting: the start-up wait reads any output as "ready", so a line written just before the
-    // exit could let the process count as started and fail later, at the write, as a broken pipe.
+  it should "report a server process that dies while starting, with its exit code" in {
+    // The request is written at once (#3077): it either meets a broken pipe or waits for a reply the exit ends. Both
+    // report the exit, never a timeout.
     val transport = transportFor(StdioTestServers.command("--exit=3"))
-    val message   = failure(transport.sendRequest(toolsRequest))
-    message should startWith("Failed to start MCP server process")
-    message should include("died during startup")
+    try {
+      val message = failure(transport.sendRequest(toolsRequest))
+      message should startWith("Stdio transport error")
+      message should include("the MCP server process exited with code 3")
+    } finally transport.close()
   }
 
   it should "report a command that does not exist as a start failure" in {

@@ -720,6 +720,70 @@ MCPServerConfig.stdio("github", Seq("github-mcp-server", "stdio"),
 `MCPToolRegistry()` and `MCPToolRegistry.mcpServerConfig`, which ran the unpinned `@playwright/mcp@latest`, are
 deprecated: build the config yourself with a pinned version, as the `PlaywrightExample` sample does.
 
+## The MCP client's transports and handshake (#3073, #3077, #3078, #3079)
+
+`llm4s-mcp` is Beta. The client's three transports and its handshake were brought in line with the MCP
+specification. What changes for a caller:
+
+**Stdio (#3077).** A stdio server's replies wait as long as `MCPServerConfig.timeout` says (the Playwright default's
+60 s now applies); they used to wait a fixed 30 s. The start-up wait is gone: the first request is written as soon as
+the process starts, and the server's reply to `initialize` is the readiness signal, so a server that says nothing
+until then no longer costs 10 s per start. `StdioTransportImpl`'s third constructor parameter, `startupTimeout`
+before, is now `timeout`, the reply timeout:
+
+```scala
+new StdioTransportImpl(command, "files", startupTimeout = 5.seconds)   // before
+new StdioTransportImpl(command, "files", timeout = 30.seconds)         // after
+```
+
+A request the server sends the client is answered (`ping` with an empty result, anything else with -32601) and is
+never taken for the reply to the client's request with the same id. Closing the transport closes the server's stdin,
+waits up to 2 s for it to exit, then terminates it and every process it started (`npx` -> `node` -> a browser), and
+kills any still running 2 s later; only the direct child was stopped before. A call that times out or is
+interrupted while waiting for its reply to `initialize` stops the process, so the next attempt starts afresh. The
+error for a server that exits names its exit code (`the MCP server process exited with code 3`).
+
+**Handshake (#3079).** The `initialize` request declares no client capabilities (`"capabilities": {}`): it used
+to declare `roots` and `sampling`, which the client does not implement. It offers `2025-06-18` on every transport
+(stdio offered `2024-11-05`) and accepts `2025-06-18`, `2025-03-26` or `2024-11-05` in reply; any other version ends
+the handshake and closes the transport. The agreed version, not a fixed `2025-06-18`, is sent as
+`MCP-Protocol-Version`. A Streamable HTTP server that refuses `initialize` with any 4xx is tried over HTTP+SSE (only
+404 and 405 were before), except 401 and 403, which are reported as they are. A JSON-RPC error's message now ends
+with its `data` when it has one: `JSON-RPC Error -32602: Invalid params (data: path must be absolute)`. A custom
+`MCPTransportImpl` may override the new `useProtocolVersion(version)`, a no-op by default.
+
+**Authentication and routing (#3078).** An HTTP server's headers, credential and HTTP client are an
+`MCPHttpOptions`, passed as `http` to `MCPServerConfig.streamableHTTP` or `sse` (the fallback transport uses it too):
+
+```scala
+val http = MCPHttpOptions()
+  .withApiKey(ApiKeyProvider.static(ApiKey(token)))                 // sent as Authorization: Bearer
+  .withHeader("X-Tenant", "acme")                                      // on every POST, GET and DELETE
+  .withHttpClient(routedClient)                                        // the application's proxy and TLS
+MCPServerConfig.streamableHTTP("docs", "https://mcp.example.com/mcp", http = http)
+```
+
+`StreamableHTTPTransport` and `SSETransport` gain the field `http` (default `MCPHttpOptions.default`), so
+`case StreamableHTTPTransport(url, name)` becomes `case StreamableHTTPTransport(url, name, _)`. The transport
+implementations' fourth parameter is an `MCPHttpOptions`; the overload taking an `Llm4sHttpClient` remains. A
+transport closes the HTTP client it created when it is closed, and never one it was given. The session id is no
+longer logged.
+
+**HTTP+SSE (#3073).** `SSETransportImpl` used to POST each request to the configured URL and read the reply from
+the POST's body, which is not the 2024-11-05 protocol: it could not talk to a legacy server, llm4s's own `MCPServer`
+included. It now `GET`s the URL, which opens the event stream; POSTs each message to the URL the server's `endpoint`
+event names (a path, or an absolute URL on the same origin; another origin is refused, since the headers and key go
+there); and reads each reply from the stream, matched by id. So an `SSETransport` (or `MCPServerConfig.sse`) URL must
+be the server's SSE endpoint, `{path}/sse` for an `MCPServer`:
+
+```scala
+MCPServerConfig.sse("legacy", "http://127.0.0.1:8080/mcp/sse")
+```
+
+A stream that ends fails the calls waiting on it; the next message opens a new stream, a new session, and the client
+runs the handshake again. There is no session `DELETE` on this transport: closing it closes the stream. Both HTTP
+transports now read SSE the same way: `data:` with or without a space after the colon, several `data` lines joined.
+
 ## A run queue sees only the submitter's tenant's entries on a thread (#3085)
 
 The run queue (`RunQueue`, `RunSubmitter`, the in-memory, SQLite and PostgreSQL queues) is experimental. No signature

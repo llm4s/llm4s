@@ -23,7 +23,7 @@ class StdioStderrDrainSpec extends AnyWordSpec with Matchers {
     "answer a server that writes 256 KB to stderr before replying, well inside the response timeout" in {
       val transport = new StdioTransportImpl(
         StdioTestServers.echo(Reply, "--stderr-kb=256"),
-        startupTimeout = 500.millis,
+        timeout = 30.seconds,
         name = "drain-ok"
       )
       val started = System.nanoTime()
@@ -40,7 +40,7 @@ class StdioStderrDrainSpec extends AnyWordSpec with Matchers {
     "keep the recent stderr in the error when the server dies after writing it" in {
       val transport = new StdioTransportImpl(
         StdioTestServers.echo(Reply, "--stderr-kb=256", "--die-after-stderr"),
-        startupTimeout = 500.millis,
+        timeout = 30.seconds,
         name = "drain-fail"
       )
       val result = transport.sendRequest(request)
@@ -56,7 +56,7 @@ class StdioStderrDrainSpec extends AnyWordSpec with Matchers {
 
     "end its stderr drain thread on close" in {
       val name      = "drain-close"
-      val transport = new StdioTransportImpl(StdioTestServers.echo(Reply), startupTimeout = 500.millis, name = name)
+      val transport = new StdioTransportImpl(StdioTestServers.echo(Reply), timeout = 30.seconds, name = name)
       transport.sendRequest(request).isRight shouldBe true
       val mine = drainThreads.filter(_.getName.contains(name))
       mine should have size 1

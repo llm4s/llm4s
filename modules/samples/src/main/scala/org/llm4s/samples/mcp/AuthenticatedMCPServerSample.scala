@@ -54,6 +54,16 @@ import org.slf4j.LoggerFactory
  *   }
  * }
  * }}}
+ *
+ * === llm4s client configuration ===
+ * {{{
+ * import org.llm4s.llmconnect.auth.ApiKeyProvider
+ * import org.llm4s.types.ProviderModelTypes.ApiKey
+ *
+ * val http   = MCPHttpOptions().withApiKey(ApiKeyProvider.static(ApiKey("my-secret-key-change-me")))
+ * val config = MCPServerConfig.streamableHTTP("llm4s-demo", "http://127.0.0.1:8080/mcp", http = http)
+ * val tools  = new MCPToolRegistry(Seq(config))
+ * }}}
  */
 object AuthenticatedMCPServerSample {
   private val logger = LoggerFactory.getLogger(getClass)
