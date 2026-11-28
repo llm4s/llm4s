@@ -500,9 +500,9 @@ each thread's latest checkpoint when a version-7 file is opened, and 9 for tombs
 upgrade. A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
-at most that long. Stop every process running an older build before opening its file with this one: an
-older process that already has the file open is not refused, and until it stops its deletes are not fenced and drop
-the record a deleted thread's id numbers on from. Opening a file at an older version upgrades it in one transaction, and
+at most that long. Stop every process running an older build before opening its file with this one. An older
+process that already has the file open is refused from its next write (`GraphError.UnsupportedStoreSchema`: each write
+checks the file's version first), so it stops writing, but it is not stopped by it. Opening a file at an older version upgrades it in one transaction, and
 opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
 it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
 
@@ -557,12 +557,18 @@ yield store.close()
 - **One schema, created and migrated on open.** The tables live in the configured schema (`llm4s` by default), so
   the store can share a database. Opening creates the schema if it is missing and brings it to the current version in
   one transaction under an advisory lock, so instances starting together migrate it once; a schema already current
-  is only read, so the application's role needs no `CREATE` once it exists.
+  is only read, so the application's role needs no `CREATE` once it exists. That transaction, and the wait for
+  another instance's migration, are bounded by `migrationTimeout` (10 minutes by default), not `callTimeout`, so a
+  step that rewrites a large table is not cut off; raise it for a very large database.
 - **The database decides time.** Claim expiry and retention age are judged by the server's clock, never a host's, so
   skew between machines changes nothing.
 - **Every write locks the thread's row** (`SELECT ... FOR UPDATE`) and checks the claim, the fence and the parent
   checkpoint before it writes; two rows are always locked in the order of their ids, so fenced commits never
   deadlock. Fencing tokens come from one sequence for the schema.
+- **Text is stored exactly.** Stored JSON escapes non-ASCII text, so content holding an unpaired surrogate (a tool
+  result cut mid-emoji) or a NUL reads back as written. An id that cannot be stored exactly - a thread, run, tenant,
+  checkpoint or effect-key id holding a NUL or an unpaired surrogate - is refused with a `ValidationError`, as every
+  store refuses it, and so is any other such text the store would send.
 - **Every call returns within `connectionTimeout + callTimeout`** (5 + 5 seconds by default): the call timeout is set
   on the server for each transaction and enforced on the client, which discards a connection whose call overran it.
   A caller-supplied pool's own connection timeout stands in for `connectionTimeout`; set a driver socket timeout on it.
@@ -571,11 +577,17 @@ yield store.close()
   the payload is a hash of the thread id, nothing of its content. Each store opens one more connection, outside its
   pool, on its first watch (`ApplicationName` `llm4s-agent-checkpoint-postgres-listener`), and keeps it until
   `close`: count it when sizing `max_connections`. Over a `DataSource` that is not a HikariCP pool with a JDBC URL,
-  that connection is taken from the `DataSource` instead, and held. A commit through any store over the schema wakes
+  that connection is taken from the `DataSource` instead, and held: its connections must unwrap to pgjdbc's
+  `PGConnection` and reach the server directly. One that does not unwrap is logged once at WARN and never tried
+  again, and the store polls. Behind a transaction-pooling proxy such as PgBouncer, `LISTEN` succeeds but no
+  notification arrives, so the store polls too: point the store, or at least its listener, at the server or a
+  session-pooled endpoint. A commit through any store over the schema wakes
   a waiting subscription within a second on a healthy database, whatever its `pollInterval`.
 - **A lost listening connection degrades to polling.** While it is down - before it first opens, after the server or
   network drops it, or once its heartbeat (a `SELECT 1` whenever `callTimeout` passes quietly) fails - each watch
-  reads once per `WatchPolicy.pollInterval`, as with SQLite, and the store reconnects in the background. A
+  reads once per `WatchPolicy.pollInterval`, as with SQLite, and the store reconnects in the background. A failure to
+  connect or `LISTEN` is logged at WARN, its cause scrubbed of known secrets, at once and then at most once a minute
+  while it lasts; `store.listening` says whether the listener is up, for a health check or a gauge. A
   notification is only a wake-up: the watch always reads the log, so a missed or repeated one loses nothing. Each
   watch still reads once per `pollInterval` while it waits, so where many subscriptions watch one database, a longer
   `pollInterval` cuts reads without slowing delivery.
@@ -584,7 +596,10 @@ yield store.close()
 
 A release that changes neither the store's schema nor the checkpoint format can replace instances one at a time. A
 release that changes either needs every instance stopped before the first new one starts: an old instance that meets
-the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing.
+the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing, and one that was
+already running when the new one migrated fails each write with the same error (every write checks the schema's
+version as it begins), so it stops writing, though it keeps running until it is stopped. A migration may take up to
+`migrationTimeout`.
 [Running agents on several machines](multiple-machines#upgrades) covers the rest of a rolling upgrade: draining,
 and runs in flight at an older graph version.
 
@@ -646,6 +661,7 @@ llm4s.agent {
       callTimeout = 5 seconds
       connectionTimeout = 5 seconds
       maxPoolSize = 10
+      migrationTimeout = 10 minutes             # bounds the open's migration instead of callTimeout
     }
     sqlite {
       path = "/var/lib/app/threads.db"           # or LLM4S_CHECKPOINTER_SQLITE_PATH

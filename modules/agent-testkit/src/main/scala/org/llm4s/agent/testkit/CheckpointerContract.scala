@@ -463,11 +463,16 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     same(s.store.latest(s.thread).value.value, StoredCheckpoint(checkpoint, Vector(write)))
   }
 
+  // surrogates built from their code units: a lone one is not a legal literal to every Scala tokenizer
+  private val high    = 0xd83d.toChar.toString
+  private val low     = 0xdc00.toChar.toString
+  private val lowPair = 0xde00.toChar.toString
+
   it should "read back text holding an unpaired surrogate, a NUL and a control character exactly (#3097)" in {
     val s     = Store()
     val token = s.claim("run").value.token
     // a tool result cut in the middle of an emoji, and a NUL, inside the content: stored as escapes, never as `?`
-    val text  = "cut \uD83D, lone \uDC00, nul \u0000, bell \u0007, emoji \uD83D\uDE00"
+    val text  = s"cut ${high}, lone ${low}, nul \u0000, bell \u0007, emoji $high$lowPair"
     val value = VersionedJson(1, ujson.Obj("text" -> text))
     val checkpoint = s
       .checkpoint("c1", None)
@@ -495,15 +500,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
   it should "refuse an id holding a NUL or an unpaired surrogate, storing nothing (#3097)" in {
     val s = Store()
-    for bad <- Vector("a\u0000b", "a\uD800", "\uDC00a") do
+    for bad <- Vector("a\u0000b", s"a$high", s"${low}a") do
       s.claim("run", on = ThreadId(bad)).refused shouldBe a[ValidationError]
       s.claim(bad).refused shouldBe a[ValidationError]
       s.claim("run", on = newThread(), tenant = Some(bad)).refused shouldBe a[ValidationError]
     // a paired surrogate is ordinary text
-    val emoji = ThreadId(s"${s.thread.value}-\uD83D\uDE00")
+    val emoji = ThreadId(s"${s.thread.value}-$high$lowPair")
     val token = s.claim("run", on = emoji).value.token
     s.commit(token, Some(s.checkpoint("c\u0000", None, on = emoji)), on = emoji).refused shouldBe a[ValidationError]
-    s.commit(token, Some(s.checkpoint("c1", None, on = emoji, runId = "r\uD800")), on = emoji).refused shouldBe
+    s.commit(token, Some(s.checkpoint("c1", None, on = emoji, runId = s"r$high")), on = emoji).refused shouldBe
       a[ValidationError]
     s.latestId(emoji) shouldBe None
     s.commit(token, Some(s.checkpoint("c1", None, on = emoji)), on = emoji).value

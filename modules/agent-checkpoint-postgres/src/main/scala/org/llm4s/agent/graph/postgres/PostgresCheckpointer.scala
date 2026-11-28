@@ -660,8 +660,13 @@ final class PostgresCheckpointer private (
       ChangeNotifier.readUntilWoken(threadId, waiter, timeout)(eventsAfter(threadId, afterSeq, limit))
     }
 
-  /** Whether this store's listening connection is up: for tests. */
-  private[postgres] def listening: Boolean = notifier.listening
+  /**
+   * Whether this store's listening connection is up (#3098): while it is, a commit or close through any store over the
+   * schema wakes this store's waits at once; while it is not - before the first wait, after the connection is lost,
+   * or for good over a `DataSource` whose connections are not PostgreSQL JDBC connections - they poll. For a health
+   * check or a gauge; the store logs each failure to listen at WARN.
+   */
+  def listening: Boolean = notifier.listening
 
   /** The listening connection's backend process id while it is up: for tests that kill it. */
   private[postgres] def listenerPid: Option[Int] = notifier.listenerPid

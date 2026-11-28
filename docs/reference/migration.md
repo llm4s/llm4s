@@ -729,6 +729,20 @@ A custom `RunQueue` implements two new methods, `allDepths()` and `closeUntaken(
 `RunQueueContract.spoilInput`, so the new contract case runs. `Submission`, `RunQueueSettings` and `TakeRequest` gain
 fields with defaults: `apply`, `of` and the setters keep compiling.
 
+## Durable stores refuse writes on a newer schema, and text that cannot be stored exactly (#3089, #3090, #3097, #3098)
+
+`llm4s-agent-checkpoint-sqlite` and `llm4s-agent-checkpoint-postgres` are experimental. The schema version is the same.
+
+| Before (1.0.0) | After |
+|---|---|
+| An open's migration ran under `callTimeout` (5 s), so a step over a large table, or a wait for another instance's migration, failed the open | It runs under the new `PostgresCheckpointerConfig.migrationTimeout` (`llm4s.agent.checkpointer.postgres.migrationTimeout`, 10 minutes) |
+| An instance already running when a newer build migrated the schema went on writing | Every write fails with `GraphError.UnsupportedStoreSchema`; reads still answer. Stop old instances before a schema-changing release, as before |
+| JSON was stored with raw UTF-8, and an unpaired surrogate became `?` (both stores) | Non-ASCII is stored as `\u` escapes, so text reads back exactly. Rows 1.0.0 wrote read as before. A query of your own over the JSON columns sees escapes |
+| A thread, run or tenant id holding a NUL failed every Postgres commit with a driver error; one holding an unpaired surrogate shared a row with another id | `claim` and `commit` refuse a thread, run, tenant, checkpoint or effect-key id holding a NUL or an unpaired surrogate with a `ValidationError` in every store; Postgres refuses any such bound text the same way |
+| A Postgres listener that could not connect or `LISTEN` retried silently for ever | It logs at WARN (at once, then at most once a minute); over connections that do not unwrap to `PGConnection` it says so once and stops, and the store polls. `PostgresCheckpointer.listening` is public |
+
+A custom `Checkpointer` should refuse such ids too: the new `CheckpointerContract` cases check it.
+
 ## The Whisper engine writes into a temporary directory, and refuses subtitle formats (#3138)
 
 `llm4s-speech` is Beta. No signature changed; `WhisperSpeechToText` behaves differently:
