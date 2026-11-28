@@ -296,7 +296,9 @@ final class RunContext private[graph] (
    * less when the call came from the turn's last allowed step, or after a handoff to an agent with a lower limit.
    * A delegated task caps its child's steps by it. `None` in any other task.
    */
-  val remainingSteps: Option[Int] = None
+  val remainingSteps: Option[Int] = None,
+  /** Whether a stop of the run has been recorded (#3253): read by [[isCancelled]] beside the interrupt flag. */
+  stopped: () => Boolean = () => false
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
@@ -311,12 +313,26 @@ final class RunContext private[graph] (
       resumeDigest,
       deadline,
       admitted,
-      remainingSteps
+      remainingSteps,
+      stopped
     )
 
   /** This context with `steps` as its [[remainingSteps]], recording usage in the same task's accumulator. */
   private[agent] def withRemainingSteps(steps: Option[Int]): RunContext =
-    new RunContext(config, position, sink, answers, usage, journal, owner, resumeDigest, deadline, admitted, steps)
+    new RunContext(
+      config,
+      position,
+      sink,
+      answers,
+      usage,
+      journal,
+      owner,
+      resumeDigest,
+      deadline,
+      admitted,
+      steps,
+      stopped
+    )
 
   /**
    * An object unique to this run incarnation: the same for every task of one run of a runtime (or one execution of a
@@ -384,8 +400,11 @@ final class RunContext private[graph] (
   private[agent] def settleChild(child: ThreadId, outcome: RunOutcome, message: String): Result[Option[RunId]] =
     sink.settleChild(child, outcome, message)
 
-  /** The task thread's interrupt flag, read without clearing it. */
-  def isCancelled: Boolean = Thread.currentThread().isInterrupted
+  /**
+   * Whether the task is to stop: its thread's interrupt flag, read without clearing it, or a stop of the run recorded
+   * by its runtime (#3253) - so a node or library that swallowed the interrupt still sees the cancel.
+   */
+  def isCancelled: Boolean = Thread.currentThread().isInterrupted || stopped()
 
   /** Forgets the durable events a failed attempt emitted, before the node is run again. */
   private[graph] def discardAttempt(): Unit = sink.discardCustom()

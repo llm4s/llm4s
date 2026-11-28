@@ -1694,6 +1694,46 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.sweep(SweepPolicy(batchSize = 10), Some(newThread()), SweepGuard.none).value.next shouldBe None
   }
 
+  // #3260: with a threadAge, a sweep removes the settled threads nothing has updated for that long, and only those
+  it should "delete in a sweep the settled top-level threads not updated for threadAge, keeping the rest" in {
+    val s      = Store(isolated = true)
+    val tenant = newTenant()
+    val old    = newThread()
+    val failed = newThread()
+    val idle   = newThread()
+    val held   = newThread()
+    val kept   = newThread()
+    registered(s, old, tenant)
+    registered(s, failed, tenant, status = CheckpointStatus.Failed)
+    // a run that stopped mid-turn waits for recover: never removed
+    registered(s, idle, tenant, status = CheckpointStatus.Running)
+    // the guard protects it: a run queue's open entry names it
+    registered(s, kept, tenant)
+    registered(s, held, tenant)
+    s.advance(10.days)
+    // a live claim holds it when the sweep comes: a run on it has begun
+    val token = s.claim("busy", on = held, tenant = tenant.map(_.value)).value.token
+    s.advance(1.second)
+    // recently updated
+    val fresh = newThread()
+    registered(s, fresh, tenant)
+    s.advance(1.second)
+    val guarded: SweepGuard = threads => Right(threads.filter(_ == kept).map(_ -> Set.empty[RunId]).toMap)
+    sweepAll(s.store, SweepPolicy(threadAge = Some(5.days)), guarded)
+    s.store.latest(old).value shouldBe None
+    s.store.latest(failed).value shouldBe None
+    s.store.latest(idle).value shouldBe defined
+    s.store.latest(kept).value shouldBe defined
+    s.store.latest(fresh).value shouldBe defined
+    s.store.latest(held).value shouldBe defined
+    listed(s, ThreadQuery(tenant, limit = ThreadQuery.MaxLimit)).toSet shouldBe Set(idle, kept, fresh, held)
+    s.store.release(held, token).value
+    // without a threadAge, no thread is ever removed
+    sweepAll(s.store, SweepPolicy(retention = RetentionPolicy(maxAge = Some(1.day))))
+    s.store.latest(kept).value shouldBe defined
+    an[IllegalArgumentException] should be thrownBy SweepPolicy(threadAge = Some(0.seconds))
+  }
+
   it should "visit every id in a sweep, the empty one included" in {
     val s     = Store(isolated = true)
     val empty = ThreadId("")
@@ -2359,6 +2399,28 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val page = s.store.threads(all.withAgent("x").withLimit(1)).value
     page.threads.map(_.threadId) shouldBe Vector(c)
     listed(s, all.withAgent("x").withLimit(1).withAfter(page.next)) shouldBe Vector(a)
+  }
+
+  // #3260: an operator finds a tenant's old threads without paging the whole registry newest first
+  it should "filter by when the store last changed a thread before an instant, and list oldest first, paged" in {
+    val s      = Store()
+    val tenant = newTenant()
+    val a      = newThread()
+    val b      = newThread()
+    val c      = newThread()
+    registered(s, a, tenant)
+    s.advance(1.second)
+    registered(s, b, tenant)
+    s.advance(1.second)
+    registered(s, c, tenant)
+    val all    = ThreadQuery(tenant)
+    val before = summary(s, tenant, c).value.updatedAt
+    listed(s, all.withUpdatedBefore(before)) shouldBe Vector(b, a)
+    listed(s, all.withOldestFirst(true)) shouldBe Vector(a, b, c)
+    listed(s, all.withOldestFirst(true).withUpdatedBefore(before)) shouldBe Vector(a, b)
+    val page = s.store.threads(all.withOldestFirst(true).withLimit(1)).value
+    page.threads.map(_.threadId) shouldBe Vector(a)
+    listed(s, all.withOldestFirst(true).withLimit(2).withAfter(page.next)) shouldBe Vector(b, c)
   }
 
   it should "list a tenant's incomplete root threads that no live claim holds, oldest first, an expired claim's included, paged" in {

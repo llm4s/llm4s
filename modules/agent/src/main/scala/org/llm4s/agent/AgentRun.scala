@@ -154,21 +154,42 @@ final class AgentRun private[agent] (
     if handle.status != RunStatus.Running then
       drain()
       tracing.foreach(_.detach())
-    for
-      result <- ended
-      // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
-      // that failed the run another way (from a model or tool wrapper) leaves it for recover, so it is Left
-      isBlock <- result match
-        case RunResult.Failed(_, _: GuardrailBlocked) => runtime.endedBlocked(threadId, runId)
-        case _                                        => Right(false)
-      status <- AgentRun.status(result, isBlock, loop, refused)
-      agentResult <- result match
-        case RunResult.Completed(state, output, _) => summary(state, Some(output.activeAgent), status)
-        case suspended: RunResult.Suspended        => summary(suspended.state, None, status)
-        // a blocked turn: the thread as the Block committed it - an input block stores nothing of the
-        // turn, an output block removes it - with the usage the turn's model calls added
-        case RunResult.Failed(state, _) => summary(state, None, status)
-    yield agentResult
+    // the turn's outcome, decided once (#3251): a later turn on the thread never changes it
+    Option(retained.get).getOrElse {
+      val (decided, read) = outcomeOf(ended)
+      // only a call that obtained the turn's own result, and read the store for it without failing, decides it: one
+      // whose wait was interrupted got a CancelledError of its own, even if the turn ended meanwhile, and one whose
+      // store read failed got that failure - each call's own, never another caller's (Codex, round 2)
+      if ended.isRight && read then retained.compareAndSet(null, decided)
+      Option(retained.get).getOrElse(decided)
+    }
+
+  /** The outcome [[await]] retains once the turn has ended; `null` until then. */
+  private val retained = new java.util.concurrent.atomic.AtomicReference[Result[AgentResult]](null)
+
+  /**
+   * The turn's outcome from `ended`, and whether every store read it made succeeded - so whether the outcome is the
+   * turn's own, which [[await]] may retain.
+   */
+  private def outcomeOf(ended: Result[RunResult[TurnOutput]]): (Result[AgentResult], Boolean) =
+    // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
+    // that failed the run another way (from a model or tool wrapper) leaves it for recover, so it is Left
+    val isBlock: Result[Boolean] = ended match
+      case Right(RunResult.Failed(_, _: GuardrailBlocked)) => runtime.endedBlocked(threadId, runId)
+      case _                                               => Right(false)
+    val outcome =
+      for
+        result  <- ended
+        blocked <- isBlock
+        status  <- AgentRun.status(result, blocked, loop, refused)
+        agentResult <- result match
+          case RunResult.Completed(state, output, _) => summary(state, Some(output.activeAgent), status)
+          case suspended: RunResult.Suspended        => summary(suspended.state, None, status)
+          // a blocked turn: the thread as the Block committed it - an input block stores nothing of the
+          // turn, an output block removes it - with the usage the turn's model calls added
+          case RunResult.Failed(state, _) => summary(state, None, status)
+      yield agentResult
+    outcome -> isBlock.isRight
 
   /** Waits, within [[AgentRun.Drain]] in all, for every listener scope to end; see [[await]]. */
   private def drain(): Unit =

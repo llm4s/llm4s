@@ -11,25 +11,33 @@ import scala.concurrent.duration.FiniteDuration
 /**
  * What a store-wide retention sweep ([[Checkpointer.sweep]], design 4.53) does to each thread it visits: it prunes the
  * thread's history by `retention`, exactly as [[Checkpointer.prune]] does, and - when `tombstoneAge` is set - reclaims
- * the tombstone of a deleted thread once the store deleted it more than `tombstoneAge` ago, by the store's clock. At
+ * the tombstone of a deleted thread once the store deleted it more than `tombstoneAge` ago, by the store's clock; and -
+ * when `threadAge` is set - deletes a settled top-level thread (its latest checkpoint `Completed` or `Failed`, no live
+ * claim, no child threads, nothing the guard protects) that the store has not updated for `threadAge`: it claims the
+ * thread, checks it is still the one it judged, and deletes it under that claim, so a run that starts meanwhile is
+ * never cut (#3260). Without `threadAge` no thread is ever removed: only its history is pruned. At
  * most `batchSize` threads are visited by one call, so every call stays within the store's bound however many
  * threads it holds; a caller pages through the store with the cursor each call returns.
  *
  * `SweepPolicy()` changes nothing: it keeps every checkpoint and event and reclaims no tombstone.
  *
- * `apply` and the `with*` setters throw `IllegalArgumentException` for a non-positive `tombstoneAge` or a `batchSize`
+ * `apply` and the `with*` setters throw `IllegalArgumentException` for a non-positive `tombstoneAge` or `threadAge`, or a
+ * `batchSize`
  * outside 1 to [[SweepPolicy.MaxBatchSize]]; [[SweepPolicy.of]] returns a `ValidationError`.
  */
 @Experimental
 final case class SweepPolicy private (
   retention: RetentionPolicy,
   tombstoneAge: Option[FiniteDuration],
-  batchSize: Int
+  batchSize: Int,
+  threadAge: Option[FiniteDuration]
 ):
-  def withRetention(r: RetentionPolicy): SweepPolicy             = SweepPolicy(r, tombstoneAge, batchSize)
-  def withTombstoneAge(age: FiniteDuration): SweepPolicy         = SweepPolicy(retention, Some(age), batchSize)
-  def withTombstoneAge(age: Option[FiniteDuration]): SweepPolicy = SweepPolicy(retention, age, batchSize)
-  def withBatchSize(n: Int): SweepPolicy                         = SweepPolicy(retention, tombstoneAge, n)
+  def withRetention(r: RetentionPolicy): SweepPolicy     = SweepPolicy(r, tombstoneAge, batchSize, threadAge)
+  def withTombstoneAge(age: FiniteDuration): SweepPolicy = SweepPolicy(retention, Some(age), batchSize, threadAge)
+  def withTombstoneAge(age: Option[FiniteDuration]): SweepPolicy = SweepPolicy(retention, age, batchSize, threadAge)
+  def withBatchSize(n: Int): SweepPolicy                         = SweepPolicy(retention, tombstoneAge, n, threadAge)
+  def withThreadAge(age: FiniteDuration): SweepPolicy = SweepPolicy(retention, tombstoneAge, batchSize, Some(age))
+  def withThreadAge(age: Option[FiniteDuration]): SweepPolicy = SweepPolicy(retention, tombstoneAge, batchSize, age)
 
 @Experimental
 object SweepPolicy:
@@ -40,9 +48,14 @@ object SweepPolicy:
   /** The most threads one call may visit: a larger page would not stay within a store's bound. */
   val MaxBatchSize: Int = 1000
 
-  private def problems(tombstoneAge: Option[FiniteDuration], batchSize: Int): List[String] =
+  private def problems(
+    tombstoneAge: Option[FiniteDuration],
+    batchSize: Int,
+    threadAge: Option[FiniteDuration]
+  ): List[String] =
     List(
       tombstoneAge.filter(_.length <= 0).map(a => s"tombstoneAge must be positive, was $a"),
+      threadAge.filter(_.length <= 0).map(a => s"threadAge must be positive, was $a"),
       Option.when(batchSize < 1 || batchSize > MaxBatchSize)(
         s"batchSize must be between 1 and $MaxBatchSize, was $batchSize"
       )
@@ -52,19 +65,21 @@ object SweepPolicy:
   def apply(
     retention: RetentionPolicy = RetentionPolicy.keepAll,
     tombstoneAge: Option[FiniteDuration] = None,
-    batchSize: Int = DefaultBatchSize
+    batchSize: Int = DefaultBatchSize,
+    threadAge: Option[FiniteDuration] = None
   ): SweepPolicy =
-    val found = problems(tombstoneAge, batchSize)
+    val found = problems(tombstoneAge, batchSize, threadAge)
     require(found.isEmpty, found.mkString("; "))
-    new SweepPolicy(retention, tombstoneAge, batchSize)
+    new SweepPolicy(retention, tombstoneAge, batchSize, threadAge)
 
   def of(
     retention: RetentionPolicy = RetentionPolicy.keepAll,
     tombstoneAge: Option[FiniteDuration] = None,
-    batchSize: Int = DefaultBatchSize
+    batchSize: Int = DefaultBatchSize,
+    threadAge: Option[FiniteDuration] = None
   ): Result[SweepPolicy] =
-    problems(tombstoneAge, batchSize) match
-      case Nil   => Right(new SweepPolicy(retention, tombstoneAge, batchSize))
+    problems(tombstoneAge, batchSize, threadAge) match
+      case Nil   => Right(new SweepPolicy(retention, tombstoneAge, batchSize, threadAge))
       case found => Left(ValidationError("sweep", found))
 
   /** Changes nothing: [[Checkpointer.sweep]] only visits. */
@@ -228,6 +243,74 @@ private[graph] object RetentionSweep:
     val evidence =
       indexed.filter((c, _) => runs(runId(c))).groupMapReduce((c, _) => runId(c))(_._2)(math.max).values.toSet
     (byPolicy.map(_._1), indexed.collect { case (c, i) if evidence(i) && !keptIndexes(i) => c })
+
+  /**
+   * Deletes `threadId` if `policy.threadAge` makes it idle (#3260): a top-level thread whose latest checkpoint is
+   * `Completed` or `Failed`, with no child threads, that the store last updated (`updatedAt`, read from the store, by
+   * its clock) before `cutoff`, and that `protectedRuns` does not name. It is claimed under its own tenant - a live run
+   * makes the claim `ThreadBusy` and the thread is kept - then read again under the claim, its update time included,
+   * and deleted only if its latest checkpoint is still the one judged and it is still not updated since `cutoff`,
+   * fenced by the claim: a metadata update that landed between the first read and the claim keeps it. Whether it was
+   * deleted; a failure is logged and the thread kept.
+   */
+  def removeIdle(
+    store: Checkpointer,
+    threadId: ThreadId,
+    cutoff: java.time.Instant,
+    updatedAt: () => Result[Option[java.time.Instant]],
+    protectedRuns: Map[ThreadId, Set[RunId]]
+  ): Boolean =
+    def settled(c: Checkpoint) = c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed
+    def idle: Result[Boolean]  = updatedAt().map(_.exists(_.isBefore(cutoff)))
+    val judged =
+      if protectedRuns.contains(threadId) then Right(None)
+      else
+        idle.flatMap {
+          case false => Right(None)
+          case true =>
+            for
+              latest <- store.latest(threadId).map(_.map(_.checkpoint).filter(c => settled(c) && c.origin.isEmpty))
+              children <- latest.fold[Result[Vector[ChildThread]]](Right(Vector.empty))(_ =>
+                store.children(threadId, None, 1)
+              )
+            yield latest.filter(_ => children.isEmpty)
+        }
+    val removed = judged.flatMap {
+      case None => Right(false)
+      case Some(judgedLatest) =>
+        store.claim(
+          threadId,
+          ClaimRequest(
+            RunId(s"llm4s-sweep-${java.util.UUID.randomUUID()}"),
+            judgedLatest.tenantId.map(TenantId(_)),
+            IdleClaimTtl
+          )
+        ) match
+          case Left(_: GraphError.ThreadBusy) => Right(false)
+          case Left(error)                    => Left(error)
+          case Right(claim)                   =>
+            // under the claim nothing else changes the thread: deleted only if it is still the one judged, and idle
+            val deleted =
+              for
+                now       <- store.latest(threadId)
+                stillIdle <- idle
+                gone      <-
+                  // and no open queue entry names it, checked atomically with the delete (Codex, round 3)
+                  if now.exists(_.checkpoint.id == judgedLatest.id) && stillIdle then
+                    store.deleteIdle(threadId, claim.token)
+                  else Right(false)
+              yield gone
+            // a deleted thread's claim went with it; one kept is given back
+            if !deleted.contains(true) then store.release(threadId, claim.token): Unit
+            deleted
+    }
+    removed.left.foreach(e =>
+      logger.warn(s"The retention sweep kept idle thread ${threadId.value}, whose removal failed: ${e.message}")
+    )
+    removed.getOrElse(false)
+
+  /** How long the claim a sweep deletes an idle thread under is held: the delete is one store call. */
+  private val IdleClaimTtl: FiniteDuration = scala.concurrent.duration.FiniteDuration(30, "seconds")
 
   /** The cursor a page of `visited` threads, read one past `batchSize` to tell whether more follow, hands back. */
   def next(visited: Vector[ThreadId], batchSize: Int): Option[ThreadId] =

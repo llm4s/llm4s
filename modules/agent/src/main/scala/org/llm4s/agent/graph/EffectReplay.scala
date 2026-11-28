@@ -446,6 +446,7 @@ object ReplayGuard:
               Left(GraphError.EffectReplayRefused(key.operation, reason))
             )
             _ <- withinCap(key, "its presumed outcome", presumed, maxOutcomeBytes)
+            _ <- notCancelled(context, key)
             _ <-
               if recorded.isDefined then Right(())
               else journal.write(new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(intent)))
@@ -496,6 +497,8 @@ object ReplayGuard:
     val journal = context.journal
     def fresh(owner: EffectOwner): Result[A] =
       for
+        // a stop asked before the intent is written leaves no record, so recover runs the effect (#3253)
+        _ <- notCancelled(context, key)
         _ <- journal.write(
           new EffectRecord(key, owner.task, owner.lineage, EffectBody.Begun(EffectIntent.Unverifiable))
         )

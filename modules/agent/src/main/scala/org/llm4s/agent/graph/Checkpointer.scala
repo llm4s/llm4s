@@ -209,6 +209,28 @@ trait Checkpointer:
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]
 
   /**
+   * [[prune]], also keeping the newest checkpoint each of `keep` committed, as a sweep's guard keeps them: what a run's
+   * admission prunes with once its claim commit has landed, keeping the thread's checkpoint from before the claim -
+   * the latest a prune before the commit always kept (#3254). The default prunes without keeping them; every llm4s
+   * store keeps them.
+   */
+  /**
+   * [[deleteThread]] for the sweep's idle-thread removal (#3260), fenced by `token` alone, done only if no open entry
+   * of the store's run queue names the thread - checked atomically with the delete, under the lock or in the
+   * transaction a submission to that queue also takes, so an entry enqueued after the sweep's guard ran keeps the
+   * thread. Whether it deleted. The default deletes as [[deleteThread]] does; every llm4s store checks.
+   */
+  private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    deleteThread(threadId, token, None).map(_ => true)
+
+  private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    @scala.annotation.unused keep: Set[RunId]
+  ): Result[Unit] =
+    prune(threadId, policy)
+
+  /**
    * Up to `limit` events with `seq > afterSeq`, ascending. `afterSeq` `0` reads from the thread's first
    * event, as does the number just before it; one behind the replay floor is
    * [[org.llm4s.agent.graph.GraphError.ReplayUnavailable GraphError.ReplayUnavailable]], and one inside the log of a deleted thread of the id
@@ -739,6 +761,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     pruned(threadId, policy, Set.empty)
   }
 
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] = withLock(lock)(pruned(threadId, policy, keep))
+
   /** [[prune]], also keeping the newest checkpoint each of `protectedRuns` committed; under `lock`. */
   private def pruned(threadId: ThreadId, policy: RetentionPolicy, protectedRuns: Set[RunId]): Result[Unit] =
     val current = record(threadId)
@@ -783,6 +811,15 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val visited = page.take(policy.batchSize)
     // asked outside the lock: the guard may read another store
     guard.retained(visited).flatMap { protectedRuns =>
+      // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+      policy.threadAge.foreach { age =>
+        val idleBefore = clock.instant().minusNanos(age.toNanos)
+        visited.foreach { t =>
+          // read again under the sweep's claim, so an update that landed before it keeps the thread
+          val updated = () => Right(withLock(lock)(threads.get(t.value).filter(_.history.nonEmpty).map(_.updatedAt)))
+          RetentionSweep.removeIdle(this, t, idleBefore, updated, protectedRuns): Unit
+        }
+      }
       val cutoff = policy.tombstoneAge.map(age => clock.instant().minusNanos(age.toNanos))
       // each thread under the lock on its own, so a sweep never holds every other call for a whole page, and a
       // thread whose prune fails is skipped rather than failing the page (#3086)
@@ -850,6 +887,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
     store(threadId, current.copy(events = current.events.filter(_._1 >= floor), earliestSeq = floor))
     Right(())
+  }
+
+  // under the lock the run queue's submissions take: an entry is enqueued before this, or after the delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] = withLock(lock) {
+    if runQueue.hasOpen(threadId) then Right(false) else deleteThread(threadId, token, None).map(_ => true)
   }
 
   def deleteThread(
@@ -932,8 +974,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   def threads(query: ThreadQuery): Result[ThreadPage] = withLock(lock) {
     val listed = registered(query.tenantId).filter(query.matches)
-    val after  = query.after.fold(listed)(cursor => listed.filter(t => RegistryOrder.before(t.cursor, cursor)))
-    Right(ThreadPage.of(after.sorted(using RegistryOrder.newestFirst).take(query.limit + 1), query.limit))
+    // the page's order: newest first, or oldest first (#3260), `after` a cursor in that order
+    val after = query.after.fold(listed)(cursor =>
+      listed.filter(t =>
+        if query.oldestFirst then RegistryOrder.before(cursor, t.cursor) else RegistryOrder.before(t.cursor, cursor)
+      )
+    )
+    val order = if query.oldestFirst then RegistryOrder.newestFirst.reverse else RegistryOrder.newestFirst
+    Right(ThreadPage.of(after.sorted(using order).take(query.limit + 1), query.limit))
   }
 
   def incompleteThreads(

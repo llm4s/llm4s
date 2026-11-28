@@ -879,6 +879,11 @@ def sweepAll(after: Option[ThreadId]): Result[Unit] =
   it again.
 - A tombstone is reclaimed once the store deleted the thread more than `tombstoneAge` ago, by its clock, and nothing was
   stored under the id since (a claim counts until it has lapsed for `tombstoneAge` too).
+- A thread itself is never removed by `retention`: it keeps its latest checkpoint, effect records, metadata and
+  registry row. With `threadAge` set, the sweep deletes a settled top-level thread (latest checkpoint `Completed` or
+  `Failed`, no child threads, no live claim, not named by the guard) that the store has not updated for that long: it
+  claims the thread, reads it again, and deletes it under the claim. Its tombstone is reclaimed later by
+  `tombstoneAge`. `ThreadQuery.withUpdatedBefore` and `withOldestFirst` find a tenant's oldest threads.
 - A reader of a reclaimed log is still refused with `ThreadDeleted`: reclaiming raises the store's reclamation mark,
   and a new thread of any id without a tombstone numbers its events from it, past every reclaimed thread's. So once a
   store has reclaimed a tombstone, new threads no longer number from `1`. Paging `children` after a reclaimed child

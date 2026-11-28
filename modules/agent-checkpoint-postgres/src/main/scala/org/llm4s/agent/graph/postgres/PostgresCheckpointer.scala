@@ -413,6 +413,16 @@ final class PostgresCheckpointer private (
     Right(())
   }
 
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    writing("prune") { c =>
+      lockRow(c, threadId).foreach(pruneStep(c, threadId, _, policy, keep, None, Int.MaxValue))
+      Right(())
+    }
+
   /**
    * One step of [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest
    * checkpoint each of `protectedRuns` committed (a sweep's protected thread, design 4.53). Events go first, then
@@ -525,6 +535,25 @@ final class PostgresCheckpointer private (
       val visited = page.take(policy.batchSize)
       // asked outside the store's transactions: the guard may read another store, such as a run queue
       guard.retained(visited).flatMap { protectedRuns =>
+        // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+        policy.threadAge.foreach { age =>
+          reading("sweep")(c => Right(clockNow(c).minusNanos(age.toNanos))).foreach { idleBefore =>
+            visited.filterNot(protectedRuns.contains).foreach { thread =>
+              // read again under the sweep's claim, so an update that landed before it keeps the thread
+              val updated = () =>
+                reading("sweep") { c =>
+                  Right(
+                    query(
+                      c,
+                      s"SELECT updated_at FROM ${t.threads} WHERE thread_id = ? AND updated_at IS NOT NULL",
+                      thread.value
+                    )(rows => instant(rows, 1)).headOption
+                  )
+                }
+              RetentionSweep.removeIdle(this, thread, idleBefore, updated, protectedRuns): Unit
+            }
+          }
+        }
         val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
         val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
           case Some(age) if candidates.nonEmpty =>
@@ -750,7 +779,30 @@ final class PostgresCheckpointer private (
     threadId: ThreadId,
     token: FencingToken,
     fence: Option[(ThreadId, FencingToken)]
-  ): Result[Unit] = writing("deleteThread") { c =>
+  ): Result[Unit] = writing("deleteThread")(c => deleting(c, threadId, token, fence))
+
+  // under the thread's lock a submission to the run queue also takes: an entry is enqueued before this, or after the
+  // delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    writing("deleteThread") { c =>
+      query(
+        c,
+        "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+        s"llm4s.agent.queue:${t.quotedSchema}:thread:${threadId.value}"
+      )(_ => ()): Unit
+      val queued =
+        query(c, s"SELECT 1 FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' LIMIT 1", threadId.value)(_ =>
+          ()
+        ).nonEmpty
+      if queued then Right(false) else deleting(c, threadId, token, None).map(_ => true)
+    }
+
+  private def deleting(
+    c: Connection,
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] =
     val rows    = lockRows(c, threadId +: fence.map(_._1).toVector)
     val current = rows.get(threadId)
     val refused = Option
@@ -776,7 +828,6 @@ final class PostgresCheckpointer private (
         // a reader waiting inside the deleted log is told at once
         notifyCommit(c, threadId)
         Right(())
-  }
 
   /**
    * Closes the store, and its pool if it owns one. Later calls return a `ProcessingError`; closing again does nothing.
@@ -1145,10 +1196,11 @@ object PostgresCheckpointer:
     query: ThreadQuery,
     now: Instant
   ): (String, Vector[Any]) =
-    registryStatement(t, query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+    registryStatement(t, query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
       query.updatedSince.foreach(since => where.add("updated_at >= ?", since))
+      query.updatedBefore.foreach(before => where.add("updated_at < ?", before))
       // containment, through the GIN index on the metadata
       if !query.metadata.isEmpty then where.add("metadata @> CAST(? AS jsonb)", ujson.write(query.metadata.toJson))
     }

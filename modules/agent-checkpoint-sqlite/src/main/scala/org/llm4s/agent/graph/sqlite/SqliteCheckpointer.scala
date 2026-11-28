@@ -406,6 +406,13 @@ final class SqliteCheckpointer private (
     pruneStep(c, threadId, policy, Set.empty, None, Int.MaxValue).map(_ => ())
   }
 
+  override private[agent] def pruneKeeping(
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    keep: Set[RunId]
+  ): Result[Unit] =
+    writing("prune")(c => pruneStep(c, threadId, policy, keep, None, Int.MaxValue).map(_ => ()))
+
   /**
    * One step of [[prune]] inside the caller's write transaction, also keeping the newest checkpoint each of
    * `protectedRuns` committed. Events go first, then checkpoints, so the floor a prune works towards can always be
@@ -572,6 +579,24 @@ final class SqliteCheckpointer private (
     }.flatMap { page =>
       val visited = page.take(policy.batchSize)
       guard.retained(visited).flatMap { protectedRuns =>
+        // idle threads first, each claimed and deleted as any caller would (#3260); their tombstones are swept later
+        policy.threadAge.foreach { age =>
+          val idleBefore = clock.instant().minusNanos(age.toNanos)
+          visited.foreach { t =>
+            // read again under the sweep's claim, so an update that landed before it keeps the thread
+            val updated = () =>
+              reading("sweep") { c =>
+                Right(
+                  query(
+                    c,
+                    "SELECT updated_nanos FROM llm4s_checkpoint_threads WHERE thread_id = ? AND updated_nanos IS NOT NULL",
+                    t.value
+                  )(rows => fromEpochNanos(rows.getLong(1))).headOption
+                )
+              }
+            RetentionSweep.removeIdle(this, t, idleBefore, updated, protectedRuns): Unit
+          }
+        }
         val cutoff = policy.tombstoneAge.map(age => epochNanos(clock.instant().minusNanos(age.toNanos)))
         RetentionSweep
           .visit[RetentionSweep.PrunePlan](visited, sweepBudget, s"SqliteCheckpointer($path)", shut) {
@@ -731,7 +756,25 @@ final class SqliteCheckpointer private (
     threadId: ThreadId,
     token: FencingToken,
     fence: Option[(ThreadId, FencingToken)]
-  ): Result[Unit] = writing("deleteThread") { c =>
+  ): Result[Unit] = writing("deleteThread")(c => deleting(c, threadId, token, fence))
+
+  // in the write transaction a submission also takes: an entry is enqueued before this, or after the delete (#3260)
+  override private[agent] def deleteIdle(threadId: ThreadId, token: FencingToken): Result[Boolean] =
+    writing("deleteThread") { c =>
+      val queued = query(
+        c,
+        "SELECT 1 FROM llm4s_checkpoint_queue_entries WHERE thread_id = ? AND state = 'open' LIMIT 1",
+        threadId.value
+      )(_ => ()).nonEmpty
+      if queued then Right(false) else deleting(c, threadId, token, None).map(_ => true)
+    }
+
+  private def deleting(
+    c: Connection,
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] =
     val current = readRow(c, threadId)
     val refused = Option
       .when(!current.flatMap(_.claim).exists(_.token == token.value))(stale(threadId, current, token))
@@ -774,7 +817,6 @@ final class SqliteCheckpointer private (
         )
         dropIfEmpty(c, threadId)
         Right(())
-  }
 
   /**
    * Closes the connection. Later calls return a `ProcessingError`; closing again does nothing. A claim this store
@@ -1184,10 +1226,11 @@ object SqliteCheckpointer:
 
   /** The statement and parameters of a page of `query`, its claims judged at `now`. */
   private[sqlite] def threadsStatement(query: ThreadQuery, now: Instant): (String, Vector[Any]) =
-    registryStatement(query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+    registryStatement(query.tenantId, newestFirst = !query.oldestFirst, query.after, query.limit, now) { where =>
       query.status.foreach(statusFilter(where, _, now))
       query.agent.foreach(agent => where.add("graph_id = ?", agent))
       query.updatedSince.foreach(since => where.add("updated_nanos >= ?", epochNanos(since)))
+      query.updatedBefore.foreach(before => where.add("updated_nanos < ?", epochNanos(before)))
       query.metadata.entries.toVector.sortBy(_._1).foreach { (key, value) =>
         where.add(
           "thread_id IN (SELECT thread_id FROM llm4s_checkpoint_thread_metadata WHERE key = ? AND value = ?)",

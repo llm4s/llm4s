@@ -590,6 +590,8 @@ final class CompiledGraph[I, O] private[graph] (
     failed: Int
   ): Result[NodeResult] =
     runOnce(node, task, execution, context, operation) match
+      // a stopped run never runs the node again, also when the node swallowed the interrupt (#3253)
+      case Left(_) if context.isCancelled => Left(CancelledError(operation))
       case Left(error) if node.retry.retries(error, failed + 1) =>
         pause(node.retry.backoffAfter(failed + 1), operation) match
           case Left(cancelled) => Left(cancelled)
@@ -607,11 +609,11 @@ final class CompiledGraph[I, O] private[graph] (
     operation: String
   ): Result[NodeResult] =
     CancelledError.attempt(operation)(Try(node.run(task.input, execution.state, context)).toResult) match
-      case Left(cancelled: CancelledError)                  => Left(cancelled)
-      case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(operation))
-      case Left(thrown)                                     => Left(thrown)
-      case Right(NodeResult.Fail(error))                    => Left(error)
-      case Right(result)                                    => Right(result)
+      case Left(cancelled: CancelledError) => Left(cancelled)
+      case Right(_) if context.isCancelled => Left(CancelledError(operation))
+      case Left(thrown)                    => Left(thrown)
+      case Right(NodeResult.Fail(error))   => Left(error)
+      case Right(result)                   => Right(result)
 
   /** Waits `delay`; an interrupt ends the wait as `Left(CancelledError)` with the flag set. */
   private def pause(delay: FiniteDuration, operation: String): Result[Unit] =

@@ -289,8 +289,17 @@ final private[graph] class DefaultRunHandle[O](
     // that has not yet run sets its flag, which the loop checks before every superstep
     if withLock(stopping)(signal.cause.compareAndSet(None, Some(stopCause))) then interrupt()
 
+  /**
+   * Run once a cancel or an expiry is recorded as the run's stop (#3253): the runtime bounds the run's end from here, so
+   * a node that ignores interrupts cannot keep the run - and its thread's claim - for good. A no-op by default.
+   */
+  @volatile private[graph] var onStopped: () => Unit = () => ()
+
   /** Interrupts a live run that has not acknowledged its stop, once its cause is recorded. */
   private def interrupt(): Unit =
+    signal.cause.get match
+      case Some(StopCause.Cancelled | StopCause.Expired) => DefaultRunHandle.guarded(onStopped()): Unit
+      case _                                             => ()
     beforeInterrupt()
     // a stop before the run thread exists records only its cause, which the loop checks before every superstep
     signal.interruptUnlessAcknowledged(() => if !result.isDone && runThread != null then runThread.interrupt())
