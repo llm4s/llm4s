@@ -131,7 +131,9 @@ addCommandAlias(
 Global / commands += Command.args("testPerformanceOnly", "<project>+") { (state, args) =>
   val unknown = args.filterNot(performanceTestProjects.contains)
   if (args.isEmpty || unknown.nonEmpty) {
-    state.log.error(s"testPerformanceOnly: name projects of performanceTestProjects (build.sbt): ${unknown.mkString(", ")}")
+    state.log.error(
+      s"testPerformanceOnly: name projects of performanceTestProjects (build.sbt): ${unknown.mkString(", ")}"
+    )
     state.fail
   } else args.distinct.toList.map(p => s"$p/testOnly -- -n $PerformanceTestTag") ::: state
 }
