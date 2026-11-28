@@ -29,8 +29,15 @@ class AgentWorkerBookkeepingSpec
 
   private val agentId    = AgentId.of("assistant").value
   private val shortLease = RunQueueSettings(lease = LeasePolicy(ttl = 600.millis, renewEvery = 150.millis))
-  private val fast       = WorkerSettings(pollInterval = 20.millis, sweepEvery = None, drainGrace = 2.seconds)
-  private val started    = new ConcurrentLinkedQueue[AgentWorker]()
+  private val fast =
+    WorkerSettings(
+      pollInterval = 20.millis,
+      sweepEvery = None,
+      drainGrace = 2.seconds,
+      retryDelay = 50.millis,
+      maxRetryDelay = 200.millis
+    )
+  private val started = new ConcurrentLinkedQueue[AgentWorker]()
 
   override def afterEach(): Unit = {
     started.asScala.foreach(_.shutdown())
@@ -62,9 +69,14 @@ class AgentWorkerBookkeepingSpec
 
   private def thread(): ThreadId = ThreadId(s"book-${java.util.UUID.randomUUID().toString.take(8)}")
 
-  private def workerOf(store: InMemoryCheckpointer, agent: Agent, queue: Option[RunQueue] = None): AgentWorker = {
+  private def workerOf(
+    store: InMemoryCheckpointer,
+    agent: Agent,
+    queue: Option[RunQueue] = None,
+    settings: WorkerSettings = fast
+  ): AgentWorker = {
     val worker =
-      AgentWorker(queue.getOrElse(store.runQueue), store, Seq(QueuedAgent(agent)), fast, shortLease).value
+      AgentWorker(queue.getOrElse(store.runQueue), store, Seq(QueuedAgent(agent)), settings, shortLease).value
     started.add(worker)
     worker
   }
@@ -114,7 +126,8 @@ class AgentWorkerBookkeepingSpec
     entered.acquire()
     running.cancel()
     running.await().isLeft shouldBe true
-    workerOf(store, agent).start()
+    // the dead worker's crash is the one the entry may have (#3287): the next take dead-letters it
+    workerOf(store, agent, settings = fast.withMaxCrashes(1)).start()
     val entry = store.runQueue.awaitClosed(None, id, 10.seconds).value
     entry.outcome.value shouldBe EntryOutcome.Failed(FailureReason.AttemptsExhausted(1))
     val settled = store.latest(on).value.value.checkpoint
