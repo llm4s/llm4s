@@ -514,11 +514,18 @@ for {
   releases every store and refuses later turns.
 - **Failures never cost the answer.** A store that cannot be searched or written is skipped, and
   announced with a durable `MemoryEvents.Skipped` (the operation and the error's type, no content);
-  `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only.
+  `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only. The events do, but the turn's
+  checkpoints do not: the recall is held in the `semantic-memory-recalled` key for the turn, so every mid-turn
+  checkpoint - and a suspended or failed thread's, kept until it is resumed, recovered or forgotten - holds the
+  recalled text (#3276). Deleting a memory does not remove it from those. Keep checkpoint retention short
+  (`RetentionPolicy`), forget threads you no longer need, and seal checkpoints with `EncryptingCheckpointer` where
+  recalled memories are sensitive.
 - **It runs outside your guardrails**, so an answer a guardrail blocks is never recorded. In one agent that is
   arranged for you, wherever you registered the two and whatever ids the guardrail middleware have; `build()` refuses
   it on a handoff target when the root agent has guardrail middleware, since the root's run last. A recording that
-  already applied is not undone by a later Block.
+  already applied is not undone by a later Block. Granting it to a [subagent](delegation#inheritance) without the
+  parent's guardrail middleware is refused at `build()` too (#3276): grant both, or give the subagent guardrails of
+  its own, so a child's answer is guarded before it is recorded.
 - **Adding it to an existing agent** registers the `semantic-memory-recalled` key, which starts
   empty: a thread at rest continues under the agent that added it, and, since the recall is
   cleared at the end of each turn, under an agent that removed it again. A thread in flight

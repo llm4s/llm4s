@@ -91,7 +91,10 @@ researcher.withInheritance(
 )
 ```
 
-- **Tools and middleware** are the parent's instances, run against the child's thread. A tool over a
+- **Tools and middleware** are the parent's instances, run against the child's thread. A middleware that must run
+  outside another of the parent's (`AgentMiddleware.placement`), such as semantic memory outside the guardrails, is
+  granted only with that one: `build()` refuses the grant otherwise (#3276), since the child's turns would have no
+  such guard around it. A tool over a
   `StateFileBackend` sees the child's own (empty) files; one over a host, workspace or store backend shares the
   parent's, so give parallel children distinct paths. A name the parent does not have is refused at `build()`. The
   task tools are never granted as tools: `withDelegate(true)` lets a child offer its own `withSubagents`, and only

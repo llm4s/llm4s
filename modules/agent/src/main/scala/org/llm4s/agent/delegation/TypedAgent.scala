@@ -798,7 +798,20 @@ final private[agent] case class ParentScope(
             s"${missing.map(m => s"'${m.value}'").toVector.sorted.mkString(", ")} to grant"
         )
       )
-    else Right(middleware.filter(m => ids(m.id)))
+    else
+      // a granted middleware that must run outside one of the parent's (#3276): without the other in the child too,
+      // it would act on the child's turns with no such guard around it (semantic memory recording an answer the
+      // parent's output guardrails never saw)
+      val granted = middleware.filter(m => ids(m.id))
+      val unguarded =
+        for
+          inner <- granted
+          outer <- middleware.filterNot(m => ids(m.id))
+          place <- inner.placement(outer).toVector
+        yield s"subagent '$id': middleware '${inner.id.value}' is granted without '${outer.id.value}', which it must " +
+          s"run outside (${place.reason}): grant '${outer.id.value}' too, or give the subagent its own"
+      if unguarded.nonEmpty then Left(ValidationError("inheritance", unguarded.toList))
+      else Right(granted)
 
 private[agent] object ParentScope:
 
