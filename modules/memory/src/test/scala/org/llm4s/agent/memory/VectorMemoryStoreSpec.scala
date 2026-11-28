@@ -704,6 +704,20 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
       }
     }
   }
+
+  // #3238: two instances over one file name one storage, however the path is spelled; another file is another
+  "VectorMemoryStore.storageIdentity" should "be the file's identity, the one SQLiteMemoryStore names" in {
+    val dir = java.nio.file.Files.createTempDirectory("llm4s-3238-identity")
+    val sub = java.nio.file.Files.createDirectory(dir.resolve("sub"))
+    def identity(path: String): Option[String] =
+      withStoreAt(path, embeddings)(_.storageIdentity.toOption.get)
+    val plain = identity(dir.resolve("alice.db").toString)
+    plain shouldBe defined
+    identity(sub.resolve("../alice.db").toString) shouldBe plain
+    identity(dir.resolve("bob.db").toString) should not be plain
+    plain shouldBe SQLiteMemoryStore.fileIdentity(dir.resolve("alice.db").toString).toOption.get
+    if (java.nio.file.Files.exists(dir.resolve("ALICE.db"))) identity(dir.resolve("ALICE.db").toString) shouldBe plain
+  }
 }
 
 class EmbeddingServiceSpec extends AnyFlatSpec with Matchers {

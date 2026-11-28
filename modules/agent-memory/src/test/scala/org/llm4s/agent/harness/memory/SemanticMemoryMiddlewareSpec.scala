@@ -465,6 +465,25 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     opened.asScala.foreach(_.close())
   }
 
+  // #3238: VectorMemoryStore names its file too, so two instances over one file are one store
+  it should "be refused when it gives two tenants two VectorMemoryStore instances over one file" in {
+    val file   = java.nio.file.Files.createTempDirectory("llm4s-3238").resolve("memory.db")
+    val opened = new CopyOnWriteArrayList[VectorMemoryStore]()
+    val m = new SemanticMemoryMiddleware(
+      _ =>
+        VectorMemoryStore(file.toString, MockEmbeddingService(dimensions = 8)).map { s =>
+          opened.add(s)
+          s
+        },
+      simple,
+      answering()
+    )
+    val agent = agentWith(answering("one", "two"), m)
+    agent.run(ThreadId("v1"), "hi", tenant(t1)).value
+    agent.run(ThreadId("v2"), "hi", tenant(t2)).left.value.message should include("same storage as tenant 't1'")
+    opened.asScala.foreach(_.close())
+  }
+
   it should "be refused when it gives two tenants one shared-cache in-memory SQLite database" in {
     val opened = new CopyOnWriteArrayList[SQLiteMemoryStore]()
     val m = new SemanticMemoryMiddleware(

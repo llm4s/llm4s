@@ -430,7 +430,8 @@ for {
   without one) and must return a store of that tenant's alone: every thread of a tenant recalls what
   the tenant's earlier threads recorded, and no tenant reads another's. A resolver that gives two
   tenants the same storage is refused: one store instance, or two stores with one
-  `storageIdentity` - a SQLite file, however its path is spelled, or a Postgres table and tenant.
+  `storageIdentity` - a SQLite file (`SQLiteMemoryStore` or `VectorMemoryStore`), however its path is spelled, or a
+  Postgres table and tenant.
   Never build a path from a tenant id as it is: `../` in one reaches outside the directory, and
   `Alice` and `alice` are one file on macOS and Windows. Hash it, as above, or check it against a
   strict pattern, and give runs without a tenant a name no tenant id can produce.
