@@ -223,13 +223,14 @@ class SSETransportImpl(
     opened match {
       case Left(error) => Left(transportFailure(error))
       case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
-        val text = readBounded(response, deadline)
-        Left(
-          MCPHttpStatus(
-            response.statusCode,
-            s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"
+        readBounded(response, deadline).flatMap { text =>
+          Left(
+            MCPHttpStatus(
+              response.statusCode,
+              s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"
+            )
           )
-        )
+        }
       case Right(response) if !response.header("content-type").exists(_.toLowerCase.contains("text/event-stream")) =>
         Try(response.body.close())
         Left(
@@ -257,9 +258,18 @@ class SSETransportImpl(
     }
   }
 
-  private def readBounded(response: StreamingHttpResponse, deadline: Deadline): String = {
+  /**
+   * The response's body, bounded, for an error message or to finish an acknowledgement. A cancelled read is a
+   * `Left(CancelledError)`, which the caller returns; any other failure to read it is an empty body, since only the
+   * status matters.
+   */
+  private def readBounded(response: StreamingHttpResponse, deadline: Deadline): Result[String] = {
     val body = new BoundedResponseBody(response.body, deadline, timeout, url, PayloadLog.MaxChars * 4)
-    try body.readAll().getOrElse("")
+    try
+      body.readAll() match {
+        case Left(cancelled: CancelledError) => Left(cancelled)
+        case other                           => Right(other.getOrElse(""))
+      }
     finally body.close()
   }
 
@@ -285,21 +295,23 @@ class SSETransportImpl(
             }
         }.flattened
         sent match {
-          case Left(error) => Left(transportFailure(error))
+          case Left(error)     => Left(transportFailure(error))
           case Right(response) =>
-            val text = readBounded(response, deadline)
-            if (response.statusCode == 404) {
-              logger.warn(s"SSETransport($name) the server no longer knows the session (404)")
-              s.close()
-              Left(MCPSessionLost.Expired)
-            } else if (response.statusCode >= 400)
-              Left(
-                MCPHttpStatus(
-                  response.statusCode,
-                  s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"
+            // A cancelled read of the acknowledgement is a cancelled post, never a sent one
+            readBounded(response, deadline).flatMap { text =>
+              if (response.statusCode == 404) {
+                logger.warn(s"SSETransport($name) the server no longer knows the session (404)")
+                s.close()
+                Left(MCPSessionLost.Expired)
+              } else if (response.statusCode >= 400)
+                Left(
+                  MCPHttpStatus(
+                    response.statusCode,
+                    s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(text)}"
+                  )
                 )
-              )
-            else Right(())
+              else Right(())
+            }
         }
     }
 

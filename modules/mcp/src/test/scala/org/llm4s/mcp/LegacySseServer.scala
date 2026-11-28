@@ -19,8 +19,12 @@ import scala.util.Try
 final class LegacySseServer(
   endpoint: String => String = _ => "/messages?sessionId=s1",
   onPost: ujson.Value => (Int, String) = LegacySseServer.echoResult,
-  streamableStatus: Int = 405
+  streamableStatus: Int = 405,
+  holdAck: ujson.Value => Option[java.util.concurrent.CountDownLatch] = _ => None
 ) extends AutoCloseable {
+
+  /** Counted down when a POST whose acknowledgement `holdAck` holds has had its headers sent. */
+  val ackHeld = new java.util.concurrent.CountDownLatch(1)
 
   /** Each request's method, path and headers (names lower case), and each POST's body. */
   val requests = new ConcurrentLinkedQueue[(String, String, Map[String, String])]()
@@ -59,9 +63,20 @@ final class LegacySseServer(
       case ("POST", "/messages") =>
         val body = ujson.read(new String(exchange.getRequestBody.readAllBytes(), UTF_8))
         posted.add(body)
-        val (status, events) = onPost(body)
-        respond(exchange, status, if (status == 202) "Accepted" else events)
-        if (status == 202 && events.nonEmpty) push(events)
+        holdAck(body) match {
+          case Some(release) =>
+            // The headers, then a body that does not end until `release`: the client is reading the acknowledgement
+            exchange.sendResponseHeaders(202, 0)
+            exchange.getResponseBody.flush()
+            ackHeld.countDown()
+            release.await(30, TimeUnit.SECONDS): Unit
+            Try(exchange.getResponseBody.close())
+            exchange.close()
+          case None =>
+            val (status, events) = onPost(body)
+            respond(exchange, status, if (status == 202) "Accepted" else events)
+            if (status == 202 && events.nonEmpty) push(events)
+        }
       case ("POST", _) => respond(exchange, streamableStatus, "not here")
       case _           => respond(exchange, 405, "no")
     }

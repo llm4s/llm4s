@@ -174,6 +174,45 @@ class SSETransportImplSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
+  it should "return CancelledError, not success, when interrupted reading a POST's acknowledgement" in {
+    val release = new java.util.concurrent.CountDownLatch(1)
+    withServer(
+      new LegacySseServer(holdAck = body => Option.when(body("method").str == "notifications/initialized")(release))
+    ) { server =>
+      using(transportFor(server, 30.seconds)) { transport =>
+        transport.sendRequest(request("initialize")).isRight shouldBe true
+        try
+          org.llm4s.testkit.ProviderModuleChecks.assertCallCancelsOnceReady("sse notification ack")(
+            transport.sendNotification(notification)
+          )(server.ackHeld.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true)
+        finally release.countDown()
+      }
+    }
+  }
+
+  "MCPClientImpl" should "not count itself initialized when the initialized notification is cancelled" in {
+    val release        = new java.util.concurrent.CountDownLatch(1)
+    @volatile var hold = true
+    withServer(
+      new LegacySseServer(holdAck =
+        body => Option.when(hold && body("method").str == "notifications/initialized")(release)
+      )
+    ) { server =>
+      val client = new MCPClientImpl(MCPServerConfig.sse("legacy", server.url, 30.seconds))
+      try {
+        try
+          org.llm4s.testkit.ProviderModuleChecks.assertCallCancelsOnceReady("initialize")(client.initialize())(
+            server.ackHeld.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+          )
+        finally release.countDown()
+        hold = false
+        client.initialize() shouldBe Right(())
+        // the handshake ran again: the cancelled one did not count
+        server.posted.asScala.count(_.obj.get("method").contains(ujson.Str("initialize"))) shouldBe 2
+      } finally client.close()
+    }
+  }
+
   "MCPClientImpl" should "fall back to HTTP+SSE when Streamable HTTP is refused, and recover a dropped stream" in
     withServer(
       new LegacySseServer(onPost =
